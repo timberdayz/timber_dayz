@@ -1231,56 +1231,6 @@ class CollectionExecutorV2:
         step_popup_handler = StepPopupHandler(self.popup_handler, platform)
 
         # 加载会话与指纹(仅当 use_account_session_fingerprint 时)
-        storage_state: Optional[Dict[str, Any]] = None
-        reused_session = False
-        if use_account_session_fingerprint and session_owner_id:
-            try:
-                session_data = await _load_or_bootstrap_session_async(
-                    platform,
-                    session_owner_id,
-                    runtime_account,
-                )
-                if session_data and isinstance(session_data.get("storage_state"), dict):
-                    storage_state = session_data["storage_state"]
-                    reused_session = True
-                    logger.info("Task %s: session loaded for %s/%s (reused_session=True)", task_id, platform, session_owner_id)
-                else:
-                    if session_data is None:
-                        logger.debug("Task %s: no valid session for %s/%s, will full login", task_id, platform, session_owner_id)
-                    else:
-                        logger.warning("Task %s: session_data missing storage_state, will full login", task_id)
-            except Exception as e:
-                logger.warning("Task %s: load_session failed: %s, will full login", task_id, e)
-
-        if use_account_session_fingerprint and session_owner_id:
-            try:
-                fp_options = await _get_fingerprint_context_options_async(platform, session_owner_id, account, proxy=proxy)
-                context_options = _build_playwright_context_options_from_fingerprint(fp_options)
-            except Exception as e:
-                logger.warning("Task %s: get fingerprint failed: %s, fallback to global context args", task_id, e)
-                from modules.apps.collection_center.browser_config_helper import get_browser_context_args
-                context_options = get_browser_context_args()
-        else:
-            from modules.apps.collection_center.browser_config_helper import get_browser_context_args
-            context_options = get_browser_context_args()
-
-        context_options.setdefault("accept_downloads", True)
-        if storage_state:
-            context_options["storage_state"] = storage_state
-
-        params = _build_runtime_task_params(
-            task_id=task_id,
-            account=runtime_account,
-            platform=platform,
-            granularity=granularity,
-            normalized_date_range=normalized_date_range,
-            task_download_dir=task_download_dir,
-            screenshot_dir=self.screenshots_dir / task_id,
-            reused_session=reused_session,
-        )
-        params["main_account_id"] = session_owner_id
-        if shop_account_id:
-            params["shop_account_id"] = shop_account_id
         session_platform = platform
         session_account_id = session_owner_id
 
@@ -1297,45 +1247,86 @@ class CollectionExecutorV2:
             raise ValueError("execute() requires either browser= or page= to be provided")
 
         # 执行器统一建 context: 由执行器创建带指纹与可选会话的 context
-        play_context = await browser_instance.new_context(**context_options)
-        page = await play_context.new_page()
-        params["reused_session"] = reused_session
-        adapter = None
-        if runtime_manifests is None:
-            adapter = create_adapter(
-                platform=platform,
-                account=runtime_account,
-                config=params,
-            )
-        if context.current_component_index == 0 and not params.get("_main_account_shared_state_prepared"):
+        if context.current_component_index == 0:
             async def _coordinated_login():
-                return await self._execute_shared_login_phase(
+                bundle = await _prepare_runtime_page_bundle(
                     task_id=task_id,
                     platform=platform,
-                    account=runtime_account,
-                    params=params,
-                    context=context,
-                    browser=browser,
-                    play_context=play_context,
-                    page=page,
-                    adapter=adapter,
+                    session_owner_id=session_owner_id,
+                    runtime_account=runtime_account,
+                    raw_account=account,
+                    granularity=granularity,
+                    normalized_date_range=normalized_date_range,
+                    task_download_dir=task_download_dir,
+                    screenshot_dir=self.screenshots_dir / task_id,
+                    shop_account_id=shop_account_id,
+                    use_account_session_fingerprint=use_account_session_fingerprint,
+                    browser_instance=browser_instance,
                     runtime_manifests=runtime_manifests,
-                    session_platform=session_platform,
-                    session_account_id=session_account_id,
-                    save_session_after_login=use_account_session_fingerprint and bool(session_owner_id),
-                    start_time=start_time,
-                    total_domains_count=total_domains_count,
+                    proxy=proxy,
                 )
+                try:
+                    play_context, page, login_result = await self._execute_shared_login_phase(
+                        task_id=task_id,
+                        platform=platform,
+                        account=runtime_account,
+                        params=bundle["params"],
+                        context=context,
+                        browser=browser_instance,
+                        play_context=bundle["play_context"],
+                        page=bundle["page"],
+                        adapter=bundle["adapter"],
+                        runtime_manifests=runtime_manifests,
+                        session_platform=session_platform,
+                        session_account_id=session_account_id,
+                        save_session_after_login=use_account_session_fingerprint and bool(session_owner_id),
+                        start_time=start_time,
+                        total_domains_count=total_domains_count,
+                    )
+                except Exception:
+                    try:
+                        await bundle["play_context"].close()
+                    except Exception as close_exc:
+                        logger.debug("Close failed runtime context after shared login error: %s", close_exc)
+                    raise
+                bundle["play_context"] = play_context
+                bundle["page"] = page
+                bundle["login_result"] = login_result
+                return bundle
 
-            play_context, page, login_result = await self._run_with_main_account_session_lock(
+            bundle = await self._run_with_main_account_session_lock(
                 task_id=task_id,
                 platform=platform,
                 main_account_id=session_owner_id,
                 operation=_coordinated_login,
             )
+            params = bundle["params"]
+            play_context = bundle["play_context"]
+            page = bundle["page"]
+            login_result = bundle["login_result"]
             params["_main_account_shared_state_prepared"] = True
             if isinstance(login_result, CollectionResult):
                 return login_result
+        else:
+            bundle = await _prepare_runtime_page_bundle(
+                task_id=task_id,
+                platform=platform,
+                session_owner_id=session_owner_id,
+                runtime_account=runtime_account,
+                raw_account=account,
+                granularity=granularity,
+                normalized_date_range=normalized_date_range,
+                task_download_dir=task_download_dir,
+                screenshot_dir=self.screenshots_dir / task_id,
+                shop_account_id=shop_account_id,
+                use_account_session_fingerprint=use_account_session_fingerprint,
+                browser_instance=browser_instance,
+                runtime_manifests=runtime_manifests,
+                proxy=proxy,
+            )
+            params = bundle["params"]
+            play_context = bundle["play_context"]
+            page = bundle["page"]
 
         if page_context_to_close is not None:
             try:
@@ -3954,35 +3945,6 @@ class CollectionExecutorV2:
 
         storage_state: Optional[Dict[str, Any]] = None
         reused_session = False
-        if use_account_session_fingerprint and session_owner_id:
-            try:
-                session_data = await _load_or_bootstrap_session_async(
-                    platform,
-                    session_owner_id,
-                    account,
-                )
-                if session_data and isinstance(session_data.get("storage_state"), dict):
-                    storage_state = session_data["storage_state"]
-                    reused_session = True
-                    logger.info("Task %s: [parallel] session loaded for %s/%s", task_id, platform, session_owner_id)
-            except Exception as e:
-                logger.warning("Task %s: [parallel] load_session failed: %s", task_id, e)
-
-        if use_account_session_fingerprint and session_owner_id:
-            try:
-                fp_options = await _get_fingerprint_context_options_async(platform, session_owner_id, account, proxy=None)
-                login_context_options = _build_playwright_context_options_from_fingerprint(fp_options)
-            except Exception as e:
-                logger.warning("Task %s: [parallel] get fingerprint failed: %s, fallback to default", task_id, e)
-                from modules.apps.collection_center.browser_config_helper import get_browser_context_args
-                login_context_options = get_browser_context_args()
-        else:
-            from modules.apps.collection_center.browser_config_helper import get_browser_context_args
-            login_context_options = get_browser_context_args()
-
-        login_context_options.setdefault("accept_downloads", True)
-        if storage_state:
-            login_context_options["storage_state"] = storage_state
 
         coordinator_cm = None
         if (
@@ -4001,25 +3963,10 @@ class CollectionExecutorV2:
             task_id, 5, "登录开始",
             details={"step_id": "login", "component": "login", "data_domain": None}
         )
-        login_context = await browser.new_context(**login_context_options)
-        login_page = await login_context.new_page()
-
-        params = _build_runtime_task_params(
-            task_id=task_id,
-            account=runtime_account,
-            platform=platform,
-            granularity=granularity,
-            normalized_date_range=normalized_date_range,
-            task_download_dir=task_download_dir,
-            screenshot_dir=self.screenshots_dir / task_id,
-            reused_session=reused_session,
-        )
-        params["main_account_id"] = session_owner_id
-        if shop_account_id:
-            params["shop_account_id"] = shop_account_id
+        login_context = None
+        login_page = None
+        params = None
         adapter = None
-        if runtime_manifests is None:
-            adapter = create_adapter(platform=platform, account=runtime_account, config=params)
         try:
             coordinator_cm = self.main_account_session_coordinator.acquire(platform, session_owner_id)
             await coordinator_cm.__aenter__()
@@ -4028,6 +3975,28 @@ class CollectionExecutorV2:
                 5,
                 MAIN_ACCOUNT_SESSION_STEP_MESSAGES["preparing_main_account_session"],
             )
+            bundle = await _prepare_runtime_page_bundle(
+                task_id=task_id,
+                platform=platform,
+                session_owner_id=session_owner_id,
+                runtime_account=runtime_account,
+                raw_account=account,
+                granularity=granularity,
+                normalized_date_range=normalized_date_range,
+                task_download_dir=task_download_dir,
+                screenshot_dir=self.screenshots_dir / task_id,
+                shop_account_id=shop_account_id,
+                use_account_session_fingerprint=use_account_session_fingerprint,
+                browser_instance=browser,
+                runtime_manifests=runtime_manifests,
+                proxy=None,
+            )
+            storage_state = bundle["storage_state"]
+            reused_session = bundle["reused_session"]
+            login_context = bundle["play_context"]
+            login_page = bundle["page"]
+            params = bundle["params"]
+            adapter = bundle["adapter"]
             step_popup_handler = StepPopupHandler(self.popup_handler, platform)
             if runtime_manifests is not None:
                 login_manifest = runtime_manifests.get("login")
@@ -4091,8 +4060,10 @@ class CollectionExecutorV2:
         finally:
             if coordinator_cm is not None:
                 await coordinator_cm.__aexit__(None, None, None)
-            await login_page.close()
-            await login_context.close()
+            if login_page is not None:
+                await login_page.close()
+            if login_context is not None:
+                await login_context.close()
         
         # 2. 并行执行各个数据域
         await self._update_status(task_id, 15, f"开始并行采集 {len(data_domains)} 个数据域...")

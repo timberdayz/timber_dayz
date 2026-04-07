@@ -6,14 +6,12 @@ import time
 
 import psycopg2
 
+from tests.db_test_config import admin_connection_kwargs, database_connection_kwargs, database_url
+
 
 def test_collection_config_shop_scope_migration_moves_legacy_public_table_into_core():
     admin_conn = psycopg2.connect(
-        host="127.0.0.1",
-        port=15432,
-        user="erp_user",
-        password="erp_pass_2025",
-        dbname="postgres",
+        **admin_connection_kwargs(),
     )
     admin_conn.autocommit = True
     rehearsal_db = f"xihong_erp_collection_scope_test_{int(time.time())}"
@@ -27,11 +25,7 @@ def test_collection_config_shop_scope_migration_moves_legacy_public_table_into_c
             )
 
         conn = psycopg2.connect(
-            host="127.0.0.1",
-            port=15432,
-            user="erp_user",
-            password="erp_pass_2025",
-            dbname=rehearsal_db,
+            **database_connection_kwargs(rehearsal_db),
         )
         try:
             with conn:
@@ -128,9 +122,7 @@ def test_collection_config_shop_scope_migration_moves_legacy_public_table_into_c
             conn.close()
 
         env = os.environ.copy()
-        env["DATABASE_URL"] = (
-            f"postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/{rehearsal_db}"
-        )
+        env["DATABASE_URL"] = database_url(rehearsal_db)
         result = subprocess.run(
             [
                 sys.executable,
@@ -153,11 +145,7 @@ def test_collection_config_shop_scope_migration_moves_legacy_public_table_into_c
         ), f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         conn = psycopg2.connect(
-            host="127.0.0.1",
-            port=15432,
-            user="erp_user",
-            password="erp_pass_2025",
-            dbname=rehearsal_db,
+            **database_connection_kwargs(rehearsal_db),
         )
         try:
             with conn:

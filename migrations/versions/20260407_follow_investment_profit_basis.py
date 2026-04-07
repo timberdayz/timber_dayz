@@ -30,6 +30,7 @@ def _table_names(connection, schema_name: str) -> set[str]:
 
 def upgrade() -> None:
     connection = op.get_bind()
+    connection.execute(sa.text(f"CREATE SCHEMA IF NOT EXISTS {FINANCE_SCHEMA}"))
     table_names = _table_names(connection, FINANCE_SCHEMA)
 
     if "shop_profit_basis" not in table_names:

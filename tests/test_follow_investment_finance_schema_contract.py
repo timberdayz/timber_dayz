@@ -6,14 +6,12 @@ import time
 
 import psycopg2
 
+from tests.db_test_config import admin_connection_kwargs, database_connection_kwargs, database_url
+
 
 def test_follow_investment_migration_bootstraps_finance_schema():
     admin_conn = psycopg2.connect(
-        host="127.0.0.1",
-        port=15432,
-        user="erp_user",
-        password="erp_pass_2025",
-        dbname="postgres",
+        **admin_connection_kwargs(),
     )
     admin_conn.autocommit = True
     rehearsal_db = f"xihong_erp_follow_investment_test_{int(time.time())}"
@@ -27,11 +25,7 @@ def test_follow_investment_migration_bootstraps_finance_schema():
             )
 
         conn = psycopg2.connect(
-            host="127.0.0.1",
-            port=15432,
-            user="erp_user",
-            password="erp_pass_2025",
-            dbname=rehearsal_db,
+            **database_connection_kwargs(rehearsal_db),
         )
         try:
             with conn:
@@ -45,8 +39,14 @@ def test_follow_investment_migration_bootstraps_finance_schema():
                         """
                     )
                     cur.execute(
-                        "INSERT INTO core.alembic_version(version_num) VALUES (%s)",
-                        ("20260406_collection_config_main_account_scope",),
+                        """
+                        INSERT INTO core.alembic_version(version_num)
+                        VALUES (%s), (%s)
+                        """,
+                        (
+                            "20260403_add_main_account_name",
+                            "20260406_collection_config_main_account_scope",
+                        ),
                     )
                     cur.execute(
                         """
@@ -70,9 +70,7 @@ def test_follow_investment_migration_bootstraps_finance_schema():
             conn.close()
 
         env = os.environ.copy()
-        env["DATABASE_URL"] = (
-            f"postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/{rehearsal_db}"
-        )
+        env["DATABASE_URL"] = database_url(rehearsal_db)
         result = subprocess.run(
             [
                 sys.executable,
@@ -95,11 +93,7 @@ def test_follow_investment_migration_bootstraps_finance_schema():
         ), f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         conn = psycopg2.connect(
-            host="127.0.0.1",
-            port=15432,
-            user="erp_user",
-            password="erp_pass_2025",
-            dbname=rehearsal_db,
+            **database_connection_kwargs(rehearsal_db),
         )
         try:
             with conn:
