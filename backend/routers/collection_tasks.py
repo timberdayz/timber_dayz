@@ -1070,9 +1070,9 @@ async def _execute_collection_task_background(
     date_range: Dict[str, str],
     granularity: str,
     debug_mode: bool,
-    execution_mode: str = "headless",
     parallel_mode: bool,
     max_parallel: int,
+    execution_mode: str = "headless",
     runtime_manifests: Optional[Dict[str, Any]] = None,
     app: Any = None,
 ):
