@@ -25,6 +25,21 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=project_root / '.env')
 
+
+def _load_app_version() -> str:
+    for env_name in ("APP_VERSION", "IMAGE_TAG", "RELEASE_VERSION"):
+        candidate = os.getenv(env_name, "").strip()
+        if candidate:
+            return candidate
+
+    version_file = project_root / "VERSION"
+    if version_file.exists():
+        version = version_file.read_text(encoding="utf-8").strip()
+        if version:
+            return version
+
+    return "dev"
+
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -109,6 +124,7 @@ logger = get_logger(__name__)
 
 # 获取配置
 settings = get_settings()
+APP_VERSION = _load_app_version()
 
 # 安全认证
 security = HTTPBearer()
@@ -601,7 +617,7 @@ app = FastAPI(
     
     详细文档:参见 `docs/API_CONTRACTS.md`
     """,
-    version="4.18.0",
+    version=APP_VERSION,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -685,7 +701,7 @@ async def health_check(db: Session = Depends(get_db)):
     health_status = {
         "status": "healthy",
         "service": "西虹ERP系统API",
-        "version": "4.19.0",  # [*] 更新版本号
+        "version": APP_VERSION,
         "timestamp": datetime.now().isoformat(),
         "database": {
             "status": "unknown",

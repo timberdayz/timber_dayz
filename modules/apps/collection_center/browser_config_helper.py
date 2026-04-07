@@ -33,7 +33,10 @@ def enforce_official_playwright_browser(launch_args: Dict[str, Any] | None = Non
     return normalized
 
 
-def get_browser_launch_args(debug_mode: bool = False) -> dict:
+def get_browser_launch_args(
+    debug_mode: bool = False,
+    execution_mode: str | None = None,
+) -> dict:
     """
     获取环境感知的浏览器启动参数(v4.7.0)
     
@@ -53,6 +56,13 @@ def get_browser_launch_args(debug_mode: bool = False) -> dict:
         from backend.utils.config import get_settings
         settings = get_settings()
         browser_config = settings.browser_config.copy()
+        normalized_mode = str(execution_mode or "").strip().lower()
+
+        if normalized_mode == "headless":
+            browser_config["headless"] = True
+            browser_config["slow_mo"] = 0
+        elif normalized_mode == "headed":
+            browser_config["headless"] = False
         
         # 调试模式覆盖
         if debug_mode:
@@ -68,6 +78,13 @@ def get_browser_launch_args(debug_mode: bool = False) -> dict:
         environment = os.getenv("ENVIRONMENT", "development")
         headless = os.getenv("PLAYWRIGHT_HEADLESS", "false").lower() == "true"
         slow_mo = int(os.getenv("PLAYWRIGHT_SLOW_MO", "0"))
+        normalized_mode = str(execution_mode or "").strip().lower()
+
+        if normalized_mode == "headless":
+            headless = True
+            slow_mo = 0
+        elif normalized_mode == "headed":
+            headless = False
         
         if debug_mode:
             headless = False

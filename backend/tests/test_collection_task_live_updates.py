@@ -135,6 +135,7 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
             return False
 
     send_complete = AsyncMock()
+    browser_launch_calls = []
     monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _DbSessionManager())
     monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", AsyncMock())
     monkeypatch.setattr(
@@ -147,7 +148,9 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.browser_config_helper.get_browser_launch_args",
-        lambda debug_mode=False: {},
+        lambda debug_mode=False, execution_mode=None: browser_launch_calls.append(
+            {"debug_mode": debug_mode, "execution_mode": execution_mode}
+        ) or {},
     )
     monkeypatch.setattr("playwright.async_api.async_playwright", lambda: _PlaywrightManager())
     monkeypatch.setattr("backend.routers.collection_tasks.connection_manager.send_complete", send_complete)
@@ -161,6 +164,7 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
         date_range={"start": "2026-03-01", "end": "2026-03-01"},
         granularity="daily",
         debug_mode=False,
+        execution_mode="headless",
         parallel_mode=False,
         max_parallel=1,
         runtime_manifests={},
@@ -173,6 +177,7 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
         files_collected=1,
         error_message=None,
     )
+    assert browser_launch_calls == [{"debug_mode": False, "execution_mode": "headless"}]
 
 
 @pytest.mark.asyncio

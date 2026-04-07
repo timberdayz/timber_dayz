@@ -405,6 +405,7 @@ async def create_task(
             date_range=normalized_date_range,
             granularity=effective_granularity,
             debug_mode=request.debug_mode,
+            execution_mode="headed" if request.debug_mode else "headless",
             parallel_mode=request.parallel_mode,
             max_parallel=request.max_parallel,
             runtime_manifests=runtime_manifests,
@@ -633,6 +634,7 @@ async def retry_task(
             date_range=original_task.date_range or {},
             granularity=original_task.granularity or "daily",
             debug_mode=getattr(original_task, "debug_mode", False) or False,
+            execution_mode="headed" if getattr(original_task, "debug_mode", False) else "headless",
             parallel_mode=False,
             max_parallel=1,
             runtime_manifests=runtime_manifests,
@@ -1068,6 +1070,7 @@ async def _execute_collection_task_background(
     date_range: Dict[str, str],
     granularity: str,
     debug_mode: bool,
+    execution_mode: str = "headless",
     parallel_mode: bool,
     max_parallel: int,
     runtime_manifests: Optional[Dict[str, Any]] = None,
@@ -1146,7 +1149,12 @@ async def _execute_collection_task_background(
             async with async_playwright() as p:
                 from modules.apps.collection_center.browser_config_helper import get_browser_launch_args
 
-                browser = await p.chromium.launch(**get_browser_launch_args(debug_mode=debug_mode))
+                browser = await p.chromium.launch(
+                    **get_browser_launch_args(
+                        debug_mode=debug_mode,
+                        execution_mode=execution_mode,
+                    )
+                )
                 try:
                     if parallel_mode:
                         logger.info(f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})")

@@ -235,6 +235,7 @@ async def create_tasks_for_config(
                     "date_range": normalized_date_range,
                     "granularity": effective_granularity,
                     "debug_mode": task.debug_mode,
+                    "execution_mode": str(config.execution_mode or "headless").lower(),
                     "parallel_mode": False,
                     "max_parallel": 3,
                     "runtime_manifests": runtime_manifests,
