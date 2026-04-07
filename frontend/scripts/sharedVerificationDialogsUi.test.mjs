@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const files = [
   path.resolve(__dirname, '../src/views/ComponentRecorder.vue'),
   path.resolve(__dirname, '../src/views/ComponentVersions.vue'),
-  path.resolve(__dirname, '../src/views/CollectionTasks.vue')
+  path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
 ]
 
 test('recorder, component test, and collection task pages all reuse VerificationResumeDialog', () => {

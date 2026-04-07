@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const viewPath = path.resolve(__dirname, '../src/views/CollectionTasks.vue')
+const viewPath = path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
 const source = fs.readFileSync(viewPath, 'utf8')
 
 test('CollectionTasks uses shared verification dialog and exposes pending verification items', () => {
@@ -34,9 +34,15 @@ test('CollectionTasks uses shared verification dialog and exposes pending verifi
   )
 
   assert.equal(
-    source.includes('viewVerificationScreenshot'),
+    source.includes('verificationScreenshotUrl'),
     true,
-    'task page should expose a screenshot preview action'
+    'task page should expose screenshot preview state'
+  )
+
+  assert.equal(
+    source.includes('getTaskScreenshotUrl'),
+    true,
+    'task page should derive screenshot preview urls from the collection API helper'
   )
 
   assert.equal(

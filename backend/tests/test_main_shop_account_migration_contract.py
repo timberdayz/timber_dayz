@@ -71,7 +71,7 @@ def test_main_shop_account_migration_applies_changes_to_postgres_rehearsal_db():
                     cur.execute(
                         """
                         CREATE TABLE core.alembic_version (
-                            version_num VARCHAR(32) NOT NULL PRIMARY KEY
+                            version_num VARCHAR(64) NOT NULL PRIMARY KEY
                         )
                         """
                     )

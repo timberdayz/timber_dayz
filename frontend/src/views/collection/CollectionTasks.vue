@@ -433,6 +433,7 @@
       :submitting="false"
       :message="currentTask?.verification_message || currentTask?.current_step || ''"
       :error-message="''"
+      :expires-at="currentTask?.verification_expires_at || ''"
       title="任务验证码回填"
       subtitle="当前采集任务已暂停，请先完成验证或人工处理后继续。"
       submit-text="提交并继续"
