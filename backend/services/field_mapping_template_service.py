@@ -6,7 +6,7 @@
 """
 
 from typing import List, Dict, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 from modules.core.db import (
     FieldMappingTemplate,
@@ -22,10 +22,10 @@ logger = get_logger(__name__)
 class FieldMappingTemplateService:
     """字段映射模板服务"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
     
-    def save_template(
+    async def save_template(
         self,
         platform: str,
         data_domain: str,
@@ -89,7 +89,7 @@ class FieldMappingTemplateService:
                 raise ValueError(f"deduplication_fields必须是列表,当前值: {deduplication_fields}")
             
             # 查找是否已有同维度的published模板(v4.5.1扩展:包含sub_domain)
-            existing = self.db.execute(
+            existing_result = await self.db.execute(
                 select(FieldMappingTemplate).where(
                     and_(
                         FieldMappingTemplate.platform == platform,
@@ -100,7 +100,8 @@ class FieldMappingTemplateService:
                         FieldMappingTemplate.status == 'published'
                     )
                 )
-            ).scalar_one_or_none()
+            )
+            existing = existing_result.scalar_one_or_none()
             
             # 计算新版本号
             if existing:
@@ -134,17 +135,18 @@ class FieldMappingTemplateService:
             )
             
             self.db.add(template)
-            self.db.commit()
+            await self.db.commit()
+            await self.db.refresh(template)
             
             logger.info(f"[Template] 保存成功: {template.template_name} (ID={template.id}, {len(header_columns)}个字段)")
             return template.id
             
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             logger.error(f"[Template] 保存失败: {e}")
             raise
     
-    def list_templates(
+    async def list_templates(
         self,
         platform: str = None,
         data_domain: str = None,
@@ -176,7 +178,8 @@ class FieldMappingTemplateService:
             # 按创建时间倒序
             stmt = stmt.order_by(desc(FieldMappingTemplate.created_at))
             
-            templates = self.db.execute(stmt).scalars().all()
+            result = await self.db.execute(stmt)
+            templates = result.scalars().all()
             
             result = []
             for tmpl in templates:
@@ -208,7 +211,7 @@ class FieldMappingTemplateService:
             logger.error(f"[Template] 列出失败: {e}")
             return []
     
-    def get_template(self, template_id: int) -> Optional[Dict]:
+    async def get_template(self, template_id: int) -> Optional[Dict]:
         """
         获取模板详情(v4.6.0重构版)
         
@@ -217,7 +220,7 @@ class FieldMappingTemplateService:
         - 改为返回header_columns数组
         """
         try:
-            template = self.db.get(FieldMappingTemplate, template_id)
+            template = await self.db.get(FieldMappingTemplate, template_id)
             
             if not template:
                 return None
@@ -248,7 +251,7 @@ class FieldMappingTemplateService:
             logger.error(f"[Template] 获取失败: {e}")
             return None
     
-    def apply_template(
+    async def apply_template(
         self,
         template_id: int,
         current_columns: List[str]
@@ -276,7 +279,7 @@ class FieldMappingTemplateService:
         import re
         
         try:
-            template_data = self.get_template(template_id)
+            template_data = await self.get_template(template_id)
             
             if not template_data:
                 raise ValueError("模板不存在")
@@ -306,10 +309,10 @@ class FieldMappingTemplateService:
                         unmatched_columns.append(col)
             
             # 更新使用次数
-            template = self.db.get(FieldMappingTemplate, template_id)
+            template = await self.db.get(FieldMappingTemplate, template_id)
             if template:
                 template.usage_count += 1
-                self.db.commit()
+                await self.db.commit()
             
             match_rate = round(matched / len(current_columns) * 100, 1) if current_columns else 0
             logger.info(f"[Template] 应用模板{template_id}: {matched}/{len(current_columns)}匹配 ({match_rate}%)")
@@ -326,7 +329,7 @@ class FieldMappingTemplateService:
             logger.error(f"[Template] 应用失败: {e}")
             raise
     
-    def delete_template(self, template_id: int) -> bool:
+    async def delete_template(self, template_id: int) -> bool:
         """
         删除模板
         
@@ -337,25 +340,25 @@ class FieldMappingTemplateService:
             bool: 是否删除成功
         """
         try:
-            template = self.db.get(FieldMappingTemplate, template_id)
+            template = await self.db.get(FieldMappingTemplate, template_id)
             
             if not template:
                 logger.warning(f"[Template] 删除失败: 模板{template_id}不存在")
                 return False
             
             # 删除模板
-            self.db.delete(template)
-            self.db.commit()
+            await self.db.delete(template)
+            await self.db.commit()
             
             logger.info(f"[Template] 删除成功: {template.template_name} (ID={template_id})")
             return True
             
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             logger.error(f"[Template] 删除失败: {e}")
             raise
 
 
-def get_template_service(db: Session) -> FieldMappingTemplateService:
+def get_template_service(db: AsyncSession) -> FieldMappingTemplateService:
     """获取模板服务实例"""
     return FieldMappingTemplateService(db)

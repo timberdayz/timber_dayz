@@ -235,6 +235,40 @@ async def test_template_update_context_core_only_uses_template_headers_as_field_
 
 
 @pytest.mark.asyncio
+async def test_save_mapping_template_accepts_async_session(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "orders",
+            "granularity": "daily",
+            "header_row": 1,
+            "header_columns": ["order_id", "profit(RMB)", "buyer_payment(RMB)"],
+            "deduplication_fields": ["order_id"],
+            "template_name": "async_save_template_test",
+            "created_by": "test",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+    assert isinstance(template_id, int)
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("SELECT template_name FROM core.field_mapping_templates WHERE id = :id"),
+            {"id": template_id},
+        )
+        assert result.scalar_one() == "async_save_template_test"
+
+
+@pytest.mark.asyncio
 async def test_template_update_context_orders_treats_rmb_suffix_as_real_header_difference(
     template_update_context_client,
     monkeypatch,
