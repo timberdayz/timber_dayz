@@ -97,6 +97,8 @@ mapped AS (
             raw_data->>'Paid Amount'
         ) AS paid_amount_raw,
         COALESCE(
+            raw_data->>'利润(RMB)',
+            raw_data->>'profit_rmb',
             raw_data->>'利润',
             raw_data->>'profit',
             raw_data->>'毛利',
@@ -146,6 +148,8 @@ mapped AS (
             NULLIF(TRIM(raw_data->>'campaign_fee'), '')
         ) AS promotion_fee_raw,
         COALESCE(
+            NULLIF(TRIM(raw_data->>'平台佣金(RMB)'), ''),
+            NULLIF(TRIM(raw_data->>'platform_commission_rmb'), ''),
             NULLIF(TRIM(raw_data->>'平台佣金'), ''),
             NULLIF(TRIM(raw_data->>'佣金'), ''),
             NULLIF(TRIM(raw_data->>'总佣金'), ''),

@@ -69,6 +69,65 @@ from backend.services.currency_extractor import get_currency_extractor  # [*] v4
 logger = get_logger(__name__)
 
 
+ORDERS_EXPLICIT_FIELD_MAP = {
+    "利润": "profit",
+    "利润(RMB)": "profit_rmb",
+    "利润（RMB）": "profit_rmb",
+    "订单原始金额": "original_amount",
+    "订单原始金额(RMB)": "original_amount_rmb",
+    "订单原始金额（RMB）": "original_amount_rmb",
+    "买家支付": "buyer_payment",
+    "买家支付(RMB)": "buyer_payment_rmb",
+    "买家支付（RMB）": "buyer_payment_rmb",
+    "平台佣金": "platform_commission",
+    "平台佣金(RMB)": "platform_commission_rmb",
+    "平台佣金（RMB）": "platform_commission_rmb",
+    "预估回款金额": "estimated_settlement",
+    "预估回款金额(RMB)": "estimated_settlement_rmb",
+    "预估回款金额（RMB）": "estimated_settlement_rmb",
+}
+
+
+def normalize_field_name_for_domain(
+    domain: str,
+    field_name: str,
+    currency_extractor=None,
+) -> str:
+    if domain and domain.lower() == "orders" and field_name in ORDERS_EXPLICIT_FIELD_MAP:
+        return ORDERS_EXPLICIT_FIELD_MAP[field_name]
+
+    extractor = currency_extractor or get_currency_extractor()
+    return extractor.normalize_field_name(field_name)
+
+
+def normalize_row_fields_for_domain(
+    domain: str,
+    row: Dict[str, Any],
+    currency_extractor=None,
+) -> Dict[str, Any]:
+    extractor = currency_extractor or get_currency_extractor()
+    normalized_row: Dict[str, Any] = {}
+    source_fields_by_target: Dict[str, str] = {}
+
+    for field_name, value in row.items():
+        normalized_field_name = normalize_field_name_for_domain(
+            domain,
+            field_name,
+            currency_extractor=extractor,
+        )
+        previous_source = source_fields_by_target.get(normalized_field_name)
+        if previous_source and previous_source != field_name:
+            raise ValueError(
+                f"Field normalization collision in domain={domain}: "
+                f"{previous_source} and {field_name} both map to {normalized_field_name}"
+            )
+
+        normalized_row[normalized_field_name] = value
+        source_fields_by_target[normalized_field_name] = field_name
+
+    return normalized_row
+
+
 class DataIngestionService:
     """
     数据入库服务(仅支持异步)
@@ -467,10 +526,11 @@ class DataIngestionService:
                     
                     for row in valid_rows:
                         # 归一化字段名(移除货币代码部分)
-                        normalized_row = {}
-                        for field_name, value in row.items():
-                            normalized_field_name = currency_extractor.normalize_field_name(field_name)
-                            normalized_row[normalized_field_name] = value
+                        normalized_row = normalize_row_fields_for_domain(
+                            domain=domain,
+                            row=row,
+                            currency_extractor=currency_extractor,
+                        )
                         normalized_rows.append(normalized_row)
                         
                         # [*] v4.16.0修复:提取货币代码时使用文件原始列名(row.keys()),而不是归一化的header_columns

@@ -7,7 +7,8 @@ def test_orders_atomic_sql_does_not_map_net_profit_into_profit_raw():
     )
     before = sql_text.split("AS profit_raw", 1)[0]
     block = before.rsplit("COALESCE(", 1)[-1]
-    assert block.count("raw_data->>") == 4
+    assert "net_profit" not in block
+    assert "净利" not in block
 
 
 def test_orders_model_sql_does_not_map_net_profit_into_profit_raw():
@@ -16,4 +17,5 @@ def test_orders_model_sql_does_not_map_net_profit_into_profit_raw():
     )
     before = sql_text.split("AS profit_raw", 1)[0]
     block = before.rsplit("COALESCE(", 1)[-1]
-    assert block.count("raw_data->>") == 4
+    assert "net_profit" not in block
+    assert "净利" not in block

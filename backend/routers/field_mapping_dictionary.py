@@ -97,6 +97,19 @@ def _split_existing_deduplication_fields(
     return available, missing
 
 
+def _normalize_template_headers_for_domain(
+    data_domain: str,
+    header_columns: list[str],
+) -> list[str]:
+    if data_domain and str(data_domain).lower() == "orders":
+        return list(header_columns)
+
+    from backend.services.currency_extractor import get_currency_extractor
+
+    currency_extractor = get_currency_extractor()
+    return currency_extractor.normalize_field_list(header_columns)
+
+
 @router.get("/dictionary")
 async def get_field_dictionary(
     data_domain: str = None,
@@ -731,16 +744,14 @@ async def save_mapping_template(
         if not header_columns:
             raise ValueError("header_columns参数必填(DSS架构:保存原始表头字段列表)")
         
-        # [*] v4.16.0新增:自动归一化header_columns(移除货币代码部分)
-        # 这样保存的模板中,header_columns不包含货币代码,后续同步时表头也不会包含货币代码
-        from backend.services.currency_extractor import get_currency_extractor
-        currency_extractor = get_currency_extractor()
-        
         # 保存原始header_columns(用于日志)
         original_header_columns = header_columns.copy()
         
-        # 归一化header_columns(移除货币代码)
-        normalized_header_columns = currency_extractor.normalize_field_list(header_columns)
+        # Domain-aware header normalization.
+        normalized_header_columns = _normalize_template_headers_for_domain(
+            request["data_domain"],
+            header_columns,
+        )
         
         # 检查是否有变化
         if normalized_header_columns != original_header_columns:
