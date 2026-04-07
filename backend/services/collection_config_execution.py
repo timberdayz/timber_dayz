@@ -22,7 +22,12 @@ from backend.services.component_runtime_resolver import (
     ComponentRuntimeResolver,
     ComponentRuntimeResolverError,
 )
-from modules.core.db import CollectionConfig, CollectionTask, ShopAccount, ShopAccountCapability
+from modules.core.db import (
+    CollectionConfig,
+    CollectionTask,
+    ShopAccount,
+    ShopAccountCapability,
+)
 from modules.core.logger import get_logger
 
 
@@ -35,7 +40,9 @@ async def _resolve_runnable_scope_runtime(
     platform: str,
     data_domains: List[str],
     sub_domains: Optional[Dict[str, List[str]]],
-) -> tuple[List[str], Optional[Dict[str, List[str]]], Dict[str, Any], List[Dict[str, str]]]:
+) -> tuple[
+    List[str], Optional[Dict[str, List[str]]], Dict[str, Any], List[Dict[str, str]]
+]:
     resolver = ComponentRuntimeResolver.from_async_session(db)
     login_manifest = await resolver.resolve_login_component(platform)
 
@@ -49,7 +56,9 @@ async def _resolve_runnable_scope_runtime(
     exports_by_domain: Dict[str, Any] = {}
     skipped_targets: List[Dict[str, str]] = []
 
-    for data_domain, sub_domain, domain_key in iter_domain_targets(data_domains, normalized_sub_domains):
+    for data_domain, sub_domain, domain_key in iter_domain_targets(
+        data_domains, normalized_sub_domains
+    ):
         try:
             export_manifest = await resolver.resolve_export_component(
                 platform=platform,
@@ -97,7 +106,11 @@ async def create_tasks_for_config(
     if config is None:
         return []
 
-    scope_rows = [scope for scope in list(config.shop_scopes or []) if getattr(scope, "enabled", True)]
+    scope_rows = [
+        scope
+        for scope in list(config.shop_scopes or [])
+        if getattr(scope, "enabled", True)
+    ]
     if not scope_rows:
         return []
 
@@ -111,15 +124,23 @@ async def create_tasks_for_config(
     shops = {shop.shop_account_id: shop for shop in shop_result.scalars().all()}
 
     capability_rows = (
-        await db.execute(
-            select(ShopAccountCapability).where(
-                ShopAccountCapability.shop_account_id.in_([shop.id for shop in shops.values()])
+        (
+            await db.execute(
+                select(ShopAccountCapability).where(
+                    ShopAccountCapability.shop_account_id.in_(
+                        [shop.id for shop in shops.values()]
+                    )
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     capability_map: Dict[int, Dict[str, bool]] = {}
     for row in capability_rows:
-        capability_map.setdefault(row.shop_account_id, {})[row.data_domain] = bool(row.enabled)
+        capability_map.setdefault(row.shop_account_id, {})[row.data_domain] = bool(
+            row.enabled
+        )
 
     time_selection = normalize_time_selection(
         date_range_type=config.date_range_type,
@@ -128,14 +149,20 @@ async def create_tasks_for_config(
     )
     normalized_date_range = build_date_range_from_time_selection(time_selection)
     normalized_date_range["time_selection"] = time_selection
-    effective_granularity = derive_granularity_from_time_selection(time_selection, config.granularity)
+    effective_granularity = derive_granularity_from_time_selection(
+        time_selection, config.granularity
+    )
 
     created_tasks: List[CollectionTask] = []
     background_start_payloads: List[Dict[str, Any]] = []
     for scope in scope_rows:
         shop = shops.get(scope.shop_account_id)
         if shop is None:
-            logger.warning("Config %s scope shop %s not found or disabled", config_id, scope.shop_account_id)
+            logger.warning(
+                "Config %s scope shop %s not found or disabled",
+                config_id,
+                scope.shop_account_id,
+            )
             continue
 
         existing_task = (
@@ -160,20 +187,36 @@ async def create_tasks_for_config(
             capability_map.get(shop.id),
             shop_type=shop.shop_type,
         )
-        filtered_domains = [domain for domain in list(scope.data_domains or []) if capabilities.get(domain, False)]
+        filtered_domains = [
+            domain
+            for domain in list(scope.data_domains or [])
+            if capabilities.get(domain, False)
+        ]
         if not filtered_domains:
-            logger.info("Skip config %s scope %s because no supported domains remain", config_id, scope.shop_account_id)
+            logger.info(
+                "Skip config %s scope %s because no supported domains remain",
+                config_id,
+                scope.shop_account_id,
+            )
             continue
 
-        normalized_sub_domains = normalize_domain_subtypes(
-            data_domains=filtered_domains,
-            sub_domains=scope.sub_domains,
-        ) or None
+        normalized_sub_domains = (
+            normalize_domain_subtypes(
+                data_domains=filtered_domains,
+                sub_domains=scope.sub_domains,
+            )
+            or None
+        )
 
         runtime_manifests: Optional[Dict[str, Any]] = None
         if resolve_runtime:
             try:
-                filtered_domains, normalized_sub_domains, runtime_manifests, skipped_targets = await _resolve_runnable_scope_runtime(
+                (
+                    filtered_domains,
+                    normalized_sub_domains,
+                    runtime_manifests,
+                    skipped_targets,
+                ) = await _resolve_runnable_scope_runtime(
                     db,
                     platform=config.platform,
                     data_domains=filtered_domains,
@@ -214,7 +257,9 @@ async def create_tasks_for_config(
             sub_domains=normalized_sub_domains,
             granularity=effective_granularity,
             date_range=normalized_date_range,
-            total_domains=count_collection_targets(filtered_domains, normalized_sub_domains),
+            total_domains=count_collection_targets(
+                filtered_domains, normalized_sub_domains
+            ),
             completed_domains=[],
             failed_domains=[],
             current_domain=None,

@@ -49,7 +49,9 @@ logger = get_logger(__name__)
 
 router = APIRouter(tags=["数据采集-任务"])
 
-TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled", "partial_success"})
+TERMINAL_TASK_STATUSES = frozenset(
+    {"completed", "failed", "cancelled", "partial_success"}
+)
 
 CAPTCHA_REDIS_KEY_PREFIX = "collection:captcha:"
 
@@ -117,7 +119,8 @@ async def _mirror_collection_task(
         payload = {
             "task_family": "collection",
             "task_type": getattr(task, "trigger_type", None) or "manual",
-            "status": _collection_status_to_task_center(getattr(task, "status", None)) or "pending",
+            "status": _collection_status_to_task_center(getattr(task, "status", None))
+            or "pending",
             "trigger_source": getattr(task, "trigger_type", None),
             "platform_code": getattr(task, "platform", None),
             "account_id": getattr(task, "account", None),
@@ -136,7 +139,11 @@ async def _mirror_collection_task(
             return await service.update_task(task.task_id, **payload)
         return await service.create_task(task_id=task.task_id, **payload)
     except Exception as exc:
-        logger.debug("Collection task mirror skipped for %s: %s", getattr(task, "task_id", "unknown"), exc)
+        logger.debug(
+            "Collection task mirror skipped for %s: %s",
+            getattr(task, "task_id", "unknown"),
+            exc,
+        )
         return {}
 
 
@@ -171,8 +178,11 @@ async def _mirror_collection_task_log(
 # 任务 API
 # ============================================================
 
+
 def _build_task_response_payload(task: CollectionTask) -> dict:
-    normalized_date_range = normalize_collection_date_range(getattr(task, "date_range", None))
+    normalized_date_range = normalize_collection_date_range(
+        getattr(task, "date_range", None)
+    )
     time_selection = None
     if "time_selection" in normalized_date_range:
         time_selection = normalized_date_range.pop("time_selection")
@@ -209,7 +219,9 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
         "failed_domains": getattr(task, "failed_domains", None),
         "current_domain": getattr(task, "current_domain", None),
         "debug_mode": getattr(task, "debug_mode", False) or False,
-        "execution_mode": "headed" if getattr(task, "debug_mode", False) else "headless",
+        "execution_mode": (
+            "headed" if getattr(task, "debug_mode", False) else "headless"
+        ),
         "error_message": getattr(task, "error_message", None),
         "duration_seconds": getattr(task, "duration_seconds", None),
         "created_at": task.created_at,
@@ -222,16 +234,18 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
         "verification_message": verification_message,
         "verification_expires_at": None,
         "verification_attempt_count": 0,
-        "verification_input_mode": verification_input_mode(verification_type)
-        if verification_type
-        else None,
+        "verification_input_mode": (
+            verification_input_mode(verification_type) if verification_type else None
+        ),
     }
 
 
 def _build_task_verification_item(task: CollectionTask) -> Optional[dict]:
-    if getattr(task, "status", None) not in ("verification_required", "paused", "manual_intervention_required") or not getattr(
-        task, "verification_type", None
-    ):
+    if getattr(task, "status", None) not in (
+        "verification_required",
+        "paused",
+        "manual_intervention_required",
+    ) or not getattr(task, "verification_type", None):
         return None
 
     return {
@@ -278,10 +292,14 @@ async def create_task(
 
     account_info = None
     try:
-        from backend.services.shop_account_loader_service import get_shop_account_loader_service
+        from backend.services.shop_account_loader_service import (
+            get_shop_account_loader_service,
+        )
 
         shop_account_loader = get_shop_account_loader_service()
-        shop_payload = await shop_account_loader.load_shop_account_async(request.account_id, db)
+        shop_payload = await shop_account_loader.load_shop_account_async(
+            request.account_id, db
+        )
         if shop_payload:
             account_info = {
                 **shop_payload["compat_account"],
@@ -298,17 +316,22 @@ async def create_task(
         account_info = await account_loader.load_account_async(request.account_id, db)
 
     if not account_info:
-        raise HTTPException(status_code=404, detail=f"账号 {request.account_id} 不存在或未启用，请先在账号管理中维护")
+        raise HTTPException(
+            status_code=404,
+            detail=f"账号 {request.account_id} 不存在或未启用，请先在账号管理中维护",
+        )
 
     task_service = TaskService(db)
-    filtered_domains, unsupported_domains = task_service.filter_domains_by_account_capability(
-        account_info, request.data_domains
+    filtered_domains, unsupported_domains = (
+        task_service.filter_domains_by_account_capability(
+            account_info, request.data_domains
+        )
     )
 
     if not filtered_domains:
         raise HTTPException(
             status_code=400,
-            detail=f"账号 {request.account_id} 不支持任何请求的数据域: {', '.join(unsupported_domains)}"
+            detail=f"账号 {request.account_id} 不支持任何请求的数据域: {', '.join(unsupported_domains)}",
         )
 
     if unsupported_domains:
@@ -321,7 +344,11 @@ async def create_task(
         sub_domains=request.sub_domains,
     )
     time_selection = normalize_time_selection(
-        time_selection=request.time_selection.model_dump(exclude_none=True) if request.time_selection else None,
+        time_selection=(
+            request.time_selection.model_dump(exclude_none=True)
+            if request.time_selection
+            else None
+        ),
         date_range=request.date_range,
     )
     effective_granularity = derive_granularity_from_time_selection(
@@ -344,7 +371,9 @@ async def create_task(
             detail=f"Stable component not ready: {e}",
         ) from e
 
-    total_domains_count = count_collection_targets(filtered_domains, normalized_sub_domains)
+    total_domains_count = count_collection_targets(
+        filtered_domains, normalized_sub_domains
+    )
 
     task = CollectionTask(
         task_id=task_uuid,
@@ -376,8 +405,8 @@ async def create_task(
             "trigger": "manual",
             "account": request.account_id,
             "total_domains": total_domains_count,
-            "debug_mode": request.debug_mode
-        }
+            "debug_mode": request.debug_mode,
+        },
     )
     db.add(log)
     await db.commit()
@@ -392,7 +421,9 @@ async def create_task(
         details=log.details,
     )
 
-    logger.info(f"Created collection task: {task_uuid} ({request.platform}/{request.account_id}) - {total_domains_count} domains, debug_mode={request.debug_mode}")
+    logger.info(
+        f"Created collection task: {task_uuid} ({request.platform}/{request.account_id}) - {total_domains_count} domains, debug_mode={request.debug_mode}"
+    )
 
     app = getattr(fastapi_request, "app", None)
     asyncio.create_task(
@@ -423,7 +454,7 @@ async def list_tasks(
     config_id: Optional[int] = Query(None, description="按配置筛选"),
     limit: int = Query(50, ge=1, le=100, description="返回数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取任务列表"""
     stmt = select(CollectionTask)
@@ -442,7 +473,9 @@ async def list_tasks(
     return [_build_task_response_payload(task) for task in tasks]
 
 
-@router.get("/tasks/verification-items", response_model=List[CollectionVerificationItem])
+@router.get(
+    "/tasks/verification-items", response_model=List[CollectionVerificationItem]
+)
 async def list_verification_items(
     platform: Optional[str] = Query(None, description="按平台筛选"),
     verification_type: Optional[str] = Query(None, description="按验证码类型筛选"),
@@ -457,7 +490,11 @@ async def list_verification_items(
     if account_id:
         stmt = stmt.where(CollectionTask.account == account_id)
     if status == "verification_required":
-        stmt = stmt.where(CollectionTask.status.in_(["verification_required", "paused", "manual_intervention_required"]))
+        stmt = stmt.where(
+            CollectionTask.status.in_(
+                ["verification_required", "paused", "manual_intervention_required"]
+            )
+        )
     elif status:
         stmt = stmt.where(CollectionTask.status == status)
 
@@ -479,10 +516,12 @@ async def list_verification_items(
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_id: str = Path(..., description="任务ID"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取任务详情"""
-    result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+    result = await db.execute(
+        select(CollectionTask).where(CollectionTask.task_id == task_id)
+    )
     task = result.scalar_one_or_none()
 
     if not task:
@@ -501,7 +540,9 @@ async def cancel_or_delete_task(
     - 终态任务(已完成/失败/已取消/部分成功)：物理删除记录
     - 非终态任务(pending/queued/running/paused/verification_required/manual_intervention_required)：仅取消(置为 cancelled)，保留记录
     """
-    result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+    result = await db.execute(
+        select(CollectionTask).where(CollectionTask.task_id == task_id)
+    )
     task = result.scalar_one_or_none()
 
     if not task:
@@ -523,7 +564,9 @@ async def cancel_or_delete_task(
             "verification_required",
             "manual_intervention_required",
         ]:
-            raise HTTPException(status_code=400, detail=f"无法取消{task.status}状态的任务")
+            raise HTTPException(
+                status_code=400, detail=f"无法取消{task.status}状态的任务"
+            )
         prev_status = task.status
         task.status = "cancelled"
         task.error_message = "用户取消"
@@ -552,21 +595,25 @@ async def cancel_or_delete_task(
 async def retry_task(
     task_id: str = Path(..., description="任务ID"),
     request: Request = None,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     重试任务
 
     创建新任务,重新开始整个流程
     """
-    result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+    result = await db.execute(
+        select(CollectionTask).where(CollectionTask.task_id == task_id)
+    )
     original_task = result.scalar_one_or_none()
 
     if not original_task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     if original_task.status not in ["failed", "cancelled"]:
-        raise HTTPException(status_code=400, detail=f"无法重试{original_task.status}状态的任务")
+        raise HTTPException(
+            status_code=400, detail=f"无法重试{original_task.status}状态的任务"
+        )
 
     new_task = CollectionTask(
         task_id=str(uuid.uuid4()),
@@ -591,7 +638,7 @@ async def retry_task(
         task_id=new_task.id,
         level="info",
         message="重试任务已创建",
-        details={"original_task_id": task_id}
+        details={"original_task_id": task_id},
     )
     db.add(log)
     await db.commit()
@@ -634,7 +681,9 @@ async def retry_task(
             date_range=original_task.date_range or {},
             granularity=original_task.granularity or "daily",
             debug_mode=getattr(original_task, "debug_mode", False) or False,
-            execution_mode="headed" if getattr(original_task, "debug_mode", False) else "headless",
+            execution_mode=(
+                "headed" if getattr(original_task, "debug_mode", False) else "headless"
+            ),
             parallel_mode=False,
             max_parallel=1,
             runtime_manifests=runtime_manifests,
@@ -658,13 +707,19 @@ async def resume_task(
     仅当任务处于 verification_required/paused 且为「等待验证」时接受请求体中的 captcha_code 或 otp，
     写入 Redis 供执行器在同一 page 内填入后继续；否则返回 4xx。
     """
-    result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+    result = await db.execute(
+        select(CollectionTask).where(CollectionTask.task_id == task_id)
+    )
     task = result.scalar_one_or_none()
 
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    if task.status not in ("verification_required", "paused", "manual_intervention_required"):
+    if task.status not in (
+        "verification_required",
+        "paused",
+        "manual_intervention_required",
+    ):
         raise HTTPException(
             status_code=400,
             detail="验证已超时或任务已结束，请重新发起采集",
@@ -677,7 +732,9 @@ async def resume_task(
         manual_completed=payload.manual_completed,
     )
     if not response_payload:
-        raise HTTPException(status_code=400, detail="请提供 captcha_code、otp 或 manual_completed")
+        raise HTTPException(
+            status_code=400, detail="请提供 captcha_code、otp 或 manual_completed"
+        )
 
     redis_client = None
     if request and getattr(request, "app", None):
@@ -728,10 +785,12 @@ async def get_task_logs(
     task_id: str = Path(..., description="任务ID"),
     level: Optional[str] = Query(None, description="按日志级别筛选"),
     limit: int = Query(100, ge=1, le=500, description="返回数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取任务日志"""
-    result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+    result = await db.execute(
+        select(CollectionTask).where(CollectionTask.task_id == task_id)
+    )
     task = result.scalar_one_or_none()
 
     if not task:
@@ -751,7 +810,7 @@ async def get_task_logs(
 @router.get("/tasks/{task_id}/screenshot")
 async def get_task_screenshot(
     task_id: str = Path(..., description="任务ID"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     获取任务截图(验证码截图)
@@ -760,7 +819,9 @@ async def get_task_screenshot(
     """
     from pathlib import Path as PathLib
 
-    result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+    result = await db.execute(
+        select(CollectionTask).where(CollectionTask.task_id == task_id)
+    )
     task = result.scalar_one_or_none()
 
     if not task:
@@ -776,18 +837,21 @@ async def get_task_screenshot(
         screenshot_path = str(project_root / screenshot_path)
 
     if not os.path.exists(screenshot_path):
-        raise HTTPException(status_code=404, detail=f"截图文件不存在: {screenshot_path}")
+        raise HTTPException(
+            status_code=404, detail=f"截图文件不存在: {screenshot_path}"
+        )
 
     return FileResponse(
         path=screenshot_path,
         media_type="image/png",
-        filename=f"task_{task_id}_screenshot.png"
+        filename=f"task_{task_id}_screenshot.png",
     )
 
 
 # ============================================================
 # 历史和统计 API
 # ============================================================
+
 
 @router.get("/history", response_model=TaskHistoryResponse)
 async def get_history(
@@ -797,7 +861,7 @@ async def get_history(
     end_date: Optional[date] = Query(None, description="结束日期"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取采集历史记录(分页)"""
     from sqlalchemy import func
@@ -811,10 +875,15 @@ async def get_history(
         conditions.append(CollectionTask.status == status)
 
     if start_date:
-        conditions.append(CollectionTask.created_at >= datetime.combine(start_date, datetime.min.time()))
+        conditions.append(
+            CollectionTask.created_at
+            >= datetime.combine(start_date, datetime.min.time())
+        )
 
     if end_date:
-        conditions.append(CollectionTask.created_at <= datetime.combine(end_date, datetime.max.time()))
+        conditions.append(
+            CollectionTask.created_at <= datetime.combine(end_date, datetime.max.time())
+        )
 
     count_stmt = select(func.count(CollectionTask.id))
     if conditions:
@@ -825,7 +894,11 @@ async def get_history(
     stmt = select(CollectionTask)
     if conditions:
         stmt = stmt.where(*conditions)
-    stmt = stmt.order_by(desc(CollectionTask.created_at)).offset((page - 1) * page_size).limit(page_size)
+    stmt = (
+        stmt.order_by(desc(CollectionTask.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     result = await db.execute(stmt)
     tasks = result.scalars().all()
 
@@ -834,34 +907,33 @@ async def get_history(
         total=total,
         page=page,
         page_size=page_size,
-        pages=(total + page_size - 1) // page_size
+        pages=(total + page_size - 1) // page_size,
     )
 
 
 @router.get("/history/stats", response_model=TaskStatsResponse)
 async def get_history_stats(
     days: int = Query(7, ge=1, le=30, description="统计天数"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取采集统计数据"""
     from sqlalchemy import func
+
     start_date = datetime.now() - timedelta(days=days)
 
-    status_stmt = select(
-        CollectionTask.status,
-        func.count(CollectionTask.id).label("count")
-    ).where(
-        CollectionTask.created_at >= start_date
-    ).group_by(CollectionTask.status)
+    status_stmt = (
+        select(CollectionTask.status, func.count(CollectionTask.id).label("count"))
+        .where(CollectionTask.created_at >= start_date)
+        .group_by(CollectionTask.status)
+    )
     status_result = await db.execute(status_stmt)
     status_stats = status_result.all()
 
-    platform_stmt = select(
-        CollectionTask.platform,
-        func.count(CollectionTask.id).label("count")
-    ).where(
-        CollectionTask.created_at >= start_date
-    ).group_by(CollectionTask.platform)
+    platform_stmt = (
+        select(CollectionTask.platform, func.count(CollectionTask.id).label("count"))
+        .where(CollectionTask.created_at >= start_date)
+        .group_by(CollectionTask.platform)
+    )
     platform_result = await db.execute(platform_stmt)
     platform_stats = platform_result.all()
 
@@ -887,13 +959,15 @@ async def get_history_stats(
         day_failed = sum(1 for t in day_tasks if t.status == "failed")
         day_rate = round(day_completed / day_total * 100, 2) if day_total > 0 else 0
 
-        daily_stats.append(DailyStats(
-            date=day,
-            total=day_total,
-            completed=day_completed,
-            failed=day_failed,
-            success_rate=day_rate
-        ))
+        daily_stats.append(
+            DailyStats(
+                date=day,
+                total=day_total,
+                completed=day_completed,
+                failed=day_failed,
+                success_rate=day_rate,
+            )
+        )
 
     return TaskStatsResponse(
         total_tasks=total,
@@ -902,13 +976,14 @@ async def get_history_stats(
         running=running_count,
         queued=queued_count,
         success_rate=success_rate,
-        daily_stats=daily_stats
+        daily_stats=daily_stats,
     )
 
 
 # ============================================================
 # 步骤可观测：状态回调(独立 session 写库，不阻塞执行器)
 # ============================================================
+
 
 async def _collection_step_status_callback(
     task_id: str,
@@ -923,9 +998,12 @@ async def _collection_step_status_callback(
     异常仅打日志不 re-raise，避免回调失败中断采集。
     """
     from backend.models.database import AsyncSessionLocal
+
     try:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+            result = await session.execute(
+                select(CollectionTask).where(CollectionTask.task_id == task_id)
+            )
             task = result.scalar_one_or_none()
             if not task:
                 return
@@ -935,7 +1013,9 @@ async def _collection_step_status_callback(
                 task.current_domain = current_domain
             if details is not None:
                 log_level = "error" if details.get("error") else "info"
-                log = CollectionTaskLog(task_id=task.id, level=log_level, message=message, details=details)
+                log = CollectionTaskLog(
+                    task_id=task.id, level=log_level, message=message, details=details
+                )
                 session.add(log)
             await session.commit()
             await _mirror_collection_task(session, task)
@@ -961,9 +1041,12 @@ async def _collection_step_status_callback(
 async def _is_collection_task_cancelled(task_id: str) -> bool:
     """检测任务是否已被用户取消(供 executor is_cancelled_callback)."""
     from backend.models.database import AsyncSessionLocal
+
     try:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+            result = await session.execute(
+                select(CollectionTask).where(CollectionTask.task_id == task_id)
+            )
             task = result.scalar_one_or_none()
             return task is not None and task.status == "cancelled"
     except Exception as e:
@@ -974,6 +1057,7 @@ async def _is_collection_task_cancelled(task_id: str) -> bool:
 # ============================================================
 # 后台任务执行(v4.7.0)
 # ============================================================
+
 
 async def _on_verification_required(
     task_id: str,
@@ -986,6 +1070,7 @@ async def _on_verification_required(
     返回用户提交的 captcha_code/otp 或 None(超时)。
     """
     from backend.models.database import AsyncSessionLocal
+
     next_status = (
         "manual_intervention_required"
         if verification_input_mode(verification_type) == "manual_continue"
@@ -998,7 +1083,9 @@ async def _on_verification_required(
     )
     try:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+            result = await session.execute(
+                select(CollectionTask).where(CollectionTask.task_id == task_id)
+            )
             task = result.scalar_one_or_none()
             if task:
                 task.verification_type = verification_type
@@ -1025,9 +1112,15 @@ async def _on_verification_required(
                 )
     except Exception as e:
         logger.error(f"Verification persist failed for task {task_id}: {e}")
-    redis_client = getattr(app, "state", None) and getattr(app.state, "redis", None) if app else None
+    redis_client = (
+        getattr(app, "state", None) and getattr(app.state, "redis", None)
+        if app
+        else None
+    )
     if not redis_client:
-        logger.warning(f"Task {task_id}: Redis not available, verification wait will timeout immediately")
+        logger.warning(
+            f"Task {task_id}: Redis not available, verification wait will timeout immediately"
+        )
         await asyncio.sleep(min(5, VERIFICATION_WAIT_TIMEOUT))
         return None
     key = f"{CAPTCHA_REDIS_KEY_PREFIX}{task_id}"
@@ -1039,12 +1132,19 @@ async def _on_verification_required(
             if val is not None:
                 try:
                     await redis_client.delete(key)
-                except Exception:
-                    pass
+                except Exception as redis_cleanup_error:
+                    logger.debug(
+                        "Task %s: failed to delete verification redis key %s: %s",
+                        task_id,
+                        key,
+                        redis_cleanup_error,
+                    )
                 try:
                     async with AsyncSessionLocal() as session:
                         result = await session.execute(
-                            select(CollectionTask).where(CollectionTask.task_id == task_id)
+                            select(CollectionTask).where(
+                                CollectionTask.task_id == task_id
+                            )
                         )
                         task = result.scalar_one_or_none()
                         if task:
@@ -1052,12 +1152,16 @@ async def _on_verification_required(
                             await session.commit()
                             await _mirror_collection_task(session, task)
                 except Exception as e:
-                    logger.warning(f"Task {task_id}: failed to switch status back to running after verification: {e}")
+                    logger.warning(
+                        f"Task {task_id}: failed to switch status back to running after verification: {e}"
+                    )
                 return val
         except Exception as e:
             logger.debug(f"Redis get during verification wait: {e}")
         await asyncio.sleep(VERIFICATION_POLL_INTERVAL)
-    logger.info(f"Task {task_id}: verification wait timed out after {VERIFICATION_WAIT_TIMEOUT}s")
+    logger.info(
+        f"Task {task_id}: verification wait timed out after {VERIFICATION_WAIT_TIMEOUT}s"
+    )
     return None
 
 
@@ -1082,12 +1186,16 @@ async def _execute_collection_task_background(
     from backend.models.database import AsyncSessionLocal
     from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 
-    async def _verification_callback(t_id: str, v_type: str, s_path: Optional[str]) -> Optional[str]:
+    async def _verification_callback(
+        t_id: str, v_type: str, s_path: Optional[str]
+    ) -> Optional[str]:
         return await _on_verification_required(t_id, v_type, s_path, app)
 
     async with AsyncSessionLocal() as db:
         try:
-            result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+            result = await db.execute(
+                select(CollectionTask).where(CollectionTask.task_id == task_id)
+            )
             task = result.scalar_one_or_none()
             if not task:
                 logger.error(f"Task {task_id} not found in database")
@@ -1101,21 +1209,31 @@ async def _execute_collection_task_background(
             try:
                 account = None
                 try:
-                    from backend.services.shop_account_loader_service import get_shop_account_loader_service
+                    from backend.services.shop_account_loader_service import (
+                        get_shop_account_loader_service,
+                    )
 
                     shop_account_loader = get_shop_account_loader_service()
-                    shop_payload = await shop_account_loader.load_shop_account_async(account_id, db)
+                    shop_payload = await shop_account_loader.load_shop_account_async(
+                        account_id, db
+                    )
                     if shop_payload:
                         account = {
                             **shop_payload["compat_account"],
-                            "main_account_id": shop_payload["main_account"]["main_account_id"],
-                            "shop_account_id": shop_payload["shop_context"]["shop_account_id"],
+                            "main_account_id": shop_payload["main_account"][
+                                "main_account_id"
+                            ],
+                            "shop_account_id": shop_payload["shop_context"][
+                                "shop_account_id"
+                            ],
                         }
                 except Exception:
                     account = None
 
                 if not account:
-                    from backend.services.account_loader_service import get_account_loader_service
+                    from backend.services.account_loader_service import (
+                        get_account_loader_service,
+                    )
 
                     account_loader = get_account_loader_service()
                     account = await account_loader.load_account_async(account_id, db)
@@ -1147,7 +1265,9 @@ async def _execute_collection_task_background(
             from playwright.async_api import async_playwright
 
             async with async_playwright() as p:
-                from modules.apps.collection_center.browser_config_helper import get_browser_launch_args
+                from modules.apps.collection_center.browser_config_helper import (
+                    get_browser_launch_args,
+                )
 
                 browser = await p.chromium.launch(
                     **get_browser_launch_args(
@@ -1157,7 +1277,9 @@ async def _execute_collection_task_background(
                 )
                 try:
                     if parallel_mode:
-                        logger.info(f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})")
+                        logger.info(
+                            f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})"
+                        )
                         result = await executor.execute_parallel_domains(
                             task_id=task_id,
                             platform=platform,
@@ -1211,7 +1333,9 @@ async def _execute_collection_task_background(
                         files_collected=result.files_collected,
                         error_message=result.error_message,
                     )
-                    logger.info(f"Task {task_id} completed: {result.status}, files={result.files_collected}")
+                    logger.info(
+                        f"Task {task_id} completed: {result.status}, files={result.files_collected}"
+                    )
                 finally:
                     await browser.close()
 
@@ -1219,7 +1343,9 @@ async def _execute_collection_task_background(
             logger.exception(f"Background task {task_id} failed: {e}")
 
             try:
-                result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+                result = await db.execute(
+                    select(CollectionTask).where(CollectionTask.task_id == task_id)
+                )
                 task = result.scalar_one_or_none()
                 if task:
                     task.status = "failed"

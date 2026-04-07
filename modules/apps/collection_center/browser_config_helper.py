@@ -11,7 +11,9 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-def enforce_official_playwright_browser(launch_args: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def enforce_official_playwright_browser(
+    launch_args: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """
     强制使用 Playwright 官方默认浏览器。
 
@@ -39,21 +41,22 @@ def get_browser_launch_args(
 ) -> dict:
     """
     获取环境感知的浏览器启动参数(v4.7.0)
-    
+
     自动根据环境返回合适的浏览器配置:
     - 开发环境:默认有头模式(headless=false, slow_mo=100)便于观察
     - 生产环境:自动无头模式(headless=true, slow_mo=0)适合Docker
     - 调试模式:强制有头模式(覆盖生产环境配置)
-    
+
     Args:
         debug_mode: 调试模式(临时启用有头浏览器)
-        
+
     Returns:
         dict: Playwright browser.launch() 参数
     """
     try:
         # 尝试从backend.utils.config导入
         from backend.utils.config import get_settings
+
         settings = get_settings()
         browser_config = settings.browser_config.copy()
         normalized_mode = str(execution_mode or "").strip().lower()
@@ -63,18 +66,18 @@ def get_browser_launch_args(
             browser_config["slow_mo"] = 0
         elif normalized_mode == "headed":
             browser_config["headless"] = False
-        
+
         # 调试模式覆盖
         if debug_mode:
-            browser_config['headless'] = False
+            browser_config["headless"] = False
             logger.info("Debug mode enabled: forcing headful browser")
-        
+
         return enforce_official_playwright_browser(browser_config)
-    
+
     except Exception as e:
         # 降级到默认配置
         logger.warning(f"Failed to load settings, using default browser config: {e}")
-        
+
         environment = os.getenv("ENVIRONMENT", "development")
         headless = os.getenv("PLAYWRIGHT_HEADLESS", "false").lower() == "true"
         slow_mo = int(os.getenv("PLAYWRIGHT_SLOW_MO", "0"))
@@ -85,26 +88,30 @@ def get_browser_launch_args(
             slow_mo = 0
         elif normalized_mode == "headed":
             headless = False
-        
+
         if debug_mode:
             headless = False
-        
+
         if environment == "production":
-            return enforce_official_playwright_browser({
-                'headless': headless or True,  # 生产环境强制无头(除非调试)
-                'slow_mo': 0,
-                'args': [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                ]
-            })
+            return enforce_official_playwright_browser(
+                {
+                    "headless": headless or True,  # 生产环境强制无头(除非调试)
+                    "slow_mo": 0,
+                    "args": [
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                    ],
+                }
+            )
         else:
-            return enforce_official_playwright_browser({
-                'headless': headless,
-                'slow_mo': slow_mo if slow_mo > 0 else 100,
-                'args': []
-            })
+            return enforce_official_playwright_browser(
+                {
+                    "headless": headless,
+                    "slow_mo": slow_mo if slow_mo > 0 else 100,
+                    "args": [],
+                }
+            )
 
 
 def get_browser_context_args() -> dict:
@@ -116,8 +123,8 @@ def get_browser_context_args() -> dict:
     可在执行器创建 context 时从 account 读取 proxy_required/proxy 并注入 context 的 proxy。
     """
     return {
-        'viewport': {'width': 1920, 'height': 1080},
-        'locale': 'zh-CN',
-        'timezone_id': 'Asia/Shanghai',
-        'accept_downloads': True,
+        "viewport": {"width": 1920, "height": 1080},
+        "locale": "zh-CN",
+        "timezone_id": "Asia/Shanghai",
+        "accept_downloads": True,
     }

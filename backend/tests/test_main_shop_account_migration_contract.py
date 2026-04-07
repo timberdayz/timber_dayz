@@ -12,7 +12,9 @@ from alembic.script import ScriptDirectory
 def _find_main_shop_account_migration() -> Path:
     versions_dir = Path("migrations/versions")
     matches = sorted(versions_dir.glob("*main*shop*account*domain*chain*.py"))
-    assert matches, "expected a main/shop account domain-chain migration in migrations/versions"
+    assert (
+        matches
+    ), "expected a main/shop account domain-chain migration in migrations/versions"
     return matches[-1]
 
 
@@ -30,7 +32,7 @@ def test_main_shop_account_migration_mentions_new_tables_and_old_source_table():
     assert "shop_account_capabilities" in source
     assert "platform_shop_discoveries" in source
     assert "platform_accounts" in source
-    assert 'unique=True' in source or 'sa.UniqueConstraint("main_account_id"' in source
+    assert "unique=True" in source or 'sa.UniqueConstraint("main_account_id"' in source
     assert 'sa.UniqueConstraint("shop_account_id"' in source
 
 
@@ -150,9 +152,9 @@ def test_main_shop_account_migration_applies_changes_to_postgres_rehearsal_db():
             timeout=240,
         )
 
-        assert result.returncode == 0, (
-            f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         conn = psycopg2.connect(
             host="127.0.0.1",

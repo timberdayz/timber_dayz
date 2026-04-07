@@ -62,10 +62,19 @@ async def test_collection_step_status_callback_broadcasts_progress(monkeypatch):
             return False
 
     send_progress = AsyncMock()
-    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _SessionManager())
-    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", AsyncMock())
-    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock())
-    monkeypatch.setattr("backend.routers.collection_tasks.connection_manager.send_progress", send_progress)
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal", lambda: _SessionManager()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.connection_manager.send_progress",
+        send_progress,
+    )
 
     await _collection_step_status_callback(
         task_id=task.task_id,
@@ -84,7 +93,9 @@ async def test_collection_step_status_callback_broadcasts_progress(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_execute_collection_task_background_broadcasts_complete_on_success(monkeypatch):
+async def test_execute_collection_task_background_broadcasts_complete_on_success(
+    monkeypatch,
+):
     from backend.routers.collection_tasks import _execute_collection_task_background
 
     task = _make_task(status="pending", progress=0, current_step=None)
@@ -136,11 +147,17 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
 
     send_complete = AsyncMock()
     browser_launch_calls = []
-    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _DbSessionManager())
-    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", AsyncMock())
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal", lambda: _DbSessionManager()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+    )
     monkeypatch.setattr(
         "backend.services.account_loader_service.get_account_loader_service",
-        lambda: SimpleNamespace(load_account_async=AsyncMock(return_value={"account_id": "acc-1"})),
+        lambda: SimpleNamespace(
+            load_account_async=AsyncMock(return_value={"account_id": "acc-1"})
+        ),
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2.CollectionExecutorV2",
@@ -150,10 +167,16 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
         "modules.apps.collection_center.browser_config_helper.get_browser_launch_args",
         lambda debug_mode=False, execution_mode=None: browser_launch_calls.append(
             {"debug_mode": debug_mode, "execution_mode": execution_mode}
-        ) or {},
+        )
+        or {},
     )
-    monkeypatch.setattr("playwright.async_api.async_playwright", lambda: _PlaywrightManager())
-    monkeypatch.setattr("backend.routers.collection_tasks.connection_manager.send_complete", send_complete)
+    monkeypatch.setattr(
+        "playwright.async_api.async_playwright", lambda: _PlaywrightManager()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.connection_manager.send_complete",
+        send_complete,
+    )
 
     await _execute_collection_task_background(
         task_id=task.task_id,
@@ -235,8 +258,12 @@ async def test_retry_task_requeues_background_execution(monkeypatch):
         "backend.routers.collection_tasks.asyncio.create_task",
         _capture_background_task,
     )
-    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", AsyncMock())
-    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock())
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+    )
 
     request = SimpleNamespace(app=SimpleNamespace())
 

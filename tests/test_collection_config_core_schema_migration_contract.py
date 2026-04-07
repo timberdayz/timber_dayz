@@ -145,9 +145,9 @@ def test_collection_config_shop_scope_migration_moves_legacy_public_table_into_c
             timeout=240,
         )
 
-        assert result.returncode == 0, (
-            f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         conn = psycopg2.connect(
             host="127.0.0.1",
