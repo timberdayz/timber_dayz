@@ -11,6 +11,7 @@
 
 import os
 import asyncio
+import time
 import uuid
 import shutil
 from pathlib import Path
@@ -373,6 +374,121 @@ def _build_playwright_context_options_from_fingerprint(fp_options: Dict[str, Any
     if "permissions" in fp_options and isinstance(fp_options["permissions"], list) and not fp_options["permissions"]:
         pass  # 不授予任何权限
     return out
+
+
+async def _prepare_runtime_page_bundle(
+    *,
+    task_id: str,
+    platform: str,
+    session_owner_id: str,
+    runtime_account: Dict[str, Any],
+    raw_account: Dict[str, Any],
+    granularity: str,
+    normalized_date_range: Dict[str, Any],
+    task_download_dir: Union[str, Path],
+    screenshot_dir: Union[str, Path],
+    shop_account_id: str,
+    use_account_session_fingerprint: bool,
+    browser_instance: Any,
+    runtime_manifests: Optional[Dict[str, Any]],
+    proxy: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    storage_state: Optional[Dict[str, Any]] = None
+    reused_session = False
+    if use_account_session_fingerprint and session_owner_id:
+        try:
+            session_data = await _load_or_bootstrap_session_async(
+                platform,
+                session_owner_id,
+                runtime_account,
+            )
+            if session_data and isinstance(session_data.get("storage_state"), dict):
+                storage_state = session_data["storage_state"]
+                reused_session = True
+                logger.info(
+                    "Task %s: session loaded for %s/%s (reused_session=True)",
+                    task_id,
+                    platform,
+                    session_owner_id,
+                )
+            else:
+                if session_data is None:
+                    logger.debug(
+                        "Task %s: no valid session for %s/%s, will full login",
+                        task_id,
+                        platform,
+                        session_owner_id,
+                    )
+                else:
+                    logger.warning(
+                        "Task %s: session_data missing storage_state, will full login",
+                        task_id,
+                    )
+        except Exception as e:
+            logger.warning("Task %s: load_session failed: %s, will full login", task_id, e)
+
+    if use_account_session_fingerprint and session_owner_id:
+        try:
+            fp_options = await _get_fingerprint_context_options_async(
+                platform,
+                session_owner_id,
+                raw_account,
+                proxy=proxy,
+            )
+            context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+        except Exception as e:
+            logger.warning(
+                "Task %s: get fingerprint failed: %s, fallback to global context args",
+                task_id,
+                e,
+            )
+            from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+
+            context_options = get_browser_context_args()
+    else:
+        from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+
+        context_options = get_browser_context_args()
+
+    context_options.setdefault("accept_downloads", True)
+    if storage_state:
+        context_options["storage_state"] = storage_state
+
+    params = _build_runtime_task_params(
+        task_id=task_id,
+        account=runtime_account,
+        platform=platform,
+        granularity=granularity,
+        normalized_date_range=normalized_date_range,
+        task_download_dir=task_download_dir,
+        screenshot_dir=screenshot_dir,
+        reused_session=reused_session,
+    )
+    params["main_account_id"] = session_owner_id
+    if shop_account_id:
+        params["shop_account_id"] = shop_account_id
+
+    play_context = await browser_instance.new_context(**context_options)
+    page = await play_context.new_page()
+    params["reused_session"] = reused_session
+
+    adapter = None
+    if runtime_manifests is None:
+        adapter = create_adapter(
+            platform=platform,
+            account=runtime_account,
+            config=params,
+        )
+
+    return {
+        "storage_state": storage_state,
+        "reused_session": reused_session,
+        "context_options": context_options,
+        "params": params,
+        "play_context": play_context,
+        "page": page,
+        "adapter": adapter,
+    }
 
 
 # Phase 9.4: 版本管理支持(懒加载,避免循环依赖)

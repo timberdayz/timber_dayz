@@ -236,3 +236,110 @@ async def test_executor_shared_state_phase_allows_different_main_accounts():
     )
 
     assert results == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_execute_reloads_main_account_session_after_waiting_for_lock(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakePage:
+        def __init__(self, context):
+            self.context = context
+            self.url = "about:blank"
+
+    class FakeContext:
+        def __init__(self, version: str):
+            self.version = version
+            self.browser = None
+
+        async def new_page(self):
+            return FakePage(self)
+
+        async def close(self):
+            return None
+
+    class FakeBrowser:
+        def __init__(self):
+            self.context_versions: list[str] = []
+
+        async def new_context(self, **kwargs):
+            storage_state = kwargs.get("storage_state") or {}
+            version = storage_state.get("version", "missing")
+            self.context_versions.append(version)
+            return FakeContext(version)
+
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+
+    current_session = {"version": "stale"}
+    first_phase_entered = asyncio.Event()
+
+    async def fake_load_session(platform, account_id, account_config=None, max_age_days=30):
+        return {"storage_state": dict(current_session)}
+
+    async def fake_execute_shared_login_phase(**kwargs):
+        if kwargs["task_id"] == "task-1":
+            first_phase_entered.set()
+            await asyncio.sleep(0.05)
+            current_session["version"] = "fresh"
+        return kwargs["play_context"], kwargs["page"], None
+
+    async def fake_execute_with_python_components(**kwargs):
+        return kwargs["play_context"].version
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._load_or_bootstrap_session_async",
+        fake_load_session,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._get_fingerprint_context_options_async",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._build_playwright_context_options_from_fingerprint",
+        lambda _fp_options: {},
+    )
+    monkeypatch.setattr(executor, "_execute_shared_login_phase", fake_execute_shared_login_phase)
+    monkeypatch.setattr(
+        executor,
+        "_execute_with_python_components",
+        fake_execute_with_python_components,
+    )
+
+    browser = FakeBrowser()
+    account = {
+        "account_id": "shop-1",
+        "main_account_id": "main-1",
+        "username": "demo",
+        "password": "secret",
+    }
+
+    first_task = asyncio.create_task(
+        executor.execute(
+            task_id="task-1",
+            platform="tiktok",
+            account_id="shop-1",
+            account=account,
+            data_domains=["products"],
+            date_range={"start": "2026-04-01", "end": "2026-04-01"},
+            granularity="daily",
+            browser=browser,
+        )
+    )
+    await first_phase_entered.wait()
+    second_task = asyncio.create_task(
+        executor.execute(
+            task_id="task-2",
+            platform="tiktok",
+            account_id="shop-2",
+            account={**account, "account_id": "shop-2"},
+            data_domains=["products"],
+            date_range={"start": "2026-04-01", "end": "2026-04-01"},
+            granularity="daily",
+            browser=browser,
+        )
+    )
+
+    results = await asyncio.gather(first_task, second_task)
+
+    assert results == ["stale", "fresh"]
