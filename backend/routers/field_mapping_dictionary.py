@@ -816,7 +816,7 @@ async def save_mapping_template(
                         f"可能导致去重失败。表头字段: {header_columns[:10]}..."
                     )
         
-        template_id = template_service.save_template(
+        template_id = await template_service.save_template(
             platform=request['platform'],
             data_domain=request['data_domain'],
             header_columns=header_columns,  # [*] v4.6.0 DSS架构:使用header_columns
@@ -1127,7 +1127,7 @@ async def list_mapping_templates(
         # 如果platform或data_domain为空字符串,转换为None
         platform = platform if platform else None
         data_domain = data_domain if data_domain else None
-        templates = template_service.list_templates(platform, data_domain)
+        templates = await template_service.list_templates(platform, data_domain)
         
         return {
             "success": True,
@@ -1156,7 +1156,7 @@ async def delete_mapping_template(
     """删除模板"""
     try:
         template_service = get_template_service(db)
-        success = template_service.delete_template(template_id)
+        success = await template_service.delete_template(template_id)
         
         if success:
             return {
@@ -1203,7 +1203,7 @@ async def apply_mapping_template(
     try:
         template_service = get_template_service(db)
         
-        result = template_service.apply_template(
+        result = await template_service.apply_template(
             template_id=request['template_id'],
             current_columns=request['columns']
         )
@@ -1211,10 +1211,10 @@ async def apply_mapping_template(
         # v4.5.1新增:获取模板完整配置
         from backend.services.template_matcher import get_template_matcher
         matcher = get_template_matcher(db)
-        config = matcher.get_template_config(request['template_id'])
+        config = await matcher.get_template_config(request['template_id'])
         
         # v4.6.0新增:检测表头变化
-        header_changes = matcher.detect_header_changes(
+        header_changes = await matcher.detect_header_changes(
             template_id=request['template_id'],
             current_columns=request['columns']
         )
