@@ -19,21 +19,71 @@ branch_labels = None
 depends_on = None
 
 
+def _column_exists(connection, schema_name: str, table_name: str, column_name: str) -> bool:
+    result = connection.execute(
+        sa.text(
+            """
+            select 1
+            from information_schema.columns
+            where table_schema = :schema_name
+              and table_name = :table_name
+              and column_name = :column_name
+            limit 1
+            """
+        ),
+        {
+            "schema_name": schema_name,
+            "table_name": table_name,
+            "column_name": column_name,
+        },
+    )
+    return result.scalar() is not None
+
+
+def _index_exists(connection, schema_name: str, index_name: str) -> bool:
+    result = connection.execute(
+        sa.text(
+            """
+            select 1
+            from pg_indexes
+            where schemaname = :schema_name
+              and indexname = :index_name
+            limit 1
+            """
+        ),
+        {
+            "schema_name": schema_name,
+            "index_name": index_name,
+        },
+    )
+    return result.scalar() is not None
+
+
 def upgrade():
-    op.add_column(
-        'employees',
-        sa.Column('user_id', sa.BigInteger(), nullable=True),
-        schema='a_class'
-    )
-    op.create_index(
-        'ix_employees_user_id',
-        'employees',
-        ['user_id'],
-        unique=False,
-        schema='a_class'
-    )
+    connection = op.get_bind()
+
+    if not _column_exists(connection, "a_class", "employees", "user_id"):
+        op.add_column(
+            'employees',
+            sa.Column('user_id', sa.BigInteger(), nullable=True),
+            schema='a_class'
+        )
+
+    if not _index_exists(connection, "a_class", "ix_employees_user_id"):
+        op.create_index(
+            'ix_employees_user_id',
+            'employees',
+            ['user_id'],
+            unique=False,
+            schema='a_class'
+        )
 
 
 def downgrade():
-    op.drop_index('ix_employees_user_id', table_name='employees', schema='a_class')
-    op.drop_column('employees', 'user_id', schema='a_class')
+    connection = op.get_bind()
+
+    if _index_exists(connection, "a_class", "ix_employees_user_id"):
+        op.drop_index('ix_employees_user_id', table_name='employees', schema='a_class')
+
+    if _column_exists(connection, "a_class", "employees", "user_id"):
+        op.drop_column('employees', 'user_id', schema='a_class')

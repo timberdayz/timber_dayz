@@ -42,6 +42,23 @@ def table_exists(conn, table_name: str, schema: str = 'public') -> bool:
     return r.scalar() or False
 
 
+def constraint_exists(conn, schema: str, table_name: str, constraint_name: str) -> bool:
+    result = conn.execute(text("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.table_constraints
+            WHERE table_schema = :schema
+              AND table_name = :table_name
+              AND constraint_name = :constraint_name
+        )
+    """), {
+        "schema": schema,
+        "table_name": table_name,
+        "constraint_name": constraint_name,
+    })
+    return result.scalar() or False
+
+
 def upgrade():
     conn = op.get_bind()
 
@@ -97,6 +114,13 @@ def upgrade():
             conn.execute(text("SELECT setval(pg_get_serial_sequence('a_class.sales_targets', 'id'), COALESCE((SELECT MAX(id) FROM a_class.sales_targets), 1))"))
             safe_print(f"  [OK] Migrated {cnt} rows to a_class.sales_targets")
 
+        if table_exists(conn, 'sales_targets', 'a_class') and not constraint_exists(conn, 'a_class', 'sales_targets', 'sales_targets_pkey'):
+            conn.execute(text("""
+                ALTER TABLE a_class.sales_targets
+                ADD CONSTRAINT sales_targets_pkey PRIMARY KEY (id)
+            """))
+            safe_print("  [OK] Added sales_targets_pkey on a_class.sales_targets(id)")
+
         # 1.3 Drop target_breakdown FK to public.sales_targets
         if table_exists(conn, 'target_breakdown', 'a_class'):
             fk_result = conn.execute(text("""
@@ -112,7 +136,11 @@ def upgrade():
                 safe_print(f"  [OK] Dropped FK {fk_name}")
 
         # 1.4 Add new FK: target_breakdown.target_id -> a_class.sales_targets.id
-        if table_exists(conn, 'target_breakdown', 'a_class'):
+        if (
+            table_exists(conn, 'target_breakdown', 'a_class')
+            and table_exists(conn, 'sales_targets', 'a_class')
+            and not constraint_exists(conn, 'a_class', 'target_breakdown', 'fk_target_breakdown_sales_targets')
+        ):
             conn.execute(text("""
                 ALTER TABLE a_class.target_breakdown
                 ADD CONSTRAINT fk_target_breakdown_sales_targets
