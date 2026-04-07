@@ -16,6 +16,28 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
     return "JSON"
 
 
+def test_orders_template_header_normalization_preserves_rmb_suffixes():
+    from backend.routers.field_mapping_dictionary import _normalize_template_headers_for_domain
+
+    normalized = _normalize_template_headers_for_domain(
+        data_domain="orders",
+        header_columns=["订单编号", "利润", "利润(RMB)", "买家支付(RMB)"],
+    )
+
+    assert normalized == ["订单编号", "利润", "利润(RMB)", "买家支付(RMB)"]
+
+
+def test_non_orders_template_header_normalization_keeps_existing_suffix_stripping():
+    from backend.routers.field_mapping_dictionary import _normalize_template_headers_for_domain
+
+    normalized = _normalize_template_headers_for_domain(
+        data_domain="products",
+        header_columns=["利润(RMB)"],
+    )
+
+    assert normalized == ["利润"]
+
+
 @pytest_asyncio.fixture
 async def template_update_context_client():
     from backend.main import app
@@ -210,3 +232,94 @@ async def test_template_update_context_core_only_uses_template_headers_as_field_
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["missing_field"]
     assert data["recommended_deduplication_fields"] == ["order_id", "shop_id"]
+
+
+@pytest.mark.asyncio
+async def test_template_update_context_orders_treats_rmb_suffix_as_real_header_difference(
+    template_update_context_client,
+    monkeypatch,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="miaoshou",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=1,
+            header_columns=["订单编号", "利润", "买家支付"],
+            deduplication_fields=["订单编号"],
+            template_name="miaoshou_orders_daily_profit_legacy",
+            version=1,
+            status="published",
+            field_count=3,
+            created_by="test",
+        )
+        file_record = CatalogFile(
+            file_path="data/raw/miaoshou/orders/orders_daily_rmb_demo.xlsx",
+            file_name="orders_daily_rmb_demo.xlsx",
+            source="data/raw",
+            platform_code="miaoshou",
+            source_platform="miaoshou",
+            data_domain="orders",
+            granularity="daily",
+            status="pending",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        session.add(template)
+        session.add(file_record)
+        await session.commit()
+        await session.refresh(template)
+        await session.refresh(file_record)
+
+    from backend.routers import field_mapping_dictionary as router_module
+
+    async def fake_load_file_update_preview(*_, **__):
+        return {
+            "file": {
+                "id": file_record.id,
+                "file_name": file_record.file_name,
+                "platform": "miaoshou",
+                "domain": "orders",
+                "granularity": "daily",
+                "sub_domain": None,
+            },
+            "header_columns": ["订单编号", "利润(RMB)", "买家支付(RMB)"],
+            "sample_data": {
+                "订单编号": "MS-1",
+                "利润(RMB)": "100",
+                "买家支付(RMB)": "200",
+            },
+            "preview_data": [
+                {
+                    "订单编号": "MS-1",
+                    "利润(RMB)": "100",
+                    "买家支付(RMB)": "200",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        router_module,
+        "_load_file_update_preview",
+        fake_load_file_update_preview,
+        raising=False,
+    )
+
+    response = await client.get(
+        f"/api/field-mapping/templates/{template.id}/update-context",
+        params={"mode": "with-sample", "file_id": file_record.id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+
+    data = payload["data"]
+    assert "利润(RMB)" in data["added_fields"]
+    assert "买家支付(RMB)" in data["added_fields"]
+    assert "利润" in data["removed_fields"]
+    assert "买家支付" in data["removed_fields"]
+    assert data["header_changes"]["detected"] is True
+    assert data["header_changes"]["is_exact_match"] is False

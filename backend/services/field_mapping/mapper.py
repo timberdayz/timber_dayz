@@ -245,6 +245,16 @@ COMPREHENSIVE_ALIAS_DICTIONARY: Dict[str, str] = {
     "是否已收款": "is_payment_received",
     "收款凭证id": "payment_voucher_id",
     "库存是否已扣减": "inventory_deducted",
+    "利润(rmb)": "profit_rmb",
+    "利润（rmb）": "profit_rmb",
+    "订单原始金额(rmb)": "original_amount_rmb",
+    "订单原始金额（rmb）": "original_amount_rmb",
+    "买家支付(rmb)": "buyer_payment_rmb",
+    "买家支付（rmb）": "buyer_payment_rmb",
+    "平台佣金(rmb)": "platform_commission_rmb",
+    "平台佣金（rmb）": "platform_commission_rmb",
+    "预估回款金额(rmb)": "estimated_settlement_rmb",
+    "预估回款金额（rmb）": "estimated_settlement_rmb",
 }
 
 # 保持向后兼容

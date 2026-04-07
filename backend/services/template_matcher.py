@@ -72,6 +72,17 @@ class TemplateMatcher:
         value = str(value).strip()
         return value or None
 
+    def _normalize_headers_for_compare(
+        self,
+        data_domain: str,
+        columns: List[str],
+    ) -> List[str]:
+        if data_domain and str(data_domain).lower() == "orders":
+            return list(columns)
+
+        currency_extractor = get_currency_extractor()
+        return currency_extractor.normalize_field_list(columns)
+
     async def find_best_template(
         self, 
         platform: str, 
@@ -460,9 +471,14 @@ class TemplateMatcher:
             
             # [*] v4.15.0新增:货币代码归一化
             # 在比较前,将字段名归一化(移除货币代码部分)
-            currency_extractor = get_currency_extractor()
-            normalized_current = currency_extractor.normalize_field_list(current_columns)
-            normalized_template = currency_extractor.normalize_field_list(template_columns)
+            normalized_current = self._normalize_headers_for_compare(
+                template.data_domain,
+                current_columns,
+            )
+            normalized_template = self._normalize_headers_for_compare(
+                template.data_domain,
+                template_columns,
+            )
             
             # 使用归一化后的字段名进行比较
             current_set = set(normalized_current)
