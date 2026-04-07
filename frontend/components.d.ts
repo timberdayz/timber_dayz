@@ -72,7 +72,6 @@ declare module 'vue' {
     ElTimeline: typeof import('element-plus/es')['ElTimeline']
     ElTimelineItem: typeof import('element-plus/es')['ElTimelineItem']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
-    ElUpload: typeof import('element-plus/es')['ElUpload']
     GroupedSidebar: typeof import('./src/components/common/GroupedSidebar.vue')['default']
     Header: typeof import('./src/components/common/Header.vue')['default']
     HeaderDiffViewer: typeof import('./src/components/dataSync/HeaderDiffViewer.vue')['default']

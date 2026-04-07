@@ -18,8 +18,17 @@ import sys
 import os
 
 
-from sqlalchemy import engine_from_config, text
+from sqlalchemy import (
+    Column,
+    MetaData,
+    PrimaryKeyConstraint,
+    String,
+    Table,
+    engine_from_config,
+    text,
+)
 from sqlalchemy import pool
+from alembic.ddl.impl import DefaultImpl
 
 from alembic import context
 
@@ -55,6 +64,30 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 target_metadata = Base.metadata if Base else None
+
+def _version_table_impl_64(
+    self,
+    *,
+    version_table: str,
+    version_table_schema: str | None,
+    version_table_pk: bool,
+    **kw,
+) -> Table:
+    vt = Table(
+        version_table,
+        MetaData(),
+        Column("version_num", String(64), nullable=False),
+        schema=version_table_schema,
+    )
+    if version_table_pk:
+        vt.append_constraint(
+            PrimaryKeyConstraint("version_num", name=f"{version_table}_pkc")
+        )
+    return vt
+
+
+DefaultImpl.version_table_impl = _version_table_impl_64
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

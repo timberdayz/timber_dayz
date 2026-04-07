@@ -277,6 +277,14 @@ async def _load_collection_accounts(
             main_account = main_account_map.get(
                 (shop_account.platform, shop_account.main_account_id)
             )
+            if main_account is None:
+                logger.warning(
+                    "Skip collection account %s because linked main account %s/%s is not enabled",
+                    shop_account.shop_account_id,
+                    shop_account.platform,
+                    shop_account.main_account_id,
+                )
+                continue
             capabilities = resolve_shop_capabilities(
                 capability_map.get(shop_account.id),
                 shop_type=shop_account.shop_type,

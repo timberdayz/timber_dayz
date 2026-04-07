@@ -1,597 +1,526 @@
 <template>
   <div class="account-alignment">
-    <!-- 页面标题 -->
     <div class="page-header">
-      <h1>🏪 妙手账号对齐</h1>
-      <p>店铺别名管理 • 账号级数据归并 • 智能建议</p>
+      <h1>店铺别名对齐</h1>
+      <p>查看 orders 数据域中的未认领店铺别名，并将其认领到现有店铺账号。</p>
     </div>
 
-    <!-- 对齐统计看板 -->
     <el-row :gutter="20" class="stats-row">
       <el-col :span="6">
         <el-card>
-          <el-statistic title="总订单数" :value="stats.total_orders" />
+          <el-statistic title="待认领别名" :value="stats.unmatchedAliases" />
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card>
-          <el-statistic title="已对齐" :value="stats.aligned">
-            <template #suffix>
-              <el-tag type="success">{{ stats.coverage_rate }}%</el-tag>
-            </template>
-          </el-statistic>
+          <el-statistic title="涉及订单数" :value="stats.unmatchedOrders" />
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card>
-          <el-statistic title="未对齐" :value="stats.unaligned">
-            <template #suffix>
-              <el-tag type="warning">{{ (100 - stats.coverage_rate).toFixed(1) }}%</el-tag>
-            </template>
-          </el-statistic>
+          <el-statistic title="已激活别名" :value="stats.activeAliases" />
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card>
-          <el-statistic title="待配置店铺" :value="stats.unique_raw_labels" />
+          <el-statistic title="可认领店铺账号" :value="stats.availableShopAccounts" />
         </el-card>
       </el-col>
     </el-row>
 
-    <!-- 操作按钮 -->
     <div class="action-buttons">
       <el-button type="primary" size="large" @click="loadData" :loading="loading">
         <el-icon><Refresh /></el-icon>
         刷新数据
       </el-button>
-      
-      <el-button type="success" size="large" @click="showSuggestions" :loading="loading">
-        <el-icon><MagicStick /></el-icon>
-        查看智能建议
-      </el-button>
-      
-      <el-button type="warning" size="large" @click="executeBackfill" :loading="backfilling">
+      <el-button
+        type="warning"
+        size="large"
+        :disabled="selectedStores.length === 0"
+        @click="openBatchClaimDialog"
+      >
         <el-icon><Connection /></el-icon>
-        执行对齐回填
-      </el-button>
-      
-      <el-button size="large" @click="showImportDialog">
-        <el-icon><Upload /></el-icon>
-        批量导入
-      </el-button>
-      
-      <el-button size="large" @click="exportYaml">
-        <el-icon><Download /></el-icon>
-        导出YAML
+        批量认领选中项
       </el-button>
     </div>
 
-    <!-- 未对齐店铺列表 -->
+    <el-alert
+      v-if="!loading && unmatchedStores.length === 0"
+      title="当前没有待认领的店铺别名。"
+      type="success"
+      :closable="false"
+      show-icon
+      class="summary-alert"
+    />
+
     <el-card class="unaligned-stores">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>⚠️ 未对齐店铺 ({{ unalignedStores.length }})</span>
-          <el-button size="small" type="primary" @click="batchAddFromUnaligned">
-            批量配置选中项
-          </el-button>
+        <div class="card-header">
+          <span>待认领店铺别名 ({{ unmatchedStores.length }})</span>
+          <span class="card-header__meta">数据来源：当前 b_class 订单事实表</span>
         </div>
       </template>
 
       <el-table
-        :data="unalignedStores"
+        :data="unmatchedStores"
         @selection-change="handleSelectionChange"
         stripe
         border
-        max-height="400"
+        max-height="420"
       >
         <el-table-column type="selection" width="55" />
-        <el-table-column prop="store_label_raw" label="原始店铺名" min-width="150" />
-        <el-table-column prop="account" label="账号" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="site" label="站点" width="100" />
+        <el-table-column prop="platform" label="平台" width="100" />
+        <el-table-column prop="site" label="站点" width="110">
+          <template #default="{ row }">
+            {{ row.site || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="store_label_raw" label="原始店铺别名" min-width="220" show-overflow-tooltip />
         <el-table-column prop="order_count" label="订单数" width="100" sortable />
-        <el-table-column prop="total_gmv" label="GMV" width="120" sortable>
-          <template #default="scope">
-            ¥{{ scope.row.total_gmv.toFixed(2) }}
+        <el-table-column prop="paid_amount" label="支付金额" width="140" sortable>
+          <template #default="{ row }">
+            {{ formatAmount(row.paid_amount) }}
           </template>
         </el-table-column>
-        <el-table-column label="建议ID" min-width="150">
-          <template #default="scope">
-            <el-tag type="info">{{ scope.row.suggested_target_id }}</el-tag>
+        <el-table-column label="建议店铺账号" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="getSuggestedShopAccount(row)">
+              {{ formatShopAccountOption(getSuggestedShopAccount(row)) }}
+            </span>
+            <span v-else class="muted-text">未命中建议，请手动选择</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="scope">
-            <el-button size="small" type="primary" @click="quickAdd(scope.row)">
-              快速配置
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" @click="openQuickClaimDialog(row)">
+              认领
             </el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <!-- 已配置别名列表 -->
     <el-card class="configured-aliases">
       <template #header>
-        <span>✅ 已配置别名 ({{ configuredAliases.length }})</span>
+        <div class="card-header">
+          <span>已激活别名 ({{ configuredAliasesForDisplay.length }})</span>
+          <span class="card-header__meta">展示当前已生效的店铺账号别名</span>
+        </div>
       </template>
 
       <el-table
-        :data="configuredAliases"
+        :data="configuredAliasesForDisplay"
         stripe
         border
-        max-height="400"
+        max-height="420"
       >
-        <el-table-column prop="store_label_raw" label="原始店铺名" min-width="150" />
-        <el-table-column prop="account" label="账号" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="site" label="站点" width="100" />
-        <el-table-column prop="target_id" label="标准账号ID" min-width="150">
-          <template #default="scope">
-            <el-tag type="success">{{ scope.row.target_id }}</el-tag>
+        <el-table-column prop="platform" label="平台" width="100" />
+        <el-table-column prop="alias_value" label="别名" min-width="220" show-overflow-tooltip />
+        <el-table-column label="店铺账号ID" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.shop_account_code }}
           </template>
         </el-table-column>
-        <el-table-column prop="notes" label="备注" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="created_at" label="创建时间" width="160" />
-        <el-table-column label="操作" width="150" fixed="right">
-          <template #default="scope">
-            <el-button size="small" @click="editAlias(scope.row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="deleteAlias(scope.row.id)">停用</el-button>
+        <el-table-column label="店铺名称" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.store_name }}
+          </template>
+        </el-table-column>
+        <el-table-column label="主账号ID" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.main_account_id }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="source" label="来源" width="140" />
+        <el-table-column prop="created_at" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              type="danger"
+              :disabled="!row.shop_account_code || !row.is_primary"
+              @click="clearPrimaryAlias(row)"
+            >
+              清除主别名
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <!-- 快速配置对话框 -->
-    <el-dialog v-model="quickAddDialogVisible" title="快速配置别名" width="600px">
-      <el-form :model="quickAddForm" label-width="120px">
-        <el-form-item label="原始店铺名">
-          <el-input v-model="quickAddForm.store_label_raw" disabled />
-        </el-form-item>
-        <el-form-item label="账号">
-          <el-input v-model="quickAddForm.account" disabled />
+    <el-dialog v-model="quickClaimDialogVisible" title="认领店铺别名" width="640px">
+      <el-form :model="quickClaimForm" label-width="120px">
+        <el-form-item label="平台">
+          <el-input v-model="quickClaimForm.platform" disabled />
         </el-form-item>
         <el-form-item label="站点">
-          <el-input v-model="quickAddForm.site" disabled />
+          <el-input :value="quickClaimForm.site || '-'" disabled />
         </el-form-item>
-        <el-form-item label="标准账号ID" required>
-          <el-input 
-            v-model="quickAddForm.target_id" 
-            placeholder="如: shopee_ph_1"
+        <el-form-item label="原始别名">
+          <el-input v-model="quickClaimForm.alias_value" disabled />
+        </el-form-item>
+        <el-form-item label="订单数">
+          <el-input :value="String(quickClaimForm.order_count || 0)" disabled />
+        </el-form-item>
+        <el-form-item label="支付金额">
+          <el-input :value="formatAmount(quickClaimForm.paid_amount)" disabled />
+        </el-form-item>
+        <el-form-item label="认领到店铺账号" required>
+          <el-select
+            v-model="quickClaimForm.shop_account_id"
+            filterable
+            clearable
+            placeholder="请选择目标店铺账号"
+            class="dialog-select"
           >
-            <template #append>
-              <el-button @click="quickAddForm.target_id = quickAddForm.suggested_target_id">
-                采纳建议
-              </el-button>
-            </template>
-          </el-input>
-          <el-text size="small" type="info" style="margin-top: 4px;">
-            系统建议: {{ quickAddForm.suggested_target_id }}
-          </el-text>
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="quickAddForm.notes" type="textarea" :rows="2" />
+            <el-option
+              v-for="option in filteredShopAccountOptions(quickClaimForm.platform)"
+              :key="option.shop_account_id"
+              :label="formatShopAccountOption(option)"
+              :value="option.shop_account_id"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
-      
+
       <template #footer>
-        <el-button @click="quickAddDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmQuickAdd" :loading="saving">确认添加</el-button>
+        <el-button @click="quickClaimDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="confirmQuickClaim">
+          确认认领
+        </el-button>
       </template>
     </el-dialog>
 
-    <!-- 批量导入对话框 -->
-    <el-dialog v-model="importDialogVisible" title="批量导入别名" width="700px">
-      <el-tabs v-model="importTab">
-        <el-tab-pane label="YAML导入" name="yaml">
-          <el-upload
-            drag
-            :auto-upload="false"
-            :on-change="handleYamlUpload"
-            :limit="1"
-            accept=".yaml,.yml"
-          >
-            <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-            <div class="el-upload__text">
-              拖拽YAML文件到此或 <em>点击选择</em>
-            </div>
-          </el-upload>
-        </el-tab-pane>
-        
-        <el-tab-pane label="CSV导入" name="csv">
-          <el-upload
-            drag
-            :auto-upload="false"
-            :on-change="handleCsvUpload"
-            :limit="1"
-            accept=".csv"
-          >
-            <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-            <div class="el-upload__text">
-              拖拽CSV文件到此或 <em>点击选择</em>
-            </div>
-          </el-upload>
-          <el-text size="small" type="info" style="margin-top: 8px;">
-            CSV格式：account,site,store_label_raw,target_id,notes
-          </el-text>
-        </el-tab-pane>
-      </el-tabs>
-      
-      <template #footer>
-        <el-button @click="importDialogVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 智能建议对话框 -->
-    <el-dialog v-model="suggestionsDialogVisible" title="智能建议" width="800px">
+    <el-dialog v-model="batchClaimDialogVisible" title="批量认领选中别名" width="640px">
       <el-alert
-        title="基于订单数量和GMV的智能建议"
-        type="info"
+        :title="`将把 ${selectedStores.length} 个别名认领到同一个店铺账号。仅当这些别名确实属于同一店铺时使用。`"
+        type="warning"
         :closable="false"
-        style="margin-bottom: 16px"
+        show-icon
+        class="batch-alert"
       />
-      
-      <el-table :data="suggestions" stripe border max-height="500">
-        <el-table-column prop="store_label_raw" label="店铺名" min-width="120" />
-        <el-table-column prop="order_count" label="订单数" width="100" sortable />
-        <el-table-column prop="suggested_target_id" label="建议ID" min-width="150">
-          <template #default="scope">
-            <el-tag>{{ scope.row.suggested_target_id }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="scope">
-            <el-button size="small" type="success" @click="adoptSuggestion(scope.row)">
-              采纳
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      
+
+      <el-form :model="batchClaimForm" label-width="120px">
+        <el-form-item label="目标平台">
+          <el-input :value="batchClaimPlatformLabel" disabled />
+        </el-form-item>
+        <el-form-item label="目标店铺账号" required>
+          <el-select
+            v-model="batchClaimForm.shop_account_id"
+            filterable
+            clearable
+            placeholder="请选择目标店铺账号"
+            class="dialog-select"
+          >
+            <el-option
+              v-for="option in filteredShopAccountOptions(batchClaimPlatform)"
+              :key="option.shop_account_id"
+              :label="formatShopAccountOption(option)"
+              :value="option.shop_account_id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
       <template #footer>
-        <el-button @click="suggestionsDialogVisible = false">关闭</el-button>
-        <el-button type="primary" @click="adoptAllSuggestions">一键采纳全部</el-button>
+        <el-button @click="batchClaimDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="confirmBatchClaim">
+          确认批量认领
+        </el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, MagicStick, Connection, Upload, Download, UploadFilled } from '@element-plus/icons-vue'
-import api from '../api'
+import { Connection, Refresh } from '@element-plus/icons-vue'
 
-// 状态
+import accountsApi from '@/api/accounts'
+
 const loading = ref(false)
-const backfilling = ref(false)
 const saving = ref(false)
 
-const stats = ref({
-  total_orders: 0,
-  aligned: 0,
-  unaligned: 0,
-  coverage_rate: 0,
-  unique_raw_labels: 0
-})
-
-const unalignedStores = ref([])
+const unmatchedStores = ref([])
 const configuredAliases = ref([])
+const shopAccounts = ref([])
 const selectedStores = ref([])
-const suggestions = ref([])
 
-// 对话框
-const quickAddDialogVisible = ref(false)
-const importDialogVisible = ref(false)
-const suggestionsDialogVisible = ref(false)
-const importTab = ref('yaml')
+const quickClaimDialogVisible = ref(false)
+const batchClaimDialogVisible = ref(false)
 
-const quickAddForm = ref({
-  account: '',
+const quickClaimForm = ref({
+  platform: '',
   site: '',
-  store_label_raw: '',
-  target_id: '',
-  suggested_target_id: '',
-  notes: ''
+  alias_value: '',
+  order_count: 0,
+  paid_amount: 0,
+  shop_account_id: '',
 })
 
-// 加载数据
-const loadData = async () => {
+const batchClaimForm = ref({
+  shop_account_id: '',
+})
+
+const shopAccountByDbId = computed(() => {
+  return new Map(shopAccounts.value.map((item) => [item.id, item]))
+})
+
+const configuredAliasesForDisplay = computed(() => {
+  return configuredAliases.value
+    .filter((item) => item.is_active)
+    .map((item) => {
+      const shopAccount = shopAccountByDbId.value.get(item.shop_account_id)
+      return {
+        ...item,
+        shop_account_code: shopAccount?.shop_account_id || '',
+        store_name: shopAccount?.store_name || '-',
+        main_account_id: shopAccount?.main_account_id || '-',
+      }
+    })
+})
+
+const stats = computed(() => {
+  const unmatchedOrders = unmatchedStores.value.reduce((sum, item) => {
+    return sum + Number(item.order_count || 0)
+  }, 0)
+
+  return {
+    unmatchedAliases: unmatchedStores.value.length,
+    unmatchedOrders,
+    activeAliases: configuredAliasesForDisplay.value.length,
+    availableShopAccounts: shopAccounts.value.filter((item) => item.enabled).length,
+  }
+})
+
+const batchClaimPlatform = computed(() => {
+  const platforms = Array.from(new Set(selectedStores.value.map((item) => item.platform).filter(Boolean)))
+  return platforms.length === 1 ? platforms[0] : ''
+})
+
+const batchClaimPlatformLabel = computed(() => batchClaimPlatform.value || '包含多个平台')
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function normalizeLooseText(value) {
+  return normalizeText(value).replace(/[\s_\-()/]+/g, '')
+}
+
+function formatAmount(value) {
+  return Number(value || 0).toFixed(2)
+}
+
+function formatDateTime(value) {
+  if (!value) return '-'
+  return String(value).replace('T', ' ').slice(0, 19)
+}
+
+function formatShopAccountOption(option) {
+  const parts = [
+    option.platform,
+    option.store_name || option.account_alias || option.shop_account_id,
+    option.shop_account_id,
+  ].filter(Boolean)
+  return parts.join(' / ')
+}
+
+function filteredShopAccountOptions(platform) {
+  const normalizedPlatform = normalizeText(platform)
+  return shopAccounts.value.filter((item) => {
+    if (!item.enabled) return false
+    if (!normalizedPlatform) return true
+    return normalizeText(item.platform) === normalizedPlatform
+  })
+}
+
+function getSuggestedShopAccount(unmatchedItem) {
+  const options = filteredShopAccountOptions(unmatchedItem.platform)
+  const aliasKey = normalizeLooseText(unmatchedItem.store_label_raw)
+
+  if (!aliasKey) {
+    return null
+  }
+
+  const exactMatch = options.find((item) => {
+    return [
+      item.account_alias,
+      item.store_name,
+      item.shop_account_id,
+    ].some((candidate) => normalizeLooseText(candidate) === aliasKey)
+  })
+  if (exactMatch) return exactMatch
+
+  const partialMatch = options.find((item) => {
+    return [
+      item.account_alias,
+      item.store_name,
+      item.shop_account_id,
+    ].some((candidate) => {
+      const normalizedCandidate = normalizeLooseText(candidate)
+      return normalizedCandidate && (
+        normalizedCandidate.includes(aliasKey) || aliasKey.includes(normalizedCandidate)
+      )
+    })
+  })
+
+  return partialMatch || null
+}
+
+async function loadData() {
   loading.value = true
   try {
-    await Promise.all([
-      loadStats(),
-      loadUnalignedStores(),
-      loadConfiguredAliases()
+    const [unmatchedResponse, aliasResponse, shopAccountResponse] = await Promise.all([
+      accountsApi.getUnmatchedShopAliases(),
+      accountsApi.listShopAccountAliases(),
+      accountsApi.listShopAccounts(),
     ])
-    ElMessage.success('数据加载完成')
+
+    unmatchedStores.value = unmatchedResponse?.items || []
+    configuredAliases.value = aliasResponse || []
+    shopAccounts.value = (shopAccountResponse || []).map((item) => ({
+      ...item,
+      id: Number(item.id),
+    }))
+    selectedStores.value = []
   } catch (error) {
-    ElMessage.error('加载数据失败')
-    console.error(error)
+    console.error('加载店铺别名对齐数据失败:', error)
+    ElMessage.error('加载店铺别名对齐数据失败')
   } finally {
     loading.value = false
   }
 }
 
-const loadStats = async () => {
-  const response = await api._get('/account-alignment/stats')
-  // 响应拦截器已提取data字段，直接使用
-  if (response) {
-    stats.value = response.stats || response
-  }
-}
-
-const loadUnalignedStores = async () => {
-  const response = await api._get('/account-alignment/distinct-raw-stores')
-  // 响应拦截器已提取data字段，直接使用
-  if (response) {
-    unalignedStores.value = response.stores || response || []
-  }
-}
-
-const loadConfiguredAliases = async () => {
-  const response = await api._get('/account-alignment/list-aliases')
-  // 响应拦截器已提取data字段，直接使用
-  if (response) {
-    configuredAliases.value = response.aliases || response || []
-  }
-}
-
-// 快速配置
-const quickAdd = (store) => {
-  quickAddForm.value = {
-    account: store.account,
-    site: store.site,
-    store_label_raw: store.store_label_raw,
-    target_id: store.suggested_target_id,
-    suggested_target_id: store.suggested_target_id,
-    notes: `订单数: ${store.order_count}, GMV: ¥${store.total_gmv.toFixed(2)}`
-  }
-  quickAddDialogVisible.value = true
-}
-
-const confirmQuickAdd = async () => {
-  if (!quickAddForm.value.target_id) {
-    ElMessage.warning('请输入标准账号ID')
-    return
-  }
-  
-  saving.value = true
-  try {
-    const response = await api._post('/account-alignment/add-alias', quickAddForm.value)
-    // 响应拦截器已提取data字段，直接使用
-    if (response) {
-      ElMessage.success('别名添加成功')
-      quickAddDialogVisible.value = false
-      await loadData()
-    }
-  } catch (error) {
-    ElMessage.error('添加失败: ' + (error.response?.data?.detail || error.message))
-  } finally {
-    saving.value = false
-  }
-}
-
-// 批量配置
-const handleSelectionChange = (selection) => {
+function handleSelectionChange(selection) {
   selectedStores.value = selection
 }
 
-const batchAddFromUnaligned = async () => {
-  if (selectedStores.value.length === 0) {
-    ElMessage.warning('请先选择店铺')
+function openQuickClaimDialog(store) {
+  const suggestedShopAccount = getSuggestedShopAccount(store)
+  quickClaimForm.value = {
+    platform: store.platform,
+    site: store.site || '',
+    alias_value: store.store_label_raw,
+    order_count: Number(store.order_count || 0),
+    paid_amount: Number(store.paid_amount || 0),
+    shop_account_id: suggestedShopAccount?.shop_account_id || '',
+  }
+  quickClaimDialogVisible.value = true
+}
+
+async function confirmQuickClaim() {
+  if (!quickClaimForm.value.shop_account_id) {
+    ElMessage.warning('请选择目标店铺账号')
     return
   }
-  
+
+  saving.value = true
   try {
-    await ElMessageBox.confirm(
-      `确定批量配置 ${selectedStores.value.length} 个店铺吗？将使用系统建议的账号ID。`,
-      '批量配置',
-      { type: 'warning' }
-    )
-    
-    const mappings = selectedStores.value.map(store => ({
-      account: store.account,
-      site: store.site,
-      store_label_raw: store.store_label_raw,
-      target_id: store.suggested_target_id,
-      notes: `批量配置: 订单${store.order_count}个`
-    }))
-    
-    saving.value = true
-    const response = await api._post('/account-alignment/batch-add-aliases', { mappings })
-    
-    // 响应拦截器已提取data字段，直接使用
-    if (response) {
-      ElMessage.success(response.message || '批量添加成功')
-      await loadData()
-    }
+    await accountsApi.claimShopAccountAlias({
+      platform: quickClaimForm.value.platform,
+      alias_value: quickClaimForm.value.alias_value,
+      shop_account_id: quickClaimForm.value.shop_account_id,
+    })
+    ElMessage.success('店铺别名认领成功')
+    quickClaimDialogVisible.value = false
+    await loadData()
   } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('批量配置失败')
-    }
+    console.error('认领店铺别名失败:', error)
+    ElMessage.error(error.response?.data?.detail || '认领店铺别名失败')
   } finally {
     saving.value = false
   }
 }
 
-// 执行回填
-const executeBackfill = async () => {
+function openBatchClaimDialog() {
+  if (selectedStores.value.length === 0) {
+    ElMessage.warning('请先选择待认领项')
+    return
+  }
+
+  const platforms = new Set(selectedStores.value.map((item) => item.platform))
+  if (platforms.size > 1) {
+    ElMessage.warning('批量认领仅支持同一平台的别名')
+    return
+  }
+
+  const suggestedShopAccount = getSuggestedShopAccount(selectedStores.value[0])
+  batchClaimForm.value = {
+    shop_account_id: suggestedShopAccount?.shop_account_id || '',
+  }
+  batchClaimDialogVisible.value = true
+}
+
+async function confirmBatchClaim() {
+  if (!batchClaimForm.value.shop_account_id) {
+    ElMessage.warning('请选择目标店铺账号')
+    return
+  }
+
   try {
     await ElMessageBox.confirm(
-      '确定执行对齐回填吗？这将根据别名表更新所有未对齐订单的账号ID。',
-      '确认回填',
+      `确认将 ${selectedStores.value.length} 个别名认领到 ${batchClaimForm.value.shop_account_id} 吗？`,
+      '确认批量认领',
       { type: 'warning' }
     )
-    
-    backfilling.value = true
-    const response = await api._post('/account-alignment/backfill')
-    
-    // 响应拦截器已提取data字段，直接使用
-    if (response) {
-      ElMessage.success(response.message || '回填成功')
-      await loadData()
-    }
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('回填失败')
-    }
-  } finally {
-    backfilling.value = false
+  } catch {
+    return
   }
-}
 
-// 智能建议
-const showSuggestions = async () => {
-  loading.value = true
+  saving.value = true
   try {
-    const response = await api._get('/account-alignment/suggestions', { min_orders: 5 })
-    // 响应拦截器已提取data字段，直接使用
-    if (response) {
-      suggestions.value = response.suggestions || response || []
-      suggestionsDialogVisible.value = true
-    }
-  } catch (error) {
-    ElMessage.error('获取建议失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-const adoptSuggestion = (suggestion) => {
-  quickAdd(suggestion)
-}
-
-const adoptAllSuggestions = async () => {
-  try {
-    await ElMessageBox.confirm(
-      `确定采纳全部 ${suggestions.value.length} 个建议吗？`,
-      '批量采纳',
-      { type: 'warning' }
+    await Promise.all(
+      selectedStores.value.map((item) =>
+        accountsApi.claimShopAccountAlias({
+          platform: item.platform,
+          alias_value: item.store_label_raw,
+          shop_account_id: batchClaimForm.value.shop_account_id,
+        })
+      )
     )
-    
-    const mappings = suggestions.value.map(s => ({
-      account: s.account,
-      site: s.site,
-      store_label_raw: s.store_label_raw,
-      target_id: s.suggested_target_id,
-      notes: `智能建议: 订单${s.order_count}个`
-    }))
-    
-    saving.value = true
-    const response = await api._post('/account-alignment/batch-add-aliases', { mappings })
-    
-    // 响应拦截器已提取data字段，直接使用
-    if (response) {
-      ElMessage.success(response.message || '批量添加成功')
-      suggestionsDialogVisible.value = false
-      await loadData()
-    }
+    ElMessage.success('批量认领完成')
+    batchClaimDialogVisible.value = false
+    await loadData()
   } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('批量采纳失败')
-    }
+    console.error('批量认领失败:', error)
+    ElMessage.error(error.response?.data?.detail || '批量认领失败')
   } finally {
     saving.value = false
   }
 }
 
-// 编辑/删除
-const editAlias = (alias) => {
-  ElMessageBox.prompt('请输入新的标准账号ID', '编辑别名', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    inputValue: alias.target_id,
-    inputPattern: /^[a-z0-9_]{3,64}$/,
-    inputErrorMessage: '格式错误（仅小写字母数字下划线，3-64位）'
-  }).then(async ({ value }) => {
-    try {
-      const response = await api._put(`/account-alignment/update-alias/${alias.id}`, {
-        target_id: value
-      })
-      // 响应拦截器已提取data字段，直接使用
-      if (response) {
-        ElMessage.success('更新成功')
-        await loadData()
-      }
-    } catch (error) {
-      ElMessage.error('更新失败')
-    }
-  }).catch(() => {})
-}
-
-const deleteAlias = async (aliasId) => {
-  try {
-    await ElMessageBox.confirm('确定停用此别名吗？', '确认停用', { type: 'warning' })
-    
-    const response = await api._delete(`/account-alignment/delete-alias/${aliasId}`)
-    // 响应拦截器已提取data字段，直接使用
-    if (response) {
-      ElMessage.success('已停用')
-      await loadData()
-    }
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('停用失败')
-    }
+async function clearPrimaryAlias(row) {
+  if (!row.shop_account_code) {
+    ElMessage.warning('未找到对应的店铺账号ID')
+    return
   }
-}
 
-// 导入/导出
-const showImportDialog = () => {
-  importDialogVisible.value = true
-}
-
-const handleYamlUpload = async (file) => {
-  const formData = new FormData()
-  formData.append('file', file.raw)
-  
   try {
-    const response = await fetch('/api/account-alignment/import-yaml', {
-      method: 'POST',
-      body: formData
-    })
-    const result = await response.json()
-    
-    if (result.success) {
-      ElMessage.success(result.message)
-      importDialogVisible.value = false
-      await loadData()
-    } else {
-      ElMessage.error(result.message || '导入失败')
-    }
-  } catch (error) {
-    ElMessage.error('YAML导入失败')
+    await ElMessageBox.confirm(
+      `确认清除 ${row.shop_account_code} 的主别名吗？`,
+      '确认清除',
+      { type: 'warning' }
+    )
+  } catch {
+    return
   }
-}
 
-const handleCsvUpload = async (file) => {
-  const formData = new FormData()
-  formData.append('file', file.raw)
-  
+  saving.value = true
   try {
-    const response = await fetch('/api/account-alignment/import-csv', {
-      method: 'POST',
-      body: formData
-    })
-    const result = await response.json()
-    
-    if (result.success) {
-      ElMessage.success(result.message)
-      importDialogVisible.value = false
-      await loadData()
-    } else {
-      ElMessage.error(result.message || '导入失败')
-    }
+    await accountsApi.clearShopAccountPrimaryAlias(row.shop_account_code)
+    ElMessage.success('主别名已清除')
+    await loadData()
   } catch (error) {
-    ElMessage.error('CSV导入失败')
-  }
-}
-
-const exportYaml = async () => {
-  try {
-    window.open('/api/account-alignment/export-yaml?platform=miaoshou', '_blank')
-    ElMessage.success('导出已开始')
-  } catch (error) {
-    ElMessage.error('导出失败')
+    console.error('清除主别名失败:', error)
+    ElMessage.error(error.response?.data?.detail || '清除主别名失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -608,7 +537,7 @@ onMounted(() => {
 .page-header {
   text-align: center;
   margin-bottom: var(--spacing-2xl);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #4f6bdc 0%, #7756b8 100%);
   color: white;
   padding: var(--spacing-2xl);
   border-radius: var(--border-radius-lg);
@@ -617,6 +546,10 @@ onMounted(() => {
 .page-header h1 {
   margin: 0 0 var(--spacing-base) 0;
   font-size: var(--font-size-4xl);
+}
+
+.page-header p {
+  margin: 0;
 }
 
 .stats-row {
@@ -630,9 +563,33 @@ onMounted(() => {
   justify-content: center;
 }
 
+.summary-alert,
 .unaligned-stores,
 .configured-aliases {
   margin-bottom: var(--spacing-xl);
 }
-</style>
 
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.card-header__meta {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.dialog-select {
+  width: 100%;
+}
+
+.batch-alert {
+  margin-bottom: 16px;
+}
+
+.muted-text {
+  color: var(--el-text-color-secondary);
+}
+</style>

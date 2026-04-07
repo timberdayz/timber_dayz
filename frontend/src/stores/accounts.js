@@ -232,7 +232,6 @@ export const useAccountsStore = defineStore('accounts', {
           if (data.username) mainPayload.username = data.username
           if (data.password) mainPayload.password = data.password
           if (data.login_url !== undefined) mainPayload.login_url = data.login_url
-          if (data.enabled !== undefined) mainPayload.enabled = data.enabled
           if (data.notes !== undefined) mainPayload.notes = data.notes
           if (Object.keys(mainPayload).length > 0) {
             await accountsApi.updateMainAccount(current.parent_account, mainPayload)
