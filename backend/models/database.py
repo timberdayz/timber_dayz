@@ -82,6 +82,43 @@ DATA_SYNC_CRITICAL_COLUMNS: dict[str, set[str]] = {
     "core.staging_product_metrics": {"file_id"},
     "core.staging_inventory": {"file_id"},
 }
+RUNTIME_TABLE_SCHEMAS: dict[str, str] = {
+    "catalog_files": "public",
+    "task_center_tasks": "public",
+    "task_center_logs": "public",
+    "task_center_links": "public",
+    "collection_tasks": "core",
+    "collection_task_logs": "core",
+}
+RUNTIME_TABLE_TIME_COLUMNS: dict[str, str] = {
+    "catalog_files": "first_seen_at",
+    "task_center_tasks": "created_at",
+    "task_center_logs": "created_at",
+    "collection_tasks": "created_at",
+    "collection_task_logs": "timestamp",
+}
+
+
+def resolve_runtime_table_schema(table_name: str) -> str | None:
+    normalized = str(table_name or "").strip().lower()
+    if not normalized:
+        return None
+    return RUNTIME_TABLE_SCHEMAS.get(normalized)
+
+
+def qualify_runtime_table_name(table_name: str) -> str:
+    normalized = str(table_name or "").strip()
+    schema_name = resolve_runtime_table_schema(normalized)
+    if not schema_name:
+        return normalized
+    return f"{schema_name}.{normalized}"
+
+
+def resolve_runtime_time_column(table_name: str) -> str | None:
+    normalized = str(table_name or "").strip().lower()
+    if not normalized:
+        return None
+    return RUNTIME_TABLE_TIME_COLUMNS.get(normalized)
 
 
 def _expand_existing_table_aliases(existing_tables: set[str]) -> set[str]:
