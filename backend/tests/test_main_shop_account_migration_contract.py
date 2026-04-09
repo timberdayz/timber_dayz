@@ -36,6 +36,16 @@ def test_main_shop_account_migration_mentions_new_tables_and_old_source_table():
     assert 'sa.UniqueConstraint("shop_account_id"' in source
 
 
+def test_main_shop_account_migration_is_idempotent_for_existing_core_tables():
+    migration_path = _find_main_shop_account_migration()
+    source = migration_path.read_text(encoding="utf-8")
+
+    assert "_table_names" in source
+    assert 'if "main_accounts" not in table_names' in source
+    assert 'if "shop_accounts" not in table_names' in source
+    assert 'if "platform_shop_discoveries" not in table_names' in source
+
+
 def test_main_shop_account_migration_has_single_head():
     config = Config("alembic.ini")
     script = ScriptDirectory.from_config(config)
@@ -144,7 +154,15 @@ def test_main_shop_account_migration_applies_changes_to_postgres_rehearsal_db():
             f"postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/{rehearsal_db}"
         )
         result = subprocess.run(
-            [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "alembic.ini",
+                "upgrade",
+                "20260402_main_shop_accounts",
+            ],
             cwd=str(Path.cwd()),
             env=env,
             capture_output=True,

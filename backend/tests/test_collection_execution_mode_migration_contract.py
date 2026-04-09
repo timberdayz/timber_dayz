@@ -25,6 +25,14 @@ def test_collection_execution_mode_migration_targets_collection_configs_only():
     assert "collection_tasks" not in source
 
 
+def test_collection_execution_mode_migration_targets_core_schema_table():
+    migration_path = _find_execution_mode_migration()
+    source = migration_path.read_text(encoding="utf-8")
+
+    assert 'SCHEMA_NAME = "core"' in source
+    assert "schema=SCHEMA_NAME" in source
+
+
 def test_alembic_has_single_head_after_execution_mode_migration():
     config = Config("alembic.ini")
     script = ScriptDirectory.from_config(config)

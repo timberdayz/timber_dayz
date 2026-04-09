@@ -64,28 +64,6 @@ services:
       - production
       - full
 
-  # ==================== pgAdmin管理界面 ====================
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: xihong_erp_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@xihong.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-    ports:
-      - "${PGADMIN_PORT:-5051}:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - erp_network
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    profiles:
-      - dev
-      - full
-
   # ==================== 后端API服务 ====================
   backend:
     build:
@@ -192,9 +170,6 @@ volumes:
   postgres_data:
     driver: local
     name: xihong_erp_postgres_data
-  pgadmin_data:
-    driver: local
-    name: xihong_erp_pgadmin_data
   redis_data:
     driver: local
     name: xihong_erp_redis_data

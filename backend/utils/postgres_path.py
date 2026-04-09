@@ -153,9 +153,12 @@ class PostgresPathManager:
             return False, str(e)
 
 
-def auto_configure_postgres_path():
+def auto_configure_postgres_path(*, emit_output: bool = True) -> bool:
     """
-    自动配置PostgreSQL PATH(在应用启动时调用)
+    自动配置 PostgreSQL 客户端工具 PATH。
+
+    返回值仅表示当前进程是否已能访问 `psql` 等客户端命令，
+    不代表数据库连接本身是否可用。
     
     Usage:
         from backend.utils.postgres_path import auto_configure_postgres_path
@@ -166,14 +169,16 @@ def auto_configure_postgres_path():
     if manager.ensure_postgres_in_path():
         is_available, version = manager.check_psql_available()
         if is_available:
-            print(f"PostgreSQL configured: {version}")
+            if emit_output:
+                print(f"PostgreSQL configured: {version}")
             return True
         else:
-            print(f"PostgreSQL PATH configured but psql not working")
+            if emit_output:
+                print("PostgreSQL PATH configured but psql not working")
             return False
     else:
-        print(f"PostgreSQL not found - database operations may fail")
-        print(f"   Please set POSTGRES_BIN_PATH environment variable")
+        if emit_output:
+            print("PostgreSQL client tools not found; skipping PATH configuration")
         return False
 
 
@@ -219,4 +224,3 @@ if __name__ == "__main__":
     
     safe_print("")
     safe_print("=" * 60)
-

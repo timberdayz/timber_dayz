@@ -10,6 +10,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Dict, Any, Optional
+from backend.schemas.field_mapping_template import (
+    DetectHeaderChangesRequest,
+    DetectHeaderChangesResponse,
+    HeaderChangesPayload,
+    TemplateContextSummary,
+    TemplateSaveRequest,
+    TemplateSaveResponse,
+    TemplateUpdateContextData,
+    TemplateUpdateContextResponse,
+)
 from backend.models.database import get_db, get_async_db
 from backend.services.field_mapping_dictionary_service import get_dictionary_service
 from backend.services.field_mapping_template_service import get_template_service  # v4.3.7阶段C
@@ -705,9 +715,9 @@ async def dictionary_rebuild(payload: Dict[str, Any] = None, db: AsyncSession = 
 
 # ========== v4.3.7阶段C: 模板管理API ==========
 
-@router.post("/templates/save")
+@router.post("/templates/save", response_model=TemplateSaveResponse)
 async def save_mapping_template(
-    request: Dict[str, Any],
+    request: TemplateSaveRequest,
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -726,16 +736,16 @@ async def save_mapping_template(
         template_service = get_template_service(db)
         
         # 验证必填参数
-        if not request.get('platform'):
+        if not request.platform:
             raise ValueError("platform参数必填")
-        if not request.get('data_domain'):
+        if not request.data_domain:
             raise ValueError("data_domain参数必填")
         
         # [*] v4.6.0 DSS架构:使用header_columns而非mappings
-        header_columns = request.get('header_columns')
-        if not header_columns and 'mappings' in request:
+        header_columns = request.header_columns
+        if not header_columns and request.mappings:
             # 兼容旧格式:从mappings提取header_columns
-            mappings = request.get('mappings', {})
+            mappings = request.mappings
             if isinstance(mappings, dict):
                 header_columns = list(mappings.keys())
             else:
@@ -749,7 +759,7 @@ async def save_mapping_template(
         
         # Domain-aware header normalization.
         normalized_header_columns = _normalize_template_headers_for_domain(
-            request["data_domain"],
+            request.data_domain,
             header_columns,
         )
         
@@ -769,18 +779,18 @@ async def save_mapping_template(
         header_columns = normalized_header_columns
         
         # 验证header_row范围
-        header_row = request.get('header_row', 0)
+        header_row = request.header_row
         if not isinstance(header_row, int) or header_row < 0 or header_row > 100:
             raise ValueError(f"header_row必须在0-100之间,当前值: {header_row}")
         
         # v4.14.0新增:验证deduplication_fields格式(必填)
-        deduplication_fields = request.get('deduplication_fields')
+        deduplication_fields = request.deduplication_fields
         if deduplication_fields is None:
             # 向后兼容:如果未提供,使用默认配置,但记录警告
             from backend.services.deduplication_fields_config import get_default_deduplication_fields
             deduplication_fields = get_default_deduplication_fields(
-                data_domain=request['data_domain'],
-                sub_domain=request.get('sub_domain')
+                data_domain=request.data_domain,
+                sub_domain=request.sub_domain
             )
             logger.warning(
                 f"[Template] [WARN] 警告:保存模板时未提供deduplication_fields,"
@@ -816,19 +826,21 @@ async def save_mapping_template(
                         f"可能导致去重失败。表头字段: {header_columns[:10]}..."
                     )
         
-        template_id = await template_service.save_template(
-            platform=request['platform'],
-            data_domain=request['data_domain'],
+        save_result = await template_service.save_template(
+            platform=request.platform,
+            data_domain=request.data_domain,
             header_columns=header_columns,  # [*] v4.6.0 DSS架构:使用header_columns
-            granularity=request.get('granularity'),
-            account=request.get('account'),
-            template_name=request.get('template_name'),
-            created_by=request.get('created_by', 'web_ui'),
+            granularity=request.granularity,
+            account=request.account,
+            template_name=request.template_name,
+            created_by=request.created_by,
             # v4.5.1新增参数
             header_row=header_row,
-            sub_domain=request.get('sub_domain'),
-            sheet_name=request.get('sheet_name'),
-            encoding=request.get('encoding', 'utf-8'),
+            sub_domain=request.sub_domain,
+            sheet_name=request.sheet_name,
+            encoding=request.encoding,
+            save_mode=request.save_mode,
+            base_template_id=request.base_template_id,
             # v4.14.0新增参数
             deduplication_fields=deduplication_fields  # 如果为None,服务层会使用默认配置
         )
@@ -1308,7 +1320,7 @@ async def detect_header_changes(
             )
         
         matcher = get_template_matcher(db)
-        header_changes = matcher.detect_header_changes(
+        header_changes = await matcher.detect_header_changes(
             template_id=template_id,
             current_columns=current_columns
         )

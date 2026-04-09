@@ -765,6 +765,8 @@ export default {
     platform,
     domain,
     dataDomain,
+    templateName,
+    template_name,
     granularity,
     sheetName,
     headerRow,
@@ -789,19 +791,19 @@ export default {
       )
     }
 
+    const resolvedTemplateName = templateName || template_name || null
+
     return await this._post('/field-mapping/templates/save', {
       platform,
       data_domain: finalDomain,
       granularity: granularity || null,
       header_columns: headerColumns || [], // ⭐ v4.6.0 DSS架构：使用header_columns
-      template_name: `${platform}_${finalDomain}_${subDomain || ''}_${
-        granularity || 'all'
-      }_v1`, // 默认模板名称
       created_by: 'web_ui',
       header_row: headerRow || 0,
       sub_domain: subDomain || null,
       sheet_name: sheetName || null,
       deduplication_fields: deduplicationFields, // ⭐ v4.14.0新增：核心字段列表（必填）
+      ...(resolvedTemplateName ? { template_name: resolvedTemplateName } : {}),
       // ⭐ 向后兼容：如果提供了mappings，也传递（后端会忽略）
       mappings: mappings || {}
     })

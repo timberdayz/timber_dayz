@@ -14,13 +14,6 @@ services:
       # 容器内部仍使用 5432 端口，容器间通信使用服务名 postgres:5432
       - "15432:5432"
 
-  pgadmin:
-    environment:
-      PGADMIN_DEFAULT_EMAIL: dev@xihong.com
-      PGADMIN_DEFAULT_PASSWORD: dev123
-    ports:
-      - "5051:80"
-
   # 后端开发配置（可选，通常本地运行）
   backend:
     build:
@@ -152,6 +145,7 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./modules:/app/modules
+      - ./migrations:/app/migrations
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp

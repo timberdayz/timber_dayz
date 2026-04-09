@@ -35,7 +35,7 @@ async def get_governance_overview(
     """Return governance overview statistics for pending files and templates."""
     try:
         stats_service = get_governance_stats(db)
-        overview = stats_service.get_overview(platform)
+        overview = await stats_service.get_overview(platform)
         return success_response(data=overview)
     except Exception as exc:
         logger.error(f"[API] 获取治理概览失败: {exc}", exc_info=True)
@@ -56,8 +56,8 @@ async def get_missing_templates(
     """Return missing template combinations for the current catalog."""
     try:
         stats_service = get_governance_stats(db)
-        missing = stats_service.get_missing_templates(platform)
-        return {"success": True, "data": missing}
+        missing = await stats_service.get_missing_templates(platform)
+        return success_response(data=missing)
     except Exception as exc:
         logger.error(f"[API] 获取缺少模板清单失败: {exc}", exc_info=True)
         return error_response(
@@ -83,7 +83,7 @@ async def get_pending_files(
     """Return pending catalog files or grouped pending batches."""
     try:
         stats_service = get_governance_stats(db)
-        files = stats_service.get_pending_files(
+        files = await stats_service.get_pending_files(
             platform=platform,
             data_domain=data_domain,
             granularity=granularity,

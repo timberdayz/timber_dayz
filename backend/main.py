@@ -168,11 +168,16 @@ async def lifespan(app: FastAPI):
     try:
         # 1. 环境配置(<1秒)
         step_start = time.time()
-        auto_configure_postgres_path()
+        postgres_path_configured = auto_configure_postgres_path(emit_output=False)
         startup_metrics["postgres_path"] = time.time() - step_start
-        logger.info(
-            f"[OK] PostgreSQL PATH配置完成 ({startup_metrics['postgres_path']:.2f}秒)"
-        )
+        if postgres_path_configured:
+            logger.info(
+                f"[OK] PostgreSQL客户端PATH配置完成 ({startup_metrics['postgres_path']:.2f}秒)"
+            )
+        else:
+            logger.info(
+                f"[SKIP] PostgreSQL客户端工具未找到，跳过PATH配置 ({startup_metrics['postgres_path']:.2f}秒)"
+            )
 
         # 2. 数据库连接验证(<2秒)
         step_start = time.time()
@@ -319,13 +324,13 @@ async def lifespan(app: FastAPI):
             startup_metrics["dashboard_bootstrap"] = time.time() - step_start
             if dashboard_bootstrap_report.get("bootstrapped"):
                 logger.info(
-                    "[OK] PostgreSQL Dashboard 璧勪骇宸茶嚜鍔ㄥ垵濮嬪寲 "
-                    f"({startup_metrics['dashboard_bootstrap']:.2f}绉? run_id={dashboard_bootstrap_report.get('run_id')})"
+                    "[OK] PostgreSQL Dashboard 资产已自动初始化 "
+                    f"({startup_metrics['dashboard_bootstrap']:.2f}秒, run_id={dashboard_bootstrap_report.get('run_id')})"
                 )
             else:
                 logger.info(
-                    "[OK] PostgreSQL Dashboard 璧勪骇宸插氨缁? "
-                    f"({startup_metrics['dashboard_bootstrap']:.2f}绉?)"
+                    "[OK] PostgreSQL Dashboard 资产已就绪 "
+                    f"({startup_metrics['dashboard_bootstrap']:.2f}秒)"
                 )
 
             dashboard_bootstrap_completed = True
@@ -336,10 +341,10 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             if not dashboard_bootstrap_completed:
                 startup_metrics["dashboard_bootstrap"] = time.time() - step_start
-                logger.error(f"[ERROR] PostgreSQL Dashboard ???????: {e}")
+                logger.error(f"[ERROR] PostgreSQL Dashboard 资产初始化失败: {e}")
                 raise
             startup_metrics["pool_warmup"] = time.time() - step_start
-            logger.warning(f"[WARN] ???????: {e}")
+            logger.warning(f"[WARN] 连接池预热失败: {e}")
 
         startup_metrics["total"] = time.time() - startup_start
 
@@ -348,7 +353,7 @@ async def lifespan(app: FastAPI):
 ╔══════════════════════════════════════════════════════════╗
 ║          西虹ERP系统启动完成 - 性能报告                  ║
 ╠══════════════════════════════════════════════════════════╣
-║  PostgreSQL PATH配置: {startup_metrics['postgres_path']:>6.2f}秒                      ║
+║  PostgreSQL客户端PATH: {startup_metrics['postgres_path']:>6.2f}秒                    ║
 ║  数据库连接验证:     {startup_metrics['postgres_connect']:>6.2f}秒                      ║
 ║  数据库表初始化:     {startup_metrics['table_init']:>6.2f}秒                      ║
 ║  连接池预热:         {startup_metrics['pool_warmup']:>6.2f}秒                      ║

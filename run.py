@@ -844,7 +844,9 @@ def _choose_local_backend_port(preferred_port=BACKEND_PORT, fallback_ports=None)
         candidates.extend(fallback_ports)
 
     for port in candidates:
-        if _can_bind_local_port(port):
+        # Windows + Docker/WSL 端口转发场景下，socket.bind() 可能出现“可绑定”
+        # 但该端口实际上已被 localhost 监听占用。回退选择需要同时避开这类假阳性。
+        if _can_bind_local_port(port) and not _is_port_in_use(port):
             return port
     return None
 

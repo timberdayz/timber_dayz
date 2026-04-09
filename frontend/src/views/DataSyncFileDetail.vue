@@ -325,10 +325,7 @@ const handleSaveTemplate = async () => {
       subDomain: fileInfo.value.sub_domain,
       headerColumns: headerColumns.value,
       headerRow: headerRow.value,
-      deduplicationFields: deduplicationFields.value, // v4.14.0新增：核心字段列表（必填）
-      template_name: `${fileInfo.value.platform}_${fileInfo.value.domain}_${
-        fileInfo.value.granularity
-      }_${fileInfo.value.sub_domain || 'default'}_v1`
+      deduplicationFields: deduplicationFields.value // v4.14.0新增：核心字段列表（必填）
     })
 
     // 检查响应结果

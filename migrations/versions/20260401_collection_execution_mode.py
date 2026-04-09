@@ -19,30 +19,34 @@ depends_on = None
 
 TABLE_NAME = "collection_configs"
 COLUMN_NAME = "execution_mode"
+SCHEMA_NAME = "core"
 
 
-def _column_names(connection, table_name: str) -> set[str]:
+def _column_names(connection, table_name: str, schema_name: str) -> set[str]:
     inspector = sa.inspect(connection)
     try:
-        return {column["name"] for column in inspector.get_columns(table_name)}
+        return {
+            column["name"] for column in inspector.get_columns(table_name, schema=schema_name)
+        }
     except Exception:
         return set()
 
 
 def upgrade() -> None:
     connection = op.get_bind()
-    columns = _column_names(connection, TABLE_NAME)
+    columns = _column_names(connection, TABLE_NAME, SCHEMA_NAME)
 
     if COLUMN_NAME not in columns:
         op.add_column(
             TABLE_NAME,
             sa.Column(COLUMN_NAME, sa.String(length=20), nullable=True, server_default="headless"),
+            schema=SCHEMA_NAME,
         )
 
     connection.execute(
         sa.text(
             f"""
-            UPDATE {TABLE_NAME}
+            UPDATE {SCHEMA_NAME}.{TABLE_NAME}
             SET {COLUMN_NAME} = 'headless'
             WHERE {COLUMN_NAME} IS NULL
             """
@@ -55,11 +59,12 @@ def upgrade() -> None:
         existing_type=sa.String(length=20),
         nullable=False,
         server_default="headless",
+        schema=SCHEMA_NAME,
     )
 
 
 def downgrade() -> None:
     connection = op.get_bind()
-    columns = _column_names(connection, TABLE_NAME)
+    columns = _column_names(connection, TABLE_NAME, SCHEMA_NAME)
     if COLUMN_NAME in columns:
-        op.drop_column(TABLE_NAME, COLUMN_NAME)
+        op.drop_column(TABLE_NAME, COLUMN_NAME, schema=SCHEMA_NAME)

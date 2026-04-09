@@ -357,3 +357,89 @@ async def test_template_update_context_orders_treats_rmb_suffix_as_real_header_d
     assert "买家支付" in data["removed_fields"]
     assert data["header_changes"]["detected"] is True
     assert data["header_changes"]["is_exact_match"] is False
+@pytest.mark.asyncio
+async def test_detect_header_changes_endpoint_returns_resolved_payload(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=1,
+            header_columns=["order_id", "platform_sku", "amount"],
+            deduplication_fields=["order_id"],
+            template_name="shopee_orders_daily_detect_v1",
+            version=1,
+            status="published",
+            field_count=3,
+            created_by="test",
+        )
+        session.add(template)
+        await session.commit()
+        await session.refresh(template)
+
+    response = await client.post(
+        "/api/field-mapping/templates/detect-header-changes",
+        json={
+            "template_id": template.id,
+            "current_columns": ["order_id", "amount", "new_metric"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["header_changes"]["detected"] is True
+    assert "new_metric" in payload["header_changes"]["added_fields"]
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_returns_versioning_metadata(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    first_response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "orders",
+            "granularity": "daily",
+            "header_row": 1,
+            "header_columns": ["order_id", "amount"],
+            "deduplication_fields": ["order_id"],
+            "created_by": "test",
+        },
+    )
+    assert first_response.status_code == 200
+    first_payload = first_response.json()
+    assert first_payload["success"] is True
+    assert first_payload["data"]["version"] == 1
+    assert first_payload["data"]["operation"] == "created"
+    assert first_payload["data"]["archived_template_id"] is None
+
+    second_response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "orders",
+            "granularity": "daily",
+            "header_row": 1,
+            "header_columns": ["order_id", "amount", "new_metric"],
+            "deduplication_fields": ["order_id"],
+            "created_by": "test",
+            "save_mode": "new_version",
+        },
+    )
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["success"] is True
+    assert second_payload["data"]["version"] == 2
+    assert second_payload["data"]["operation"] == "new_version"
+    assert second_payload["data"]["archived_template_id"] == first_payload["data"]["template_id"]
+    assert second_payload["data"]["template_name"].endswith("_v2")
