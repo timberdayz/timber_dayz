@@ -297,7 +297,7 @@ class ShopeeLogin(LoginComponent):
             raise RuntimeError("failed to switch otp mode back to phone")
 
     async def _cleanup_after_login(self, page: Any) -> None:
-        return None
+        await self.stabilize_safe_notices(page, label="post-login cleanup")
 
     async def _raise_otp_verification_required(self, page: Any, config: dict[str, Any]) -> None:
         screenshot_dir = (config or {}).get("task", {}).get("screenshot_dir")

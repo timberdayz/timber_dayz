@@ -1,6 +1,3 @@
-import sys
-import types
-
 import pytest
 
 from modules.components.base import ExecutionContext
@@ -38,20 +35,15 @@ def test_miaoshou_login_known_error_texts_include_graphical_captcha_failure():
 
 
 @pytest.mark.asyncio
-async def test_miaoshou_login_cleanup_after_login_invokes_overlay_guard(monkeypatch):
+async def test_miaoshou_login_cleanup_after_login_invokes_shared_stabilizer():
     component = MiaoshouLogin(_ctx())
     calls = []
 
-    class _FakeGuard:
-        async def run(self, page, *, label=None):
-            calls.append(label)
-            return 1
+    async def _fake_stabilize(page, *, label=None):  # noqa: ARG001
+        calls.append(label)
+        return 1
 
-    monkeypatch.setitem(
-        sys.modules,
-        "modules.platforms.miaoshou.components.overlay_guard",
-        types.SimpleNamespace(OverlayGuard=_FakeGuard),
-    )
+    component.stabilize_safe_notices = _fake_stabilize  # type: ignore[attr-defined]
 
     await component._cleanup_after_login(page=object())
 

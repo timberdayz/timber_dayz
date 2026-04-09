@@ -108,14 +108,36 @@ class UniversalPopupHandler:
             return self._platform_configs[platform]
 
         try:
-            mod = __import__(f"modules.platforms.{platform}.popup_config", fromlist=["get_close_selectors", "get_overlay_selectors", "get_poll_strategy"])
+            mod = __import__(
+                f"modules.platforms.{platform}.popup_config",
+                fromlist=[
+                    "get_close_selectors",
+                    "get_overlay_selectors",
+                    "get_poll_strategy",
+                    "get_safe_notice_close_selectors",
+                    "get_safe_notice_overlay_selectors",
+                    "get_safe_notice_exclusion_selectors",
+                ],
+            )
             close = getattr(mod, "get_close_selectors", lambda: [])()
             overlay = getattr(mod, "get_overlay_selectors", lambda: [])()
             poll = getattr(mod, "get_poll_strategy", lambda: {})()
+            safe_notice_close = getattr(
+                mod, "get_safe_notice_close_selectors", lambda: []
+            )()
+            safe_notice_overlay = getattr(
+                mod, "get_safe_notice_overlay_selectors", lambda: []
+            )()
+            safe_notice_exclusion = getattr(
+                mod, "get_safe_notice_exclusion_selectors", lambda: []
+            )()
             config = {
                 "close_selectors": close,
                 "overlay_selectors": overlay,
                 "poll_strategy": poll,
+                "safe_notice_close_selectors": safe_notice_close,
+                "safe_notice_overlay_selectors": safe_notice_overlay,
+                "safe_notice_exclusion_selectors": safe_notice_exclusion,
             }
             self._platform_configs[platform] = config
             logger.info(f"Loaded platform popup config: {platform}")
@@ -162,6 +184,33 @@ class UniversalPopupHandler:
             platform_selectors = platform_config.get('overlay_selectors', [])
             selectors = platform_selectors + selectors
         
+        return selectors
+
+    def get_safe_notice_close_selectors(self, platform: str = None) -> List[str]:
+        selectors: List[str] = []
+
+        if platform:
+            platform_config = self._load_platform_config(platform)
+            selectors.extend(platform_config.get("safe_notice_close_selectors", []))
+
+        return selectors
+
+    def get_safe_notice_overlay_selectors(self, platform: str = None) -> List[str]:
+        selectors: List[str] = []
+
+        if platform:
+            platform_config = self._load_platform_config(platform)
+            selectors.extend(platform_config.get("safe_notice_overlay_selectors", []))
+
+        return selectors
+
+    def get_safe_notice_exclusion_selectors(self, platform: str = None) -> List[str]:
+        selectors: List[str] = []
+
+        if platform:
+            platform_config = self._load_platform_config(platform)
+            selectors.extend(platform_config.get("safe_notice_exclusion_selectors", []))
+
         return selectors
     
     def get_poll_strategy(self, platform: str = None) -> Dict[str, int]:
@@ -243,6 +292,55 @@ class UniversalPopupHandler:
             logger.info(f"Total popups closed: {closed_count}")
         
         return closed_count
+
+    async def close_safe_notices(
+        self,
+        page,
+        platform: str = None,
+        max_rounds: int = None,
+        interval_ms: int = None,
+        watch_ms: int = None,
+    ) -> int:
+        """Close only platform-approved informational notice overlays."""
+        strategy = self.get_poll_strategy(platform)
+        max_rounds = max_rounds or strategy["max_rounds"]
+        interval_ms = interval_ms or strategy["interval_ms"]
+        watch_ms = watch_ms or strategy["watch_ms"]
+
+        close_selectors = self.get_safe_notice_close_selectors(platform)
+        exclusion_selectors = self.get_safe_notice_exclusion_selectors(platform)
+
+        if not close_selectors:
+            return 0
+
+        closed_count = 0
+        start_time = asyncio.get_event_loop().time()
+
+        for _round_num in range(max_rounds):
+            elapsed = (asyncio.get_event_loop().time() - start_time) * 1000
+            if elapsed > watch_ms:
+                break
+
+            closed_this_round = await self._try_close_safe_notices(
+                page,
+                close_selectors=close_selectors,
+                exclusion_selectors=exclusion_selectors,
+            )
+            closed_count += closed_this_round
+
+            if closed_this_round == 0:
+                break
+
+            await asyncio.sleep(interval_ms / 1000)
+
+        if closed_count > 0:
+            logger.info(
+                "Closed %s safe notice popup(s) for platform=%s",
+                closed_count,
+                platform,
+            )
+
+        return closed_count
     
     async def _try_close_popups(self, page, selectors: List[str]) -> int:
         """
@@ -281,6 +379,42 @@ class UniversalPopupHandler:
                     # 元素不存在或不可点击,继续下一个
                     pass
         
+        return closed
+
+    async def _try_close_safe_notices(
+        self,
+        page,
+        *,
+        close_selectors: List[str],
+        exclusion_selectors: List[str],
+    ) -> int:
+        frames = [page] + list(getattr(page, "frames", []))
+
+        for frame in frames:
+            for selector in exclusion_selectors:
+                try:
+                    element = frame.locator(selector).first
+                    if await element.is_visible(timeout=100):
+                        logger.debug(
+                            "Skip safe notice cleanup because exclusion selector is visible: %s",
+                            selector,
+                        )
+                        return 0
+                except Exception:
+                    continue
+
+        closed = 0
+        for frame in frames:
+            for selector in close_selectors:
+                try:
+                    element = frame.locator(selector).first
+                    if await element.is_visible(timeout=100):
+                        await element.click(timeout=1000)
+                        closed += 1
+                        await asyncio.sleep(0.1)
+                except Exception:
+                    continue
+
         return closed
     
     async def _try_esc_key(self, page) -> bool:
@@ -452,4 +586,3 @@ class StepPopupHandler:
             else:
                 # 没有弹窗,可能是其他原因导致失败
                 logger.debug("No popups found, step may have failed for other reasons")
-

@@ -101,12 +101,7 @@ class MiaoshouLogin(LoginComponent):
         return None
 
     async def _cleanup_after_login(self, page: Any) -> None:
-        try:
-            from modules.platforms.miaoshou.components.overlay_guard import OverlayGuard
-
-            await OverlayGuard().run(page, label="post-login cleanup")
-        except Exception:
-            pass
+        await self.stabilize_safe_notices(page, label="post-login cleanup")
 
     async def _wait_for_login_outcome(
         self,
