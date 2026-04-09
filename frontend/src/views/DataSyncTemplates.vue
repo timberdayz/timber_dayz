@@ -606,6 +606,8 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields }) => {
       dataDomain: template.data_domain,
       subDomain: template.sub_domain,
       granularity: template.granularity,
+      saveMode: 'new_version',
+      baseTemplateId: template.id,
       headerRow: template.header_row ?? 0,
       headerColumns: context.current_header_columns,
       deduplicationFields: selectedFields
@@ -652,6 +654,7 @@ const handleSaveTemplate = async () => {
       dataDomain: fileFilters.value.domain,  // 使用dataDomain参数名
       subDomain: fileFilters.value.sub_domain,
       granularity: fileFilters.value.granularity,
+      saveMode: 'create',
       headerRow: headerRow.value,
       headerColumns: headerColumns.value,
       deduplicationFields: deduplicationFields.value  // v4.14.0新增：核心字段列表（必填）

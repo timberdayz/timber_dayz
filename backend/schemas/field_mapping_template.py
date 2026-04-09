@@ -89,6 +89,18 @@ class TemplateSaveResponse(BaseModel):
     message: str
 
 
+class DefaultDeduplicationFieldsData(BaseModel):
+    fields: List[str]
+    description: str
+    reason: str
+
+
+class DefaultDeduplicationFieldsResponse(BaseModel):
+    success: bool = True
+    data: DefaultDeduplicationFieldsData
+    message: str
+
+
 class TemplateUpdateContextData(BaseModel):
     template: TemplateContextSummary
     template_header_columns: List[str]
@@ -113,3 +125,70 @@ class TemplateUpdateContextResponse(BaseModel):
     success: bool = True
     data: TemplateUpdateContextData
     message: str
+
+
+class TemplateListItem(BaseModel):
+    id: int
+    platform: str
+    data_domain: str
+    granularity: Optional[str] = None
+    account: Optional[str] = None
+    sub_domain: Optional[str] = None
+    header_row: int = 0
+    sheet_name: Optional[str] = None
+    encoding: str = "utf-8"
+    template_name: Optional[str] = None
+    version: int
+    status: Optional[str] = None
+    field_count: int = 0
+    deduplication_fields: List[str] = Field(default_factory=list)
+    usage_count: int = 0
+    success_rate: float = 0.0
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class TemplateListData(BaseModel):
+    templates: List[TemplateListItem]
+    count: int
+
+
+class TemplateListResponse(BaseModel):
+    success: bool = True
+    data: TemplateListData
+
+
+class TemplateDeleteData(BaseModel):
+    template_id: int
+
+
+class TemplateDeleteResponse(BaseModel):
+    success: bool = True
+    data: TemplateDeleteData
+    message: str
+
+
+class TemplateApplyRequest(BaseModel):
+    template_id: int = Field(..., description="模板ID")
+    columns: List[str] = Field(..., min_length=1, description="当前列名列表")
+
+
+class TemplateApplyConfig(BaseModel):
+    header_row: int = 0
+    sub_domain: Optional[str] = None
+    sheet_name: Optional[str] = None
+    encoding: str = "utf-8"
+
+
+class TemplateApplyResponse(BaseModel):
+    success: bool = True
+    mappings: Dict[str, Any] = Field(default_factory=dict)
+    matched: int
+    unmatched: int
+    unmatched_columns: List[str] = Field(default_factory=list)
+    match_rate: float
+    config: TemplateApplyConfig
+    template_name: Optional[str] = None
+    template_version: Optional[int] = None
+    header_columns: List[str] = Field(default_factory=list)
+    header_changes: HeaderChangesPayload

@@ -65,6 +65,7 @@ from backend.routers import (
     # accounts,  # v4.18.0: 已删除,使用account_management替代
     field_mapping,
     field_mapping_dictionary,  # v4.3.7: 字段映射辞典API
+    field_mapping_templates,
     auto_ingest,  # v4.5.0: 自动入库API(v4.12.0标记为废弃,使用data_sync替代)
     data_sync,  # v4.12.0: 数据同步API(新统一入口)
     data_sync_mapping_quality,  # v4.13.0: 字段映射质量评分API
@@ -917,6 +918,9 @@ app.include_router(field_mapping.router, prefix="/api/field-mapping", tags=["字
 # v4.3.7 字段映射辞典API(中文友好)
 app.include_router(
     field_mapping_dictionary.router, prefix="/api/field-mapping", tags=["字段映射辞典"]
+)
+app.include_router(
+    field_mapping_templates.router, prefix="/api/field-mapping", tags=["??????"]
 )
 
 # [WARN] v4.6.0 DSS架构重构:已删除field_mapping_dictionary_mv_display(DSS架构不再需要物化视图显示标识)

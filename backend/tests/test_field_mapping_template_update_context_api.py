@@ -17,7 +17,7 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 
 
 def test_orders_template_header_normalization_preserves_rmb_suffixes():
-    from backend.routers.field_mapping_dictionary import _normalize_template_headers_for_domain
+    from backend.routers.field_mapping_templates import _normalize_template_headers_for_domain
 
     normalized = _normalize_template_headers_for_domain(
         data_domain="orders",
@@ -28,7 +28,7 @@ def test_orders_template_header_normalization_preserves_rmb_suffixes():
 
 
 def test_non_orders_template_header_normalization_keeps_existing_suffix_stripping():
-    from backend.routers.field_mapping_dictionary import _normalize_template_headers_for_domain
+    from backend.routers.field_mapping_templates import _normalize_template_headers_for_domain
 
     normalized = _normalize_template_headers_for_domain(
         data_domain="products",
@@ -104,7 +104,7 @@ async def test_template_update_context_returns_diff_and_deduplication_groups(
         await session.refresh(template)
         await session.refresh(file_record)
 
-    from backend.routers import field_mapping_dictionary as router_module
+    from backend.routers import field_mapping_templates as router_module
 
     async def fake_load_file_update_preview(*_, **__):
         return {
@@ -307,7 +307,7 @@ async def test_template_update_context_orders_treats_rmb_suffix_as_real_header_d
         await session.refresh(template)
         await session.refresh(file_record)
 
-    from backend.routers import field_mapping_dictionary as router_module
+    from backend.routers import field_mapping_templates as router_module
 
     async def fake_load_file_update_preview(*_, **__):
         return {
@@ -443,3 +443,100 @@ async def test_save_mapping_template_returns_versioning_metadata(
     assert second_payload["data"]["operation"] == "new_version"
     assert second_payload["data"]["archived_template_id"] == first_payload["data"]["template_id"]
     assert second_payload["data"]["template_name"].endswith("_v2")
+
+
+@pytest.mark.asyncio
+async def test_list_templates_returns_wrapped_template_collection(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        session.add(
+            FieldMappingTemplate(
+                platform="shopee",
+                data_domain="orders",
+                granularity="daily",
+                sub_domain=None,
+                header_row=1,
+                header_columns=["order_id", "amount"],
+                deduplication_fields=["order_id"],
+                template_name="shopee_orders_daily_v1",
+                version=1,
+                status="published",
+                field_count=2,
+                created_by="test",
+            )
+        )
+        await session.commit()
+
+    response = await client.get("/api/field-mapping/templates/list")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["count"] == 1
+    assert payload["data"]["templates"][0]["template_name"] == "shopee_orders_daily_v1"
+
+
+@pytest.mark.asyncio
+async def test_default_deduplication_fields_endpoint_returns_wrapped_payload(
+    template_update_context_client,
+):
+    client, _ = template_update_context_client
+
+    response = await client.get(
+        "/api/field-mapping/templates/default-deduplication-fields",
+        params={"data_domain": "orders"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["fields"]
+    assert payload["data"]["description"]
+    assert payload["data"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_apply_template_endpoint_returns_typed_payload(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=1,
+            header_columns=["order_id", "amount"],
+            deduplication_fields=["order_id"],
+            template_name="shopee_orders_daily_v1",
+            version=1,
+            status="published",
+            field_count=2,
+            created_by="test",
+        )
+        session.add(template)
+        await session.commit()
+        await session.refresh(template)
+
+    response = await client.post(
+        "/api/field-mapping/templates/apply",
+        json={
+            "template_id": template.id,
+            "columns": ["order_id", "amount", "new_metric"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["matched"] == 2
+    assert payload["unmatched"] == 1
+    assert payload["unmatched_columns"] == ["new_metric"]
+    assert payload["config"]["header_row"] == 1
+    assert payload["template_name"] == "shopee_orders_daily_v1"
+    assert payload["template_version"] == 1

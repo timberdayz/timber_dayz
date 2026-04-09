@@ -767,6 +767,8 @@ export default {
     dataDomain,
     templateName,
     template_name,
+    saveMode,
+    baseTemplateId,
     granularity,
     sheetName,
     headerRow,
@@ -774,21 +776,18 @@ export default {
     subDomain,
     deduplicationFields
   }) {
-    // 兼容domain和dataDomain两种参数名
+    // Support both domain and dataDomain parameter names
     const finalDomain = dataDomain || domain
     if (!platform || !finalDomain) {
-      throw new Error('平台和数据域为必填项')
+      throw new Error('platform and data domain are required')
     }
 
-    // ⭐ v4.14.0新增：验证deduplication_fields必填
     if (
       !deduplicationFields ||
       !Array.isArray(deduplicationFields) ||
       deduplicationFields.length === 0
     ) {
-      throw new Error(
-        '核心字段（deduplicationFields）为必填项，请至少选择1个字段'
-      )
+      throw new Error('deduplicationFields is required and must contain at least one field')
     }
 
     const resolvedTemplateName = templateName || template_name || null
@@ -797,14 +796,15 @@ export default {
       platform,
       data_domain: finalDomain,
       granularity: granularity || null,
-      header_columns: headerColumns || [], // ⭐ v4.6.0 DSS架构：使用header_columns
+      header_columns: headerColumns || [],
       created_by: 'web_ui',
       header_row: headerRow || 0,
       sub_domain: subDomain || null,
       sheet_name: sheetName || null,
-      deduplication_fields: deduplicationFields, // ⭐ v4.14.0新增：核心字段列表（必填）
+      deduplication_fields: deduplicationFields,
+      save_mode: saveMode || 'create',
+      base_template_id: baseTemplateId || null,
       ...(resolvedTemplateName ? { template_name: resolvedTemplateName } : {}),
-      // ⭐ 向后兼容：如果提供了mappings，也传递（后端会忽略）
       mappings: mappings || {}
     })
   },

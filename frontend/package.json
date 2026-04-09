@@ -14,6 +14,7 @@
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path ../.gitignore",
     "type-check": "vue-tsc --noEmit",
     "smoke:playwright": "node scripts/playwrightFrontendSmoke.mjs",
+    "smoke:template-management": "node scripts/dataSyncTemplateManagementPlaywrightSmoke.mjs",
     "test:smoke-shared": "node --test scripts/frontendSmokeShared.test.mjs"
   },
   "dependencies": {

@@ -323,6 +323,7 @@ const handleSaveTemplate = async () => {
       dataDomain: fileInfo.value.domain, // 使用dataDomain参数名
       granularity: fileInfo.value.granularity,
       subDomain: fileInfo.value.sub_domain,
+      saveMode: 'create',
       headerColumns: headerColumns.value,
       headerRow: headerRow.value,
       deduplicationFields: deduplicationFields.value // v4.14.0新增：核心字段列表（必填）
