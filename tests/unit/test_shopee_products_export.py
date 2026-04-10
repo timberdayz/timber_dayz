@@ -257,6 +257,78 @@ async def test_products_wait_top_report_download_button_waits_for_matching_proce
 
 
 @pytest.mark.asyncio
+async def test_products_wait_top_report_download_button_prefers_inserted_duplicate_row_over_baseline_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"start_date": "2026-02-01", "end_date": "2026-02-28"},
+    )
+    component = ShopeeProductsExport(ctx)
+    component._latest_report_baseline_rows = [
+        "parentskudetail.20260101_20260131.xlsx",
+        "parentskudetail.20260201_20260228.xlsx",
+    ]
+    new_target_button = _FakeActionLocator("\u4e0b\u8f7d")
+    old_duplicate_button = _FakeActionLocator("\u4e0b\u8f7d")
+    panel = _FakePanel(
+        [
+            _FakeRow("parentskudetail.20260201_20260228.xlsx", [new_target_button]),
+            _FakeRow("parentskudetail.20260101_20260131.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
+            _FakeRow("parentskudetail.20260201_20260228.xlsx", [old_duplicate_button]),
+        ]
+    )
+
+    monkeypatch.setattr(
+        component,
+        "_wait_latest_report_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
+
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
+
+    assert button is new_target_button
+
+
+@pytest.mark.asyncio
+async def test_products_wait_top_report_download_button_uses_baseline_counts_for_duplicate_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"start_date": "2026-02-01", "end_date": "2026-02-28"},
+    )
+    component = ShopeeProductsExport(ctx)
+    component._latest_report_baseline_rows = [
+        "parentskudetail.20260101_20260131.xlsx",
+        "parentskudetail.20260201_20260228.xlsx",
+    ]
+    old_duplicate_button = _FakeActionLocator("\u4e0b\u8f7d")
+    inserted_duplicate_button = _FakeActionLocator("\u4e0b\u8f7d")
+    panel = _FakePanel(
+        [
+            _FakeRow("parentskudetail.20260201_20260228.xlsx", [inserted_duplicate_button]),
+            _FakeRow("parentskudetail.20260101_20260131.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
+            _FakeRow("parentskudetail.20260201_20260228.xlsx", [old_duplicate_button]),
+        ]
+    )
+
+    monkeypatch.setattr(
+        component,
+        "_wait_latest_report_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
+
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
+
+    assert button is inserted_duplicate_button
+
+
+@pytest.mark.asyncio
 async def test_services_agent_wait_top_report_download_button_prefers_agent_matching_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -289,3 +361,33 @@ async def test_services_agent_wait_top_report_download_button_prefers_agent_matc
     button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
 
     assert button is target_button
+
+
+@pytest.mark.asyncio
+async def test_capture_latest_report_baseline_preserves_duplicate_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    panel = _FakePanel(
+        [
+            _FakeRow("parentskudetail.20260201_20260228.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
+            _FakeRow("parentskudetail.20260101_20260131.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
+            _FakeRow("parentskudetail.20260201_20260228.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
+        ]
+    )
+
+    monkeypatch.setattr(
+        component,
+        "_first_visible_locator",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
+
+    await component._capture_latest_report_baseline(_FakePage())
+
+    assert component._latest_report_baseline_rows == [
+        "parentskudetail.20260201_20260228.xlsx",
+        "parentskudetail.20260101_20260131.xlsx",
+        "parentskudetail.20260201_20260228.xlsx",
+    ]

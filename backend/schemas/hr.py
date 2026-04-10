@@ -809,6 +809,11 @@ class CopyFromPrevMonthBody(BaseModel):
 
 
 class ShopCommissionConfigUpdate(BaseModel):
+    year_month: str = Field(
+        ...,
+        pattern=r"^\d{4}-\d{2}$",
+        description="适用月份 YYYY-MM",
+    )
     """店铺可分配净利润率更新"""
 
     allocatable_profit_rate: float = Field(

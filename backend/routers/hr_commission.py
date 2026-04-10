@@ -432,6 +432,7 @@ async def put_shop_commission_config(
             return error_response(ErrorCode.DATA_NOT_FOUND, "该店铺尚未同步至系统，请先在账号管理中同步", status_code=400)
         existing = await db.execute(
             select(ShopCommissionConfig).where(
+                ShopCommissionConfig.year_month == body.year_month,
                 ShopCommissionConfig.platform_code == pc,
                 ShopCommissionConfig.shop_id == sid,
             )
@@ -443,13 +444,22 @@ async def put_shop_commission_config(
             rec.updated_at = datetime.now(timezone.utc)
         else:
             rec = ShopCommissionConfig(
+                year_month=body.year_month,
                 platform_code=pc,
                 shop_id=sid,
                 allocatable_profit_rate=rate,
             )
             db.add(rec)
         await db.commit()
-        return {"success": True, "data": {"platform_code": pc, "shop_id": sid, "allocatable_profit_rate": rate}}
+        return {
+            "success": True,
+            "data": {
+                "year_month": body.year_month,
+                "platform_code": pc,
+                "shop_id": sid,
+                "allocatable_profit_rate": rate,
+            },
+        }
     except Exception as e:
         await db.rollback()
         logger.error(f"保存店铺可分配利润率失败: {e}", exc_info=True)
@@ -559,7 +569,9 @@ async def get_shop_profit_statistics(
             metrics_by_shop = {}
 
         # 3. 获取店铺可分配利润率配置
-        config_query = select(ShopCommissionConfig)
+        config_query = select(ShopCommissionConfig).where(
+            ShopCommissionConfig.year_month == month
+        )
         config_rows = (await db.execute(config_query)).scalars().all()
         allocatable_by_shop: Dict[str, float] = {
             f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
@@ -675,19 +687,24 @@ async def get_annual_profit_statistics(
             }
 
         # 加载店铺可分配利润率配置（年度统计共用）
-        config_query = select(ShopCommissionConfig)
-        config_rows = (await db.execute(config_query)).scalars().all()
-        allocatable_by_shop: Dict[str, float] = {
-            f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
-            for c in config_rows
-        }
-
         for month_num in range(1, 13):
             month_str = f"{year}-{month_num:02d}"
             try:
                 month_date = date(year, month_num, 1)
             except (ValueError, TypeError):
                 continue
+
+            config_rows = (
+                await db.execute(
+                    select(ShopCommissionConfig).where(
+                        ShopCommissionConfig.year_month == month_str
+                    )
+                )
+            ).scalars().all()
+            allocatable_by_shop: Dict[str, float] = {
+                f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
+                for c in config_rows
+            }
 
             try:
                 metrics_by_shop: Dict[str, Dict] = await load_shop_monthly_metrics(db, month_str)

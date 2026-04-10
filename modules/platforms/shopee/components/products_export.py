@@ -34,7 +34,7 @@ class ShopeeProductsExport(ExportComponent):
         self.sel = selectors or ProductsSelectors()
         self.service_sel = ServicesSelectors()
         self._download_waiter: asyncio.Task | None = None
-        self._latest_report_baseline_rows: set[str] = set()
+        self._latest_report_baseline_rows: list[str] = []
 
     def _products_page_looks_ready(self, url: str) -> bool:
         current = str(url or "").strip().lower()
@@ -1410,16 +1410,16 @@ class ShopeeProductsExport(ExportComponent):
     async def _capture_latest_report_baseline(self, page: Any) -> None:
         panel = await self._first_visible_locator(page, self.service_sel.latest_report_panels)
         if panel is None:
-            self._latest_report_baseline_rows = set()
+            self._latest_report_baseline_rows = []
             return
-        baseline: set[str] = set()
+        baseline: list[str] = []
         for row in await self._visible_report_rows(panel):
             try:
                 row_text = self._normalize_report_row_text(await row.text_content())
             except Exception:
                 row_text = ""
             if row_text:
-                baseline.add(row_text)
+                baseline.append(row_text)
         self._latest_report_baseline_rows = baseline
 
     async def _row_action(self, row: Any) -> tuple[Any | None, str]:
@@ -1454,7 +1454,7 @@ class ShopeeProductsExport(ExportComponent):
             return "downloaded"
         return "unknown"
 
-    def _report_row_score(self, normalized_row_text: str) -> int:
+    def _report_row_score(self, normalized_row_text: str, *, is_inserted: bool) -> int:
         if not normalized_row_text:
             return -1
 
@@ -1470,21 +1470,47 @@ class ShopeeProductsExport(ExportComponent):
         if prefixes and any(prefix in normalized_row_text for prefix in prefixes):
             score += 20
 
-        if normalized_row_text not in self._latest_report_baseline_rows:
+        if is_inserted:
             score += 10
         return score
+
+    def _inserted_row_flags(self, normalized_rows: list[str]) -> list[bool]:
+        baseline = list(self._latest_report_baseline_rows)
+        flags: list[bool] = []
+        baseline_idx = 0
+        baseline_len = len(baseline)
+
+        for row_text in normalized_rows:
+            if baseline_idx < baseline_len and row_text == baseline[baseline_idx]:
+                flags.append(False)
+                baseline_idx += 1
+            else:
+                flags.append(True)
+        return flags
 
     async def _resolve_report_row_action(self, panel: Any) -> tuple[Any | None, str]:
         best_download: tuple[int, Any] | None = None
         best_processing: tuple[int, Any] | None = None
-
-        for row in await self._visible_report_rows(panel):
+        rows = await self._visible_report_rows(panel)
+        normalized_rows: list[str] = []
+        raw_texts: list[str] = []
+        for row in rows:
             try:
                 row_text = (await row.text_content()) or ""
             except Exception:
                 row_text = ""
-            normalized_row_text = self._normalize_report_row_text(row_text)
-            score = self._report_row_score(normalized_row_text)
+            raw_texts.append(row_text)
+            normalized_rows.append(self._normalize_report_row_text(row_text))
+
+        inserted_flags = self._inserted_row_flags(normalized_rows)
+
+        for idx, row in enumerate(rows):
+            row_text = raw_texts[idx]
+            normalized_row_text = normalized_rows[idx]
+            score = self._report_row_score(
+                normalized_row_text,
+                is_inserted=inserted_flags[idx],
+            )
             if score < 0:
                 continue
 

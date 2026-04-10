@@ -496,7 +496,10 @@ async function handleSaveRow(row) {
     // 保存可分配利润率
     const rate = Number(shop.allocatable_profit_rate)
     if (!Number.isNaN(rate) && rate >= 0 && rate <= 1) {
-      await api.putHrShopCommissionConfig(shop.platform_code, shop.shop_id, { allocatable_profit_rate: rate })
+      await api.putHrShopCommissionConfig(shop.platform_code, shop.shop_id, {
+        year_month: configMonth.value,
+        allocatable_profit_rate: rate
+      })
     }
     ElMessage.success('已保存')
     await loadConfigData()
@@ -521,7 +524,10 @@ async function handleDeleteRow(row) {
     for (const a of items) await api.deleteHrEmployeeShopAssignment(a.id)
     shop.assignments = []
     shop.allocatable_profit_rate = 0
-    await api.putHrShopCommissionConfig(shop.platform_code, shop.shop_id, { allocatable_profit_rate: 0 })
+    await api.putHrShopCommissionConfig(shop.platform_code, shop.shop_id, {
+      year_month: configMonth.value,
+      allocatable_profit_rate: 0
+    })
     ElMessage.success('已删除，可重新编辑')
     await loadConfigData()
   } catch (e) {
@@ -578,7 +584,7 @@ async function loadConfigData() {
       api.getHrEmployeeShopAssignments({ year_month: configMonth.value, page: 1, page_size: 1000 }),
       api.getTargetShops(),
       api.getHrShopProfitStatistics({ month: configMonth.value }).catch(() => ({ data: [] })),
-      api.getHrShopCommissionConfig().catch(() => ({ data: [] }))
+      api.getHrShopCommissionConfig({ year_month: configMonth.value }).catch(() => ({ data: [] }))
     ])
     const shopData = shopsRes?.data ?? shopsRes ?? []
     const shopList = Array.isArray(shopData) ? shopData : (shopData?.data ?? shopData ?? [])
