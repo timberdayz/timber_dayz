@@ -576,6 +576,27 @@ async def lifespan(app: FastAPI):
         except Exception as scheduler_err:
             logger.warning(f"[调度器] 初始化失败(不影响主功能): {scheduler_err}")
 
+        try:
+            enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in (
+                "true",
+                "1",
+            )
+            deployment_role = os.getenv("DEPLOYMENT_ROLE", "").lower()
+            if enable_collection and deployment_role != "cloud":
+                from backend.models.database import AsyncSessionLocal
+                from backend.services.collection_queue_runner import CollectionQueueRunner
+
+                queue_runner = CollectionQueueRunner(
+                    session_factory=AsyncSessionLocal,
+                )
+                await queue_runner.start()
+                app.state.collection_queue_runner = queue_runner
+                logger.info("[QueueRunner] Collection config queue runner started")
+        except Exception as queue_runner_err:
+            logger.warning(
+                f"[QueueRunner] Initialization failed (non-blocking): {queue_runner_err}"
+            )
+
     except Exception as e:
         logger.error(f"[ERROR] 系统启动失败: {e}")
         raise
@@ -623,6 +644,16 @@ async def lifespan(app: FastAPI):
             logger.info("[调度器] 采集调度器已关闭")
     except Exception as e:
         logger.debug(f"[关闭] 关闭调度器时出现异常(可忽略): {e}")
+
+    try:
+        if (
+            hasattr(app.state, "collection_queue_runner")
+            and app.state.collection_queue_runner
+        ):
+            await app.state.collection_queue_runner.shutdown()
+            logger.info("[QueueRunner] Collection config queue runner stopped")
+    except Exception as e:
+        logger.debug(f"[关闭] QueueRunner shutdown warning (ignorable): {e}")
 
     # v4.12.0修复:正确取消后台任务,优雅处理CancelledError异常
     # 使用try-except包装整个关闭流程,避免CancelledError影响关闭
