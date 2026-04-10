@@ -1,5 +1,5 @@
-﻿[32m[INFO][0m 2026-04-10 20:10:22 - modules.core.config - 配置管理器初始化,配置目录: config
-[32m[INFO][0m 2026-04-10 20:10:22 - modules.core.registry - 应用注册器初始化完成
+﻿[32m[INFO][0m 2026-04-10 20:16:08 - modules.core.config - 配置管理器初始化,配置目录: config
+[32m[INFO][0m 2026-04-10 20:16:08 - modules.core.registry - 应用注册器初始化完成
 # Schema Alignment Audit
 
 ## Summary
@@ -203,6 +203,15 @@
 - these assets must not be treated as ORM-missing business-table drift
 - these assets must not be targeted by duplicate/public cleanup waves
 - later work should govern ownership, generation, refresh, and verification, not force ORM parity
+
+## Wave 3 Governance
+
+`wave_3_ops_and_historical` contains operations/support tables and migration-history artifacts.
+
+- operations/support table: runtime infra or observability assets managed with ops ownership
+- migration-history artifact: retained Alembic/version history artifacts that must stay outside business-table cleanup
+- these assets must not be treated as business ORM drift
+- these assets should be governed by retention, operational ownership, and migration-policy review
 
 ## First Repair Wave Recommendation
 

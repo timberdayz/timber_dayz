@@ -117,6 +117,16 @@ def build_markdown_report(report: dict) -> str:
     lines.append("- later work should govern ownership, generation, refresh, and verification, not force ORM parity")
     lines.append("")
 
+    lines.append("## Wave 3 Governance")
+    lines.append("")
+    lines.append("`wave_3_ops_and_historical` contains operations/support tables and migration-history artifacts.")
+    lines.append("")
+    lines.append("- operations/support table: runtime infra or observability assets managed with ops ownership")
+    lines.append("- migration-history artifact: retained Alembic/version history artifacts that must stay outside business-table cleanup")
+    lines.append("- these assets must not be treated as business ORM drift")
+    lines.append("- these assets should be governed by retention, operational ownership, and migration-policy review")
+    lines.append("")
+
     lines.append("## First Repair Wave Recommendation")
     lines.append("")
     lines.append("- Start with the wave-1 runtime-critical table family.")
