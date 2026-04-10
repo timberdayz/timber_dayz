@@ -100,6 +100,39 @@ def classify_duplicate_group(table_name: str, canonical_schema: str, actual_sche
     return "needs_manual_review", "requires runtime and data lineage audit before cleanup"
 
 
+def classify_extra_only_table(table_name: str, actual_schemas: list[str]) -> tuple[str, str, str]:
+    schemas = set(actual_schemas)
+    if any(schema == "b_class" for schema in schemas) and table_name.startswith("fact_"):
+        return (
+            "generated_runtime_fact",
+            "wave_2_runtime_generated",
+            "treat as generated runtime fact asset; exclude from duplicate cleanup and classify with runtime SQL ownership",
+        )
+    if any(schema == "api" for schema in schemas) and table_name.endswith("_module"):
+        return (
+            "generated_runtime_api",
+            "wave_2_runtime_generated",
+            "treat as generated API module asset; exclude from duplicate cleanup and classify with SQL/view generation ownership",
+        )
+    if any(schema == "ops" for schema in schemas):
+        return (
+            "operations_runtime_table",
+            "wave_3_ops_and_historical",
+            "treat as operations/support table and review with infra ownership",
+        )
+    if table_name.startswith("alembic_version"):
+        return (
+            "historical_migration_artifact",
+            "wave_3_ops_and_historical",
+            "treat as migration-history artifact; do not mix with business-table cleanup",
+        )
+    return (
+        "runtime_or_legacy_extra",
+        "wave_4_manual_review",
+        "inventory and classify before any cleanup",
+    )
+
+
 def analyze_duplicate_groups(
     expected_schema_map: dict[str, str],
     actual_schema_map: dict[str, list[str]],
@@ -145,16 +178,23 @@ def analyze_duplicate_groups(
             )
 
     extra_only = []
+    follow_up_waves: dict[str, list[str]] = defaultdict(list)
     for table_name, actual_schemas in sorted(actual_schema_map.items()):
         if table_name not in expected_schema_map:
+            risk_class, follow_up_wave, recommended_action = classify_extra_only_table(
+                table_name,
+                sorted(actual_schemas),
+            )
             extra_only.append(
                 {
                     "table_name": table_name,
                     "actual_schemas": sorted(actual_schemas),
-                    "risk_class": "runtime_or_legacy_extra",
-                    "recommended_action": "inventory and classify before any cleanup",
+                    "risk_class": risk_class,
+                    "follow_up_wave": follow_up_wave,
+                    "recommended_action": recommended_action,
                 }
             )
+            follow_up_waves[follow_up_wave].append(table_name)
 
     migration_evidence = build_migration_evidence_map()
     wave_one_priority_tables = []
@@ -191,6 +231,7 @@ def analyze_duplicate_groups(
         "missing_tables": missing_tables,
         "extra_only_tables": extra_only,
         "wave_one_priority_tables": wave_one_priority_tables,
+        "follow_up_waves": {key: sorted(value) for key, value in sorted(follow_up_waves.items())},
     }
 
 

@@ -1,5 +1,5 @@
-﻿[32m[INFO][0m 2026-04-10 19:34:44 - modules.core.config - 配置管理器初始化,配置目录: config
-[32m[INFO][0m 2026-04-10 19:34:44 - modules.core.registry - 应用注册器初始化完成
+﻿[32m[INFO][0m 2026-04-10 19:55:04 - modules.core.config - 配置管理器初始化,配置目录: config
+[32m[INFO][0m 2026-04-10 19:55:04 - modules.core.registry - 应用注册器初始化完成
 # Schema Alignment Audit
 
 ## Summary
@@ -86,81 +86,117 @@
 
 ## Extra-Only Runtime Tables
 
-- `alembic_version` in `['core']`
-- `alembic_version__archive_retired` in `['public']`
-- `apscheduler_jobs` in `['core']`
-- `campaign_targets` in `['a_class']`
-- `data_freshness_log` in `['ops']`
-- `data_lineage_registry` in `['ops']`
-- `dim_date` in `['core']`
-- `fact_miaoshou_analytics_daily` in `['b_class']`
-- `fact_miaoshou_analytics_monthly` in `['b_class']`
-- `fact_miaoshou_analytics_weekly` in `['b_class']`
-- `fact_miaoshou_inventory_monthly` in `['b_class']`
-- `fact_miaoshou_inventory_snapshot` in `['b_class']`
-- `fact_miaoshou_inventory_weekly` in `['b_class']`
-- `fact_miaoshou_orders_daily` in `['b_class']`
-- `fact_miaoshou_orders_monthly` in `['b_class']`
-- `fact_miaoshou_orders_shopee_monthly` in `['b_class']`
-- `fact_miaoshou_orders_shopee_weekly` in `['b_class']`
-- `fact_miaoshou_orders_tiktok_weekly` in `['b_class']`
-- `fact_miaoshou_orders_weekly` in `['b_class']`
-- `fact_miaoshou_products_daily` in `['b_class']`
-- `fact_miaoshou_products_monthly` in `['b_class']`
-- `fact_miaoshou_products_weekly` in `['b_class']`
-- `fact_miaoshou_services_agent_daily` in `['b_class']`
-- `fact_miaoshou_services_agent_monthly` in `['b_class']`
-- `fact_miaoshou_services_agent_weekly` in `['b_class']`
-- `fact_miaoshou_services_ai_assistant_daily` in `['b_class']`
-- `fact_miaoshou_services_ai_assistant_monthly` in `['b_class']`
-- `fact_miaoshou_services_ai_assistant_weekly` in `['b_class']`
-- `fact_miaoshou_traffic_daily` in `['b_class']`
-- `fact_miaoshou_traffic_monthly` in `['b_class']`
-- `fact_miaoshou_traffic_weekly` in `['b_class']`
-- `fact_sales_orders` in `['core']`
-- `fact_shopee_analytics_daily` in `['b_class']`
-- `fact_shopee_analytics_monthly` in `['b_class']`
-- `fact_shopee_analytics_weekly` in `['b_class']`
-- `fact_shopee_inventory_snapshot` in `['b_class']`
-- `fact_shopee_orders_daily` in `['b_class']`
-- `fact_shopee_orders_monthly` in `['b_class']`
-- `fact_shopee_orders_weekly` in `['b_class']`
-- `fact_shopee_products_daily` in `['b_class']`
-- `fact_shopee_products_monthly` in `['b_class']`
-- `fact_shopee_products_shopee_daily` in `['b_class']`
-- `fact_shopee_products_shopee_monthly` in `['b_class']`
-- `fact_shopee_products_shopee_weekly` in `['b_class']`
-- `fact_shopee_products_weekly` in `['b_class']`
-- `fact_shopee_services_agent_daily` in `['b_class']`
-- `fact_shopee_services_agent_monthly` in `['b_class']`
-- `fact_shopee_services_agent_weekly` in `['b_class']`
-- `fact_shopee_services_ai_assistant_daily` in `['b_class']`
-- `fact_shopee_services_ai_assistant_monthly` in `['b_class']`
+- `alembic_version` in `['core']` class=`historical_migration_artifact` wave=`wave_3_ops_and_historical`
+- `alembic_version__archive_retired` in `['public']` class=`historical_migration_artifact` wave=`wave_3_ops_and_historical`
+- `apscheduler_jobs` in `['core']` class=`runtime_or_legacy_extra` wave=`wave_4_manual_review`
+- `campaign_targets` in `['a_class']` class=`runtime_or_legacy_extra` wave=`wave_4_manual_review`
+- `data_freshness_log` in `['ops']` class=`operations_runtime_table` wave=`wave_3_ops_and_historical`
+- `data_lineage_registry` in `['ops']` class=`operations_runtime_table` wave=`wave_3_ops_and_historical`
+- `dim_date` in `['core']` class=`runtime_or_legacy_extra` wave=`wave_4_manual_review`
+- `fact_miaoshou_analytics_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_analytics_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_analytics_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_inventory_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_inventory_snapshot` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_inventory_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_orders_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_orders_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_orders_shopee_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_orders_shopee_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_orders_tiktok_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_orders_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_products_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_products_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_products_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_services_agent_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_services_agent_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_services_agent_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_services_ai_assistant_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_services_ai_assistant_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_services_ai_assistant_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_traffic_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_traffic_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_miaoshou_traffic_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_sales_orders` in `['core']` class=`runtime_or_legacy_extra` wave=`wave_4_manual_review`
+- `fact_shopee_analytics_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_analytics_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_analytics_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_inventory_snapshot` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_orders_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_orders_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_orders_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_products_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_products_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_products_shopee_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_products_shopee_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_products_shopee_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_products_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_services_agent_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_services_agent_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_services_agent_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_services_ai_assistant_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
+- `fact_shopee_services_ai_assistant_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
 - ... 34 more
+
+## Follow-Up Waves
+
+### wave_2_runtime_generated
+
+- `fact_miaoshou_analytics_daily`
+- `fact_miaoshou_analytics_monthly`
+- `fact_miaoshou_analytics_weekly`
+- `fact_miaoshou_inventory_monthly`
+- `fact_miaoshou_inventory_snapshot`
+- `fact_miaoshou_inventory_weekly`
+- `fact_miaoshou_orders_daily`
+- `fact_miaoshou_orders_monthly`
+- `fact_miaoshou_orders_shopee_monthly`
+- `fact_miaoshou_orders_shopee_weekly`
+- `fact_miaoshou_orders_tiktok_weekly`
+- `fact_miaoshou_orders_weekly`
+- `fact_miaoshou_products_daily`
+- `fact_miaoshou_products_monthly`
+- `fact_miaoshou_products_weekly`
+- `fact_miaoshou_services_agent_daily`
+- `fact_miaoshou_services_agent_monthly`
+- `fact_miaoshou_services_agent_weekly`
+- `fact_miaoshou_services_ai_assistant_daily`
+- `fact_miaoshou_services_ai_assistant_monthly`
+- `fact_miaoshou_services_ai_assistant_weekly`
+- `fact_miaoshou_traffic_daily`
+- `fact_miaoshou_traffic_monthly`
+- `fact_miaoshou_traffic_weekly`
+- `fact_shopee_analytics_daily`
+- `fact_shopee_analytics_monthly`
+- `fact_shopee_analytics_weekly`
+- `fact_shopee_inventory_snapshot`
+- `fact_shopee_orders_daily`
+- `fact_shopee_orders_monthly`
+- ... 40 more
+
+### wave_3_ops_and_historical
+
+- `alembic_version`
+- `alembic_version__archive_retired`
+- `data_freshness_log`
+- `data_lineage_registry`
+- `pipeline_run_log`
+- `pipeline_step_log`
+
+### wave_4_manual_review
+
+- `apscheduler_jobs`
+- `campaign_targets`
+- `dim_date`
+- `fact_sales_orders`
+- `field_alias_rules`
+- `inventory_age_current`
+- `inventory_age_history`
+- `performance_scores_c`
 
 ## First Repair Wave Recommendation
 
 - Start with the wave-1 runtime-critical table family.
 - Treat schema-placement mismatches and time-column mismatches as immediate alignment targets.
 - Keep duplicate cleanup for non-wave-1 tables behind proof-based follow-up waves.
-
-## Wave 1 Status
-
-- Audit artifact: complete
-- Runtime schema/time-column contracts: complete
-- Script/diagnostic alignment:
-  - `scripts/analyze_schema_cleanup_candidates.py`: complete
-  - `scripts/audit_schema_alignment.py`: complete
-  - `scripts/verify_restore.py`: complete
-- Existing migration coverage for wave-1 tables: confirmed by contract tests
-- New repair migration for wave-1 tables: not required in this round
-
-Current interpretation:
-
-- The wave-1 table family does not currently require a new additive repair migration to prove correctness.
-- The immediate operational risk was primarily in runtime/tooling assumptions, not in missing wave-1 table existence or missing baseline migration coverage.
-- Remaining work should now move to deeper `P2/P3` alignment:
-  - broader migration-history consistency
-  - extra-only runtime table classification
-  - later-wave duplicate/legacy cleanup
 

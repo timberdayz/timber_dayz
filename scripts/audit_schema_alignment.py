@@ -87,10 +87,24 @@ def build_markdown_report(report: dict) -> str:
     lines.append("## Extra-Only Runtime Tables")
     lines.append("")
     for item in report["extra_only_tables"][:50]:
-        lines.append(f"- `{item['table_name']}` in `{item['actual_schemas']}`")
+        lines.append(
+            f"- `{item['table_name']}` in `{item['actual_schemas']}`"
+            f" class=`{item['risk_class']}` wave=`{item['follow_up_wave']}`"
+        )
     if len(report["extra_only_tables"]) > 50:
         lines.append(f"- ... {len(report['extra_only_tables']) - 50} more")
     lines.append("")
+
+    lines.append("## Follow-Up Waves")
+    lines.append("")
+    for wave_name, table_names in report.get("follow_up_waves", {}).items():
+        lines.append(f"### {wave_name}")
+        lines.append("")
+        for table_name in table_names[:30]:
+            lines.append(f"- `{table_name}`")
+        if len(table_names) > 30:
+            lines.append(f"- ... {len(table_names) - 30} more")
+        lines.append("")
 
     lines.append("## First Repair Wave Recommendation")
     lines.append("")

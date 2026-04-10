@@ -59,3 +59,39 @@ def test_inventory_script_emits_migration_evidence_placeholders_for_wave_one_tab
     assert "migration_evidence" in catalog
     assert "orm_schema" in catalog
     assert "runtime_schema" in catalog
+
+
+def test_inventory_script_classifies_extra_only_runtime_tables_into_follow_up_buckets():
+    expected = {}
+    actual = {
+        "fact_shopee_orders_daily": ["b_class"],
+        "business_overview_kpi_module": ["api"],
+        "data_freshness_log": ["ops"],
+        "alembic_version__archive_retired": ["public"],
+    }
+
+    report = analyze_duplicate_groups(expected, actual)
+    by_name = {item["table_name"]: item for item in report["extra_only_tables"]}
+
+    assert by_name["fact_shopee_orders_daily"]["risk_class"] == "generated_runtime_fact"
+    assert by_name["business_overview_kpi_module"]["risk_class"] == "generated_runtime_api"
+    assert by_name["data_freshness_log"]["risk_class"] == "operations_runtime_table"
+    assert by_name["alembic_version__archive_retired"]["risk_class"] == "historical_migration_artifact"
+
+
+def test_inventory_script_emits_follow_up_wave_groups_for_extra_only_tables():
+    expected = {}
+    actual = {
+        "fact_shopee_orders_daily": ["b_class"],
+        "business_overview_kpi_module": ["api"],
+        "data_freshness_log": ["ops"],
+    }
+
+    report = analyze_duplicate_groups(expected, actual)
+    follow_up = report["follow_up_waves"]
+
+    assert "wave_2_runtime_generated" in follow_up
+    assert "wave_3_ops_and_historical" in follow_up
+    assert "fact_shopee_orders_daily" in follow_up["wave_2_runtime_generated"]
+    assert "business_overview_kpi_module" in follow_up["wave_2_runtime_generated"]
+    assert "data_freshness_log" in follow_up["wave_3_ops_and_historical"]
