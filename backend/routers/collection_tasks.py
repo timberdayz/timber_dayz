@@ -17,9 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import desc, select
 
 from backend.models.database import get_async_db
-from modules.core.db import CollectionTask, CollectionTaskLog
+from modules.core.db import CollectionConfig, CollectionTask, CollectionTaskLog
 from modules.core.logger import get_logger
 from backend.schemas.collection import (
+    CollectionConfigRunResponse,
     TaskCreateRequest,
     ResumeTaskRequest,
     TaskResponse,
@@ -59,23 +60,46 @@ VERIFICATION_WAIT_TIMEOUT = int(os.getenv("VERIFICATION_TIMEOUT", "300"))
 VERIFICATION_POLL_INTERVAL = 1.5
 
 
-@router.post("/configs/{config_id}/run", response_model=List[TaskResponse])
+def _build_config_run_response_payload(run: Any) -> dict:
+    return {
+        "id": run.id,
+        "run_id": run.run_id,
+        "config_id": run.config_id,
+        "platform": run.platform,
+        "main_account_id": run.main_account_id,
+        "trigger_type": run.trigger_type,
+        "status": run.status,
+        "priority": getattr(run, "priority", 5),
+        "scheduled_for": getattr(run, "scheduled_for", None),
+        "started_at": getattr(run, "started_at", None),
+        "completed_at": getattr(run, "completed_at", None),
+        "error_message": getattr(run, "error_message", None),
+        "created_at": getattr(run, "created_at", None),
+        "updated_at": getattr(run, "updated_at", None),
+    }
+
+
+@router.post("/configs/{config_id}/run", response_model=CollectionConfigRunResponse)
 async def run_config_tasks(
     config_id: int,
     fastapi_request: Request,
     db: AsyncSession = Depends(get_async_db),
 ):
-    from backend.services.collection_config_execution import create_tasks_for_config
+    from backend.services.collection_config_run_service import CollectionConfigRunService
 
-    tasks = await create_tasks_for_config(
-        db,
-        config_id=config_id,
-        trigger_type="config",
-        app=getattr(fastapi_request, "app", None),
-        start_background=True,
-        resolve_runtime=True,
+    result = await db.execute(
+        select(CollectionConfig).where(
+            CollectionConfig.id == config_id,
+            CollectionConfig.is_active == True,
+        )
     )
-    return [_build_task_response_payload(task) for task in tasks]
+    config = result.scalar_one_or_none()
+    if config is None:
+        raise HTTPException(status_code=404, detail="config not found")
+
+    run_service = CollectionConfigRunService(db)
+    run, _ = await run_service.enqueue_config_run(config, trigger_type="manual")
+    return _build_config_run_response_payload(run)
 
 
 def _collection_task_details_payload(task: CollectionTask) -> dict:
