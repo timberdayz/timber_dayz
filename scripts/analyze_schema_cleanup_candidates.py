@@ -18,6 +18,10 @@ from sqlalchemy import create_engine, inspect
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from backend.models.database import (
+    resolve_runtime_table_schema,
+    resolve_runtime_time_column,
+)
 from backend.utils.config import get_settings
 from modules.core.db import Base
 
@@ -37,6 +41,30 @@ LIKELY_CLEANUP_DUPLICATES = {
     "staging_raw_data",
     "dim_shops",
 }
+WAVE_ONE_PRIORITY_TABLES = {
+    "catalog_files": "P0",
+    "collection_tasks": "P0",
+    "collection_task_logs": "P0",
+    "task_center_tasks": "P1",
+    "task_center_logs": "P1",
+    "task_center_links": "P1",
+}
+
+
+def build_migration_evidence_map() -> dict[str, list[str]]:
+    evidence: dict[str, list[str]] = {}
+    candidates = [
+        Path("migrations/versions/20260112_v5_0_0_schema_snapshot.py"),
+        Path("migrations/versions/20260328_add_task_center_tables.py"),
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for table_name in WAVE_ONE_PRIORITY_TABLES:
+            if table_name in text:
+                evidence.setdefault(table_name, []).append(str(path).replace("\\", "/"))
+    return evidence
 
 
 def build_expected_schema_map() -> dict[str, str]:
@@ -128,6 +156,27 @@ def analyze_duplicate_groups(
                 }
             )
 
+    migration_evidence = build_migration_evidence_map()
+    wave_one_priority_tables = []
+    for table_name, priority in WAVE_ONE_PRIORITY_TABLES.items():
+        orm_schema = expected_schema_map.get(table_name)
+        runtime_schemas = sorted(actual_schema_map.get(table_name, []))
+        runtime_schema = resolve_runtime_table_schema(table_name) or (
+            runtime_schemas[0] if runtime_schemas else orm_schema
+        )
+        wave_one_priority_tables.append(
+            {
+                "table_name": table_name,
+                "wave": "wave_1",
+                "priority": priority,
+                "orm_schema": orm_schema,
+                "runtime_schema": runtime_schema,
+                "runtime_schemas": runtime_schemas,
+                "runtime_time_column": resolve_runtime_time_column(table_name),
+                "migration_evidence": migration_evidence.get(table_name, []),
+            }
+        )
+
     return {
         "summary": {
             "expected_table_count": len(expected_schema_map),
@@ -141,6 +190,7 @@ def analyze_duplicate_groups(
         "misplaced_tables": misplaced_tables,
         "missing_tables": missing_tables,
         "extra_only_tables": extra_only,
+        "wave_one_priority_tables": wave_one_priority_tables,
     }
 
 

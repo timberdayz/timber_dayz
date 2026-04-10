@@ -26,7 +26,11 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models.database import AsyncSessionLocal
+from backend.models.database import (
+    AsyncSessionLocal,
+    qualify_runtime_table_name,
+    resolve_runtime_time_column,
+)
 
 
 # --- Critical tables to verify ---
@@ -78,10 +82,10 @@ class VerificationResult:
 async def verify_table_count(
     db: AsyncSession, table: str, schema: str, min_rows: int, result: VerificationResult
 ):
-    schema_prefix = f'"{schema}".' if schema != "public" else ""
+    qualified_table = qualify_runtime_table_name(table)
     try:
         row = await db.execute(
-            text(f"SELECT COUNT(*) FROM {schema_prefix}\"{table}\"")
+            text(f"SELECT COUNT(*) FROM {qualified_table}")
         )
         count = row.scalar()
         if count >= min_rows:
@@ -102,18 +106,23 @@ async def verify_table_freshness(
     max_age_hours: int,
     result: VerificationResult,
 ):
-    schema_prefix = f'"{schema}".' if schema != "public" else ""
+    qualified_table = qualify_runtime_table_name(table)
+    time_column = resolve_runtime_time_column(table) or "created_at"
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
     try:
         row = await db.execute(
             text(
-                f"SELECT MAX(created_at) FROM {schema_prefix}\"{table}\" "
-                f"WHERE created_at IS NOT NULL"
+                f"SELECT MAX({time_column}) FROM {qualified_table} "
+                f"WHERE {time_column} IS NOT NULL"
             )
         )
         latest = row.scalar()
         if latest is None:
-            result.add(f"freshness:{schema}.{table}", "WARN", "No created_at timestamps found")
+            result.add(
+                f"freshness:{schema}.{table}",
+                "WARN",
+                f"No {time_column} timestamps found",
+            )
             return
         # Ensure timezone-aware
         if latest.tzinfo is None:
@@ -143,14 +152,16 @@ async def verify_referential_integrity(
     schema: str,
     result: VerificationResult,
 ):
+    child_qualified = qualify_runtime_table_name(child_table)
+    parent_qualified = qualify_runtime_table_name(parent_table)
     try:
         row = await db.execute(
             text(
                 f"""
-                SELECT COUNT(*) FROM "{child_table}" c
+                SELECT COUNT(*) FROM {child_qualified} c
                 WHERE c."{child_col}" IS NOT NULL
                   AND NOT EXISTS (
-                    SELECT 1 FROM "{parent_table}" p
+                    SELECT 1 FROM {parent_qualified} p
                     WHERE p."{parent_col}" = c."{child_col}"
                   )
                 """
