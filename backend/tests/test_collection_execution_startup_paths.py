@@ -75,34 +75,31 @@ class _AsyncSessionManager:
 
 
 @pytest.mark.asyncio
-async def test_execute_scheduled_collection_config_starts_background_execution(monkeypatch):
+async def test_execute_scheduled_collection_config_enqueues_config_run(monkeypatch):
     from backend.services import collection_scheduler as module
 
     fake_config = SimpleNamespace(
         id=27,
+        platform="shopee",
+        main_account_id="main-shopee",
         is_active=True,
         schedule_enabled=True,
         schedule_cron="0 6 * * *",
     )
     fake_result = SimpleNamespace(scalar_one_or_none=lambda: fake_config)
     fake_session = SimpleNamespace(execute=AsyncMock(return_value=fake_result))
-    create_tasks = AsyncMock(return_value=[])
+    fake_run = SimpleNamespace(id=3, run_id="run-27", status="queued")
+    enqueue = AsyncMock(return_value=(fake_run, True))
 
     monkeypatch.setattr(
         "backend.models.database.AsyncSessionLocal",
         lambda: _AsyncSessionManager(fake_session),
     )
     monkeypatch.setattr(
-        "backend.services.collection_config_execution.create_tasks_for_config",
-        create_tasks,
+        "backend.services.collection_config_run_service.CollectionConfigRunService",
+        lambda db: SimpleNamespace(enqueue_config_run=enqueue),
     )
 
     await module.execute_scheduled_collection_config(27)
 
-    create_tasks.assert_awaited_once_with(
-        fake_session,
-        config_id=27,
-        trigger_type="scheduled",
-        start_background=True,
-        resolve_runtime=True,
-    )
+    enqueue.assert_awaited_once_with(fake_config, trigger_type="scheduled")

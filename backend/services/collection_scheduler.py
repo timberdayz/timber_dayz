@@ -85,7 +85,7 @@ def resolve_config_debug_mode(config: CollectionConfig | Any) -> bool:
 
 async def execute_scheduled_collection_config(config_id: int) -> None:
     from backend.models.database import AsyncSessionLocal
-    from backend.services.collection_config_execution import create_tasks_for_config
+    from backend.services.collection_config_run_service import CollectionConfigRunService
 
     logger.info("Executing scheduled task for config %s", config_id)
     async with AsyncSessionLocal() as db:
@@ -103,14 +103,23 @@ async def execute_scheduled_collection_config(config_id: int) -> None:
             logger.warning("Scheduled config %s is disabled or missing cron", config_id)
             return
 
-        tasks = await create_tasks_for_config(
-            db,
-            config_id=config_id,
+        run_service = CollectionConfigRunService(db)
+        run, created = await run_service.enqueue_config_run(
+            config,
             trigger_type="scheduled",
-            start_background=True,
-            resolve_runtime=True,
         )
-        logger.info("Created %s scheduled tasks for config %s", len(tasks), config_id)
+        if created:
+            logger.info(
+                "Queued scheduled config run %s for config %s",
+                run.run_id,
+                config_id,
+            )
+        else:
+            logger.info(
+                "Skipped duplicate scheduled config run for config %s (existing run %s)",
+                config_id,
+                run.run_id,
+            )
 
 
 class CollectionScheduler:

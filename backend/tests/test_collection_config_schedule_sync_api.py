@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from modules.core.db import (
     CollectionConfig,
+    CollectionConfigRun,
     CollectionConfigShopScope,
     CollectionTask,
     MainAccount,
@@ -51,6 +52,7 @@ async def schedule_sync_engine():
         await conn.run_sync(ShopAccount.__table__.create)
         await conn.run_sync(ShopAccountCapability.__table__.create)
         await conn.run_sync(CollectionConfig.__table__.create)
+        await conn.run_sync(CollectionConfigRun.__table__.create)
         await conn.run_sync(CollectionConfigShopScope.__table__.create)
         await conn.run_sync(CollectionTask.__table__.create)
 
@@ -154,6 +156,7 @@ async def test_create_config_with_schedule_enabled_registers_job_immediately(
         json={
             "name": "shopee-scheduled-v1",
             "platform": "shopee",
+            "main_account_id": "main-shopee",
             "shop_scopes": [
                 {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
                 {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
@@ -187,6 +190,7 @@ async def test_update_config_schedule_reschedules_immediately(
         json={
             "name": "shopee-scheduled-v2",
             "platform": "shopee",
+            "main_account_id": "main-shopee",
             "shop_scopes": [
                 {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
                 {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
@@ -227,6 +231,7 @@ async def test_disable_and_delete_config_remove_registered_job_immediately(
         json={
             "name": "shopee-scheduled-v3",
             "platform": "shopee",
+            "main_account_id": "main-shopee",
             "shop_scopes": [
                 {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
                 {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
