@@ -715,6 +715,7 @@ class CollectionConfig(Base):
         cascade="all, delete-orphan",
     )
     tasks = relationship("CollectionTask", back_populates="config")
+    runs = relationship("CollectionConfigRun", back_populates="config", cascade="all, delete-orphan")
     
     __table_args__ = (
         UniqueConstraint(
@@ -772,6 +773,47 @@ class CollectionConfigShopScope(Base):
     )
 
 
+class CollectionConfigRun(Base):
+    """
+    采集配置运行实例。
+
+    用于表达某个 CollectionConfig 在某次触发中进入队列并被执行一次。
+    """
+
+    __tablename__ = "collection_config_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(100), nullable=False)
+    config_id = Column(
+        Integer,
+        ForeignKey("core.collection_configs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    platform = Column(String(50), nullable=False)
+    main_account_id = Column(String(100), nullable=False)
+    trigger_type = Column(String(20), nullable=False, default="scheduled")
+    status = Column(String(32), nullable=False, default="queued")
+    priority = Column(Integer, nullable=False, default=5)
+    scheduled_for = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    config = relationship("CollectionConfig", back_populates="runs")
+    tasks = relationship("CollectionTask", back_populates="config_run")
+
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_collection_config_runs_run_id"),
+        Index("ix_collection_config_runs_status", "status"),
+        Index("ix_collection_config_runs_created_at", "created_at"),
+        Index("ix_collection_config_runs_config_id", "config_id"),
+        Index("ix_collection_config_runs_main_account_id", "main_account_id"),
+        {"schema": "core"},
+    )
+
+
 class CollectionTask(Base):
     """
     数据采集任务表
@@ -800,6 +842,11 @@ class CollectionTask(Base):
     
     # 关联配置(可选,快速采集时为空)
     config_id = Column(Integer, ForeignKey("core.collection_configs.id", ondelete="SET NULL"), nullable=True)
+    config_run_id = Column(
+        Integer,
+        ForeignKey("core.collection_config_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     
     # 进度跟踪
     progress = Column(Integer, default=0, nullable=False)  # 0-100
@@ -845,6 +892,7 @@ class CollectionTask(Base):
     
     # 关系
     config = relationship("CollectionConfig", back_populates="tasks")
+    config_run = relationship("CollectionConfigRun", back_populates="tasks")
     logs = relationship("CollectionTaskLog", back_populates="task", cascade="all, delete-orphan")
     parent_task = relationship("CollectionTask", remote_side=[id], backref="retry_tasks")
     
@@ -853,6 +901,7 @@ class CollectionTask(Base):
         Index("ix_collection_tasks_platform", "platform"),
         Index("ix_collection_tasks_status", "status"),
         Index("ix_collection_tasks_config", "config_id"),
+        Index("ix_collection_tasks_config_run", "config_run_id"),
         Index("ix_collection_tasks_created", "created_at"),
         {"schema": "core"},
     )
