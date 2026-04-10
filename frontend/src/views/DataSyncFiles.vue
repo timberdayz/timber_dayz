@@ -77,7 +77,7 @@ v4.6.0新增：独立的数据同步系统
           :disabled="(governanceStats.pending_count || 0) === 0"
         >
           <el-icon><Upload /></el-icon>
-          手动全部数据同步
+          同步全部待同步文件（有模板）
         </el-button>
         <el-button
           type="warning"
@@ -86,7 +86,7 @@ v4.6.0新增：独立的数据同步系统
           :disabled="(governanceStats.failed_count || 0) === 0"
         >
           <el-icon><RefreshRight /></el-icon>
-          批量重试失败
+          重试当前列表失败项
         </el-button>
         <el-button
           type="danger"
@@ -94,7 +94,7 @@ v4.6.0新增：独立的数据同步系统
           :loading="cleaning"
         >
           <el-icon><Delete /></el-icon>
-          清理数据库
+          清空已入库事实数据
         </el-button>
       </div>
     </el-card>
@@ -259,7 +259,11 @@ v4.6.0新增：独立的数据同步系统
             <el-icon><Upload /></el-icon>
             同步选中
           </el-button>
-          <el-button @click="selectedFiles = []">
+          <el-button type="danger" @click="handleBatchDelete" :loading="batchDeleting">
+            <el-icon><Delete /></el-icon>
+            删除选中
+          </el-button>
+          <el-button @click="clearSelectedFiles">
             <el-icon><Close /></el-icon>
             取消选择
           </el-button>
@@ -279,12 +283,13 @@ v4.6.0新增：独立的数据同步系统
             :disabled="files.length === 0"
           >
             <el-icon><Upload /></el-icon>
-            同步全部
+            同步当前列表
           </el-button>
         </div>
       </template>
 
       <el-table
+        ref="filesTableRef"
         :data="files"
         v-loading="loading"
         @selection-change="handleSelectionChange"
@@ -680,8 +685,10 @@ const loading = ref(false)
 const syncing = ref(false)
 const syncingFiles = ref([])
 const deletingFiles = ref([])
+const batchDeleting = ref(false)
 const files = ref([])
 const selectedFiles = ref([])
+const filesTableRef = ref(null)
 const statsLoading = ref(false)
 const refreshing = ref(false)
 const syncingAll = ref(false)
@@ -1043,6 +1050,11 @@ const handleSelectionChange = (selection) => {
   selectedFiles.value = selection.map((f) => f.id)
 }
 
+const clearSelectedFiles = () => {
+  selectedFiles.value = []
+  filesTableRef.value?.clearSelection?.()
+}
+
 // 查看详情
 const viewDetail = (fileId) => {
   router.push(`/data-sync/file-detail/${fileId}`)
@@ -1073,6 +1085,34 @@ const buildDeleteImpactHtml = (impact) => {
           : ''
       }
       <div style="margin-top:10px;color:#c45656;"><strong>此操作不可撤销，仅建议测试环境使用。</strong></div>
+    </div>
+  `
+}
+
+const buildBatchDeleteImpactHtml = (impact) => {
+  const warnings = (impact.warnings || [])
+    .slice(0, 10)
+    .map((item) => `<li>${item}</li>`)
+    .join('')
+
+  return `
+    <div style="line-height:1.7;">
+      <div><strong>请求删除：</strong>${impact.requested_count || 0} 个文件</div>
+      <div><strong>可删除：</strong>${impact.deletable_count || 0} 个</div>
+      <div><strong>处理中跳过：</strong>${impact.processing_count || 0} 个</div>
+      <div><strong>不存在：</strong>${impact.missing_count || 0} 个</div>
+      <div><strong>已同步/部分成功：</strong>${impact.ingested_like_count || 0} 个</div>
+      <div><strong>将删除 Quarantine：</strong>${impact.quarantine_rows || 0} 行</div>
+      <div><strong>将删除 Staging：</strong>${impact.staging_rows || 0} 行</div>
+      <div><strong>将删除事实数据：</strong>${impact.fact_rows || 0} 行</div>
+      <div><strong>本地文件存在：</strong>${impact.local_file_exists_count || 0} 个</div>
+      <div><strong>伴生文件存在：</strong>${impact.meta_file_exists_count || 0} 个</div>
+      ${
+        warnings
+          ? `<div style="margin-top:8px;"><strong>警告：</strong><ul style="margin:4px 0 0 20px;">${warnings}</ul></div>`
+          : ''
+      }
+      <div style="margin-top:10px;color:#c45656;"><strong>此操作不可撤销，请确认后执行。</strong></div>
     </div>
   `
 }
@@ -1128,6 +1168,53 @@ const handleDeleteFile = async (row) => {
     }
   } finally {
     deletingFiles.value = deletingFiles.value.filter((id) => id !== fileId)
+  }
+}
+
+const handleBatchDelete = async () => {
+  if (selectedFiles.value.length === 0) {
+    ElMessage.warning('请先选择文件')
+    return
+  }
+
+  batchDeleting.value = true
+
+  try {
+    const impactResult = await api.getDataSyncFilesBatchDeleteImpact(selectedFiles.value)
+    const impact = impactResult?.data || impactResult
+
+    await ElMessageBox.confirm(
+      buildBatchDeleteImpactHtml(impact),
+      '确认批量删除',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        dangerouslyUseHTMLString: true
+      }
+    )
+
+    const deleteResult = await api.deleteDataSyncFilesBatch(selectedFiles.value)
+    const payload = deleteResult?.data || deleteResult
+    ElMessage.success(
+      deleteResult?.message ||
+        `批量删除完成：成功 ${payload?.deleted_count || 0}，跳过 ${payload?.skipped_count || 0}，失败 ${payload?.failed_count || 0}`
+    )
+
+    clearSelectedFiles()
+    await loadFiles(false)
+    await loadGovernanceStats(false)
+
+    if ((payload?.warnings || []).length > 0) {
+      ElMessage.warning(payload.warnings[0])
+    }
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      console.error('批量删除文件失败:', error)
+      ElMessage.error(error.message || '批量删除文件失败')
+    }
+  } finally {
+    batchDeleting.value = false
   }
 }
 
@@ -1385,7 +1472,7 @@ const retryAllFailed = async () => {
 
   try {
     await ElMessageBox.confirm(
-      `确定要重试所有 ${failedFiles.length} 个失败文件吗？`,
+      `确定要重试当前列表中的 ${failedFiles.length} 个失败或部分成功文件吗？`,
       '确认批量重试',
       {
         confirmButtonText: '确定',
@@ -1479,7 +1566,7 @@ const batchSync = async () => {
       )
 
       // 清空选择
-      selectedFiles.value = []
+      clearSelectedFiles()
 
       // 开始轮询进度
       startProgressPolling(result.task_id)
@@ -1638,7 +1725,7 @@ const handleRefreshFiles = async () => {
 const handleSyncAll = async () => {
   try {
     await ElMessageBox.confirm(
-      `确定要同步所有有模板的待同步文件吗？当前有 ${
+      `确定要提交所有待同步且已匹配模板的文件吗？当前共有 ${
         governanceStats.value.pending_count || 0
       } 个待同步文件。`,
       '确认全部同步',
@@ -1677,7 +1764,7 @@ const handleSyncAll = async () => {
 const handleCleanupDatabase = async () => {
   try {
     await ElMessageBox.confirm(
-      '⚠️ 警告：此操作将删除所有已入库的数据，并重置文件状态为待同步。\n\n此操作不可恢复，确定要继续吗？',
+      '警告：此操作只会清空已入库的事实数据，并将部分文件状态重置为待同步；不会删除本地文件、伴生文件、staging 或 quarantine 记录。\n\n此操作不可恢复，确定要继续吗？',
       '确认清理数据库',
       {
         confirmButtonText: '确定清理',

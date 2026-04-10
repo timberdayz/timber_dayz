@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -20,6 +21,7 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 async def drifted_delete_client():
     from backend.main import app
     from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
 
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
     async with engine.begin() as conn:
@@ -57,7 +59,11 @@ async def drifted_delete_client():
         async with session_factory() as session:
             yield session
 
+    async def override_current_user():
+        return SimpleNamespace(user_id=1, username="admin", is_active=True, status="active", is_superuser=True, roles=[])
+
     app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:

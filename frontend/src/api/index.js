@@ -1207,8 +1207,22 @@ export default {
     return await this._get(`/data-sync/files/${fileId}/delete-impact`)
   },
 
+  async getDataSyncFilesBatchDeleteImpact(fileIds) {
+    return await this._post('/data-sync/files/batch-delete-impact', {
+      file_ids: fileIds
+    })
+  },
+
   async deleteDataSyncFile(fileId) {
     return await this._delete(`/data-sync/files/${fileId}`)
+  },
+
+  async deleteDataSyncFilesBatch(fileIds) {
+    return await this._delete('/data-sync/files/batch', {
+      data: {
+        file_ids: fileIds
+      }
+    })
   },
 
   /**
