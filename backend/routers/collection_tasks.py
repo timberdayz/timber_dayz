@@ -17,7 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import desc, select
 
 from backend.models.database import get_async_db
-from modules.core.db import CollectionConfig, CollectionTask, CollectionTaskLog
+from modules.core.db import (
+    CollectionConfig,
+    CollectionConfigRun,
+    CollectionTask,
+    CollectionTaskLog,
+)
 from modules.core.logger import get_logger
 from backend.schemas.collection import (
     CollectionConfigRunResponse,
@@ -313,6 +318,20 @@ async def create_task(
         ComponentRuntimeResolver,
         ComponentRuntimeResolverError,
     )
+
+    active_config_run = (
+        await db.execute(
+            select(CollectionConfigRun).where(CollectionConfigRun.status == "running")
+        )
+    ).scalar_one_or_none()
+    if active_config_run is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "collection config queue is busy; wait for the active config run "
+                "to finish before starting quick collection"
+            ),
+        )
 
     account_info = None
     try:
