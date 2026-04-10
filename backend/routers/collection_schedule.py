@@ -237,9 +237,13 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
     """
     from backend.services.collection_scheduler import APSCHEDULER_AVAILABLE
     from backend.schemas.collection import BrowserPoolStatus
+    from modules.core.db import CollectionConfigRun
 
     running_count = 0
     queued_count = 0
+    running_config_runs = 0
+    queued_config_runs = 0
+    active_config_run = None
     try:
         from sqlalchemy import text
         result = await db.execute(text("""
@@ -255,6 +259,33 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
                 queued_count = row[1]
     except Exception as e:
         logger.warning(f"Health check task query failed (migration pending?): {e}")
+
+    try:
+        config_run_rows = (
+            await db.execute(
+                select(CollectionConfigRun).where(
+                    CollectionConfigRun.status.in_(["running", "queued"])
+                )
+            )
+        ).scalars().all()
+        for row in config_run_rows:
+            if row.status == "running":
+                running_config_runs += 1
+                if active_config_run is None:
+                    active_config_run = {
+                        "id": row.id,
+                        "run_id": row.run_id,
+                        "config_id": row.config_id,
+                        "main_account_id": row.main_account_id,
+                        "platform": row.platform,
+                        "trigger_type": row.trigger_type,
+                        "status": row.status,
+                        "started_at": row.started_at,
+                    }
+            elif row.status == "queued":
+                queued_config_runs += 1
+    except Exception as e:
+        logger.warning(f"Health check config run query failed: {e}")
 
     from backend.services.task_service import TaskService
     max_concurrent = TaskService.MAX_CONCURRENT_TASKS
@@ -280,6 +311,9 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
         status="healthy",
         running_tasks=running_count,
         queued_tasks=queued_count,
+        running_config_runs=running_config_runs,
+        queued_config_runs=queued_config_runs,
+        active_config_run=active_config_run,
         browser_pool=BrowserPoolStatus(
             active=running_count,
             max_allowed=max_concurrent

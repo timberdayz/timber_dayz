@@ -480,14 +480,27 @@ class BrowserPoolStatus(BaseModel):
     max_allowed: int
 
 
+class ActiveConfigRunStatus(BaseModel):
+    id: int
+    run_id: str
+    config_id: int
+    main_account_id: str
+    platform: str
+    trigger_type: str
+    status: str
+    started_at: Optional[datetime] = None
+
+
 class HealthCheckResponse(BaseModel):
     """健康检查响应"""
 
     status: str
     running_tasks: int
     queued_tasks: int
+    running_config_runs: int = 0
+    queued_config_runs: int = 0
+    active_config_run: Optional[ActiveConfigRunStatus] = None
     browser_pool: BrowserPoolStatus
     database: str
     scheduler: str
-
 

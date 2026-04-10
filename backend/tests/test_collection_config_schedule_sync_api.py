@@ -259,3 +259,60 @@ async def test_disable_and_delete_config_remove_registered_job_immediately(
     delete_response = await client.delete(f"/api/collection/configs/{config_id}", headers=auth_headers)
     assert delete_response.status_code == 200
     assert fake_scheduler.remove_calls[-1] == config_id
+
+
+@pytest.mark.asyncio
+async def test_health_check_exposes_config_run_queue_status(
+    schedule_sync_client,
+    schedule_sync_session,
+):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    config = CollectionConfig(
+        name="health-config-v1",
+        platform="shopee",
+        main_account_id="main-shopee",
+        account_ids=["shop-sg-1"],
+        data_domains=["orders"],
+        sub_domains=None,
+        granularity="daily",
+        date_range_type="yesterday",
+        schedule_enabled=True,
+        schedule_cron="0 6 * * *",
+        retry_count=3,
+        execution_mode="headless",
+        is_active=True,
+    )
+    schedule_sync_session.add(config)
+    await schedule_sync_session.flush()
+    schedule_sync_session.add_all(
+        [
+            CollectionConfigRun(
+                run_id="run-running",
+                config_id=config.id,
+                platform="shopee",
+                main_account_id="main-shopee",
+                trigger_type="scheduled",
+                status="running",
+            ),
+            CollectionConfigRun(
+                run_id="run-queued",
+                config_id=config.id,
+                platform="shopee",
+                main_account_id="main-shopee",
+                trigger_type="scheduled",
+                status="queued",
+            ),
+        ]
+    )
+    await schedule_sync_session.commit()
+
+    response = await client.get("/api/collection/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["running_config_runs"] == 1
+    assert payload["queued_config_runs"] == 1
+    assert payload["active_config_run"]["run_id"] == "run-running"
+    assert payload["active_config_run"]["main_account_id"] == "main-shopee"
