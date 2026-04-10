@@ -44,3 +44,68 @@ async def test_data_ingested_event_triggers_postgresql_refresh(monkeypatch):
 
     assert scheduled["coro"] is not None
     assert captured["event"] == event
+
+
+@pytest.mark.asyncio
+async def test_inventory_data_ingested_event_triggers_inventory_age_refresh(
+    monkeypatch,
+):
+    from backend.services.event_listeners import (
+        run_pipeline_refresh_for_data_ingested_event,
+    )
+
+    calls = {"pipeline": 0, "inventory_age": 0}
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def commit(self):
+            return None
+
+    class _FakeAsyncSessionLocal:
+        def __call__(self):
+            return _FakeSession()
+
+    class _FakeInventoryAgeRefreshService:
+        def __init__(self, db):
+            self.db = db
+
+        async def refresh(self, force_full: bool = False):
+            calls["inventory_age"] += 1
+            assert force_full is False
+            return {"mode": "incremental", "replayed_key_count": 1}
+
+    async def _fake_execute_refresh_plan(*args, **kwargs):
+        calls["pipeline"] += 1
+        return "run-1"
+
+    monkeypatch.setattr(
+        "backend.services.event_listeners.AsyncSessionLocal",
+        _FakeAsyncSessionLocal(),
+    )
+    monkeypatch.setattr(
+        "backend.services.event_listeners.execute_refresh_plan",
+        _fake_execute_refresh_plan,
+    )
+    monkeypatch.setattr(
+        "backend.services.event_listeners.InventoryAgeRefreshService",
+        _FakeInventoryAgeRefreshService,
+    )
+
+    event = DataIngestedEvent(
+        file_id=99,
+        platform_code="miaoshou",
+        data_domain="inventory",
+        granularity="snapshot",
+        row_count=10,
+    )
+
+    run_id = await run_pipeline_refresh_for_data_ingested_event(event)
+
+    assert run_id == "run-1"
+    assert calls["pipeline"] == 1
+    assert calls["inventory_age"] == 1

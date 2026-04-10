@@ -55,5 +55,9 @@ export default {
 
   async getAgingBuckets(params = {}) {
     return await api._get('/inventory/aging/buckets', { params })
+  },
+
+  async getAgingHistory(params = {}) {
+    return await api._get('/inventory/aging/history', { params })
   }
 }

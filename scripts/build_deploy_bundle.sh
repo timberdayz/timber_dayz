@@ -33,6 +33,8 @@ copy_if_exists "docker-compose.prod.yml" "${BUNDLE_DIR}/docker-compose.prod.yml"
 copy_if_exists "docker-compose.cloud.yml" "${BUNDLE_DIR}/docker-compose.cloud.yml"
 copy_if_exists "docker-compose.cloud-4c8g.yml" "${BUNDLE_DIR}/docker-compose.cloud-4c8g.yml"
 copy_if_exists "scripts/deploy_remote_production.sh" "${BUNDLE_DIR}/deploy_remote_production.sh"
+copy_if_exists "scripts/rebuild_inventory_age_from_snapshots.py" "${BUNDLE_DIR}/scripts/rebuild_inventory_age_from_snapshots.py"
+copy_if_exists "scripts/complete_deployment_guide.md" "${BUNDLE_DIR}/scripts/complete_deployment_guide.md"
 
 shopt -s nullglob
 

@@ -9,6 +9,9 @@ from backend.models.database import AsyncSessionLocal, SessionLocal
 from backend.services.cloud_b_class_auto_sync_dispatch_service import (
     CloudBClassAutoSyncDispatchService,
 )
+from backend.services.data_pipeline.inventory_age_refresh_service import (
+    InventoryAgeRefreshService,
+)
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
 from backend.utils.events import AClassUpdatedEvent, DataIngestedEvent, MVRefreshedEvent
 from modules.core.logger import get_logger
@@ -94,6 +97,17 @@ async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent)
             "[EventListener] PostgreSQL refresh pipeline completed: "
             f"run_id={run_id}, file_id={event.file_id}, domain={event.data_domain}, targets={len(targets)}"
         )
+
+        if event.data_domain == "inventory":
+            inventory_age_result = await InventoryAgeRefreshService(session).refresh(
+                force_full=False
+            )
+            await session.commit()
+            logger.info(
+                "[EventListener] Inventory age replay completed: "
+                f"file_id={event.file_id}, result={inventory_age_result}"
+            )
+
         return run_id
 
 

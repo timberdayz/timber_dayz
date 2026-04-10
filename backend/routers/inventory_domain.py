@@ -13,6 +13,7 @@ from backend.schemas.inventory import (
     InventoryAdjustmentResponse,
     InventoryAlertResponse,
     InventoryAgingBucketResponse,
+    InventoryAgingHistoryPointResponse,
     InventoryAgingRowResponse,
     InventoryAgingSummaryResponse,
     InventoryBalanceDetailResponse,
@@ -279,6 +280,22 @@ async def list_inventory_aging(
     return await service.list_aging_rows(
         platform=platform,
         shop_id=shop_id,
+        platform_sku=platform_sku,
+    )
+
+
+@router.get(
+    "/aging/history",
+    response_model=List[InventoryAgingHistoryPointResponse],
+)
+async def list_inventory_aging_history(
+    platform: Optional[str] = Query(None, description="平台编码"),
+    platform_sku: Optional[str] = Query(None, description="平台SKU或SKU Key"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    service = InventoryAgingService(db)
+    return await service.list_aging_history(
+        platform=platform,
         platform_sku=platform_sku,
     )
 
