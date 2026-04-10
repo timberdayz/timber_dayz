@@ -106,6 +106,17 @@ def build_markdown_report(report: dict) -> str:
             lines.append(f"- ... {len(table_names) - 30} more")
         lines.append("")
 
+    lines.append("## Wave 2 Governance")
+    lines.append("")
+    lines.append("`wave_2_runtime_generated` contains generated runtime assets, not canonical business tables.")
+    lines.append("")
+    lines.append("- generated runtime fact asset: `b_class.fact_*` tables produced by collection/data pipelines")
+    lines.append("- generated runtime API asset: `api.*_module` tables/materialized outputs used by dashboard/query paths")
+    lines.append("- these assets must not be treated as ORM-missing business-table drift")
+    lines.append("- these assets must not be targeted by duplicate/public cleanup waves")
+    lines.append("- later work should govern ownership, generation, refresh, and verification, not force ORM parity")
+    lines.append("")
+
     lines.append("## First Repair Wave Recommendation")
     lines.append("")
     lines.append("- Start with the wave-1 runtime-critical table family.")

@@ -1,5 +1,5 @@
-﻿[32m[INFO][0m 2026-04-10 19:55:04 - modules.core.config - 配置管理器初始化,配置目录: config
-[32m[INFO][0m 2026-04-10 19:55:04 - modules.core.registry - 应用注册器初始化完成
+﻿[32m[INFO][0m 2026-04-10 20:10:22 - modules.core.config - 配置管理器初始化,配置目录: config
+[32m[INFO][0m 2026-04-10 20:10:22 - modules.core.registry - 应用注册器初始化完成
 # Schema Alignment Audit
 
 ## Summary
@@ -193,6 +193,16 @@
 - `inventory_age_current`
 - `inventory_age_history`
 - `performance_scores_c`
+
+## Wave 2 Governance
+
+`wave_2_runtime_generated` contains generated runtime assets, not canonical business tables.
+
+- generated runtime fact asset: `b_class.fact_*` tables produced by collection/data pipelines
+- generated runtime API asset: `api.*_module` tables/materialized outputs used by dashboard/query paths
+- these assets must not be treated as ORM-missing business-table drift
+- these assets must not be targeted by duplicate/public cleanup waves
+- later work should govern ownership, generation, refresh, and verification, not force ORM parity
 
 ## First Repair Wave Recommendation
 
