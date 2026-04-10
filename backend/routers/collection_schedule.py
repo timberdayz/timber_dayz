@@ -4,14 +4,15 @@
 拆分自 collection.py，包含定时调度 CRUD、Cron 验证、预设、任务列表和健康检查端点。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.models.database import get_async_db
-from modules.core.db import CollectionConfig
+from modules.core.db import CollectionConfig, CollectionConfigRun
 from modules.core.logger import get_logger
 from backend.schemas.collection import (
+    CollectionConfigRunResponse,
     ScheduleUpdateRequest,
     CronValidateRequest,
     ScheduleResponse,
@@ -30,6 +31,37 @@ router = APIRouter(tags=["数据采集-调度"])
 # ============================================================
 # 调度管理 API
 # ============================================================
+
+@router.get("/config-runs", response_model=list[CollectionConfigRunResponse])
+async def list_config_runs(
+    status: str | None = Query(None, description="Filter by config run status"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_async_db),
+):
+    stmt = select(CollectionConfigRun)
+    if status:
+        stmt = stmt.where(CollectionConfigRun.status == status)
+    stmt = stmt.order_by(
+        CollectionConfigRun.created_at.desc(),
+        CollectionConfigRun.id.desc(),
+    ).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.get("/config-runs/{run_id}", response_model=CollectionConfigRunResponse)
+async def get_config_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        select(CollectionConfigRun).where(CollectionConfigRun.run_id == run_id)
+    )
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="config run not found")
+    return run
+
 
 @router.post("/configs/{config_id}/schedule", response_model=ScheduleResponse)
 async def update_config_schedule(
