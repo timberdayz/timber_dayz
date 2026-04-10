@@ -228,6 +228,7 @@ class MiaoshouOrdersExportBase(ExportComponent):
             nav_result = await self.navigation_component.run(page, TargetPage.ORDERS)
             if not nav_result.success:
                 raise RuntimeError(nav_result.message or "navigation failed")
+            await self.stabilize_safe_notices(page, label="before-first-action cleanup")
             await self._ensure_popup_closed(page)
             await self._ensure_orders_subtype_selected(page, subtype)
 

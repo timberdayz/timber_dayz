@@ -139,6 +139,31 @@ class ComponentBase(ABC):
             if self.logger:
                 self.logger.warning(f"Overlay guard failed (ignored): {e}")
     
+    async def stabilize_safe_notices(
+        self,
+        page: Any,
+        *,
+        label: Optional[str] = None,
+    ) -> int:
+        """Best-effort runtime cleanup for platform-approved informational notices."""
+        platform = str(getattr(self.ctx, "platform", "") or "").strip().lower()
+        if not platform:
+            return 0
+
+        try:
+            from modules.apps.collection_center.popup_handler import UniversalPopupHandler
+
+            if label and self.logger:
+                self.logger.info(label)
+            return await UniversalPopupHandler().close_safe_notices(
+                page,
+                platform=platform,
+            )
+        except Exception as e:
+            if self.logger:
+                self.logger.warning(f"Safe notice stabilization failed (ignored): {e}")
+            return 0
+
     async def report_step(
         self,
         event_type: str,
@@ -182,4 +207,3 @@ class ComponentBase(ABC):
         - Raise ComponentError for unrecoverable errors
         """
         raise NotImplementedError
-

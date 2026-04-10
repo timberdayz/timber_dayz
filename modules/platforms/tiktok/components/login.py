@@ -289,7 +289,7 @@ class TiktokLogin(LoginComponent):
         await locator.click(timeout=5000)
 
     async def _cleanup_after_login(self, page: Any) -> None:
-        return None
+        await self.stabilize_safe_notices(page, label="post-login cleanup")
 
     async def _homepage_dom_looks_ready(self, page: Any) -> bool:
         config = self.ctx.config or {}

@@ -40,7 +40,7 @@ from sqlalchemy import text, inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import ProgrammingError
 
-from backend.models.database import engine, SessionLocal
+from backend.models.database import engine, SessionLocal, qualify_runtime_table_name
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -394,7 +394,7 @@ def verify_core_functionality(db: Session) -> Dict:
     
     try:
         # 检查catalog_files
-        query = text("SELECT COUNT(*) FROM core.catalog_files LIMIT 1")
+        query = text(f"SELECT COUNT(*) FROM {qualify_runtime_table_name('catalog_files')} LIMIT 1")
         result = db.execute(query).scalar()
         verification["catalog_files"] = result is not None
         print(f"  [{'OK' if verification['catalog_files'] else 'FAIL'}] catalog_files")
@@ -488,4 +488,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

@@ -15,7 +15,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from backend.models.database import SessionLocal
+from backend.models.database import SessionLocal, qualify_runtime_table_name
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -111,11 +111,15 @@ def test_search_path():
             # 先回滚之前失败的事务
             db.rollback()
             from sqlalchemy import text
-            result = db.execute(text("SELECT COUNT(*) FROM core.catalog_files"))
+            result = db.execute(
+                text(
+                    f"SELECT COUNT(*) FROM {qualify_runtime_table_name('catalog_files')}"
+                )
+            )
             core_count = result.scalar() or 0
             results["tests"].append({
                 "name": "Core Schema访问",
-                "schema": "core",
+                "schema": qualify_runtime_table_name("catalog_files").split(".", 1)[0],
                 "table": "catalog_files",
                 "status": "success",
                 "row_count": core_count
@@ -199,4 +203,3 @@ def test_search_path():
 if __name__ == "__main__":
     exit_code = test_search_path()
     sys.exit(exit_code)
-

@@ -38,6 +38,7 @@ class MiaoshouNavigation(NavigationComponent):
                 timeout=60000,
             )
             await page.get_by_text("利润明细", exact=False).first.wait_for(state="visible", timeout=15000)
+            await self.stabilize_safe_notices(page, label="post-navigation cleanup")
             return NavigationResult(success=True, message="ok", url=str(getattr(page, "url", "") or ""))
 
         if target is TargetPage.WAREHOUSE_CHECKLIST:
@@ -47,6 +48,7 @@ class MiaoshouNavigation(NavigationComponent):
                 timeout=60000,
             )
             await page.get_by_text("仓库清单", exact=False).first.wait_for(state="visible", timeout=15000)
+            await self.stabilize_safe_notices(page, label="post-navigation cleanup")
             return NavigationResult(success=True, message="ok", url=str(getattr(page, "url", "") or ""))
 
         return NavigationResult(success=False, message=f"unsupported target: {target}", url=str(getattr(page, "url", "") or ""))
