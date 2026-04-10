@@ -52,3 +52,19 @@ def test_orders_export_uses_named_date_inputs_in_custom_range_path():
 
     assert "apply_custom_range(" in source
     assert "MiaoshouCustomDateRange(" in source
+
+
+def test_orders_export_handles_optional_confirm_dialog_between_menu_click_and_download():
+    source = _source()
+
+    click_index = source.index("await self._click_export_all_orders(page)")
+    confirm_index = source.index("await self._confirm_export_if_needed(page)")
+    wait_index = source.index("target = await self._wait_export_complete(page, download, subtype=subtype)")
+
+    assert click_index < confirm_index < wait_index
+
+
+def test_orders_export_declares_confirm_helper():
+    source = _source()
+
+    assert "async def _confirm_export_if_needed(" in source

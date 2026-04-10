@@ -156,6 +156,35 @@ class MiaoshouOrdersExportBase(ExportComponent):
     async def _click_export_all_orders(self, page: Any) -> None:
         await page.get_by_role("menuitem", name="导出全部订单").first.click(timeout=1500)
 
+    async def _confirm_export_if_needed(self, page: Any) -> None:
+        for title in self.sel.export_confirm_dialog_titles:
+            dialog = page.get_by_role("dialog", name=title).last
+            try:
+                await dialog.wait_for(state="visible", timeout=2500)
+            except Exception:
+                continue
+
+            body_matched = not self.sel.export_confirm_body_texts
+            for body_text in self.sel.export_confirm_body_texts:
+                try:
+                    body = dialog.get_by_text(body_text, exact=False).first
+                    await body.wait_for(state="visible", timeout=500)
+                    body_matched = True
+                    break
+                except Exception:
+                    continue
+            if not body_matched:
+                continue
+
+            for button_text in self.sel.export_confirm_button_texts:
+                try:
+                    confirm_button = dialog.get_by_role("button", name=button_text).first
+                    await confirm_button.wait_for(state="visible", timeout=1000)
+                    await confirm_button.click(timeout=1500)
+                    return
+                except Exception:
+                    continue
+
     async def _wait_export_progress_ready(self, page: Any) -> None:
         title = page.get_by_role("heading", name="正在导出").first
         await title.wait_for(state="visible", timeout=10000)
@@ -257,6 +286,7 @@ class MiaoshouOrdersExportBase(ExportComponent):
             await self._ensure_export_menu_open(page)
             async with page.expect_download(timeout=180000) as dl_info:
                 await self._click_export_all_orders(page)
+                await self._confirm_export_if_needed(page)
             download = await dl_info.value
 
             target = await self._wait_export_complete(page, download, subtype=subtype)

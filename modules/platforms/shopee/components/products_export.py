@@ -34,6 +34,7 @@ class ShopeeProductsExport(ExportComponent):
         self.sel = selectors or ProductsSelectors()
         self.service_sel = ServicesSelectors()
         self._download_waiter: asyncio.Task | None = None
+        self._latest_report_baseline_rows: set[str] = set()
 
     def _products_page_looks_ready(self, url: str) -> bool:
         current = str(url or "").strip().lower()
@@ -1329,6 +1330,212 @@ class ShopeeProductsExport(ExportComponent):
             waited += poll_ms
         return None
 
+    def _latest_report_download_tokens(self) -> tuple[str, ...]:
+        return ("\u4e0b\u8f7d", "download")
+
+    def _latest_report_processing_tokens(self) -> tuple[str, ...]:
+        return (
+            "\u8fdb\u884c\u4e2d",
+            "\u751f\u6210\u4e2d",
+            "\u5904\u7406\u4e2d",
+            "processing",
+            "generating",
+            "queued",
+            "in progress",
+        )
+
+    def _latest_report_downloaded_tokens(self) -> tuple[str, ...]:
+        return ("\u5df2\u4e0b\u8f7d", "downloaded")
+
+    def _normalize_report_row_text(self, value: str | None) -> str:
+        text = str(value or "").strip().lower()
+        if not text:
+            return ""
+        compact = re.sub(r"\s+", "", text)
+        return compact.replace("\\", "/")
+
+    def _report_date_signature(self) -> str | None:
+        config = self.ctx.config or {}
+        time_selection = config.get("time_selection")
+        start_date = None
+        end_date = None
+        if isinstance(time_selection, dict):
+            start_date = time_selection.get("start_date") or time_selection.get("start")
+            end_date = time_selection.get("end_date") or time_selection.get("end")
+        start_date = start_date or config.get("start_date")
+        end_date = end_date or config.get("end_date") or start_date
+        if not start_date or not end_date:
+            return None
+        start_compact = str(start_date).replace("-", "").strip()
+        end_compact = str(end_date).replace("-", "").strip()
+        if not start_compact or not end_compact:
+            return None
+        return f"{start_compact}_{end_compact}"
+
+    def _report_filename_prefixes(self) -> tuple[str, ...]:
+        return ("parentskudetail", "skudetail", "parentsku")
+
+    async def _visible_report_rows(self, panel: Any) -> list[Any]:
+        row_selectors = (
+            ".ant-table-row",
+            ".el-table__row",
+            "tbody tr",
+            '[class*="report-item"]',
+            '[class*="download-item"]',
+            '[class*="row"]',
+            "li",
+            "div",
+        )
+        for selector in row_selectors:
+            try:
+                rows = panel.locator(selector)
+                count = await rows.count()
+            except Exception:
+                continue
+            if count <= 0:
+                continue
+            visible_rows: list[Any] = []
+            for idx in range(count):
+                row = rows.nth(idx)
+                try:
+                    if not await row.is_visible():
+                        continue
+                except Exception:
+                    continue
+                visible_rows.append(row)
+            if visible_rows:
+                return visible_rows
+        return []
+
+    async def _capture_latest_report_baseline(self, page: Any) -> None:
+        panel = await self._first_visible_locator(page, self.service_sel.latest_report_panels)
+        if panel is None:
+            self._latest_report_baseline_rows = set()
+            return
+        baseline: set[str] = set()
+        for row in await self._visible_report_rows(panel):
+            try:
+                row_text = self._normalize_report_row_text(await row.text_content())
+            except Exception:
+                row_text = ""
+            if row_text:
+                baseline.add(row_text)
+        self._latest_report_baseline_rows = baseline
+
+    async def _row_action(self, row: Any) -> tuple[Any | None, str]:
+        try:
+            actions = row.locator("button, a, [role='button']")
+            count = await actions.count()
+        except Exception:
+            return None, ""
+
+        for idx in range(count):
+            candidate = actions.nth(idx)
+            try:
+                if not await candidate.is_visible():
+                    continue
+            except Exception:
+                continue
+            try:
+                text = str((await candidate.text_content()) or "").strip()
+            except Exception:
+                text = ""
+            if text:
+                return candidate, text
+        return None, ""
+
+    def _row_state(self, row_text: str, action_text: str) -> str:
+        normalized = self._normalize_report_row_text(f"{row_text} {action_text}")
+        if any(token in normalized for token in self._latest_report_download_tokens()):
+            return "download"
+        if any(token in normalized for token in self._latest_report_processing_tokens()):
+            return "processing"
+        if any(token in normalized for token in self._latest_report_downloaded_tokens()):
+            return "downloaded"
+        return "unknown"
+
+    def _report_row_score(self, normalized_row_text: str) -> int:
+        if not normalized_row_text:
+            return -1
+
+        score = 1
+        signature = self._report_date_signature()
+        if signature:
+            if signature.lower() in normalized_row_text:
+                score += 100
+            else:
+                return -1
+
+        prefixes = self._report_filename_prefixes()
+        if prefixes and any(prefix in normalized_row_text for prefix in prefixes):
+            score += 20
+
+        if normalized_row_text not in self._latest_report_baseline_rows:
+            score += 10
+        return score
+
+    async def _resolve_report_row_action(self, panel: Any) -> tuple[Any | None, str]:
+        best_download: tuple[int, Any] | None = None
+        best_processing: tuple[int, Any] | None = None
+
+        for row in await self._visible_report_rows(panel):
+            try:
+                row_text = (await row.text_content()) or ""
+            except Exception:
+                row_text = ""
+            normalized_row_text = self._normalize_report_row_text(row_text)
+            score = self._report_row_score(normalized_row_text)
+            if score < 0:
+                continue
+
+            action, action_text = await self._row_action(row)
+            if action is None:
+                continue
+
+            state = self._row_state(row_text, action_text)
+            if state == "download":
+                if best_download is None or score > best_download[0]:
+                    best_download = (score, action)
+            elif state == "processing":
+                if best_processing is None or score > best_processing[0]:
+                    best_processing = (score, action)
+
+        if best_download is not None:
+            return best_download[1], "download"
+        if best_processing is not None:
+            return best_processing[1], "processing"
+        return None, ""
+
+    async def _wait_top_report_download_button(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 180000,
+        poll_ms: int = 1500,
+    ) -> Any | None:
+        if self._download_waiter is None and hasattr(page, "wait_for_event"):
+            self._download_waiter = asyncio.create_task(
+                page.wait_for_event("download", timeout=timeout_ms)
+            )
+
+        waited = 0
+        while waited <= timeout_ms:
+            panel = await self._wait_latest_report_panel(page, timeout_ms=poll_ms, poll_ms=300)
+            if panel is not None:
+                action, state = await self._resolve_report_row_action(panel)
+                if action is not None:
+                    if state == "download":
+                        return action
+                    if state == "processing":
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(poll_ms)
+                        waited += poll_ms
+                        continue
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return None
+
     async def _ensure_shop_selected(self, page: Any) -> None:
         cfg = self.ctx.config or {}
         account = self.ctx.account or {}
@@ -1647,6 +1854,7 @@ class ShopeeProductsExport(ExportComponent):
         button = await self._first_visible_locator(page, self.sel.export_buttons)
         if button is None:
             raise RuntimeError("export button not found")
+        await self._capture_latest_report_baseline(page)
         await self._cancel_download_waiter()
         if hasattr(page, "wait_for_event"):
             self._download_waiter = asyncio.create_task(

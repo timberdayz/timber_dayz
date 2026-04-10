@@ -188,3 +188,33 @@ class ShopeeServicesExportBase(ShopeeAnalyticsExport):
                 await page.wait_for_timeout(poll_ms)
             waited += poll_ms
         return None
+
+    def _report_filename_prefixes(self) -> tuple[str, ...]:
+        subtype = self._resolved_subtype()
+        prefix_map = {
+            "agent": ("chat_", "chat."),
+            "ai_assistant": ("assistant", "aiassistant", "ai_assistant"),
+        }
+        return prefix_map.get(subtype, (subtype,))
+
+    async def _wait_latest_report_panel(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 20000,
+        poll_ms: int = 500,
+    ) -> Any | None:
+        return await super()._wait_latest_report_panel(page, timeout_ms=timeout_ms, poll_ms=poll_ms)
+
+    async def _wait_top_report_download_button(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 180000,
+        poll_ms: int = 1500,
+    ) -> Any | None:
+        return await super()._wait_top_report_download_button(
+            page,
+            timeout_ms=timeout_ms,
+            poll_ms=poll_ms,
+        )

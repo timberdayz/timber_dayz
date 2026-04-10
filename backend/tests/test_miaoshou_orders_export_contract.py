@@ -102,3 +102,17 @@ def test_miaoshou_orders_export_maps_platform_subtype_to_ui_labels():
     assert component._orders_subtype_label("shopee") == "Shopee"
     assert component._orders_subtype_label("tiktok") == "TikTok"
     assert component._orders_subtype_label("lazada") == "Lazada"
+
+
+def test_miaoshou_orders_config_declares_export_confirm_dialog_candidates():
+    selectors = OrdersSelectors()
+
+    assert "提示" in selectors.export_confirm_dialog_titles
+    assert "确定导出" in selectors.export_confirm_button_texts
+    assert any("字段" in text for text in selectors.export_confirm_body_texts)
+
+
+def test_miaoshou_orders_export_source_confirms_export_when_dialog_appears():
+    source = Path("modules/platforms/miaoshou/components/orders_export_base.py").read_text(encoding="utf-8")
+
+    assert "await self._confirm_export_if_needed(page)" in source

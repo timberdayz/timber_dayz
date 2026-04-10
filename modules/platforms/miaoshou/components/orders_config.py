@@ -35,6 +35,18 @@ EXPORT_PROGRESS_TEXTS: Final[list[str]] = [
     "正在下载",
 ]
 
+EXPORT_CONFIRM_DIALOG_TITLES: Final[list[str]] = [
+    "提示",
+]
+
+EXPORT_CONFIRM_BODY_TEXTS: Final[list[str]] = [
+    "导出的数据字段与当前列表显示的字段相同",
+]
+
+EXPORT_CONFIRM_BUTTON_TEXTS: Final[list[str]] = [
+    "确定导出",
+]
+
 DATE_SHORTCUTS: Final[list[str]] = [
     "今天",
     "昨天",
@@ -105,6 +117,9 @@ class OrdersSelectors:
     export_menu_items: tuple[str, ...] = tuple(EXPORT_MENU_ITEMS)
     export_progress_titles: tuple[str, ...] = tuple(EXPORT_PROGRESS_TITLES)
     export_progress_texts: tuple[str, ...] = tuple(EXPORT_PROGRESS_TEXTS)
+    export_confirm_dialog_titles: tuple[str, ...] = tuple(EXPORT_CONFIRM_DIALOG_TITLES)
+    export_confirm_body_texts: tuple[str, ...] = tuple(EXPORT_CONFIRM_BODY_TEXTS)
+    export_confirm_button_texts: tuple[str, ...] = tuple(EXPORT_CONFIRM_BUTTON_TEXTS)
     date_shortcuts: tuple[str, ...] = tuple(DATE_SHORTCUTS)
     custom_date_input_names: tuple[str, ...] = tuple(CUSTOM_DATE_INPUT_NAMES)
     custom_time_input_names: tuple[str, ...] = tuple(CUSTOM_TIME_INPUT_NAMES)
