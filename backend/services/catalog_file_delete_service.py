@@ -68,6 +68,69 @@ class CatalogFileDeleteResult:
         return asdict(self)
 
 
+@dataclass
+class CatalogFileBatchDeleteImpactItem:
+    file_id: int
+    file_name: str | None
+    status: str | None
+    can_delete: bool
+    message: str | None = None
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class CatalogFileBatchDeleteImpactSummary:
+    requested_count: int
+    found_count: int
+    missing_count: int
+    processing_count: int
+    deletable_count: int
+    ingested_like_count: int
+    local_file_exists_count: int
+    meta_file_exists_count: int
+    quarantine_rows: int
+    staging_rows: int
+    fact_rows: int
+    items: list[CatalogFileBatchDeleteImpactItem] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        payload = asdict(self)
+        payload["items"] = [item.to_dict() for item in self.items]
+        return payload
+
+
+@dataclass
+class CatalogFileBatchDeleteResultItem:
+    file_id: int
+    file_name: str | None
+    status: str | None
+    outcome: str
+    message: str
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class CatalogFileBatchDeleteResultSummary:
+    requested_count: int
+    deleted_count: int
+    failed_count: int
+    skipped_count: int
+    items: list[CatalogFileBatchDeleteResultItem] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        payload = asdict(self)
+        payload["items"] = [item.to_dict() for item in self.items]
+        return payload
+
+
 class CatalogFileDeleteService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -103,6 +166,106 @@ class CatalogFileDeleteService:
             warnings=warnings,
         )
 
+    async def analyze_batch_delete_impact(self, file_ids: list[int]) -> CatalogFileBatchDeleteImpactSummary:
+        requested_ids = list(file_ids or [])
+        if not requested_ids:
+            return CatalogFileBatchDeleteImpactSummary(
+                requested_count=0,
+                found_count=0,
+                missing_count=0,
+                processing_count=0,
+                deletable_count=0,
+                ingested_like_count=0,
+                local_file_exists_count=0,
+                meta_file_exists_count=0,
+                quarantine_rows=0,
+                staging_rows=0,
+                fact_rows=0,
+            )
+
+        unique_ids = list(dict.fromkeys(requested_ids))
+        result = await self.db.execute(select(CatalogFile).where(CatalogFile.id.in_(unique_ids)))
+        catalogs = {catalog.id: catalog for catalog in result.scalars().all()}
+        items: list[CatalogFileBatchDeleteImpactItem] = []
+        warnings: list[str] = []
+        found_count = 0
+        missing_count = 0
+        processing_count = 0
+        deletable_count = 0
+        ingested_like_count = 0
+        local_file_exists_count = 0
+        meta_file_exists_count = 0
+        quarantine_rows = 0
+        staging_rows = 0
+        fact_rows = 0
+
+        for file_id in requested_ids:
+            catalog = catalogs.get(file_id)
+            if catalog is None:
+                missing_count += 1
+                items.append(
+                    CatalogFileBatchDeleteImpactItem(
+                        file_id=file_id,
+                        file_name=None,
+                        status=None,
+                        can_delete=False,
+                        message="文件不存在",
+                    )
+                )
+                continue
+
+            found_count += 1
+            impact = await self.analyze_delete_impact(file_id)
+            status = (impact.status or "").lower()
+            item_warnings = list(impact.warnings)
+            can_delete = impact.can_delete and status != "processing"
+            message = None
+
+            if status == "processing":
+                processing_count += 1
+                can_delete = False
+                message = "文件正在处理中，已跳过"
+                item_warnings.append("processing 状态文件不允许批量删除")
+            else:
+                deletable_count += 1
+
+            if status in {"ingested", "partial_success"}:
+                ingested_like_count += 1
+            if impact.local_file_exists:
+                local_file_exists_count += 1
+            if impact.meta_file_exists:
+                meta_file_exists_count += 1
+            quarantine_rows += impact.quarantine_rows
+            staging_rows += impact.staging_rows
+            fact_rows += impact.fact_rows
+            warnings.extend(item_warnings)
+            items.append(
+                CatalogFileBatchDeleteImpactItem(
+                    file_id=impact.file_id,
+                    file_name=impact.file_name,
+                    status=impact.status,
+                    can_delete=can_delete,
+                    message=message,
+                    warnings=item_warnings,
+                )
+            )
+
+        return CatalogFileBatchDeleteImpactSummary(
+            requested_count=len(requested_ids),
+            found_count=found_count,
+            missing_count=missing_count,
+            processing_count=processing_count,
+            deletable_count=deletable_count,
+            ingested_like_count=ingested_like_count,
+            local_file_exists_count=local_file_exists_count,
+            meta_file_exists_count=meta_file_exists_count,
+            quarantine_rows=quarantine_rows,
+            staging_rows=staging_rows,
+            fact_rows=fact_rows,
+            items=items,
+            warnings=warnings,
+        )
+
     async def delete_catalog_file(self, file_id: int, force: bool = True) -> CatalogFileDeleteResult:
         catalog = await self._get_catalog_file(file_id)
         impact = await self.analyze_delete_impact(file_id)
@@ -133,6 +296,84 @@ class CatalogFileDeleteService:
             deleted_quarantine_rows=deleted_quarantine_rows,
             deleted_staging_rows=deleted_staging_rows,
             deleted_fact_rows=deleted_fact_rows,
+            warnings=warnings,
+        )
+
+    async def delete_catalog_files_batch(self, file_ids: list[int]) -> CatalogFileBatchDeleteResultSummary:
+        requested_ids = list(file_ids or [])
+        unique_ids = list(dict.fromkeys(requested_ids))
+        result = await self.db.execute(select(CatalogFile).where(CatalogFile.id.in_(unique_ids)))
+        catalogs = {catalog.id: catalog for catalog in result.scalars().all()}
+        items: list[CatalogFileBatchDeleteResultItem] = []
+        warnings: list[str] = []
+        deleted_count = 0
+        failed_count = 0
+        skipped_count = 0
+
+        for file_id in requested_ids:
+            catalog = catalogs.get(file_id)
+            if catalog is None:
+                skipped_count += 1
+                items.append(
+                    CatalogFileBatchDeleteResultItem(
+                        file_id=file_id,
+                        file_name=None,
+                        status=None,
+                        outcome="skipped",
+                        message="文件不存在",
+                    )
+                )
+                continue
+
+            if (catalog.status or "").lower() == "processing":
+                skipped_count += 1
+                item_warning = "processing 状态文件不允许批量删除"
+                warnings.append(item_warning)
+                items.append(
+                    CatalogFileBatchDeleteResultItem(
+                        file_id=file_id,
+                        file_name=catalog.file_name,
+                        status=catalog.status,
+                        outcome="skipped",
+                        message="文件正在处理中，已跳过",
+                        warnings=[item_warning],
+                    )
+                )
+                continue
+
+            try:
+                delete_result = await self.delete_catalog_file(file_id, force=True)
+                deleted_count += 1
+                warnings.extend(delete_result.warnings)
+                items.append(
+                    CatalogFileBatchDeleteResultItem(
+                        file_id=file_id,
+                        file_name=catalog.file_name,
+                        status=catalog.status,
+                        outcome="deleted",
+                        message="删除成功",
+                        warnings=delete_result.warnings,
+                    )
+                )
+            except Exception as exc:
+                failed_count += 1
+                await self.db.rollback()
+                items.append(
+                    CatalogFileBatchDeleteResultItem(
+                        file_id=file_id,
+                        file_name=catalog.file_name,
+                        status=catalog.status,
+                        outcome="failed",
+                        message=str(exc),
+                    )
+                )
+
+        return CatalogFileBatchDeleteResultSummary(
+            requested_count=len(requested_ids),
+            deleted_count=deleted_count,
+            failed_count=failed_count,
+            skipped_count=skipped_count,
+            items=items,
             warnings=warnings,
         )
 

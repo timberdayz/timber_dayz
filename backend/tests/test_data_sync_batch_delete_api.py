@@ -18,7 +18,7 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 
 
 @pytest_asyncio.fixture
-async def file_delete_client():
+async def batch_delete_client():
     from backend.main import app
     from backend.models.database import get_async_db
     from backend.dependencies.auth import get_current_user
@@ -54,25 +54,55 @@ async def file_delete_client():
 
 
 @pytest.mark.asyncio
-async def test_get_delete_impact_returns_platform_and_fact_counts(
-    file_delete_client,
-):
-    pg_async_client, session_factory, _app, _get_current_user = file_delete_client
+async def test_batch_delete_impact_returns_aggregate_counts(batch_delete_client):
+    client, session_factory, _app, _get_current_user = batch_delete_client
+
     async with session_factory() as session:
-        catalog = CatalogFile(
-            file_path="data/raw/2026/tiktok_orders_weekly_20260331_140511.xlsx",
-            file_name="tiktok_orders_weekly_20260331_140511.xlsx",
+        pending_catalog = CatalogFile(
+            file_path="data/raw/2026/batch-delete-a.xlsx",
+            file_name="batch-delete-a.xlsx",
             source="data/raw",
             platform_code="tiktok",
             source_platform="miaoshou",
             data_domain="orders",
             granularity="weekly",
-            status="ingested",
+            status="pending",
             first_seen_at=datetime.now(timezone.utc),
         )
-        session.add(catalog)
+        processing_catalog = CatalogFile(
+            file_path="data/raw/2026/batch-delete-b.xlsx",
+            file_name="batch-delete-b.xlsx",
+            source="data/raw",
+            platform_code="tiktok",
+            source_platform="miaoshou",
+            data_domain="orders",
+            granularity="weekly",
+            status="processing",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        session.add_all([pending_catalog, processing_catalog])
         await session.flush()
 
+        session.add(
+            DataQuarantine(
+                source_file=pending_catalog.file_name,
+                catalog_file_id=pending_catalog.id,
+                row_data="{}",
+                error_type="validation_error",
+                error_msg="bad row",
+                platform_code="tiktok",
+                data_domain="orders",
+            )
+        )
+        session.add(
+            StagingOrders(
+                platform_code="tiktok",
+                shop_id="shop-1",
+                order_id="order-1",
+                order_data={"id": "order-1"},
+                file_id=pending_catalog.id,
+            )
+        )
         await session.execute(
             text(
                 """
@@ -91,34 +121,39 @@ async def test_get_delete_impact_returns_platform_and_fact_counts(
                 VALUES (:file_id, 'order-a'), (:file_id, 'order-b')
                 """
             ),
-            {"file_id": catalog.id},
+            {"file_id": pending_catalog.id},
         )
         await session.commit()
-        file_id = catalog.id
 
-    response = await pg_async_client.get(f"/api/data-sync/files/{file_id}/delete-impact")
+    response = await client.post(
+        "/api/data-sync/files/batch-delete-impact",
+        json={"file_ids": [pending_catalog.id, processing_catalog.id, 999999]},
+    )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["data"]["file_id"] == file_id
-    assert payload["data"]["platform_code"] == "tiktok"
+    assert payload["data"]["requested_count"] == 3
+    assert payload["data"]["found_count"] == 2
+    assert payload["data"]["missing_count"] == 1
+    assert payload["data"]["deletable_count"] == 1
+    assert payload["data"]["processing_count"] == 1
+    assert payload["data"]["quarantine_rows"] == 1
+    assert payload["data"]["staging_rows"] == 1
     assert payload["data"]["fact_rows"] == 2
 
 
 @pytest.mark.asyncio
-async def test_delete_file_endpoint_removes_file_record(
-    file_delete_client,
-    tmp_path,
-):
-    file_path = tmp_path / "delete-me.xlsx"
-    meta_path = tmp_path / "delete-me.meta.json"
+async def test_batch_delete_deletes_pending_and_skips_processing(batch_delete_client, tmp_path):
+    client, session_factory, _app, _get_current_user = batch_delete_client
+
+    file_path = tmp_path / "batch-delete.xlsx"
+    meta_path = tmp_path / "batch-delete.meta.json"
     file_path.write_text("demo", encoding="utf-8")
     meta_path.write_text("{}", encoding="utf-8")
 
-    pg_async_client, session_factory, _app, _get_current_user = file_delete_client
     async with session_factory() as session:
-        catalog = CatalogFile(
+        pending_catalog = CatalogFile(
             file_path=str(file_path),
             file_name=file_path.name,
             source="data/raw",
@@ -130,28 +165,56 @@ async def test_delete_file_endpoint_removes_file_record(
             meta_file_path=str(meta_path),
             first_seen_at=datetime.now(timezone.utc),
         )
-        session.add(catalog)
+        processing_catalog = CatalogFile(
+            file_path="data/raw/2026/processing.xlsx",
+            file_name="processing.xlsx",
+            source="data/raw",
+            platform_code="tiktok",
+            source_platform="miaoshou",
+            data_domain="orders",
+            granularity="weekly",
+            status="processing",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        session.add_all([pending_catalog, processing_catalog])
         await session.commit()
-        file_id = catalog.id
+        pending_id = pending_catalog.id
+        processing_id = processing_catalog.id
 
-    response = await pg_async_client.delete(f"/api/data-sync/files/{file_id}")
+    response = await client.request(
+        "DELETE",
+        "/api/data-sync/files/batch",
+        json={"file_ids": [pending_id, processing_id]},
+    )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["data"]["file_id"] == file_id
-    assert payload["data"]["deleted_catalog"] is True
+    assert payload["data"]["requested_count"] == 2
+    assert payload["data"]["deleted_count"] == 1
+    assert payload["data"]["skipped_count"] == 1
+
+    item_by_id = {item["file_id"]: item for item in payload["data"]["items"]}
+    assert item_by_id[pending_id]["outcome"] == "deleted"
+    assert item_by_id[processing_id]["outcome"] == "skipped"
+
+    async with session_factory() as session:
+        deleted_catalog = await session.get(CatalogFile, pending_id)
+        kept_catalog = await session.get(CatalogFile, processing_id)
+        assert deleted_catalog is None
+        assert kept_catalog is not None
+
+    assert not file_path.exists()
+    assert not meta_path.exists()
 
 
 @pytest.mark.asyncio
-async def test_delete_file_endpoints_require_authenticated_user(
-    file_delete_client,
-):
-    client, session_factory, app, get_current_user = file_delete_client
+async def test_batch_delete_endpoints_require_authenticated_user(batch_delete_client):
+    client, session_factory, app, get_current_user = batch_delete_client
     async with session_factory() as session:
         catalog = CatalogFile(
-            file_path="data/raw/2026/auth-delete.xlsx",
-            file_name="auth-delete.xlsx",
+            file_path="data/raw/2026/auth-batch.xlsx",
+            file_name="auth-batch.xlsx",
             source="data/raw",
             platform_code="tiktok",
             source_platform="miaoshou",
@@ -166,22 +229,27 @@ async def test_delete_file_endpoints_require_authenticated_user(
 
     app.dependency_overrides.pop(get_current_user, None)
 
-    impact_response = await client.get(f"/api/data-sync/files/{file_id}/delete-impact")
-    delete_response = await client.delete(f"/api/data-sync/files/{file_id}")
+    impact_response = await client.post(
+        "/api/data-sync/files/batch-delete-impact",
+        json={"file_ids": [file_id]},
+    )
+    delete_response = await client.request(
+        "DELETE",
+        "/api/data-sync/files/batch",
+        json={"file_ids": [file_id]},
+    )
 
     assert impact_response.status_code == 401
     assert delete_response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_delete_file_endpoints_require_admin_user(
-    file_delete_client,
-):
-    client, session_factory, app, get_current_user = file_delete_client
+async def test_batch_delete_endpoints_require_admin_user(batch_delete_client):
+    client, session_factory, app, get_current_user = batch_delete_client
     async with session_factory() as session:
         catalog = CatalogFile(
-            file_path="data/raw/2026/non-admin-delete.xlsx",
-            file_name="non-admin-delete.xlsx",
+            file_path="data/raw/2026/non-admin-batch.xlsx",
+            file_name="non-admin-batch.xlsx",
             source="data/raw",
             platform_code="tiktok",
             source_platform="miaoshou",
@@ -199,8 +267,15 @@ async def test_delete_file_endpoints_require_admin_user(
 
     app.dependency_overrides[get_current_user] = override_non_admin_user
 
-    impact_response = await client.get(f"/api/data-sync/files/{file_id}/delete-impact")
-    delete_response = await client.delete(f"/api/data-sync/files/{file_id}")
+    impact_response = await client.post(
+        "/api/data-sync/files/batch-delete-impact",
+        json={"file_ids": [file_id]},
+    )
+    delete_response = await client.request(
+        "DELETE",
+        "/api/data-sync/files/batch",
+        json={"file_ids": [file_id]},
+    )
 
     assert impact_response.status_code == 403
     assert delete_response.status_code == 403

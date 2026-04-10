@@ -28,7 +28,7 @@ from backend.models.database import get_db, get_async_db, SessionLocal, AsyncSes
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.data_sync_service import DataSyncService
 from backend.services.sync_progress_tracker import SyncProgressTracker
-from backend.dependencies.auth import get_current_user  # [*] Phase 4.2: 用户认证
+from backend.dependencies.auth import get_current_user, require_admin  # [*] Phase 4.2: 用户认证
 from backend.services.user_task_quota import get_user_task_quota_service  # [*] Phase 4.2: 用户任务配额
 
 # [*] Phase 2: API 限流(使用 slowapi)
@@ -80,6 +80,9 @@ from backend.schemas.data_sync import (
 )
 
 from backend.schemas.catalog_file_delete import (
+    CatalogFileBatchDeleteImpactResponse,
+    CatalogFileBatchDeleteRequest,
+    CatalogFileBatchDeleteResultResponse,
     CatalogFileDeleteImpactResponse,
     CatalogFileDeleteResultResponse,
 )
@@ -418,10 +421,77 @@ async def list_files(
         )
 
 
+@router.post("/data-sync/files/batch-delete-impact")
+async def get_batch_file_delete_impact(
+    body: CatalogFileBatchDeleteRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        service = CatalogFileDeleteService(db)
+        impact = await service.analyze_batch_delete_impact(body.file_ids)
+        payload = CatalogFileBatchDeleteImpactResponse.model_validate(impact.to_dict())
+        return success_response(data=payload.model_dump(), message="获取批量删除影响成功")
+    except DataSyncSchemaDriftError as exc:
+        logger.error(f"[DataSync BatchDeleteImpact] Schema drift: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="获取批量删除影响失败：数据库结构未完成迁移，请执行 Alembic 迁移",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion=f"执行 Alembic 迁移: {exc.recovery_command}",
+            status_code=500,
+        )
+    except Exception as exc:
+        logger.error(f"[DataSync BatchDeleteImpact] 查询失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="获取批量删除影响失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            status_code=500,
+        )
+
+
+@router.delete("/data-sync/files/batch")
+async def delete_catalog_files_batch(
+    body: CatalogFileBatchDeleteRequest = Body(...),
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        service = CatalogFileDeleteService(db)
+        result = await service.delete_catalog_files_batch(body.file_ids)
+        payload = CatalogFileBatchDeleteResultResponse.model_validate(result.to_dict())
+        return success_response(data=payload.model_dump(), message="批量删除文件成功")
+    except DataSyncSchemaDriftError as exc:
+        await db.rollback()
+        logger.error(f"[DataSync BatchDelete] Schema drift: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="批量删除文件失败：数据库结构未完成迁移，请执行 Alembic 迁移",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion=f"执行 Alembic 迁移: {exc.recovery_command}",
+            status_code=500,
+        )
+    except Exception as exc:
+        await db.rollback()
+        logger.error(f"[DataSync BatchDelete] 删除失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="批量删除文件失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            status_code=500,
+        )
+
+
 @router.get("/data-sync/files/{file_id}/delete-impact")
 async def get_file_delete_impact(
     file_id: int = Path(..., description="文件ID"),
     db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
 ):
     try:
         service = CatalogFileDeleteService(db)
@@ -461,6 +531,7 @@ async def get_file_delete_impact(
 async def delete_catalog_file(
     file_id: int = Path(..., description="文件ID"),
     db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
 ):
     try:
         service = CatalogFileDeleteService(db)
@@ -2361,7 +2432,8 @@ async def sync_all_with_template(
 
 @router.post("/data-sync/cleanup-database")
 async def cleanup_database(
-    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2:改为异步会话
+    db: AsyncSession = Depends(get_async_db),  # [*] v4.18.2:改为异步会话
+    current_user = Depends(require_admin),
 ):
     """
     清理数据库API [*] **新增(2025-02-01)**
