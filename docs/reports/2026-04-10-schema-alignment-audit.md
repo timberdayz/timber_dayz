@@ -144,3 +144,23 @@
 - Treat schema-placement mismatches and time-column mismatches as immediate alignment targets.
 - Keep duplicate cleanup for non-wave-1 tables behind proof-based follow-up waves.
 
+## Wave 1 Status
+
+- Audit artifact: complete
+- Runtime schema/time-column contracts: complete
+- Script/diagnostic alignment:
+  - `scripts/analyze_schema_cleanup_candidates.py`: complete
+  - `scripts/audit_schema_alignment.py`: complete
+  - `scripts/verify_restore.py`: complete
+- Existing migration coverage for wave-1 tables: confirmed by contract tests
+- New repair migration for wave-1 tables: not required in this round
+
+Current interpretation:
+
+- The wave-1 table family does not currently require a new additive repair migration to prove correctness.
+- The immediate operational risk was primarily in runtime/tooling assumptions, not in missing wave-1 table existence or missing baseline migration coverage.
+- Remaining work should now move to deeper `P2/P3` alignment:
+  - broader migration-history consistency
+  - extra-only runtime table classification
+  - later-wave duplicate/legacy cleanup
+
