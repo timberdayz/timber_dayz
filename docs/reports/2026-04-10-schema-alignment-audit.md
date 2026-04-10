@@ -1,5 +1,5 @@
-﻿[32m[INFO][0m 2026-04-10 20:16:08 - modules.core.config - 配置管理器初始化,配置目录: config
-[32m[INFO][0m 2026-04-10 20:16:08 - modules.core.registry - 应用注册器初始化完成
+﻿[32m[INFO][0m 2026-04-10 20:28:36 - modules.core.config - 配置管理器初始化,配置目录: config
+[32m[INFO][0m 2026-04-10 20:28:36 - modules.core.registry - 应用注册器初始化完成
 # Schema Alignment Audit
 
 ## Summary
@@ -212,6 +212,15 @@
 - migration-history artifact: retained Alembic/version history artifacts that must stay outside business-table cleanup
 - these assets must not be treated as business ORM drift
 - these assets should be governed by retention, operational ownership, and migration-policy review
+
+## Wave 4 Governance
+
+`wave_4_manual_review` contains tables that require manual review before any cleanup, retirement, or ownership decision.
+
+- these tables are neither automatically business drift nor automatically safe historical artifacts
+- they may represent partial runtime assets, abandoned experiments, support tables, or legacy business models
+- they must not be auto-retired or auto-aligned without explicit human review
+- later work should classify each table into keep, migrate, archive, or remove
 
 ## First Repair Wave Recommendation
 

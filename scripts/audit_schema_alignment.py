@@ -127,6 +127,16 @@ def build_markdown_report(report: dict) -> str:
     lines.append("- these assets should be governed by retention, operational ownership, and migration-policy review")
     lines.append("")
 
+    lines.append("## Wave 4 Governance")
+    lines.append("")
+    lines.append("`wave_4_manual_review` contains tables that require manual review before any cleanup, retirement, or ownership decision.")
+    lines.append("")
+    lines.append("- these tables are neither automatically business drift nor automatically safe historical artifacts")
+    lines.append("- they may represent partial runtime assets, abandoned experiments, support tables, or legacy business models")
+    lines.append("- they must not be auto-retired or auto-aligned without explicit human review")
+    lines.append("- later work should classify each table into keep, migrate, archive, or remove")
+    lines.append("")
+
     lines.append("## First Repair Wave Recommendation")
     lines.append("")
     lines.append("- Start with the wave-1 runtime-critical table family.")
