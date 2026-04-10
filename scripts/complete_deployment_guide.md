@@ -160,6 +160,31 @@ docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compos
 docker ps --filter "name=xihong_erp" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ```
 
+### 验证库存连续库龄资产
+
+部署完成后，生产流程应保证以下两件事已经发生：
+
+1. 后端启动时已通过 PostgreSQL dashboard bootstrap 创建 `semantic/mart/api` 所需 SQL 资产
+2. 后端健康后已自动执行：
+
+```bash
+docker compose exec -T backend python3 /app/scripts/rebuild_inventory_age_from_snapshots.py --full-rebuild
+```
+
+如需人工核对，可在服务器上执行：
+
+```bash
+docker compose exec -T backend python3 /app/scripts/rebuild_inventory_age_from_snapshots.py --dry-run
+```
+
+并检查以下对象是否存在且有数据：
+
+- `mart.inventory_snapshot_company_daily`
+- `mart.inventory_age_history`
+- `mart.inventory_age_current`
+- `api.inventory_age_list_module`
+- `api.inventory_age_summary_module`
+
 ## 🎉 修复完成
 
 **所有服务（除 pgadmin）都已配置 profiles，可以通过 `--profile production` 自动部署！**

@@ -807,6 +807,14 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
+echo "[INFO] Phase 3a: rebuilding persisted inventory age state..."
+if "${compose_cmd_base[@]}" exec -T backend python3 /app/scripts/rebuild_inventory_age_from_snapshots.py --full-rebuild; then
+  echo "[OK] Inventory age full rebuild completed"
+else
+  echo "[FAIL] Inventory age full rebuild failed"
+  exit 1
+fi
+
 echo "[INFO] Phase 3b: starting frontend..."
 "${compose_cmd_base[@]}" up -d frontend
 

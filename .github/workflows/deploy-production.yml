@@ -197,6 +197,16 @@ jobs:
       - name: Validate Database Fields (Release Gate)
         run: python scripts/validate_database_fields.py
 
+      - name: Validate Inventory Age Pipeline (Release Gate)
+        run: |
+          pytest -q \
+            backend/tests/data_pipeline/test_inventory_snapshot_change_module.py \
+            backend/tests/data_pipeline/test_inventory_snapshot_company_daily_module.py \
+            backend/tests/data_pipeline/test_inventory_age_refresh_service.py \
+            backend/tests/data_pipeline/test_event_listeners.py \
+            backend/tests/test_inventory_aging_service.py \
+            backend/tests/test_inventory_aging_schema_contract.py
+
   build-and-push:
     name: Build and Push Images (Release Tag)
     runs-on: ubuntu-latest
