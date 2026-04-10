@@ -193,6 +193,7 @@ from backend.schemas.inventory import (
     InventoryGrnResponse,
     InventoryGrnPostResponse,
     InventoryAgingBucketResponse,
+    InventoryAgingHistoryPointResponse,
     InventoryAgingRowResponse,
     InventoryAgingSummaryResponse,
     InventoryBalanceSummaryResponse,

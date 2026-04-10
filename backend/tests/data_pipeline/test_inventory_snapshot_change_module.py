@@ -21,6 +21,13 @@ def test_inventory_snapshot_change_sql_mentions_stock_delta_and_stagnant_days():
     assert "estimated_stagnant_days" in sql_text
 
 
+def test_inventory_snapshot_semantic_sql_maps_miaoshou_starred_fields():
+    sql_text = Path("sql/semantic/inventory_snapshot.sql").read_text(encoding="utf-8")
+    assert "*商品SKU" in sql_text
+    assert "*商品名称" in sql_text
+    assert "库存总量" in sql_text
+
+
 def test_refresh_registry_tracks_inventory_snapshot_assets():
     assert "mart.inventory_snapshot_history" in PIPELINE_DEPENDENCIES
     assert "mart.inventory_snapshot_latest" in PIPELINE_DEPENDENCIES

@@ -130,19 +130,43 @@ class InventoryAgingBucketResponse(BaseModel):
 
 
 class InventoryAgingRowResponse(BaseModel):
+    snapshot_date: date
     platform_code: str
-    shop_id: str
-    platform_sku: str
-    remaining_qty: int
-    oldest_age_days: int
-    youngest_age_days: int
-    weighted_avg_age_days: float
-    remaining_value: float = 0.0
+    sku_key: str
+    platform_sku: Optional[str] = None
+    product_sku: Optional[str] = None
+    product_name: Optional[str] = None
+    current_qty: int
+    previous_qty: Optional[int] = None
+    qty_delta: Optional[int] = None
+    age_anchor_date: Optional[date] = None
+    age_days: int
+    reset_reason: str
+    inventory_value: float = 0.0
+    bucket: str
+
+
+class InventoryAgingHistoryPointResponse(BaseModel):
+    snapshot_date: date
+    platform_code: str
+    sku_key: str
+    platform_sku: Optional[str] = None
+    product_sku: Optional[str] = None
+    product_name: Optional[str] = None
+    current_qty: int
+    previous_qty: Optional[int] = None
+    qty_delta: Optional[int] = None
+    age_anchor_date: Optional[date] = None
+    age_days: Optional[int] = None
+    reset_reason: str
+    inventory_value: float = 0.0
+    bucket: Optional[str] = None
 
 
 class InventoryAgingSummaryResponse(BaseModel):
     rows: List[InventoryAgingRowResponse] = Field(default_factory=list)
     buckets: List[InventoryAgingBucketResponse] = Field(default_factory=list)
+    total_sku_count: int = 0
     total_quantity: int = 0
     total_value: float = 0.0
 
