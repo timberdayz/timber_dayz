@@ -138,6 +138,14 @@ const saving = ref(false)
 const preferences = ref([])
 const notificationPermission = ref('default') // 'default', 'granted', 'denied'
 
+Object.assign(notificationTypeLabels, {
+  task_assigned: '新任务分配',
+  task_due_soon: '任务即将到期',
+  task_overdue: '任务已超期',
+  task_returned: '任务被退回',
+  task_nudged: '任务催办提醒'
+})
+
 // 获取通知类型标签
 const getNotificationTypeLabel = (type) => {
   return notificationTypeLabels[type] || type
