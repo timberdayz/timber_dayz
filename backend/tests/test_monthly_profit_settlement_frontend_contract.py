@@ -1,11 +1,11 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 
 def test_financial_management_page_exposes_monthly_profit_settlement_center():
     text = Path("frontend/src/views/FinancialManagement.vue").read_text(encoding="utf-8")
 
     assert "月度利润结算中心" in text
-    assert "company monthly settlement" in text
+    assert "公司月结" in text
     assert "查询月结" in text
     assert "重建月结" in text
     assert "审批通过" in text
