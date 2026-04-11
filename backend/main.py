@@ -987,10 +987,11 @@ app.include_router(inventory_overview.router, tags=["库存总览"])
 #     prefix="/api/finance",
 #     tags=["财务管理"]
 # )
-from backend.routers import follow_investment, profit_basis
+from backend.routers import follow_investment, monthly_profit_settlement, profit_basis
 
 app.include_router(profit_basis.router, tags=["利润结算基准"])
 app.include_router(follow_investment.router, tags=["跟投收益"])
+app.include_router(monthly_profit_settlement.router, tags=["月度利润结算中心"])
 
 # 系统管理路由
 app.include_router(auth.router, prefix="/api", tags=["认证管理"])

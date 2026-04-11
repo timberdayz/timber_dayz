@@ -1,4 +1,5 @@
 import pytest
+import modules.core.db as core_db
 
 from modules.core.db import (
     AllocationRule,
@@ -29,6 +30,12 @@ from modules.core.db import (
     TaxVoucher,
     ThreeWayMatchLog,
 )
+
+
+MonthlyProfitSettlement = getattr(core_db, "MonthlyProfitSettlement", None)
+MonthlyProfitPersonnelDetail = getattr(core_db, "MonthlyProfitPersonnelDetail", None)
+MonthlyProfitFollowDetail = getattr(core_db, "MonthlyProfitFollowDetail", None)
+MonthlyProfitAdjustment = getattr(core_db, "MonthlyProfitAdjustment", None)
 
 
 @pytest.mark.parametrize(
@@ -71,6 +78,24 @@ def test_finance_tables_bind_explicitly_to_finance_schema(model, table_name):
     assert table.fullname == f"finance.{table_name}"
 
 
+@pytest.mark.parametrize(
+    ("model_name", "model", "table_name"),
+    [
+        ("MonthlyProfitSettlement", MonthlyProfitSettlement, "monthly_profit_settlements"),
+        ("MonthlyProfitPersonnelDetail", MonthlyProfitPersonnelDetail, "monthly_profit_personnel_details"),
+        ("MonthlyProfitFollowDetail", MonthlyProfitFollowDetail, "monthly_profit_follow_details"),
+        ("MonthlyProfitAdjustment", MonthlyProfitAdjustment, "monthly_profit_adjustments"),
+    ],
+)
+def test_monthly_profit_settlement_models_bind_explicitly_to_finance_schema(model_name, model, table_name):
+    assert model is not None, f"{model_name} model is missing from modules.core.db"
+
+    table = model.__table__
+    assert table.name == table_name
+    assert table.schema == "finance"
+    assert table.fullname == f"finance.{table_name}"
+
+
 def test_finance_internal_foreign_keys_target_finance_tables():
     po_line_targets = {fk.target_fullname for fk in POLine.__table__.foreign_keys}
     grn_header_targets = {fk.target_fullname for fk in GRNHeader.__table__.foreign_keys}
@@ -82,6 +107,12 @@ def test_finance_internal_foreign_keys_target_finance_tables():
     tax_voucher_targets = {fk.target_fullname for fk in TaxVoucher.__table__.foreign_keys}
     follow_investment_settlement_targets = {fk.target_fullname for fk in FollowInvestmentSettlement.__table__.foreign_keys}
     follow_investment_detail_targets = {fk.target_fullname for fk in FollowInvestmentDetail.__table__.foreign_keys}
+    assert MonthlyProfitPersonnelDetail is not None, "MonthlyProfitPersonnelDetail model is missing from modules.core.db"
+    assert MonthlyProfitFollowDetail is not None, "MonthlyProfitFollowDetail model is missing from modules.core.db"
+    assert MonthlyProfitAdjustment is not None, "MonthlyProfitAdjustment model is missing from modules.core.db"
+    monthly_profit_personnel_detail_targets = {fk.target_fullname for fk in MonthlyProfitPersonnelDetail.__table__.foreign_keys}
+    monthly_profit_follow_detail_targets = {fk.target_fullname for fk in MonthlyProfitFollowDetail.__table__.foreign_keys}
+    monthly_profit_adjustment_targets = {fk.target_fullname for fk in MonthlyProfitAdjustment.__table__.foreign_keys}
 
     assert "finance.po_headers.po_id" in po_line_targets
     assert "finance.po_headers.po_id" in grn_header_targets
@@ -98,6 +129,10 @@ def test_finance_internal_foreign_keys_target_finance_tables():
     assert "finance.invoice_headers.invoice_id" in tax_voucher_targets
     assert "finance.shop_profit_basis.id" in follow_investment_settlement_targets
     assert "finance.follow_investment_settlements.id" in follow_investment_detail_targets
+    assert "finance.monthly_profit_settlements.id" in monthly_profit_personnel_detail_targets
+    assert "finance.monthly_profit_settlements.id" in monthly_profit_follow_detail_targets
+    assert "finance.follow_investment_settlements.id" in monthly_profit_follow_detail_targets
+    assert "finance.monthly_profit_settlements.id" in monthly_profit_adjustment_targets
 
 
 def test_finance_external_foreign_keys_keep_core_targets():

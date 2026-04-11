@@ -2872,6 +2872,108 @@ class FollowInvestmentDetail(Base):
     )
 
 
+class MonthlyProfitSettlement(Base):
+    """公司级月度利润结算主表"""
+    __tablename__ = "monthly_profit_settlements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
+
+    net_profit_amount = Column(Float, default=0.0, nullable=False)
+
+    personnel_target_ratio = Column(Float, default=0.0, nullable=False)
+    follow_target_ratio = Column(Float, default=0.0, nullable=False)
+    company_target_ratio = Column(Float, default=0.0, nullable=False)
+
+    personnel_target_amount = Column(Float, default=0.0, nullable=False)
+    follow_target_amount = Column(Float, default=0.0, nullable=False)
+    company_target_amount = Column(Float, default=0.0, nullable=False)
+
+    personnel_actual_amount = Column(Float, default=0.0, nullable=False)
+    follow_actual_amount = Column(Float, default=0.0, nullable=False)
+    company_actual_amount = Column(Float, default=0.0, nullable=False)
+
+    adjustment_amount = Column(Float, default=0.0, nullable=False)
+    difference_amount = Column(Float, default=0.0, nullable=False)
+    difference_ratio = Column(Float, default=0.0, nullable=False)
+
+    status = Column(String(32), default="draft", nullable=False)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    remark = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("period_month", name="uq_monthly_profit_settlements_period"),
+        Index("ix_monthly_profit_settlements_status", "status"),
+        {"schema": "finance"},
+    )
+
+
+class MonthlyProfitPersonnelDetail(Base):
+    """公司级月度利润结算人员成本明细表"""
+    __tablename__ = "monthly_profit_personnel_details"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    settlement_id = Column(Integer, ForeignKey("finance.monthly_profit_settlements.id", ondelete="CASCADE"), nullable=False)
+    detail_type = Column(String(64), nullable=False)
+    employee_code = Column(String(64), nullable=True)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    source_module = Column(String(64), nullable=True)
+    source_record_id = Column(String(64), nullable=True)
+    amount = Column(Float, default=0.0, nullable=False)
+    remark = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_monthly_profit_personnel_details_settlement", "settlement_id"),
+        {"schema": "finance"},
+    )
+
+
+class MonthlyProfitFollowDetail(Base):
+    """公司级月度利润结算跟投收益明细表"""
+    __tablename__ = "monthly_profit_follow_details"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    settlement_id = Column(Integer, ForeignKey("finance.monthly_profit_settlements.id", ondelete="CASCADE"), nullable=False)
+    investor_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=True)
+    source_settlement_id = Column(Integer, ForeignKey("finance.follow_investment_settlements.id"), nullable=True)
+    amount = Column(Float, default=0.0, nullable=False)
+    status = Column(String(32), default="approved", nullable=False)
+    remark = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_monthly_profit_follow_details_settlement", "settlement_id"),
+        {"schema": "finance"},
+    )
+
+
+class MonthlyProfitAdjustment(Base):
+    """公司级月度利润结算调整项表"""
+    __tablename__ = "monthly_profit_adjustments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    settlement_id = Column(Integer, ForeignKey("finance.monthly_profit_settlements.id", ondelete="CASCADE"), nullable=False)
+    adjustment_type = Column(String(64), nullable=False)
+    amount = Column(Float, default=0.0, nullable=False)
+    reason = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_monthly_profit_adjustments_settlement", "settlement_id"),
+        {"schema": "finance"},
+    )
+
+
 class ReturnOrder(Base):
     """退货单表"""
     __tablename__ = "return_orders"

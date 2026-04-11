@@ -323,6 +323,177 @@
         </el-table>
       </el-tab-pane>
       <el-tab-pane label="利润分配基准" name="profit-basis">
+
+        <el-card class="profit-summary">
+          <template #header>
+            <div class="card-header">
+              <span>月度利润结算中心</span>
+              <el-tag type="success">company monthly settlement</el-tag>
+            </div>
+          </template>
+
+          <el-form :inline="true" class="filter-form">
+            <el-form-item label="月份">
+              <el-date-picker
+                v-model="monthlyProfitSettlementForm.period_month"
+                type="month"
+                value-format="YYYY-MM"
+                format="YYYY-MM"
+                style="width: 140px"
+              />
+            </el-form-item>
+            <el-form-item label="人员目标">
+              <el-input-number v-model="monthlyProfitSettlementForm.personnel_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" />
+            </el-form-item>
+            <el-form-item label="跟投目标">
+              <el-input-number v-model="monthlyProfitSettlementForm.follow_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" />
+            </el-form-item>
+            <el-form-item label="公司目标">
+              <el-input-number v-model="monthlyProfitSettlementForm.company_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" />
+            </el-form-item>
+            <el-form-item label="调整项">
+              <el-input-number v-model="monthlyProfitSettlementForm.adjustment_amount" :step="100" :precision="2" />
+            </el-form-item>
+            <el-form-item label="调整原因">
+              <el-input v-model="monthlyProfitSettlementForm.adjustment_reason" placeholder="请输入调整原因" style="width: 220px" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="loadMonthlyProfitSettlement" :loading="financeStore.monthlyProfitSettlement.loading">
+                查询月结
+              </el-button>
+              <el-button @click="rebuildMonthlyProfitSettlement" :loading="financeStore.monthlyProfitSettlement.loading">
+                重建月结
+              </el-button>
+              <el-button
+                v-if="financeStore.monthlyProfitSettlement.data?.summary?.id"
+                @click="saveMonthlyProfitSettlementTargets"
+                :loading="financeStore.monthlyProfitSettlement.loading"
+              >
+                保存目标
+              </el-button>
+              <el-button
+                v-if="financeStore.monthlyProfitSettlement.data?.summary?.id && financeStore.monthlyProfitSettlement.data?.summary?.status !== 'approved'"
+                type="success"
+                @click="approveMonthlyProfitSettlement"
+              >
+                审批通过
+              </el-button>
+              <el-button
+                v-if="financeStore.monthlyProfitSettlement.data?.summary?.id && financeStore.monthlyProfitSettlement.data?.summary?.status === 'approved'"
+                type="warning"
+                @click="reopenMonthlyProfitSettlement"
+              >
+                回退草稿
+              </el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-alert
+            v-if="financeStore.monthlyProfitSettlement.error"
+            type="error"
+            :closable="false"
+            :title="financeStore.monthlyProfitSettlement.error"
+            style="margin-bottom: 16px;"
+          />
+
+          <el-alert
+            v-if="financeStore.monthlyProfitSettlement.data?.summary && (Math.abs(financeStore.monthlyProfitSettlement.data.summary.difference_amount || 0) > 3000 || Math.abs(financeStore.monthlyProfitSettlement.data.summary.difference_ratio || 0) > 0.01)"
+            type="warning"
+            :closable="false"
+            title="当前月结差异超过默认阈值，系统将拦截直接审批，请先核对上游数据或填写调整原因。"
+            style="margin-bottom: 16px;"
+          />
+
+          <el-row v-if="financeStore.monthlyProfitSettlement.data?.summary" :gutter="20" style="margin-bottom: 20px;">
+            <el-col :span="6">
+              <div class="summary-item">
+                <div class="summary-label">月度净利润</div>
+                <div class="summary-value profit">{{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.net_profit_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="summary-item">
+                <div class="summary-label">人员成本</div>
+                <div class="summary-value cost">{{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.personnel_actual_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="summary-item">
+                <div class="summary-label">跟投收益</div>
+                <div class="summary-value revenue">{{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.follow_actual_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="summary-item">
+                <div class="summary-label">公司留存</div>
+                <div class="summary-value profit">{{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.company_actual_amount) }}</div>
+              </div>
+            </el-col>
+          </el-row>
+
+          <el-row v-if="financeStore.monthlyProfitSettlement.data?.summary" :gutter="20">
+            <el-col :span="8">
+              <div class="summary-item">
+                <div class="summary-label">人员目标 / 实际</div>
+                <div>{{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.personnel_target_amount) }} / {{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.personnel_actual_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="8">
+              <div class="summary-item">
+                <div class="summary-label">跟投目标 / 实际</div>
+                <div>{{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.follow_target_amount) }} / {{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.follow_actual_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="8">
+              <div class="summary-item">
+                <div class="summary-label">公司目标 / 实际</div>
+                <div>{{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.company_target_amount) }} / {{ formatCurrency(financeStore.monthlyProfitSettlement.data.summary.company_actual_amount) }}</div>
+              </div>
+            </el-col>
+          </el-row>
+
+          <el-table
+            v-if="financeStore.monthlyProfitSettlement.data?.personnel_details?.length"
+            :data="financeStore.monthlyProfitSettlement.data.personnel_details"
+            stripe
+            style="margin-top: 20px;"
+          >
+            <el-table-column prop="detail_type" label="人员成本类型" min-width="160" />
+            <el-table-column prop="employee_code" label="员工编号" width="140" />
+            <el-table-column prop="amount" label="金额" width="160" align="right">
+              <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+            </el-table-column>
+            <el-table-column prop="source_module" label="来源模块" min-width="160" />
+          </el-table>
+
+          <el-table
+            v-if="financeStore.monthlyProfitSettlement.data?.follow_details?.length"
+            :data="financeStore.monthlyProfitSettlement.data.follow_details"
+            stripe
+            style="margin-top: 20px;"
+          >
+            <el-table-column prop="investor_user_id" label="投资人ID" width="140" />
+            <el-table-column prop="source_settlement_id" label="来源结算ID" width="140" />
+            <el-table-column prop="amount" label="跟投收益金额" width="160" align="right">
+              <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="120" />
+          </el-table>
+
+          <el-table
+            v-if="financeStore.monthlyProfitSettlement.data?.adjustments?.length"
+            :data="financeStore.monthlyProfitSettlement.data.adjustments"
+            stripe
+            style="margin-top: 20px;"
+          >
+            <el-table-column prop="adjustment_type" label="调整类型" width="160" />
+            <el-table-column prop="amount" label="调整金额" width="160" align="right">
+              <template #default="{ row }">{{ formatCurrency(row.amount) }}</template>
+            </el-table-column>
+            <el-table-column prop="reason" label="调整原因" min-width="220" />
+            <el-table-column prop="created_by" label="创建人" width="140" />
+          </el-table>
+        </el-card>
         <el-card class="profit-summary">
           <template #header>
             <div class="card-header">
@@ -815,6 +986,15 @@ const profitBasisForm = ref({
   shop_id: ''
 })
 
+const monthlyProfitSettlementForm = ref({
+  period_month: currentMonth,
+  personnel_target_ratio: 0.3,
+  follow_target_ratio: 0.2,
+  company_target_ratio: 0.5,
+  adjustment_amount: 0,
+  adjustment_reason: ''
+})
+
 const followInvestmentForm = ref({
   period_month: currentMonth,
   platform_code: 'shopee',
@@ -881,6 +1061,82 @@ const followInvestmentRecordForm = ref({
   status: 'active',
   remark: ''
 })
+
+
+const loadMonthlyProfitSettlement = async () => {
+  await financeStore.fetchMonthlyProfitSettlement({
+    period_month: monthlyProfitSettlementForm.value.period_month
+  })
+}
+
+const rebuildMonthlyProfitSettlement = async () => {
+  try {
+    await financeStore.rebuildMonthlyProfitSettlement({
+      period_month: monthlyProfitSettlementForm.value.period_month,
+      personnel_target_ratio: monthlyProfitSettlementForm.value.personnel_target_ratio,
+      follow_target_ratio: monthlyProfitSettlementForm.value.follow_target_ratio,
+      company_target_ratio: monthlyProfitSettlementForm.value.company_target_ratio,
+      adjustment_amount: monthlyProfitSettlementForm.value.adjustment_amount,
+      adjustment_reason: monthlyProfitSettlementForm.value.adjustment_reason || null
+    })
+    ElMessage.success('月度利润结算已重建')
+  } catch (error) {
+    ElMessage.error('重建月度利润结算失败: ' + error.message)
+  }
+}
+
+const saveMonthlyProfitSettlementTargets = async () => {
+  const settlementId = financeStore.monthlyProfitSettlement.data?.summary?.id
+  if (!settlementId) {
+    ElMessage.warning('请先查询或重建月结')
+    return
+  }
+
+  try {
+    await financeStore.updateMonthlyProfitSettlementTargets(settlementId, {
+      personnel_target_ratio: monthlyProfitSettlementForm.value.personnel_target_ratio,
+      follow_target_ratio: monthlyProfitSettlementForm.value.follow_target_ratio,
+      company_target_ratio: monthlyProfitSettlementForm.value.company_target_ratio,
+      adjustment_amount: monthlyProfitSettlementForm.value.adjustment_amount,
+      adjustment_reason: monthlyProfitSettlementForm.value.adjustment_reason || null
+    })
+    ElMessage.success('月度目标比例已保存')
+  } catch (error) {
+    ElMessage.error('保存月度目标比例失败: ' + error.message)
+  }
+}
+
+const approveMonthlyProfitSettlement = async () => {
+  const settlementId = financeStore.monthlyProfitSettlement.data?.summary?.id
+  if (!settlementId) {
+    ElMessage.warning('请先查询月结')
+    return
+  }
+
+  try {
+    await financeStore.approveMonthlyProfitSettlement(settlementId)
+    ElMessage.success('月度利润结算已审批')
+    await loadMonthlyProfitSettlement()
+  } catch (error) {
+    ElMessage.error('审批月度利润结算失败: ' + error.message)
+  }
+}
+
+const reopenMonthlyProfitSettlement = async () => {
+  const settlementId = financeStore.monthlyProfitSettlement.data?.summary?.id
+  if (!settlementId) {
+    ElMessage.warning('请先查询月结')
+    return
+  }
+
+  try {
+    await financeStore.reopenMonthlyProfitSettlement(settlementId)
+    ElMessage.success('月度利润结算已回退到草稿')
+    await loadMonthlyProfitSettlement()
+  } catch (error) {
+    ElMessage.error('回退月度利润结算失败: ' + error.message)
+  }
+}
 
 const loadProfitBasis = async () => {
   if (!profitBasisForm.value.shop_id) {
@@ -1308,6 +1564,7 @@ const getProfitMarginType = (margin) => {
 
 onMounted(() => {
   initData()
+  loadMonthlyProfitSettlement()
   loadFollowInvestments()
   loadFollowInvestmentSettlements()
 })
