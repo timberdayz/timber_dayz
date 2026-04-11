@@ -29,3 +29,12 @@ def test_financial_management_page_uses_platform_and_shop_list_workflow():
     assert "当前店铺详情" in text
     assert "selectedShop" in text
     assert "getTargetShops" in text
+
+
+def test_financial_management_page_shows_platform_level_shop_status_summary():
+    text = Path("frontend/src/views/FinancialManagement.vue").read_text(encoding="utf-8")
+
+    assert "本平台店铺概览" in text
+    assert "有跟投记录店铺" in text
+    assert "有结算台账店铺" in text
+    assert "待补经营数据" in text

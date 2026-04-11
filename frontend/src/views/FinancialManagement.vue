@@ -79,6 +79,31 @@
         </div>
       </template>
 
+      <div class="platform-overview-card">
+        <div class="platform-overview-header">
+          <span>本平台店铺概览</span>
+          <div class="platform-overview-meta">{{ selectedPlatformLabel }} · {{ selectedMonth }}</div>
+        </div>
+        <div class="platform-overview-grid">
+          <div class="platform-overview-item">
+            <div class="overview-label">平台店铺数</div>
+            <div class="overview-value">{{ platformShopStats.total }}</div>
+          </div>
+          <div class="platform-overview-item">
+            <div class="overview-label">有跟投记录店铺</div>
+            <div class="overview-value">{{ platformShopStats.withFollowInvestment }}</div>
+          </div>
+          <div class="platform-overview-item">
+            <div class="overview-label">有结算台账店铺</div>
+            <div class="overview-value">{{ platformShopStats.withSettlement }}</div>
+          </div>
+          <div class="platform-overview-item warning">
+            <div class="overview-label">待补经营数据</div>
+            <div class="overview-value">{{ platformShopStats.pendingData }}</div>
+          </div>
+        </div>
+      </div>
+
       <div class="workspace-layout">
         <aside class="shop-list-panel">
           <div class="shop-list-header">
@@ -110,6 +135,9 @@
                 <div class="shop-row-tags">
                   <el-tag v-if="selectedShop?.shop_id === shop.shop_id" size="small" type="primary">当前</el-tag>
                   <el-tag size="small" :type="shop.enabled === false ? 'danger' : 'success'">{{ shop.enabled === false ? '停用' : '可用' }}</el-tag>
+                  <el-tag v-if="getShopStatus(shop).hasFollowInvestment" size="small" type="warning">有跟投记录</el-tag>
+                  <el-tag v-if="getShopStatus(shop).hasSettlement" size="small" type="info">有结算台账</el-tag>
+                  <el-tag v-if="getShopStatus(shop).pendingData" size="small" effect="plain">待补经营数据</el-tag>
                 </div>
               </div>
               <div class="shop-meta">{{ shop.shop_id }}</div>
@@ -258,6 +286,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import financeApi from '@/api/finance'
 import { useFinanceStore } from '@/stores/finance'
 
 const financeStore = useFinanceStore()
@@ -270,6 +299,8 @@ const shopKeyword = ref('')
 const platformLabels = { shopee: 'Shopee', tiktok: 'TikTok', amazon: 'Amazon', miaoshou: '妙手ERP' }
 const allShops = ref([])
 const selectedShop = ref(null)
+const platformFollowInvestments = ref([])
+const platformSettlementRows = ref([])
 const monthlyForm = ref({ period_month: currentMonth, personnel_target_ratio: 0.3, follow_target_ratio: 0.2, company_target_ratio: 0.5, adjustment_amount: 0, adjustment_reason: '' })
 const profitBasisForm = ref({ period_month: currentMonth, platform_code: 'shopee', shop_id: '' })
 const followInvestmentForm = ref({ period_month: currentMonth, platform_code: 'shopee', shop_id: '', distribution_ratio: 0.4 })
@@ -294,6 +325,16 @@ const filteredShops = computed(() => {
     return `${shop.shop_name || ''} ${shop.shop_id || ''}`.toLowerCase().includes(keyword)
   })
 })
+const platformShopStats = computed(() => {
+  const followShopIds = new Set(platformFollowInvestments.value.map((item) => item.shop_id).filter(Boolean))
+  const settlementShopIds = new Set(platformSettlementRows.value.map((item) => item.shop_id).filter(Boolean))
+  const total = filteredShops.value.length
+  const withFollowInvestment = filteredShops.value.filter((shop) => followShopIds.has(shop.shop_id)).length
+  const withSettlement = filteredShops.value.filter((shop) => settlementShopIds.has(shop.shop_id)).length
+  const pendingData = filteredShops.value.filter((shop) => !followShopIds.has(shop.shop_id) && !settlementShopIds.has(shop.shop_id)).length
+
+  return { total, withFollowInvestment, withSettlement, pendingData }
+})
 
 const syncMonthlyForm = (payload) => { const summary = payload?.summary; if (!summary) return; const firstAdjustment = payload?.adjustments?.[0] || null; monthlyForm.value = { period_month: summary.period_month || currentMonth, personnel_target_ratio: Number(summary.personnel_target_ratio ?? 0.3), follow_target_ratio: Number(summary.follow_target_ratio ?? 0.2), company_target_ratio: Number(summary.company_target_ratio ?? 0.5), adjustment_amount: Number(summary.adjustment_amount ?? 0), adjustment_reason: firstAdjustment?.reason || '' } }
 const syncSelectedShopForms = () => {
@@ -306,9 +347,17 @@ const syncSelectedShopForms = () => {
   followInvestmentRecordForm.value = { ...followInvestmentRecordForm.value, platform_code: selectedPlatform.value, shop_id: shopId }
 }
 const loadShopList = async () => { const response = await api.getTargetShops(); allShops.value = (response?.data || response || []).filter((shop) => shop.platform_code); if (!selectedShop.value || selectedShop.value.platform_code !== selectedPlatform.value) { selectedShop.value = filteredShops.value[0] || null; syncSelectedShopForms() } }
+const loadPlatformShopSignals = async () => {
+  const [followResponse, settlementResponse] = await Promise.all([
+    financeApi.getFollowInvestments({ platform_code: selectedPlatform.value }),
+    financeApi.getFollowInvestmentSettlements({ platform_code: selectedPlatform.value, period_month: selectedMonth.value })
+  ])
+  platformFollowInvestments.value = followResponse?.data || followResponse || []
+  platformSettlementRows.value = settlementResponse?.data || settlementResponse || []
+}
 const selectShop = (shop) => { selectedShop.value = shop; syncSelectedShopForms(); financeStore.followInvestmentSettlement.data = { settlement: null, details: [] }; financeStore.profitBasis.data = null; loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() }
-const handlePlatformChange = () => { shopKeyword.value = ''; selectedShop.value = filteredShops.value[0] || null; syncSelectedShopForms(); if (selectedShop.value) { loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() } }
-const handleMonthChange = () => { syncSelectedShopForms(); loadMonthlySettlement(); if (selectedShop.value) { loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() } }
+const handlePlatformChange = async () => { shopKeyword.value = ''; selectedShop.value = filteredShops.value[0] || null; syncSelectedShopForms(); await loadPlatformShopSignals(); if (selectedShop.value) { loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() } }
+const handleMonthChange = async () => { syncSelectedShopForms(); loadMonthlySettlement(); await loadPlatformShopSignals(); if (selectedShop.value) { loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() } }
 const loadMonthlySettlement = async () => { await financeStore.fetchMonthlyProfitSettlement({ period_month: monthlyForm.value.period_month }); syncMonthlyForm(financeStore.monthlyProfitSettlement.data) }
 const rebuildMonthlySettlement = async () => { try { await financeStore.rebuildMonthlyProfitSettlement({ period_month: monthlyForm.value.period_month, personnel_target_ratio: monthlyForm.value.personnel_target_ratio, follow_target_ratio: monthlyForm.value.follow_target_ratio, company_target_ratio: monthlyForm.value.company_target_ratio, adjustment_amount: monthlyForm.value.adjustment_amount, adjustment_reason: monthlyForm.value.adjustment_reason || null }); syncMonthlyForm(financeStore.monthlyProfitSettlement.data); ElMessage.success('月度利润结算已重建') } catch (error) { ElMessage.error('重建月度利润结算失败: ' + error.message) } }
 const saveMonthlyTargets = async () => { if (!currentSettlementId.value) return ElMessage.warning('请先查询或重建月结'); try { await financeStore.updateMonthlyProfitSettlementTargets(currentSettlementId.value, { personnel_target_ratio: monthlyForm.value.personnel_target_ratio, follow_target_ratio: monthlyForm.value.follow_target_ratio, company_target_ratio: monthlyForm.value.company_target_ratio, adjustment_amount: monthlyForm.value.adjustment_amount, adjustment_reason: monthlyForm.value.adjustment_reason || null }); syncMonthlyForm(financeStore.monthlyProfitSettlement.data); ElMessage.success('月度目标比例已保存') } catch (error) { ElMessage.error('保存月度目标比例失败: ' + error.message) } }
@@ -316,21 +365,30 @@ const approveMonthlySettlement = async () => { if (!currentSettlementId.value) r
 const reopenMonthlySettlement = async () => { if (!currentSettlementId.value) return ElMessage.warning('请先查询月结'); try { await financeStore.reopenMonthlyProfitSettlement(currentSettlementId.value); ElMessage.success('月度利润结算已回退到草稿'); await loadMonthlySettlement() } catch (error) { ElMessage.error('回退月度利润结算失败: ' + error.message) } }
 const loadProfitBasis = async () => { if (!selectedShop.value) return; await financeStore.fetchProfitBasis({ period_month: profitBasisForm.value.period_month, platform_code: profitBasisForm.value.platform_code, shop_id: profitBasisForm.value.shop_id }) }
 const rebuildProfitBasis = async () => { if (!selectedShop.value) return; try { await financeStore.rebuildProfitBasis({ period_month: profitBasisForm.value.period_month, platform_code: profitBasisForm.value.platform_code, shop_id: profitBasisForm.value.shop_id, basis_version: 'A_ONLY_V1' }); ElMessage.success('利润分配基准已重算') } catch (error) { ElMessage.error('重算利润基准失败: ' + error.message) } }
-const runFollowInvestmentSettlement = async () => { if (!selectedShop.value) return; try { await financeStore.calculateFollowInvestmentSettlement({ period_month: followInvestmentForm.value.period_month, platform_code: followInvestmentForm.value.platform_code, shop_id: followInvestmentForm.value.shop_id, distribution_ratio: followInvestmentForm.value.distribution_ratio }); ElMessage.success('跟投收益试算完成') } catch (error) { ElMessage.error('跟投收益试算失败: ' + error.message) } }
+const runFollowInvestmentSettlement = async () => { if (!selectedShop.value) return; try { await financeStore.calculateFollowInvestmentSettlement({ period_month: followInvestmentForm.value.period_month, platform_code: followInvestmentForm.value.platform_code, shop_id: followInvestmentForm.value.shop_id, distribution_ratio: followInvestmentForm.value.distribution_ratio }); await loadPlatformShopSignals(); ElMessage.success('跟投收益试算完成') } catch (error) { ElMessage.error('跟投收益试算失败: ' + error.message) } }
 const loadFollowInvestments = async () => { if (!selectedShop.value) return; await financeStore.fetchFollowInvestments({ platform_code: followInvestmentQuery.value.platform_code || undefined, shop_id: followInvestmentQuery.value.shop_id || undefined, status: followInvestmentQuery.value.status || undefined }) }
 const loadFollowInvestmentSettlements = async () => { if (!selectedShop.value) return; await financeStore.fetchFollowInvestmentSettlements({ period_month: settlementQuery.value.period_month || undefined, platform_code: settlementQuery.value.platform_code || undefined, shop_id: settlementQuery.value.shop_id || undefined, status: settlementQuery.value.status || undefined }) }
 const viewSettlementDetails = async (row) => { await financeStore.fetchFollowInvestmentSettlementDetails(row.id); showSettlementDetailsDrawer.value = true }
 const resetFollowInvestmentRecordForm = () => { followInvestmentRecordForm.value = { investor_user_id: null, platform_code: selectedPlatform.value, shop_id: selectedShop.value?.shop_id || '', contribution_amount: 0, contribution_date: new Date().toISOString().split('T')[0], withdraw_date: '', status: 'active', remark: '' }; editingFollowInvestmentId.value = null }
 const openCreateFollowInvestment = () => { followInvestmentDialogMode.value = 'create'; resetFollowInvestmentRecordForm(); showFollowInvestmentDialog.value = true }
 const openEditFollowInvestment = (row) => { followInvestmentDialogMode.value = 'edit'; editingFollowInvestmentId.value = row.id; followInvestmentRecordForm.value = { investor_user_id: row.investor_user_id, platform_code: row.platform_code, shop_id: row.shop_id, contribution_amount: row.contribution_amount, contribution_date: row.contribution_date, withdraw_date: row.withdraw_date || '', status: row.status, remark: row.remark || '' }; showFollowInvestmentDialog.value = true }
-const submitFollowInvestmentRecord = async () => { try { submitting.value = true; const payload = { ...followInvestmentRecordForm.value, withdraw_date: followInvestmentRecordForm.value.withdraw_date || null }; if (followInvestmentDialogMode.value === 'create') { await financeStore.createFollowInvestment(payload) } else { await financeStore.updateFollowInvestment(editingFollowInvestmentId.value, payload, { platform_code: followInvestmentQuery.value.platform_code || undefined, shop_id: followInvestmentQuery.value.shop_id || undefined, status: followInvestmentQuery.value.status || undefined }) } ElMessage.success('跟投记录已保存'); showFollowInvestmentDialog.value = false; resetFollowInvestmentRecordForm(); await loadFollowInvestments() } catch (error) { ElMessage.error('保存跟投记录失败: ' + error.message) } finally { submitting.value = false } }
-const archiveFollowInvestment = async (row) => { try { await ElMessageBox.confirm(`确认归档跟投记录 #${row.id} 吗？`, '归档跟投记录', { confirmButtonText: '确认归档', cancelButtonText: '取消', type: 'warning' }); await financeStore.archiveFollowInvestment(row.id, { platform_code: followInvestmentQuery.value.platform_code || undefined, shop_id: followInvestmentQuery.value.shop_id || undefined, status: followInvestmentQuery.value.status || undefined }); ElMessage.success('跟投记录已归档') } catch (error) { if (error !== 'cancel') ElMessage.error('归档失败: ' + (error.message || error)) } }
-const approveFollowInvestment = async (row) => { try { await financeStore.approveFollowInvestmentSettlement(row.id); ElMessage.success('结算已审批'); await loadFollowInvestmentSettlements() } catch (error) { ElMessage.error('审批失败: ' + error.message) } }
-const reopenFollowInvestment = async (row) => { try { await financeStore.reopenFollowInvestmentSettlement(row.id); ElMessage.success('结算已回退'); await loadFollowInvestmentSettlements() } catch (error) { ElMessage.error('回退失败: ' + error.message) } }
+const submitFollowInvestmentRecord = async () => { try { submitting.value = true; const payload = { ...followInvestmentRecordForm.value, withdraw_date: followInvestmentRecordForm.value.withdraw_date || null }; if (followInvestmentDialogMode.value === 'create') { await financeStore.createFollowInvestment(payload) } else { await financeStore.updateFollowInvestment(editingFollowInvestmentId.value, payload, { platform_code: followInvestmentQuery.value.platform_code || undefined, shop_id: followInvestmentQuery.value.shop_id || undefined, status: followInvestmentQuery.value.status || undefined }) } await loadPlatformShopSignals(); ElMessage.success('跟投记录已保存'); showFollowInvestmentDialog.value = false; resetFollowInvestmentRecordForm(); await loadFollowInvestments() } catch (error) { ElMessage.error('保存跟投记录失败: ' + error.message) } finally { submitting.value = false } }
+const archiveFollowInvestment = async (row) => { try { await ElMessageBox.confirm(`确认归档跟投记录 #${row.id} 吗？`, '归档跟投记录', { confirmButtonText: '确认归档', cancelButtonText: '取消', type: 'warning' }); await financeStore.archiveFollowInvestment(row.id, { platform_code: followInvestmentQuery.value.platform_code || undefined, shop_id: followInvestmentQuery.value.shop_id || undefined, status: followInvestmentQuery.value.status || undefined }); await loadPlatformShopSignals(); ElMessage.success('跟投记录已归档') } catch (error) { if (error !== 'cancel') ElMessage.error('归档失败: ' + (error.message || error)) } }
+const approveFollowInvestment = async (row) => { try { await financeStore.approveFollowInvestmentSettlement(row.id); await loadPlatformShopSignals(); ElMessage.success('结算已审批'); await loadFollowInvestmentSettlements() } catch (error) { ElMessage.error('审批失败: ' + error.message) } }
+const reopenFollowInvestment = async (row) => { try { await financeStore.reopenFollowInvestmentSettlement(row.id); await loadPlatformShopSignals(); ElMessage.success('结算已回退'); await loadFollowInvestmentSettlements() } catch (error) { ElMessage.error('回退失败: ' + error.message) } }
+const getShopStatus = (shop) => {
+  const hasFollowInvestment = platformFollowInvestments.value.some((item) => item.shop_id === shop.shop_id)
+  const hasSettlement = platformSettlementRows.value.some((item) => item.shop_id === shop.shop_id)
+  return {
+    hasFollowInvestment,
+    hasSettlement,
+    pendingData: !hasFollowInvestment && !hasSettlement
+  }
+}
 const formatCurrency = (num) => (!num && num !== 0) ? '0.00' : new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num)
 const formatPercentValue = (num) => (num == null || num === undefined) ? '-' : `${(Number(num) * 100).toFixed(2)}%`
 const formatDateTime = (dateTime) => (!dateTime ? '-' : new Date(dateTime).toLocaleString('zh-CN'))
-onMounted(async () => { await loadShopList(); monthlyForm.value.period_month = selectedMonth.value; await loadMonthlySettlement(); if (selectedShop.value) { await loadProfitBasis(); await loadFollowInvestments(); await loadFollowInvestmentSettlements() } })
+onMounted(async () => { await loadShopList(); await loadPlatformShopSignals(); monthlyForm.value.period_month = selectedMonth.value; await loadMonthlySettlement(); if (selectedShop.value) { await loadProfitBasis(); await loadFollowInvestments(); await loadFollowInvestmentSettlements() } })
 </script>
 
 <style scoped>
@@ -355,6 +413,14 @@ onMounted(async () => { await loadShopList(); monthlyForm.value.period_month = s
 .workspace-header { align-items: flex-start; }
 .workspace-subtitle { margin-top: 6px; color: #909399; font-size: 12px; }
 .workspace-filters { display: flex; gap: 12px; align-items: center; }
+.platform-overview-card { margin-bottom: 18px; padding: 18px 20px; border: 1px solid #ebeef5; border-radius: 12px; background: linear-gradient(180deg, #fbfdff 0%, #f6fafc 100%); }
+.platform-overview-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; font-weight: 600; }
+.platform-overview-meta { color: #909399; font-size: 12px; }
+.platform-overview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.platform-overview-item { padding: 14px 16px; border-radius: 10px; background: #fff; border: 1px solid #e8eef3; }
+.platform-overview-item.warning { background: #fffaf0; border-color: #f7d8a8; }
+.overview-label { margin-bottom: 8px; color: #606266; font-size: 12px; }
+.overview-value { font-size: 24px; font-weight: 700; color: #1f4d78; }
 .workspace-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
 .shop-list-panel { border-right: 1px solid #ebeef5; padding-right: 16px; }
 .shop-list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600; }
@@ -377,6 +443,6 @@ onMounted(async () => { await loadShopList(); monthlyForm.value.period_month = s
 .shop-tabs :deep(.el-tabs__header) { margin-bottom: 16px; }
 .inner-card { border: none; box-shadow: none; }
 .inner-toolbar { margin-bottom: 16px; }
-@media (max-width: 960px) { .workspace-layout { grid-template-columns: 1fr; } .shop-list-panel { border-right: none; padding-right: 0; } .workspace-filters { width: 100%; justify-content: flex-start; flex-wrap: wrap; } .shop-detail-header { flex-direction: column; } .shop-detail-signals { justify-content: flex-start; } }
+@media (max-width: 960px) { .platform-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .workspace-layout { grid-template-columns: 1fr; } .shop-list-panel { border-right: none; padding-right: 0; } .workspace-filters { width: 100%; justify-content: flex-start; flex-wrap: wrap; } .shop-detail-header { flex-direction: column; } .shop-detail-signals { justify-content: flex-start; } }
 @media (max-width: 768px) { .financial-management { padding: 12px; } .page-header { padding: 20px; } .page-header h1 { font-size: 24px; } }
 </style>
