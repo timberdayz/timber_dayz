@@ -819,3 +819,37 @@ class ShopCommissionConfigUpdate(BaseModel):
     allocatable_profit_rate: float = Field(
         ..., ge=0, le=1, description="可分配净利润率 0-1，如 0.8 表示 80%"
     )
+
+class EmployeePerformanceAdjustmentCreate(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM")
+    employee_code: str = Field(..., min_length=1, max_length=64)
+    adjustment_type: str = Field(..., min_length=1, max_length=32)
+    score_delta: float = Field(..., ge=-100, le=100, description="绩效分增减值，可正可负")
+    source: Optional[str] = Field(None, max_length=64)
+    reason: Optional[str] = Field(None, max_length=512)
+
+
+class EmployeePerformanceAdjustmentUpdate(BaseModel):
+    adjustment_type: Optional[str] = Field(None, min_length=1, max_length=32)
+    score_delta: Optional[float] = Field(None, ge=-100, le=100)
+    source: Optional[str] = Field(None, max_length=64)
+    reason: Optional[str] = Field(None, max_length=512)
+    status: Optional[str] = Field(None, pattern="^(active|inactive)$")
+
+
+class EmployeePerformanceAdjustmentResponse(BaseModel):
+    id: int
+    employee_code: str
+    employee_name: Optional[str] = None
+    year_month: str
+    adjustment_type: str
+    score_delta: float
+    source: Optional[str] = None
+    reason: Optional[str] = None
+    status: str
+    created_by: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

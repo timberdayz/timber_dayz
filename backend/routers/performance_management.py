@@ -794,7 +794,7 @@ async def list_performance_scores(
                     "operation_score": None,
                     "total_score": scr,
                     "rank": rank_by_code.get(ec),
-                    "performance_coefficient": 1.0 + (scr - 80) / 100 if scr else 1.0,
+                    "performance_coefficient": None,
                 })
             result = {
                 "success": True,

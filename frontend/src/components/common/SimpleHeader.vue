@@ -36,7 +36,7 @@ const pageTitle = computed(() => {
     '/inventory/aging': '⏳ 库存库龄',
     '/inventory/opening-balances': '📘 期初余额',
     '/human-resources': '👥 人力管理',
-    '/financial-management': '💰 财务管理',
+    '/financial-management': '💰 财务结算中心',
     '/store-management': '🏪 店铺管理',
     '/system-settings': '⚙️ 系统设置',
     '/account-management': '👤 账号管理',

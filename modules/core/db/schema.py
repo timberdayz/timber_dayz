@@ -4379,6 +4379,36 @@ class ShopCommissionConfig(Base):
     )
 
 
+class EmployeePerformanceAdjustment(Base):
+    """
+    A类数据表: 员工绩效调整项(月度)
+
+    用于承接考试、培训检核、人工奖惩等个人绩效加减分。
+    """
+
+    __tablename__ = "employee_performance_adjustments"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)
+    year_month = Column(String(7), nullable=False)
+    adjustment_type = Column(String(32), nullable=False)
+    score_delta = Column(Float, nullable=False, default=0.0)
+    source = Column(String(64), nullable=True)
+    reason = Column(String(512), nullable=True)
+    status = Column(String(32), nullable=False, default="active")
+    created_by = Column(String(64), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_employee_performance_adjustments_employee", "employee_code"),
+        Index("ix_employee_performance_adjustments_month", "year_month"),
+        Index("ix_employee_performance_adjustments_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
 class WorkShift(Base):
     """
     A类数据表:排班班次配置

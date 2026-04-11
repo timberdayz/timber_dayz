@@ -2,7 +2,7 @@
   <div class="financial-management">
     <!-- 页面标题 -->
     <div class="page-header">
-      <h1>💰 财务管理中心</h1>
+      <h1>💰 财务结算中心</h1>
       <p>应收管理 • 收款跟踪 • 利润分析</p>
     </div>
 

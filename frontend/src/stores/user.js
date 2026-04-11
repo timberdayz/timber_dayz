@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 import authApi from '@/api/auth'
+import { hasAnyRole, hasPermissionForRoles } from '@/utils/authRoles'
 import {
   clearPersistedAuthState,
   hasPersistedAuthSession,
@@ -64,9 +65,9 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  const hasPermission = (permission) => permissions.value.includes(permission)
+  const hasPermission = (permission) => hasPermissionForRoles(roles.value, permission)
 
-  const hasRole = (requiredRoles) => requiredRoles.some((role) => roles.value.includes(role))
+  const hasRole = (requiredRoles) => hasAnyRole(roles.value, requiredRoles)
 
   const hydrateFromStorage = () => {
     const state = readPersistedAuthState(localStorage)

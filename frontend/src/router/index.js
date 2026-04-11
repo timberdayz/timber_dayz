@@ -479,9 +479,9 @@ const routes = [
   {
     path: '/financial-overview',
     name: 'FinancialOverview',
-    component: () => import('../views/FinancialOverview.vue'),  // v4.9.1: 财务总览
+    redirect: '/financial-management',
     meta: {
-      title: '财务总览',
+      title: '??????',
       icon: 'Money',
       permission: 'financial-management',
       roles: ['admin', 'manager', 'finance']

@@ -1027,9 +1027,128 @@ async def test_shopee_products_export_wait_top_report_download_button_targets_in
     )
 
     component._latest_report_baseline_rows = [
-        ("old.xlsxdownload", "download"),
+        ("old.xlsx", "download"),
     ]
-    component._latest_report_top_snapshot = ("old.xlsxdownload", "download")
+    component._latest_report_top_snapshot = ("old.xlsx", "download")
+    component._latest_report_count_snapshot = 1
+
+    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+
+    assert await button.text_content() == "download-new"
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_wait_top_report_download_button_does_not_fallback_to_second_row_while_top_is_processing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    component._download_waiter = asyncio.get_running_loop().create_future()
+
+    old_row = _ReportRow("old.xlsx download", action_text="download-old", status_text="download-old")
+    processing_top_row = _ReportRow("new.xlsx processing", action_text="processing", status_text="processing")
+    ready_top_row = _ReportRow("new.xlsx download", action_text="download-new", status_text="download-new")
+    processing_panel = _ReportPanelLocator([processing_top_row, old_row])
+    ready_panel = _ReportPanelLocator([ready_top_row, old_row])
+    panels = iter([processing_panel, ready_panel])
+
+    async def _panel_side_effect(*args, **kwargs):
+        try:
+            return next(panels)
+        except StopIteration:
+            return ready_panel
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(side_effect=_panel_side_effect),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_detect_inserted_top_row", lambda baseline_rows, current_rows: None, raising=False)
+
+    component._latest_report_baseline_rows = [
+        ("old.xlsx", "download"),
+    ]
+    component._latest_report_top_snapshot = ("old.xlsx", "download")
+    component._latest_report_count_snapshot = 1
+
+    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+
+    assert await button.text_content() == "download-new"
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_wait_top_report_download_button_waits_for_first_row_to_change_before_clicking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    component._download_waiter = asyncio.get_running_loop().create_future()
+
+    old_top_row = _ReportRow("old.xlsx download", action_text="download-old", status_text="download-old")
+    unchanged_panel = _ReportPanelLocator([old_top_row])
+    new_top_row = _ReportRow("new.xlsx download", action_text="download-new", status_text="download-new")
+    shifted_old_row = _ReportRow("old.xlsx download", action_text="download-old", status_text="download-old")
+    ready_panel = _ReportPanelLocator([new_top_row, shifted_old_row])
+    panels = iter([unchanged_panel, ready_panel])
+
+    async def _panel_side_effect(*args, **kwargs):
+        try:
+            return next(panels)
+        except StopIteration:
+            return ready_panel
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(side_effect=_panel_side_effect),
+        raising=False,
+    )
+
+    component._latest_report_baseline_rows = [
+        ("old.xlsx", "download"),
+    ]
+    component._latest_report_top_snapshot = ("old.xlsx", "download")
+    component._latest_report_count_snapshot = 1
+
+    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+
+    assert await button.text_content() == "download-new"
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_wait_top_report_download_button_does_not_fallback_when_first_row_state_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    component._download_waiter = asyncio.get_running_loop().create_future()
+
+    unknown_top_row = _ReportRow("new.xlsx pending", action_text="查看", status_text="查看")
+    old_second_row = _ReportRow("old.xlsx download", action_text="download-old", status_text="download-old")
+    ready_top_row = _ReportRow("new.xlsx download", action_text="download-new", status_text="download-new")
+    pending_panel = _ReportPanelLocator([unknown_top_row, old_second_row])
+    ready_panel = _ReportPanelLocator([ready_top_row, old_second_row])
+    panels = iter([pending_panel, ready_panel])
+
+    async def _panel_side_effect(*args, **kwargs):
+        try:
+            return next(panels)
+        except StopIteration:
+            return ready_panel
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(side_effect=_panel_side_effect),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_detect_inserted_top_row", lambda baseline_rows, current_rows: None, raising=False)
+
+    component._latest_report_baseline_rows = [
+        ("old.xlsx", "download"),
+    ]
+    component._latest_report_top_snapshot = ("old.xlsx", "download")
     component._latest_report_count_snapshot = 1
 
     button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)

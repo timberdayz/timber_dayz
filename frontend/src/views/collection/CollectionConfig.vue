@@ -1183,6 +1183,48 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+  position: relative;
+  scrollbar-width: thin;
+  scrollbar-color: #cfd6e4 transparent;
+}
+
+.queue-list::before,
+.queue-list::after {
+  content: '';
+  position: sticky;
+  left: 0;
+  right: 4px;
+  height: 14px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.queue-list::before {
+  top: 0;
+  margin-bottom: -14px;
+  background: linear-gradient(180deg, rgba(250, 250, 250, 0.96), rgba(250, 250, 250, 0));
+}
+
+.queue-list::after {
+  bottom: 0;
+  margin-top: -14px;
+  background: linear-gradient(0deg, rgba(250, 250, 250, 0.96), rgba(250, 250, 250, 0));
+}
+
+.queue-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.queue-list::-webkit-scrollbar-thumb {
+  background: #cfd6e4;
+  border-radius: 999px;
+}
+
+.queue-list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .queue-item {

@@ -114,6 +114,10 @@ def test_collection_config_loads_config_run_queue_panel():
     assert "collectionApi.getConfigRuns(" in text
     assert "activeConfigRuns" in text
     assert "queuedConfigRuns" in text
+    assert "max-height: 360px" in text or "max-height: 420px" in text
+    assert "overflow-y: auto" in text
+    assert "::before" in text and "::after" in text
+    assert "::-webkit-scrollbar" in text
 
 
 def test_collection_config_run_uses_queue_run_feedback_not_task_id_redirect():

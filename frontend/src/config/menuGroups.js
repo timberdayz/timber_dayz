@@ -104,8 +104,7 @@ export const menuGroups = [
     order: 6,
     defaultExpanded: true,
     items: [
-      '/financial-overview',     // v4.9.1: 财务总览
-      '/financial-management',   // 跟投收益管理
+      '/financial-management',   // 财务结算中心
       '/expense-management',     // 费用管理
       '/b-cost-analysis',        // B类成本分析
       '/finance-reports',        // 财务报表
@@ -256,7 +255,7 @@ export const routeDisplayNames = {
   '/inventory-dashboard-v3': '库存看板',
   // ⚠️ v4.12.0移除：数据浏览器功能已移除
   // '/data-browser': '数据浏览器',
-  '/financial-management': '跟投收益管理',
+  '/financial-management': '财务结算中心',
   '/my-follow-investment-income': '我的跟投收益',
   // ⭐ v4.6.0新增：数据同步路由显示名称
   '/data-sync/files': '文件列表',

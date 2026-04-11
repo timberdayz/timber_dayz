@@ -1302,66 +1302,6 @@ class ShopeeProductsExport(ExportComponent):
                 return candidate, normalized
         return None, None
 
-    async def _wait_top_report_download_button(
-        self,
-        page: Any,
-        *,
-        timeout_ms: int = 180000,
-        poll_ms: int = 1500,
-    ) -> Any | None:
-        if self._download_waiter is None and hasattr(page, "wait_for_event"):
-            self._download_waiter = asyncio.create_task(
-                page.wait_for_event("download", timeout=timeout_ms)
-            )
-
-        waited = 0
-        while waited <= timeout_ms:
-            panel = await self._wait_latest_report_panel(page, timeout_ms=poll_ms, poll_ms=300)
-            if panel is not None:
-                action, text = await self._top_report_action(panel)
-                if action is not None and text:
-                    if "涓嬭浇" in text:
-                        return action
-                    if "杩涜涓" in text:
-                        if hasattr(page, "wait_for_timeout"):
-                            await page.wait_for_timeout(poll_ms)
-                        waited += poll_ms
-                        continue
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(poll_ms)
-            waited += poll_ms
-        return None
-
-    async def _wait_top_report_download_button(
-        self,
-        page: Any,
-        *,
-        timeout_ms: int = 180000,
-        poll_ms: int = 1500,
-    ) -> Any | None:
-        # Override the earlier mojibake variant with the actual Product page labels.
-        if self._download_waiter is None and hasattr(page, "wait_for_event"):
-            self._download_waiter = asyncio.create_task(
-                page.wait_for_event("download", timeout=timeout_ms)
-            )
-
-        waited = 0
-        while waited <= timeout_ms:
-            panel = await self._wait_latest_report_panel(page, timeout_ms=poll_ms, poll_ms=300)
-            if panel is not None:
-                action, text = await self._top_report_action(panel)
-                if action is not None and text:
-                    if "下载" in text:
-                        return action
-                    if "进行中" in text:
-                        if hasattr(page, "wait_for_timeout"):
-                            await page.wait_for_timeout(poll_ms)
-                        waited += poll_ms
-                        continue
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(poll_ms)
-            waited += poll_ms
-        return None
 
     def _latest_report_download_tokens(self) -> tuple[str, ...]:
         return ("\u4e0b\u8f7d", "download")
@@ -1386,6 +1326,22 @@ class ShopeeProductsExport(ExportComponent):
             return ""
         compact = re.sub(r"\s+", "", text)
         return compact.replace("\\", "/")
+
+    def _normalize_report_row_identity(self, value: str | None) -> str:
+        identity = self._normalize_report_row_text(value)
+        filename_match = re.search(r"[^/\s]+\.(?:xlsx|xls|csv|zip)", identity)
+        if filename_match is not None:
+            return filename_match.group(0)
+        status_tokens = (
+            *self._latest_report_download_tokens(),
+            *self._latest_report_processing_tokens(),
+            *self._latest_report_downloaded_tokens(),
+        )
+        for token in sorted(status_tokens, key=len, reverse=True):
+            normalized_token = self._normalize_report_row_text(token)
+            if normalized_token:
+                identity = identity.replace(normalized_token, "")
+        return identity
 
     async def _visible_report_rows(self, panel: Any) -> list[Any]:
         row_selectors = (
@@ -1428,7 +1384,7 @@ class ShopeeProductsExport(ExportComponent):
         baseline: list[tuple[str, str]] = []
         for row in await self._visible_report_rows(panel):
             try:
-                row_text = self._normalize_report_row_text(await row.text_content())
+                row_text = self._normalize_report_row_identity(await row.text_content())
             except Exception:
                 row_text = ""
             state = await self._row_status(row)
@@ -1538,7 +1494,7 @@ class ShopeeProductsExport(ExportComponent):
         state = self._row_state(row_text, status_text)
         if state == "unknown":
             return None
-        return self._normalize_report_row_text(row_text), state
+        return self._normalize_report_row_identity(row_text), state
 
     async def _capture_latest_report_top_snapshot(self, page: Any) -> None:
         panel = await self._ensure_latest_report_panel_open(page)
@@ -1558,7 +1514,7 @@ class ShopeeProductsExport(ExportComponent):
                 row_text = (await row.text_content()) or ""
             except Exception:
                 row_text = ""
-            normalized_row = self._normalize_report_row_text(row_text)
+            normalized_row = self._normalize_report_row_identity(row_text)
             state = self._row_state(row_text, action_text)
             candidates.append(
                 {
@@ -1610,10 +1566,9 @@ class ShopeeProductsExport(ExportComponent):
             )
 
         waited = 0
-        seen_processing = False
         baseline_snapshot = self._latest_report_top_snapshot
         baseline_rows = list(self._latest_report_baseline_rows)
-        target_top_row_text: str | None = None
+        target_top_row_locked = False
         while waited <= timeout_ms:
             panel = await self._ensure_latest_report_panel_open(page)
             if panel is not None:
@@ -1626,59 +1581,45 @@ class ShopeeProductsExport(ExportComponent):
                 current_count = len(await self._visible_report_rows(panel))
                 count_increased = current_count > self._latest_report_count_snapshot
                 row_candidates = await self._report_row_candidates(panel)
-                for candidate in row_candidates:
-                    if candidate["state"] == "processing":
-                        seen_processing = True
 
-                target_candidate: dict[str, Any] | None = None
-                if target_top_row_text is not None:
-                    if row_candidates and row_candidates[0]["text"] == target_top_row_text:
-                        target_candidate = row_candidates[0]
-                else:
+                top_candidate = row_candidates[0] if row_candidates else None
+                if top_candidate is not None and not target_top_row_locked:
                     inserted_top = self._detect_inserted_top_row(baseline_rows, row_candidates)
                     if inserted_top is not None:
-                        target_top_row_text = inserted_top["text"]
-                        target_candidate = inserted_top
+                        target_top_row_locked = True
+                    elif baseline_rows:
+                        baseline_first_text, baseline_first_state = baseline_rows[0]
+                        if (
+                            count_increased
+                            or current_changed
+                            or top_candidate["state"] != baseline_first_state
+                            or top_candidate["text"] != baseline_first_text
+                        ):
+                            target_top_row_locked = True
+                    elif baseline_snapshot is None or current_changed or count_increased:
+                        target_top_row_locked = True
 
-                if target_candidate is not None:
-                    target_state = target_candidate["state"]
-                    target_action = target_candidate["action"]
-                    if target_state == "processing":
+                if top_candidate is not None and target_top_row_locked:
+                    target_state = str(top_candidate["state"])
+                    target_action = top_candidate["action"]
+                    if target_state != "download":
                         if hasattr(page, "wait_for_timeout"):
                             await page.wait_for_timeout(poll_ms)
                         waited += poll_ms
                         continue
-                    if target_state == "download" and target_action is not None:
+                    if target_action is not None:
                         return target_action
 
-                changed_download_candidates: list[Any] = []
-                fallback_download_candidates: list[Any] = []
-                for candidate in row_candidates:
-                    idx = int(candidate["index"])
-                    action = candidate["action"]
-                    normalized_row = str(candidate["text"])
-                    state = str(candidate["state"])
-                    if state != "download":
+                if top_candidate is not None and baseline_rows:
+                    baseline_first_text, baseline_first_state = baseline_rows[0]
+                    if (
+                        top_candidate["text"] == baseline_first_text
+                        and top_candidate["state"] == baseline_first_state
+                    ):
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(poll_ms)
+                        waited += poll_ms
                         continue
-                    if action is None:
-                        continue
-                    baseline_changed = idx >= len(baseline_rows)
-                    if not baseline_changed and idx < len(baseline_rows):
-                        baseline_row_text, baseline_state = baseline_rows[idx]
-                        baseline_changed = (
-                            baseline_row_text != normalized_row or baseline_state != state
-                        )
-                    if baseline_changed:
-                        changed_download_candidates.append(action)
-                    else:
-                        fallback_download_candidates.append(action)
-
-                if changed_download_candidates:
-                    return changed_download_candidates[0]
-                if fallback_download_candidates and (
-                    current_changed or count_increased or baseline_snapshot is None
-                ):
-                    return fallback_download_candidates[0]
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
             waited += poll_ms
