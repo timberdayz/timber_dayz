@@ -28,6 +28,7 @@ from modules.core.db import (
     ShopProfitBasis,
 )
 from modules.core.logger import get_logger
+from backend.services.performance_coefficient import calculate_performance_coefficient
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.profit_basis_service import ProfitBasisService
 
@@ -386,11 +387,33 @@ class HRIncomeCalculationService:
 
         for employee_code, rec in commission_agg.items():
             sales_amount = rec["sales_amount"]
-            commission_amount = rec["commission_amount"]
+            raw_commission_amount = rec["commission_amount"]
             if sales_amount > 0:
-                commission_rate = commission_amount / sales_amount
+                commission_rate = raw_commission_amount / sales_amount
             else:
                 commission_rate = 0.0
+            perf_rec = performance_agg.get(employee_code, {})
+            if perf_rec.get("weighted_rate_den", 0) > 0:
+                achievement_rate = perf_rec["weighted_rate_num"] / perf_rec["weighted_rate_den"]
+            else:
+                achievement_rate = 0.0
+            if perf_rec.get("weighted_score_den", 0) > 0:
+                performance_score = perf_rec["weighted_score_num"] / perf_rec["weighted_score_den"]
+            else:
+                performance_score = min(max(achievement_rate, 0.0), 1.0) * 100.0
+            performance_score += self._to_float(
+                attendance_adjustment_by_employee.get(employee_code),
+                0.0,
+            )
+            performance_score += self._to_float(
+                manual_adjustment_by_employee.get(employee_code),
+                0.0,
+            )
+            performance_score = min(max(performance_score, 0.0), 100.0)
+            coefficient = calculate_performance_coefficient(performance_score)
+            commission_amount = raw_commission_amount * coefficient
+            if sales_amount > 0:
+                commission_rate = commission_amount / sales_amount
 
             try:
                 comm = (

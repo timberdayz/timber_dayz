@@ -1343,6 +1343,27 @@ class ShopeeProductsExport(ExportComponent):
                 identity = identity.replace(normalized_token, "")
         return identity
 
+    def _looks_like_report_entry(
+        self,
+        *,
+        identity: str,
+        state: str,
+        action_text: str | None = None,
+    ) -> bool:
+        if re.search(r"[^/\s]+\.(?:xlsx|xls|csv|zip)", identity):
+            return True
+        if state != "unknown":
+            return True
+        normalized_action = self._normalize_report_row_text(action_text)
+        if not normalized_action:
+            return False
+        known_tokens = (
+            *self._latest_report_download_tokens(),
+            *self._latest_report_processing_tokens(),
+            *self._latest_report_downloaded_tokens(),
+        )
+        return any(self._normalize_report_row_text(token) in normalized_action for token in known_tokens)
+
     async def _visible_report_rows(self, panel: Any) -> list[Any]:
         row_selectors = (
             ".list-item",
@@ -1388,7 +1409,7 @@ class ShopeeProductsExport(ExportComponent):
             except Exception:
                 row_text = ""
             state = await self._row_status(row)
-            if row_text:
+            if self._looks_like_report_entry(identity=row_text, state=state):
                 baseline.append((row_text, state))
         self._latest_report_baseline_rows = baseline
 
@@ -1482,19 +1503,11 @@ class ShopeeProductsExport(ExportComponent):
         return None, ""
 
     async def _top_report_snapshot(self, panel: Any) -> tuple[str, str] | None:
-        rows = await self._visible_report_rows(panel)
-        if not rows:
+        candidates = await self._report_row_candidates(panel)
+        if not candidates:
             return None
-        top_row = rows[0]
-        try:
-            row_text = (await top_row.text_content()) or ""
-        except Exception:
-            row_text = ""
-        status_text = await self._row_status_text(top_row)
-        state = self._row_state(row_text, status_text)
-        if state == "unknown":
-            return None
-        return self._normalize_report_row_identity(row_text), state
+        top_candidate = candidates[0]
+        return str(top_candidate["text"]), str(top_candidate["state"])
 
     async def _capture_latest_report_top_snapshot(self, page: Any) -> None:
         panel = await self._ensure_latest_report_panel_open(page)
@@ -1516,6 +1529,8 @@ class ShopeeProductsExport(ExportComponent):
                 row_text = ""
             normalized_row = self._normalize_report_row_identity(row_text)
             state = self._row_state(row_text, action_text)
+            if not self._looks_like_report_entry(identity=normalized_row, state=state, action_text=action_text):
+                continue
             candidates.append(
                 {
                     "index": idx,

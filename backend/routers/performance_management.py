@@ -57,6 +57,7 @@ from backend.services.postgresql_shop_metrics_service import (
     load_shop_monthly_metrics,
     load_shop_monthly_target_achievement,
 )
+from backend.services.performance_coefficient import calculate_performance_coefficient
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
@@ -794,7 +795,7 @@ async def list_performance_scores(
                     "operation_score": None,
                     "total_score": scr,
                     "rank": rank_by_code.get(ec),
-                    "performance_coefficient": None,
+                    "performance_coefficient": calculate_performance_coefficient(scr) if scr else calculate_performance_coefficient(0),
                 })
             result = {
                 "success": True,
@@ -1225,7 +1226,9 @@ async def calculate_performance_scores(
                     "operation_score": operation_score,
                     "total_score": round(sales_score + profit_score + key_product_score + operation_score, 4),
                     "rank": None,
-                    "performance_coefficient": 1.0,
+                    "performance_coefficient": calculate_performance_coefficient(
+                        round(sales_score + profit_score + key_product_score + operation_score, 4)
+                    ),
                     "score_details": {
                         "sales": {
                             "status": "calculated",

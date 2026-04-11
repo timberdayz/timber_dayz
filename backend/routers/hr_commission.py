@@ -23,6 +23,7 @@ from backend.schemas.hr import (
     EmployeePerformanceResponse,
     EmployeeCommissionResponse,
     ShopCommissionResponse,
+    EmployeePerformanceAdjustmentCreate, EmployeePerformanceAdjustmentResponse, EmployeePerformanceAdjustmentUpdate,
     EmployeeShopAssignmentCreate, EmployeeShopAssignmentResponse, EmployeeShopAssignmentUpdate,
     ShopCommissionConfigUpdate,
     CopyFromPrevMonthBody,
@@ -30,6 +31,7 @@ from backend.schemas.hr import (
 from modules.core.db import (
     ShopAccount, Employee, DimShop, DimUser,
     EmployeePerformance, EmployeeCommission, ShopCommission,
+    EmployeePerformanceAdjustment,
     EmployeeShopAssignment, ShopCommissionConfig, EmployeeTarget, ShopProfitBasis,
 )
 
@@ -42,6 +44,135 @@ def year_month_to_first_day(year_month: str) -> date:
 
 def _shop_key(platform_code: str | None, shop_id: str | None) -> str:
     return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
+
+
+async def _list_employee_performance_adjustments(
+    *,
+    year_month: Optional[str],
+    employee_code: Optional[str],
+    status: Optional[str],
+    page: int,
+    page_size: int,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    query = select(EmployeePerformanceAdjustment)
+    conditions = []
+    if year_month:
+        conditions.append(EmployeePerformanceAdjustment.year_month == year_month)
+    if employee_code:
+        conditions.append(EmployeePerformanceAdjustment.employee_code == employee_code)
+    if status:
+        conditions.append(EmployeePerformanceAdjustment.status == status)
+    if conditions:
+        query = query.where(and_(*conditions))
+
+    total = (
+        await db.execute(select(func.count()).select_from(query.subquery()))
+    ).scalar() or 0
+    rows = (
+        await db.execute(
+            query.order_by(
+                EmployeePerformanceAdjustment.year_month.desc(),
+                EmployeePerformanceAdjustment.employee_code,
+                EmployeePerformanceAdjustment.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+
+    employee_codes = sorted({row.employee_code for row in rows if getattr(row, "employee_code", None)})
+    name_map: Dict[str, str] = {}
+    if employee_codes:
+        name_rows = (
+            await db.execute(
+                select(Employee.employee_code, Employee.name).where(Employee.employee_code.in_(employee_codes))
+            )
+        ).all()
+        name_map = {row[0]: row[1] or row[0] for row in name_rows}
+
+    items = []
+    for row in rows:
+        payload = EmployeePerformanceAdjustmentResponse.model_validate(row)
+        payload.employee_name = name_map.get(row.employee_code, row.employee_code)
+        items.append(payload)
+    return {"success": True, "data": {"items": items, "total": total}}
+
+
+async def _create_employee_performance_adjustment(
+    *,
+    body: EmployeePerformanceAdjustmentCreate,
+    db: AsyncSession,
+    current_user,
+) -> Dict[str, Any]:
+    employee = (
+        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+    ).scalar_one_or_none()
+    if not employee:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+
+    record = EmployeePerformanceAdjustment(
+        employee_code=body.employee_code,
+        year_month=body.year_month,
+        adjustment_type=body.adjustment_type,
+        score_delta=body.score_delta,
+        source=body.source,
+        reason=body.reason,
+        status="active",
+        created_by=str(getattr(current_user, "username", None) or getattr(current_user, "user_id", None) or "system"),
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    payload = EmployeePerformanceAdjustmentResponse.model_validate(record)
+    payload.employee_name = getattr(employee, "name", None) or record.employee_code
+    return {"success": True, "data": payload}
+
+
+async def _update_employee_performance_adjustment(
+    *,
+    adjustment_id: int,
+    body: EmployeePerformanceAdjustmentUpdate,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    record = (
+        await db.execute(
+            select(EmployeePerformanceAdjustment).where(EmployeePerformanceAdjustment.id == adjustment_id)
+        )
+    ).scalar_one_or_none()
+    if not record:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效调整项不存在: {adjustment_id}", status_code=404)
+
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(record, key, value)
+    record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(record)
+    employee_name = (
+        await db.execute(select(Employee.name).where(Employee.employee_code == record.employee_code))
+    ).scalar_one_or_none()
+    payload = EmployeePerformanceAdjustmentResponse.model_validate(record)
+    payload.employee_name = employee_name or record.employee_code
+    return {"success": True, "data": payload}
+
+
+async def _delete_employee_performance_adjustment(
+    *,
+    adjustment_id: int,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    record = (
+        await db.execute(
+            select(EmployeePerformanceAdjustment).where(EmployeePerformanceAdjustment.id == adjustment_id)
+        )
+    ).scalar_one_or_none()
+    if not record:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效调整项不存在: {adjustment_id}", status_code=404)
+
+    record.status = "inactive"
+    record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"success": True, "data": {"id": adjustment_id, "status": "inactive"}}
 
 
 async def _load_profit_basis_map(
@@ -122,6 +253,84 @@ async def list_employee_performance(
 # ============================================================================
 # 提成查询API（只读）
 # ============================================================================
+
+@router.get("/performance-adjustments")
+async def list_employee_performance_adjustments(
+    year_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    employee_code: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _list_employee_performance_adjustments(
+            year_month=year_month,
+            employee_code=employee_code,
+            status=status,
+            page=page,
+            page_size=page_size,
+            db=db,
+        )
+    except Exception as e:
+        logger.error(f"获取个人绩效调整项列表失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人绩效调整项列表失败: {str(e)}", status_code=500)
+
+
+@router.post("/performance-adjustments")
+async def create_employee_performance_adjustment(
+    body: EmployeePerformanceAdjustmentCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _create_employee_performance_adjustment(
+            body=body,
+            db=db,
+            current_user=current_user,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"创建个人绩效调整项失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建个人绩效调整项失败: {str(e)}", status_code=500)
+
+
+@router.put("/performance-adjustments/{adjustment_id}")
+async def update_employee_performance_adjustment(
+    adjustment_id: int,
+    body: EmployeePerformanceAdjustmentUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _update_employee_performance_adjustment(
+            adjustment_id=adjustment_id,
+            body=body,
+            db=db,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"更新个人绩效调整项失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新个人绩效调整项失败: {str(e)}", status_code=500)
+
+
+@router.delete("/performance-adjustments/{adjustment_id}")
+async def delete_employee_performance_adjustment(
+    adjustment_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _delete_employee_performance_adjustment(
+            adjustment_id=adjustment_id,
+            db=db,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"停用个人绩效调整项失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"停用个人绩效调整项失败: {str(e)}", status_code=500)
+
 
 @router.get("/commissions/employee", response_model=List[EmployeeCommissionResponse])
 async def list_employee_commissions(

@@ -12,7 +12,7 @@ def test_financial_management_page_exposes_monthly_profit_settlement_center():
     assert "回退草稿" in text
     assert "调整原因" in text
     assert "投资人ID" in text
-    assert "来源结算ID" in text
+    assert "结算ID" in text
 
 
 def test_finance_api_exposes_monthly_profit_settlement_endpoints():

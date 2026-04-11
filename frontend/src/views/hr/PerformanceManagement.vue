@@ -13,13 +13,13 @@
         placeholder="选择月份"
         size="default"
         style="width: 180px;"
-        @change="loadPerformanceList"
+        @change="handlePeriodChange"
       />
       <el-radio-group v-model="filters.groupBy" size="default" @change="loadPerformanceList">
         <el-radio-button value="shop">按店铺</el-radio-button>
         <el-radio-button value="person">按人员</el-radio-button>
       </el-radio-group>
-      <el-button :icon="Refresh" @click="loadPerformanceList">刷新</el-button>
+      <el-button :icon="Refresh" @click="handleRefreshAll">刷新</el-button>
       <el-button
         type="warning"
         :loading="calculating"
@@ -134,6 +134,46 @@
     </el-card>
     
     <!-- 绩效详情对话框 -->
+
+
+    <el-card v-if="hasPermission('performance:config')" style="margin-top: 20px;">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>ä¸ªäººç»©æè°æ´é¡¹</span>
+          <div style="display: flex; gap: 8px;">
+            <el-button size="small" @click="loadAdjustmentList">å·æ°</el-button>
+            <el-button size="small" type="primary" @click="openCreateAdjustment">æ°å¢è°æ´é¡¹</el-button>
+          </div>
+        </div>
+      </template>
+      <el-table :data="adjustmentList.data" stripe v-loading="adjustmentList.loading" class="erp-table" border>
+        <el-table-column prop="employee_name" label="äººå" width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.employee_name || row.employee_code || '?' }}</template>
+        </el-table-column>
+        <el-table-column prop="year_month" label="æä»½" width="100" />
+        <el-table-column prop="adjustment_type" label="è°æ´ç±»å" width="140" />
+        <el-table-column prop="score_delta" label="åå¼åå" width="100" align="right">
+          <template #default="{ row }">
+            <el-tag :type="Number(row.score_delta || 0) >= 0 ? 'success' : 'danger'" size="small">{{ Number(row.score_delta || 0) > 0 ? '+' : '' }}{{ Number(row.score_delta || 0).toFixed(1) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="source" label="æ¥æº" width="140" show-overflow-tooltip />
+        <el-table-column prop="reason" label="åå /å¤æ³¨" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="status" label="ç¶æ" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? 'å¯ç¨' : 'åç¨' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="æä½" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" link @click="openEditAdjustment(row)">å·æ°</el-button>
+            <el-button size="small" type="danger" link @click="handleDeleteAdjustment(row)">å·æ°</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="adjustmentList.data.length === 0 && !adjustmentList.loading" style="padding: 24px; text-align: center; color: #909399;">ä¸ªäººç»©æè°æ´é¡¹??????</div>
+    </el-card>
+
     <el-dialog
       v-model="detailVisible"
       title="绩效详情"
@@ -241,6 +281,37 @@
         <el-button type="primary" @click="handleConfigSubmit" :loading="configSubmitting" :disabled="totalWeight !== 100">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="adjustmentDialogVisible"
+      :title="adjustmentMode === 'create' ? 'ä¸ªäººç»©æè°æ´é¡¹??' : 'ä¸ªäººç»©æè°æ´é¡¹??'"
+      width="520px"
+    >
+      <el-form :model="adjustmentForm" label-width="110px">
+        <el-form-item label="æä»½"><el-input v-model="adjustmentForm.year_month" disabled /></el-form-item>
+        <el-form-item label="äººå" required>
+          <el-select v-model="adjustmentForm.employee_code" filterable placeholder="éæ©äººå" style="width: 100%;">
+            <el-option v-for="employee in adjustmentEmployeeOptions" :key="employee.employee_code" :label="`${employee.name} (${employee.employee_code})`" :value="employee.employee_code" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="è°æ´ç±»å" required>
+          <el-select v-model="adjustmentForm.adjustment_type" placeholder="éæ©è°æ´ç±»å" style="width: 100%;">
+            <el-option label="èè¯" value="exam_score" />
+            <el-option label="å¹è®­æ£æ ¸" value="training_check" />
+            <el-option label="äººå·¥å¥æ©" value="manual_other" />
+            <el-option label="èå¤æ£å" value="attendance_penalty" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="è°æ´ç±»å" required><el-input-number v-model="adjustmentForm.score_delta" :min="-100" :max="100" :step="0.5" :precision="1" style="width: 100%;" /></el-form-item>
+        <el-form-item label="æ¥æº"><el-input v-model="adjustmentForm.source" placeholder="ä¾å¦ manual_exam / training_review" /></el-form-item>
+        <el-form-item label="??/??"><el-input v-model="adjustmentForm.reason" type="textarea" :rows="3" placeholder="ä¸ªäººç»©æè°æ´é¡¹?" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="adjustmentDialogVisible = false">å·æ°</el-button>
+        <el-button type="primary" :loading="adjustmentSubmitting" @click="handleSubmitAdjustment">å·æ°</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -312,6 +383,17 @@ const calculating = ref(false)
 const configVisible = ref(false)
 const configSubmitting = ref(false)
 const configFormRef = ref(null)
+const employeeDirectory = ref([])
+const adjustmentDialogVisible = ref(false)
+const adjustmentSubmitting = ref(false)
+// ä¸ªäººç»©æè°æ´é¡¹
+const adjustmentMode = ref('create')
+
+const adjustmentList = reactive({
+  data: [],
+  total: 0,
+  loading: false
+})
 
 // 配置表单
 const configForm = reactive({
@@ -330,6 +412,15 @@ const weightConfig = reactive({
   key_product_weight: 25,
   operation_weight: 20
 })
+const adjustmentForm = reactive({
+  id: null,
+  year_month: '',
+  employee_code: '',
+  adjustment_type: 'exam_score',
+  score_delta: 0,
+  source: '',
+  reason: ''
+})
 
 // 总权重计算
 const totalWeight = computed(() => {
@@ -341,6 +432,10 @@ const formulaText = computed(() => {
 })
 
 // 表单验证规则
+const adjustmentEmployeeOptions = computed(() => {
+  return (employeeDirectory.value || []).filter((item) => !item.status || item.status === 'active')
+})
+
 const configRules = {
   sales_weight: [
     { required: true, message: '销售额权重不能为空', trigger: 'blur' },
@@ -491,6 +586,124 @@ const loadWeightConfig = async () => {
   }
 }
 
+const loadEmployeeDirectory = async () => {
+  if (!hasPermission('performance:config')) return
+  try {
+    const response = await api.getHrEmployees({ page: 1, page_size: 500 })
+    const data = Array.isArray(response) ? response : (response?.items || response?.data?.items || response?.data || [])
+    employeeDirectory.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    employeeDirectory.value = []
+  }
+}
+
+const loadAdjustmentList = async () => {
+  if (!hasPermission('performance:config')) return
+  adjustmentList.loading = true
+  try {
+    const response = await api.getHrPerformanceAdjustments({
+      year_month: typeof filters.period === 'string' ? filters.period : undefined,
+      page: 1,
+      page_size: 100
+    })
+    adjustmentList.data = response?.items || []
+    adjustmentList.total = response?.total || 0
+  } catch (error) {
+    adjustmentList.data = []
+    adjustmentList.total = 0
+    handleApiError(error, { showMessage: true, logError: true })
+  } finally {
+    adjustmentList.loading = false
+  }
+}
+
+const handleRefreshAll = async () => {
+  await Promise.all([loadPerformanceList(), loadAdjustmentList()])
+}
+
+const handlePeriodChange = async () => {
+  await handleRefreshAll()
+}
+
+const resetAdjustmentForm = () => {
+  adjustmentForm.id = null
+  adjustmentForm.year_month = typeof filters.period === 'string' ? filters.period : ''
+  adjustmentForm.employee_code = ''
+  adjustmentForm.adjustment_type = 'exam_score'
+  adjustmentForm.score_delta = 0
+  adjustmentForm.source = ''
+  adjustmentForm.reason = ''
+}
+
+const openCreateAdjustment = () => {
+  adjustmentMode.value = 'create'
+  resetAdjustmentForm()
+  adjustmentDialogVisible.value = true
+}
+
+const openEditAdjustment = (row) => {
+  adjustmentMode.value = 'edit'
+  adjustmentForm.id = row.id
+  adjustmentForm.year_month = row.year_month
+  adjustmentForm.employee_code = row.employee_code
+  adjustmentForm.adjustment_type = row.adjustment_type
+  adjustmentForm.score_delta = Number(row.score_delta || 0)
+  adjustmentForm.source = row.source || ''
+  adjustmentForm.reason = row.reason || ''
+  adjustmentDialogVisible.value = true
+}
+
+const handleSubmitAdjustment = async () => {
+  if (!adjustmentForm.year_month) {
+    ElMessage.warning('请选择月份')
+    return
+  }
+  if (!adjustmentForm.employee_code) {
+    ElMessage.warning('请选择月份')
+    return
+  }
+  adjustmentSubmitting.value = true
+  try {
+    const payload = {
+      year_month: adjustmentForm.year_month,
+      employee_code: adjustmentForm.employee_code,
+      adjustment_type: adjustmentForm.adjustment_type,
+      score_delta: Number(adjustmentForm.score_delta || 0),
+      source: adjustmentForm.source || null,
+      reason: adjustmentForm.reason || null
+    }
+    if (adjustmentMode.value === 'create') {
+      await api.createHrPerformanceAdjustment(payload)
+    } else {
+      await api.updateHrPerformanceAdjustment(adjustmentForm.id, payload)
+    }
+    ElMessage.success('ä¸ªäººç»©æè°æ´é¡¹????')
+    adjustmentDialogVisible.value = false
+    await loadAdjustmentList()
+  } catch (error) {
+    handleApiError(error, { showMessage: true, logError: true })
+  } finally {
+    adjustmentSubmitting.value = false
+  }
+}
+
+const handleDeleteAdjustment = async (row) => {
+  try {
+    await ElMessageBox.confirm('ä¸ªäººç»©æè°æ´é¡¹ä¸ªäººç»©æè°æ´é¡¹', '????', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
+    await api.deleteHrPerformanceAdjustment(row.id)
+    ElMessage.success('ä¸ªäººç»©æè°æ´é¡¹')
+    await loadAdjustmentList()
+  } catch (error) {
+    if (error !== 'cancel') {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
+  }
+}
+
 const handleRecalculate = async () => {
   const period = typeof filters.period === 'string'
     ? filters.period
@@ -512,7 +725,7 @@ const handleRecalculate = async () => {
         confirmButtonText: '知道了'
       })
     }
-    await loadPerformanceList()
+    await handleRefreshAll()
   } catch (error) {
     const code = error?.response?.data?.data?.error_code
     if (code === 'PERF_CALC_NOT_READY') {
@@ -612,9 +825,10 @@ const handleExport = () => {
 
 // formatCurrency 已从 @/utils/dataFormatter 导入，无需重复声明
 
-onMounted(() => {
-  loadWeightConfig()
-  loadPerformanceList()
+onMounted(async () => {
+  await loadWeightConfig()
+  await loadEmployeeDirectory()
+  await handleRefreshAll()
 })
 </script>
 

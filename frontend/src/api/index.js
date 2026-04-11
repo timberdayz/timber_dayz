@@ -1905,6 +1905,18 @@ export default {
   async getHrPerformance(params = {}) {
     return await this._get('/hr/performance', { params })
   },
+  async getHrPerformanceAdjustments(params = {}) {
+    return await this._get('/hr/performance-adjustments', { params })
+  },
+  async createHrPerformanceAdjustment(data) {
+    return await this._post('/hr/performance-adjustments', data)
+  },
+  async updateHrPerformanceAdjustment(adjustmentId, data) {
+    return await this._put(`/hr/performance-adjustments/${adjustmentId}`, data)
+  },
+  async deleteHrPerformanceAdjustment(adjustmentId) {
+    return await this._delete(`/hr/performance-adjustments/${adjustmentId}`)
+  },
 
   // === 提成查询（只读） ===
   async getHrEmployeeCommissions(params = {}) {
