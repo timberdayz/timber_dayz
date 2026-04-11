@@ -49,3 +49,14 @@ def test_financial_management_page_supports_shop_filters_and_exception_visualiza
     assert "当前店铺异常提示" in text
     assert "shopFilterMode" in text
     assert "shopExceptionItems" in text
+
+
+def test_financial_management_page_exposes_formal_settlement_rules():
+    text = Path("frontend/src/views/FinancialManagement.vue").read_text(encoding="utf-8")
+
+    assert "规则口径" in text
+    assert "可继续结算店铺" in text
+    assert "已具备结算信号" in text
+    assert "status.canSettle" in text
+    assert "status.pendingData" in text
+    assert "status.hasException" in text

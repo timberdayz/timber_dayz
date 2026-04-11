@@ -90,6 +90,10 @@
             <div class="overview-value">{{ platformShopStats.total }}</div>
           </div>
           <div class="platform-overview-item">
+            <div class="overview-label">可继续结算店铺</div>
+            <div class="overview-value">{{ platformShopStats.canSettle }}</div>
+          </div>
+          <div class="platform-overview-item">
             <div class="overview-label">有跟投记录店铺</div>
             <div class="overview-value">{{ platformShopStats.withFollowInvestment }}</div>
           </div>
@@ -100,6 +104,15 @@
           <div class="platform-overview-item warning">
             <div class="overview-label">待补经营数据</div>
             <div class="overview-value">{{ platformShopStats.pendingData }}</div>
+          </div>
+        </div>
+        <div class="rule-summary-card">
+          <div class="rule-summary-title">规则口径</div>
+          <div class="rule-summary-list">
+            <div>已具备结算信号：同时存在跟投记录与当月结算台账。</div>
+            <div>可继续结算店铺：已具备结算信号，且可进入单店结算处理。</div>
+            <div>待补经营数据：既没有跟投记录，也没有当月结算台账。</div>
+            <div>异常店铺：缺少结算台账，或仍处于待补经营数据状态。</div>
           </div>
         </div>
       </div>
@@ -143,8 +156,10 @@
                 <div class="shop-row-tags">
                   <el-tag v-if="selectedShop?.shop_id === shop.shop_id" size="small" type="primary">当前</el-tag>
                   <el-tag size="small" :type="shop.enabled === false ? 'danger' : 'success'">{{ shop.enabled === false ? '停用' : '可用' }}</el-tag>
+                  <el-tag v-if="getShopStatus(shop).canSettle" size="small" type="success">可继续结算</el-tag>
                   <el-tag v-if="getShopStatus(shop).hasFollowInvestment" size="small" type="warning">有跟投记录</el-tag>
                   <el-tag v-if="getShopStatus(shop).hasSettlement" size="small" type="info">有结算台账</el-tag>
+                  <el-tag v-if="getShopStatus(shop).hasException" size="small" type="danger">异常</el-tag>
                   <el-tag v-if="getShopStatus(shop).pendingData" size="small" effect="plain">待补经营数据</el-tag>
                 </div>
               </div>
@@ -354,14 +369,19 @@ const filteredShops = computed(() => {
   })
 })
 const platformShopStats = computed(() => {
-  const followShopIds = new Set(platformFollowInvestments.value.map((item) => item.shop_id).filter(Boolean))
-  const settlementShopIds = new Set(platformSettlementRows.value.map((item) => item.shop_id).filter(Boolean))
   const total = filteredShops.value.length
-  const withFollowInvestment = filteredShops.value.filter((shop) => followShopIds.has(shop.shop_id)).length
-  const withSettlement = filteredShops.value.filter((shop) => settlementShopIds.has(shop.shop_id)).length
-  const pendingData = filteredShops.value.filter((shop) => !followShopIds.has(shop.shop_id) && !settlementShopIds.has(shop.shop_id)).length
+  const canSettle = filteredShops.value.filter((shop) => {
+    const status = getShopStatus(shop)
+    return status.canSettle
+  }).length
+  const withFollowInvestment = filteredShops.value.filter((shop) => getShopStatus(shop).hasFollowInvestment).length
+  const withSettlement = filteredShops.value.filter((shop) => getShopStatus(shop).hasSettlement).length
+  const pendingData = filteredShops.value.filter((shop) => {
+    const status = getShopStatus(shop)
+    return status.pendingData
+  }).length
 
-  return { total, withFollowInvestment, withSettlement, pendingData }
+  return { total, canSettle, withFollowInvestment, withSettlement, pendingData }
 })
 const shopExceptionItems = computed(() => {
   if (!selectedShop.value) return []
@@ -438,11 +458,15 @@ const reopenFollowInvestment = async (row) => { try { await financeStore.reopenF
 const getShopStatus = (shop) => {
   const hasFollowInvestment = platformFollowInvestments.value.some((item) => item.shop_id === shop.shop_id)
   const hasSettlement = platformSettlementRows.value.some((item) => item.shop_id === shop.shop_id)
+  const canSettle = hasFollowInvestment && hasSettlement
+  const pendingData = !hasFollowInvestment && !hasSettlement
+  const hasException = pendingData || !hasSettlement
   return {
     hasFollowInvestment,
     hasSettlement,
-    pendingData: !hasFollowInvestment && !hasSettlement,
-    hasException: !hasSettlement || !hasFollowInvestment
+    canSettle,
+    pendingData,
+    hasException
   }
 }
 const formatCurrency = (num) => (!num && num !== 0) ? '0.00' : new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num)
@@ -481,6 +505,9 @@ onMounted(async () => { await loadShopList(); await loadPlatformShopSignals(); m
 .platform-overview-item.warning { background: #fffaf0; border-color: #f7d8a8; }
 .overview-label { margin-bottom: 8px; color: #606266; font-size: 12px; }
 .overview-value { font-size: 24px; font-weight: 700; color: #1f4d78; }
+.rule-summary-card { margin-top: 14px; padding: 14px 16px; border-radius: 10px; border: 1px dashed #c8d7e1; background: rgba(255, 255, 255, 0.75); }
+.rule-summary-title { margin-bottom: 8px; color: #1f4d78; font-size: 13px; font-weight: 700; }
+.rule-summary-list { display: grid; gap: 6px; color: #4f6474; font-size: 12px; line-height: 1.5; }
 .workspace-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
 .shop-list-panel { border-right: 1px solid #ebeef5; padding-right: 16px; }
 .shop-list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600; }
