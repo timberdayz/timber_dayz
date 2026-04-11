@@ -76,7 +76,17 @@ export const deleteConfig = async (id) => {
 
 export const runConfig = async (id) => {
   const response = await api.post(`/collection/configs/${id}/run`)
+  return response || null
+}
+
+export const getConfigRuns = async (params = {}) => {
+  const response = await api.get('/collection/config-runs', { params })
   return response || []
+}
+
+export const getConfigRun = async (runId) => {
+  const response = await api.get(`/collection/config-runs/${runId}`)
+  return response
 }
 
 // ============================================================
@@ -429,6 +439,8 @@ export default {
   updateConfig,
   deleteConfig,
   runConfig,
+  getConfigRuns,
+  getConfigRun,
   
   // 账号管理
   getAccounts,
