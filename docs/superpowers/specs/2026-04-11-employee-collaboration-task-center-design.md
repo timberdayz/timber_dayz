@@ -526,6 +526,23 @@ Recommended first source set:
 
 These are frequent, structured, and easy to reason about operationally.
 
+## Current Implementation Note
+
+The first implementation pass now has:
+- collaboration task tables, service, API, and notifications
+- a real `我的任务` page and task detail page
+- backend source synchronization for:
+  - monthly cost entry
+  - performance confirmation
+- task-detail links into corresponding business pages
+
+The following items remain intentionally incomplete:
+- business-page task writeback in the existing finance and performance public pages
+- hard enforcement of one supervisor per `year_month + platform_code + shop_id`
+- true replenishment automation
+
+Replenishment should still be treated as a bridge source until the procurement runtime is production-ready.
+
 ## Out Of Scope For V1
 
 - full email / SMS / enterprise-chat delivery
