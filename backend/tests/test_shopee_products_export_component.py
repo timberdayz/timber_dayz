@@ -1006,9 +1006,9 @@ async def test_shopee_products_export_wait_top_report_download_button_scans_beyo
     component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
     component._download_waiter = asyncio.get_running_loop().create_future()
 
-    old_row = _ReportRow("old.xlsx 下载", action_text="下载-old", status_text="下载-old")
-    processing_row = _ReportRow("new.xlsx 进行中", action_text="进行中", status_text="进行中")
-    ready_row = _ReportRow("new.xlsx 下载", action_text="下载-new", status_text="下载-new")
+    old_row = _ReportRow("old.xlsx download", action_text="download-old", status_text="download-old")
+    processing_row = _ReportRow("new.xlsx processing", action_text="processing", status_text="processing")
+    ready_row = _ReportRow("new.xlsx download", action_text="download-new", status_text="download-new")
     processing_panel = _ReportPanelLocator([old_row, processing_row])
     ready_panel = _ReportPanelLocator([old_row, ready_row])
     panels = iter([processing_panel, ready_panel])
@@ -1027,15 +1027,15 @@ async def test_shopee_products_export_wait_top_report_download_button_scans_beyo
     )
 
     component._latest_report_baseline_rows = [
-        ("old.xlsx下载", "download"),
-        ("new.xlsx进行中", "processing"),
+        ("old.xlsxdownload", "download"),
+        ("new.xlsxprocessing", "processing"),
     ]
-    component._latest_report_top_snapshot = ("old.xlsx下载", "download")
+    component._latest_report_top_snapshot = ("old.xlsxdownload", "download")
     component._latest_report_count_snapshot = 2
 
     button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
 
-    assert await button.text_content() == "下载-new"
+    assert await button.text_content() == "download-new"
 
 
 @pytest.mark.asyncio

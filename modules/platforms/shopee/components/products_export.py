@@ -1611,7 +1611,7 @@ class ShopeeProductsExport(ExportComponent):
                 if changed_download_candidates:
                     return changed_download_candidates[0]
                 if fallback_download_candidates and (
-                    seen_processing or current_changed or count_increased or baseline_snapshot is None
+                    current_changed or count_increased or baseline_snapshot is None
                 ):
                     return fallback_download_candidates[0]
             if hasattr(page, "wait_for_timeout"):
