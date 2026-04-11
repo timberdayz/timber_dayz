@@ -269,6 +269,7 @@ def test_calculate_month_employee_performance_uses_store_total_score():
             shop_id="S1",
             period="2026-03",
             total_score=92.0,
+            performance_coefficient=1.2,
             score_details={
                 "sales": {"target": 900.0},
                 "summary": {"status": "complete"},
@@ -279,6 +280,7 @@ def test_calculate_month_employee_performance_uses_store_total_score():
             shop_id="S2",
             period="2026-03",
             total_score=80.0,
+            performance_coefficient=0.9,
             score_details={
                 "sales": {"target": 100.0},
                 "summary": {"status": "complete"},
@@ -334,8 +336,8 @@ def test_calculate_month_employee_performance_uses_store_total_score():
     assert result["employee_count"] == 1
     commission = next(x for x in added if isinstance(x, EmployeeCommission))
     perf = next(x for x in added if isinstance(x, EmployeePerformance))
-    assert commission.commission_amount == pytest.approx(180.0)
-    assert commission.commission_rate == pytest.approx(1.5)
+    assert commission.commission_amount == pytest.approx(172.5)
+    assert commission.commission_rate == pytest.approx(1.4375)
     assert perf.actual_sales == pytest.approx(1200.0)
     assert perf.achievement_rate == pytest.approx((60.0 * 1000.0 + 50.0 * 200.0) / 1200.0 / 100.0)
     assert perf.performance_score == pytest.approx(90.8)

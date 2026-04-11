@@ -111,6 +111,14 @@
             <el-tag type="info">{{ filteredShops.length }} 家</el-tag>
           </div>
           <div class="shop-list-toolbar">
+            <div class="shop-filter-block">
+              <div class="shop-filter-label">店铺筛选</div>
+              <el-radio-group v-model="shopFilterMode" size="small">
+                <el-radio-button label="all">全部店铺</el-radio-button>
+                <el-radio-button label="exception">只看异常店铺</el-radio-button>
+                <el-radio-button label="pending">只看待补经营数据</el-radio-button>
+              </el-radio-group>
+            </div>
             <el-input
               v-model="shopKeyword"
               clearable
@@ -161,7 +169,22 @@
           </div>
 
           <el-empty v-if="!selectedShop" description="请先从左侧店铺列表选择一个店铺" />
-          <el-tabs v-else v-model="activeShopTab" class="shop-tabs">
+          <div v-else>
+            <el-card class="shop-exception-card" v-if="shopExceptionItems.length">
+              <template #header>
+                <div class="card-header">
+                  <span>当前店铺异常提示</span>
+                  <el-tag type="danger">{{ shopExceptionItems.length }} 项</el-tag>
+                </div>
+              </template>
+              <div class="shop-exception-list">
+                <div v-for="item in shopExceptionItems" :key="item.key" class="shop-exception-item">
+                  <div class="shop-exception-title">{{ item.title }}</div>
+                  <div class="shop-exception-desc">{{ item.description }}</div>
+                </div>
+              </div>
+            </el-card>
+            <el-tabs v-model="activeShopTab" class="shop-tabs">
             <el-tab-pane label="店铺结算净利润口径" name="basis">
               <el-card class="inner-card">
                 <el-form :inline="true" class="filter-form">
@@ -248,7 +271,8 @@
                 </el-table>
               </el-card>
             </el-tab-pane>
-          </el-tabs>
+            </el-tabs>
+          </div>
         </section>
       </div>
     </el-card>
@@ -296,6 +320,7 @@ const activeShopTab = ref('basis')
 const selectedMonth = ref(currentMonth)
 const selectedPlatform = ref('shopee')
 const shopKeyword = ref('')
+const shopFilterMode = ref('all')
 const platformLabels = { shopee: 'Shopee', tiktok: 'TikTok', amazon: 'Amazon', miaoshou: '妙手ERP' }
 const allShops = ref([])
 const selectedShop = ref(null)
@@ -321,6 +346,9 @@ const filteredShops = computed(() => {
   const keyword = shopKeyword.value.trim().toLowerCase()
   return allShops.value.filter((shop) => {
     if (shop.platform_code !== selectedPlatform.value) return false
+    const status = getShopStatus(shop)
+    if (shopFilterMode.value === 'exception' && !status.hasException) return false
+    if (shopFilterMode.value === 'pending' && !status.pendingData) return false
     if (!keyword) return true
     return `${shop.shop_name || ''} ${shop.shop_id || ''}`.toLowerCase().includes(keyword)
   })
@@ -334,6 +362,37 @@ const platformShopStats = computed(() => {
   const pendingData = filteredShops.value.filter((shop) => !followShopIds.has(shop.shop_id) && !settlementShopIds.has(shop.shop_id)).length
 
   return { total, withFollowInvestment, withSettlement, pendingData }
+})
+const shopExceptionItems = computed(() => {
+  if (!selectedShop.value) return []
+  const status = getShopStatus(selectedShop.value)
+  const items = []
+
+  if (status.pendingData) {
+    items.push({
+      key: 'pending-data',
+      title: '缺少经营沉淀数据',
+      description: '当前店铺既没有跟投记录，也没有当月结算台账，建议先核对利润口径和跟投数据。'
+    })
+  }
+
+  if (!financeStore.profitBasis.data) {
+    items.push({
+      key: 'profit-basis',
+      title: '尚未加载利润口径',
+      description: '请先查询或重算店铺结算净利润口径，再继续后续试算和审批。'
+    })
+  }
+
+  if (!status.hasSettlement) {
+    items.push({
+      key: 'settlement-ledger',
+      title: '缺少当月结算台账',
+      description: '当前月份还没有结算台账，建议先完成跟投收益试算或检查月度结算生成流程。'
+    })
+  }
+
+  return items
 })
 
 const syncMonthlyForm = (payload) => { const summary = payload?.summary; if (!summary) return; const firstAdjustment = payload?.adjustments?.[0] || null; monthlyForm.value = { period_month: summary.period_month || currentMonth, personnel_target_ratio: Number(summary.personnel_target_ratio ?? 0.3), follow_target_ratio: Number(summary.follow_target_ratio ?? 0.2), company_target_ratio: Number(summary.company_target_ratio ?? 0.5), adjustment_amount: Number(summary.adjustment_amount ?? 0), adjustment_reason: firstAdjustment?.reason || '' } }
@@ -356,7 +415,7 @@ const loadPlatformShopSignals = async () => {
   platformSettlementRows.value = settlementResponse?.data || settlementResponse || []
 }
 const selectShop = (shop) => { selectedShop.value = shop; syncSelectedShopForms(); financeStore.followInvestmentSettlement.data = { settlement: null, details: [] }; financeStore.profitBasis.data = null; loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() }
-const handlePlatformChange = async () => { shopKeyword.value = ''; selectedShop.value = filteredShops.value[0] || null; syncSelectedShopForms(); await loadPlatformShopSignals(); if (selectedShop.value) { loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() } }
+const handlePlatformChange = async () => { shopKeyword.value = ''; shopFilterMode.value = 'all'; selectedShop.value = filteredShops.value[0] || null; syncSelectedShopForms(); await loadPlatformShopSignals(); if (selectedShop.value) { loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() } }
 const handleMonthChange = async () => { syncSelectedShopForms(); loadMonthlySettlement(); await loadPlatformShopSignals(); if (selectedShop.value) { loadProfitBasis(); loadFollowInvestments(); loadFollowInvestmentSettlements() } }
 const loadMonthlySettlement = async () => { await financeStore.fetchMonthlyProfitSettlement({ period_month: monthlyForm.value.period_month }); syncMonthlyForm(financeStore.monthlyProfitSettlement.data) }
 const rebuildMonthlySettlement = async () => { try { await financeStore.rebuildMonthlyProfitSettlement({ period_month: monthlyForm.value.period_month, personnel_target_ratio: monthlyForm.value.personnel_target_ratio, follow_target_ratio: monthlyForm.value.follow_target_ratio, company_target_ratio: monthlyForm.value.company_target_ratio, adjustment_amount: monthlyForm.value.adjustment_amount, adjustment_reason: monthlyForm.value.adjustment_reason || null }); syncMonthlyForm(financeStore.monthlyProfitSettlement.data); ElMessage.success('月度利润结算已重建') } catch (error) { ElMessage.error('重建月度利润结算失败: ' + error.message) } }
@@ -382,7 +441,8 @@ const getShopStatus = (shop) => {
   return {
     hasFollowInvestment,
     hasSettlement,
-    pendingData: !hasFollowInvestment && !hasSettlement
+    pendingData: !hasFollowInvestment && !hasSettlement,
+    hasException: !hasSettlement || !hasFollowInvestment
   }
 }
 const formatCurrency = (num) => (!num && num !== 0) ? '0.00' : new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num)
@@ -425,6 +485,8 @@ onMounted(async () => { await loadShopList(); await loadPlatformShopSignals(); m
 .shop-list-panel { border-right: 1px solid #ebeef5; padding-right: 16px; }
 .shop-list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600; }
 .shop-list-toolbar { display: grid; gap: 10px; margin-bottom: 12px; }
+.shop-filter-block { display: grid; gap: 8px; }
+.shop-filter-label { color: #606266; font-size: 12px; font-weight: 600; }
 .shop-list-hints { display: flex; flex-direction: column; gap: 4px; color: #909399; font-size: 12px; }
 .shop-list { display: flex; flex-direction: column; gap: 10px; max-height: 880px; overflow: auto; }
 .shop-row { width: 100%; border: 1px solid #ebeef5; background: #fff; border-radius: 12px; padding: 14px; text-align: left; cursor: pointer; transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease; }
@@ -440,6 +502,11 @@ onMounted(async () => { await loadShopList(); await loadPlatformShopSignals(); m
 .shop-detail-title { font-size: 18px; font-weight: 700; color: #303133; }
 .shop-detail-meta { color: #909399; margin-top: 4px; }
 .shop-detail-signals { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.shop-exception-card { margin-bottom: 16px; border-color: #f7d8a8; background: linear-gradient(180deg, #fffdf8 0%, #fff8eb 100%); }
+.shop-exception-list { display: grid; gap: 10px; }
+.shop-exception-item { padding: 12px 14px; border-radius: 10px; border: 1px solid #f3d19e; background: rgba(255, 255, 255, 0.8); }
+.shop-exception-title { font-weight: 600; color: #ad6800; margin-bottom: 4px; }
+.shop-exception-desc { color: #8c6d1f; font-size: 13px; line-height: 1.5; }
 .shop-tabs :deep(.el-tabs__header) { margin-bottom: 16px; }
 .inner-card { border: none; box-shadow: none; }
 .inner-toolbar { margin-bottom: 16px; }

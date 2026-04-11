@@ -103,6 +103,6 @@ def test_list_performance_scores_person_fallback_cn_columns_serializable():
     assert row["employee_name"] == "Alice"
     assert row["rank"] == 1
     assert row["total_score"] == 88.0
-    assert row["performance_coefficient"] == 1.0
+    assert row["performance_coefficient"] is None
     assert isinstance(row["sales_achieved"], float)
     assert db.rollback.await_count >= 1

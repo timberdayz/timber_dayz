@@ -36,6 +36,7 @@ from modules.core.db import (
     PerformanceConfig,
     PerformanceScore,
     SalesTarget,
+    ShopAlert,
     TargetBreakdown,
     Employee,
     EmployeePerformance,
@@ -57,7 +58,9 @@ from backend.services.postgresql_shop_metrics_service import (
     load_shop_monthly_metrics,
     load_shop_monthly_target_achievement,
 )
-from backend.services.performance_coefficient import calculate_performance_coefficient
+from backend.services.performance_coefficient import (
+    calculate_ranked_performance_coefficient,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
@@ -430,6 +433,229 @@ def _public_coefficient(coefficient: Optional[float], details: Dict[str, Any]) -
     return coefficient if _summary_is_complete(details) else None
 
 
+def _apply_ranking_policy(
+    calc_list: List[Dict[str, Any]],
+    operating_days_by_shop: Dict[str, int],
+) -> None:
+    eligible_rows: List[Dict[str, Any]] = []
+    for row in calc_list:
+        key = f"{(row.get('platform_code') or '').lower()}|{row.get('shop_id') or ''}"
+        operating_days = int(operating_days_by_shop.get(key, 31) or 0)
+        summary = row.setdefault("score_details", {}).setdefault("summary", {})
+        summary["operating_days"] = operating_days
+        eligible = summary.get("status") == "complete" and operating_days >= 15
+        summary["ranking_pool_status"] = "official" if eligible else "observation"
+        if eligible:
+            eligible_rows.append(row)
+        else:
+            row["rank"] = None
+            row["performance_coefficient"] = None
+
+    eligible_rows.sort(
+        key=lambda item: (
+            -float(item.get("total_score") or 0),
+            -float(item.get("operation_score") or 0),
+            -float(item.get("profit_score") or 0),
+            -float(item.get("sales_score") or 0),
+        )
+    )
+    total = len(eligible_rows)
+    for index, row in enumerate(eligible_rows, start=1):
+        row["rank"] = index
+        row["performance_coefficient"] = calculate_ranked_performance_coefficient(
+            row.get("total_score"),
+            index,
+            total,
+        )
+
+
+def _build_performance_alert_payloads(
+    period: str,
+    calc_list: List[Dict[str, Any]],
+    prior_red_streak_by_shop: Dict[str, int],
+) -> Dict[str, List[Dict[str, Any]]]:
+    alerts_by_shop: Dict[str, List[Dict[str, Any]]] = {}
+    for row in calc_list:
+        summary = row.get("score_details", {}).get("summary", {})
+        summary["performance_alert_level"] = None
+        summary["performance_alert_types"] = []
+        if summary.get("ranking_pool_status") != "official":
+            continue
+        total_score = float(row.get("total_score") or 0.0)
+        shop_key = f"{(row.get('platform_code') or '').lower()}|{row.get('shop_id') or ''}"
+        payloads: List[Dict[str, Any]] = []
+        if total_score < 60:
+            payloads.append(
+                {
+                    "alert_type": "performance_red_card",
+                    "alert_level": "critical",
+                    "title": f"{period} 店铺绩效红牌",
+                    "message": f"店铺当月绩效分 {total_score:.1f}，低于 60 分红线。",
+                    "metric_value": total_score,
+                    "threshold": 60.0,
+                    "metric_unit": "score",
+                }
+            )
+            if prior_red_streak_by_shop.get(shop_key, 0) >= 2:
+                payloads.append(
+                    {
+                        "alert_type": "performance_elimination_review",
+                        "alert_level": "critical",
+                        "title": f"{period} 店铺进入淘汰评估",
+                        "message": "店铺已连续 3 个月红牌，需进入淘汰评估。",
+                        "metric_value": total_score,
+                        "threshold": 60.0,
+                        "metric_unit": "score",
+                    }
+                )
+        elif total_score < 70:
+            payloads.append(
+                {
+                    "alert_type": "performance_yellow_card",
+                    "alert_level": "warning",
+                    "title": f"{period} 店铺绩效黄牌",
+                    "message": f"店铺当月绩效分 {total_score:.1f}，低于 70 分黄线。",
+                    "metric_value": total_score,
+                    "threshold": 70.0,
+                    "metric_unit": "score",
+                }
+            )
+        if payloads:
+            summary["performance_alert_level"] = payloads[0]["alert_level"]
+            summary["performance_alert_types"] = [
+                payload["alert_type"] for payload in payloads
+            ]
+            alerts_by_shop[shop_key] = payloads
+    return alerts_by_shop
+
+
+async def _load_shop_monthly_operating_days(
+    db: AsyncSession,
+    year_month: str,
+) -> Dict[str, int]:
+    try:
+        period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+        if period_start.month == 12:
+            period_end = period_start.replace(year=period_start.year + 1, month=1, day=1)
+        else:
+            period_end = period_start.replace(month=period_start.month + 1, day=1)
+        result = await db.execute(
+            text(
+                """
+                select lower(platform_code) as platform_code,
+                       shop_id,
+                       count(distinct period_date) as operating_days
+                from mart.shop_day_kpi
+                where period_date >= :period_start
+                  and period_date < :period_end
+                group by lower(platform_code), shop_id
+                """
+            ),
+            {"period_start": period_start, "period_end": period_end},
+        )
+        return {
+            f"{(row.get('platform_code') or '').lower()}|{row.get('shop_id') or ''}": int(row.get("operating_days") or 0)
+            for row in result.mappings().all()
+        }
+    except Exception as e:
+        logger.warning("绩效计算经营天数加载失败: %s", e)
+        return {}
+
+
+async def _load_prior_red_streak_by_shop(
+    db: AsyncSession,
+    calc_list: List[Dict[str, Any]],
+) -> Dict[str, int]:
+    streak_by_shop: Dict[str, int] = {}
+    try:
+        for row in calc_list:
+            platform_code = (row.get("platform_code") or "").lower()
+            shop_id = row.get("shop_id") or ""
+            rows = (
+                await db.execute(
+                    select(PerformanceScore)
+                    .where(
+                        PerformanceScore.platform_code == platform_code,
+                        PerformanceScore.shop_id == shop_id,
+                    )
+                    .order_by(PerformanceScore.period.desc())
+                    .limit(2)
+                )
+            ).scalars().all()
+            streak = 0
+            for history in rows:
+                if float(getattr(history, "total_score", 0.0) or 0.0) < 60:
+                    streak += 1
+                else:
+                    break
+            streak_by_shop[f"{platform_code}|{shop_id}"] = streak
+    except Exception as e:
+        logger.warning("绩效计算历史红牌读取失败: %s", e)
+    return streak_by_shop
+
+
+async def _sync_performance_alerts(
+    db: AsyncSession,
+    calc_list: List[Dict[str, Any]],
+    alerts_by_shop: Dict[str, List[Dict[str, Any]]],
+) -> None:
+    performance_alert_types = {
+        "performance_yellow_card",
+        "performance_red_card",
+        "performance_elimination_review",
+    }
+    try:
+        for row in calc_list:
+            platform_code = (row.get("platform_code") or "").lower()
+            shop_id = row.get("shop_id") or ""
+            shop_key = f"{platform_code}|{shop_id}"
+            payloads = alerts_by_shop.get(shop_key, [])
+            existing_rows = (
+                await db.execute(
+                    select(ShopAlert).where(
+                        ShopAlert.platform_code == platform_code,
+                        ShopAlert.shop_id == shop_id,
+                        ShopAlert.is_resolved == False,
+                        ShopAlert.alert_type.in_(performance_alert_types),
+                    )
+                )
+            ).scalars().all()
+            existing_by_type = {alert.alert_type: alert for alert in existing_rows}
+            current_types = {payload["alert_type"] for payload in payloads}
+            for alert in existing_rows:
+                if alert.alert_type not in current_types:
+                    alert.is_resolved = True
+                    alert.resolved_at = datetime.now(timezone.utc)
+                    alert.resolved_by = "system"
+            for payload in payloads:
+                existing = existing_by_type.get(payload["alert_type"])
+                if existing:
+                    existing.alert_level = payload["alert_level"]
+                    existing.title = payload["title"]
+                    existing.message = payload["message"]
+                    existing.metric_value = payload["metric_value"]
+                    existing.threshold = payload["threshold"]
+                    existing.metric_unit = payload["metric_unit"]
+                    existing.updated_at = datetime.now(timezone.utc)
+                else:
+                    db.add(
+                        ShopAlert(
+                            platform_code=platform_code,
+                            shop_id=shop_id,
+                            alert_type=payload["alert_type"],
+                            alert_level=payload["alert_level"],
+                            title=payload["title"],
+                            message=payload["message"],
+                            metric_value=payload["metric_value"],
+                            threshold=payload["threshold"],
+                            metric_unit=payload["metric_unit"],
+                            is_resolved=False,
+                        )
+                    )
+    except Exception as e:
+        logger.warning("绩效预警同步失败: %s", e)
+
+
 def _build_metric_detail(details: Dict[str, Any], metric: str, score_value: Optional[float]) -> Dict[str, Any]:
     metric_details = _score_details_field(details, metric) or {}
     return {
@@ -795,7 +1021,7 @@ async def list_performance_scores(
                     "operation_score": None,
                     "total_score": scr,
                     "rank": rank_by_code.get(ec),
-                    "performance_coefficient": calculate_performance_coefficient(scr) if scr else calculate_performance_coefficient(0),
+                    "performance_coefficient": None,
                 })
             result = {
                 "success": True,
@@ -1226,9 +1452,7 @@ async def calculate_performance_scores(
                     "operation_score": operation_score,
                     "total_score": round(sales_score + profit_score + key_product_score + operation_score, 4),
                     "rank": None,
-                    "performance_coefficient": calculate_performance_coefficient(
-                        round(sales_score + profit_score + key_product_score + operation_score, 4)
-                    ),
+                    "performance_coefficient": None,
                     "score_details": {
                         "sales": {
                             "status": "calculated",
@@ -1292,6 +1516,15 @@ async def calculate_performance_scores(
                 }
             )
 
+        operating_days_by_shop = await _load_shop_monthly_operating_days(db, period)
+        _apply_ranking_policy(calc_list, operating_days_by_shop)
+        prior_red_streak_by_shop = await _load_prior_red_streak_by_shop(db, calc_list)
+        alerts_by_shop = _build_performance_alert_payloads(
+            period,
+            calc_list,
+            prior_red_streak_by_shop,
+        )
+
         # 4) upsert c_class.performance_scores
         upserts = 0
         for row in calc_list:
@@ -1332,6 +1565,7 @@ async def calculate_performance_scores(
                     )
                 )
             upserts += 1
+        await _sync_performance_alerts(db, calc_list, alerts_by_shop)
         income_service = HRIncomeCalculationService(db=db)
         income_result = await income_service.calculate_month(period)
         payroll_service = PayrollGenerationService(db=db)

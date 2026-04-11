@@ -85,28 +85,42 @@ class ShopeeServicesExportBase(ShopeeAnalyticsExport):
             index += 1
 
     async def _wait_download_complete(self, page: Any) -> str | None:
-        button = await self._wait_top_report_download_button(page)
-        if button is not None:
-            try:
-                await button.click(timeout=5000)
-            except Exception:
-                return None
-
         waiter = self._download_waiter
-        if waiter is None:
-            if not hasattr(page, "wait_for_event"):
-                return None
-            try:
-                download = await page.wait_for_event("download", timeout=60000)
-            except Exception:
-                return None
-        else:
+        download = None
+        if waiter is not None and waiter.done():
+            self._log_export_diagnostic(
+                "download_event_ready_before_report_button",
+                sub_domain=self._resolved_subtype(),
+            )
             try:
                 download = await waiter
             except Exception:
                 return None
             finally:
                 self._download_waiter = None
+        else:
+            button = await self._wait_top_report_download_button(page)
+            if button is not None:
+                try:
+                    await button.click(timeout=5000)
+                except Exception:
+                    return None
+
+            waiter = self._download_waiter
+            if waiter is None:
+                if not hasattr(page, "wait_for_event"):
+                    return None
+                try:
+                    download = await page.wait_for_event("download", timeout=self.DOWNLOAD_EVENT_TIMEOUT_MS)
+                except Exception:
+                    return None
+            else:
+                try:
+                    download = await waiter
+                except Exception:
+                    return None
+                finally:
+                    self._download_waiter = None
 
         granularity = str((self.ctx.config or {}).get("granularity") or "manual")
         subtype = self._resolved_subtype()

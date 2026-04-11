@@ -38,3 +38,14 @@ def test_financial_management_page_shows_platform_level_shop_status_summary():
     assert "有跟投记录店铺" in text
     assert "有结算台账店铺" in text
     assert "待补经营数据" in text
+
+
+def test_financial_management_page_supports_shop_filters_and_exception_visualization():
+    text = Path("frontend/src/views/FinancialManagement.vue").read_text(encoding="utf-8")
+
+    assert "店铺筛选" in text
+    assert "只看异常店铺" in text
+    assert "只看待补经营数据" in text
+    assert "当前店铺异常提示" in text
+    assert "shopFilterMode" in text
+    assert "shopExceptionItems" in text

@@ -28,6 +28,7 @@ class ShopeeProductsExport(ExportComponent):
     platform = "shopee"
     component_type = "export"
     data_domain = "products"
+    DOWNLOAD_EVENT_TIMEOUT_MS = 180000
 
     def __init__(self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None) -> None:
         super().__init__(ctx)
@@ -60,6 +61,32 @@ class ShopeeProductsExport(ExportComponent):
     def _build_month_leaf_pattern(self, text: str):
         escaped = re.escape(str(text or "").strip())
         return re.compile(rf"^\s*{escaped}\s*$")
+
+    def _log_export_diagnostic(self, event: str, **fields: Any) -> None:
+        if not self.logger:
+            return
+        details = ", ".join(
+            f"{key}={value}"
+            for key, value in fields.items()
+            if value is not None and value != ""
+        )
+        message = f"[ShopeeExportDiag] {event}"
+        if details:
+            message = f"{message} | {details}"
+        self.logger.info(message)
+
+    def _warn_export_diagnostic(self, event: str, **fields: Any) -> None:
+        if not self.logger:
+            return
+        details = ", ".join(
+            f"{key}={value}"
+            for key, value in fields.items()
+            if value is not None and value != ""
+        )
+        message = f"[ShopeeExportDiag] {event}"
+        if details:
+            message = f"{message} | {details}"
+        self.logger.warning(message)
 
     def _calendar_month_key(self, year: int, month: int) -> int:
         return year * 12 + month
@@ -1623,6 +1650,13 @@ class ShopeeProductsExport(ExportComponent):
                         waited += poll_ms
                         continue
                     if target_action is not None:
+                        self._log_export_diagnostic(
+                            "latest_report_download_ready",
+                            waited_ms=waited,
+                            row_text=top_candidate["text"],
+                            row_state=target_state,
+                            row_count=current_count,
+                        )
                         return target_action
 
                 if top_candidate is not None and baseline_rows:
@@ -1638,6 +1672,19 @@ class ShopeeProductsExport(ExportComponent):
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
             waited += poll_ms
+        timeout_row_text = None
+        timeout_row_state = None
+        if 'top_candidate' in locals() and top_candidate is not None:
+            timeout_row_text = top_candidate["text"]
+            timeout_row_state = top_candidate["state"]
+        self._warn_export_diagnostic(
+            "latest_report_download_timeout",
+            waited_ms=waited,
+            row_text=timeout_row_text,
+            row_state=timeout_row_state,
+            baseline_snapshot=self._latest_report_top_snapshot,
+            baseline_count=self._latest_report_count_snapshot,
+        )
         return None
 
     async def _ensure_shop_selected(self, page: Any) -> None:
@@ -1961,10 +2008,16 @@ class ShopeeProductsExport(ExportComponent):
         await self._capture_latest_report_baseline(page)
         await self._capture_latest_report_top_snapshot(page)
         await self._ensure_latest_report_panel_open(page)
+        self._log_export_diagnostic(
+            "export_trigger_click",
+            current_url=str(getattr(page, "url", "") or ""),
+            baseline_snapshot=self._latest_report_top_snapshot,
+            baseline_count=self._latest_report_count_snapshot,
+        )
         await self._cancel_download_waiter()
         if hasattr(page, "wait_for_event"):
             self._download_waiter = asyncio.create_task(
-                page.wait_for_event("download", timeout=60000)
+                page.wait_for_event("download", timeout=self.DOWNLOAD_EVENT_TIMEOUT_MS)
             )
         await button.click(timeout=5000)
         await page.wait_for_timeout(500)
@@ -1983,12 +2036,13 @@ class ShopeeProductsExport(ExportComponent):
     ) -> str:
         waited = 0
         while waited <= timeout_ms:
-            if await self._detect_export_throttled(page):
-                return "throttled"
-
             waiter = self._download_waiter
             if waiter is not None and waiter.done():
+                self._log_export_diagnostic("download_event_started", waited_ms=waited)
                 return "download_started"
+
+            if await self._detect_export_throttled(page):
+                return "throttled"
 
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
@@ -2019,6 +2073,7 @@ class ShopeeProductsExport(ExportComponent):
         button = await self._wait_top_report_download_button(page)
         if button is not None:
             try:
+                self._log_export_diagnostic("top_report_download_click")
                 await button.click(timeout=5000)
             except Exception:
                 return None
@@ -2028,7 +2083,11 @@ class ShopeeProductsExport(ExportComponent):
             if not hasattr(page, "wait_for_event"):
                 return None
             try:
-                download = await page.wait_for_event("download", timeout=60000)
+                self._log_export_diagnostic(
+                    "wait_direct_download_event",
+                    timeout_ms=self.DOWNLOAD_EVENT_TIMEOUT_MS,
+                )
+                download = await page.wait_for_event("download", timeout=self.DOWNLOAD_EVENT_TIMEOUT_MS)
             except Exception:
                 return None
         else:
@@ -2055,6 +2114,11 @@ class ShopeeProductsExport(ExportComponent):
                 return None
         except OSError:
             return None
+        self._log_export_diagnostic(
+            "download_saved",
+            suggested_filename=suggested,
+            target_path=str(target),
+        )
         return str(target)
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
@@ -2065,7 +2129,9 @@ class ShopeeProductsExport(ExportComponent):
 
             await self._trigger_export(page)
             post_action_state = await self._wait_export_post_action_state(page)
-            if post_action_state == "throttled":
+            if post_action_state == "download_started":
+                throttled = False
+            elif post_action_state == "throttled":
                 throttled = True
             else:
                 throttled = await self._detect_export_throttled(page)

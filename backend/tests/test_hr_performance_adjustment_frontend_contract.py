@@ -18,3 +18,19 @@ def test_hr_performance_management_view_exposes_adjustment_panel():
     assert "adjustmentList" in text
     assert "loadAdjustmentList" in text
     assert "createHrPerformanceAdjustment" in text
+
+
+def test_performance_views_expose_ranking_pool_and_alert_helpers():
+    mgmt = Path("frontend/src/views/hr/PerformanceManagement.vue").read_text(encoding="utf-8")
+    display = Path("frontend/src/views/hr/PerformanceDisplay.vue").read_text(encoding="utf-8")
+
+    assert "rankingPoolText" in mgmt
+    assert "performanceAlertText" in mgmt
+    assert "poolFilter" in mgmt
+    assert "alertFilter" in mgmt
+    assert "filteredPerformanceData" in mgmt
+    assert "rankingPoolText" in display
+    assert "performanceAlertText" in display
+    assert "poolFilter" in display
+    assert "alertFilter" in display
+    assert "filteredPerformanceData" in display

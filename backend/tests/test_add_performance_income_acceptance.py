@@ -191,6 +191,24 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_load_shop_monthly_operating_days",
+        AsyncMock(return_value={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_prior_red_streak_by_shop",
+        AsyncMock(return_value={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "PayrollGenerationService",
         _FakePayrollService,
         raising=False,
@@ -430,6 +448,9 @@ def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
 
     monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
     monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
+    monkeypatch.setattr(performance_management_module, "_load_shop_monthly_operating_days", AsyncMock(return_value={}), raising=False)
+    monkeypatch.setattr(performance_management_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={}), raising=False)
+    monkeypatch.setattr(performance_management_module, "_sync_performance_alerts", AsyncMock(return_value=None), raising=False)
     monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
 
     resp = asyncio.run(
@@ -568,6 +589,9 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
 
     monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
     monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
+    monkeypatch.setattr(performance_management_module, "_load_shop_monthly_operating_days", AsyncMock(return_value={}), raising=False)
+    monkeypatch.setattr(performance_management_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={}), raising=False)
+    monkeypatch.setattr(performance_management_module, "_sync_performance_alerts", AsyncMock(return_value=None), raising=False)
     monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
 
     resp = asyncio.run(
@@ -711,6 +735,9 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
     monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
     monkeypatch.setattr(performance_management_module, "_load_shop_monthly_product_metrics", _fake_product_metrics)
     monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
+    monkeypatch.setattr(performance_management_module, "_load_shop_monthly_operating_days", AsyncMock(return_value={}), raising=False)
+    monkeypatch.setattr(performance_management_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={}), raising=False)
+    monkeypatch.setattr(performance_management_module, "_sync_performance_alerts", AsyncMock(return_value=None), raising=False)
     monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
 
     resp = asyncio.run(

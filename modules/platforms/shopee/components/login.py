@@ -40,6 +40,25 @@ class ShopeeLogin(LoginComponent):
             return False
         return current.startswith("https://seller.shopee.cn/?") and "cnsc_shop_id=" in current
 
+    async def _wait_for_reused_session_redirect(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 5000,
+        poll_ms: int = 300,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            current_url = str(getattr(page, "url", "") or "")
+            if self._login_looks_successful(current_url):
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            else:
+                await asyncio.sleep(poll_ms / 1000)
+            waited += poll_ms
+        return False
+
     async def _homepage_dom_looks_ready(self, page: Any) -> bool:
         signal_count = 0
         for selector in (
@@ -484,6 +503,12 @@ class ShopeeLogin(LoginComponent):
             if self._login_looks_successful(str(getattr(page, "url", "") or "")):
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
+
+            if params.get("reused_session"):
+                redirected = await self._wait_for_reused_session_redirect(page)
+                if redirected:
+                    await self._cleanup_after_login(page)
+                    return LoginResult(success=True, message="ok")
 
             await self._fill_credentials(page, username, password)
             await self._ensure_remember_me_checked(page)

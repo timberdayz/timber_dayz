@@ -101,7 +101,7 @@ class ShopeeAnalyticsExport(ShopeeProductsExport):
             if not hasattr(page, "wait_for_event"):
                 return None
             try:
-                download = await page.wait_for_event("download", timeout=60000)
+                download = await page.wait_for_event("download", timeout=self.DOWNLOAD_EVENT_TIMEOUT_MS)
             except Exception:
                 return None
         else:
