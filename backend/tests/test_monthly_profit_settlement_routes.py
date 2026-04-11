@@ -123,6 +123,47 @@ async def test_rebuild_monthly_profit_settlement_route_returns_service_payload(m
 
 
 @pytest.mark.asyncio
+async def test_rebuild_monthly_profit_settlement_route_returns_409_for_approved_month(monkeypatch):
+    module = _load_router_module()
+
+    class _ServiceStub:
+        async def rebuild_month(
+            self,
+            period_month,
+            personnel_target_ratio,
+            follow_target_ratio,
+            company_target_ratio,
+            adjustment_amount,
+            adjustment_reason=None,
+        ):
+            raise module.MonthlyProfitSettlementConflictError("settlement already approved; reopen before rebuild")
+
+    async def _override_db():
+        yield object()
+
+    app = FastAPI()
+    app.include_router(module.router)
+    app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
+    app.dependency_overrides[get_async_db] = _override_db
+    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/finance/monthly-profit-settlement/rebuild",
+            json={
+                "period_month": "2026-04",
+                "personnel_target_ratio": 0.3,
+                "follow_target_ratio": 0.2,
+                "company_target_ratio": 0.5,
+                "adjustment_amount": 0.0,
+                "adjustment_reason": "finance note",
+            },
+        )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_update_monthly_profit_settlement_targets_route_returns_service_payload(monkeypatch):
     module = _load_router_module()
 

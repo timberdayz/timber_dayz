@@ -225,6 +225,23 @@ async def test_load_follow_payload_expands_investor_level_details():
 
 
 @pytest.mark.asyncio
+async def test_load_follow_payload_preserves_zero_approved_income():
+    module = _load_service_module()
+    db = _make_db()
+    service = module.MonthlyProfitSettlementService(db)
+
+    detail_rows = [
+        SimpleNamespace(investor_user_id=101, source_settlement_id=5, approved_income=0.0, estimated_income=6500.0, status="approved"),
+    ]
+    db.execute = AsyncMock(return_value=_ScalarResult(detail_rows))
+
+    payload = await service._load_follow_payload("2026-04")
+
+    assert payload["actual_amount"] == pytest.approx(0.0)
+    assert payload["details"][0]["amount"] == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
 async def test_approve_rejects_duplicate_approval():
     module = _load_service_module()
     db = _make_db()

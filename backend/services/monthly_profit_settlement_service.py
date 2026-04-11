@@ -179,7 +179,9 @@ class MonthlyProfitSettlementService:
         details: list[dict[str, Any]] = []
         total = 0.0
         for row in rows:
-            amount = self._to_float(getattr(row, "approved_income", 0) or getattr(row, "estimated_income", 0))
+            approved_income = getattr(row, "approved_income", None)
+            estimated_income = getattr(row, "estimated_income", 0)
+            amount = self._to_float(approved_income if approved_income is not None else estimated_income)
             total += amount
             details.append(
                 {

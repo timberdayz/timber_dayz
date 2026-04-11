@@ -1062,11 +1062,26 @@ const followInvestmentRecordForm = ref({
   remark: ''
 })
 
+const syncMonthlyProfitSettlementForm = (payload) => {
+  const summary = payload?.summary
+  if (!summary) return
+  const firstAdjustment = payload?.adjustments?.[0] || null
+
+  monthlyProfitSettlementForm.value = {
+    period_month: summary.period_month || currentMonth,
+    personnel_target_ratio: Number(summary.personnel_target_ratio ?? 0.3),
+    follow_target_ratio: Number(summary.follow_target_ratio ?? 0.2),
+    company_target_ratio: Number(summary.company_target_ratio ?? 0.5),
+    adjustment_amount: Number(summary.adjustment_amount ?? 0),
+    adjustment_reason: firstAdjustment?.reason || ''
+  }
+}
 
 const loadMonthlyProfitSettlement = async () => {
   await financeStore.fetchMonthlyProfitSettlement({
     period_month: monthlyProfitSettlementForm.value.period_month
   })
+  syncMonthlyProfitSettlementForm(financeStore.monthlyProfitSettlement.data)
 }
 
 const rebuildMonthlyProfitSettlement = async () => {
@@ -1079,16 +1094,17 @@ const rebuildMonthlyProfitSettlement = async () => {
       adjustment_amount: monthlyProfitSettlementForm.value.adjustment_amount,
       adjustment_reason: monthlyProfitSettlementForm.value.adjustment_reason || null
     })
-    ElMessage.success('月度利润结算已重建')
+    syncMonthlyProfitSettlementForm(financeStore.monthlyProfitSettlement.data)
+    ElMessage.success('?????????')
   } catch (error) {
-    ElMessage.error('重建月度利润结算失败: ' + error.message)
+    ElMessage.error('??????????: ' + error.message)
   }
 }
 
 const saveMonthlyProfitSettlementTargets = async () => {
   const settlementId = financeStore.monthlyProfitSettlement.data?.summary?.id
   if (!settlementId) {
-    ElMessage.warning('请先查询或重建月结')
+    ElMessage.warning('?????????')
     return
   }
 
@@ -1100,9 +1116,10 @@ const saveMonthlyProfitSettlementTargets = async () => {
       adjustment_amount: monthlyProfitSettlementForm.value.adjustment_amount,
       adjustment_reason: monthlyProfitSettlementForm.value.adjustment_reason || null
     })
-    ElMessage.success('月度目标比例已保存')
+    syncMonthlyProfitSettlementForm(financeStore.monthlyProfitSettlement.data)
+    ElMessage.success('?????????')
   } catch (error) {
-    ElMessage.error('保存月度目标比例失败: ' + error.message)
+    ElMessage.error('??????????: ' + error.message)
   }
 }
 

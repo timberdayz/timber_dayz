@@ -70,10 +70,10 @@ async def rebuild_monthly_profit_settlement(
             adjustment_amount=body.adjustment_amount,
             adjustment_reason=body.adjustment_reason,
         )
-    except (MonthlyProfitSettlementValidationError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MonthlyProfitSettlementConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (MonthlyProfitSettlementValidationError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return success_response(data=payload)
 
 
