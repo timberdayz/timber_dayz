@@ -223,6 +223,7 @@ async def test_wait_top_report_download_button_ignores_stale_top_download_until_
     ctx = ExecutionContext(platform="shopee", account={}, config={})
     component = ShopeeProductsExport(ctx)
     component._latest_report_top_snapshot = ("stale-report", "download")
+    component._latest_report_count_snapshot = 1
     stale_download = _FakeActionLocator("下载")
     panels = [_FakePanel([_FakeRow("stale-report", [stale_download])])]
 
@@ -327,10 +328,7 @@ async def test_wait_top_report_download_button_accepts_top_download_when_count_i
     ctx = ExecutionContext(platform="shopee", account={}, config={})
     component = ShopeeProductsExport(ctx)
     component._latest_report_top_snapshot = ("parentskudetail.20260201_20260228.xlsx", "download")
-    component._latest_report_baseline_rows = [
-        "parentskudetail.20260201_20260228.xlsx",
-        "parentskudetail.20260101_20260131.xlsx",
-    ]
+    component._latest_report_count_snapshot = 2
     top_download = _FakeActionLocator("涓嬭浇")
     panel = _FakePanel(
         [
