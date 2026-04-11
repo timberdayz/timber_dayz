@@ -108,6 +108,21 @@ def test_collection_config_run_uses_backend_config_run_endpoint():
     assert "for (const accountId of accountIds)" not in text
 
 
+def test_collection_config_loads_config_run_queue_panel():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+
+    assert "collectionApi.getConfigRuns(" in text
+    assert "activeConfigRuns" in text
+    assert "queuedConfigRuns" in text
+
+
+def test_collection_config_run_uses_queue_run_feedback_not_task_id_redirect():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+
+    assert "runResult.run_id" in text
+    assert "task_ids" not in text or "taskIds" not in text
+
+
 def test_collection_config_exposes_main_account_scoping_hooks():
     text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
 

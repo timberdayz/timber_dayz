@@ -123,6 +123,37 @@
       </div>
     </el-card>
 
+    <el-card class="queue-card">
+      <template #header>
+        <div class="table-header">
+          <span>配置执行队列</span>
+          <span class="table-summary">运行中 {{ activeConfigRuns.length }} / 排队中 {{ queuedConfigRuns.length }}</span>
+        </div>
+      </template>
+
+      <div v-if="!configRuns.length" class="empty-tip">当前没有配置执行记录</div>
+      <div v-else class="queue-list">
+        <div
+          v-for="run in visibleConfigRuns"
+          :key="run.run_id"
+          class="queue-item"
+        >
+          <div class="queue-item-title">
+            <el-tag :type="getConfigRunTagType(run.status)" size="small">{{ getConfigRunStatusLabel(run.status) }}</el-tag>
+            <span>{{ run.main_account_id }}</span>
+            <span class="queue-run-id">{{ run.run_id }}</span>
+          </div>
+          <div class="queue-item-meta">
+            <span>配置 #{{ run.config_id }}</span>
+            <span>{{ getPlatformLabel(run.platform) }}</span>
+            <span>{{ run.trigger_type === 'manual' ? '手动执行' : '定时执行' }}</span>
+            <span>创建于 {{ formatDateTime(run.created_at) }}</span>
+          </div>
+          <div v-if="run.error_message" class="queue-item-error">{{ run.error_message }}</div>
+        </div>
+      </div>
+    </el-card>
+
     <el-card class="table-card">
       <template #header>
         <div class="table-header">
@@ -446,7 +477,6 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { MagicStick, Plus, Refresh } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
@@ -460,11 +490,10 @@ import {
   normalizeDomainSubtypeMap
 } from '@/constants/collection'
 
-const router = useRouter()
-
 const loading = ref(false)
 const accountsLoading = ref(false)
 const coverageLoading = ref(false)
+const configRunsLoading = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
 const quickSetupVisible = ref(false)
@@ -473,6 +502,7 @@ const isEdit = ref(false)
 
 const activeGranularity = ref('daily')
 const configs = ref([])
+const configRuns = ref([])
 const flatAccounts = ref([])
 const dialogAccounts = ref([])
 const groupedAccounts = ref([])
@@ -567,6 +597,13 @@ const currentCoverageSummary = computed(() => {
   const partial = coverageItems.value.filter((item) => item.partial_covered).length
   return { total, covered, missing, partial }
 })
+const activeConfigRuns = computed(() =>
+  (configRuns.value || []).filter((run) => run.status === 'running')
+)
+const queuedConfigRuns = computed(() =>
+  (configRuns.value || []).filter((run) => run.status === 'queued')
+)
+const visibleConfigRuns = computed(() => (configRuns.value || []).slice(0, 8))
 
 const platformAccounts = computed(() => {
   const scopedAccounts = dialogAccounts.value.length ? dialogAccounts.value : flatAccounts.value
@@ -659,6 +696,37 @@ function defaultDateTypeForGranularity(value) {
 function getPlatformTagType(platform) {
   const types = { shopee: 'warning', tiktok: 'danger', miaoshou: 'success' }
   return types[String(platform || '').toLowerCase()] || 'info'
+}
+
+function getConfigRunTagType(status) {
+  const types = {
+    running: 'success',
+    queued: 'info',
+    completed: 'success',
+    partial_success: 'warning',
+    failed: 'danger',
+    cancelled: 'info'
+  }
+  return types[status] || 'info'
+}
+
+function getConfigRunStatusLabel(status) {
+  const labels = {
+    running: '运行中',
+    queued: '排队中',
+    completed: '已完成',
+    partial_success: '部分成功',
+    failed: '失败',
+    cancelled: '已取消'
+  }
+  return labels[status] || status
+}
+
+function formatDateTime(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString('zh-CN', { hour12: false })
 }
 
 function getExecutionModeLabel(mode) {
@@ -841,8 +909,20 @@ async function loadCoverage() {
   }
 }
 
+async function loadConfigRuns() {
+  configRunsLoading.value = true
+  try {
+    configRuns.value = await collectionApi.getConfigRuns()
+  } catch (error) {
+    ElMessage.error(`加载配置运行队列失败: ${error.message}`)
+    configRuns.value = []
+  } finally {
+    configRunsLoading.value = false
+  }
+}
+
 async function reloadPageData() {
-  await Promise.all([loadConfigs(), loadAccounts(), loadCoverage()])
+  await Promise.all([loadConfigs(), loadAccounts(), loadCoverage(), loadConfigRuns()])
 }
 
 function resetForm() {
@@ -1013,21 +1093,14 @@ async function toggleActive(row) {
 
 async function runConfig(row) {
   try {
-    const tasks = await collectionApi.runConfig(row.id)
-    const taskIds = (tasks || []).map((task) => task.task_id).filter(Boolean)
-    if (!taskIds.length) {
-      ElMessage.warning('该配置没有创建出可执行的采集任务')
+    const runResult = await collectionApi.runConfig(row.id)
+    if (!runResult?.run_id) {
+      ElMessage.warning('该配置未成功加入执行队列')
       return
     }
-    ElMessage.success(`已创建 ${taskIds.length} 个采集任务`)
-    await router.push({
-      name: 'CollectionTasks',
-      query: {
-        source: 'config',
-        config_id: row.id,
-        task_ids: taskIds.join(',')
-      }
-    })
+    const actionText = runResult.status === 'running' ? '已开始执行' : '已加入队列'
+    ElMessage.success(`${actionText}: ${runResult.run_id}`)
+    await loadConfigRuns()
   } catch (error) {
     ElMessage.error(`执行失败: ${error.message}`)
   }
@@ -1101,8 +1174,50 @@ onMounted(() => {
 }
 
 .granularity-card,
+.queue-card,
 .table-card {
   margin-bottom: 20px;
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.queue-item {
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fafafa;
+}
+
+.queue-item-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.queue-item-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.queue-run-id {
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  color: #606266;
+}
+
+.queue-item-error {
+  margin-top: 8px;
+  color: #f56c6c;
+  font-size: 12px;
 }
 
 .granularity-toolbar {

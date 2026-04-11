@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from modules.core.db import (
     CollectionConfig,
+    CollectionConfigRun,
     CollectionConfigShopScope,
     CollectionTask,
     MainAccount,
@@ -51,6 +52,7 @@ async def schedule_sync_engine():
         await conn.run_sync(ShopAccount.__table__.create)
         await conn.run_sync(ShopAccountCapability.__table__.create)
         await conn.run_sync(CollectionConfig.__table__.create)
+        await conn.run_sync(CollectionConfigRun.__table__.create)
         await conn.run_sync(CollectionConfigShopScope.__table__.create)
         await conn.run_sync(CollectionTask.__table__.create)
 
@@ -154,6 +156,7 @@ async def test_create_config_with_schedule_enabled_registers_job_immediately(
         json={
             "name": "shopee-scheduled-v1",
             "platform": "shopee",
+            "main_account_id": "main-shopee",
             "shop_scopes": [
                 {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
                 {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
@@ -187,6 +190,7 @@ async def test_update_config_schedule_reschedules_immediately(
         json={
             "name": "shopee-scheduled-v2",
             "platform": "shopee",
+            "main_account_id": "main-shopee",
             "shop_scopes": [
                 {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
                 {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
@@ -227,6 +231,7 @@ async def test_disable_and_delete_config_remove_registered_job_immediately(
         json={
             "name": "shopee-scheduled-v3",
             "platform": "shopee",
+            "main_account_id": "main-shopee",
             "shop_scopes": [
                 {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
                 {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
@@ -254,3 +259,153 @@ async def test_disable_and_delete_config_remove_registered_job_immediately(
     delete_response = await client.delete(f"/api/collection/configs/{config_id}", headers=auth_headers)
     assert delete_response.status_code == 200
     assert fake_scheduler.remove_calls[-1] == config_id
+
+
+@pytest.mark.asyncio
+async def test_health_check_exposes_config_run_queue_status(
+    schedule_sync_client,
+    schedule_sync_session,
+):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    config = CollectionConfig(
+        name="health-config-v1",
+        platform="shopee",
+        main_account_id="main-shopee",
+        account_ids=["shop-sg-1"],
+        data_domains=["orders"],
+        sub_domains=None,
+        granularity="daily",
+        date_range_type="yesterday",
+        schedule_enabled=True,
+        schedule_cron="0 6 * * *",
+        retry_count=3,
+        execution_mode="headless",
+        is_active=True,
+    )
+    schedule_sync_session.add(config)
+    await schedule_sync_session.flush()
+    schedule_sync_session.add_all(
+        [
+            CollectionConfigRun(
+                run_id="run-running",
+                config_id=config.id,
+                platform="shopee",
+                main_account_id="main-shopee",
+                trigger_type="scheduled",
+                status="running",
+            ),
+            CollectionConfigRun(
+                run_id="run-queued",
+                config_id=config.id,
+                platform="shopee",
+                main_account_id="main-shopee",
+                trigger_type="scheduled",
+                status="queued",
+            ),
+        ]
+    )
+    await schedule_sync_session.commit()
+
+    response = await client.get("/api/collection/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["running_config_runs"] == 1
+    assert payload["queued_config_runs"] == 1
+    assert payload["active_config_run"]["run_id"] == "run-running"
+    assert payload["active_config_run"]["main_account_id"] == "main-shopee"
+
+
+@pytest.mark.asyncio
+async def test_list_config_runs_returns_recent_runs(schedule_sync_client, schedule_sync_session):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    config = CollectionConfig(
+        name="runs-config-v1",
+        platform="shopee",
+        main_account_id="main-shopee",
+        account_ids=["shop-sg-1"],
+        data_domains=["orders"],
+        sub_domains=None,
+        granularity="daily",
+        date_range_type="yesterday",
+        schedule_enabled=True,
+        schedule_cron="0 6 * * *",
+        retry_count=3,
+        execution_mode="headless",
+        is_active=True,
+    )
+    schedule_sync_session.add(config)
+    await schedule_sync_session.flush()
+    schedule_sync_session.add_all(
+        [
+            CollectionConfigRun(
+                run_id="run-new",
+                config_id=config.id,
+                platform="shopee",
+                main_account_id="main-shopee",
+                trigger_type="manual",
+                status="queued",
+            ),
+            CollectionConfigRun(
+                run_id="run-old",
+                config_id=config.id,
+                platform="shopee",
+                main_account_id="main-shopee",
+                trigger_type="scheduled",
+                status="completed",
+            ),
+        ]
+    )
+    await schedule_sync_session.commit()
+
+    response = await client.get("/api/collection/config-runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["run_id"] for item in payload] == ["run-old", "run-new"]
+
+
+@pytest.mark.asyncio
+async def test_get_config_run_returns_matching_run(schedule_sync_client, schedule_sync_session):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    config = CollectionConfig(
+        name="run-detail-config-v1",
+        platform="shopee",
+        main_account_id="main-shopee",
+        account_ids=["shop-sg-1"],
+        data_domains=["orders"],
+        sub_domains=None,
+        granularity="daily",
+        date_range_type="yesterday",
+        schedule_enabled=True,
+        schedule_cron="0 6 * * *",
+        retry_count=3,
+        execution_mode="headless",
+        is_active=True,
+    )
+    schedule_sync_session.add(config)
+    await schedule_sync_session.flush()
+    run = CollectionConfigRun(
+        run_id="run-detail",
+        config_id=config.id,
+        platform="shopee",
+        main_account_id="main-shopee",
+        trigger_type="scheduled",
+        status="running",
+    )
+    schedule_sync_session.add(run)
+    await schedule_sync_session.commit()
+
+    response = await client.get("/api/collection/config-runs/run-detail")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "run-detail"
+    assert payload["status"] == "running"
+    assert payload["config_id"] == config.id

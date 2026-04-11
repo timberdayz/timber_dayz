@@ -1,6 +1,10 @@
 import pytest
 
-from modules.core.db import CollectionConfig, CollectionTask, CollectionTaskLog
+from modules.core.db import (
+    CollectionConfig,
+    CollectionTask,
+    CollectionTaskLog,
+)
 
 
 @pytest.mark.parametrize(
@@ -17,3 +21,17 @@ def test_collection_tables_bind_explicitly_to_core_schema(model, table_name):
     assert table.name == table_name
     assert table.schema == "core"
     assert table.fullname == f"core.{table_name}"
+
+
+def test_collection_config_run_table_binds_explicitly_to_core_schema():
+    from modules.core.db import CollectionConfigRun
+
+    table = CollectionConfigRun.__table__
+
+    assert table.name == "collection_config_runs"
+    assert table.schema == "core"
+    assert table.fullname == "core.collection_config_runs"
+
+
+def test_collection_task_exposes_config_run_linkage():
+    assert hasattr(CollectionTask, "config_run_id")

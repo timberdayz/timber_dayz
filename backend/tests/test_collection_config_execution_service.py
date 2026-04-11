@@ -8,6 +8,7 @@ from backend.services.collection_config_execution import create_tasks_for_config
 from backend.services.component_runtime_resolver import NoStableComponentVersionError
 from modules.core.db import (
     CollectionConfig,
+    CollectionConfigRun,
     CollectionConfigShopScope,
     CollectionTask,
     MainAccount,
@@ -27,6 +28,7 @@ async def config_execution_engine():
         await conn.run_sync(ShopAccount.__table__.create)
         await conn.run_sync(ShopAccountCapability.__table__.create)
         await conn.run_sync(CollectionConfig.__table__.create)
+        await conn.run_sync(CollectionConfigRun.__table__.create)
         await conn.run_sync(CollectionConfigShopScope.__table__.create)
         await conn.run_sync(CollectionTask.__table__.create)
 
@@ -130,13 +132,33 @@ async def _seed_config(session):
     return config.id
 
 
+async def _seed_config_run(session, *, config_id: int) -> int:
+    config = (
+        await session.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
+    ).scalar_one()
+    run = CollectionConfigRun(
+        run_id="run-1",
+        config_id=config.id,
+        platform=config.platform,
+        main_account_id=config.main_account_id,
+        trigger_type="scheduled",
+        status="queued",
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    return run.id
+
+
 @pytest.mark.asyncio
 async def test_create_tasks_for_config_expands_per_shop_scope(config_execution_session):
     config_id = await _seed_config(config_execution_session)
+    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
 
     tasks = await create_tasks_for_config(
         config_execution_session,
         config_id=config_id,
+        config_run_id=config_run_id,
         trigger_type="scheduled",
         resolve_runtime=False,
     )
@@ -145,13 +167,16 @@ async def test_create_tasks_for_config_expands_per_shop_scope(config_execution_s
     task_map = {task.account: task for task in tasks}
     assert task_map["shop-sg-1"].data_domains == ["orders", "services"]
     assert task_map["shop-sg-1"].sub_domains == {"services": ["agent"]}
+    assert task_map["shop-sg-1"].config_run_id == config_run_id
     assert task_map["shop-my-1"].data_domains == ["products"]
     assert task_map["shop-my-1"].sub_domains is None
+    assert task_map["shop-my-1"].config_run_id == config_run_id
 
 
 @pytest.mark.asyncio
 async def test_create_tasks_for_config_skips_conflicted_shop_without_blocking_others(config_execution_session):
     config_id = await _seed_config(config_execution_session)
+    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
 
     config_result = await config_execution_session.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
     config = config_result.scalar_one()
@@ -180,6 +205,7 @@ async def test_create_tasks_for_config_skips_conflicted_shop_without_blocking_ot
     tasks = await create_tasks_for_config(
         config_execution_session,
         config_id=config_id,
+        config_run_id=config_run_id,
         trigger_type="scheduled",
         resolve_runtime=False,
     )
@@ -194,6 +220,7 @@ async def test_create_tasks_for_config_prunes_unsupported_subtypes_without_skipp
     monkeypatch,
 ):
     config_id = await _seed_config(config_execution_session)
+    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
 
     class _FakeResolver:
         async def resolve_login_component(self, platform):
@@ -244,6 +271,7 @@ async def test_create_tasks_for_config_prunes_unsupported_subtypes_without_skipp
     tasks = await create_tasks_for_config(
         config_execution_session,
         config_id=config_id,
+        config_run_id=config_run_id,
         trigger_type="scheduled",
         resolve_runtime=True,
     )
@@ -257,11 +285,12 @@ async def test_create_tasks_for_config_prunes_unsupported_subtypes_without_skipp
 
 
 @pytest.mark.asyncio
-async def test_create_tasks_for_config_schedules_background_only_after_commit(
+async def test_create_tasks_for_config_keeps_background_launch_disabled(
     config_execution_session,
     monkeypatch,
 ):
     config_id = await _seed_config(config_execution_session)
+    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
 
     class _FakeResolver:
         async def resolve_login_component(self, platform):
@@ -276,25 +305,10 @@ async def test_create_tasks_for_config_schedules_background_only_after_commit(
         lambda db: _FakeResolver(),
     )
 
-    commit_completed = False
     scheduled_calls = []
 
-    original_commit = config_execution_session.commit
-
-    async def _commit_wrapper():
-        nonlocal commit_completed
-        await original_commit()
-        commit_completed = True
-
-    config_execution_session.commit = _commit_wrapper
-
     def _fake_create_task(coro):
-        scheduled_calls.append(
-            {
-                "commit_completed": commit_completed,
-                "coro_name": getattr(coro, "__name__", coro.__class__.__name__),
-            }
-        )
+        scheduled_calls.append(getattr(coro, "__name__", coro.__class__.__name__))
         coro.close()
         return SimpleNamespace(cancel=lambda: None)
 
@@ -303,11 +317,12 @@ async def test_create_tasks_for_config_schedules_background_only_after_commit(
     tasks = await create_tasks_for_config(
         config_execution_session,
         config_id=config_id,
+        config_run_id=config_run_id,
         trigger_type="scheduled",
         start_background=True,
         resolve_runtime=True,
     )
 
     assert len(tasks) == 2
-    assert scheduled_calls
-    assert all(call["commit_completed"] for call in scheduled_calls)
+    assert scheduled_calls == []
+    assert all(task.config_run_id == config_run_id for task in tasks)

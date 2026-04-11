@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -92,6 +91,7 @@ async def create_tasks_for_config(
     db: AsyncSession,
     *,
     config_id: int,
+    config_run_id: int | None = None,
     trigger_type: str,
     app: Any = None,
     start_background: bool = False,
@@ -154,7 +154,6 @@ async def create_tasks_for_config(
     )
 
     created_tasks: List[CollectionTask] = []
-    background_start_payloads: List[Dict[str, Any]] = []
     for scope in scope_rows:
         shop = shops.get(scope.shop_account_id)
         if shop is None:
@@ -248,6 +247,7 @@ async def create_tasks_for_config(
         task = CollectionTask(
             task_id=str(uuid.uuid4()),
             config_id=config_id,
+            config_run_id=config_run_id,
             platform=config.platform,
             account=scope.shop_account_id,
             status="pending",
@@ -269,31 +269,7 @@ async def create_tasks_for_config(
         db.add(task)
         created_tasks.append(task)
 
-        if start_background:
-            background_start_payloads.append(
-                {
-                    "task_id": task.task_id,
-                    "platform": config.platform,
-                    "account_id": scope.shop_account_id,
-                    "data_domains": filtered_domains,
-                    "sub_domains": normalized_sub_domains,
-                    "date_range": normalized_date_range,
-                    "granularity": effective_granularity,
-                    "debug_mode": task.debug_mode,
-                    "execution_mode": str(config.execution_mode or "headless").lower(),
-                    "parallel_mode": False,
-                    "max_parallel": 3,
-                    "runtime_manifests": runtime_manifests,
-                    "app": app,
-                }
-            )
-
     await db.commit()
     for task in created_tasks:
         await db.refresh(task)
-    if background_start_payloads:
-        from backend.routers.collection_tasks import _execute_collection_task_background
-
-        for payload in background_start_payloads:
-            asyncio.create_task(_execute_collection_task_background(**payload))
     return created_tasks

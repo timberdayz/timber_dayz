@@ -238,6 +238,23 @@ class TaskResponse(BaseModel):
     verification_input_mode: Optional[str] = Field(None, description="验证码交互方式")
 
 
+class CollectionConfigRunResponse(BaseModel):
+    id: int
+    run_id: str
+    config_id: int
+    platform: str
+    main_account_id: str
+    trigger_type: str
+    status: str
+    priority: int
+    scheduled_for: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 class CollectionVerificationItem(BaseModel):
     task_id: str
     account_id: str
@@ -463,15 +480,27 @@ class BrowserPoolStatus(BaseModel):
     max_allowed: int
 
 
+class ActiveConfigRunStatus(BaseModel):
+    id: int
+    run_id: str
+    config_id: int
+    main_account_id: str
+    platform: str
+    trigger_type: str
+    status: str
+    started_at: Optional[datetime] = None
+
+
 class HealthCheckResponse(BaseModel):
     """健康检查响应"""
 
     status: str
     running_tasks: int
     queued_tasks: int
+    running_config_runs: int = 0
+    queued_config_runs: int = 0
+    active_config_run: Optional[ActiveConfigRunStatus] = None
     browser_pool: BrowserPoolStatus
     database: str
     scheduler: str
-
-
 

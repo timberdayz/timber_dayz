@@ -5,62 +5,52 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_run_config_tasks_starts_background_execution(monkeypatch):
+async def test_run_config_tasks_enqueues_config_run(monkeypatch):
     from backend.routers import collection_tasks as module
 
-    fake_task = SimpleNamespace(
-        id=1,
-        task_id="task-config-1",
+    fake_config = SimpleNamespace(
+        id=123,
         platform="shopee",
-        account="shop-sg-1",
-        status="pending",
-        progress=0,
-        current_step=None,
-        files_collected=0,
-        trigger_type="config",
+        main_account_id="main-shopee",
+        is_active=True,
+    )
+    fake_run = SimpleNamespace(
+        id=1,
+        run_id="run-config-1",
         config_id=123,
-        data_domains=["orders"],
-        sub_domains=None,
-        granularity="daily",
-        date_range={"start": "2026-04-06", "end": "2026-04-06"},
-        total_domains=1,
-        completed_domains=[],
-        failed_domains=[],
-        current_domain=None,
-        debug_mode=False,
-        error_message=None,
-        duration_seconds=None,
-        created_at=None,
-        updated_at=None,
+        platform="shopee",
+        main_account_id="main-shopee",
+        trigger_type="manual",
+        status="queued",
+        priority=5,
+        scheduled_for=None,
         started_at=None,
         completed_at=None,
-        verification_type=None,
-        verification_screenshot=None,
-        time_selection=None,
+        error_message=None,
+        created_at=None,
+        updated_at=None,
     )
-    create_tasks = AsyncMock(return_value=[fake_task])
+    fake_result = SimpleNamespace(scalar_one_or_none=lambda: fake_config)
+    enqueue = AsyncMock(return_value=(fake_run, True))
+
+    async def _fake_execute(stmt):
+        return fake_result
+
+    db = SimpleNamespace(execute=_fake_execute)
     monkeypatch.setattr(
-        "backend.services.collection_config_execution.create_tasks_for_config",
-        create_tasks,
+        "backend.services.collection_config_run_service.CollectionConfigRunService",
+        lambda db: SimpleNamespace(enqueue_config_run=enqueue),
     )
 
-    app = SimpleNamespace(state=SimpleNamespace())
-    db = object()
     result = await module.run_config_tasks(
         config_id=123,
-        fastapi_request=SimpleNamespace(app=app),
+        fastapi_request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),
         db=db,
     )
 
-    create_tasks.assert_awaited_once_with(
-        db,
-        config_id=123,
-        trigger_type="config",
-        app=app,
-        start_background=True,
-        resolve_runtime=True,
-    )
-    assert result[0]["task_id"] == "task-config-1"
+    enqueue.assert_awaited_once_with(fake_config, trigger_type="manual")
+    assert result["run_id"] == "run-config-1"
+    assert result["status"] == "queued"
 
 
 class _AsyncSessionManager:
@@ -75,34 +65,31 @@ class _AsyncSessionManager:
 
 
 @pytest.mark.asyncio
-async def test_execute_scheduled_collection_config_starts_background_execution(monkeypatch):
+async def test_execute_scheduled_collection_config_enqueues_config_run(monkeypatch):
     from backend.services import collection_scheduler as module
 
     fake_config = SimpleNamespace(
         id=27,
+        platform="shopee",
+        main_account_id="main-shopee",
         is_active=True,
         schedule_enabled=True,
         schedule_cron="0 6 * * *",
     )
     fake_result = SimpleNamespace(scalar_one_or_none=lambda: fake_config)
     fake_session = SimpleNamespace(execute=AsyncMock(return_value=fake_result))
-    create_tasks = AsyncMock(return_value=[])
+    fake_run = SimpleNamespace(id=3, run_id="run-27", status="queued")
+    enqueue = AsyncMock(return_value=(fake_run, True))
 
     monkeypatch.setattr(
         "backend.models.database.AsyncSessionLocal",
         lambda: _AsyncSessionManager(fake_session),
     )
     monkeypatch.setattr(
-        "backend.services.collection_config_execution.create_tasks_for_config",
-        create_tasks,
+        "backend.services.collection_config_run_service.CollectionConfigRunService",
+        lambda db: SimpleNamespace(enqueue_config_run=enqueue),
     )
 
     await module.execute_scheduled_collection_config(27)
 
-    create_tasks.assert_awaited_once_with(
-        fake_session,
-        config_id=27,
-        trigger_type="scheduled",
-        start_background=True,
-        resolve_runtime=True,
-    )
+    enqueue.assert_awaited_once_with(fake_config, trigger_type="scheduled")

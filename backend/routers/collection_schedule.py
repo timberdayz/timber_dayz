@@ -4,14 +4,15 @@
 拆分自 collection.py，包含定时调度 CRUD、Cron 验证、预设、任务列表和健康检查端点。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.models.database import get_async_db
-from modules.core.db import CollectionConfig
+from modules.core.db import CollectionConfig, CollectionConfigRun
 from modules.core.logger import get_logger
 from backend.schemas.collection import (
+    CollectionConfigRunResponse,
     ScheduleUpdateRequest,
     CronValidateRequest,
     ScheduleResponse,
@@ -30,6 +31,37 @@ router = APIRouter(tags=["数据采集-调度"])
 # ============================================================
 # 调度管理 API
 # ============================================================
+
+@router.get("/config-runs", response_model=list[CollectionConfigRunResponse])
+async def list_config_runs(
+    status: str | None = Query(None, description="Filter by config run status"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_async_db),
+):
+    stmt = select(CollectionConfigRun)
+    if status:
+        stmt = stmt.where(CollectionConfigRun.status == status)
+    stmt = stmt.order_by(
+        CollectionConfigRun.created_at.desc(),
+        CollectionConfigRun.id.desc(),
+    ).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.get("/config-runs/{run_id}", response_model=CollectionConfigRunResponse)
+async def get_config_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        select(CollectionConfigRun).where(CollectionConfigRun.run_id == run_id)
+    )
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="config run not found")
+    return run
+
 
 @router.post("/configs/{config_id}/schedule", response_model=ScheduleResponse)
 async def update_config_schedule(
@@ -237,9 +269,13 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
     """
     from backend.services.collection_scheduler import APSCHEDULER_AVAILABLE
     from backend.schemas.collection import BrowserPoolStatus
+    from modules.core.db import CollectionConfigRun
 
     running_count = 0
     queued_count = 0
+    running_config_runs = 0
+    queued_config_runs = 0
+    active_config_run = None
     try:
         from sqlalchemy import text
         result = await db.execute(text("""
@@ -255,6 +291,33 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
                 queued_count = row[1]
     except Exception as e:
         logger.warning(f"Health check task query failed (migration pending?): {e}")
+
+    try:
+        config_run_rows = (
+            await db.execute(
+                select(CollectionConfigRun).where(
+                    CollectionConfigRun.status.in_(["running", "queued"])
+                )
+            )
+        ).scalars().all()
+        for row in config_run_rows:
+            if row.status == "running":
+                running_config_runs += 1
+                if active_config_run is None:
+                    active_config_run = {
+                        "id": row.id,
+                        "run_id": row.run_id,
+                        "config_id": row.config_id,
+                        "main_account_id": row.main_account_id,
+                        "platform": row.platform,
+                        "trigger_type": row.trigger_type,
+                        "status": row.status,
+                        "started_at": row.started_at,
+                    }
+            elif row.status == "queued":
+                queued_config_runs += 1
+    except Exception as e:
+        logger.warning(f"Health check config run query failed: {e}")
 
     from backend.services.task_service import TaskService
     max_concurrent = TaskService.MAX_CONCURRENT_TASKS
@@ -280,6 +343,9 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
         status="healthy",
         running_tasks=running_count,
         queued_tasks=queued_count,
+        running_config_runs=running_config_runs,
+        queued_config_runs=queued_config_runs,
+        active_config_run=active_config_run,
         browser_pool=BrowserPoolStatus(
             active=running_count,
             max_allowed=max_concurrent
