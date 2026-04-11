@@ -21,11 +21,4 @@ class ShopeeServicesAgentExport(ShopeeServicesExportBase):
         super().__init__(ctx, selectors=selectors, service_selectors=service_selectors)
 
     async def _wait_download_complete(self, page):  # type: ignore[override]
-        button = await self._wait_top_report_download_button(page)
-        if button is None:
-            return None
-        try:
-            await button.click(timeout=5000)
-        except Exception:
-            return None
         return await super()._wait_download_complete(page)

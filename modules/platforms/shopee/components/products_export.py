@@ -35,6 +35,8 @@ class ShopeeProductsExport(ExportComponent):
         self.service_sel = ServicesSelectors()
         self._download_waiter: asyncio.Task | None = None
         self._latest_report_baseline_rows: list[str] = []
+        self._latest_report_top_snapshot: tuple[str, str] | None = None
+        self._latest_report_count_snapshot: int = 0
 
     def _products_page_looks_ready(self, url: str) -> bool:
         current = str(url or "").strip().lower()
@@ -1246,6 +1248,37 @@ class ShopeeProductsExport(ExportComponent):
             waited += poll_ms
         return None
 
+    async def _find_latest_report_trigger(self, page: Any) -> Any | None:
+        export_button = await self._first_visible_locator(page, self.sel.export_buttons)
+        if export_button is not None:
+            xpath_candidates = (
+                'xpath=following-sibling::*[self::button or @role="button"][1]',
+                'xpath=ancestor::*[self::div or self::section][1]/descendant::*[self::button or @role="button"][last()]',
+            )
+            for selector in xpath_candidates:
+                try:
+                    locator = export_button.locator(selector)
+                    if await locator.count() > 0 and await locator.first.is_visible():
+                        return locator.first
+                except Exception:
+                    continue
+        return await self._first_visible_locator(page, self.service_sel.latest_report_triggers)
+
+    async def _ensure_latest_report_panel_open(self, page: Any) -> Any | None:
+        panel = await self._first_visible_locator(page, self.service_sel.latest_report_panels)
+        if panel is not None:
+            return panel
+        trigger = await self._find_latest_report_trigger(page)
+        if trigger is None:
+            return None
+        try:
+            await trigger.click(timeout=5000)
+        except Exception:
+            return None
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(300)
+        return await self._wait_latest_report_panel(page, timeout_ms=5000, poll_ms=300)
+
     async def _top_report_action(self, panel: Any) -> tuple[Any | None, str | None]:
         try:
             actions = panel.locator("button, a, [role='button']")
@@ -1354,36 +1387,16 @@ class ShopeeProductsExport(ExportComponent):
         compact = re.sub(r"\s+", "", text)
         return compact.replace("\\", "/")
 
-    def _report_date_signature(self) -> str | None:
-        config = self.ctx.config or {}
-        time_selection = config.get("time_selection")
-        start_date = None
-        end_date = None
-        if isinstance(time_selection, dict):
-            start_date = time_selection.get("start_date") or time_selection.get("start")
-            end_date = time_selection.get("end_date") or time_selection.get("end")
-        start_date = start_date or config.get("start_date")
-        end_date = end_date or config.get("end_date") or start_date
-        if not start_date or not end_date:
-            return None
-        start_compact = str(start_date).replace("-", "").strip()
-        end_compact = str(end_date).replace("-", "").strip()
-        if not start_compact or not end_compact:
-            return None
-        return f"{start_compact}_{end_compact}"
-
-    def _report_filename_prefixes(self) -> tuple[str, ...]:
-        return ("parentskudetail", "skudetail", "parentsku")
-
     async def _visible_report_rows(self, panel: Any) -> list[Any]:
         row_selectors = (
+            ".list-item",
             ".ant-table-row",
             ".el-table__row",
             "tbody tr",
             '[class*="report-item"]',
             '[class*="download-item"]',
-            '[class*="row"]',
             "li",
+            '[class*="row"]',
             "div",
         )
         for selector in row_selectors:
@@ -1444,8 +1457,37 @@ class ShopeeProductsExport(ExportComponent):
                 return candidate, text
         return None, ""
 
-    def _row_state(self, row_text: str, action_text: str) -> str:
-        normalized = self._normalize_report_row_text(f"{row_text} {action_text}")
+    async def _row_status_text(self, row: Any) -> str:
+        status_selectors = (
+            ".status",
+            '[class*="status"]',
+            'button, a, [role="button"]',
+        )
+        for selector in status_selectors:
+            try:
+                locator = row.locator(selector)
+                count = await locator.count()
+            except Exception:
+                continue
+            if count <= 0:
+                continue
+            for idx in range(count):
+                candidate = locator.nth(idx)
+                try:
+                    if not await candidate.is_visible():
+                        continue
+                except Exception:
+                    continue
+                try:
+                    text = str((await candidate.text_content()) or "").strip()
+                except Exception:
+                    text = ""
+                if text:
+                    return text
+        return ""
+
+    def _row_state(self, row_text: str, status_text: str) -> str:
+        normalized = self._normalize_report_row_text(f"{row_text} {status_text}")
         if any(token in normalized for token in self._latest_report_download_tokens()):
             return "download"
         if any(token in normalized for token in self._latest_report_processing_tokens()):
@@ -1454,83 +1496,49 @@ class ShopeeProductsExport(ExportComponent):
             return "downloaded"
         return "unknown"
 
-    def _report_row_score(self, normalized_row_text: str, *, is_inserted: bool) -> int:
-        if not normalized_row_text:
-            return -1
-
-        score = 1
-        signature = self._report_date_signature()
-        if signature:
-            if signature.lower() in normalized_row_text:
-                score += 100
-            else:
-                return -1
-
-        prefixes = self._report_filename_prefixes()
-        if prefixes and any(prefix in normalized_row_text for prefix in prefixes):
-            score += 20
-
-        if is_inserted:
-            score += 10
-        return score
-
-    def _inserted_row_flags(self, normalized_rows: list[str]) -> list[bool]:
-        baseline = list(self._latest_report_baseline_rows)
-        flags: list[bool] = []
-        baseline_idx = 0
-        baseline_len = len(baseline)
-
-        for row_text in normalized_rows:
-            if baseline_idx < baseline_len and row_text == baseline[baseline_idx]:
-                flags.append(False)
-                baseline_idx += 1
-            else:
-                flags.append(True)
-        return flags
-
     async def _resolve_report_row_action(self, panel: Any) -> tuple[Any | None, str]:
-        best_download: tuple[int, Any] | None = None
-        best_processing: tuple[int, Any] | None = None
         rows = await self._visible_report_rows(panel)
-        normalized_rows: list[str] = []
-        raw_texts: list[str] = []
-        for row in rows:
-            try:
-                row_text = (await row.text_content()) or ""
-            except Exception:
-                row_text = ""
-            raw_texts.append(row_text)
-            normalized_rows.append(self._normalize_report_row_text(row_text))
-
-        inserted_flags = self._inserted_row_flags(normalized_rows)
-
-        for idx, row in enumerate(rows):
-            row_text = raw_texts[idx]
-            normalized_row_text = normalized_rows[idx]
-            score = self._report_row_score(
-                normalized_row_text,
-                is_inserted=inserted_flags[idx],
-            )
-            if score < 0:
-                continue
-
-            action, action_text = await self._row_action(row)
-            if action is None:
-                continue
-
-            state = self._row_state(row_text, action_text)
-            if state == "download":
-                if best_download is None or score > best_download[0]:
-                    best_download = (score, action)
-            elif state == "processing":
-                if best_processing is None or score > best_processing[0]:
-                    best_processing = (score, action)
-
-        if best_download is not None:
-            return best_download[1], "download"
-        if best_processing is not None:
-            return best_processing[1], "processing"
+        if not rows:
+            return None, ""
+        top_row = rows[0]
+        try:
+            row_text = (await top_row.text_content()) or ""
+        except Exception:
+            row_text = ""
+        status_text = await self._row_status_text(top_row)
+        state = self._row_state(row_text, status_text)
+        if state == "processing":
+            return None, "processing"
+        action, action_text = await self._row_action(top_row)
+        if action is None:
+            return None, ""
+        if self._row_state(row_text, action_text) == "download":
+            return action, "download"
         return None, ""
+
+    async def _top_report_snapshot(self, panel: Any) -> tuple[str, str] | None:
+        rows = await self._visible_report_rows(panel)
+        if not rows:
+            return None
+        top_row = rows[0]
+        try:
+            row_text = (await top_row.text_content()) or ""
+        except Exception:
+            row_text = ""
+        status_text = await self._row_status_text(top_row)
+        state = self._row_state(row_text, status_text)
+        if state == "unknown":
+            return None
+        return self._normalize_report_row_text(row_text), state
+
+    async def _capture_latest_report_top_snapshot(self, page: Any) -> None:
+        panel = await self._ensure_latest_report_panel_open(page)
+        if panel is None:
+            self._latest_report_top_snapshot = None
+            self._latest_report_count_snapshot = 0
+            return
+        self._latest_report_count_snapshot = len(await self._visible_report_rows(panel))
+        self._latest_report_top_snapshot = await self._top_report_snapshot(panel)
 
     async def _wait_top_report_download_button(
         self,
@@ -1545,18 +1553,30 @@ class ShopeeProductsExport(ExportComponent):
             )
 
         waited = 0
+        seen_processing = False
+        baseline_snapshot = self._latest_report_top_snapshot
         while waited <= timeout_ms:
-            panel = await self._wait_latest_report_panel(page, timeout_ms=poll_ms, poll_ms=300)
+            panel = await self._ensure_latest_report_panel_open(page)
             if panel is not None:
                 action, state = await self._resolve_report_row_action(panel)
-                if action is not None:
-                    if state == "download":
-                        return action
-                    if state == "processing":
-                        if hasattr(page, "wait_for_timeout"):
-                            await page.wait_for_timeout(poll_ms)
+                current_snapshot = await self._top_report_snapshot(panel)
+                current_changed = (
+                    baseline_snapshot is not None
+                    and current_snapshot is not None
+                    and current_snapshot != baseline_snapshot
+                )
+                current_count = len(await self._visible_report_rows(panel))
+                count_increased = current_count > self._latest_report_count_snapshot
+                if state == "processing":
+                    seen_processing = True
+                    if hasattr(page, "wait_for_timeout"):
+                        await page.wait_for_timeout(poll_ms)
                         waited += poll_ms
                         continue
+                if action is not None and state == "download" and (
+                    seen_processing or current_changed or count_increased or baseline_snapshot is None
+                ):
+                    return action
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
             waited += poll_ms
@@ -1880,7 +1900,8 @@ class ShopeeProductsExport(ExportComponent):
         button = await self._first_visible_locator(page, self.sel.export_buttons)
         if button is None:
             raise RuntimeError("export button not found")
-        await self._capture_latest_report_baseline(page)
+        await self._capture_latest_report_top_snapshot(page)
+        await self._ensure_latest_report_panel_open(page)
         await self._cancel_download_waiter()
         if hasattr(page, "wait_for_event"):
             self._download_waiter = asyncio.create_task(

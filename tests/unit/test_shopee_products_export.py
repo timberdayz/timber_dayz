@@ -50,6 +50,32 @@ class _FakeActionGroup:
         return self._locators[0]
 
 
+class _FakeTextLocator:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    async def is_visible(self) -> bool:
+        return True
+
+    async def text_content(self) -> str:
+        return self._text
+
+
+class _FakeTextGroup:
+    def __init__(self, texts: list[str]) -> None:
+        self._locators = [_FakeTextLocator(text) for text in texts]
+
+    async def count(self) -> int:
+        return len(self._locators)
+
+    def nth(self, idx: int) -> _FakeTextLocator:
+        return self._locators[idx]
+
+    @property
+    def first(self) -> _FakeTextLocator:
+        return self._locators[0]
+
+
 class _FakeRow:
     def __init__(self, text: str, actions: list[_FakeActionLocator]) -> None:
         self._text = text
@@ -64,6 +90,8 @@ class _FakeRow:
     def locator(self, selector: str) -> _FakeActionGroup:
         if "button" in selector or "role='button'" in selector or 'role="button"' in selector:
             return _FakeActionGroup(self._actions)
+        if "status" in selector:
+            return _FakeTextGroup([action._text for action in self._actions if action._text])
         return _FakeActionGroup([])
 
 
@@ -161,80 +189,75 @@ async def test_wait_download_complete_clicks_latest_report_download_button(
 
 
 @pytest.mark.asyncio
-async def test_wait_top_report_download_button_recognizes_download_text(
+async def test_wait_top_report_download_button_returns_top_download_after_processing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = ExecutionContext(platform="shopee", account={}, config={})
     component = ShopeeProductsExport(ctx)
-    panel = _FakePanel([_FakeRow("parentskudetail.20260101_20260131.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")])])
+    panels = [
+        _FakePanel([_FakeRow("new-report", [_FakeActionLocator("进行中")])]),
+        _FakePanel([_FakeRow("new-report", [_FakeActionLocator("下载")])]),
+    ]
+
+    async def _next_panel(*_args, **_kwargs):
+        if len(panels) > 1:
+            return panels.pop(0)
+        return panels[0]
 
     monkeypatch.setattr(
         component,
-        "_wait_latest_report_panel",
-        AsyncMock(return_value=panel),
+        "_ensure_latest_report_panel_open",
+        AsyncMock(side_effect=_next_panel),
         raising=False,
     )
 
-    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=20, poll_ms=1)
 
-    assert button is not None
+    assert button is panels[0]._rows[0]._actions[0]
 
 
 @pytest.mark.asyncio
-async def test_products_wait_top_report_download_button_prefers_matching_date_signature(
+async def test_wait_top_report_download_button_ignores_stale_top_download_until_processing_seen(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ctx = ExecutionContext(
-        platform="shopee",
-        account={},
-        config={"start_date": "2026-01-01", "end_date": "2026-01-31"},
-    )
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
     component = ShopeeProductsExport(ctx)
-    old_button = _FakeActionLocator("\u4e0b\u8f7d")
-    target_button = _FakeActionLocator("\u4e0b\u8f7d")
-    panel = _FakePanel(
-        [
-            _FakeRow("parentskudetail.20260201_20260228.xlsx", [old_button]),
-            _FakeRow("parentskudetail.20260101_20260131.xlsx", [target_button]),
-        ]
-    )
+    component._latest_report_top_snapshot = ("stale-report", "download")
+    stale_download = _FakeActionLocator("下载")
+    panels = [_FakePanel([_FakeRow("stale-report", [stale_download])])]
 
     monkeypatch.setattr(
         component,
-        "_wait_latest_report_panel",
-        AsyncMock(return_value=panel),
+        "_ensure_latest_report_panel_open",
+        AsyncMock(return_value=panels[0]),
         raising=False,
     )
 
-    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=3, poll_ms=1)
 
-    assert button is target_button
+    assert button is None
 
 
 @pytest.mark.asyncio
-async def test_products_wait_top_report_download_button_waits_for_matching_processing_row(
+async def test_products_wait_top_report_download_button_prefers_top_slot_over_lower_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ctx = ExecutionContext(
-        platform="shopee",
-        account={},
-        config={"start_date": "2026-01-01", "end_date": "2026-01-31"},
-    )
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
     component = ShopeeProductsExport(ctx)
-    old_button = _FakeActionLocator("\u4e0b\u8f7d")
-    processing_button = _FakeActionLocator("\u8fdb\u884c\u4e2d")
-    target_button = _FakeActionLocator("\u4e0b\u8f7d")
+    lower_old_download = _FakeActionLocator("下载")
+    top_processing = _FakeActionLocator("进行中")
+    top_download = _FakeActionLocator("下载")
     panels = [
         _FakePanel(
             [
-                _FakeRow("parentskudetail.20260201_20260228.xlsx", [old_button]),
-                _FakeRow("parentskudetail.20260101_20260131.xlsx", [processing_button]),
+                _FakeRow("top-new-report", [top_processing]),
+                _FakeRow("old-report", [lower_old_download]),
             ]
         ),
         _FakePanel(
             [
-                _FakeRow("parentskudetail.20260201_20260228.xlsx", [old_button]),
-                _FakeRow("parentskudetail.20260101_20260131.xlsx", [target_button]),
+                _FakeRow("top-new-report", [top_download]),
+                _FakeRow("old-report", [lower_old_download]),
             ]
         ),
     ]
@@ -246,148 +269,152 @@ async def test_products_wait_top_report_download_button_waits_for_matching_proce
 
     monkeypatch.setattr(
         component,
-        "_wait_latest_report_panel",
+        "_ensure_latest_report_panel_open",
         AsyncMock(side_effect=_next_panel),
         raising=False,
     )
 
     button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=20, poll_ms=1)
 
-    assert button is target_button
+    assert button is top_download
 
 
 @pytest.mark.asyncio
-async def test_products_wait_top_report_download_button_prefers_inserted_duplicate_row_over_baseline_duplicate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ctx = ExecutionContext(
-        platform="shopee",
-        account={},
-        config={"start_date": "2026-02-01", "end_date": "2026-02-28"},
-    )
-    component = ShopeeProductsExport(ctx)
-    component._latest_report_baseline_rows = [
-        "parentskudetail.20260101_20260131.xlsx",
-        "parentskudetail.20260201_20260228.xlsx",
-    ]
-    new_target_button = _FakeActionLocator("\u4e0b\u8f7d")
-    old_duplicate_button = _FakeActionLocator("\u4e0b\u8f7d")
-    panel = _FakePanel(
-        [
-            _FakeRow("parentskudetail.20260201_20260228.xlsx", [new_target_button]),
-            _FakeRow("parentskudetail.20260101_20260131.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
-            _FakeRow("parentskudetail.20260201_20260228.xlsx", [old_duplicate_button]),
-        ]
-    )
-
-    monkeypatch.setattr(
-        component,
-        "_wait_latest_report_panel",
-        AsyncMock(return_value=panel),
-        raising=False,
-    )
-
-    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
-
-    assert button is new_target_button
-
-
-@pytest.mark.asyncio
-async def test_products_wait_top_report_download_button_uses_baseline_counts_for_duplicate_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ctx = ExecutionContext(
-        platform="shopee",
-        account={},
-        config={"start_date": "2026-02-01", "end_date": "2026-02-28"},
-    )
-    component = ShopeeProductsExport(ctx)
-    component._latest_report_baseline_rows = [
-        "parentskudetail.20260101_20260131.xlsx",
-        "parentskudetail.20260201_20260228.xlsx",
-    ]
-    old_duplicate_button = _FakeActionLocator("\u4e0b\u8f7d")
-    inserted_duplicate_button = _FakeActionLocator("\u4e0b\u8f7d")
-    panel = _FakePanel(
-        [
-            _FakeRow("parentskudetail.20260201_20260228.xlsx", [inserted_duplicate_button]),
-            _FakeRow("parentskudetail.20260101_20260131.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
-            _FakeRow("parentskudetail.20260201_20260228.xlsx", [old_duplicate_button]),
-        ]
-    )
-
-    monkeypatch.setattr(
-        component,
-        "_wait_latest_report_panel",
-        AsyncMock(return_value=panel),
-        raising=False,
-    )
-
-    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
-
-    assert button is inserted_duplicate_button
-
-
-@pytest.mark.asyncio
-async def test_services_agent_wait_top_report_download_button_prefers_agent_matching_row(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ctx = ExecutionContext(
-        platform="shopee",
-        account={},
-        config={
-            "services_subtype": "agent",
-            "start_date": "2026-04-01",
-            "end_date": "2026-04-01",
-        },
-    )
-    component = ShopeeServicesAgentExport(ctx)
-    old_button = _FakeActionLocator("\u4e0b\u8f7d")
-    target_button = _FakeActionLocator("\u4e0b\u8f7d")
-    panel = _FakePanel(
-        [
-            _FakeRow("chat_20260331_20260331.xlsx", [old_button]),
-            _FakeRow("chat_20260401_20260401.xlsx", [target_button]),
-        ]
-    )
-
-    monkeypatch.setattr(
-        component,
-        "_wait_latest_report_panel",
-        AsyncMock(return_value=panel),
-        raising=False,
-    )
-
-    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
-
-    assert button is target_button
-
-
-@pytest.mark.asyncio
-async def test_capture_latest_report_baseline_preserves_duplicate_rows(
+async def test_products_wait_top_report_download_button_prefers_first_duplicate_candidate_after_processing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = ExecutionContext(platform="shopee", account={}, config={})
     component = ShopeeProductsExport(ctx)
+    first_top_processing = _FakeActionLocator("进行中")
+    first_top_download = _FakeActionLocator("下载")
+    later_duplicate_download = _FakeActionLocator("下载")
+    panels = [
+        _FakePanel(
+            [
+                _FakeRow("parentskudetail.20260201_20260228.xlsx", [first_top_processing]),
+                _FakeRow("parentskudetail.20260201_20260228.xlsx", [later_duplicate_download]),
+            ]
+        ),
+        _FakePanel(
+            [
+                _FakeRow("parentskudetail.20260201_20260228.xlsx", [first_top_download]),
+                _FakeRow("parentskudetail.20260201_20260228.xlsx", [later_duplicate_download]),
+            ]
+        ),
+    ]
+
+    async def _next_panel(*_args, **_kwargs):
+        if len(panels) > 1:
+            return panels.pop(0)
+        return panels[0]
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(side_effect=_next_panel),
+        raising=False,
+    )
+
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=20, poll_ms=1)
+
+    assert button is first_top_download
+
+
+@pytest.mark.asyncio
+async def test_wait_top_report_download_button_accepts_top_download_when_count_increases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    component._latest_report_top_snapshot = ("parentskudetail.20260201_20260228.xlsx", "download")
+    component._latest_report_baseline_rows = [
+        "parentskudetail.20260201_20260228.xlsx",
+        "parentskudetail.20260101_20260131.xlsx",
+    ]
+    top_download = _FakeActionLocator("涓嬭浇")
     panel = _FakePanel(
         [
-            _FakeRow("parentskudetail.20260201_20260228.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
-            _FakeRow("parentskudetail.20260101_20260131.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
-            _FakeRow("parentskudetail.20260201_20260228.xlsx", [_FakeActionLocator("\u4e0b\u8f7d")]),
+            _FakeRow("parentskudetail.20260201_20260228.xlsx", [top_download]),
+            _FakeRow("parentskudetail.20260201_20260228.xlsx", [_FakeActionLocator("涓嬭浇")]),
+            _FakeRow("parentskudetail.20260101_20260131.xlsx", [_FakeActionLocator("涓嬭浇")]),
         ]
     )
 
     monkeypatch.setattr(
         component,
-        "_first_visible_locator",
+        "_ensure_latest_report_panel_open",
         AsyncMock(return_value=panel),
         raising=False,
     )
 
-    await component._capture_latest_report_baseline(_FakePage())
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
 
-    assert component._latest_report_baseline_rows == [
-        "parentskudetail.20260201_20260228.xlsx",
-        "parentskudetail.20260101_20260131.xlsx",
-        "parentskudetail.20260201_20260228.xlsx",
+    assert button is top_download
+
+
+@pytest.mark.asyncio
+async def test_services_agent_wait_top_report_download_button_uses_same_top_slot_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"services_subtype": "agent"},
+    )
+    component = ShopeeServicesAgentExport(ctx)
+    top_processing = _FakeActionLocator("进行中")
+    top_download = _FakeActionLocator("下载")
+    lower_old_download = _FakeActionLocator("下载")
+    panels = [
+        _FakePanel(
+            [
+                _FakeRow("chat_20260401_20260401.xlsx", [top_processing]),
+                _FakeRow("chat_20260401_20260401.xlsx", [lower_old_download]),
+            ]
+        ),
+        _FakePanel(
+            [
+                _FakeRow("chat_20260401_20260401.xlsx", [top_download]),
+                _FakeRow("chat_20260401_20260401.xlsx", [lower_old_download]),
+            ]
+        ),
     ]
+
+    async def _next_panel(*_args, **_kwargs):
+        if len(panels) > 1:
+            return panels.pop(0)
+        return panels[0]
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(side_effect=_next_panel),
+        raising=False,
+    )
+
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=20, poll_ms=1)
+
+    assert button is top_download
+
+
+@pytest.mark.asyncio
+async def test_capture_latest_report_top_snapshot_records_top_row_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    panel = _FakePanel([_FakeRow("parentskudetail.20260201_20260228.xlsx", [_FakeActionLocator("下载")])])
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
+
+    await component._capture_latest_report_top_snapshot(_FakePage())
+
+    assert component._latest_report_top_snapshot == (
+        "parentskudetail.20260201_20260228.xlsx",
+        "download",
+    )
