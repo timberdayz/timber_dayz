@@ -255,11 +255,11 @@ class _NavPanel(_FakePanel):
         return self.selector_locators.get(selector, _FakeLocator(visible=False, count=0))
 
 
-def test_shopee_products_export_accepts_products_overview_url() -> None:
+def test_shopee_products_export_accepts_products_performance_url() -> None:
     component = ShopeeProductsExport(_ctx())
 
     assert component._products_page_looks_ready(
-        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+        "https://seller.shopee.cn/datacenter/product/performance?cnsc_shop_id=1"
     ) is True
 
 
@@ -999,7 +999,7 @@ async def test_shopee_products_export_wait_download_complete_rejects_empty_file(
 
 
 @pytest.mark.asyncio
-async def test_shopee_products_export_wait_top_report_download_button_scans_beyond_top_row(
+async def test_shopee_products_export_wait_top_report_download_button_targets_inserted_top_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
@@ -1009,8 +1009,8 @@ async def test_shopee_products_export_wait_top_report_download_button_scans_beyo
     old_row = _ReportRow("old.xlsx download", action_text="download-old", status_text="download-old")
     processing_row = _ReportRow("new.xlsx processing", action_text="processing", status_text="processing")
     ready_row = _ReportRow("new.xlsx download", action_text="download-new", status_text="download-new")
-    processing_panel = _ReportPanelLocator([old_row, processing_row])
-    ready_panel = _ReportPanelLocator([old_row, ready_row])
+    processing_panel = _ReportPanelLocator([processing_row, old_row])
+    ready_panel = _ReportPanelLocator([ready_row, old_row])
     panels = iter([processing_panel, ready_panel])
 
     async def _panel_side_effect(*args, **kwargs):
@@ -1028,10 +1028,9 @@ async def test_shopee_products_export_wait_top_report_download_button_scans_beyo
 
     component._latest_report_baseline_rows = [
         ("old.xlsxdownload", "download"),
-        ("new.xlsxprocessing", "processing"),
     ]
     component._latest_report_top_snapshot = ("old.xlsxdownload", "download")
-    component._latest_report_count_snapshot = 2
+    component._latest_report_count_snapshot = 1
 
     button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
 

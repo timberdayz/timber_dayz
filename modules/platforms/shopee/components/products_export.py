@@ -1549,6 +1549,54 @@ class ShopeeProductsExport(ExportComponent):
         self._latest_report_count_snapshot = len(await self._visible_report_rows(panel))
         self._latest_report_top_snapshot = await self._top_report_snapshot(panel)
 
+    async def _report_row_candidates(self, panel: Any) -> list[dict[str, Any]]:
+        rows = await self._visible_report_rows(panel)
+        candidates: list[dict[str, Any]] = []
+        for idx, row in enumerate(rows):
+            action, action_text = await self._row_action(row)
+            try:
+                row_text = (await row.text_content()) or ""
+            except Exception:
+                row_text = ""
+            normalized_row = self._normalize_report_row_text(row_text)
+            state = self._row_state(row_text, action_text)
+            candidates.append(
+                {
+                    "index": idx,
+                    "row": row,
+                    "action": action,
+                    "text": normalized_row,
+                    "state": state,
+                }
+            )
+        return candidates
+
+    def _detect_inserted_top_row(
+        self,
+        baseline_rows: list[tuple[str, str]],
+        current_rows: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not baseline_rows or len(current_rows) < 2:
+            return None
+
+        baseline_first_text, _baseline_first_state = baseline_rows[0]
+        current_top = current_rows[0]
+        current_second = current_rows[1]
+
+        if current_second["text"] != baseline_first_text:
+            return None
+
+        if current_top["text"] == baseline_first_text and current_top["state"] == baseline_rows[0][1]:
+            return None
+
+        if len(baseline_rows) >= 2 and len(current_rows) >= 3:
+            baseline_second_text, _baseline_second_state = baseline_rows[1]
+            current_third = current_rows[2]
+            if current_third["text"] != baseline_second_text:
+                return None
+
+        return current_top
+
     async def _wait_top_report_download_button(
         self,
         page: Any,
@@ -1565,6 +1613,7 @@ class ShopeeProductsExport(ExportComponent):
         seen_processing = False
         baseline_snapshot = self._latest_report_top_snapshot
         baseline_rows = list(self._latest_report_baseline_rows)
+        target_top_row_text: str | None = None
         while waited <= timeout_ms:
             panel = await self._ensure_latest_report_panel_open(page)
             if panel is not None:
@@ -1576,26 +1625,42 @@ class ShopeeProductsExport(ExportComponent):
                 )
                 current_count = len(await self._visible_report_rows(panel))
                 count_increased = current_count > self._latest_report_count_snapshot
-                rows = await self._visible_report_rows(panel)
-                row_candidates: list[tuple[int, Any, str, str]] = []
-                for idx, row in enumerate(rows):
-                    action, action_text = await self._row_action(row)
-                    if action is None:
-                        continue
-                    try:
-                        row_text = (await row.text_content()) or ""
-                    except Exception:
-                        row_text = ""
-                    state = self._row_state(row_text, action_text)
-                    normalized_row = self._normalize_report_row_text(row_text)
-                    if state == "processing":
+                row_candidates = await self._report_row_candidates(panel)
+                for candidate in row_candidates:
+                    if candidate["state"] == "processing":
                         seen_processing = True
-                    row_candidates.append((idx, action, normalized_row, state))
+
+                target_candidate: dict[str, Any] | None = None
+                if target_top_row_text is not None:
+                    if row_candidates and row_candidates[0]["text"] == target_top_row_text:
+                        target_candidate = row_candidates[0]
+                else:
+                    inserted_top = self._detect_inserted_top_row(baseline_rows, row_candidates)
+                    if inserted_top is not None:
+                        target_top_row_text = inserted_top["text"]
+                        target_candidate = inserted_top
+
+                if target_candidate is not None:
+                    target_state = target_candidate["state"]
+                    target_action = target_candidate["action"]
+                    if target_state == "processing":
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(poll_ms)
+                        waited += poll_ms
+                        continue
+                    if target_state == "download" and target_action is not None:
+                        return target_action
 
                 changed_download_candidates: list[Any] = []
                 fallback_download_candidates: list[Any] = []
-                for idx, action, normalized_row, state in row_candidates:
+                for candidate in row_candidates:
+                    idx = int(candidate["index"])
+                    action = candidate["action"]
+                    normalized_row = str(candidate["text"])
+                    state = str(candidate["state"])
                     if state != "download":
+                        continue
+                    if action is None:
                         continue
                     baseline_changed = idx >= len(baseline_rows)
                     if not baseline_changed and idx < len(baseline_rows):
