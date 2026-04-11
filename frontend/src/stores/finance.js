@@ -58,6 +58,17 @@ export const useFinanceStore = defineStore('finance', {
       error: null
     },
 
+    monthlyProfitSettlement: {
+      data: {
+        summary: null,
+        personnel_details: [],
+        follow_details: [],
+        adjustments: []
+      },
+      loading: false,
+      error: null
+    },
+
     followInvestmentSettlement: {
       data: {
         settlement: null,
@@ -303,6 +314,73 @@ export const useFinanceStore = defineStore('finance', {
       }
     },
 
+    async fetchMonthlyProfitSettlement(params = {}) {
+      this.monthlyProfitSettlement.loading = true
+      this.monthlyProfitSettlement.error = null
+
+      try {
+        const response = await financeApi.getMonthlyProfitSettlement(params)
+        this.monthlyProfitSettlement.data = response.data || response
+      } catch (error) {
+        this.monthlyProfitSettlement.error = error.message
+        console.error('获取月度利润结算中心数据失败:', error)
+      } finally {
+        this.monthlyProfitSettlement.loading = false
+      }
+    },
+
+    async rebuildMonthlyProfitSettlement(data) {
+      this.monthlyProfitSettlement.loading = true
+      this.monthlyProfitSettlement.error = null
+
+      try {
+        const response = await financeApi.rebuildMonthlyProfitSettlement(data)
+        this.monthlyProfitSettlement.data = response.data || response
+        return response
+      } catch (error) {
+        this.monthlyProfitSettlement.error = error.message
+        console.error('重建月度利润结算中心失败:', error)
+        throw error
+      } finally {
+        this.monthlyProfitSettlement.loading = false
+      }
+    },
+
+    async updateMonthlyProfitSettlementTargets(id, data) {
+      this.monthlyProfitSettlement.loading = true
+      this.monthlyProfitSettlement.error = null
+
+      try {
+        const response = await financeApi.updateMonthlyProfitSettlementTargets(id, data)
+        this.monthlyProfitSettlement.data = response.data || response
+        return response
+      } catch (error) {
+        this.monthlyProfitSettlement.error = error.message
+        console.error('更新月度利润结算中心目标比例失败:', error)
+        throw error
+      } finally {
+        this.monthlyProfitSettlement.loading = false
+      }
+    },
+
+    async approveMonthlyProfitSettlement(id) {
+      const response = await financeApi.approveMonthlyProfitSettlement(id)
+      if (this.monthlyProfitSettlement.data?.summary?.id === id) {
+        this.monthlyProfitSettlement.data.summary.status = 'approved'
+        this.monthlyProfitSettlement.data.summary.approved_by = response.data?.approved_by || response.approved_by
+      }
+      return response
+    },
+
+    async reopenMonthlyProfitSettlement(id) {
+      const response = await financeApi.reopenMonthlyProfitSettlement(id)
+      if (this.monthlyProfitSettlement.data?.summary?.id === id) {
+        this.monthlyProfitSettlement.data.summary.status = 'draft'
+        this.monthlyProfitSettlement.data.summary.approved_by = null
+      }
+      return response
+    },
+
     async calculateFollowInvestmentSettlement(data) {
       this.followInvestmentSettlement.loading = true
       this.followInvestmentSettlement.error = null
@@ -484,6 +562,12 @@ export const useFinanceStore = defineStore('finance', {
       this.expenses.data = []
       this.profitReport.data = {}
       this.profitBasis.data = null
+      this.monthlyProfitSettlement.data = {
+        summary: null,
+        personnel_details: [],
+        follow_details: [],
+        adjustments: []
+      }
       this.followInvestmentSettlement.data = { settlement: null, details: [] }
       this.followInvestments.data = []
       this.followInvestmentSettlements.data = []

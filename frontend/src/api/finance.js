@@ -188,6 +188,26 @@ export default {
     return await api._post('/finance/profit-basis/rebuild', data)
   },
 
+  async getMonthlyProfitSettlement(params = {}) {
+    return await api._get('/finance/monthly-profit-settlement', { params })
+  },
+
+  async rebuildMonthlyProfitSettlement(data) {
+    return await api._post('/finance/monthly-profit-settlement/rebuild', data)
+  },
+
+  async updateMonthlyProfitSettlementTargets(id, data) {
+    return await api._put(`/finance/monthly-profit-settlement/${id}/targets`, data)
+  },
+
+  async approveMonthlyProfitSettlement(id) {
+    return await api._post(`/finance/monthly-profit-settlement/${id}/approve`, {})
+  },
+
+  async reopenMonthlyProfitSettlement(id) {
+    return await api._post(`/finance/monthly-profit-settlement/${id}/reopen`, {})
+  },
+
   async getFollowInvestments(params = {}) {
     return await api._get('/finance/follow-investments', { params })
   },

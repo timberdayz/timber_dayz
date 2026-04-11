@@ -1,5 +1,7 @@
 # HR Payroll Operations Runbook
 
+> 关联文档：月结总账与经营汇总流程请同时参考 `docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md`。
+
 ## 1. Scope
 
 本文档面向 HR、管理员和维护人员，说明当前系统中“绩效重算 -> 工资单生成 -> 我的收入展示 -> 工资单流转”的实际运行方式、页面入口、排障步骤和审计定位方法。
