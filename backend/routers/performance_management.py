@@ -58,6 +58,7 @@ from backend.services.postgresql_shop_metrics_service import (
     load_shop_monthly_target_achievement,
 )
 from backend.services.performance_coefficient import calculate_performance_coefficient
+from backend.services.employee_task_sources import sync_performance_confirmation_task
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
@@ -1337,6 +1338,30 @@ async def calculate_performance_scores(
         payroll_service = PayrollGenerationService(db=db)
         payroll_result = await payroll_service.generate_month(period)
         await db.commit()
+        try:
+            employee_rows = (
+                await db.execute(
+                    select(EmployeePerformance.employee_code).where(
+                        EmployeePerformance.year_month == period
+                    )
+                )
+            ).scalars().all()
+            for employee_code in sorted({code for code in employee_rows if code}):
+                try:
+                    await sync_performance_confirmation_task(
+                        db,
+                        year_month=period,
+                        employee_code=employee_code,
+                        created_by=None,
+                    )
+                except Exception as task_err:
+                    logger.warning(
+                        "[PerformanceManagement] employee confirmation task sync failed for %s: %s",
+                        employee_code,
+                        task_err,
+                    )
+        except Exception as sync_err:
+            logger.warning("[PerformanceManagement] employee confirmation task batch sync failed: %s", sync_err)
         try:
             from backend.services.cache_service import get_cache_service
             await invalidate_performance_related_caches(get_cache_service())
