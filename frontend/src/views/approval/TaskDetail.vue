@@ -33,8 +33,11 @@
       <el-col :span="8">
         <el-card shadow="hover" class="detail-card">
           <template #header>处理动作</template>
-          <el-button type="primary" @click="startTask">开始处理</el-button>
-          <el-button plain @click="submitResult">提交结果</el-button>
+          <div class="action-list">
+            <el-button type="primary" @click="startTask">开始处理</el-button>
+            <el-button plain @click="submitResult">提交结果</el-button>
+            <el-button v-if="businessRoute" plain @click="goToBusinessPage">前往业务页处理</el-button>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -42,13 +45,29 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import employeeTasksApi from '@/api/employeeTasks.js'
 
 const route = useRoute()
+const router = useRouter()
 const task = ref({})
+
+const businessRoute = computed(() => {
+  const sourceRecordId = String(task.value?.source_record_id || '')
+  if (task.value?.source_module === 'expense-management') {
+    const [yearMonth, platformCode, shopId] = sourceRecordId.split(':')
+    if (!yearMonth || !shopId) return ''
+    return `/expense-management?task_id=${route.params.taskId}&year_month=${encodeURIComponent(yearMonth)}&shop_id=${encodeURIComponent(shopId)}&platform_code=${encodeURIComponent(platformCode || '')}`
+  }
+  if (task.value?.source_module === 'performance-management') {
+    const [yearMonth, employeeCode] = sourceRecordId.split(':')
+    if (!yearMonth || !employeeCode) return ''
+    return `/hr-performance-display?task_id=${route.params.taskId}&year_month=${encodeURIComponent(yearMonth)}&employee_code=${encodeURIComponent(employeeCode)}`
+  }
+  return ''
+})
 
 const loadTask = async () => {
   task.value = await employeeTasksApi.getTask(route.params.taskId)
@@ -66,6 +85,11 @@ const submitResult = async () => {
   })
 }
 
+const goToBusinessPage = () => {
+  if (!businessRoute.value) return
+  router.push(businessRoute.value)
+}
+
 onMounted(() => {
   void loadTask()
 })
@@ -79,5 +103,11 @@ onMounted(() => {
 .detail-line {
   margin-bottom: 8px;
   color: #606266;
+}
+
+.action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 </style>
