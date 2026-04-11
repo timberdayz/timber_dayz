@@ -1120,9 +1120,9 @@ async def _on_verification_required(
         else "verification_required"
     )
     waiting_message = (
-        "绛夊緟浜哄伐澶勭悊"
+        "等待人工处理"
         if next_status == "manual_intervention_required"
-        else "绛夊緟楠岃瘉鐮佸洖濉?"
+        else "等待验证码回填"
     )
     try:
         async with AsyncSessionLocal() as session:

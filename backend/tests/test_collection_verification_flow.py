@@ -207,6 +207,7 @@ async def test_on_verification_required_broadcasts_websocket_event(monkeypatch):
 
     assert value is None
     assert task.status == "verification_required"
+    assert task.current_step == "等待验证码回填"
     broadcast.assert_awaited_once_with(
         "task-1",
         "graphical_captcha",
@@ -252,3 +253,4 @@ async def test_on_verification_required_marks_manual_continue_types_as_manual_in
 
     assert value is None
     assert task.status == "manual_intervention_required"
+    assert task.current_step == "等待人工处理"
