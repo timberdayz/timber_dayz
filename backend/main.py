@@ -584,7 +584,21 @@ async def lifespan(app: FastAPI):
             deployment_role = os.getenv("DEPLOYMENT_ROLE", "").lower()
             if enable_collection and deployment_role != "cloud":
                 from backend.models.database import AsyncSessionLocal
+                from backend.services.collection_config_run_service import (
+                    CollectionConfigRunService,
+                )
                 from backend.services.collection_queue_runner import CollectionQueueRunner
+
+                async with AsyncSessionLocal() as db:
+                    run_service = CollectionConfigRunService(db)
+                    recovered_runs = await run_service.mark_running_runs_failed(
+                        error_message="service restarted before config run completed"
+                    )
+                    if recovered_runs:
+                        logger.warning(
+                            "[QueueRunner] Marked %s running config runs as failed after restart",
+                            len(recovered_runs),
+                        )
 
                 queue_runner = CollectionQueueRunner(
                     session_factory=AsyncSessionLocal,

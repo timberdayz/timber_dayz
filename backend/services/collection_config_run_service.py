@@ -99,6 +99,31 @@ class CollectionConfigRunService:
         await self.db.refresh(run)
         return run
 
+    async def mark_running_runs_failed(
+        self,
+        *,
+        error_message: str,
+    ) -> list[CollectionConfigRun]:
+        runs = (
+            await self.db.execute(
+                select(CollectionConfigRun).where(CollectionConfigRun.status == "running")
+            )
+        ).scalars().all()
+
+        if not runs:
+            return []
+
+        now = datetime.now(timezone.utc)
+        for run in runs:
+            run.status = "failed"
+            run.error_message = error_message
+            run.completed_at = now
+
+        await self.db.commit()
+        for run in runs:
+            await self.db.refresh(run)
+        return list(runs)
+
     async def finalize_run_from_tasks(self, run_id: int) -> CollectionConfigRun:
         run = await self._get_run(run_id)
         tasks = (

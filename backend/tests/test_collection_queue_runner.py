@@ -216,3 +216,33 @@ async def test_process_run_executes_expanded_tasks_sequentially(queue_runner_ses
 
     assert execution_order == ["task-1", "task-2"]
     assert finalized == [11]
+
+
+@pytest.mark.asyncio
+async def test_process_once_marks_run_failed_when_processing_raises(queue_runner_session_factory):
+    from backend.services.collection_config_run_service import CollectionConfigRunService
+    from backend.services.collection_queue_runner import CollectionQueueRunner
+
+    config = await _seed_config(queue_runner_session_factory)
+    async with queue_runner_session_factory() as session:
+        run_service = CollectionConfigRunService(session)
+        run, _ = await run_service.enqueue_config_run(config, trigger_type="scheduled")
+
+    runner = CollectionQueueRunner(
+        session_factory=queue_runner_session_factory,
+        poll_interval_seconds=0.01,
+    )
+
+    async def _broken_process(_run):
+        raise RuntimeError("boom")
+
+    runner._process_run = _broken_process
+
+    processed = await runner.process_once()
+
+    assert processed is True
+    async with queue_runner_session_factory() as session:
+        run_service = CollectionConfigRunService(session)
+        refreshed = await run_service._get_run(run.id)
+        assert refreshed.status == "failed"
+        assert "boom" in (refreshed.error_message or "")

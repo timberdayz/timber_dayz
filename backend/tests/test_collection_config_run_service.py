@@ -216,3 +216,46 @@ async def test_get_running_run_returns_only_running_instance(config_run_session)
         await config_run_session.execute(select(CollectionConfigRun))
     ).scalars().all()
     assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_mark_running_runs_failed_marks_only_active_running_runs(config_run_session):
+    from backend.services.collection_config_run_service import CollectionConfigRunService
+
+    config = await _seed_config(config_run_session)
+    service = CollectionConfigRunService(config_run_session)
+    running_run, _ = await service.enqueue_config_run(config, trigger_type="scheduled")
+    await service.claim_next_queued_run()
+    queued_run = CollectionConfigRun(
+        run_id="queued-run",
+        config_id=config.id,
+        platform=config.platform,
+        main_account_id=config.main_account_id,
+        trigger_type="scheduled",
+        status="queued",
+    )
+    config_run_session.add(queued_run)
+
+    config_run_session.add(
+        CollectionConfigRun(
+            run_id="completed-run",
+            config_id=config.id,
+            platform=config.platform,
+            main_account_id=config.main_account_id,
+            trigger_type="scheduled",
+            status="completed",
+        )
+    )
+    await config_run_session.commit()
+    await config_run_session.refresh(queued_run)
+
+    updated_runs = await service.mark_running_runs_failed(
+        error_message="service restarted before config run completed"
+    )
+
+    assert [run.id for run in updated_runs] == [running_run.id]
+    assert updated_runs[0].status == "failed"
+    assert updated_runs[0].completed_at is not None
+
+    refreshed_queued = await service._get_run(queued_run.id)
+    assert refreshed_queued.status == "queued"

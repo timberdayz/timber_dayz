@@ -66,7 +66,15 @@ class CollectionQueueRunner:
             run = await service.claim_next_queued_run()
             if run is None:
                 return False
-            await self._process_run(run)
+            try:
+                await self._process_run(run)
+            except Exception as exc:
+                await service.mark_run_failed(run.id, error_message=str(exc))
+                logger.warning(
+                    "CollectionQueueRunner failed while processing run %s: %s",
+                    getattr(run, "run_id", run.id),
+                    exc,
+                )
             return True
 
     async def _process_run(self, run: object) -> None:
