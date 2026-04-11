@@ -34,7 +34,7 @@ class ShopeeProductsExport(ExportComponent):
         self.sel = selectors or ProductsSelectors()
         self.service_sel = ServicesSelectors()
         self._download_waiter: asyncio.Task | None = None
-        self._latest_report_baseline_rows: list[str] = []
+        self._latest_report_baseline_rows: list[tuple[str, str]] = []
         self._latest_report_top_snapshot: tuple[str, str] | None = None
         self._latest_report_count_snapshot: int = 0
 
@@ -1425,15 +1425,24 @@ class ShopeeProductsExport(ExportComponent):
         if panel is None:
             self._latest_report_baseline_rows = []
             return
-        baseline: list[str] = []
+        baseline: list[tuple[str, str]] = []
         for row in await self._visible_report_rows(panel):
             try:
                 row_text = self._normalize_report_row_text(await row.text_content())
             except Exception:
                 row_text = ""
+            state = await self._row_status(row)
             if row_text:
-                baseline.append(row_text)
+                baseline.append((row_text, state))
         self._latest_report_baseline_rows = baseline
+
+    async def _row_status(self, row: Any) -> str:
+        try:
+            row_text = (await row.text_content()) or ""
+        except Exception:
+            row_text = ""
+        status_text = await self._row_status_text(row)
+        return self._row_state(row_text, status_text)
 
     async def _row_action(self, row: Any) -> tuple[Any | None, str]:
         try:
@@ -1555,10 +1564,10 @@ class ShopeeProductsExport(ExportComponent):
         waited = 0
         seen_processing = False
         baseline_snapshot = self._latest_report_top_snapshot
+        baseline_rows = list(self._latest_report_baseline_rows)
         while waited <= timeout_ms:
             panel = await self._ensure_latest_report_panel_open(page)
             if panel is not None:
-                action, state = await self._resolve_report_row_action(panel)
                 current_snapshot = await self._top_report_snapshot(panel)
                 current_changed = (
                     baseline_snapshot is not None
@@ -1567,16 +1576,44 @@ class ShopeeProductsExport(ExportComponent):
                 )
                 current_count = len(await self._visible_report_rows(panel))
                 count_increased = current_count > self._latest_report_count_snapshot
-                if state == "processing":
-                    seen_processing = True
-                    if hasattr(page, "wait_for_timeout"):
-                        await page.wait_for_timeout(poll_ms)
-                        waited += poll_ms
+                rows = await self._visible_report_rows(panel)
+                row_candidates: list[tuple[int, Any, str, str]] = []
+                for idx, row in enumerate(rows):
+                    action, action_text = await self._row_action(row)
+                    if action is None:
                         continue
-                if action is not None and state == "download" and (
+                    try:
+                        row_text = (await row.text_content()) or ""
+                    except Exception:
+                        row_text = ""
+                    state = self._row_state(row_text, action_text)
+                    normalized_row = self._normalize_report_row_text(row_text)
+                    if state == "processing":
+                        seen_processing = True
+                    row_candidates.append((idx, action, normalized_row, state))
+
+                changed_download_candidates: list[Any] = []
+                fallback_download_candidates: list[Any] = []
+                for idx, action, normalized_row, state in row_candidates:
+                    if state != "download":
+                        continue
+                    baseline_changed = idx >= len(baseline_rows)
+                    if not baseline_changed and idx < len(baseline_rows):
+                        baseline_row_text, baseline_state = baseline_rows[idx]
+                        baseline_changed = (
+                            baseline_row_text != normalized_row or baseline_state != state
+                        )
+                    if baseline_changed:
+                        changed_download_candidates.append(action)
+                    else:
+                        fallback_download_candidates.append(action)
+
+                if changed_download_candidates:
+                    return changed_download_candidates[0]
+                if fallback_download_candidates and (
                     seen_processing or current_changed or count_increased or baseline_snapshot is None
                 ):
-                    return action
+                    return fallback_download_candidates[0]
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
             waited += poll_ms
@@ -1900,6 +1937,7 @@ class ShopeeProductsExport(ExportComponent):
         button = await self._first_visible_locator(page, self.sel.export_buttons)
         if button is None:
             raise RuntimeError("export button not found")
+        await self._capture_latest_report_baseline(page)
         await self._capture_latest_report_top_snapshot(page)
         await self._ensure_latest_report_panel_open(page)
         await self._cancel_download_waiter()

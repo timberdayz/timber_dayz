@@ -10,6 +10,7 @@ import pytest
 from modules.components.base import ExecutionContext
 from modules.components.export.base import ExportMode
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
+from modules.platforms.shopee.components.services_agent_export import ShopeeServicesAgentExport
 
 
 def _ctx(config: dict | None = None) -> ExecutionContext:
@@ -179,6 +180,69 @@ class _FakePanel:
             text,
             _FakeTextMatch(_FakeLocator(visible=False, count=0), _FakeLocator(visible=False, count=0)),
         )
+
+
+class _ReportRow(_FakeLocator):
+    def __init__(
+        self,
+        row_text: str,
+        *,
+        action_text: str | None = None,
+        status_text: str | None = None,
+        visible: bool = True,
+    ) -> None:
+        self.action_locator = _FakeLocator(action_text, visible=visible, count=1 if action_text else 0)
+        self.status_locator = _FakeLocator(status_text, visible=visible, count=1 if status_text else 0)
+        button_locators = [locator for locator in (self.action_locator, self.status_locator) if _locator_is_visible(locator)]
+        selector_locators = {
+            "button, a, [role='button']": _FakeLocatorGroup(button_locators),
+            ".status": _FakeLocatorGroup([self.status_locator] if status_text else []),
+            '[class*="status"]': _FakeLocatorGroup([self.status_locator] if status_text else []),
+        }
+        super().__init__(
+            row_text,
+            visible=visible,
+            count=1 if visible else 0,
+            selector_locators=selector_locators,
+        )
+
+
+def _locator_is_visible(locator: _FakeLocator) -> bool:
+    return getattr(locator, "_visible", False) and getattr(locator, "_count", 0) > 0
+
+
+class _ReportPanelLocator(_FakeLocator):
+    def __init__(self, rows: list[_ReportRow], *, visible: bool = True) -> None:
+        super().__init__("latest-report-panel", visible=visible, count=1 if visible else 0)
+        self._rows = rows
+
+    def locator(self, selector: str):
+        row_selectors = {
+            ".list-item",
+            ".ant-table-row",
+            ".el-table__row",
+            "tbody tr",
+            '[class*="report-item"]',
+            '[class*="download-item"]',
+            "li",
+            '[class*="row"]',
+            "div",
+        }
+        if selector in row_selectors:
+            return _FakeLocatorGroup(self._rows)
+        return super().locator(selector)
+
+
+class _DownloadEventPage(_FakePage):
+    def __init__(self, button: _FakeLocator, url: str) -> None:
+        super().__init__(url)
+        self.button = button
+
+    async def wait_for_event(self, event_name: str, timeout: int = 60000):
+        assert event_name == "download"
+        if not self.button.clicked:
+            raise RuntimeError("download not started")
+        return _FakeDownload(suggested_filename="services-agent-export.xlsx", payload=b"file-bytes")
 
 
 class _NavPanel(_FakePanel):
@@ -932,6 +996,76 @@ async def test_shopee_products_export_wait_download_complete_rejects_empty_file(
     result = await component._wait_download_complete(page)
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_wait_top_report_download_button_scans_beyond_top_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    component._download_waiter = asyncio.get_running_loop().create_future()
+
+    old_row = _ReportRow("old.xlsx 下载", action_text="下载-old", status_text="下载-old")
+    processing_row = _ReportRow("new.xlsx 进行中", action_text="进行中", status_text="进行中")
+    ready_row = _ReportRow("new.xlsx 下载", action_text="下载-new", status_text="下载-new")
+    processing_panel = _ReportPanelLocator([old_row, processing_row])
+    ready_panel = _ReportPanelLocator([old_row, ready_row])
+    panels = iter([processing_panel, ready_panel])
+
+    async def _panel_side_effect(*args, **kwargs):
+        try:
+            return next(panels)
+        except StopIteration:
+            return ready_panel
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(side_effect=_panel_side_effect),
+        raising=False,
+    )
+
+    component._latest_report_baseline_rows = [
+        ("old.xlsx下载", "download"),
+        ("new.xlsx进行中", "processing"),
+    ]
+    component._latest_report_top_snapshot = ("old.xlsx下载", "download")
+    component._latest_report_count_snapshot = 2
+
+    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+
+    assert await button.text_content() == "下载-new"
+
+
+@pytest.mark.asyncio
+async def test_shopee_services_agent_wait_download_complete_clicks_ui_download_before_waiting_event(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    download_button = _FakeLocator("下载", visible=True)
+    page = _DownloadEventPage(
+        download_button,
+        "https://seller.shopee.cn/datacenter/services/agent?cnsc_shop_id=1",
+    )
+    component = ShopeeServicesAgentExport(_ctx({"shop_name": "shop-a", "granularity": "daily", "sub_domain": "agent"}))
+
+    monkeypatch.setattr(
+        component,
+        "_wait_top_report_download_button",
+        AsyncMock(return_value=download_button),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "modules.platforms.shopee.components.services_export_base.build_standard_output_root",
+        lambda ctx, data_type, granularity, subtype=None: tmp_path,
+    )
+
+    result = await component._wait_download_complete(page)
+
+    assert download_button.clicked is True
+    assert result is not None
+    assert (tmp_path / "services-agent-export.xlsx").exists()
 
 
 @pytest.mark.asyncio

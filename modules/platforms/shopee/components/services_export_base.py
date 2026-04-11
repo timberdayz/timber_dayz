@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -27,7 +26,8 @@ class ShopeeServicesExportBase(ShopeeAnalyticsExport):
         path = self._service_path(subtype)
         super().__init__(
             ctx,
-            selectors=selectors or replace(
+            selectors=selectors
+            or replace(
                 ProductsSelectors(),
                 overview_path=path,
             ),
@@ -85,6 +85,13 @@ class ShopeeServicesExportBase(ShopeeAnalyticsExport):
             index += 1
 
     async def _wait_download_complete(self, page: Any) -> str | None:
+        button = await self._wait_top_report_download_button(page)
+        if button is not None:
+            try:
+                await button.click(timeout=5000)
+            except Exception:
+                return None
+
         waiter = self._download_waiter
         if waiter is None:
             if not hasattr(page, "wait_for_event"):
@@ -124,78 +131,6 @@ class ShopeeServicesExportBase(ShopeeAnalyticsExport):
         except OSError:
             return None
         return str(target)
-
-    async def _wait_latest_report_panel(self, page: Any, *, timeout_ms: int = 20000, poll_ms: int = 500) -> Any | None:
-        waited = 0
-        while waited <= timeout_ms:
-            panel = await self._first_visible_locator(page, self.service_sel.latest_report_panels)
-            if panel is not None:
-                return panel
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(poll_ms)
-            waited += poll_ms
-        return None
-
-    async def _top_report_action(self, panel: Any) -> tuple[Any | None, str | None]:
-        try:
-            actions = panel.locator("button, a, [role='button']")
-            count = await actions.count()
-        except Exception:
-            return None, None
-
-        for idx in range(count):
-            candidate = actions.nth(idx)
-            try:
-                if not await candidate.is_visible():
-                    continue
-            except Exception:
-                continue
-            try:
-                text = (await candidate.text_content()) or ""
-            except Exception:
-                text = ""
-            normalized = str(text).strip()
-            if any(token in normalized for token in self.service_sel.panel_action_tokens):
-                return candidate, normalized
-        return None, None
-
-    async def _wait_top_report_download_button(
-        self,
-        page: Any,
-        *,
-        timeout_ms: int = 180000,
-        poll_ms: int = 1500,
-    ) -> Any | None:
-        if self._download_waiter is None and hasattr(page, "wait_for_event"):
-            self._download_waiter = asyncio.create_task(
-                page.wait_for_event("download", timeout=timeout_ms)
-            )
-
-        waited = 0
-        while waited <= timeout_ms:
-            panel = await self._wait_latest_report_panel(page, timeout_ms=poll_ms, poll_ms=300)
-            if panel is not None:
-                action, text = await self._top_report_action(panel)
-                if action is not None and text:
-                    if "下载" in text:
-                        return action
-                    if "进行中" in text:
-                        if hasattr(page, "wait_for_timeout"):
-                            await page.wait_for_timeout(poll_ms)
-                        waited += poll_ms
-                        continue
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(poll_ms)
-            waited += poll_ms
-        return None
-
-    def _report_filename_prefixes(self) -> tuple[str, ...]:
-        subtype = self._resolved_subtype()
-        prefix_map = {
-            "agent": ("chat_", "chat."),
-            "ai_assistant": ("assistant", "aiassistant", "ai_assistant"),
-        }
-        return prefix_map.get(subtype, (subtype,))
 
     async def _wait_latest_report_panel(
         self,
