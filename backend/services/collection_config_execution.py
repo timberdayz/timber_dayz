@@ -266,6 +266,7 @@ async def create_tasks_for_config(
             debug_mode=str(config.execution_mode or "headless").lower() == "headed",
             created_at=datetime.now(timezone.utc),
         )
+        task.runtime_manifests = runtime_manifests
         db.add(task)
         created_tasks.append(task)
 

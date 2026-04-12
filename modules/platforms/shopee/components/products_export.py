@@ -2306,13 +2306,34 @@ class ShopeeProductsExport(ExportComponent):
         )
         return str(target)
 
+    async def ensure_page_ready(self, page: Any) -> None:
+        await self._ensure_products_page_ready(page)
+
+    async def ensure_shop_ready(self, page: Any) -> None:
+        await self._ensure_shop_selected(page)
+
+    async def ensure_date_ready(self, page: Any) -> None:
+        from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
+
+        picker = ShopeeDatePicker(self.ctx)
+        result = await picker.run(page, picker._resolve_option_from_context())
+        if not getattr(result, "success", False):
+            raise RuntimeError(getattr(result, "message", "date picker failed"))
+
+    async def trigger_export(self, page: Any) -> Any:
+        await self._trigger_export(page)
+        return True
+
+    async def collect_download_result(self, page: Any, _trigger_state: Any) -> str | None:
+        return await self._wait_download_complete(page)
+
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
-            await self._ensure_products_page_ready(page)
-            await self._ensure_shop_selected(page)
-            await self._ensure_date_selection(page)
+            await self.ensure_page_ready(page)
+            await self.ensure_shop_ready(page)
+            await self.ensure_date_ready(page)
 
-            await self._trigger_export(page)
+            await self.trigger_export(page)
             post_action_state = await self._wait_export_post_action_state(page)
             if post_action_state in {"download_started", "report_progress"}:
                 throttled = False
@@ -2324,7 +2345,7 @@ class ShopeeProductsExport(ExportComponent):
                 retry_ready = await self._wait_export_retry_ready(page)
                 if not retry_ready:
                     return ExportResult(success=False, message="export throttled and retry not ready")
-                await self._trigger_export(page)
+                await self.trigger_export(page)
                 retry_post_action_state = await self._wait_export_post_action_state(page)
                 if retry_post_action_state in {"download_started", "report_progress"}:
                     throttled = False
@@ -2336,7 +2357,7 @@ class ShopeeProductsExport(ExportComponent):
                     await self._cancel_download_waiter()
                     return ExportResult(success=False, message="export throttled and retry not ready")
 
-            file_path = await self._wait_download_complete(page)
+            file_path = await self.collect_download_result(page, True)
             if file_path:
                 return ExportResult(success=True, message="download complete", file_path=file_path)
             return ExportResult(success=False, message="download did not complete", file_path=None)

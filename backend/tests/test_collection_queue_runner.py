@@ -200,7 +200,7 @@ async def test_process_run_executes_expanded_tasks_sequentially(queue_runner_ses
             ),
         ]
 
-    async def _fake_execute(task):
+    async def _fake_execute(task, runtime_manifests=None):
         execution_order.append(task.task_id)
 
     finalized = []
@@ -216,6 +216,97 @@ async def test_process_run_executes_expanded_tasks_sequentially(queue_runner_ses
 
     assert execution_order == ["task-1", "task-2"]
     assert finalized == [11]
+
+
+@pytest.mark.asyncio
+async def test_process_run_passes_runtime_manifests_from_expansion_to_execute_task(
+    queue_runner_session_factory,
+):
+    from backend.services.collection_queue_runner import CollectionQueueRunner
+
+    runner = CollectionQueueRunner(
+        session_factory=queue_runner_session_factory,
+        poll_interval_seconds=0.01,
+    )
+    run = SimpleNamespace(id=12, config_id=22, trigger_type="scheduled")
+    task = SimpleNamespace(
+        task_id="task-1",
+        platform="tiktok",
+        account="shop-sg-1",
+        data_domains=["products"],
+        sub_domains=None,
+        date_range={"start_date": "2026-04-10", "end_date": "2026-04-10"},
+        granularity="daily",
+        debug_mode=False,
+    )
+    manifests = {
+        "login": {"component_name": "tiktok/login"},
+        "exports_by_domain": {"products": {"component_name": "tiktok/products_export"}},
+    }
+
+    async def _fake_expand(_run):
+        return [(task, manifests)]
+
+    captured: list[tuple[str, object | None]] = []
+
+    async def _fake_execute(expanded_task, runtime_manifests=None):
+        captured.append((expanded_task.task_id, runtime_manifests))
+
+    finalized = []
+
+    async def _fake_finalize(_run):
+        finalized.append(_run.id)
+
+    runner._expand_run_tasks = _fake_expand
+    runner._execute_task = _fake_execute
+    runner._finalize_run = _fake_finalize
+
+    await runner._process_run(run)
+
+    assert captured == [("task-1", manifests)]
+    assert finalized == [12]
+
+
+@pytest.mark.asyncio
+async def test_execute_task_forwards_runtime_manifests_to_background_executor(
+    queue_runner_session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from backend.services.collection_queue_runner import CollectionQueueRunner
+
+    runner = CollectionQueueRunner(
+        session_factory=queue_runner_session_factory,
+        poll_interval_seconds=0.01,
+    )
+    task = SimpleNamespace(
+        task_id="task-1",
+        platform="tiktok",
+        account="shop-sg-1",
+        data_domains=["products"],
+        sub_domains=None,
+        date_range={"start_date": "2026-04-10", "end_date": "2026-04-10"},
+        granularity="daily",
+        debug_mode=False,
+    )
+    manifests = {
+        "login": {"component_name": "tiktok/login"},
+        "exports_by_domain": {"products": {"component_name": "tiktok/products_export"}},
+    }
+
+    captured = {}
+
+    async def _fake_background(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._execute_collection_task_background",
+        _fake_background,
+    )
+
+    await runner._execute_task(task, runtime_manifests=manifests)
+
+    assert captured["task_id"] == "task-1"
+    assert captured["runtime_manifests"] == manifests
 
 
 @pytest.mark.asyncio

@@ -71,3 +71,23 @@ async def test_export_does_not_fallback_to_generic_export_component_in_v2(monkey
 
     assert result.success is False
     assert "Failed to load canonical export component" in result.message
+
+
+def test_tiktok_products_export_loader_prefers_export_component_over_imported_tiktok_helpers():
+    adapter = PythonComponentAdapter(platform="tiktok", account=_account(), config={})
+
+    component_class = adapter._load_component_class("products_export")
+
+    assert component_class is not None
+    assert component_class.__name__ == "TiktokProductsExport"
+    assert component_class.__module__ == "modules.platforms.tiktok.components.products_export"
+
+
+def test_tiktok_services_agent_export_loader_prefers_export_component_over_imported_tiktok_helpers():
+    adapter = PythonComponentAdapter(platform="tiktok", account=_account(), config={})
+
+    component_class = adapter._load_component_class("services_agent_export")
+
+    assert component_class is not None
+    assert component_class.__name__ == "TiktokServicesAgentExport"
+    assert component_class.__module__ == "modules.platforms.tiktok.components.services_agent_export"

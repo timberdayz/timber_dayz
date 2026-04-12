@@ -181,17 +181,20 @@ class PythonComponentAdapter:
         
         try:
             module = importlib.import_module(f"{base_module}.{component_name}")
+            module_path = module.__name__
             
             # 查找组件类(优先匹配平台前缀)
             platform_prefix = self.platform.capitalize()
             for name, obj in inspect.getmembers(module, inspect.isclass):
-                if name.startswith(platform_prefix):
+                if name.startswith(platform_prefix) and obj.__module__ == module_path:
                     self._component_cache[cache_key] = obj
                     return obj
             
             # 备选:查找任何以 Component 结尾的类
             for name, obj in inspect.getmembers(module, inspect.isclass):
-                if name.endswith("Component") or name.endswith("Export"):
+                if obj.__module__ == module_path and (
+                    name.endswith("Component") or name.endswith("Export")
+                ):
                     self._component_cache[cache_key] = obj
                     return obj
                     

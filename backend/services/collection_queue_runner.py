@@ -83,8 +83,14 @@ class CollectionQueueRunner:
             return
 
         tasks = await self._expand_run_tasks(run)
-        for task in tasks:
-            await self._execute_task(task)
+        for task_info in tasks:
+            runtime_manifests = None
+            task = task_info
+            if isinstance(task_info, tuple) and len(task_info) == 2:
+                task, runtime_manifests = task_info
+            else:
+                runtime_manifests = getattr(task_info, "runtime_manifests", None)
+            await self._execute_task(task, runtime_manifests=runtime_manifests)
         await self._finalize_run(run)
 
     async def _expand_run_tasks(self, run: object):
@@ -105,7 +111,12 @@ class CollectionQueueRunner:
                 resolve_runtime=True,
             )
 
-    async def _execute_task(self, task: object) -> None:
+    async def _execute_task(
+        self,
+        task: object,
+        *,
+        runtime_manifests: object | None = None,
+    ) -> None:
         from backend.routers.collection_tasks import _execute_collection_task_background
 
         await _execute_collection_task_background(
@@ -120,7 +131,7 @@ class CollectionQueueRunner:
             execution_mode="headed" if getattr(task, "debug_mode", False) else "headless",
             parallel_mode=False,
             max_parallel=1,
-            runtime_manifests=None,
+            runtime_manifests=runtime_manifests,
             app=None,
         )
 

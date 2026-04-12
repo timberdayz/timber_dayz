@@ -310,6 +310,37 @@ async def test_products_page_ready_navigates_to_performance_url() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_products_ensure_date_ready_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={"granularity": "weekly"})
+    component = ShopeeProductsExport(ctx)
+    run_picker = AsyncMock(return_value=Mock(success=True, message="ok"))
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "run",
+        run_picker,
+    )
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_resolve_option_from_context",
+        lambda self: Mock(),
+    )
+    monkeypatch.setattr(
+        component,
+        "_ensure_date_selection",
+        AsyncMock(side_effect=AssertionError("products export should delegate to ShopeeDatePicker")),
+        raising=False,
+    )
+
+    await component.ensure_date_ready(_FakePage())
+
+    assert run_picker.await_count == 1
+
+
 def test_direct_download_components_do_not_inherit_products_or_services_semantics() -> None:
     assert not issubclass(ShopeeAnalyticsExport, ShopeeProductsExport)
     assert not issubclass(ShopeeServicesAiAssistantExport, ShopeeServicesExportBase)
@@ -983,7 +1014,7 @@ async def test_run_does_not_retry_export_after_download_started_even_if_throttle
     trigger_export = AsyncMock()
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
     monkeypatch.setattr(component, "_ensure_shop_selected", AsyncMock(), raising=False)
-    monkeypatch.setattr(component, "_ensure_date_selection", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "ensure_date_ready", AsyncMock(), raising=False)
     monkeypatch.setattr(component, "_trigger_export", trigger_export, raising=False)
     monkeypatch.setattr(
         component,
@@ -1043,7 +1074,7 @@ async def test_run_does_not_retry_export_after_report_progress_even_if_throttled
     trigger_export = AsyncMock()
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
     monkeypatch.setattr(component, "_ensure_shop_selected", AsyncMock(), raising=False)
-    monkeypatch.setattr(component, "_ensure_date_selection", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "ensure_date_ready", AsyncMock(), raising=False)
     monkeypatch.setattr(component, "_trigger_export", trigger_export, raising=False)
     monkeypatch.setattr(
         component,
