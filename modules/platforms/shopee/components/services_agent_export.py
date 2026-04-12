@@ -4,6 +4,7 @@ from typing import Any
 
 from modules.components.base import ExecutionContext
 from modules.components.export.base import ExportMode, ExportResult
+from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
 from modules.platforms.shopee.components.products_config import ProductsSelectors
 from modules.platforms.shopee.components.services_config import ServicesSelectors
 from modules.platforms.shopee.components.services_export_base import ShopeeServicesExportBase
@@ -34,7 +35,10 @@ class ShopeeServicesAgentExport(ShopeeServicesExportBase):
         await self._ensure_shop_selected(page)
 
     async def ensure_date_ready(self, page: Any) -> None:
-        await self._ensure_date_selection(page)
+        picker = ShopeeDatePicker(self.ctx)
+        result = await picker.run(page, picker._resolve_option_from_context())
+        if not getattr(result, "success", False):
+            raise RuntimeError(getattr(result, "message", "date picker failed"))
 
     async def trigger_export(self, page: Any) -> Any:
         await self._trigger_export(page)

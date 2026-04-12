@@ -6,6 +6,7 @@ from typing import Any
 
 from modules.components.base import ExecutionContext
 from modules.components.export.base import ExportComponent, ExportMode, ExportResult
+from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
 from modules.platforms.shopee.components import _download_helpers as download_helpers
 from modules.platforms.shopee.components.business_analysis_common import (
     build_domain_path,
@@ -165,12 +166,52 @@ class ShopeeAnalyticsExport(ExportComponent):
 
     async def ensure_page_ready(self, page: Any) -> None:
         await self._ensure_products_page_ready(page)
+        if not await self._wait_analytics_business_ready(page):
+            raise RuntimeError("analytics page shell loaded but business content not ready")
+
+    async def _wait_analytics_business_ready(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 15000,
+        poll_ms: int = 500,
+    ) -> bool:
+        selectors = (
+            'button:has-text("导出数据")',
+            '[role="button"]:has-text("导出数据")',
+            'button:has-text("下载数据")',
+            '[role="button"]:has-text("下载数据")',
+            'div:has-text("统计时间")',
+            'button:has-text("过去 30 天")',
+            'button:has-text("过去30天")',
+            'button:has-text("过去 7 天")',
+            'button:has-text("过去7天")',
+            'button:has-text("按日")',
+            'button:has-text("按周")',
+            'button:has-text("按月")',
+        )
+        waited = 0
+        while waited <= timeout_ms:
+            for selector in selectors:
+                try:
+                    locator = page.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=300):
+                        return True
+                except Exception:
+                    continue
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
 
     async def ensure_shop_ready(self, page: Any) -> None:
         await self._ensure_shop_selected(page)
 
     async def ensure_date_ready(self, page: Any) -> None:
-        await self._ensure_date_selection(page)
+        picker = ShopeeDatePicker(self.ctx)
+        result = await picker.run(page, picker._resolve_option_from_context())
+        if not getattr(result, "success", False):
+            raise RuntimeError(getattr(result, "message", "date picker failed"))
 
     async def trigger_export(self, page: Any) -> Any:
         button = await self._first_visible_locator(page, self.sel.export_buttons)

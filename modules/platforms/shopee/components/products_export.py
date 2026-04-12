@@ -244,53 +244,103 @@ class ShopeeProductsExport(ExportComponent):
             "body > div",
         )
 
-        anchor_texts = (
-            self.sel.preset_labels.get("today_realtime", ""),
-            self.sel.granularity_labels.get("daily", ""),
-        )
+        anchor_texts = self._date_panel_anchor_texts()
 
+        best_panel = None
+        best_score: tuple[int, int] | None = None
         for selector in common_selectors:
             try:
                 locator = page.locator(selector)
-                for anchor in anchor_texts:
-                    if anchor:
-                        locator = locator.filter(has_text=anchor)
                 count = await locator.count()
                 for idx in range(count - 1, -1, -1):
                     candidate = locator.nth(idx)
                     if await candidate.is_visible(timeout=500):
-                        return candidate
+                        score = await self._score_date_panel_candidate(candidate, anchor_texts)
+                        if score[0] <= 0:
+                            continue
+                        if best_score is None or score > best_score:
+                            best_panel = candidate
+                            best_score = score
             except Exception:
                 continue
+        if best_panel is not None:
+            return best_panel
 
         fallback_locators = (
             page.locator("div"),
             page.locator("ul"),
         )
         best_panel = None
-        best_text_len = None
+        best_score = None
         for locator in fallback_locators:
             try:
-                filtered = locator
-                for anchor in anchor_texts:
-                    if anchor:
-                        filtered = filtered.filter(has_text=anchor)
-                count = await filtered.count()
+                count = await locator.count()
                 for idx in range(count):
-                    candidate = filtered.nth(idx)
+                    candidate = locator.nth(idx)
                     if not await candidate.is_visible(timeout=300):
                         continue
-                    try:
-                        text_content = await candidate.text_content() or ""
-                    except Exception:
-                        text_content = ""
-                    text_len = len(text_content)
-                    if best_text_len is None or text_len > best_text_len:
+                    score = await self._score_date_panel_candidate(candidate, anchor_texts)
+                    if score[0] <= 0:
+                        continue
+                    if best_score is None or score > best_score:
                         best_panel = candidate
-                        best_text_len = text_len
+                        best_score = score
             except Exception:
                 continue
         return best_panel
+
+    def _date_panel_anchor_texts(self) -> tuple[str, ...]:
+        domain = str(
+            getattr(self, "data_domain", "")
+            or (self.ctx.config or {}).get("data_domain")
+            or "products"
+        ).strip().lower()
+        anchors: list[str] = [
+            self.sel.granularity_labels.get("daily", ""),
+            self.sel.granularity_labels.get("weekly", ""),
+            self.sel.granularity_labels.get("monthly", ""),
+        ]
+        if domain == "products":
+            anchors.extend(
+                [
+                    self.sel.preset_labels.get("today_realtime", ""),
+                    self.sel.preset_labels.get("yesterday", ""),
+                ]
+            )
+        else:
+            anchors.extend(
+                [
+                    self.sel.preset_labels.get("yesterday", ""),
+                    self.sel.preset_labels.get("last_7_days", ""),
+                    self.sel.preset_labels.get("last_30_days", ""),
+                ]
+            )
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for anchor in anchors:
+            normalized = self._normalize_date_text(anchor)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(anchor)
+        return tuple(deduped)
+
+    async def _score_date_panel_candidate(
+        self,
+        candidate: Any,
+        anchor_texts: tuple[str, ...],
+    ) -> tuple[int, int]:
+        try:
+            text_content = await candidate.text_content() or ""
+        except Exception:
+            text_content = ""
+        normalized_text = self._normalize_date_text(text_content)
+        hits = sum(
+            1
+            for anchor in anchor_texts
+            if anchor and self._normalize_date_text(anchor) in normalized_text
+        )
+        return hits, len(normalized_text)
 
     async def _find_date_option_locator(self, page: Any, text: str) -> Any | None:
         panel = await self._find_date_panel(page)

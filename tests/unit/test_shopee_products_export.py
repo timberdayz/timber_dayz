@@ -11,6 +11,7 @@ from modules.components.base import ExecutionContext
 from modules.platforms.shopee.components import _download_helpers as download_helpers
 from modules.platforms.shopee.components import products_export as products_export_module
 from modules.platforms.shopee.components.analytics_export import ShopeeAnalyticsExport
+from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
 from modules.platforms.shopee.components.services_ai_assistant_export import (
     ShopeeServicesAiAssistantExport,
@@ -222,6 +223,53 @@ class _MonthNavPage(_FakePage):
     def _advance(self) -> None:
         if self._header_idx < len(self._headers) - 1:
             self._header_idx += 1
+
+
+class _FilterablePanelLocator(_FakeTextLocator):
+    def __init__(self, text: str, *, visible: bool = True) -> None:
+        super().__init__(text)
+        self._visible = visible
+
+    async def is_visible(self, *args, **kwargs) -> bool:
+        return self._visible
+
+
+class _FilterableLocatorGroup:
+    def __init__(self, locators: list[_FilterablePanelLocator]) -> None:
+        self._locators = locators
+
+    def filter(self, *, has_text: str | None = None):
+        if not has_text:
+            return self
+        return _FilterableLocatorGroup(
+            [locator for locator in self._locators if has_text in (locator._text or "")]
+        )
+
+    async def count(self) -> int:
+        return len(self._locators)
+
+    def nth(self, idx: int):
+        return self._locators[idx]
+
+
+class _DatePanelDetectionPage(_FakePage):
+    def __init__(self, panels: list[_FilterablePanelLocator]) -> None:
+        self._panels = panels
+
+    def locator(self, selector: str):
+        if selector in (
+            ".arco-trigger-popup",
+            ".arco-picker-dropdown",
+            ".ant-picker-dropdown",
+            '[class*="picker-dropdown"]',
+            '[class*="dropdown"]',
+            '[class*="popup"]',
+            "body > div",
+            "div",
+            "ul",
+        ):
+            return _FilterableLocatorGroup(self._panels)
+        return _FilterableLocatorGroup([])
 
 
 class _FutureCompletingPage(_FakePage):
@@ -510,6 +558,8 @@ async def test_services_agent_wait_top_report_download_button_uses_same_top_slot
 async def test_services_agent_run_uses_task_row_collection_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from modules.platforms.shopee.components import services_agent_export as services_agent_module
+
     ctx = ExecutionContext(
         platform="shopee",
         account={},
@@ -521,7 +571,16 @@ async def test_services_agent_run_uses_task_row_collection_path(
 
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
     monkeypatch.setattr(component, "_ensure_shop_selected", AsyncMock(), raising=False)
-    monkeypatch.setattr(component, "_ensure_date_selection", AsyncMock(), raising=False)
+    monkeypatch.setattr(
+        services_agent_module.ShopeeDatePicker,
+        "run",
+        AsyncMock(return_value=Mock(success=True, message="ok")),
+    )
+    monkeypatch.setattr(
+        services_agent_module.ShopeeDatePicker,
+        "_resolve_option_from_context",
+        lambda self: Mock(),
+    )
     monkeypatch.setattr(component, "trigger_export", AsyncMock(return_value=trigger_button), raising=False)
     monkeypatch.setattr(
         component,
@@ -626,14 +685,26 @@ async def test_capture_direct_download_artifact_reconciles_file_from_downloads_r
 async def test_analytics_run_returns_success_from_direct_download_collection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from modules.platforms.shopee.components import analytics_export as analytics_export_module
+
     ctx = ExecutionContext(platform="shopee", account={}, config={"granularity": "daily"})
     component = ShopeeAnalyticsExport(ctx)
     trigger_button = Mock()
     trigger_button.click = AsyncMock()
 
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "_wait_analytics_business_ready", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_ensure_shop_selected", AsyncMock(), raising=False)
-    monkeypatch.setattr(component, "_ensure_date_selection", AsyncMock(), raising=False)
+    monkeypatch.setattr(
+        analytics_export_module.ShopeeDatePicker,
+        "run",
+        AsyncMock(return_value=Mock(success=True, message="ok")),
+    )
+    monkeypatch.setattr(
+        analytics_export_module.ShopeeDatePicker,
+        "_resolve_option_from_context",
+        lambda self: Mock(),
+    )
     monkeypatch.setattr(component, "trigger_export", AsyncMock(return_value=trigger_button), raising=False)
     monkeypatch.setattr(
         component,
@@ -652,6 +723,102 @@ async def test_analytics_run_returns_success_from_direct_download_collection(
 
     assert result.success is True
     assert result.file_path == "C:/tmp/analytics.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_analytics_ensure_page_ready_requires_business_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeAnalyticsExport(ctx)
+    monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "_wait_analytics_business_ready", AsyncMock(return_value=False), raising=False)
+
+    with pytest.raises(RuntimeError, match="analytics page shell loaded but business content not ready"):
+        await component.ensure_page_ready(_FakePage())
+
+
+@pytest.mark.asyncio
+async def test_find_date_panel_for_services_does_not_require_today_realtime_anchor() -> None:
+    component = ShopeeProductsExport(
+        ExecutionContext(
+            platform="shopee",
+            account={},
+            config={"data_domain": "services", "services_subtype": "agent", "granularity": "weekly"},
+        )
+    )
+    page = _DatePanelDetectionPage(
+        [
+            _FilterablePanelLocator("按日 按周 按月 昨天 过去7天 过去30天"),
+            _FilterablePanelLocator("页面其他内容"),
+        ]
+    )
+
+    panel = await component._find_date_panel(page)
+
+    assert panel is not None
+    assert await panel.text_content() == "按日 按周 按月 昨天 过去7天 过去30天"
+
+
+@pytest.mark.asyncio
+async def test_shopee_date_picker_runs_custom_range_using_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={
+            "data_domain": "analytics",
+            "time_selection": {
+                "mode": "custom",
+                "start_date": "2026-03-30",
+                "end_date": "2026-04-05",
+            },
+            "granularity": "weekly",
+        },
+    )
+    picker = ShopeeDatePicker(ctx)
+    monkeypatch.setattr(picker._delegate, "_ensure_date_selection", AsyncMock(), raising=False)
+
+    result = await picker.run(_FakePage(), picker._resolve_option_from_context())
+
+    assert result.success is True
+    picker._delegate._ensure_date_selection.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_services_agent_ensure_date_ready_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from modules.platforms.shopee.components import services_agent_export as services_agent_module
+
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"services_subtype": "agent", "granularity": "weekly"},
+    )
+    component = ShopeeServicesAgentExport(ctx)
+    run_picker = AsyncMock(return_value=Mock(success=True, message="ok"))
+    monkeypatch.setattr(
+        services_agent_module.ShopeeDatePicker,
+        "run",
+        run_picker,
+    )
+    monkeypatch.setattr(
+        services_agent_module.ShopeeDatePicker,
+        "_resolve_option_from_context",
+        lambda self: Mock(),
+    )
+    monkeypatch.setattr(
+        component,
+        "_ensure_date_selection",
+        AsyncMock(side_effect=AssertionError("should delegate to ShopeeDatePicker")),
+        raising=False,
+    )
+
+    await component.ensure_date_ready(_FakePage())
+
+    assert run_picker.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -981,7 +1148,16 @@ async def test_services_ai_assistant_run_uses_direct_download_collection_without
 
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
     monkeypatch.setattr(component, "_ensure_shop_selected", AsyncMock(), raising=False)
-    monkeypatch.setattr(component, "_ensure_date_selection", AsyncMock(), raising=False)
+    monkeypatch.setattr(
+        ai_export_module.ShopeeDatePicker,
+        "run",
+        AsyncMock(return_value=Mock(success=True, message="ok")),
+    )
+    monkeypatch.setattr(
+        ai_export_module.ShopeeDatePicker,
+        "_resolve_option_from_context",
+        lambda self: Mock(),
+    )
     monkeypatch.setattr(component, "trigger_export", AsyncMock(return_value=trigger_button), raising=False)
     monkeypatch.setattr(
         component,

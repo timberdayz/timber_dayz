@@ -7,6 +7,7 @@ from typing import Any
 
 from modules.components.base import ExecutionContext
 from modules.components.export.base import ExportComponent, ExportMode, ExportResult
+from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
 from modules.platforms.shopee.components import _download_helpers as download_helpers
 from modules.platforms.shopee.components.business_analysis_common import (
     granularity_label,
@@ -134,7 +135,10 @@ class ShopeeServicesAiAssistantExport(ExportComponent):
         await self._ensure_shop_selected(page)
 
     async def ensure_date_ready(self, page: Any) -> None:
-        await self._ensure_date_selection(page)
+        picker = ShopeeDatePicker(self.ctx)
+        result = await picker.run(page, picker._resolve_option_from_context())
+        if not getattr(result, "success", False):
+            raise RuntimeError(getattr(result, "message", "date picker failed"))
 
     async def trigger_export(self, page: Any) -> Any:
         button = await self._first_visible_locator(page, self.sel.export_buttons)
