@@ -295,3 +295,81 @@ async def test_employee_task_initiator_close_endpoint_for_pending_task(
 
     assert response.status_code == 200
     assert response.json()["data"]["status"] == "closed"
+
+
+@pytest.mark.asyncio
+async def test_employee_task_admin_reassign_endpoint(
+    employee_task_route_session,
+    seeded_employee_task_data,
+):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 9
+        username = "admin"
+        is_active = True
+        is_superuser = True
+        roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/employee-tasks/task-1/reassign",
+            json={"new_owner_user_id": 2, "reason": "handover"},
+        )
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["owner_user_id"] == 2
+
+
+@pytest.mark.asyncio
+async def test_employee_task_admin_force_close_endpoint(
+    employee_task_route_session,
+    seeded_employee_task_data,
+):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 9
+        username = "admin"
+        is_active = True
+        is_superuser = True
+        roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/employee-tasks/task-1/force-close",
+            json={"reason": "invalid task"},
+        )
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "closed"

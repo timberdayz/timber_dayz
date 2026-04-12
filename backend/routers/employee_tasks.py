@@ -8,6 +8,7 @@ from backend.models.database import get_async_db
 from backend.schemas.employee_task import (
     EmployeeTaskCommentRequest,
     EmployeeTaskCancellationRequest,
+    EmployeeTaskReassignRequest,
     EmployeeTaskStructuredSupplementRequest,
     EmployeeTaskSubmitRequest,
 )
@@ -151,6 +152,67 @@ async def request_employee_task_cancel(
     service = EmployeeTaskService(db)
     try:
         task = await service.request_task_cancellation(
+            task_id,
+            actor_user_id=current_user.user_id,
+            reason=body.reason,
+        )
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return success_response(data=task)
+
+
+@router.post("/{task_id}/reassign")
+async def reassign_employee_task(
+    task_id: str,
+    body: EmployeeTaskReassignRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(get_current_user),
+):
+    service = EmployeeTaskService(db)
+    try:
+        task = await service.reassign_task(
+            task_id,
+            actor_user_id=current_user.user_id,
+            new_owner_user_id=body.new_owner_user_id,
+            reason=body.reason,
+        )
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return success_response(data=task)
+
+
+@router.post("/{task_id}/takeover")
+async def takeover_employee_task(
+    task_id: str,
+    body: EmployeeTaskCancellationRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(get_current_user),
+):
+    service = EmployeeTaskService(db)
+    try:
+        task = await service.take_over_task(
+            task_id,
+            actor_user_id=current_user.user_id,
+            reason=body.reason,
+        )
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return success_response(data=task)
+
+
+@router.post("/{task_id}/force-close")
+async def force_close_employee_task(
+    task_id: str,
+    body: EmployeeTaskCancellationRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(get_current_user),
+):
+    service = EmployeeTaskService(db)
+    try:
+        task = await service.force_close_task(
             task_id,
             actor_user_id=current_user.user_id,
             reason=body.reason,

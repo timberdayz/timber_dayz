@@ -70,3 +70,8 @@ class EmployeeTaskStructuredSupplementRequest(BaseModel):
 
 class EmployeeTaskCancellationRequest(BaseModel):
     reason: str
+
+
+class EmployeeTaskReassignRequest(BaseModel):
+    new_owner_user_id: int
+    reason: str
