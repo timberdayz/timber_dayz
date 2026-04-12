@@ -15,7 +15,7 @@
 
 使用方法:
     python run.py                      # 传统模式（需先启动 Postgres/Redis）
-    python run.py --local              # 一键本地：Docker 起 Postgres/Redis，本机起后端+Celery+前端
+    python run.py --local              # 本地采集测试：Docker 起 postgres、redis、celery-worker，本机起后端+前端
     python run.py --use-docker         # 后端 Docker + 前端本地模式（推荐）
     python run.py --backend-only       # 仅启动后端
     python run.py --frontend-only      # 仅启动前端
@@ -1268,7 +1268,7 @@ def main():
     parser.add_argument(
         "--local",
         action="store_true",
-        help="一键本地开发：Docker 启动 Postgres/Redis/Celery，本机启动后端与前端",
+        help="本地采集测试模式：Docker 启动 postgres、redis、celery-worker，本机启动后端与前端",
     )
     args = parser.parse_args()
 
@@ -1277,12 +1277,12 @@ def main():
     warn_legacy_shop_session_artifacts(project_root)
 
     if args.local and not args.use_docker and not args.frontend_only:
-        safe_print("\n[模式] 一键本地开发（Docker Postgres/Redis/Celery + 本机后端/前端）")
+        safe_print("\n[模式] 本地采集测试模式（Docker: postgres、redis、celery-worker；本机: 后端、前端）")
         if not ensure_postgres_redis_docker(project_root, with_celery=True):
             safe_print("\n[ERROR] Docker 基础服务启动失败，请检查 Docker 与 compose 配置")
             raise SystemExit(1)
         args.no_celery = True
-        safe_print("  [OK] 数据库、Redis 与 Celery 已就绪，接下来启动本机后端与前端...\n")
+        safe_print("  [OK] Docker 基础服务 postgres、redis、celery-worker 已就绪，接下来启动本机后端与前端...\n")
 
     if args.use_docker:
         safe_print("\n[模式] 后端 Docker + 前端本地模式")

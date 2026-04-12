@@ -171,3 +171,17 @@ def test_report_migrate_failure_prints_migrate_diagnostics(monkeypatch):
     assert "xihong_erp_migrate" in joined
     assert "迁移失败" in joined
     assert "docker logs xihong_erp_migrate" in joined
+
+
+def test_run_py_local_mode_is_described_as_collection_testing():
+    text = Path("run.py").read_text(encoding="utf-8", errors="replace")
+
+    assert "python run.py --local              # 本地采集测试" in text
+    assert "本地采集测试模式" in text
+
+
+def test_run_py_local_mode_mentions_required_docker_services():
+    text = Path("run.py").read_text(encoding="utf-8", errors="replace")
+
+    assert "postgres、redis、celery-worker" in text
+    assert "Docker 基础服务" in text
