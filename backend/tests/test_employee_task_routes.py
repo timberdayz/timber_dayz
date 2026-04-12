@@ -256,3 +256,42 @@ async def test_employee_task_collaborator_submit_still_denied(
     app.dependency_overrides.pop(get_current_user, None)
 
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_employee_task_initiator_close_endpoint_for_pending_task(
+    employee_task_route_session,
+    seeded_employee_task_data,
+):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 2
+        username = "creator"
+        is_active = True
+        is_superuser = False
+        roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/employee-tasks/task-1/close-by-initiator",
+            json={"reason": "created by mistake"},
+        )
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "closed"

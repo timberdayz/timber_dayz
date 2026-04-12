@@ -177,6 +177,55 @@ class EmployeeTaskService:
         await self.db.commit()
         return await self.get_task_detail(task_id, actor_user_id=actor_user_id)
 
+    async def close_task_as_initiator(
+        self,
+        task_id: str,
+        *,
+        actor_user_id: int,
+        reason: str,
+    ) -> dict[str, Any]:
+        task = await self._get_visible_task(task_id, actor_user_id)
+        if task.created_by != actor_user_id:
+            raise ValueError("Only the initiator may close this task")
+        if not can_user_perform_task_action(task.task_category, task.status, "initiator", "close_unstarted_task"):
+            raise ValueError("Initiator may only directly close unstarted tasks")
+        await self.repository.update_task(
+            task,
+            status=STATUS_CLOSED,
+            closed_at=datetime.now(timezone.utc),
+        )
+        await self.repository.create_log(
+            task_pk=task.id,
+            actor_user_id=actor_user_id,
+            action="close_unstarted_task",
+            message=reason,
+            details_json={"reason": reason},
+        )
+        await self.db.commit()
+        return await self.get_task_detail(task_id, actor_user_id=actor_user_id)
+
+    async def request_task_cancellation(
+        self,
+        task_id: str,
+        *,
+        actor_user_id: int,
+        reason: str,
+    ) -> dict[str, Any]:
+        task = await self._get_visible_task(task_id, actor_user_id)
+        if task.created_by != actor_user_id:
+            raise ValueError("Only the initiator may request task cancellation")
+        if not can_user_perform_task_action(task.task_category, task.status, "initiator", "request_cancel"):
+            raise ValueError("Initiator may only request cancellation after the task has started")
+        await self.repository.create_log(
+            task_pk=task.id,
+            actor_user_id=actor_user_id,
+            action="request_cancel",
+            message=reason,
+            details_json={"reason": reason},
+        )
+        await self.db.commit()
+        return await self.get_task_detail(task_id, actor_user_id=actor_user_id)
+
     async def _get_owned_task(self, task_id: str, actor_user_id: int):
         task = await self.repository.get_task_by_task_id(task_id)
         if task is None:

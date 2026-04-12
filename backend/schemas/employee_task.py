@@ -66,3 +66,7 @@ class EmployeeTaskCommentRequest(BaseModel):
 
 class EmployeeTaskStructuredSupplementRequest(BaseModel):
     payload: dict[str, Any]
+
+
+class EmployeeTaskCancellationRequest(BaseModel):
+    reason: str
