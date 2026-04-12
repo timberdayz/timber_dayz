@@ -90,3 +90,47 @@ def test_component_tester_accepts_known_no_data_success_without_downloaded_file(
     assert ok is True
     assert result.phase is None
     assert result.error is None
+
+
+def test_component_tester_accepts_tiktok_products_export_with_valid_file(tmp_path: Path):
+    tester = ComponentTester(platform="tiktok", account_id="acc-1")
+    result = ComponentTestResult(
+        component_name="products_export",
+        platform="tiktok",
+        status=_TestStatus.PENDING,
+    )
+    target = tmp_path / "products.xlsx"
+    target.write_text("dummy", encoding="utf-8")
+
+    ok = tester._check_export_complete_gate(
+        file_path=str(target),
+        result=result,
+        component_name="tiktok/products_export",
+        success_message="ok",
+    )
+
+    assert ok is True
+    assert result.phase is None
+    assert result.error is None
+
+
+def test_component_tester_accepts_tiktok_analytics_export_with_valid_file(tmp_path: Path):
+    tester = ComponentTester(platform="tiktok", account_id="acc-1")
+    result = ComponentTestResult(
+        component_name="analytics_export",
+        platform="tiktok",
+        status=_TestStatus.PENDING,
+    )
+    target = tmp_path / "analytics.xlsx"
+    target.write_text("dummy", encoding="utf-8")
+
+    ok = tester._check_export_complete_gate(
+        file_path=str(target),
+        result=result,
+        component_name="tiktok/analytics_export",
+        success_message="ok",
+    )
+
+    assert ok is True
+    assert result.phase is None
+    assert result.error is None

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
 from modules.components.base import ExecutionContext
+from modules.components.export.base import build_standard_output_root
 from modules.components.date_picker.base import DateOption
 from modules.components.export.base import ExportComponent, ExportMode, ExportResult
 from modules.platforms.tiktok.components.date_picker import TiktokDatePicker
+from modules.platforms.tiktok.components._download_helpers import (
+    cleanup_download_capture,
+    create_download_capture,
+    resolve_export_timeout_ms,
+    save_download_to_target,
+)
 from modules.platforms.tiktok.components.export import TiktokExport
 from modules.platforms.tiktok.components.shop_switch import TiktokShopSwitch
 
@@ -20,6 +28,7 @@ class TiktokProductsExport(ExportComponent):
 
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
+        self._download_capture = None
 
     def _target_region(self) -> str | None:
         config = self.ctx.config or {}
@@ -120,6 +129,97 @@ class TiktokProductsExport(ExportComponent):
     async def _run_export(self, page: Any):
         return await TiktokExport(self.ctx).run(page, mode=ExportMode.STANDARD)
 
+    async def ensure_page_ready(self, page: Any) -> str:
+        entry_state = await self._wait_for_entry_state(page)
+        current_url = str(getattr(page, "url", "") or "")
+
+        if entry_state == "login":
+            raise RuntimeError("login required before products export")
+
+        region = self._target_region() or self._target_region_from_page_url(current_url)
+        if entry_state != "products":
+            target_url = self._products_page_url(region) if region else self._generic_products_page_url()
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(800)
+            current_url = str(getattr(page, "url", "") or "")
+
+        if self._is_login_page(current_url):
+            raise RuntimeError("login required before products export")
+
+        return current_url
+
+    async def ensure_shop_ready(self, page: Any, current_url: str) -> str | None:
+        region = self._target_region() or self._target_region_from_page_url(current_url)
+        if not region:
+            return None
+
+        if self.ctx.config is None:
+            self.ctx.config = {}
+        self.ctx.config["shop_region"] = region
+        switch_result = await self._run_shop_switch(page)
+        if not getattr(switch_result, "success", False):
+            raise RuntimeError(getattr(switch_result, "message", "shop switch failed"))
+        return region
+
+    async def ensure_date_ready(self, page: Any) -> None:
+        date_option = self._date_option_from_context()
+        if date_option is None:
+            return
+
+        if await self._date_selection_already_satisfied(page, date_option):
+            return
+
+        date_result = await self._run_date_picker(page, date_option)
+        if not getattr(date_result, "success", False):
+            raise RuntimeError(getattr(date_result, "message", "date picker failed"))
+        if not await self._confirm_date_selection(page, date_option):
+            raise RuntimeError("date state not confirmed")
+
+    async def trigger_export(self, page: Any) -> bool:
+        helper = TiktokExport(self.ctx)
+        self._download_capture = create_download_capture(page)
+        clicked = await helper._click_first(page, helper._export_button_selectors(), timeout=3000)
+        if not clicked:
+            cleanup_download_capture(page, self._download_capture)
+            self._download_capture = None
+            return False
+
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(500)
+        return True
+
+    async def collect_download_result(self, page: Any) -> str | None:
+        capture = self._download_capture
+        timeout_ms = resolve_export_timeout_ms(self.ctx.config or {})
+        download = None
+
+        try:
+            if hasattr(page, "wait_for_event"):
+                try:
+                    download = await page.wait_for_event("download", timeout=timeout_ms)
+                except Exception:
+                    download = getattr(capture, "latest_download", None)
+            else:
+                download = getattr(capture, "latest_download", None)
+        finally:
+            if capture is not None:
+                cleanup_download_capture(page, capture)
+            self._download_capture = None
+
+        if download is None:
+            return None
+
+        cfg = self.ctx.config or {}
+        out_root = build_standard_output_root(
+            self.ctx,
+            data_type="products",
+            granularity=str(cfg.get("granularity") or "range").lower(),
+        )
+        filename = getattr(download, "suggested_filename", None) or "products.xlsx"
+        saved = await save_download_to_target(download, Path(out_root) / filename)
+        return str(saved) if saved is not None else None
+
     async def _wait_for_entry_state(
         self,
         page: Any,
@@ -142,60 +242,19 @@ class TiktokProductsExport(ExportComponent):
         return "unknown"
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
-        entry_state = await self._wait_for_entry_state(page)
-        current_url = str(getattr(page, "url", "") or "")
+        try:
+            current_url = await self.ensure_page_ready(page)
+            await self.ensure_shop_ready(page, current_url)
+            await self.ensure_date_ready(page)
+        except RuntimeError as exc:
+            return ExportResult(success=False, message=str(exc), file_path=None)
 
-        if entry_state == "login":
-            return ExportResult(success=False, message="login required before products export", file_path=None)
+        triggered = await self.trigger_export(page)
+        if not triggered:
+            return ExportResult(success=False, message="products export failed", file_path=None)
 
-        region = self._target_region() or self._target_region_from_page_url(current_url)
-
-        if entry_state != "products":
-            target_url = self._products_page_url(region) if region else self._generic_products_page_url()
-            await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(800)
-            current_url = str(getattr(page, "url", "") or "")
-            region = region or self._target_region_from_page_url(current_url)
-
-        if self._is_login_page(current_url):
-            return ExportResult(success=False, message="login required before products export", file_path=None)
-
-        if region:
-            if self.ctx.config is None:
-                self.ctx.config = {}
-            self.ctx.config["shop_region"] = region
-            switch_result = await self._run_shop_switch(page)
-            if not getattr(switch_result, "success", False):
-                return ExportResult(
-                    success=False,
-                    message=getattr(switch_result, "message", "shop switch failed"),
-                    file_path=None,
-                )
-
-        date_option = self._date_option_from_context()
-        if date_option is not None:
-            if not await self._date_selection_already_satisfied(page, date_option):
-                date_result = await self._run_date_picker(page, date_option)
-                if not getattr(date_result, "success", False):
-                    return ExportResult(
-                        success=False,
-                        message=getattr(date_result, "message", "date picker failed"),
-                        file_path=None,
-                    )
-                if not await self._confirm_date_selection(page, date_option):
-                    return ExportResult(success=False, message="date state not confirmed", file_path=None)
-
-        export_result = await self._run_export(page)
-        if not getattr(export_result, "success", False):
-            return ExportResult(
-                success=False,
-                message=getattr(export_result, "message", "products export failed"),
-                file_path=None,
-            )
-
-        file_path = getattr(export_result, "file_path", None)
+        file_path = await self.collect_download_result(page)
         if not file_path:
             return ExportResult(success=False, message="products export did not produce file_path", file_path=None)
 
-        return ExportResult(success=True, message=getattr(export_result, "message", "ok"), file_path=file_path)
+        return ExportResult(success=True, message="ok", file_path=file_path)
