@@ -362,3 +362,21 @@ After phase 2, the employee task center should evolve from a usable task inbox i
 - structured action rules by task type
 
 This creates a solid base for future task-source expansion such as replenishment, customer reply confirmation, ad placement confirmation, and anomaly handling.
+
+## Current Implementation Status
+
+The current repository state now includes:
+- task-type policy engine for the active task types
+- collaborator supplement actions
+- initiator close-before-start and cancellation request actions
+- admin reassignment, takeover, and force-close actions
+- assignment-time permission validation for the active task types
+- task detail page regions for:
+  - collaborator supplement
+  - initiator operations
+  - administrator operations
+
+The remaining work after this phase is no longer rule-definition work, but expansion work:
+- richer front-end forms and conditional visibility
+- more task sources
+- reporting and operational dashboards

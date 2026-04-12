@@ -11,14 +11,22 @@ The current implementation covers:
 - backend service and API
 - task notifications through the existing notification center
 - frontend inbox and task detail page
+- phase 2 action policies for:
+  - collaborator supplement
+  - initiator close / cancel request
+  - admin reassign / takeover / force close
 - automatic task source helpers for:
   - monthly cost entry
   - performance confirmation
+- business-page task-context writeback in:
+  - expense management
+  - performance public display
+- system-level uniqueness enforcement for one supervisor per shop-month assignment
 
 The current implementation does not yet fully cover:
-- business-page task-context writeback in the finance and performance public pages
 - procurement / replenishment automatic task generation
-- system-level uniqueness enforcement for shop supervisor assignments
+- task statistics / management dashboards
+- configurable reminder timing and escalation rules
 
 ## Task Categories
 
@@ -84,6 +92,7 @@ Owner resolution:
 
 Current runtime behavior:
 - after expense save succeeds, backend attempts to sync a monthly cost task
+- the expense page can receive task context and submit a task result back after the matching month/shop save
 - task sync is best-effort and must not roll back the expense save path
 
 Known limitation:
@@ -102,10 +111,8 @@ Owner resolution:
 
 Current runtime behavior:
 - after performance calculation succeeds, backend attempts to sync one confirmation task per employee in the calculated month
+- the public performance page can receive task context and let the employee confirm or dispute from that page
 - sync is best-effort and must not roll back performance calculation
-
-Known limitation:
-- the employee-facing public page still needs a safe task writeback integration step
 
 ## Procurement / Replenishment Bridge
 
@@ -127,11 +134,7 @@ Business rule agreed for v1:
 
 Current implementation status:
 - the source helper assumes this uniqueness when resolving monthly cost task owners
-- a formal system-level guard in `hr_commission.py` is still pending because that file contains historical encoding/string corruption risk and should be cleaned carefully before behavioral edits
-
-Operational guidance until the guard lands:
-- keep one `supervisor` per `year_month + platform_code + shop_id`
-- avoid assigning multiple supervisors to the same shop-month combination
+- the shop assignment router now rejects duplicate `supervisor` rows for the same `year_month + platform_code + shop_id`
 
 ## Validation Commands
 
@@ -151,7 +154,7 @@ npm -C frontend run type-check
 ## Next Implementation Steps
 
 Recommended next work order:
-1. clean historical string/encoding damage in the finance and performance public pages
-2. add task-context-aware business-page writeback
-3. add formal unique-supervisor enforcement in the shop assignment router
+1. add richer task-detail forms for phase 2 actions
+2. expand task sources beyond cost entry and performance confirmation
+3. add task statistics / management dashboards
 4. add procurement bridge messaging until replenishment runtime is ready
