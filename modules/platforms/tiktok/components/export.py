@@ -5,6 +5,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from modules.components.export.base import ExportComponent, ExportMode, ExportResult, build_standard_output_root
+from modules.platforms.tiktok.components._download_helpers import (
+    cleanup_download_capture,
+    create_download_capture,
+    resolve_export_timeout_ms,
+    save_download_to_target,
+)
 
 
 class TiktokExport(ExportComponent):
@@ -138,15 +144,21 @@ class TiktokExport(ExportComponent):
             await page.wait_for_timeout(500)
             return self._build_success_result("export triggered")
 
+        download_capture = create_download_capture(page)
         try:
-            async with page.expect_download(timeout=10000) as download_info:
+            async with page.expect_download(timeout=resolve_export_timeout_ms(self.ctx.config or {})) as download_info:
                 clicked = await self._click_first(page, self._export_button_selectors(), timeout=3000)
                 if not clicked:
                     return self._build_error_result("export button not found")
                 await page.wait_for_timeout(500)
             download = await download_info.value
         except Exception as exc:
-            return self._build_error_result(str(exc))
+            if download_capture.latest_download is not None:
+                download = download_capture.latest_download
+            else:
+                return self._build_error_result(str(exc))
+        finally:
+            cleanup_download_capture(page, download_capture)
 
         cfg = self.ctx.config or {}
         out_root = build_standard_output_root(
@@ -159,8 +171,11 @@ class TiktokExport(ExportComponent):
 
         filename = getattr(download, "suggested_filename", None) or f"{data_type}.xlsx"
         target = out_root / filename
-        await download.save_as(str(target))
-        return self._build_success_result("ok", str(target))
+        saved = await save_download_to_target(download, target)
+        if saved is None:
+            return self._build_error_result("download save failed")
+
+        return self._build_success_result("ok", str(saved))
 
 
 TiktokExporterComponent = TiktokExport

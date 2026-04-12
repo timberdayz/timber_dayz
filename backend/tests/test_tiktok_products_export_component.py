@@ -101,13 +101,15 @@ async def test_tiktok_products_export_navigates_to_products_page_and_runs_helper
     date_state_mock = AsyncMock(return_value=False)
     date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_30_DAYS))
     confirm_mock = AsyncMock(return_value=True)
-    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/products.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
     monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
     monkeypatch.setattr(component, "_confirm_date_selection", confirm_mock, raising=False)
-    monkeypatch.setattr(component, "_run_export", export_mock)
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
 
     result = await component.run(page)
 
@@ -116,7 +118,8 @@ async def test_tiktok_products_export_navigates_to_products_page_and_runs_helper
     ]
     switch_mock.assert_awaited_once()
     date_mock.assert_awaited_once_with(page, DateOption.LAST_30_DAYS)
-    export_mock.assert_awaited_once()
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
     assert result.success is True
     assert result.file_path == "temp/products.xlsx"
 
@@ -156,18 +159,21 @@ async def test_tiktok_products_export_skips_date_picker_when_current_range_alrea
     switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
     date_state_mock = AsyncMock(return_value=True)
     date_mock = AsyncMock()
-    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/products.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
     monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
-    monkeypatch.setattr(component, "_run_export", export_mock)
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
 
     result = await component.run(page)
 
     date_state_mock.assert_awaited_once_with(page, DateOption.LAST_7_DAYS)
     date_mock.assert_not_awaited()
-    export_mock.assert_awaited_once()
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
     assert result.success is True
 
 
@@ -221,16 +227,45 @@ async def test_tiktok_products_export_forwards_explicit_custom_range_to_date_pic
     date_state_mock = AsyncMock(return_value=False)
     date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_30_DAYS))
     confirm_mock = AsyncMock(return_value=True)
-    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/products.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
     monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
     monkeypatch.setattr(component, "_confirm_date_selection", confirm_mock, raising=False)
-    monkeypatch.setattr(component, "_run_export", export_mock)
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
 
     result = await component.run(page)
 
     date_mock.assert_awaited_once_with(page, DateOption.LAST_30_DAYS)
-    export_mock.assert_awaited_once()
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_uses_explicit_trigger_and_collect_stages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    date_state_mock = AsyncMock(return_value=True)
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/products-delayed.xlsx")
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+    monkeypatch.setattr(component, "_run_export", AsyncMock(side_effect=AssertionError("should use explicit stages")), raising=False)
+
+    result = await component.run(page)
+
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
+    assert result.success is True
+    assert result.file_path == "temp/products-delayed.xlsx"

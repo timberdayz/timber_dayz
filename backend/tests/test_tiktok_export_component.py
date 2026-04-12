@@ -88,6 +88,7 @@ class _FakePage:
         self.url = url
         self.locators: dict[str, _FakeLocator] = {}
         self.timeout_calls: list[int] = []
+        self.expect_download_timeouts: list[int] = []
         self.download: _FakeDownload | None = None
 
     def locator(self, selector: str) -> _FakeLocator:
@@ -97,6 +98,7 @@ class _FakePage:
         self.timeout_calls.append(ms)
 
     def expect_download(self, timeout: int = 0):  # noqa: ARG002
+        self.expect_download_timeouts.append(timeout)
         return _FakeExpectDownload(self)
 
 
@@ -227,3 +229,35 @@ async def test_tiktok_export_does_not_click_disabled_export_button() -> None:
     assert result.success is False
     assert "download" in result.message.lower() or result.message == "export button not found"
     assert disabled_export_button.clicked == 0
+
+
+@pytest.mark.asyncio
+async def test_tiktok_export_uses_configured_export_timeout_when_present() -> None:
+    component = TiktokExport(_ctx({"shop_region": "SG", "export_timeout_ms": 240000}))
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG")
+    export_button = _FakeLocator(visible=True)
+
+    async def _click(timeout: int | None = None) -> None:
+        export_button.clicked += 1
+        page.download = _FakeDownload("traffic.xlsx")
+
+    export_button.click = _click  # type: ignore[method-assign]
+    page.locators[component._export_button_selectors()[0]] = export_button
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert page.expect_download_timeouts == [240000]
+
+
+def test_tiktok_top_level_exports_no_longer_delegate_semantic_export_to_shared_run() -> None:
+    products_source = Path("modules/platforms/tiktok/components/products_export.py").read_text(encoding="utf-8")
+    analytics_source = Path("modules/platforms/tiktok/components/analytics_export.py").read_text(encoding="utf-8")
+    services_source = Path("modules/platforms/tiktok/components/services_agent_export.py").read_text(encoding="utf-8")
+
+    assert "await self._run_export(page)" not in products_source
+    assert "await self._run_export(page)" not in analytics_source
+    assert "await self._run_export(page)" not in services_source
+    assert "await self.collect_download_result(page)" in products_source
+    assert "await self.collect_download_result(page)" in analytics_source
+    assert "await self.collect_download_result(page)" in services_source

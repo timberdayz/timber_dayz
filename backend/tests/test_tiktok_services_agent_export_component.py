@@ -175,7 +175,8 @@ async def test_tiktok_services_agent_export_navigates_to_services_page_and_runs_
     date_state_mock = AsyncMock(return_value=False)
     date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_30_DAYS))
     confirm_mock = AsyncMock(return_value=True)
-    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/services-agent.xlsx"))
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/services-agent.xlsx")
     detail_mock = AsyncMock(return_value=True)
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
@@ -183,7 +184,8 @@ async def test_tiktok_services_agent_export_navigates_to_services_page_and_runs_
     monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
     monkeypatch.setattr(component, "_confirm_date_selection", confirm_mock, raising=False)
-    monkeypatch.setattr(component, "_run_export", export_mock)
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
     monkeypatch.setattr(component, "_no_exportable_data", AsyncMock(return_value=False), raising=False)
 
     result = await component.run(page)
@@ -194,7 +196,8 @@ async def test_tiktok_services_agent_export_navigates_to_services_page_and_runs_
     switch_mock.assert_awaited_once()
     detail_mock.assert_awaited_once_with(page)
     date_mock.assert_awaited_once_with(page, DateOption.LAST_30_DAYS)
-    export_mock.assert_awaited_once()
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
     assert result.success is True
     assert result.file_path == "temp/services-agent.xlsx"
 
@@ -454,16 +457,48 @@ async def test_tiktok_services_agent_export_waits_for_ready_state_before_running
     switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
     detail_mock = AsyncMock(return_value=True)
     date_state_mock = AsyncMock(return_value=True)
-    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/services-agent.xlsx"))
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/services-agent.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
     monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
     monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
     monkeypatch.setattr(component, "_wait_export_readiness_state", AsyncMock(return_value="ready"))
-    monkeypatch.setattr(component, "_run_export", export_mock)
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
 
     result = await component.run(page)
 
-    export_mock.assert_awaited_once()
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
     assert result.success is True
     assert result.file_path == "temp/services-agent.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_uses_explicit_trigger_and_collect_stages_when_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "weekly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    detail_mock = AsyncMock(return_value=True)
+    date_state_mock = AsyncMock(return_value=True)
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/services-agent-delayed.xlsx")
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_wait_export_readiness_state", AsyncMock(return_value="ready"))
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+    monkeypatch.setattr(component, "_run_export", AsyncMock(side_effect=AssertionError("should use explicit stages")), raising=False)
+
+    result = await component.run(page)
+
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
+    assert result.success is True
+    assert result.file_path == "temp/services-agent-delayed.xlsx"
