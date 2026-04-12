@@ -73,6 +73,37 @@ async def employee_task_async_client(employee_task_route_session):
 
 
 @pytest_asyncio.fixture
+async def employee_task_async_client_other_user(employee_task_route_session):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        def __init__(self, user_id: int):
+            self.user_id = user_id
+            self.username = "other"
+            self.is_active = True
+            self.is_superuser = False
+            self.roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser(99)
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        yield client
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest_asyncio.fixture
 async def seeded_employee_task_data(employee_task_route_session):
     from backend.services.employee_task_service import EmployeeTaskService
 
@@ -113,6 +144,16 @@ async def test_employee_task_detail_endpoint_returns_timeline(
     payload = response.json()["data"]
     assert payload["task_id"] == "task-1"
     assert payload["timeline"][0]["action"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_employee_task_detail_endpoint_denies_unrelated_user(
+    employee_task_async_client_other_user,
+    seeded_employee_task_data,
+):
+    response = await employee_task_async_client_other_user.get("/api/employee-tasks/task-1")
+
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

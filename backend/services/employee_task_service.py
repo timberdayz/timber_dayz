@@ -83,10 +83,12 @@ class EmployeeTaskService:
         rows = await self.repository.list_tasks_for_user(user_id=user_id, scope=scope)
         return [await self._task_to_dict(row) for row in rows]
 
-    async def get_task_detail(self, task_id: str) -> dict[str, Any]:
+    async def get_task_detail(self, task_id: str, *, actor_user_id: int | None = None) -> dict[str, Any]:
         task = await self.repository.get_task_by_task_id(task_id)
         if task is None:
             raise ValueError(f"Task {task_id} not found")
+        if actor_user_id is not None:
+            await self._assert_task_visible(task, actor_user_id)
         return await self._task_to_dict(task, include_timeline=True)
 
     async def start_task(self, task_id: str, *, actor_user_id: int) -> dict[str, Any]:
@@ -104,7 +106,7 @@ class EmployeeTaskService:
             details_json={"status": STATUS_IN_PROGRESS},
         )
         await self.db.commit()
-        return await self.get_task_detail(task_id)
+        return await self.get_task_detail(task_id, actor_user_id=actor_user_id)
 
     async def submit_task_result(
         self,
@@ -134,7 +136,7 @@ class EmployeeTaskService:
             details_json={"status": next_status},
         )
         await self.db.commit()
-        return await self.get_task_detail(task_id)
+        return await self.get_task_detail(task_id, actor_user_id=actor_user_id)
 
     async def _get_owned_task(self, task_id: str, actor_user_id: int):
         task = await self.repository.get_task_by_task_id(task_id)
@@ -143,6 +145,16 @@ class EmployeeTaskService:
         if task.owner_user_id != actor_user_id:
             raise ValueError("Only the task owner may perform this action")
         return task
+
+    async def _assert_task_visible(self, task, actor_user_id: int) -> None:
+        if task.owner_user_id == actor_user_id:
+            return
+        if task.created_by == actor_user_id:
+            return
+        participants = await self.repository.list_participants(task.id)
+        if any(row.user_id == actor_user_id for row in participants):
+            return
+        raise ValueError("Access denied for this task")
 
     async def _task_to_dict(self, task, *, include_timeline: bool = False) -> dict[str, Any]:
         participants = await self.repository.list_participants(task.id)

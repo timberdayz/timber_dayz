@@ -32,9 +32,10 @@ async def get_employee_task(
 ):
     service = EmployeeTaskService(db)
     try:
-        task = await service.get_task_detail(task_id)
+        task = await service.get_task_detail(task_id, actor_user_id=current_user.user_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        status_code = 404 if "not found" in str(exc) else 403
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return success_response(data=task)
 
 

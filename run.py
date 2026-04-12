@@ -16,7 +16,7 @@
 使用方法:
     python run.py                      # 传统模式（需先启动 Postgres/Redis）
     python run.py --local              # 一键本地：Docker 起 Postgres/Redis，本机起后端+Celery+前端
-    python run.py --use-docker         # Docker Compose模式（推荐，统一管理）
+    python run.py --use-docker         # 后端 Docker + 前端本地模式（推荐）
     python run.py --backend-only       # 仅启动后端
     python run.py --frontend-only      # 仅启动前端
     python run.py --no-celery          # 不启动Celery worker
@@ -481,6 +481,32 @@ def pre_flight_check_docker(project_root):
     return True
 
 
+def _resolve_docker_compose_command():
+    """优先使用 Docker Compose v2，回退到 v1。"""
+    if shutil.which("docker"):
+        return ["docker", "compose"]
+    if shutil.which("docker-compose"):
+        return ["docker-compose"]
+    return None
+
+
+def _report_migrate_failure(reason):
+    """统一输出 migrate 一次性任务失败的诊断信息。"""
+    migrate_container = "xihong_erp_migrate"
+    safe_print(f"  [ERROR] {reason}")
+    safe_print(f"  migrate 容器状态: {get_docker_container_status(migrate_container)}")
+    safe_print("  migrate 容器日志（最后30行）:")
+    logs = show_docker_container_logs(migrate_container, 30)
+    for line in logs.split('\n')[-30:]:
+        if line.strip():
+            safe_print(f"    {line}")
+    safe_print("  诊断建议:")
+    safe_print("    1. 查看完整日志: docker logs xihong_erp_migrate")
+    safe_print("    2. 单独执行迁移: docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up migrate")
+    safe_print("    3. 修复迁移后重试 run.py")
+    return False
+
+
 def start_services_with_docker_compose(use_collection=False):
     """使用Docker Compose启动服务（v4.19.6新增，生产模式：确保所有服务在容器中运行）
     use_collection: 若为 True，加载 docker-compose.collection-dev.yml，使 backend 使用 Dockerfile.collection（带 Playwright）
@@ -492,6 +518,11 @@ def start_services_with_docker_compose(use_collection=False):
     # [Phase 3.3] 启动前检查：Docker 可用性
     safe_print("  [检查] 本地开发启动清单...")
     if not pre_flight_check_docker(project_root):
+        return False
+
+    compose_command = _resolve_docker_compose_command()
+    if not compose_command:
+        safe_print("  [ERROR] 未找到 Docker Compose 命令（docker compose / docker-compose）")
         return False
     
     # [Phase 2.3] 启动前环境检查（Docker 关键变量）
@@ -574,7 +605,7 @@ def start_services_with_docker_compose(use_collection=False):
     try:
         # 启动Redis和PostgreSQL
         safe_print("  [启动] Redis和PostgreSQL...")
-        cmd = ["docker-compose"] + compose_files + ["--profile", "dev", "up", "-d", "redis", "postgres"]
+        cmd = compose_command + compose_files + ["--profile", "dev", "up", "-d", "redis", "postgres"]
         result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='ignore')
         if result.returncode != 0:
             error_msg = result.stderr or result.stdout or "未知错误"
@@ -616,12 +647,14 @@ def start_services_with_docker_compose(use_collection=False):
         safe_print("  提示: 首次构建可能需要几分钟，请耐心等待...")
         backend_container = "xihong_erp_backend"
         try:
-            cmd = ["docker-compose"] + compose_files + ["--profile", profile_name, "up", "-d", "backend"]
+            cmd = compose_command + compose_files + ["--profile", profile_name, "up", "-d", "backend"]
             # [FIX] 增加超时到300秒（5分钟），首次构建需要更长时间
             result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore')
             
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "未知错误"
+                if "xihong_erp_migrate" in error_msg or "migrate" in error_msg.lower():
+                    return _report_migrate_failure("数据库迁移任务失败，后端未启动")
                 safe_print(f"  [ERROR] 后端API启动命令失败: {error_msg[:200]}")
                 safe_print(f"  容器状态: {get_docker_container_status(backend_container)}")
                 safe_print("  容器日志:")
@@ -649,6 +682,8 @@ def start_services_with_docker_compose(use_collection=False):
                 # 容器未运行
                 status = get_docker_container_status(backend_container)
                 safe_print(f"  [ERROR] 后端容器启动失败")
+                if get_docker_container_status("xihong_erp_migrate") not in ("missing", "unknown", ""):
+                    _report_migrate_failure("数据库迁移任务可能失败，导致后端未能启动")
                 safe_print(f"  容器状态: {status}")
                 safe_print("  容器日志（最后30行）:")
                 logs = show_docker_container_logs(backend_container, 30)
@@ -759,12 +794,14 @@ def start_services_with_docker_compose(use_collection=False):
         safe_print("  提示: 首次构建可能需要几分钟，请耐心等待...")
         celery_container = "xihong_erp_celery_worker"
         try:
-            cmd = ["docker-compose"] + compose_files + ["--profile", profile_name, "up", "-d", "celery-worker"]
+            cmd = compose_command + compose_files + ["--profile", profile_name, "up", "-d", "celery-worker"]
             # [FIX] 增加超时到300秒（5分钟）
             result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore')
             
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "未知错误"
+                if "xihong_erp_migrate" in error_msg or "migrate" in error_msg.lower():
+                    return _report_migrate_failure("数据库迁移任务失败，Celery Worker 未启动")
                 safe_print(f"  [ERROR] Celery Worker启动失败: {error_msg[:200]}")
                 safe_print(f"  容器状态: {get_docker_container_status(celery_container)}")
                 safe_print("  容器日志:")
@@ -791,6 +828,8 @@ def start_services_with_docker_compose(use_collection=False):
             else:
                 status = get_docker_container_status(celery_container)
                 safe_print(f"  [ERROR] Celery Worker容器启动失败")
+                if get_docker_container_status("xihong_erp_migrate") not in ("missing", "unknown", ""):
+                    _report_migrate_failure("数据库迁移任务可能失败，导致 Celery Worker 未能启动")
                 safe_print(f"  容器状态: {status}")
                 safe_print("  容器日志（最后30行）:")
                 logs = show_docker_container_logs(celery_container, 30)
@@ -812,8 +851,8 @@ def start_services_with_docker_compose(use_collection=False):
         
         return True
     except FileNotFoundError:
-        safe_print("  [ERROR] docker-compose 命令未找到")
-        safe_print("  提示: 请安装Docker Compose或确保其在PATH中")
+        safe_print("  [ERROR] Docker Compose 命令未找到")
+        safe_print("  提示: 请安装 docker compose 或 docker-compose，并确保其在 PATH 中")
         return False
     except Exception as e:
         safe_print(f"  [ERROR] Docker Compose启动失败: {e}")
@@ -1045,6 +1084,11 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
     if not pre_flight_check_docker(project_root):
         return False
 
+    compose_command = _resolve_docker_compose_command()
+    if not compose_command:
+        safe_print("  [ERROR] 未找到 Docker Compose 命令（docker compose / docker-compose）")
+        return False
+
     compose_base = project_root / "docker-compose.yml"
     compose_dev = project_root / "docker-compose.dev.yml"
     if not compose_base.exists():
@@ -1091,7 +1135,7 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
 
     try:
         safe_print("  [启动] " + ", ".join(services) + "...")
-        cmd = ["docker-compose"] + compose_files + profiles + ["up", "-d"] + services
+        cmd = compose_command + compose_files + profiles + ["up", "-d"] + services
         result = subprocess.run(
             cmd,
             cwd=project_root,
@@ -1103,10 +1147,15 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
         )
         if result.returncode != 0:
             error_msg = (result.stderr or result.stdout or "未知错误")[:300]
+            if "xihong_erp_migrate" in error_msg or "migrate" in error_msg.lower():
+                return _report_migrate_failure("数据库迁移任务失败，本地 Docker 基础服务未能完成初始化")
             safe_print(f"  [ERROR] 启动失败: {error_msg}")
             return False
 
         if not _wait_for_local_docker_infra(required_names, max_wait=60):
+            migrate_status = get_docker_container_status("xihong_erp_migrate")
+            if migrate_status not in ("missing", "unknown", "") and "Exited" in migrate_status:
+                return _report_migrate_failure("数据库迁移任务失败，本地 Docker 基础服务未能完成初始化")
             return False
 
         postgres_user = os.getenv("POSTGRES_USER", "erp_user")
@@ -1210,7 +1259,7 @@ def main():
     parser.add_argument("--frontend-only", action="store_true", help="仅启动前端")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     parser.add_argument("--no-celery", action="store_true", help="不启动Celery worker")
-    parser.add_argument("--use-docker", action="store_true", help="使用Docker Compose启动服务")
+    parser.add_argument("--use-docker", action="store_true", help="后端 Docker + 前端本地模式")
     parser.add_argument(
         "--collection",
         action="store_true",
@@ -1236,7 +1285,7 @@ def main():
         safe_print("  [OK] 数据库、Redis 与 Celery 已就绪，接下来启动本机后端与前端...\n")
 
     if args.use_docker:
-        safe_print("\n[模式] Docker Compose 模式（统一管理服务）")
+        safe_print("\n[模式] 后端 Docker + 前端本地模式")
         if not args.frontend_only:
             docker_success = start_services_with_docker_compose(
                 use_collection=args.collection,

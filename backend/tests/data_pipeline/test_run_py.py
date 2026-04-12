@@ -1,6 +1,6 @@
 from pathlib import Path
-import re
 import importlib.util
+import re
 
 
 def _load_run_module():
@@ -99,7 +99,7 @@ def test_warn_legacy_shop_session_artifacts_reports_detected_paths(tmp_path, mon
     result = module.warn_legacy_shop_session_artifacts(tmp_path)
 
     assert result is True
-    assert any("店铺级会话历史残留" in message for message in messages)
+    assert any("历史残留" in message for message in messages)
     assert any("cleanup_legacy_shop_session_artifacts.py --delete" in message for message in messages)
 
 
@@ -130,3 +130,44 @@ def test_run_py_uses_clean_docker_wait_messages():
     assert "Docker 基础服务已就绪" in text
     assert "等待中..." in text
     assert "Docker 基础服务等待超时" in text
+
+
+def test_resolve_docker_compose_command_prefers_v2(monkeypatch):
+    module = _load_run_module()
+
+    monkeypatch.setattr(
+        module.shutil,
+        "which",
+        lambda name: "C:/Program Files/Docker/docker.exe" if name == "docker" else None,
+    )
+
+    assert module._resolve_docker_compose_command() == ["docker", "compose"]
+
+
+def test_resolve_docker_compose_command_falls_back_to_v1(monkeypatch):
+    module = _load_run_module()
+
+    monkeypatch.setattr(
+        module.shutil,
+        "which",
+        lambda name: "C:/Program Files/Docker/docker-compose.exe" if name == "docker-compose" else None,
+    )
+
+    assert module._resolve_docker_compose_command() == ["docker-compose"]
+
+
+def test_report_migrate_failure_prints_migrate_diagnostics(monkeypatch):
+    module = _load_run_module()
+    messages = []
+
+    monkeypatch.setattr(module, "safe_print", messages.append)
+    monkeypatch.setattr(module, "get_docker_container_status", lambda name: f"status:{name}")
+    monkeypatch.setattr(module, "show_docker_container_logs", lambda name, lines=30: f"log:{name}:{lines}")
+
+    result = module._report_migrate_failure("迁移失败")
+
+    assert result is False
+    joined = "\n".join(messages)
+    assert "xihong_erp_migrate" in joined
+    assert "迁移失败" in joined
+    assert "docker logs xihong_erp_migrate" in joined
