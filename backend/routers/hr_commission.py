@@ -509,6 +509,18 @@ async def create_employee_shop_assignment(
         )
         if dup.scalar_one_or_none():
             return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该员工在该月已关联该店铺", status_code=409)
+        if body.role == "supervisor":
+            supervisor_dup = await db.execute(
+                select(EmployeeShopAssignment).where(
+                    EmployeeShopAssignment.year_month == body.year_month,
+                    EmployeeShopAssignment.platform_code == body.platform_code,
+                    EmployeeShopAssignment.shop_id == body.shop_id,
+                    EmployeeShopAssignment.role == "supervisor",
+                    EmployeeShopAssignment.status == "active",
+                )
+            )
+            if supervisor_dup.scalar_one_or_none():
+                return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该店铺该月份已存在主管责任人", status_code=409)
 
         rec = EmployeeShopAssignment(
             year_month=body.year_month,
@@ -547,6 +559,20 @@ async def update_employee_shop_assignment(
         rec = result.scalar_one_or_none()
         if not rec:
             return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
+        next_role = body.role if body.role is not None else rec.role
+        if next_role == "supervisor":
+            supervisor_dup = await db.execute(
+                select(EmployeeShopAssignment).where(
+                    EmployeeShopAssignment.year_month == rec.year_month,
+                    EmployeeShopAssignment.platform_code == rec.platform_code,
+                    EmployeeShopAssignment.shop_id == rec.shop_id,
+                    EmployeeShopAssignment.role == "supervisor",
+                    EmployeeShopAssignment.status == "active",
+                    EmployeeShopAssignment.id != id,
+                )
+            )
+            if supervisor_dup.scalar_one_or_none():
+                return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该店铺该月份已存在主管责任人", status_code=409)
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(rec, k, v)
         await db.commit()

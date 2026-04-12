@@ -27,6 +27,21 @@
       >
         重新计算
       </el-button>
+      <el-button
+        v-if="taskContext.taskId"
+        type="success"
+        @click="submitPerformanceTaskResult('confirmed', 'performance confirmed from public display')"
+      >
+        ????
+      </el-button>
+      <el-button
+        v-if="taskContext.taskId"
+        type="danger"
+        plain
+        @click="submitPerformanceTaskResult('disputed', 'performance disputed from public display')"
+      >
+        ????
+      </el-button>
       <el-select v-model="filters.platform" placeholder="选择平台" clearable size="default" style="width: 140px; margin-left: auto;" @change="loadPerformanceList">
         <el-option label="全部平台" value="" />
         <el-option label="Shopee" value="Shopee" />
@@ -184,14 +199,17 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
+import employeeTasksApi from '@/api/employeeTasks.js'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatPercent } from '@/utils/dataFormatter'
 
 const userStore = useUserStore()
+const route = useRoute()
 
 const performanceList = reactive({
   data: [],
@@ -225,6 +243,11 @@ const performanceDetail = reactive({
 })
 
 const detailVisible = ref(false)
+const taskContext = reactive({
+  taskId: '',
+  yearMonth: '',
+  employeeCode: ''
+})
 
 function formatCell(v) {
   if (v == null || v === '') return '—'
@@ -234,6 +257,29 @@ function formatCell(v) {
 
 const hasPermission = (permission) => {
   return userStore.hasPermission(permission)
+}
+
+const initTaskContext = () => {
+  taskContext.taskId = typeof route.query.task_id === 'string' ? route.query.task_id : ''
+  taskContext.yearMonth = typeof route.query.year_month === 'string' ? route.query.year_month : ''
+  taskContext.employeeCode = typeof route.query.employee_code === 'string' ? route.query.employee_code : ''
+  if (taskContext.yearMonth) {
+    filters.period = taskContext.yearMonth
+  }
+}
+
+const submitPerformanceTaskResult = async (result, comment) => {
+  if (!taskContext.taskId) return
+  await employeeTasksApi.submitTask(taskContext.taskId, {
+    completion_payload: {
+      employee_code: taskContext.employeeCode,
+      year_month: filters.period,
+      confirmation_result: result
+    },
+    result_comment: comment,
+    requires_confirmation: result !== 'confirmed'
+  })
+  ElMessage.success('绩效确认任务已提交')
 }
 
 function isMetricCalculated(metric) {
@@ -417,6 +463,7 @@ const handleViewDetail = async (row) => {
 }
 
 onMounted(() => {
+  initTaskContext()
   loadWeightConfig()
   loadPerformanceList()
 })
