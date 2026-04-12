@@ -284,6 +284,12 @@ const filters = reactive({
   groupBy: 'shop'
 })
 
+const taskContext = reactive({
+  taskId: '',
+  yearMonth: '',
+  employeeCode: ''
+})
+
 const performanceDetail = reactive({
   data: null,
   loading: false

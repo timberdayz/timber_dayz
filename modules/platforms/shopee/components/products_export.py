@@ -907,7 +907,30 @@ class ShopeeProductsExport(ExportComponent):
                 '[class*="next"]:not([class*="super"])',
             ),
         }
-        return await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ()))
+        if await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ())):
+            return True
+
+        text_map = {
+            "prev": ("<", "\u2039", "\u3008"),
+            "next": (">", "\u203a", "\u3009"),
+        }
+        panel = await self._find_date_panel(page)
+        containers = [panel, page] if panel is not None else [page]
+        for container in containers:
+            if container is None:
+                continue
+            for label in text_map.get(direction, ()):
+                try:
+                    locator = await self._pick_visible_locator(container.get_by_text(label, exact=True))
+                    if locator is None:
+                        continue
+                    await locator.click(timeout=5000)
+                    if hasattr(page, "wait_for_timeout"):
+                        await page.wait_for_timeout(250)
+                    return True
+                except Exception:
+                    continue
+        return False
 
     def _parse_calendar_header_month_year_zh(self, header_text: str | None) -> tuple[int, int] | None:
         text = str(header_text or "").strip()
@@ -922,6 +945,10 @@ class ShopeeProductsExport(ExportComponent):
         month_match = re.search(r"(\d{1,2})\s*\u6708", text)
         if month_match:
             return year, int(month_match.group(1))
+
+        month_year_numeric_match = re.search(r"(\d{1,2})\s*\u6708\s*(20\d{2})", text)
+        if month_year_numeric_match:
+            return int(month_year_numeric_match.group(2)), int(month_year_numeric_match.group(1))
 
         zh_months = (
             ("\u5341\u4e00\u6708", 11),
@@ -939,6 +966,37 @@ class ShopeeProductsExport(ExportComponent):
         )
         for label, month in zh_months:
             if label in text:
+                return year, month
+
+        month_year_labels = (
+            ("\u5341\u4e00\u6708", 11),
+            ("\u5341\u4e8c\u6708", 12),
+            ("\u5341\u6708", 10),
+            ("\u4e00\u6708", 1),
+            ("\u4e8c\u6708", 2),
+            ("\u4e09\u6708", 3),
+            ("\u56db\u6708", 4),
+            ("\u4e94\u6708", 5),
+            ("\u516d\u6708", 6),
+            ("\u4e03\u6708", 7),
+            ("\u516b\u6708", 8),
+            ("\u4e5d\u6708", 9),
+            ("january", 1),
+            ("february", 2),
+            ("march", 3),
+            ("april", 4),
+            ("may", 5),
+            ("june", 6),
+            ("july", 7),
+            ("august", 8),
+            ("september", 9),
+            ("october", 10),
+            ("november", 11),
+            ("december", 12),
+        )
+        lowered = text.lower()
+        for label, month in month_year_labels:
+            if label in lowered:
                 return year, month
         return None
 

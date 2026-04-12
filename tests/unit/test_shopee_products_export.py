@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -35,10 +36,10 @@ class _FakeActionLocator:
         self._text = text
         self.click = AsyncMock()
 
-    async def is_visible(self) -> bool:
+    async def is_visible(self, *args, **kwargs) -> bool:
         return True
 
-    async def is_enabled(self) -> bool:
+    async def is_enabled(self, *args, **kwargs) -> bool:
         return True
 
     async def text_content(self) -> str:
@@ -60,11 +61,44 @@ class _FakeActionGroup:
         return self._locators[0]
 
 
+class _FakeNavLocator(_FakeActionLocator):
+    def __init__(self, text: str, on_click=None) -> None:
+        super().__init__(text)
+        self._on_click = on_click
+        self.click = AsyncMock(side_effect=self._click_impl)
+
+    async def _click_impl(self, *args, **kwargs) -> None:
+        if self._on_click is not None:
+            self._on_click()
+
+
+class _FakeLocatorSequence:
+    def __init__(self, locators: list[Any]) -> None:
+        self._locators = locators
+
+    async def count(self) -> int:
+        return len(self._locators)
+
+    def nth(self, idx: int):
+        return self._locators[idx]
+
+    @property
+    def first(self):
+        return self._locators[0]
+
+    @property
+    def last(self):
+        return self._locators[-1]
+
+
 class _FakeTextLocator:
     def __init__(self, text: str) -> None:
         self._text = text
 
-    async def is_visible(self) -> bool:
+    async def count(self) -> int:
+        return 1
+
+    async def is_visible(self, *args, **kwargs) -> bool:
         return True
 
     async def text_content(self) -> str:
@@ -141,6 +175,53 @@ class _FakePage:
 class _DirectDownloadPage(_FakePage):
     def __init__(self) -> None:
         self.context = Mock()
+
+
+class _MonthNavPage(_FakePage):
+    def __init__(self, headers: list[str]) -> None:
+        self._headers = headers
+        self._header_idx = 0
+
+    def locator(self, selector: str):
+        if selector == "body > div":
+            return _FakeLocatorSequence([self])
+        if "header" in selector:
+            return _FakeLocatorSequence([_FakeTextLocator(self._headers[self._header_idx])])
+        return _FakeLocatorSequence([])
+
+    def filter(self, **kwargs):
+        return self
+
+    async def count(self) -> int:
+        return 1
+
+    async def is_visible(self, timeout: int = 500) -> bool:
+        return True
+
+    async def text_content(self) -> str:
+        return self._headers[self._header_idx]
+
+    def get_by_text(self, text, exact: bool = False):
+        normalized = str(text)
+        if normalized in {"<", "‹"}:
+            return _FakeLocatorSequence([
+                _FakeNavLocator(
+                    normalized,
+                    on_click=lambda: None,
+                )
+            ])
+        if normalized in {">", "›"}:
+            return _FakeLocatorSequence([
+                _FakeNavLocator(
+                    normalized,
+                    on_click=self._advance,
+                )
+            ])
+        return _FakeLocatorSequence([])
+
+    def _advance(self) -> None:
+        if self._header_idx < len(self._headers) - 1:
+            self._header_idx += 1
 
 
 class _FutureCompletingPage(_FakePage):
@@ -842,6 +923,17 @@ async def test_wait_top_report_download_button_exits_when_download_event_arrives
     assert button is None
     assert waiter.done() is True
     assert page._wait_calls <= 2
+
+
+@pytest.mark.asyncio
+async def test_navigate_calendar_panel_to_month_supports_single_arrow_text_fallback() -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    page = _MonthNavPage(["四月2025", "五月2025", "六月2025", "三月2026"])
+
+    result = await component._navigate_calendar_panel_to_month(page, 2026, 3)
+
+    assert result is True
 
 
 @pytest.mark.asyncio
