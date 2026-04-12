@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.employee_task_repository import EmployeeTaskRepository
+from backend.services.employee_task_policy import can_user_perform_task_action
 
 
 STATUS_PENDING = "pending"
@@ -138,6 +139,44 @@ class EmployeeTaskService:
         await self.db.commit()
         return await self.get_task_detail(task_id, actor_user_id=actor_user_id)
 
+    async def append_task_comment(
+        self,
+        task_id: str,
+        *,
+        actor_user_id: int,
+        comment: str,
+    ) -> dict[str, Any]:
+        task = await self._get_visible_task(task_id, actor_user_id)
+        await self._assert_can_supplement(task, actor_user_id, "append_comment")
+        await self.repository.create_log(
+            task_pk=task.id,
+            actor_user_id=actor_user_id,
+            action="append_comment",
+            message=comment,
+            details_json={"comment": comment},
+        )
+        await self.db.commit()
+        return await self.get_task_detail(task_id, actor_user_id=actor_user_id)
+
+    async def append_task_structured_data(
+        self,
+        task_id: str,
+        *,
+        actor_user_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        task = await self._get_visible_task(task_id, actor_user_id)
+        await self._assert_can_supplement(task, actor_user_id, "append_structured_data")
+        await self.repository.create_log(
+            task_pk=task.id,
+            actor_user_id=actor_user_id,
+            action="append_structured_data",
+            message="Structured supplement added",
+            details_json=payload,
+        )
+        await self.db.commit()
+        return await self.get_task_detail(task_id, actor_user_id=actor_user_id)
+
     async def _get_owned_task(self, task_id: str, actor_user_id: int):
         task = await self.repository.get_task_by_task_id(task_id)
         if task is None:
@@ -145,6 +184,22 @@ class EmployeeTaskService:
         if task.owner_user_id != actor_user_id:
             raise ValueError("Only the task owner may perform this action")
         return task
+
+    async def _get_visible_task(self, task_id: str, actor_user_id: int):
+        task = await self.repository.get_task_by_task_id(task_id)
+        if task is None:
+            raise ValueError(f"Task {task_id} not found")
+        await self._assert_task_visible(task, actor_user_id)
+        return task
+
+    async def _assert_can_supplement(self, task, actor_user_id: int, action: str) -> None:
+        if task.owner_user_id == actor_user_id:
+            return
+        participants = await self.repository.list_participants(task.id)
+        collaborator = next((row for row in participants if row.user_id == actor_user_id and row.participant_role == "collaborator"), None)
+        if collaborator and can_user_perform_task_action(task.task_category, task.status, "collaborator", action):
+            return
+        raise ValueError("Only task collaborators or the owner may supplement this task")
 
     async def _assert_task_visible(self, task, actor_user_id: int) -> None:
         if task.owner_user_id == actor_user_id:

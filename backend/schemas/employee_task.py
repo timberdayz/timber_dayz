@@ -58,3 +58,11 @@ class EmployeeTaskSubmitRequest(BaseModel):
     completion_payload: dict[str, Any]
     result_comment: str | None = None
     requires_confirmation: bool = False
+
+
+class EmployeeTaskCommentRequest(BaseModel):
+    comment: str
+
+
+class EmployeeTaskStructuredSupplementRequest(BaseModel):
+    payload: dict[str, Any]
