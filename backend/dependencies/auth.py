@@ -24,13 +24,34 @@ security = HTTPBearer(auto_error=False)
 
 
 def is_admin_user(current_user: DimUser) -> bool:
+    return has_any_role_code(current_user, {"admin"})
+
+
+def extract_role_codes(current_user: DimUser) -> set[str]:
+    role_codes: set[str] = set()
     if getattr(current_user, "is_superuser", False):
-        return True
-    return any(
-        (hasattr(role, "role_code") and role.role_code == "admin")
-        or (hasattr(role, "role_name") and role.role_name == "admin")
-        for role in getattr(current_user, "roles", []) or []
-    )
+        role_codes.add("admin")
+
+    for role in getattr(current_user, "roles", []) or []:
+        if isinstance(role, str):
+            role_codes.add(role.strip().lower())
+            continue
+        role_code = getattr(role, "role_code", None)
+        role_name = getattr(role, "role_name", None)
+        if role_code:
+            role_codes.add(str(role_code).strip().lower())
+        elif role_name:
+            role_codes.add(str(role_name).strip().lower())
+    return role_codes
+
+
+def has_any_role_code(current_user: DimUser, expected_codes: set[str]) -> bool:
+    role_codes = extract_role_codes(current_user)
+    return any(code in role_codes for code in expected_codes)
+
+
+def is_admin_or_manager_user(current_user: DimUser) -> bool:
+    return has_any_role_code(current_user, {"admin", "manager"})
 
 
 async def get_current_user(
@@ -102,6 +123,17 @@ async def require_admin(
 ):
     """要求管理员权限。"""
     if not is_admin_user(current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Insufficient permissions",
+        )
+    return current_user
+
+
+async def require_admin_or_manager(
+    current_user: DimUser = Depends(get_current_user),
+):
+    if not is_admin_or_manager_user(current_user):
         raise HTTPException(
             status_code=403,
             detail="Insufficient permissions",

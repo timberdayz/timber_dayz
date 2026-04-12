@@ -140,10 +140,10 @@
                 </div>
                 <div class="group-actions">
                   <el-button
-                    v-if="getNotificationRoute(group.notification_type)"
+                    v-if="getNotificationRoute(group.notification_type) || group.latest_notification?.extra_data?.target_route"
                     type="success"
                     size="small"
-                    @click="goToNotificationRoute(group.notification_type)"
+                    @click="goToNotificationRoute(group.notification_type, group.latest_notification)"
                   >
                     {{ getNotificationRouteLabel(group.notification_type) }}
                   </el-button>
@@ -232,11 +232,11 @@
             
             <div class="notification-actions">
               <el-button
-                v-if="getNotificationRoute(notification.notification_type)"
+                v-if="resolveNotificationRoute(notification)"
                 type="success"
                 link
                 size="small"
-                @click="goToNotificationRoute(notification.notification_type)"
+                @click="goToNotificationRoute(notification.notification_type, notification)"
               >
                 {{ getNotificationRouteLabel(notification.notification_type) }}
               </el-button>
@@ -496,7 +496,9 @@ const getTypeTagColor = (type) => {
     'user_approved': 'success',
     'user_rejected': 'danger',
     'password_reset': 'info',
-    'system_alert': 'danger'
+    'system_alert': 'danger',
+    'task_assigned': 'success',
+    'training_assigned': 'success'
   }
   return colors[type] || 'info'
 }
@@ -508,7 +510,9 @@ const getTypeLabel = (type) => {
     'user_approved': '已批准',
     'user_rejected': '已拒绝',
     'password_reset': '密码重置',
-    'system_alert': '系统告警'
+    'task_assigned': '任务指派',
+    'system_alert': '系统告警',
+    'training_assigned': '培训任务'
   }
   return labels[type] || type
 }
@@ -521,6 +525,8 @@ const getNotificationRoute = (type) => {
   case 'user_rejected':
   case 'password_reset':
     return '/user-management'
+  case 'training_assigned':
+    return '/training/overview'
   default:
     return ''
   }
@@ -534,13 +540,19 @@ const getNotificationRouteLabel = (type) => {
   case 'user_rejected':
   case 'password_reset':
     return '用户管理'
+  case 'training_assigned':
+    return '培训管理'
   default:
     return ''
   }
 }
 
-const goToNotificationRoute = (type) => {
-  const target = getNotificationRoute(type)
+const resolveNotificationRoute = (notification) => {
+  return notification.extra_data?.target_route || getNotificationRoute(notification.notification_type)
+}
+
+const goToNotificationRoute = (type, notification = null) => {
+  const target = notification?.extra_data?.target_route || getNotificationRoute(type)
   if (!target) return
   router.push(target)
 }

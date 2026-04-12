@@ -1179,6 +1179,114 @@ class EmployeeTaskParticipant(Base):
     )
 
 
+class TrainingProgram(Base):
+    """Formal ERP training program definition."""
+
+    __tablename__ = "training_programs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    program_id = Column(String(64), nullable=True)
+    name = Column(String(255), nullable=False)
+    category = Column(String(64), nullable=False)
+    target_role = Column(String(255), nullable=False)
+    external_platform = Column(String(64), nullable=False, default="飞书")
+    completion_rule = Column(Text, nullable=False)
+    learning_url = Column(String(1024), nullable=True)
+    exam_url = Column(String(1024), nullable=True)
+    materials_url = Column(String(1024), nullable=True)
+    external_course_id = Column(String(128), nullable=True)
+    external_exam_id = Column(String(128), nullable=True)
+    status = Column(String(32), nullable=False, default="待上线")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    assignments = relationship("TrainingAssignment", back_populates="program", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("program_id", name="uq_training_programs_program_id"),
+        Index("ix_training_programs_category", "category"),
+        Index("ix_training_programs_status", "status"),
+        {"schema": "core"},
+    )
+
+
+class TrainingFeishuConfig(Base):
+    """Feishu integration config for training management."""
+
+    __tablename__ = "training_feishu_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider_code = Column(String(32), nullable=False, default="feishu")
+    app_id = Column(String(128), nullable=False)
+    app_secret_encrypted = Column(Text, nullable=True)
+    tenant_key = Column(String(128), nullable=True)
+    base_url = Column(String(255), nullable=True)
+    is_enabled = Column(Boolean, nullable=False, default=False)
+    updated_by_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("provider_code", name="uq_training_feishu_configs_provider_code"),
+        {"schema": "core"},
+    )
+
+
+class TrainingAssignment(Base):
+    """Employee-level training assignment record."""
+
+    __tablename__ = "training_assignments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    assignment_id = Column(String(64), nullable=True)
+    program_pk = Column(Integer, ForeignKey("core.training_programs.id", ondelete="CASCADE"), nullable=False)
+    employee_name = Column(String(128), nullable=False)
+    employee_code = Column(String(64), nullable=False)
+    department = Column(String(128), nullable=False)
+    role_name = Column(String(128), nullable=False)
+    learning_status = Column(String(32), nullable=False, default="待学习")
+    current_status = Column(String(32), nullable=False, default="待学习")
+    due_date = Column(String(32), nullable=False)
+    supervisor_name = Column(String(128), nullable=False)
+    task_id = Column(String(100), nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    program = relationship("TrainingProgram", back_populates="assignments")
+    result = relationship("TrainingResult", back_populates="assignment", uselist=False, cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("assignment_id", name="uq_training_assignments_assignment_id"),
+        Index("ix_training_assignments_employee_code", "employee_code"),
+        Index("ix_training_assignments_current_status", "current_status"),
+        Index("ix_training_assignments_program_pk", "program_pk"),
+        Index("ix_training_assignments_task_id", "task_id"),
+        {"schema": "core"},
+    )
+
+
+class TrainingResult(Base):
+    """Training result and score attached to an assignment."""
+
+    __tablename__ = "training_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    assignment_pk = Column(Integer, ForeignKey("core.training_assignments.id", ondelete="CASCADE"), nullable=False)
+    exam_score = Column(Integer, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    assignment = relationship("TrainingAssignment", back_populates="result")
+
+    __table_args__ = (
+        UniqueConstraint("assignment_pk", name="uq_training_results_assignment_pk"),
+        Index("ix_training_results_assignment_pk", "assignment_pk"),
+        {"schema": "core"},
+    )
+
+
 class CloudBClassSyncCheckpoint(Base):
     """Per-table checkpoint for local-to-cloud B-class sync."""
 

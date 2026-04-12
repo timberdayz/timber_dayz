@@ -57,7 +57,7 @@
         <el-table-column prop="priority" label="优先级" width="120" />
         <el-table-column label="操作" width="140">
           <template #default="{ row }">
-            <el-button type="primary" link @click="openTask(row.task_id)">查看详情</el-button>
+            <el-button type="primary" link @click="openTask(row.task_id, row)">查看详情</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -100,7 +100,11 @@ const loadTasks = async () => {
   tasks.value = response?.items || []
 }
 
-const openTask = (taskId) => {
+const openTask = (taskId, row) => {
+  if (row?.source_module === 'training' && row?.source_record_id) {
+    router.push(`/training/assignments/${row.source_record_id}`)
+    return
+  }
   router.push(`/my-tasks/${taskId}`)
 }
 

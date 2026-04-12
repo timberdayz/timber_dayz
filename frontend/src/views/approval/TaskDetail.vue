@@ -66,6 +66,9 @@ const businessRoute = computed(() => {
     if (!yearMonth || !employeeCode) return ''
     return `/hr-performance-display?task_id=${route.params.taskId}&year_month=${encodeURIComponent(yearMonth)}&employee_code=${encodeURIComponent(employeeCode)}`
   }
+  if (task.value?.source_module === 'training' && sourceRecordId) {
+    return `/training/assignments/${encodeURIComponent(sourceRecordId)}`
+  }
   return ''
 })
 
