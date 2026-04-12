@@ -19,3 +19,9 @@ test('task detail page contains timeline and action sections', () => {
     assert.equal(taskDetailSource.includes(label), true, `TaskDetail.vue should contain ${label}`)
   }
 })
+
+test('task detail page contains phase2 action regions', () => {
+  for (const label of ['协作补充', '发起人操作', '管理员操作']) {
+    assert.equal(taskDetailSource.includes(label), true, `TaskDetail.vue should contain ${label}`)
+  }
+})

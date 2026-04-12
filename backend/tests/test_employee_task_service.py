@@ -185,3 +185,81 @@ async def test_employee_task_service_owner_flow_updates_status_and_logs(employee
         "started",
         "submitted",
     ]
+
+
+@pytest.mark.asyncio
+async def test_initiator_can_close_pending_task(employee_task_sqlite_session):
+    from backend.services.employee_task_service import EmployeeTaskService
+
+    service = EmployeeTaskService(employee_task_sqlite_session)
+    await service.create_task(
+        task_id="task-2",
+        task_type="monthly_cost_entry",
+        task_category="execution",
+        title="Fill monthly cost",
+        owner_user_id=1,
+        created_by=2,
+        source_type="system",
+        source_module="expense-management",
+    )
+
+    detail = await service.close_task_as_initiator(
+        "task-2",
+        actor_user_id=2,
+        reason="created by mistake",
+    )
+
+    assert detail["status"] == "closed"
+    assert detail["timeline"][-1]["action"] == "close_unstarted_task"
+
+
+@pytest.mark.asyncio
+async def test_initiator_cannot_close_started_task_directly(employee_task_sqlite_session):
+    from backend.services.employee_task_service import EmployeeTaskService
+
+    service = EmployeeTaskService(employee_task_sqlite_session)
+    await service.create_task(
+        task_id="task-3",
+        task_type="monthly_cost_entry",
+        task_category="execution",
+        title="Fill monthly cost",
+        owner_user_id=1,
+        created_by=2,
+        source_type="system",
+        source_module="expense-management",
+    )
+    await service.start_task("task-3", actor_user_id=1)
+
+    with pytest.raises(ValueError, match="unstarted"):
+        await service.close_task_as_initiator(
+            "task-3",
+            actor_user_id=2,
+            reason="too late to close directly",
+        )
+
+
+@pytest.mark.asyncio
+async def test_initiator_can_request_cancel_after_started(employee_task_sqlite_session):
+    from backend.services.employee_task_service import EmployeeTaskService
+
+    service = EmployeeTaskService(employee_task_sqlite_session)
+    await service.create_task(
+        task_id="task-4",
+        task_type="monthly_cost_entry",
+        task_category="execution",
+        title="Fill monthly cost",
+        owner_user_id=1,
+        created_by=2,
+        source_type="system",
+        source_module="expense-management",
+    )
+    await service.start_task("task-4", actor_user_id=1)
+
+    detail = await service.request_task_cancellation(
+        "task-4",
+        actor_user_id=2,
+        reason="cancel requested by initiator",
+    )
+
+    assert detail["status"] == "in_progress"
+    assert detail["timeline"][-1]["action"] == "request_cancel"

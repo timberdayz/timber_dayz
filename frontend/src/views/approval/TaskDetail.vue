@@ -39,6 +39,31 @@
             <el-button v-if="businessRoute" plain @click="goToBusinessPage">前往业务页处理</el-button>
           </div>
         </el-card>
+
+        <el-card shadow="hover" class="detail-card">
+          <template #header>协作补充</template>
+          <div class="action-list">
+            <el-button plain @click="appendComment">补充评论</el-button>
+            <el-button plain @click="appendSupplement">补充结构化数据</el-button>
+          </div>
+        </el-card>
+
+        <el-card shadow="hover" class="detail-card">
+          <template #header>发起人操作</template>
+          <div class="action-list">
+            <el-button plain @click="closeByInitiator">关闭未开始任务</el-button>
+            <el-button plain @click="requestCancel">申请取消</el-button>
+          </div>
+        </el-card>
+
+        <el-card shadow="hover" class="detail-card">
+          <template #header>管理员操作</template>
+          <div class="action-list">
+            <el-button plain @click="reassignTask">重派任务</el-button>
+            <el-button plain @click="takeOverTask">接管任务</el-button>
+            <el-button type="danger" plain @click="forceCloseTask">强制关闭</el-button>
+          </div>
+        </el-card>
       </el-col>
     </el-row>
   </div>
@@ -83,6 +108,34 @@ const submitResult = async () => {
     result_comment: 'submitted from task detail',
     requires_confirmation: true
   })
+}
+
+const appendComment = async () => {
+  task.value = await employeeTasksApi.appendComment(route.params.taskId, 'collaborator comment from task detail')
+}
+
+const appendSupplement = async () => {
+  task.value = await employeeTasksApi.appendSupplement(route.params.taskId, { supplemented: true })
+}
+
+const closeByInitiator = async () => {
+  task.value = await employeeTasksApi.closeByInitiator(route.params.taskId, 'initiator close from task detail')
+}
+
+const requestCancel = async () => {
+  task.value = await employeeTasksApi.requestCancel(route.params.taskId, 'initiator cancel request from task detail')
+}
+
+const reassignTask = async () => {
+  task.value = await employeeTasksApi.reassignTask(route.params.taskId, 2, 'admin reassignment from task detail')
+}
+
+const takeOverTask = async () => {
+  task.value = await employeeTasksApi.takeOverTask(route.params.taskId, 'admin takeover from task detail')
+}
+
+const forceCloseTask = async () => {
+  task.value = await employeeTasksApi.forceCloseTask(route.params.taskId, 'admin force close from task detail')
 }
 
 const goToBusinessPage = () => {

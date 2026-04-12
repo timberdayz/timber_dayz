@@ -118,6 +118,7 @@ async def seeded_employee_task_data(employee_task_route_session):
         source_type="system",
         source_module="expense-management",
         cc_user_ids=[3],
+        collaborator_user_ids=[3],
     )
 
 
@@ -174,3 +175,201 @@ async def test_employee_task_start_and_submit_endpoints(
     assert start_response.status_code == 200
     assert submit_response.status_code == 200
     assert submit_response.json()["data"]["status"] == "pending_confirmation"
+
+
+@pytest.mark.asyncio
+async def test_employee_task_collaborator_comment_endpoint(
+    employee_task_route_session,
+    seeded_employee_task_data,
+):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 3
+        username = "collab"
+        is_active = True
+        is_superuser = False
+        roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/employee-tasks/task-1/comment",
+            json={"comment": "collaborator note"},
+        )
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["timeline"][-1]["action"] == "append_comment"
+
+
+@pytest.mark.asyncio
+async def test_employee_task_collaborator_submit_still_denied(
+    employee_task_route_session,
+    seeded_employee_task_data,
+):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 3
+        username = "collab"
+        is_active = True
+        is_superuser = False
+        roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/employee-tasks/task-1/submit",
+            json={
+                "completion_payload": {"amount": 500},
+                "result_comment": "collab submit",
+                "requires_confirmation": False,
+            },
+        )
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_employee_task_initiator_close_endpoint_for_pending_task(
+    employee_task_route_session,
+    seeded_employee_task_data,
+):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 2
+        username = "creator"
+        is_active = True
+        is_superuser = False
+        roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/employee-tasks/task-1/close-by-initiator",
+            json={"reason": "created by mistake"},
+        )
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "closed"
+
+
+@pytest.mark.asyncio
+async def test_employee_task_admin_reassign_endpoint(
+    employee_task_route_session,
+    seeded_employee_task_data,
+):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 9
+        username = "admin"
+        is_active = True
+        is_superuser = True
+        roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/employee-tasks/task-1/reassign",
+            json={"new_owner_user_id": 2, "reason": "handover"},
+        )
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["owner_user_id"] == 2
+
+
+@pytest.mark.asyncio
+async def test_employee_task_admin_force_close_endpoint(
+    employee_task_route_session,
+    seeded_employee_task_data,
+):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 9
+        username = "admin"
+        is_active = True
+        is_superuser = True
+        roles = []
+
+    async def override_get_async_db():
+        yield employee_task_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/employee-tasks/task-1/force-close",
+            json={"reason": "invalid task"},
+        )
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "closed"
