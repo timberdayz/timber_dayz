@@ -99,6 +99,7 @@ services:
       # 应用配置
       ENVIRONMENT: "production"
       APP_ENV: production
+      RUN_MIGRATIONS: "0"
       DEBUG: "false"
       LOG_LEVEL: INFO
       USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-true}
@@ -132,6 +133,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - erp_network
     healthcheck:
@@ -153,6 +156,34 @@ services:
       - full
 
   # Vue.js前端
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        - ENVIRONMENT=production
+    container_name: xihong_erp_migrate
+    restart: "no"
+    command: alembic upgrade heads
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      RUN_MIGRATIONS: "1"
+      ENVIRONMENT: "production"
+      APP_ENV: production
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+      - ./uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - erp_network
+    profiles:
+      - production
+      - full
+
   frontend:
     build:
       context: .
@@ -256,6 +287,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       ENVIRONMENT: "production"
       APP_ENV: production
+      RUN_MIGRATIONS: "0"
       DB_POOL_SIZE: 2
       DB_MAX_OVERFLOW: 2
       CPU_EXECUTOR_WORKERS: 1
@@ -276,6 +308,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - erp_network
     # ⚠️ 重要：添加健康检查，确保 Worker 正常运行
@@ -283,10 +317,8 @@ services:
     healthcheck:
       test:
         [
-          "CMD",
-          "python",
-          "-c",
-          "import os, redis; r=redis.from_url(os.environ['CELERY_BROKER_URL']); r.ping(); print('ok')",
+          "CMD-SHELL",
+          "celery -A backend.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5 | grep -q pong",
         ]
       interval: 30s
       timeout: 10s
@@ -323,6 +355,7 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-false}
+      RUN_MIGRATIONS: "0"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -331,6 +364,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - erp_network
     # ⚠️ 重要：添加健康检查，确保 Beat 正常运行；放宽间隔与 start_period 减少误判重启

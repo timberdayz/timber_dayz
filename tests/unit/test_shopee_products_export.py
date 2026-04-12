@@ -135,6 +135,18 @@ class _FakePage:
         return None
 
 
+class _FutureCompletingPage(_FakePage):
+    def __init__(self, waiter: asyncio.Future[_FakeDownload]) -> None:
+        self._waiter = waiter
+        self._wait_calls = 0
+
+    async def wait_for_timeout(self, _ms: int) -> None:
+        self._wait_calls += 1
+        if self._wait_calls == 1 and not self._waiter.done():
+            self._waiter.set_result(_FakeDownload("delayed-download.xlsx"))
+        return None
+
+
 @pytest.mark.asyncio
 async def test_products_page_ready_navigates_to_performance_url() -> None:
     ctx = ExecutionContext(
@@ -548,6 +560,64 @@ async def test_services_ai_assistant_wait_download_complete_logs_existing_downlo
 
 
 @pytest.mark.asyncio
+async def test_services_ai_assistant_wait_top_report_download_button_ignores_stale_other_domain_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"services_subtype": "ai_assistant"},
+    )
+    component = ShopeeServicesAiAssistantExport(ctx)
+    stale_products_download = _FakeActionLocator(DOWNLOAD_TEXT)
+    ai_assistant_download = _FakeActionLocator(DOWNLOAD_TEXT)
+    panel = _FakePanel(
+        [
+            _FakeRow("parentskudetail.20260301_20260331.xlsx", [stale_products_download]),
+            _FakeRow("shop_ai_assistant_20260410-20260410.xlsx", [ai_assistant_download]),
+        ]
+    )
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
+
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
+
+    assert button is ai_assistant_download
+
+
+@pytest.mark.asyncio
+async def test_products_wait_top_report_download_button_ignores_stale_services_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    stale_services_download = _FakeActionLocator(DOWNLOAD_TEXT)
+    products_download = _FakeActionLocator(DOWNLOAD_TEXT)
+    panel = _FakePanel(
+        [
+            _FakeRow("shop_ai_assistant_20260410-20260410.xlsx", [stale_services_download]),
+            _FakeRow("parentskudetail.20260301_20260331.xlsx", [products_download]),
+        ]
+    )
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
+
+    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
+
+    assert button is products_download
+
+
+@pytest.mark.asyncio
 async def test_wait_export_post_action_state_prefers_download_started_over_throttled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -599,3 +669,128 @@ async def test_run_does_not_retry_export_after_download_started_even_if_throttle
 
     assert result.success is True
     trigger_export.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wait_export_post_action_state_prefers_report_progress_over_throttled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    component._latest_report_top_snapshot = ("parentskudetail.old.xlsx", "download")
+    component._latest_report_count_snapshot = 1
+    panel = _FakePanel([_FakeRow("parentskudetail.new.xlsx", [_FakeActionLocator(PROCESSING_TEXT)])])
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component,
+        "_detect_export_throttled",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
+
+    state = await component._wait_export_post_action_state(_FakePage(), timeout_ms=1, poll_ms=1)
+
+    assert state == "report_progress"
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_retry_export_after_report_progress_even_if_throttled_text_lingers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+
+    trigger_export = AsyncMock()
+    monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "_ensure_shop_selected", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "_ensure_date_selection", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "_trigger_export", trigger_export, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_wait_export_post_action_state",
+        AsyncMock(return_value="report_progress"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component,
+        "_detect_export_throttled",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_wait_download_complete", AsyncMock(return_value="C:/tmp/traffic.xlsx"), raising=False)
+
+    result = await component.run(_FakePage())
+
+    assert result.success is True
+    trigger_export.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wait_top_report_download_button_exits_when_download_event_arrives_during_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    waiter: asyncio.Future[_FakeDownload] = asyncio.Future()
+    component._download_waiter = waiter
+    component._latest_report_top_snapshot = ("parentskudetail.old.xlsx", "download")
+    component._latest_report_count_snapshot = 1
+    stale_panel = _FakePanel([_FakeRow("parentskudetail.old.xlsx", [_FakeActionLocator(DOWNLOAD_TEXT)])])
+    page = _FutureCompletingPage(waiter)
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(return_value=stale_panel),
+        raising=False,
+    )
+
+    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+
+    assert button is None
+    assert waiter.done() is True
+    assert page._wait_calls <= 2
+
+
+@pytest.mark.asyncio
+async def test_services_ai_assistant_wait_download_complete_consumes_late_download_event_without_report_button(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from modules.platforms.shopee.components import services_export_base as services_export_base_module
+
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"granularity": "daily", "services_subtype": "ai_assistant"},
+    )
+    component = ShopeeServicesAiAssistantExport(ctx)
+    waiter: asyncio.Future[_FakeDownload] = asyncio.Future()
+    component._download_waiter = waiter
+    component._latest_report_top_snapshot = ("shop_ai_assistant_old.xlsx", "download")
+    component._latest_report_count_snapshot = 1
+    stale_panel = _FakePanel([_FakeRow("shop_ai_assistant_old.xlsx", [_FakeActionLocator(DOWNLOAD_TEXT)])])
+    page = _FutureCompletingPage(waiter)
+
+    monkeypatch.setattr(
+        component,
+        "_ensure_latest_report_panel_open",
+        AsyncMock(return_value=stale_panel),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        services_export_base_module,
+        "build_standard_output_root",
+        lambda *args, **kwargs: tmp_path,
+    )
+
+    file_path = await component._wait_download_complete(page)
+
+    assert file_path == str(tmp_path / "delayed-download.xlsx")
+    assert page._wait_calls <= 2

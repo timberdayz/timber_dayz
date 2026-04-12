@@ -1370,6 +1370,34 @@ class ShopeeProductsExport(ExportComponent):
                 identity = identity.replace(normalized_token, "")
         return identity
 
+    def _current_report_identity_tokens(self) -> tuple[str, ...]:
+        data_domain = str(getattr(self, "data_domain", "products") or "products").strip().lower()
+        if data_domain == "analytics":
+            return ("traffic_overview", "trafficoverview")
+        if data_domain == "services":
+            cfg = self.ctx.config or {}
+            subtype = str(
+                cfg.get("services_subtype")
+                or cfg.get("sub_domain")
+                or getattr(self, "sub_domain", "")
+                or ""
+            ).strip().lower()
+            if subtype == "ai_assistant":
+                return ("shop_ai_assistant",)
+            if subtype == "agent":
+                return ("chat_",)
+            return ("shop_ai_assistant", "chat_")
+        return ("parentskudetail", "productoverview")
+
+    def _matches_current_report_identity(self, identity: str) -> bool:
+        normalized_identity = self._normalize_report_row_identity(identity)
+        if not normalized_identity:
+            return False
+        tokens = self._current_report_identity_tokens()
+        if not tokens:
+            return True
+        return any(token in normalized_identity for token in tokens)
+
     def _looks_like_report_entry(
         self,
         *,
@@ -1378,7 +1406,7 @@ class ShopeeProductsExport(ExportComponent):
         action_text: str | None = None,
     ) -> bool:
         if re.search(r"[^/\s]+\.(?:xlsx|xls|csv|zip)", identity):
-            return True
+            return self._matches_current_report_identity(identity)
         if state != "unknown":
             return True
         normalized_action = self._normalize_report_row_text(action_text)
@@ -1569,6 +1597,43 @@ class ShopeeProductsExport(ExportComponent):
             )
         return candidates
 
+    async def _latest_report_progress_started(self, page: Any) -> bool:
+        panel = await self._ensure_latest_report_panel_open(page)
+        if panel is None:
+            return False
+
+        baseline_snapshot = self._latest_report_top_snapshot
+        baseline_rows = list(self._latest_report_baseline_rows)
+        current_snapshot = await self._top_report_snapshot(panel)
+        current_count = len(await self._visible_report_rows(panel))
+        count_increased = current_count > self._latest_report_count_snapshot
+        row_candidates = await self._report_row_candidates(panel)
+        top_candidate = row_candidates[0] if row_candidates else None
+        if top_candidate is None:
+            return False
+
+        inserted_top = self._detect_inserted_top_row(baseline_rows, row_candidates)
+        if inserted_top is not None:
+            return True
+
+        current_changed = (
+            baseline_snapshot is not None
+            and current_snapshot is not None
+            and current_snapshot != baseline_snapshot
+        )
+
+        if baseline_rows:
+            baseline_first_text, baseline_first_state = baseline_rows[0]
+            if (
+                count_increased
+                or current_changed
+                or top_candidate["state"] != baseline_first_state
+                or top_candidate["text"] != baseline_first_text
+            ):
+                return True
+
+        return bool((baseline_snapshot is None and current_snapshot is not None) or count_increased or current_changed)
+
     def _detect_inserted_top_row(
         self,
         baseline_rows: list[tuple[str, str]],
@@ -1612,6 +1677,14 @@ class ShopeeProductsExport(ExportComponent):
         baseline_rows = list(self._latest_report_baseline_rows)
         target_top_row_locked = False
         while waited <= timeout_ms:
+            waiter = self._download_waiter
+            if waiter is not None and waiter.done():
+                self._log_export_diagnostic(
+                    "download_event_ready_during_report_wait",
+                    waited_ms=waited,
+                )
+                return None
+
             panel = await self._ensure_latest_report_panel_open(page)
             if panel is not None:
                 current_snapshot = await self._top_report_snapshot(panel)
@@ -2041,6 +2114,10 @@ class ShopeeProductsExport(ExportComponent):
                 self._log_export_diagnostic("download_event_started", waited_ms=waited)
                 return "download_started"
 
+            if await self._latest_report_progress_started(page):
+                self._log_export_diagnostic("latest_report_progress_started", waited_ms=waited)
+                return "report_progress"
+
             if await self._detect_export_throttled(page):
                 return "throttled"
 
@@ -2129,7 +2206,7 @@ class ShopeeProductsExport(ExportComponent):
 
             await self._trigger_export(page)
             post_action_state = await self._wait_export_post_action_state(page)
-            if post_action_state == "download_started":
+            if post_action_state in {"download_started", "report_progress"}:
                 throttled = False
             elif post_action_state == "throttled":
                 throttled = True
@@ -2141,7 +2218,9 @@ class ShopeeProductsExport(ExportComponent):
                     return ExportResult(success=False, message="export throttled and retry not ready")
                 await self._trigger_export(page)
                 retry_post_action_state = await self._wait_export_post_action_state(page)
-                if retry_post_action_state == "throttled":
+                if retry_post_action_state in {"download_started", "report_progress"}:
+                    throttled = False
+                elif retry_post_action_state == "throttled":
                     throttled = True
                 else:
                     throttled = await self._detect_export_throttled(page)

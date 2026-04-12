@@ -93,6 +93,56 @@ def test_dev_celery_healthcheck_does_not_depend_on_ps_binary():
     assert "ps aux" not in " ".join(str(part) for part in health_test)
 
 
+def test_dev_compose_uses_dedicated_migrate_service_and_disables_runtime_migrations():
+    compose = _read_yaml("docker-compose.dev.yml")
+    services = compose["services"]
+
+    migrate = services["migrate"]
+    backend_env = services["backend"]["environment"]
+    worker_env = services["celery-worker"]["environment"]
+
+    assert migrate["command"] == "alembic upgrade heads"
+    assert migrate["environment"]["RUN_MIGRATIONS"] == "1"
+    assert backend_env["RUN_MIGRATIONS"] == "0"
+    assert worker_env["RUN_MIGRATIONS"] == "0"
+
+
+def test_dev_celery_healthcheck_uses_worker_readiness():
+    compose = _read_yaml("docker-compose.dev.yml")
+    health_test = compose["services"]["celery-worker"]["healthcheck"]["test"]
+    health_joined = " ".join(str(part) for part in health_test)
+
+    assert "inspect" in health_joined
+    assert "ping" in health_joined
+    assert "redis.from_url" not in health_joined
+
+
+def test_prod_compose_uses_dedicated_migrate_service_and_disables_runtime_migrations():
+    compose = _read_yaml("docker-compose.prod.yml")
+    services = compose["services"]
+
+    migrate = services["migrate"]
+    backend_env = services["backend"]["environment"]
+    worker_env = services["celery-worker"]["environment"]
+    beat_env = services["celery-beat"]["environment"]
+
+    assert migrate["command"] == "alembic upgrade heads"
+    assert migrate["environment"]["RUN_MIGRATIONS"] == "1"
+    assert backend_env["RUN_MIGRATIONS"] == "0"
+    assert worker_env["RUN_MIGRATIONS"] == "0"
+    assert beat_env["RUN_MIGRATIONS"] == "0"
+
+
+def test_prod_celery_healthcheck_uses_worker_readiness():
+    compose = _read_yaml("docker-compose.prod.yml")
+    health_test = compose["services"]["celery-worker"]["healthcheck"]["test"]
+    health_joined = " ".join(str(part) for part in health_test)
+
+    assert "inspect" in health_joined
+    assert "ping" in health_joined
+    assert "redis.from_url" not in health_joined
+
+
 def test_dev_frontend_uses_vite_port_instead_of_nginx_port():
     compose = _read_yaml("docker-compose.dev.yml")
     frontend = compose["services"]["frontend"]
