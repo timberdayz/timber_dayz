@@ -29,6 +29,21 @@
       >
         重新计算
       </el-button>
+      <el-button
+        v-if="taskContext.taskId"
+        type="success"
+        @click="submitPerformanceTaskResult('confirmed', 'performance confirmed from public display')"
+      >
+        确认无误
+      </el-button>
+      <el-button
+        v-if="taskContext.taskId"
+        type="danger"
+        plain
+        @click="submitPerformanceTaskResult('disputed', 'performance disputed from public display')"
+      >
+        提交异议
+      </el-button>
       <el-select v-model="poolFilter" size="default" style="width: 120px;">
         <el-option label="全部池" value="all" />
         <el-option label="正式池" value="official" />
@@ -208,14 +223,17 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
+import employeeTasksApi from '@/api/employeeTasks.js'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatPercent } from '@/utils/dataFormatter'
 
 const userStore = useUserStore()
+const route = useRoute()
 
 const performanceList = reactive({
   data: [],
@@ -338,6 +356,29 @@ function scoreTagType(score) {
   if (score >= 90) return 'success'
   if (score >= 80) return 'warning'
   return 'danger'
+}
+
+const initTaskContext = () => {
+  taskContext.taskId = typeof route.query.task_id === 'string' ? route.query.task_id : ''
+  taskContext.yearMonth = typeof route.query.year_month === 'string' ? route.query.year_month : ''
+  taskContext.employeeCode = typeof route.query.employee_code === 'string' ? route.query.employee_code : ''
+  if (taskContext.yearMonth) {
+    filters.period = taskContext.yearMonth
+  }
+}
+
+const submitPerformanceTaskResult = async (result, comment) => {
+  if (!taskContext.taskId) return
+  await employeeTasksApi.submitTask(taskContext.taskId, {
+    completion_payload: {
+      employee_code: taskContext.employeeCode,
+      year_month: filters.period,
+      confirmation_result: result
+    },
+    result_comment: comment,
+    requires_confirmation: result !== 'confirmed'
+  })
+  ElMessage.success('绩效确认任务已提交')
 }
 
 function isMetricCalculated(metric) {
@@ -493,6 +534,7 @@ const handleViewDetail = async (row) => {
 }
 
 onMounted(() => {
+  initTaskContext()
   loadWeightConfig()
   loadPerformanceList()
 })

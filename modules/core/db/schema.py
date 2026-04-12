@@ -1086,6 +1086,99 @@ class TaskCenterLink(Base):
     )
 
 
+class EmployeeTask(Base):
+    """Employee-facing collaboration task for daily business work."""
+
+    __tablename__ = "employee_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(100), nullable=False)
+    task_type = Column(String(64), nullable=False)
+    task_category = Column(String(32), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(32), nullable=False, default="pending")
+    priority = Column(String(16), nullable=False, default="medium")
+    owner_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+    source_type = Column(String(32), nullable=False)
+    source_module = Column(String(64), nullable=False)
+    source_record_type = Column(String(64), nullable=True)
+    source_record_id = Column(String(128), nullable=True)
+    completion_schema = Column(JSON_COMPAT, nullable=True)
+    completion_payload = Column(JSON_COMPAT, nullable=True)
+    result_status = Column(String(32), nullable=True)
+    result_comment = Column(Text, nullable=True)
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    owner = relationship("DimUser", foreign_keys=[owner_user_id], backref="owned_employee_tasks")
+    creator = relationship("DimUser", foreign_keys=[created_by], backref="created_employee_tasks")
+    logs = relationship("EmployeeTaskLog", back_populates="task", cascade="all, delete-orphan")
+    participants = relationship("EmployeeTaskParticipant", back_populates="task", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_employee_tasks_task_id"),
+        Index("ix_employee_tasks_owner_status", "owner_user_id", "status"),
+        Index("ix_employee_tasks_due_at", "due_at"),
+        Index("ix_employee_tasks_source", "source_module", "source_record_type", "source_record_id"),
+        Index("ix_employee_tasks_created_at", "created_at"),
+        CheckConstraint(
+            "status IN ('pending', 'in_progress', 'pending_confirmation', 'completed', 'rejected', 'closed')",
+            name="chk_employee_tasks_status",
+        ),
+    )
+
+
+class EmployeeTaskLog(Base):
+    """Timeline row for employee collaboration tasks."""
+
+    __tablename__ = "employee_task_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_pk = Column(Integer, ForeignKey("employee_tasks.id", ondelete="CASCADE"), nullable=False)
+    actor_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=True)
+    action = Column(String(32), nullable=False)
+    message = Column(Text, nullable=False)
+    details_json = Column(JSON_COMPAT, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    task = relationship("EmployeeTask", back_populates="logs")
+    actor = relationship("DimUser", backref="employee_task_logs")
+
+    __table_args__ = (
+        Index("ix_employee_task_logs_task_created", "task_pk", "created_at"),
+    )
+
+
+class EmployeeTaskParticipant(Base):
+    """Additional participants on employee tasks beyond the primary owner."""
+
+    __tablename__ = "employee_task_participants"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_pk = Column(Integer, ForeignKey("employee_tasks.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+    participant_role = Column(String(16), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    task = relationship("EmployeeTask", back_populates="participants")
+    user = relationship("DimUser", backref="employee_task_participations")
+
+    __table_args__ = (
+        UniqueConstraint("task_pk", "user_id", "participant_role", name="uq_employee_task_participants"),
+        Index("ix_employee_task_participants_user_role", "user_id", "participant_role"),
+        CheckConstraint(
+            "participant_role IN ('cc', 'collaborator')",
+            name="chk_employee_task_participant_role",
+        ),
+    )
+
+
 class CloudBClassSyncCheckpoint(Base):
     """Per-table checkpoint for local-to-cloud B-class sync."""
 

@@ -116,6 +116,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const SYSTEM_NOTIFICATIONS_ROUTE = '/system-notifications'
 const USER_APPROVAL_ROUTE = '/admin/users/pending'
+const TASK_CENTER_ROUTE = '/my-tasks'
 
 // 状态
 const showPopover = ref(false)
@@ -298,6 +299,12 @@ const handleNotificationClick = async (notification) => {
   
   // 根据通知类型跳转
   showPopover.value = false
+
+  if (String(notification.notification_type || '').startsWith('task_')) {
+    const targetRoute = notification.extra_data?.target_route || TASK_CENTER_ROUTE
+    router.push(targetRoute)
+    return
+  }
   
   switch (notification.notification_type) {
   case 'user_registered':

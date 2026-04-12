@@ -18,6 +18,11 @@ class NotificationType(str, Enum):
     ACCOUNT_LOCKED = "account_locked"  # 账户被锁定(通知用户)v4.19.0
     ACCOUNT_UNLOCKED = "account_unlocked"  # 账户已解锁(通知用户)v4.19.0
     SYSTEM_ALERT = "system_alert"  # 系统告警
+    TASK_ASSIGNED = "task_assigned"
+    TASK_DUE_SOON = "task_due_soon"
+    TASK_OVERDUE = "task_overdue"
+    TASK_RETURNED = "task_returned"
+    TASK_NUDGED = "task_nudged"
 
 
 class NotificationPriority(str, Enum):
@@ -194,4 +199,3 @@ class NotificationGroupListResponse(BaseModel):
     groups: List[NotificationGroupItem]
     total_count: int
     total_unread: int
-

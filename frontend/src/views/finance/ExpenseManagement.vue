@@ -544,10 +544,14 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Calendar, Shop } from '@element-plus/icons-vue'
 import api from '@/api'
 import PageHeader from '@/components/common/PageHeader.vue'
+import employeeTasksApi from '@/api/employeeTasks.js'
+
+const route = useRoute()
 
 // ==================== 公共状态 ====================
 const viewMode = ref('monthly') // monthly | shop
@@ -594,10 +598,43 @@ const shopSummary = reactive({
   month_count: 0
 })
 
+const taskContext = reactive({
+  taskId: '',
+  yearMonth: '',
+  shopId: '',
+  platformCode: ''
+})
+
 // ==================== 公共方法 ====================
 const formatNumber = (num) => {
   if (num === null || num === undefined) return '0.00'
   return Number(num).toFixed(2)
+}
+
+const initTaskContext = () => {
+  taskContext.taskId = typeof route.query.task_id === 'string' ? route.query.task_id : ''
+  taskContext.yearMonth = typeof route.query.year_month === 'string' ? route.query.year_month : ''
+  taskContext.shopId = typeof route.query.shop_id === 'string' ? route.query.shop_id : ''
+  taskContext.platformCode = typeof route.query.platform_code === 'string' ? route.query.platform_code : ''
+  if (taskContext.yearMonth) {
+    selectedMonth.value = taskContext.yearMonth
+  }
+}
+
+const tryCompleteTaskFromExpenseRow = async (row, yearMonthOverride = '') => {
+  if (!taskContext.taskId) return
+  const currentYearMonth = String(yearMonthOverride || row.year_month || selectedMonth.value || '')
+  if (currentYearMonth !== String(taskContext.yearMonth || '')) return
+  if (String(row.shop_id || '') !== String(taskContext.shopId || '')) return
+  await employeeTasksApi.submitTask(taskContext.taskId, {
+    completion_payload: {
+      year_month: currentYearMonth,
+      shop_id: row.shop_id,
+      total: Number(row.total) || 0
+    },
+    result_comment: 'monthly cost entry submitted from expense management',
+    requires_confirmation: true
+  })
 }
 
 // 加载店铺列表
@@ -810,6 +847,7 @@ const handleSaveRow = async (row) => {
     }
 
     await api.post('/expenses', payload)
+    await tryCompleteTaskFromExpenseRow(row, selectedMonth.value)
     ElMessage.success('保存成功')
     await loadMonthlyExpenses()
   } catch (error) {
@@ -890,6 +928,7 @@ const handleBatchSave = async () => {
         }
 
         await api.post('/expenses', payload)
+        await tryCompleteTaskFromExpenseRow(row, selectedMonth.value)
         successCount++
       } catch (error) {
         console.error(`保存店铺 ${row.shop_name || row.shop_id} 失败:`, error)
@@ -1025,6 +1064,7 @@ const handleSaveShopRow = async (row) => {
     }
 
     await api.post('/expenses', payload)
+    await tryCompleteTaskFromExpenseRow(row, row.year_month)
     ElMessage.success('保存成功')
     await loadShopExpenses()
   } catch (error) {
@@ -1062,10 +1102,13 @@ const handleDeleteShopRow = async (row, index) => {
 
 // ==================== 生命周期 ====================
 onMounted(() => {
+  initTaskContext()
   loadShops()
   // 默认选择当前月份和年份
   const now = new Date()
-  selectedMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  if (!selectedMonth.value) {
+    selectedMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  }
   selectedYear.value = `${now.getFullYear()}`
   loadMonthlyExpenses()
 })

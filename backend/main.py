@@ -108,6 +108,7 @@ from backend.routers import (
     rate_limit,  # [*] v4.19.2: 限流管理API
     data_migration,  # v5.0.0: 数据迁移API
     task_center,  # task center unified read APIs
+    employee_tasks,
 )
 from backend.routers import rate_limit_config  # [*] v4.19.4: 限流配置管理API(Phase 3)
 from backend.routers import cloud_sync as cloud_sync_router
@@ -1160,6 +1161,7 @@ app.include_router(data_migration.router, prefix="/api", tags=["数据迁移"])
 app.include_router(cloud_sync_router.router, tags=["云端同步管理"])
 
 app.include_router(task_center.router, prefix="/api", tags=["任务中心"])
+app.include_router(employee_tasks.router, prefix="/api", tags=["员工任务中心"])
 
 # 全局异常处理(v4.6.0统一响应格式)
 from backend.utils.api_response import error_response

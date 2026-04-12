@@ -26,7 +26,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text, select
+from sqlalchemy import text, select, or_
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -46,9 +46,26 @@ from backend.schemas.expense import (
     ExpenseSummaryResponse,
 )
 from backend.dependencies.auth import get_current_user
+from backend.services.employee_task_sources import sync_monthly_cost_entry_task
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/expenses", tags=["费用管理"])
+
+
+async def _resolve_shop_platform_code(db: AsyncSession, shop_id: str) -> Optional[str]:
+    result = await db.execute(
+        select(ShopAccount).where(
+            ShopAccount.enabled == True,
+            or_(
+                ShopAccount.platform_shop_id == shop_id,
+                ShopAccount.shop_account_id == shop_id,
+            ),
+        )
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return None
+    return (row.platform or "").lower() or None
 
 
 # ==================== Request/Response Models ====================
@@ -591,6 +608,19 @@ async def create_or_update_expense(
         row = result.fetchone()
         if not row:
             raise Exception("Upsert操作未返回数据")
+
+        try:
+            platform_code = await _resolve_shop_platform_code(db, request.shop_id)
+            if platform_code:
+                await sync_monthly_cost_entry_task(
+                    db,
+                    year_month=request.year_month,
+                    platform_code=platform_code,
+                    shop_id=request.shop_id,
+                    created_by=getattr(current_user, "user_id", None),
+                )
+        except Exception as task_err:
+            logger.warning(f"[ExpenseManagement] employee task sync failed: {task_err}")
         
         rent = float(row.rent or 0)
         salary = float(row.salary or 0)

@@ -41,7 +41,18 @@ const routes = [
       title: '用户审批',
       icon: 'User',
       permission: 'user-management',
-      roles: ['admin']
+      roles: ['admin', 'manager', 'operator', 'finance']
+    }
+  },
+  {
+    path: '/my-tasks/:taskId',
+    name: 'TaskDetail',
+    component: () => import('../views/approval/TaskDetail.vue'),
+    meta: {
+      title: '任务详情',
+      icon: 'List',
+      permission: 'my-tasks',
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {
@@ -52,7 +63,7 @@ const routes = [
       title: '超简化页面',
       icon: 'Setting',
       permission: 'system-settings',
-      roles: ['admin']
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {
@@ -980,7 +991,7 @@ const routes = [
       title: '我的待办',
       icon: 'List',
       permission: 'my-tasks',
-      roles: ['admin']
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {

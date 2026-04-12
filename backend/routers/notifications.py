@@ -220,7 +220,12 @@ NOTIFICATION_TYPE_LABELS = {
     "password_reset": "Password Reset",
     "account_locked": "Account Locked",
     "account_unlocked": "Account Unlocked",
-    "system_alert": "System Alert"
+    "system_alert": "System Alert",
+    "task_assigned": "Task Assigned",
+    "task_due_soon": "Task Due Soon",
+    "task_overdue": "Task Overdue",
+    "task_returned": "Task Returned",
+    "task_nudged": "Task Reminder",
 }
 
 
@@ -708,8 +713,15 @@ async def create_notification(
     valid_priorities = ["high", "medium", "low"]
     if priority.lower() not in valid_priorities:
         priority = "medium"  # 无效值使用默认
-    
+
+    sqlite_notification_id = None
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "sqlite":
+        max_id_result = await db.execute(select(func.max(Notification.notification_id)))
+        sqlite_notification_id = (max_id_result.scalar() or 0) + 1
+
     notification = Notification(
+        notification_id=sqlite_notification_id,
         recipient_id=recipient_id,
         notification_type=notification_type.value if isinstance(notification_type, NotificationType) else notification_type,
         title=title,
