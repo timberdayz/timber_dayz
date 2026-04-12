@@ -360,6 +360,16 @@ class LoginStatusDetector:
             
             # 如果URL明确表示已登录,快速返回
             if url_result.status == LoginStatus.LOGGED_IN and url_result.confidence >= 0.85:
+                login_form_result = await self._check_login_form_elements(
+                    page,
+                    self.config.get("element_check_timeout", 5000),
+                )
+                if details is not None:
+                    details["login_form_override_check"] = login_form_result.__dict__
+                if login_form_result.status == LoginStatus.NOT_LOGGED_IN:
+                    self._log_result("element_override", login_form_result, start_time)
+                    self._update_cache(current_url, login_form_result)
+                    return login_form_result
                 self._log_result("url", url_result, start_time)
                 self._update_cache(current_url, url_result)
                 return url_result

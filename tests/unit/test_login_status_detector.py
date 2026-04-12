@@ -231,6 +231,46 @@ class TestElementDetection:
         assert result.confidence >= 0.7
 
 
+class TestShopeeSellerShellFalsePositive:
+    """锁定 Shopee seller 壳页误判为已登录的回归场景。"""
+
+    @pytest.mark.anyio
+    async def test_detect_treats_visible_login_form_on_seller_url_as_not_logged_in(self):
+        detector = LoginStatusDetector("shopee")
+
+        async def _cookies():
+            return []
+
+        login_locator = AsyncMock()
+        login_locator.count.return_value = 1
+        login_locator.first.is_visible.return_value = True
+
+        missing_locator = AsyncMock()
+        missing_locator.count.return_value = 0
+        missing_locator.first.is_visible.return_value = False
+
+        mock_page = MagicMock()
+        mock_page.url = "https://seller.shopee.cn/seller/home"
+        mock_page.wait_for_timeout = AsyncMock()
+        mock_page.context.cookies = _cookies
+
+        def _locator(selector: str):
+            if selector in LOGIN_DETECTION_CONFIG["shopee"]["login_form_selectors"]:
+                return login_locator
+            return missing_locator
+
+        mock_page.locator.side_effect = _locator
+        mock_page.get_by_text.return_value = missing_locator
+        mock_page.get_by_role.return_value = missing_locator
+        mock_page.get_by_placeholder.return_value = missing_locator
+        mock_page.get_by_label.return_value = missing_locator
+
+        result = await detector.detect(mock_page, wait_for_redirect=False)
+
+        assert result.status == LoginStatus.NOT_LOGGED_IN
+        assert "login form" in result.reason.lower()
+
+
 class TestCombinedResults:
     """测试综合判断逻辑"""
     
