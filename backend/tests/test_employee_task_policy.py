@@ -42,3 +42,21 @@ def test_admin_has_override_actions():
     assert can_user_perform_task_action("execution", "pending", "admin", "reassign_task") is True
     assert can_user_perform_task_action("execution", "in_progress", "admin", "takeover_task") is True
     assert can_user_perform_task_action("execution", "pending_confirmation", "admin", "force_close_task") is True
+
+
+def test_validate_task_target_permission_for_monthly_cost_entry():
+    from backend.services.employee_task_policy import validate_task_target_permission
+
+    validate_task_target_permission("monthly_cost_entry", {"expense-management", "my-tasks"})
+
+    with pytest.raises(ValueError, match="permission"):
+        validate_task_target_permission("monthly_cost_entry", {"my-tasks"})
+
+
+def test_validate_task_target_permission_for_performance_confirmation():
+    from backend.services.employee_task_policy import validate_task_target_permission
+
+    validate_task_target_permission("performance_confirmation", {"performance:read", "my-tasks"})
+
+    with pytest.raises(ValueError, match="permission"):
+        validate_task_target_permission("performance_confirmation", {"expense-management"})

@@ -54,3 +54,10 @@ def can_user_perform_task_action(
         if task_category == "confirmation":
             return action in {"submit_result"}
     return False
+
+
+def validate_task_target_permission(task_type: str, user_permissions: set[str]) -> None:
+    policy = get_task_type_policy(task_type)
+    required_permission = policy["required_permission"]
+    if required_permission not in user_permissions:
+        raise ValueError(f"User lacks required permission for task target: {required_permission}")

@@ -191,3 +191,46 @@ async def test_sync_performance_confirmation_task_targets_employee_user(employee
     assert payload["task_type"] == "performance_confirmation"
     assert payload["owner_user_id"] == 2
     assert payload["source_module"] == "performance-management"
+
+
+@pytest.mark.asyncio
+async def test_sync_monthly_cost_entry_task_rejects_owner_without_required_permission(employee_task_source_session):
+    from backend.services.employee_task_sources import sync_monthly_cost_entry_task
+
+    employee_task_source_session.add(
+        EmployeeShopAssignment(
+            id=1,
+            year_month="2026-04",
+            employee_code="EMP001",
+            platform_code="shopee",
+            shop_id="shop-1",
+            role="supervisor",
+            commission_ratio=0.1,
+            status="active",
+        )
+    )
+    await employee_task_source_session.commit()
+
+    with pytest.raises(ValueError, match="permission"):
+        await sync_monthly_cost_entry_task(
+            employee_task_source_session,
+            year_month="2026-04",
+            platform_code="shopee",
+            shop_id="shop-1",
+            created_by=1,
+            owner_permissions={"my-tasks"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_performance_confirmation_task_rejects_owner_without_required_permission(employee_task_source_session):
+    from backend.services.employee_task_sources import sync_performance_confirmation_task
+
+    with pytest.raises(ValueError, match="permission"):
+        await sync_performance_confirmation_task(
+            employee_task_source_session,
+            year_month="2026-04",
+            employee_code="EMP002",
+            created_by=1,
+            owner_permissions={"expense-management"},
+        )

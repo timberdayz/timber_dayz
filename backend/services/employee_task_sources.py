@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.employee_task_policy import validate_task_target_permission
 from backend.services.employee_task_service import EmployeeTaskService
 from modules.core.db import Employee, EmployeeShopAssignment
 
@@ -47,6 +48,7 @@ async def sync_monthly_cost_entry_task(
     platform_code: str,
     shop_id: str,
     created_by: int | None,
+    owner_permissions: set[str] | None = None,
 ):
     owner_user_id = await resolve_shop_supervisor_user_id(
         db,
@@ -54,6 +56,7 @@ async def sync_monthly_cost_entry_task(
         platform_code=platform_code,
         shop_id=shop_id,
     )
+    validate_task_target_permission("monthly_cost_entry", owner_permissions or {"expense-management"})
     service = EmployeeTaskService(db)
     task_id = f"monthly-cost:{year_month}:{platform_code}:{shop_id}"
     return await service.create_task(
@@ -80,6 +83,7 @@ async def sync_performance_confirmation_task(
     year_month: str,
     employee_code: str,
     created_by: int | None,
+    owner_permissions: set[str] | None = None,
 ):
     employee_result = await db.execute(
         select(Employee).where(Employee.employee_code == employee_code)
@@ -88,6 +92,7 @@ async def sync_performance_confirmation_task(
     if employee is None or not employee.user_id:
         raise ValueError("Employee is not linked to a user account")
 
+    validate_task_target_permission("performance_confirmation", owner_permissions or {"performance:read"})
     service = EmployeeTaskService(db)
     task_id = f"performance-confirmation:{year_month}:{employee_code}"
     return await service.create_task(
