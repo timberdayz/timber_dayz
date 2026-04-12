@@ -1179,6 +1179,101 @@ class EmployeeTaskParticipant(Base):
     )
 
 
+class ApprovalTemplate(Base):
+    """Reusable approval workflow definition."""
+
+    __tablename__ = "approval_templates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    template_code = Column(String(100), nullable=False)
+    template_name = Column(String(255), nullable=False)
+    business_type = Column(String(64), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    target_route = Column(String(255), nullable=True)
+    form_schema = Column(JSON_COMPAT, nullable=True)
+    approval_mode = Column(String(32), nullable=False, default="single")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("template_code", name="uq_approval_templates_template_code"),
+        Index("ix_approval_templates_business_type", "business_type"),
+        Index("ix_approval_templates_enabled", "enabled"),
+    )
+
+
+class ApprovalInstance(Base):
+    """One concrete approval request."""
+
+    __tablename__ = "approval_instances"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    approval_id = Column(String(100), nullable=False)
+    template_code = Column(String(100), nullable=False)
+    applicant_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+    business_key = Column(String(255), nullable=True)
+    status = Column(String(32), nullable=False, default="draft")
+    current_step = Column(Integer, nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    applicant = relationship("DimUser", foreign_keys=[applicant_user_id], backref="approval_instances")
+
+    __table_args__ = (
+        UniqueConstraint("approval_id", name="uq_approval_instances_approval_id"),
+        Index("ix_approval_instances_applicant_status", "applicant_user_id", "status"),
+        Index("ix_approval_instances_template_code", "template_code"),
+    )
+
+
+class ApprovalStep(Base):
+    """Sequential approval step for an approval instance."""
+
+    __tablename__ = "approval_steps"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    approval_pk = Column(Integer, ForeignKey("approval_instances.id", ondelete="CASCADE"), nullable=False)
+    step_order = Column(Integer, nullable=False)
+    approver_type = Column(String(32), nullable=False)
+    approver_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=True)
+    status = Column(String(32), nullable=False, default="pending")
+    acted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    approval = relationship("ApprovalInstance", backref="steps")
+    approver = relationship("DimUser", foreign_keys=[approver_user_id], backref="approval_steps")
+
+    __table_args__ = (
+        Index("ix_approval_steps_approval_order", "approval_pk", "step_order"),
+        Index("ix_approval_steps_approver_status", "approver_user_id", "status"),
+    )
+
+
+class ApprovalActionLog(Base):
+    """Audit log for approval actions."""
+
+    __tablename__ = "approval_action_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    approval_pk = Column(Integer, ForeignKey("approval_instances.id", ondelete="CASCADE"), nullable=False)
+    step_pk = Column(Integer, ForeignKey("approval_steps.id", ondelete="SET NULL"), nullable=True)
+    actor_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+    action_type = Column(String(32), nullable=False)
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    approval = relationship("ApprovalInstance", backref="action_logs")
+    step = relationship("ApprovalStep", foreign_keys=[step_pk], backref="action_logs")
+    actor = relationship("DimUser", foreign_keys=[actor_user_id], backref="approval_action_logs")
+
+    __table_args__ = (
+        Index("ix_approval_action_logs_approval_created", "approval_pk", "created_at"),
+        Index("ix_approval_action_logs_actor_created", "actor_user_id", "created_at"),
+    )
+
+
 class CloudBClassSyncCheckpoint(Base):
     """Per-table checkpoint for local-to-cloud B-class sync."""
 
