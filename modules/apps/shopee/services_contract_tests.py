@@ -27,9 +27,11 @@ def test_services_component_metadata_contract() -> None:
 
     assert ShopeeServicesAiAssistantExport.data_domain == "services"
     assert ShopeeServicesAiAssistantExport.sub_domain == "ai_assistant"
+    assert ShopeeServicesAiAssistantExport.DOWNLOAD_MODE == "direct"
 
     assert ShopeeServicesAgentExport.data_domain == "services"
     assert ShopeeServicesAgentExport.sub_domain == "agent"
+    assert ShopeeServicesAgentExport.DOWNLOAD_MODE == "task_row"
 
 
 def test_services_export_rejects_today_realtime_contract() -> None:

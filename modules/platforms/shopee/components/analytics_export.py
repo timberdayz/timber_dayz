@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from modules.components.base import ExecutionContext
-from modules.components.export.base import ExportMode, ExportResult
-from modules.components.export.base import build_standard_output_root
+from modules.components.export.base import ExportComponent, ExportMode, ExportResult
 from modules.platforms.shopee.components import _download_helpers as download_helpers
 from modules.platforms.shopee.components.business_analysis_common import (
     build_domain_path,
@@ -18,7 +17,7 @@ from modules.platforms.shopee.components.products_config import ProductsSelector
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
 
 
-class ShopeeAnalyticsExport(ShopeeProductsExport):
+class ShopeeAnalyticsExport(ExportComponent):
     platform = "shopee"
     component_type = "export"
     data_domain = "analytics"
@@ -26,13 +25,17 @@ class ShopeeAnalyticsExport(ShopeeProductsExport):
     DIRECT_DOWNLOAD_EVENT_TIMEOUT_MS = 10000
 
     def __init__(self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None) -> None:
-        super().__init__(
+        super().__init__(ctx)
+        self._shared = ShopeeProductsExport(
             ctx,
             selectors=selectors or replace(
                 ProductsSelectors(),
                 overview_path=build_domain_path("analytics"),
             ),
         )
+        self.sel = self._shared.sel
+        self.service_sel = self._shared.service_sel
+        self._shared._target_date_label = self._target_date_label  # type: ignore[method-assign]
 
     def _products_page_looks_ready(self, url: str) -> bool:
         current = str(url or "").strip().lower()
@@ -148,6 +151,27 @@ class ShopeeAnalyticsExport(ShopeeProductsExport):
                 return retry_candidate
             index += 1
 
+    async def _first_visible_locator(self, page: Any, selectors: tuple[str, ...]) -> Any | None:
+        return await self._shared._first_visible_locator(page, selectors)
+
+    async def _detect_export_throttled(self, page: Any) -> bool:
+        return await self._shared._detect_export_throttled(page)
+
+    async def _ensure_shop_selected(self, page: Any) -> None:
+        await self._shared._ensure_shop_selected(page)
+
+    async def _ensure_date_selection(self, page: Any) -> None:
+        await self._shared._ensure_date_selection(page)
+
+    async def ensure_page_ready(self, page: Any) -> None:
+        await self._ensure_products_page_ready(page)
+
+    async def ensure_shop_ready(self, page: Any) -> None:
+        await self._ensure_shop_selected(page)
+
+    async def ensure_date_ready(self, page: Any) -> None:
+        await self._ensure_date_selection(page)
+
     async def trigger_export(self, page: Any) -> Any:
         button = await self._first_visible_locator(page, self.sel.export_buttons)
         if button is None:
@@ -170,9 +194,9 @@ class ShopeeAnalyticsExport(ShopeeProductsExport):
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
-            await self._ensure_products_page_ready(page)
-            await self._ensure_shop_selected(page)
-            await self._ensure_date_selection(page)
+            await self.ensure_page_ready(page)
+            await self.ensure_shop_ready(page)
+            await self.ensure_date_ready(page)
 
             trigger_button = await self.trigger_export(page)
             file_path = await self.collect_download_result(page, trigger_button)

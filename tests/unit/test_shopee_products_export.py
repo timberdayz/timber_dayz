@@ -15,6 +15,7 @@ from modules.platforms.shopee.components.services_ai_assistant_export import (
     ShopeeServicesAiAssistantExport,
 )
 from modules.platforms.shopee.components.services_agent_export import ShopeeServicesAgentExport
+from modules.platforms.shopee.components.services_export_base import ShopeeServicesExportBase
 
 
 DOWNLOAD_TEXT = "\u4e0b\u8f7d"
@@ -178,6 +179,11 @@ async def test_products_page_ready_navigates_to_performance_url() -> None:
         page.goto.await_args.args[0]
         == "https://seller.shopee.cn/datacenter/product/performance?cnsc_shop_id=1227491331"
     )
+
+
+def test_direct_download_components_do_not_inherit_products_or_services_semantics() -> None:
+    assert not issubclass(ShopeeAnalyticsExport, ShopeeProductsExport)
+    assert not issubclass(ShopeeServicesAiAssistantExport, ShopeeServicesExportBase)
 
 
 @pytest.mark.asyncio
@@ -420,6 +426,43 @@ async def test_services_agent_wait_top_report_download_button_uses_same_top_slot
 
 
 @pytest.mark.asyncio
+async def test_services_agent_run_uses_task_row_collection_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"services_subtype": "agent", "granularity": "daily"},
+    )
+    component = ShopeeServicesAgentExport(ctx)
+    trigger_button = Mock()
+    trigger_button.click = AsyncMock()
+
+    monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "_ensure_shop_selected", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "_ensure_date_selection", AsyncMock(), raising=False)
+    monkeypatch.setattr(component, "trigger_export", AsyncMock(return_value=trigger_button), raising=False)
+    monkeypatch.setattr(
+        component,
+        "collect_download_result",
+        AsyncMock(return_value="C:/tmp/services-agent.xlsx"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component,
+        "_wait_top_report_download_button",
+        AsyncMock(return_value=_FakeActionLocator(DOWNLOAD_TEXT)),
+        raising=False,
+    )
+
+    result = await component.run(_FakePage())
+
+    assert component.DOWNLOAD_MODE == "task_row"
+    assert result.success is True
+    assert result.file_path == "C:/tmp/services-agent.xlsx"
+
+
+@pytest.mark.asyncio
 async def test_capture_latest_report_top_snapshot_records_top_row_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -445,25 +488,24 @@ async def test_capture_latest_report_top_snapshot_records_top_row_state(
 @pytest.mark.asyncio
 async def test_analytics_wait_download_complete_uses_extended_download_timeout(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
     from modules.platforms.shopee.components import analytics_export as analytics_export_module
 
     ctx = ExecutionContext(platform="shopee", account={}, config={"granularity": "monthly"})
     component = ShopeeAnalyticsExport(ctx)
-    page = Mock()
-    page.wait_for_event = AsyncMock(return_value=_FakeDownload("traffic_overview.xlsx"))
-
+    trigger_button = Mock()
+    trigger_button.click = AsyncMock()
+    capture_download = AsyncMock(return_value="C:/tmp/traffic_overview.xlsx")
     monkeypatch.setattr(
-        analytics_export_module,
-        "build_standard_output_root",
-        lambda *args, **kwargs: tmp_path,
+        analytics_export_module.download_helpers,
+        "capture_direct_download_artifact",
+        capture_download,
     )
 
-    file_path = await component._wait_download_complete(page)
+    file_path = await component.collect_download_result(_FakePage(), trigger_button)
 
-    page.wait_for_event.assert_awaited_once_with("download", timeout=180000)
-    assert file_path == str(tmp_path / "traffic_overview.xlsx")
+    assert file_path == "C:/tmp/traffic_overview.xlsx"
+    assert capture_download.await_args.kwargs["timeout_ms"] == 10000
 
 
 @pytest.mark.asyncio
@@ -534,9 +576,8 @@ async def test_analytics_run_returns_success_from_direct_download_collection(
 @pytest.mark.asyncio
 async def test_services_ai_assistant_wait_download_complete_prefers_existing_download_event(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    from modules.platforms.shopee.components import services_export_base as services_export_base_module
+    from modules.platforms.shopee.components import services_ai_assistant_export as ai_export_module
 
     ctx = ExecutionContext(
         platform="shopee",
@@ -544,29 +585,20 @@ async def test_services_ai_assistant_wait_download_complete_prefers_existing_dow
         config={"granularity": "daily", "services_subtype": "ai_assistant"},
     )
     component = ShopeeServicesAiAssistantExport(ctx)
-    completed_waiter: asyncio.Future[_FakeDownload] = asyncio.Future()
-    completed_waiter.set_result(_FakeDownload("shop_ai_assistant.xlsx"))
-    component._download_waiter = completed_waiter
+    trigger_button = Mock()
+    trigger_button.click = AsyncMock()
+    capture_download = AsyncMock(return_value="C:/tmp/shop_ai_assistant.xlsx")
 
-    wait_top_report_download_button = AsyncMock(
-        side_effect=AssertionError("should not wait for top report button after download already started")
-    )
     monkeypatch.setattr(
-        component,
-        "_wait_top_report_download_button",
-        wait_top_report_download_button,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        services_export_base_module,
-        "build_standard_output_root",
-        lambda *args, **kwargs: tmp_path,
+        ai_export_module.download_helpers,
+        "capture_direct_download_artifact",
+        capture_download,
     )
 
-    file_path = await component._wait_download_complete(Mock())
+    file_path = await component.collect_download_result(_FakePage(), trigger_button)
 
-    wait_top_report_download_button.assert_not_awaited()
-    assert file_path == str(tmp_path / "shop_ai_assistant.xlsx")
+    assert file_path == "C:/tmp/shop_ai_assistant.xlsx"
+    assert capture_download.await_args.kwargs["subtype"] == "ai_assistant"
 
 
 @pytest.mark.asyncio
@@ -599,9 +631,8 @@ async def test_wait_top_report_download_button_logs_timeout_summary(
 @pytest.mark.asyncio
 async def test_services_ai_assistant_wait_download_complete_logs_existing_download_event(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    from modules.platforms.shopee.components import services_export_base as services_export_base_module
+    from modules.platforms.shopee.components import services_ai_assistant_export as ai_export_module
 
     logger = Mock()
     ctx = ExecutionContext(
@@ -611,54 +642,38 @@ async def test_services_ai_assistant_wait_download_complete_logs_existing_downlo
         logger=logger,
     )
     component = ShopeeServicesAiAssistantExport(ctx)
-    completed_waiter: asyncio.Future[_FakeDownload] = asyncio.Future()
-    completed_waiter.set_result(_FakeDownload("shop_ai_assistant.xlsx"))
-    component._download_waiter = completed_waiter
+    trigger_button = Mock()
+    trigger_button.click = AsyncMock()
+
+    async def _capture_direct(**kwargs):
+        component.logger.info("[ShopeeExportDiag] direct_download_collection_started")
+        return "C:/tmp/shop_ai_assistant.xlsx"
 
     monkeypatch.setattr(
-        services_export_base_module,
-        "build_standard_output_root",
-        lambda *args, **kwargs: tmp_path,
+        ai_export_module.download_helpers,
+        "capture_direct_download_artifact",
+        _capture_direct,
     )
 
-    file_path = await component._wait_download_complete(Mock())
+    file_path = await component.collect_download_result(_FakePage(), trigger_button)
 
-    assert file_path == str(tmp_path / "shop_ai_assistant.xlsx")
+    assert file_path == "C:/tmp/shop_ai_assistant.xlsx"
     assert any(
-        "download_event_ready_before_report_button" in str(call.args[0])
+        "direct_download_collection_started" in str(call.args[0])
         for call in logger.info.call_args_list
     )
 
 
 @pytest.mark.asyncio
-async def test_services_ai_assistant_wait_top_report_download_button_ignores_stale_other_domain_row(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_services_ai_assistant_exposes_direct_download_mode() -> None:
     ctx = ExecutionContext(
         platform="shopee",
         account={},
         config={"services_subtype": "ai_assistant"},
     )
     component = ShopeeServicesAiAssistantExport(ctx)
-    stale_products_download = _FakeActionLocator(DOWNLOAD_TEXT)
-    ai_assistant_download = _FakeActionLocator(DOWNLOAD_TEXT)
-    panel = _FakePanel(
-        [
-            _FakeRow("parentskudetail.20260301_20260331.xlsx", [stale_products_download]),
-            _FakeRow("shop_ai_assistant_20260410-20260410.xlsx", [ai_assistant_download]),
-        ]
-    )
 
-    monkeypatch.setattr(
-        component,
-        "_ensure_latest_report_panel_open",
-        AsyncMock(return_value=panel),
-        raising=False,
-    )
-
-    button = await component._wait_top_report_download_button(_FakePage(), timeout_ms=10, poll_ms=1)
-
-    assert button is ai_assistant_download
+    assert component.DOWNLOAD_MODE == "direct"
 
 
 @pytest.mark.asyncio
@@ -832,9 +847,8 @@ async def test_wait_top_report_download_button_exits_when_download_event_arrives
 @pytest.mark.asyncio
 async def test_services_ai_assistant_wait_download_complete_consumes_late_download_event_without_report_button(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    from modules.platforms.shopee.components import services_export_base as services_export_base_module
+    from modules.platforms.shopee.components import services_ai_assistant_export as ai_export_module
 
     ctx = ExecutionContext(
         platform="shopee",
@@ -842,29 +856,20 @@ async def test_services_ai_assistant_wait_download_complete_consumes_late_downlo
         config={"granularity": "daily", "services_subtype": "ai_assistant"},
     )
     component = ShopeeServicesAiAssistantExport(ctx)
-    waiter: asyncio.Future[_FakeDownload] = asyncio.Future()
-    component._download_waiter = waiter
-    component._latest_report_top_snapshot = ("shop_ai_assistant_old.xlsx", "download")
-    component._latest_report_count_snapshot = 1
-    stale_panel = _FakePanel([_FakeRow("shop_ai_assistant_old.xlsx", [_FakeActionLocator(DOWNLOAD_TEXT)])])
-    page = _FutureCompletingPage(waiter)
+    trigger_button = Mock()
+    trigger_button.click = AsyncMock()
+    capture_download = AsyncMock(return_value="C:/tmp/delayed-download.xlsx")
 
     monkeypatch.setattr(
-        component,
-        "_ensure_latest_report_panel_open",
-        AsyncMock(return_value=stale_panel),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        services_export_base_module,
-        "build_standard_output_root",
-        lambda *args, **kwargs: tmp_path,
+        ai_export_module.download_helpers,
+        "capture_direct_download_artifact",
+        capture_download,
     )
 
-    file_path = await component._wait_download_complete(page)
+    file_path = await component.collect_download_result(_FakePage(), trigger_button)
 
-    assert file_path == str(tmp_path / "delayed-download.xlsx")
-    assert page._wait_calls <= 2
+    assert file_path == "C:/tmp/delayed-download.xlsx"
+    assert capture_download.await_count == 1
 
 
 @pytest.mark.asyncio

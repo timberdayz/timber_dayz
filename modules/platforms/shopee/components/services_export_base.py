@@ -6,12 +6,17 @@ from typing import Any
 
 from modules.components.base import ExecutionContext
 from modules.components.export.base import build_standard_output_root
-from modules.platforms.shopee.components.analytics_export import ShopeeAnalyticsExport
+from modules.platforms.shopee.components.business_analysis_common import (
+    granularity_label,
+    normalize_time_request,
+    preset_label,
+)
 from modules.platforms.shopee.components.products_config import ProductsSelectors
+from modules.platforms.shopee.components.products_export import ShopeeProductsExport
 from modules.platforms.shopee.components.services_config import ServicesSelectors
 
 
-class ShopeeServicesExportBase(ShopeeAnalyticsExport):
+class ShopeeServicesExportBase(ShopeeProductsExport):
     data_domain = "services"
     sub_domain: str | None = None
 
@@ -54,6 +59,12 @@ class ShopeeServicesExportBase(ShopeeAnalyticsExport):
         except KeyError as exc:
             raise ValueError(f"unsupported services subtype: {subtype}") from exc
 
+    def _validate_services_preset(self, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized == "today_realtime":
+            raise ValueError("unsupported preset 'today_realtime' for shopee/services")
+        return normalized
+
     def _products_page_looks_ready(self, url: str) -> bool:
         current = str(url or "").strip().lower()
         if not current:
@@ -69,6 +80,55 @@ class ShopeeServicesExportBase(ShopeeAnalyticsExport):
             await page.wait_for_timeout(1200)
         if not self._products_page_looks_ready(str(getattr(page, "url", "") or "")):
             raise RuntimeError("services page is not ready")
+
+    def _target_date_label(self, config: dict[str, Any]) -> str:
+        time_selection = config.get("time_selection")
+        if isinstance(time_selection, dict):
+            if str(time_selection.get("mode") or "").strip().lower() == "preset" and time_selection.get("preset"):
+                normalized = normalize_time_request(
+                    "services",
+                    time_mode="preset",
+                    value=self._validate_services_preset(str(time_selection["preset"])),
+                )
+                return preset_label(normalized["value"])
+
+        if config.get("date_preset"):
+            normalized = normalize_time_request(
+                "services",
+                time_mode="preset",
+                value=self._validate_services_preset(str(config["date_preset"])),
+            )
+            return preset_label(normalized["value"])
+
+        if "preset" in config:
+            normalized = normalize_time_request(
+                "services",
+                time_mode="preset",
+                value=self._validate_services_preset(str(config["preset"])),
+            )
+            return preset_label(normalized["value"])
+
+        granularity = str(config.get("granularity") or "daily").strip().lower()
+        preset_by_granularity = {
+            "day": "yesterday",
+            "daily": "yesterday",
+            "d": "yesterday",
+            "week": "last_7_days",
+            "weekly": "last_7_days",
+            "w": "last_7_days",
+            "month": "last_30_days",
+            "monthly": "last_30_days",
+            "m": "last_30_days",
+        }
+        preset_value = preset_by_granularity.get(granularity)
+        if preset_value:
+            return preset_label(preset_value)
+        normalized = normalize_time_request(
+            "services",
+            time_mode="granularity",
+            value=granularity,
+        )
+        return granularity_label(normalized["value"])
 
     def _build_download_target_path(self, out_root: Path, suggested_filename: str) -> Path:
         candidate = out_root / suggested_filename

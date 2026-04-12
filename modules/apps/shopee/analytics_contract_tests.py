@@ -30,6 +30,7 @@ def test_analytics_export_metadata_contract() -> None:
         ExecutionContext(platform="shopee", account={}, config={})
     )
     assert export_component.sel.overview_path == "/datacenter/traffic/overview"
+    assert export_component.DOWNLOAD_MODE == "direct"
 
 
 def test_analytics_rejects_today_realtime_contract() -> None:

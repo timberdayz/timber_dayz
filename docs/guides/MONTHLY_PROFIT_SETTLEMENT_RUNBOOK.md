@@ -1,5 +1,7 @@
 # Monthly Profit Settlement Runbook
 
+> 涉及店铺赛马、观察池、黄牌/红牌、淘汰评估与挂店人提成继承口径时，请优先参见 `docs/guides/PERFORMANCE_RACING_POLICY.md`。
+
 ## 1. 目的
 
 本文说明“月度利润结算中心”的实际使用方式，用于把当月店铺结算利润、人员成本、跟投收益与公司留存统一汇总为公司级月结结果。

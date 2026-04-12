@@ -50,6 +50,28 @@
         <el-option label="Lazada" value="Lazada" />
       </el-select>
     </div>
+
+    <el-card shadow="never" class="policy-card">
+      <template #header>
+        <div class="card-header">
+          <span>口径说明</span>
+        </div>
+      </template>
+      <div class="policy-grid">
+        <div class="policy-item">
+          <div class="policy-label">赛马池</div>
+          <div class="policy-text">正式池参与公司总榜赛马并生成系数；观察池仅展示绩效，不参与正式奖惩。</div>
+        </div>
+        <div class="policy-item">
+          <div class="policy-label">预警规则</div>
+          <div class="policy-text">绩效分低于 70 为黄牌，低于 60 为红牌；连续红牌达到条件时升级为淘汰评估。</div>
+        </div>
+        <div class="policy-item">
+          <div class="policy-label">{{ filters.groupBy === 'person' ? '人员维度' : '店铺维度' }}</div>
+          <div class="policy-text">{{ currentGroupPolicyText }}</div>
+        </div>
+      </div>
+    </el-card>
     
     <!-- 绩效表格 -->
     <el-card>
@@ -457,6 +479,13 @@ const totalWeight = computed(() => {
 })
 const formulaText = computed(() => {
   return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 重点产品(${weightConfig.key_product_weight}%) + 运营得分(${weightConfig.operation_weight}%)`
+})
+
+const currentGroupPolicyText = computed(() => {
+  if (filters.groupBy === 'person') {
+    return '人员绩效分按挂店店铺绩效承接结果叠加个人加减项；提成系数按挂店店铺赛马结果加权继承。'
+  }
+  return '店铺总分由销售、毛利、重点产品和运营四项组成；正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
 })
 
 // 表单验证规则
@@ -900,6 +929,36 @@ onMounted(async () => {
 .action-bar {
   display: flex;
   align-items: center;
+}
+
+.policy-card {
+  margin-bottom: 20px;
+}
+
+.policy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.policy-item {
+  padding: 12px 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.policy-label {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.policy-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
 }
 
 /* 浼佷笟绾ц〃鏍兼牱寮?*/

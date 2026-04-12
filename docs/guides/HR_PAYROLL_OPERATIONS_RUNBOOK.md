@@ -1,5 +1,7 @@
 # HR Payroll Operations Runbook
 
+> 最新绩效赛马、观察池、预警、挂店人继承与提成奖惩口径，请优先参见 `docs/guides/PERFORMANCE_RACING_POLICY.md`。
+
 > 关联文档：月结总账与经营汇总流程请同时参考 `docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md`。
 
 ## 1. Scope
