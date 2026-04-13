@@ -60,7 +60,7 @@ from modules.core.db import (
     MaterializedViewRefreshLog,  # v4.11.4新增:物化视图刷新日志表
 )
 
-from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncRun, CloudBClassSyncTask
+from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncRun, CloudBClassSyncTask, RefreshQueueTask
 from modules.core.db import TaskCenterTask, TaskCenterLog, TaskCenterLink
 from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability, PlatformShopDiscovery
 from modules.core.db import (
@@ -343,26 +343,14 @@ logger.info(f"[async] 异步数据库连接已配置: {ASYNC_DATABASE_URL.split(
 
 def reset_async_engine_pool_for_new_loop() -> None:
     """
-    Dispose pooled async connections before entering a fresh asyncio.run() loop.
+    Drop pooled async connections before entering a fresh asyncio.run() loop.
 
     Celery sync tasks create a new event loop per invocation. asyncpg
     connections retained in the global pool can still be attached to the
     previous loop and raise cross-loop runtime errors when reused.
     """
-
-    async def _dispose() -> None:
-        await async_engine.dispose()
-
-    try:
-        asyncio.run(_dispose())
-        logger.info("[async] disposed async engine pool before creating a new event loop")
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_dispose())
-        finally:
-            loop.close()
-        logger.info("[async] disposed async engine pool using fallback event loop")
+    async_engine.sync_engine.dispose(close=False)
+    logger.info("[async] dropped async engine pool before creating a new event loop")
 
 # ==================== FastAPI依赖注入 ====================
 
@@ -751,6 +739,7 @@ __all__ = [
     "CloudBClassSyncCheckpoint",
     "CloudBClassSyncRun",
     "CloudBClassSyncTask",
+    "RefreshQueueTask",
     "TaskCenterTask",
     "TaskCenterLog",
     "TaskCenterLink",

@@ -158,6 +158,20 @@ def test_prod_celery_healthcheck_uses_worker_readiness():
     assert "redis.from_url" not in health_joined
 
 
+def test_celery_app_includes_refresh_queue_task_module_and_beat_schedule():
+    from backend.celery_app import celery_app
+
+    include_modules = set(celery_app.conf.include or [])
+    beat_schedule = celery_app.conf.beat_schedule or {}
+
+    assert "backend.tasks.refresh_queue_tasks" in include_modules
+    assert "process-refresh-queue-every-minute" in beat_schedule
+    assert (
+        beat_schedule["process-refresh-queue-every-minute"]["task"]
+        == "backend.tasks.refresh_queue_tasks.process_refresh_queue_task"
+    )
+
+
 def test_dev_frontend_uses_vite_port_instead_of_nginx_port():
     compose = _read_yaml("docker-compose.dev.yml")
     frontend = compose["services"]["frontend"]

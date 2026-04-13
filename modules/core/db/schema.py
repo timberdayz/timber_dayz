@@ -1355,6 +1355,39 @@ class CloudBClassSyncTask(Base):
     )
 
 
+class RefreshQueueTask(Base):
+    """Durable global queue row for serial post-ingest refresh work."""
+
+    __tablename__ = "refresh_queue_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(String(100), nullable=False)
+    trigger_type = Column(String(32), nullable=False, default="data_ingested")
+    pipeline_name = Column(String(100), nullable=False)
+    dedupe_key = Column(String(255), nullable=False)
+    targets_json = Column(JSON_COMPAT, nullable=False, default=list)
+    context_json = Column(JSON_COMPAT, nullable=False, default=dict)
+    status = Column(String(32), nullable=False, default="pending")
+    attempt_count = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_refresh_queue_tasks_job_id"),
+        Index("ix_refresh_queue_tasks_status", "status"),
+        Index("ix_refresh_queue_tasks_dedupe_key", "dedupe_key"),
+        Index("ix_refresh_queue_tasks_created_at", "created_at"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'skipped')",
+            name="chk_refresh_queue_tasks_status",
+        ),
+        {"schema": "core"},
+    )
+
+
 class ComponentVersion(Base):
     """
     组件版本管理表 (Phase 9.4)

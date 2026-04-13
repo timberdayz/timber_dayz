@@ -29,6 +29,7 @@ celery_app = Celery(
         "backend.tasks.data_processing",
         "backend.tasks.scheduled_tasks",
         "backend.tasks.data_sync_tasks",  # [*] v4.19.1 恢复:数据同步任务模块
+        "backend.tasks.refresh_queue_tasks",
         "backend.tasks.image_extraction",  # [*] 图片提取任务模块
         # [WARN] v4.6.0 DSS架构重构:已删除mv_refresh(Metabase直接查询原始表,无需物化视图)
         # [WARN] v4.6.0 DSS架构重构:已删除c_class_calculation(C类数据由Metabase定时计算)
@@ -91,6 +92,11 @@ celery_app.conf.beat_schedule = {
         'task': 'backend.tasks.scheduled_tasks.auto_ingest_pending_files',
         'schedule': crontab(minute='*/15'),
     },
+
+    'process-refresh-queue-every-minute': {
+        'task': 'backend.tasks.refresh_queue_tasks.process_refresh_queue_task',
+        'schedule': crontab(minute='*'),
+    },
     
     # 每6小时检查低库存
     'check-low-stock-every-6hours': {
@@ -113,4 +119,3 @@ celery_app.conf.beat_schedule = {
 
 if __name__ == '__main__':
     celery_app.start()
-

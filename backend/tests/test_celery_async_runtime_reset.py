@@ -6,15 +6,20 @@ def test_reset_async_engine_pool_for_new_loop_disposes_engine(monkeypatch):
 
     called = {"dispose": 0}
 
-    class _FakeAsyncEngine:
-        async def dispose(self):
+    class _FakeSyncEngine:
+        def dispose(self, close=False):
             called["dispose"] += 1
+            called["close"] = close
+
+    class _FakeAsyncEngine:
+        sync_engine = _FakeSyncEngine()
 
     monkeypatch.setattr(database_module, "async_engine", _FakeAsyncEngine(), raising=False)
 
     database_module.reset_async_engine_pool_for_new_loop()
 
     assert called["dispose"] == 1
+    assert called["close"] is False
 
 
 def test_auto_ingest_pending_files_resets_async_engine_before_asyncio_run(monkeypatch):

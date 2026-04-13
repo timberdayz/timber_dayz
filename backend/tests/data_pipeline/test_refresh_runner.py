@@ -88,6 +88,70 @@ def test_refresh_runner_builds_step_plan():
     ]
 
 
+@pytest.mark.asyncio
+async def test_ensure_ops_tables_runs_bootstrap_only_once_per_process(monkeypatch):
+    from backend.services.data_pipeline import refresh_runner
+
+    calls = []
+
+    class _FakeResult:
+        def __init__(self, value=True):
+            self._value = value
+
+        def scalar(self):
+            return self._value
+
+    class _FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, _stmt):
+            self.calls += 1
+            return _FakeResult(True)
+
+    async def _fake_execute_sql_file(db, path):
+        calls.append(path)
+        return None
+
+    monkeypatch.setattr(refresh_runner, "_OPS_TABLES_READY", False, raising=False)
+    monkeypatch.setattr(refresh_runner, "execute_sql_file", _fake_execute_sql_file)
+
+    db = _FakeSession()
+    await refresh_runner._ensure_ops_tables(db)
+    await refresh_runner._ensure_ops_tables(db)
+
+    assert calls == ["sql/ops/create_pipeline_tables.sql"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_ops_tables_skips_bootstrap_when_required_tables_exist(monkeypatch):
+    from backend.services.data_pipeline import refresh_runner
+
+    calls = []
+
+    class _FakeResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar(self):
+            return self._value
+
+    class _FakeSession:
+        async def execute(self, _stmt):
+            return _FakeResult(4)
+
+    async def _fake_execute_sql_file(db, path):
+        calls.append(path)
+        return None
+
+    monkeypatch.setattr(refresh_runner, "_OPS_TABLES_READY", False, raising=False)
+    monkeypatch.setattr(refresh_runner, "execute_sql_file", _fake_execute_sql_file)
+
+    await refresh_runner._ensure_ops_tables(_FakeSession())
+
+    assert calls == []
+
+
 @pytest.mark.pg_only
 @pytest.mark.asyncio
 async def test_execute_sql_target_creates_ops_tables():

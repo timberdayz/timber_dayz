@@ -6,13 +6,13 @@ from backend.utils.events import DataIngestedEvent
 
 
 @pytest.mark.asyncio
-async def test_data_ingested_event_triggers_postgresql_refresh(monkeypatch):
+async def test_data_ingested_event_triggers_postgresql_refresh_enqueue(monkeypatch):
     from backend.services.event_listeners import event_listener
 
     captured = {}
     scheduled = {}
 
-    def _fake_run_pipeline_refresh(event):
+    def _fake_enqueue_refresh(event):
         captured["event"] = event
         async def _noop():
             return None
@@ -24,8 +24,8 @@ async def test_data_ingested_event_triggers_postgresql_refresh(monkeypatch):
         return "task-created"
 
     monkeypatch.setattr(
-        "backend.services.event_listeners.run_pipeline_refresh_for_data_ingested_event",
-        _fake_run_pipeline_refresh,
+        "backend.services.event_listeners.enqueue_refresh_for_data_ingested_event",
+        _fake_enqueue_refresh,
     )
     monkeypatch.setattr(
         "backend.services.event_listeners.asyncio.create_task",

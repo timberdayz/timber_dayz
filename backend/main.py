@@ -1001,12 +1001,14 @@ app.include_router(system_monitoring.router, prefix="/api", tags=["系统监控"
 # [WARN] 注意:只保留治理统计API,自动入库API已移除
 # 治理统计API(governance/*)仍然需要,因为数据治理功能依赖这些API
 from backend.routers import auto_ingest
+from backend.routers import refresh_queue
 
 app.include_router(
     auto_ingest.router,
     prefix="/api/field-mapping",
     tags=["数据治理统计"],  # [*] 只保留治理统计API,自动入库API已废弃
 )
+app.include_router(refresh_queue.router, prefix="/api")
 
 # v4.6.0 数据隔离区API(查看和重新处理隔离数据)
 app.include_router(data_quarantine.router, prefix="/api", tags=["数据隔离区"])

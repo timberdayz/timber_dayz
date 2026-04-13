@@ -12,6 +12,7 @@ from backend.services.cloud_b_class_auto_sync_dispatch_service import (
 from backend.services.data_pipeline.inventory_age_refresh_service import (
     InventoryAgeRefreshService,
 )
+from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
 from backend.utils.events import AClassUpdatedEvent, DataIngestedEvent, MVRefreshedEvent
 from modules.core.logger import get_logger
@@ -115,6 +116,40 @@ async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent)
             return run_id
 
 
+async def enqueue_refresh_for_data_ingested_event(event: DataIngestedEvent) -> Optional[str]:
+    targets = determine_pipeline_targets_for_data_ingested(event)
+    if not targets:
+        logger.info(
+            "[EventListener] DATA_INGESTED matched no PostgreSQL refresh targets: "
+            f"file_id={event.file_id}, domain={event.data_domain}, granularity={event.granularity}"
+        )
+        return None
+
+    async with AsyncSessionLocal() as session:
+        queue_service = RefreshQueueService(session)
+        task = await queue_service.enqueue_refresh(
+            trigger_type="data_ingested",
+            pipeline_name="data_ingested_refresh",
+            targets=targets,
+            context={
+                "file_id": event.file_id,
+                "platform_code": event.platform_code,
+                "data_domain": event.data_domain,
+                "sub_domain": event.sub_domain,
+                "granularity": event.granularity,
+                "row_count": event.row_count,
+                "source_table_name": event.source_table_name,
+                "timestamp": event.timestamp,
+                "related_file_ids": [event.file_id] if event.file_id is not None else [],
+            },
+        )
+        logger.info(
+            "[EventListener] PostgreSQL refresh intent enqueued: "
+            f"job_id={task.job_id}, file_id={event.file_id}, domain={event.data_domain}, targets={len(targets)}"
+        )
+        return task.job_id
+
+
 class EventListener:
     """Event listener entrypoints used by ingestion and background workflows."""
 
@@ -130,20 +165,20 @@ class EventListener:
             asyncio.get_running_loop()
         except RuntimeError:
             try:
-                run_id = asyncio.run(run_pipeline_refresh_for_data_ingested_event(event))
+                job_id = asyncio.run(enqueue_refresh_for_data_ingested_event(event))
                 logger.info(
-                    "[EventListener] Synchronous PostgreSQL refresh completed: "
-                    f"file_id={event.file_id}, run_id={run_id}"
+                    "[EventListener] Synchronous PostgreSQL refresh enqueue completed: "
+                    f"file_id={event.file_id}, job_id={job_id}"
                 )
             except Exception as exc:
                 logger.warning(
-                    f"[EventListener] DATA_INGESTED synchronous PostgreSQL refresh failed: {exc}",
+                    f"[EventListener] DATA_INGESTED synchronous PostgreSQL refresh enqueue failed: {exc}",
                     exc_info=True,
                 )
         else:
-            task = asyncio.create_task(run_pipeline_refresh_for_data_ingested_event(event))
+            task = asyncio.create_task(enqueue_refresh_for_data_ingested_event(event))
             logger.info(
-                "[EventListener] PostgreSQL refresh background task scheduled: "
+                "[EventListener] PostgreSQL refresh enqueue task scheduled: "
                 f"file_id={event.file_id}, task={task!r}"
             )
 

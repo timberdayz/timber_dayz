@@ -14,6 +14,16 @@ from backend.services.data_pipeline.refresh_registry import (
 from backend.services.data_pipeline.sql_loader import load_sql_text, split_sql_statements
 
 
+_OPS_TABLES_READY = False
+_OPS_TABLES_LOCK = asyncio.Lock()
+_OPS_REQUIRED_TABLES = {
+    "pipeline_run_log",
+    "pipeline_step_log",
+    "data_freshness_log",
+    "data_lineage_registry",
+}
+
+
 def build_refresh_plan(targets: list[str]) -> list[str]:
     return topologically_sort_targets(targets)
 
@@ -25,7 +35,37 @@ def _target_type(target: str) -> str:
 
 
 async def _ensure_ops_tables(db: AsyncSession) -> None:
-    await execute_sql_file(db, "sql/ops/create_pipeline_tables.sql")
+    global _OPS_TABLES_READY
+
+    if _OPS_TABLES_READY:
+        return
+
+    async with _OPS_TABLES_LOCK:
+        if _OPS_TABLES_READY:
+            return
+
+        existing_tables_result = await db.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_schema = 'ops'
+                  AND table_name IN (
+                      'pipeline_run_log',
+                      'pipeline_step_log',
+                      'data_freshness_log',
+                      'data_lineage_registry'
+                  )
+                """
+            )
+        )
+        existing_tables_count = existing_tables_result.scalar() or 0
+        if existing_tables_count >= len(_OPS_REQUIRED_TABLES):
+            _OPS_TABLES_READY = True
+            return
+
+        await execute_sql_file(db, "sql/ops/create_pipeline_tables.sql")
+        _OPS_TABLES_READY = True
 
 
 async def _insert_run_log(
