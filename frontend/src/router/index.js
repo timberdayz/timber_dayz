@@ -410,6 +410,17 @@ const routes = [
     }
   },
   {
+    path: '/data-sync/refresh-queue',
+    name: 'DataSyncRefreshQueue',
+    component: () => import('../views/DataSyncRefreshQueue.vue'),
+    meta: {
+      title: '刷新队列',
+      icon: 'Refresh',
+      permission: 'data-sync',
+      roles: ['admin']
+    }
+  },
+  {
     path: '/cloud-sync',
     name: 'CloudSyncManagement',
     component: () => import('../views/CloudSyncManagement.vue'),

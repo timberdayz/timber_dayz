@@ -381,6 +381,49 @@ def test_postgresql_inventory_backlog_route_returns_summary_payload(monkeypatch)
     assert body["data"]["top_products"][0]["risk_level"] == "medium"
 
 
+@pytest.mark.asyncio
+async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_timeouts(monkeypatch):
+    cache_calls = []
+
+    class _ServiceStub:
+        async def get_business_overview_inventory_backlog(self, min_days):
+            return {"summary": {"total_value": 1000}, "top_products": []}
+
+    class _CacheServiceStub:
+        async def get(self, cache_type, **kwargs):
+            cache_calls.append(("get", cache_type, dict(kwargs)))
+            return None
+
+        async def get_or_set_singleflight(self, cache_type, producer, **kwargs):
+            cache_calls.append(("get_or_set_singleflight", cache_type, dict(kwargs)))
+            return await producer()
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    app = FastAPI()
+    app.state.cache_service = _CacheServiceStub()
+    app.include_router(router)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/business-overview/inventory-backlog",
+            params={"days": 30},
+        )
+
+    assert response.status_code == 200
+    singleflight_call = next(call for call in cache_calls if call[0] == "get_or_set_singleflight")
+    assert singleflight_call[1] == "dashboard_inventory_backlog"
+    assert singleflight_call[2]["days"] == "30"
+    assert singleflight_call[2]["lock_ttl"] >= 60
+    assert singleflight_call[2]["wait_timeout"] >= 30
+
+
 def test_postgresql_clearance_ranking_route_returns_priority_fields(monkeypatch):
     class _ServiceStub:
         async def get_clearance_ranking(self, limit):

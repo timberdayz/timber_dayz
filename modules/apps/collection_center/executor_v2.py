@@ -725,12 +725,34 @@ class CollectionExecutorV2:
         login_gate_reason: str,
         login_gate_url: Optional[str],
     ) -> Dict[str, Any]:
-        return {
+        details = {
             "actual_execution_mode": params.get("_actual_execution_mode"),
             "runtime_session_mode": params.get("_runtime_session_mode"),
             "login_gate_ready": login_gate_ready,
             "login_gate_reason": login_gate_reason,
             "login_gate_url": login_gate_url,
+        }
+        diagnostics = params.get("_runtime_session_diagnostics")
+        if isinstance(diagnostics, dict):
+            details.update(diagnostics)
+        return details
+
+    @staticmethod
+    def _runtime_session_diagnostics(
+        *,
+        platform: str,
+        params: Dict[str, Any],
+        runtime_bundle: Any,
+    ) -> Dict[str, Any]:
+        return {
+            "session_owner_id": params.get("main_account_id"),
+            "shop_account_id": params.get("shop_account_id"),
+            "persistent_profile_path": getattr(runtime_bundle, "profile_path", None),
+            "profile_contains_state": bool(getattr(runtime_bundle, "reused_session", False)),
+            "probe_urls": runtime_session.build_runtime_login_gate_probe_urls(
+                platform=platform,
+                account=params.get("account") if isinstance(params.get("account"), dict) else None,
+            ),
         }
 
     async def _execute_shared_login_phase(
@@ -879,11 +901,20 @@ class CollectionExecutorV2:
                 12,
                 MAIN_ACCOUNT_SESSION_STEP_MESSAGES["switching_target_shop"],
             )
-        await self._ensure_login_gate_ready(page, platform)
+        gate_result = await self._ensure_login_gate_ready(page, platform)
         await self._update_status(
             task_id,
             15,
             MAIN_ACCOUNT_SESSION_STEP_MESSAGES["target_shop_ready"],
+            details={
+                "step_id": "login_gate_result",
+                **self._runtime_metadata_details(
+                    params=params,
+                    login_gate_ready=True,
+                    login_gate_reason=gate_result.reason,
+                    login_gate_url=gate_result.current_url,
+                ),
+            },
         )
         logger.info(
             "Task %s: [Python] Login completed successfully (reused_session=%s)",
@@ -956,7 +987,7 @@ class CollectionExecutorV2:
             total_domains=total_domains_count,
         )
 
-    async def _ensure_login_gate_ready(self, page: Any, platform: str) -> None:
+    async def _ensure_login_gate_ready(self, page: Any, platform: str) -> GateResult:
         ok, gate_result = await runtime_session.check_login_gate_ready(
             page=page,
             platform=platform,
@@ -966,6 +997,7 @@ class CollectionExecutorV2:
                 f"login gate not ready: status={gate_result.status.value}, "
                 f"reason={gate_result.reason}, url={getattr(page, 'url', '')}"
             )
+        return gate_result
 
     def _ensure_export_complete(
         self,
@@ -1413,6 +1445,11 @@ class CollectionExecutorV2:
                         else "headed"
                     )
                     params["_legacy_direct_page_mode"] = legacy_direct_page_mode
+                    params["_runtime_session_diagnostics"] = self._runtime_session_diagnostics(
+                        platform=platform,
+                        params=params,
+                        runtime_bundle=runtime_bundle,
+                    )
                     adapter = None
                     if runtime_manifests is None:
                         adapter = create_adapter(
@@ -1498,6 +1535,11 @@ class CollectionExecutorV2:
                     else "headed"
                 )
                 params["_legacy_direct_page_mode"] = legacy_direct_page_mode
+                params["_runtime_session_diagnostics"] = self._runtime_session_diagnostics(
+                    platform=platform,
+                    params=params,
+                    runtime_bundle=runtime_bundle,
+                )
                 play_context = runtime_bundle.context
                 page = runtime_bundle.page
 

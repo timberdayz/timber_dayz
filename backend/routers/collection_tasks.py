@@ -225,6 +225,11 @@ def _extract_runtime_metadata_from_logs(logs: List[Any]) -> Optional[dict]:
             "login_gate_ready": details.get("login_gate_ready"),
             "login_gate_reason": details.get("login_gate_reason"),
             "login_gate_url": details.get("login_gate_url"),
+            "session_owner_id": details.get("session_owner_id"),
+            "shop_account_id": details.get("shop_account_id"),
+            "persistent_profile_path": details.get("persistent_profile_path"),
+            "profile_contains_state": details.get("profile_contains_state"),
+            "probe_urls": details.get("probe_urls"),
         }
     return None
 
@@ -1219,6 +1224,12 @@ async def _on_verification_required(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + VERIFICATION_WAIT_TIMEOUT
     while loop.time() < deadline:
+        if await _is_collection_task_cancelled(task_id):
+            logger.info(
+                "Task %s: verification wait stopped because task was cancelled",
+                task_id,
+            )
+            return None
         try:
             val = await redis_client.get(key)
             if val is not None:
@@ -1239,7 +1250,7 @@ async def _on_verification_required(
                             )
                         )
                         task = result.scalar_one_or_none()
-                        if task:
+                        if task and task.status != "cancelled":
                             task.status = "running"
                             await session.commit()
                             await _mirror_collection_task(session, task)
@@ -1255,6 +1266,271 @@ async def _on_verification_required(
         f"Task {task_id}: verification wait timed out after {VERIFICATION_WAIT_TIMEOUT}s"
     )
     return None
+
+
+async def _load_collection_account_payload(account_id: str) -> dict:
+    from backend.models.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        account = None
+        try:
+            from backend.services.shop_account_loader_service import (
+                get_shop_account_loader_service,
+            )
+
+            shop_account_loader = get_shop_account_loader_service()
+            shop_payload = await shop_account_loader.load_shop_account_async(
+                account_id, db
+            )
+            if shop_payload:
+                account = {
+                    **shop_payload["compat_account"],
+                    "main_account_id": shop_payload["main_account"]["main_account_id"],
+                    "shop_account_id": shop_payload["shop_context"]["shop_account_id"],
+                }
+        except Exception:
+            account = None
+
+        if not account:
+            from backend.services.account_loader_service import (
+                get_account_loader_service,
+            )
+
+            account_loader = get_account_loader_service()
+            account = await account_loader.load_account_async(account_id, db)
+
+        if not account:
+            raise ValueError(f"Account {account_id} not found or disabled")
+
+        return account
+
+
+async def _persist_collection_task_state(
+    task_id: str,
+    *,
+    mutate,
+    retry_attempts: int = 1,
+) -> CollectionTask | None:
+    from backend.models.database import AsyncSessionLocal
+
+    last_error: Exception | None = None
+    for attempt in range(retry_attempts + 1):
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(CollectionTask).where(CollectionTask.task_id == task_id)
+                )
+                task = result.scalar_one_or_none()
+                if task is None:
+                    return None
+                mutate(task)
+                await db.commit()
+                await _mirror_collection_task(db, task)
+                return task
+        except Exception as exc:
+            last_error = exc
+            if attempt >= retry_attempts:
+                raise
+            logger.warning(
+                "Task %s state writeback attempt %s failed, retrying with fresh session: %s",
+                task_id,
+                attempt + 1,
+                exc,
+            )
+
+    if last_error is not None:
+        raise last_error
+    return None
+
+
+async def _mark_collection_task_running(task_id: str) -> CollectionTask | None:
+    now = datetime.now(timezone.utc)
+
+    def _mutate(task: CollectionTask) -> None:
+        task.status = "running"
+        task.started_at = now
+
+    return await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=0)
+
+
+async def _mark_collection_task_failed(
+    task_id: str,
+    *,
+    error_message: str,
+) -> CollectionTask | None:
+    now = datetime.now(timezone.utc)
+
+    def _mutate(task: CollectionTask) -> None:
+        task.status = "failed"
+        task.error_message = error_message
+        task.completed_at = now
+
+    return await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=1)
+
+
+async def _persist_collection_task_result(
+    task_id: str,
+    result: Any,
+) -> CollectionTask | None:
+    completed_at = (
+        None
+        if result.status in ["paused", "manual_intervention_required"]
+        else datetime.now(timezone.utc)
+    )
+    duration_seconds = (
+        None
+        if result.status in ["paused", "manual_intervention_required"]
+        else result.duration_seconds
+    )
+
+    def _mutate(task: CollectionTask) -> None:
+        task.status = result.status
+        if result.status in ["completed", "partial_success"]:
+            task.progress = 100
+        elif result.status in ["paused", "manual_intervention_required"]:
+            task.progress = max(getattr(task, "progress", 0) or 0, 1)
+        else:
+            task.progress = 0
+        task.files_collected = result.files_collected
+        task.error_message = result.error_message
+        task.completed_at = completed_at
+        task.duration_seconds = duration_seconds
+        task.completed_domains = result.completed_domains
+        task.failed_domains = result.failed_domains
+
+    return await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=1)
+
+
+async def _execute_collection_task_background_v2(
+    task_id: str,
+    platform: str,
+    account_id: str,
+    data_domains: List[str],
+    sub_domains: Optional[List[str]],
+    date_range: Dict[str, str],
+    granularity: str,
+    debug_mode: bool,
+    parallel_mode: bool,
+    max_parallel: int,
+    execution_mode: str = "headless",
+    runtime_manifests: Optional[Dict[str, Any]] = None,
+    app: Any = None,
+):
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    async def _verification_callback(
+        t_id: str, v_type: str, s_path: Optional[str]
+    ) -> Optional[str]:
+        return await _on_verification_required(t_id, v_type, s_path, app)
+
+    try:
+        task = await _mark_collection_task_running(task_id)
+        if not task:
+            logger.error(f"Task {task_id} not found in database")
+            return
+
+        try:
+            account = await _load_collection_account_payload(account_id)
+        except Exception as e:
+            logger.error(f"Failed to load account {account_id}: {e}")
+            failed_task = await _mark_collection_task_failed(
+                task_id,
+                error_message=f"璐﹀彿鍔犺浇澶辫触: {str(e)}",
+            )
+            await connection_manager.send_complete(
+                task_id,
+                "failed",
+                files_collected=getattr(failed_task, "files_collected", 0) or 0,
+                error_message=getattr(failed_task, "error_message", str(e)),
+            )
+            return
+
+        executor = CollectionExecutorV2(
+            status_callback=_collection_step_status_callback,
+            is_cancelled_callback=_is_collection_task_cancelled,
+            verification_required_callback=_verification_callback,
+        )
+
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as p:
+            from modules.apps.collection_center.browser_config_helper import (
+                get_browser_launch_args,
+            )
+
+            browser = None
+            try:
+                if parallel_mode:
+                    browser = await p.chromium.launch(
+                        **get_browser_launch_args(
+                            debug_mode=debug_mode,
+                            execution_mode=execution_mode,
+                        )
+                    )
+                    logger.info(
+                        f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})"
+                    )
+                    result = await executor.execute_parallel_domains(
+                        task_id=task_id,
+                        platform=platform,
+                        account_id=account_id,
+                        account=account,
+                        data_domains=data_domains,
+                        date_range=date_range,
+                        granularity=granularity,
+                        browser=browser,
+                        browser_type=p.chromium,
+                        max_parallel=max_parallel,
+                        debug_mode=debug_mode,
+                        runtime_manifests=runtime_manifests,
+                    )
+                else:
+                    result = await executor.execute(
+                        task_id=task_id,
+                        platform=platform,
+                        account_id=account_id,
+                        account=account,
+                        data_domains=data_domains,
+                        sub_domains=sub_domains,
+                        date_range=date_range,
+                        granularity=granularity,
+                        browser=None,
+                        browser_type=p.chromium,
+                        debug_mode=debug_mode,
+                        runtime_manifests=runtime_manifests,
+                        session_runtime_mode="persistent_profile",
+                    )
+            finally:
+                if browser is not None:
+                    await browser.close()
+
+        await _persist_collection_task_result(task_id, result)
+        await connection_manager.send_complete(
+            task_id,
+            result.status,
+            files_collected=result.files_collected,
+            error_message=result.error_message,
+        )
+        logger.info(
+            f"Task {task_id} completed: {result.status}, files={result.files_collected}"
+        )
+
+    except Exception as e:
+        logger.exception(f"Background task {task_id} failed: {e}")
+
+        try:
+            failed_task = await _mark_collection_task_failed(
+                task_id,
+                error_message=str(e),
+            )
+            await connection_manager.send_complete(
+                task_id,
+                "failed",
+                files_collected=getattr(failed_task, "files_collected", 0) or 0,
+                error_message=str(e),
+            )
+        except Exception as db_error:
+            logger.error(f"Failed to update task status: {db_error}")
 
 
 async def _execute_collection_task_background(
@@ -1275,6 +1551,22 @@ async def _execute_collection_task_background(
     """
     后台执行采集任务(v4.7.0 + Phase 9.1)
     """
+    return await _execute_collection_task_background_v2(
+        task_id=task_id,
+        platform=platform,
+        account_id=account_id,
+        data_domains=data_domains,
+        sub_domains=sub_domains,
+        date_range=date_range,
+        granularity=granularity,
+        debug_mode=debug_mode,
+        parallel_mode=parallel_mode,
+        max_parallel=max_parallel,
+        execution_mode=execution_mode,
+        runtime_manifests=runtime_manifests,
+        app=app,
+    )
+
     from backend.models.database import AsyncSessionLocal
     from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 

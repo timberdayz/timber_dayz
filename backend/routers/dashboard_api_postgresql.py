@@ -28,6 +28,8 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard-postgresql"])
 _B_COST_ALLOWED_ROLES = {"admin", "manager", "finance"}
+_DASHBOARD_SINGLEFLIGHT_LOCK_TTL = 60
+_DASHBOARD_SINGLEFLIGHT_WAIT_TIMEOUT = 35.0
 
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
@@ -56,7 +58,13 @@ async def _resolve_cached_payload(
         cached = await cache_service.get(cache_type, **cache_params)
         if cached is not None:
             return cached, "HIT"
-        payload = await cache_service.get_or_set_singleflight(cache_type, producer, **cache_params)
+        payload = await cache_service.get_or_set_singleflight(
+            cache_type,
+            producer,
+            lock_ttl=_DASHBOARD_SINGLEFLIGHT_LOCK_TTL,
+            wait_timeout=_DASHBOARD_SINGLEFLIGHT_WAIT_TIMEOUT,
+            **cache_params,
+        )
         return payload, "MISS"
     payload = await producer()
     return payload, "BYPASS"

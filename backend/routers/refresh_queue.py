@@ -52,3 +52,41 @@ async def list_refresh_queue_tasks(
             detail=str(exc),
             status_code=500,
         )
+
+
+@router.post("/tasks/{task_id}/retry")
+async def retry_refresh_queue_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        service = RefreshQueueService(db)
+        row = await service.retry_failed_task(task_id)
+        return success_response(
+            data={
+                "id": row.id,
+                "job_id": row.job_id,
+                "status": row.status,
+                "attempt_count": row.attempt_count,
+                "last_error": row.last_error,
+            },
+            message="refresh queue 任务已重试",
+        )
+    except ValueError as exc:
+        return error_response(
+            code=ErrorCode.DATA_VALIDATION_FAILED,
+            message="重试 refresh queue 任务失败",
+            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+            detail=str(exc),
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error("[RefreshQueueAPI] 重试任务失败: %s", exc, exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="重试 refresh queue 任务失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            status_code=500,
+        )

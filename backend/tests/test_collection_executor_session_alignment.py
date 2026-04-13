@@ -129,6 +129,85 @@ async def test_shared_login_phase_skips_login_when_persistent_runtime_gate_is_re
     executor._execute_python_component.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_shared_login_phase_records_ready_gate_after_login_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._execute_python_component = AsyncMock(return_value=True)
+
+    page = type("Page", (), {"url": "https://seller.tiktok.com/homepage"})()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.probe_runtime_login_gate",
+        AsyncMock(
+            return_value=(
+                False,
+                GateResult(
+                    stage="login_gate",
+                    status=GateStatus.FAILED,
+                    reason="login form visible",
+                    current_url="https://seller.tiktok.com/account/login",
+                ),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.check_login_gate_ready",
+        AsyncMock(
+            return_value=(
+                True,
+                GateResult(
+                    stage="login_gate",
+                    status=GateStatus.READY,
+                    reason="login confirmed after refresh",
+                    current_url="https://seller.tiktok.com/homepage",
+                ),
+            )
+        ),
+    )
+
+    await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="tiktok",
+        account={"account_id": "acc-1", "login_url": "https://seller.tiktok.com"},
+        params={
+            "_runtime_session_mode": "persistent_profile",
+            "_actual_execution_mode": "headless",
+        },
+        context=type(
+            "Ctx",
+            (),
+            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        )(),
+        browser=object(),
+        play_context=object(),
+        page=page,
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="tiktok",
+        session_account_id="acc-1",
+        save_session_after_login=False,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    runtime_details = [
+        call.kwargs.get("details")
+        for call in executor._update_status.await_args_list
+        if call.kwargs.get("details")
+    ]
+    assert any(
+        details.get("step_id") == "login_gate_result"
+        and details.get("login_gate_ready") is True
+        and details.get("login_gate_reason") == "login confirmed after refresh"
+        for details in runtime_details
+    )
+
+
 def test_build_runtime_launch_kwargs_uses_headed_when_debug_mode_enabled() -> None:
     executor = CollectionExecutorV2()
 
@@ -136,3 +215,34 @@ def test_build_runtime_launch_kwargs_uses_headed_when_debug_mode_enabled() -> No
 
     assert launch_kwargs["headless"] is False
     assert "--start-maximized" in launch_kwargs["args"]
+
+
+def test_runtime_metadata_details_include_session_diagnostics() -> None:
+    details = CollectionExecutorV2._runtime_metadata_details(
+        params={
+            "_actual_execution_mode": "headless",
+            "_runtime_session_mode": "persistent_profile",
+            "_runtime_session_diagnostics": {
+                "session_owner_id": "main-1",
+                "shop_account_id": "shop-1",
+                "persistent_profile_path": "profiles/tiktok/main-1",
+                "profile_contains_state": True,
+                "probe_urls": [
+                    "https://seller.tiktok.com/homepage",
+                    "https://seller.tiktok.com/account/login",
+                ],
+            },
+        },
+        login_gate_ready=True,
+        login_gate_reason="login confirmed",
+        login_gate_url="https://seller.tiktok.com/homepage",
+    )
+
+    assert details["session_owner_id"] == "main-1"
+    assert details["shop_account_id"] == "shop-1"
+    assert details["persistent_profile_path"] == "profiles/tiktok/main-1"
+    assert details["profile_contains_state"] is True
+    assert details["probe_urls"] == [
+        "https://seller.tiktok.com/homepage",
+        "https://seller.tiktok.com/account/login",
+    ]

@@ -19,6 +19,15 @@ TERMINAL_TASK_STATUSES = {
 }
 
 ACTIVE_RUN_STATUSES = {"queued", "running"}
+RECOVERABLE_TASK_STATUSES = {
+    "pending",
+    "queued",
+    "running",
+    "paused",
+    "verification_required",
+    "verification_submitted",
+    "manual_intervention_required",
+}
 
 
 class CollectionConfigRunService:
@@ -132,10 +141,25 @@ class CollectionConfigRunService:
             return []
 
         now = datetime.now(timezone.utc)
+        run_ids = [run.id for run in runs]
+        tasks = (
+            await self.db.execute(
+                select(CollectionTask).where(
+                    CollectionTask.config_run_id.in_(run_ids),
+                    CollectionTask.status.in_(RECOVERABLE_TASK_STATUSES),
+                )
+            )
+        ).scalars().all()
+
         for run in runs:
             run.status = "failed"
             run.error_message = error_message
             run.completed_at = now
+
+        for task in tasks:
+            task.status = "failed"
+            task.error_message = error_message
+            task.completed_at = now
 
         await self.db.commit()
         for run in runs:

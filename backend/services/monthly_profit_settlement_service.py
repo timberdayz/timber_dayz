@@ -7,7 +7,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
-    EmployeeCommission,
     FollowInvestmentDetail,
     FollowInvestmentSettlement,
     MonthlyProfitAdjustment,
@@ -117,11 +116,6 @@ class MonthlyProfitSettlementService:
         return sum(self._to_float(row.profit_basis_amount) for row in rows)
 
     async def _load_personnel_payload(self, period_month: str) -> dict[str, Any]:
-        commission_rows = (
-            await self.db.execute(
-                select(EmployeeCommission).where(EmployeeCommission.year_month == period_month)
-            )
-        ).scalars().all()
         payroll_rows = (
             await self.db.execute(
                 select(PayrollRecord).where(PayrollRecord.year_month == period_month)
@@ -130,20 +124,6 @@ class MonthlyProfitSettlementService:
 
         details: list[dict[str, Any]] = []
         total = 0.0
-
-        for row in commission_rows:
-            amount = self._to_float(getattr(row, "commission_amount", 0))
-            total += amount
-            details.append(
-                {
-                    "detail_type": "shop_commission",
-                    "amount": amount,
-                    "employee_code": getattr(row, "employee_code", None),
-                    "source_module": "employee_commissions",
-                    "source_record_id": str(getattr(row, "id", "") or ""),
-                    "remark": None,
-                }
-            )
 
         for row in payroll_rows:
             amount = self._to_float(getattr(row, "total_cost", 0))

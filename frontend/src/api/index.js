@@ -1235,6 +1235,14 @@ export default {
     return await this._get('/data-sync/tasks', { params })
   },
 
+  async getRefreshQueueTasks(params = {}) {
+    return await this._get('/refresh-queue/tasks', { params })
+  },
+
+  async retryRefreshQueueTask(taskId) {
+    return await this._post(`/refresh-queue/tasks/${taskId}/retry`)
+  },
+
   async startSingleAutoIngest(
     fileId,
     onlyWithTemplate = true,

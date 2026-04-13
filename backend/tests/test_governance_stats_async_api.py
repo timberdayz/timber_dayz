@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 
-from modules.core.db import CatalogFile
+from modules.core.db import CatalogFile, FieldMappingTemplate
 
 
 @compiles(JSONB, "sqlite")
@@ -26,6 +26,7 @@ async def governance_client(monkeypatch):
     async with engine.begin() as conn:
         await conn.execute(text("ATTACH DATABASE ':memory:' AS core"))
         await conn.run_sync(CatalogFile.__table__.create)
+        await conn.run_sync(FieldMappingTemplate.__table__.create)
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -151,3 +152,95 @@ async def test_governance_missing_templates_counts_pending_files(governance_clie
             "file_count": 2,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_data_sync_governance_stats_reports_ready_update_required_and_missing_counts(governance_client, monkeypatch):
+    client, session_factory = governance_client
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        session.add(
+            FieldMappingTemplate(
+                platform="tiktok",
+                data_domain="products",
+                granularity="monthly",
+                sub_domain=None,
+                template_name="tiktok_products__monthly_v2",
+                version=2,
+                status="published",
+                header_row=2,
+                header_columns=["日期", "商品交易总额", "退款金额"],
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add_all(
+            [
+                CatalogFile(
+                    file_path="data/raw/2026/products-ready.xlsx",
+                    file_name="products-ready.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="products",
+                    granularity="monthly",
+                    status="pending",
+                    first_seen_at=now,
+                ),
+                CatalogFile(
+                    file_path="data/raw/2026/products-update.xlsx",
+                    file_name="products-update.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="products",
+                    granularity="monthly",
+                    status="pending",
+                    first_seen_at=now,
+                ),
+                CatalogFile(
+                    file_path="data/raw/2026/services-missing.xlsx",
+                    file_name="services-missing.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="services",
+                    granularity="daily",
+                    sub_domain="ai_assistant",
+                    status="pending",
+                    first_seen_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    async def _fake_readiness(self, file_id, use_template_header_row=True):
+        mapping = {
+            1: {"ready": True, "template_status": "ready", "should_auto_sync": True},
+            2: {"ready": False, "template_status": "update_required", "should_auto_sync": False},
+            3: {"ready": False, "template_status": "missing", "should_auto_sync": False},
+        }
+        row = mapping.get(file_id, {"ready": False, "template_status": "missing", "should_auto_sync": False})
+        return {
+            "file_id": file_id,
+            "file_name": f"file-{file_id}.xlsx",
+            "template_update_required": row["template_status"] == "update_required",
+            "update_reason": None,
+            **row,
+        }
+
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.DataSyncService.get_file_sync_readiness",
+        _fake_readiness,
+    )
+
+    response = await client.get("/api/data-sync/governance/stats")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["pending_count"] == 3
+    assert payload["data"]["ready_to_sync_count"] == 1
+    assert payload["data"]["template_update_required_count"] == 1
+    assert payload["data"]["missing_template_count"] == 1

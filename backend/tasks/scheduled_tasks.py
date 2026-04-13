@@ -276,6 +276,30 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
                     db_local = AsyncSessionLocal()
                     try:
                         sync_service = DataSyncService(db_local)
+                        readiness = await sync_service.get_file_sync_readiness(
+                            file_id,
+                            use_template_header_row=True,
+                        )
+                        if not readiness.get("should_auto_sync", True):
+                            template_status = readiness.get("template_status")
+                            if template_status == "update_required":
+                                return {
+                                    "success": False,
+                                    "file_id": file_id,
+                                    "file_name": readiness.get("file_name"),
+                                    "status": "skipped",
+                                    "error_code": "TEMPLATE_UPDATE_REQUIRED",
+                                    "message": readiness.get("update_reason") or "模板需要更新后再同步",
+                                }
+                            if template_status == "missing":
+                                return {
+                                    "success": False,
+                                    "file_id": file_id,
+                                    "file_name": readiness.get("file_name"),
+                                    "status": "skipped",
+                                    "error_code": "NO_TEMPLATE",
+                                    "message": readiness.get("message") or "无模板",
+                                }
                         result = await sync_service.sync_single_file(
                             file_id=file_id,
                             only_with_template=True,
@@ -340,6 +364,7 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
             "failed": 0,
             "skipped": 0,
             "skipped_no_template": 0,
+            "skipped_template_update": 0,
         }
 
         for item in results:
@@ -360,6 +385,8 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
                     or "无模板" in message
                 ):
                     summary["skipped_no_template"] += 1
+                if item.get("error_code") == "TEMPLATE_UPDATE_REQUIRED":
+                    summary["skipped_template_update"] += 1
 
         logger.info(
             "[AutoIngest] 定时任务完成: processed=%s, success=%s, quarantined=%s, failed=%s, skipped=%s",

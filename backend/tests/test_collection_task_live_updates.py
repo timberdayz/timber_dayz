@@ -207,6 +207,134 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
 
 
 @pytest.mark.asyncio
+async def test_execute_collection_task_background_retries_terminal_writeback_with_fresh_session(
+    monkeypatch,
+):
+    from backend.routers.collection_tasks import _execute_collection_task_background
+
+    task = _make_task(status="pending", progress=0, current_step=None)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+
+    start_session = MagicMock(name="start_session")
+    start_session.execute = AsyncMock(return_value=result)
+    start_session.commit = AsyncMock()
+
+    account_session = MagicMock(name="account_session")
+    account_session.execute = AsyncMock(return_value=result)
+    account_session.commit = AsyncMock()
+
+    failed_finalize_session = MagicMock(name="failed_finalize_session")
+    failed_finalize_session.execute = AsyncMock(return_value=result)
+    failed_finalize_session.commit = AsyncMock(
+        side_effect=RuntimeError("connection is closed")
+    )
+
+    successful_finalize_session = MagicMock(name="successful_finalize_session")
+    successful_finalize_session.execute = AsyncMock(return_value=result)
+    successful_finalize_session.commit = AsyncMock()
+
+    sessions = iter(
+        [
+            start_session,
+            account_session,
+            failed_finalize_session,
+            successful_finalize_session,
+        ]
+    )
+
+    class _DbSessionManager:
+        def __init__(self, session):
+            self._session = session
+
+        async def __aenter__(self):
+            return self._session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _ExecutorStub:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def execute(self, **kwargs):
+            return SimpleNamespace(
+                status="completed",
+                files_collected=3,
+                error_message=None,
+                duration_seconds=249,
+                completed_domains=["orders:shopee", "orders:tiktok", "inventory"],
+                failed_domains=[],
+            )
+
+    class _PlaywrightStub:
+        chromium = SimpleNamespace()
+
+    class _PlaywrightManager:
+        async def __aenter__(self):
+            return _PlaywrightStub()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    send_complete = AsyncMock()
+    mirror_task = AsyncMock()
+
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal",
+        lambda: _DbSessionManager(next(sessions)),
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task",
+        mirror_task,
+    )
+    monkeypatch.setattr(
+        "backend.services.account_loader_service.get_account_loader_service",
+        lambda: SimpleNamespace(
+            load_account_async=AsyncMock(return_value={"account_id": "acc-1"})
+        ),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.CollectionExecutorV2",
+        _ExecutorStub,
+    )
+    monkeypatch.setattr(
+        "playwright.async_api.async_playwright", lambda: _PlaywrightManager()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.connection_manager.send_complete",
+        send_complete,
+    )
+
+    await _execute_collection_task_background(
+        task_id=task.task_id,
+        platform=task.platform,
+        account_id=task.account,
+        data_domains=["orders", "inventory"],
+        sub_domains={"orders": ["shopee", "tiktok"]},
+        date_range={"start": "2026-03-01", "end": "2026-03-01"},
+        granularity="daily",
+        debug_mode=False,
+        execution_mode="headless",
+        parallel_mode=False,
+        max_parallel=1,
+        runtime_manifests={},
+        app=None,
+    )
+
+    assert start_session.commit.await_count == 1
+    assert account_session.commit.await_count == 0
+    assert failed_finalize_session.commit.await_count == 1
+    assert successful_finalize_session.commit.await_count == 1
+    send_complete.assert_awaited_once_with(
+        task.task_id,
+        "completed",
+        files_collected=3,
+        error_message=None,
+    )
+
+
+@pytest.mark.asyncio
 async def test_execute_collection_task_background_parallel_mode_still_launches_browser(
     monkeypatch,
 ):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import Select, select
@@ -100,6 +100,25 @@ class RefreshQueueService:
         await self.db.refresh(task)
         return task
 
+    async def recover_stale_running_tasks(self, *, timeout_seconds: int) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+        result = await self.db.execute(
+            select(RefreshQueueTask)
+            .where(
+                RefreshQueueTask.status == "running",
+                RefreshQueueTask.started_at.is_not(None),
+                RefreshQueueTask.started_at < cutoff,
+            )
+        )
+        rows = result.scalars().all()
+        for task in rows:
+            task.status = "failed"
+            task.last_error = "refresh queue task timed out while running"
+            task.finished_at = datetime.now(timezone.utc)
+        if rows:
+            await self.db.commit()
+        return len(rows)
+
     async def mark_completed(self, task_id: int) -> RefreshQueueTask:
         task = await self.db.get(RefreshQueueTask, task_id)
         if task is None:
@@ -131,6 +150,22 @@ class RefreshQueueService:
         stmt = stmt.limit(limit)
         result = await self.db.execute(stmt)
         return result.scalars().all()
+
+    async def retry_failed_task(self, task_id: int) -> RefreshQueueTask:
+        task = await self.db.get(RefreshQueueTask, task_id)
+        if task is None:
+            raise ValueError(f"refresh queue task {task_id} not found")
+        if task.status != "failed":
+            raise ValueError(f"refresh queue task {task_id} is not failed")
+
+        task.status = "pending"
+        task.attempt_count = 0
+        task.last_error = None
+        task.started_at = None
+        task.finished_at = None
+        await self.db.commit()
+        await self.db.refresh(task)
+        return task
 
     async def _get_pending_by_dedupe_key(self, dedupe_key: str) -> RefreshQueueTask | None:
         result = await self.db.execute(

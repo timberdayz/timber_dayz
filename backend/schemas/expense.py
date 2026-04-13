@@ -16,7 +16,7 @@ class ExpenseCreateRequest(BaseModel):
         ..., description="费用月份(YYYY-MM)", pattern=r"^\d{4}-\d{2}$"
     )
     rent: float = Field(0.0, ge=0, description="租金(CNY)")
-    salary: float = Field(0.0, ge=0, description="工资(CNY)")
+    marketing_fee: float = Field(0.0, ge=0, description="营销费用(CNY)")
     utilities: float = Field(0.0, ge=0, description="水电费(CNY)")
     other_costs: float = Field(0.0, ge=0, description="其他成本(CNY)")
 
@@ -25,7 +25,7 @@ class ExpenseUpdateRequest(BaseModel):
     """更新费用请求"""
 
     rent: Optional[float] = Field(None, ge=0)
-    salary: Optional[float] = Field(None, ge=0)
+    marketing_fee: Optional[float] = Field(None, ge=0)
     utilities: Optional[float] = Field(None, ge=0)
     other_costs: Optional[float] = Field(None, ge=0)
 
@@ -37,7 +37,7 @@ class ExpenseResponse(BaseModel):
     shop_id: str
     year_month: str
     rent: float
-    salary: float
+    marketing_fee: float
     utilities: float
     other_costs: float
     total: float
@@ -54,7 +54,7 @@ class ExpenseSummaryResponse(BaseModel):
     year_month: str
     shop_count: int
     total_rent: float
-    total_salary: float
+    total_marketing_fee: float
     total_utilities: float
     total_other_costs: float
     total_amount: float

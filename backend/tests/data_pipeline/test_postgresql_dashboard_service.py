@@ -444,6 +444,110 @@ async def test_postgresql_dashboard_service_operational_metrics_preserves_today_
     assert result["time_gap"] == -5
 
 
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_inventory_backlog_builds_from_snapshot_and_sales_queries(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        if "FROM mart.inventory_snapshot_latest" in query:
+            return [
+                {
+                    "snapshot_date": "2026-04-14",
+                    "platform_code": "shopee",
+                    "shop_id": "shop-a",
+                    "product_id": "P1",
+                    "product_name": "Alpha",
+                    "platform_sku": "SKU-1",
+                    "product_sku": "PSKU-1",
+                    "warehouse_name": "WH-1",
+                    "available_stock": 100,
+                    "on_hand_stock": 120,
+                    "inventory_value": 300,
+                },
+                {
+                    "snapshot_date": "2026-04-14",
+                    "platform_code": "shopee",
+                    "shop_id": "shop-a",
+                    "product_id": "P2",
+                    "product_name": "Beta",
+                    "platform_sku": "SKU-2",
+                    "product_sku": "PSKU-2",
+                    "warehouse_name": "WH-1",
+                    "available_stock": 10,
+                    "on_hand_stock": 12,
+                    "inventory_value": 100,
+                },
+            ]
+        if "FROM mart.inventory_snapshot_change" in query:
+            return [
+                {
+                    "platform_code": "shopee",
+                    "shop_id": "shop-a",
+                    "platform_sku": "SKU-1",
+                    "product_sku": "PSKU-1",
+                    "warehouse_name": "WH-1",
+                    "stock_delta": -5,
+                    "inventory_value_delta": -50,
+                    "is_stagnant": True,
+                    "snapshot_gap_days": 7,
+                    "estimated_stagnant_days": 7,
+                    "stagnant_snapshot_count": 1,
+                }
+            ]
+        if "FROM semantic.fact_orders_atomic" in query:
+            return [
+                {
+                    "platform_code": "shopee",
+                    "shop_id": "shop-a",
+                    "platform_sku": "SKU-1",
+                    "product_sku": "PSKU-1",
+                    "sold_units_30d": 60,
+                    "active_days_30d": 30,
+                }
+            ]
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    result = await service.get_business_overview_inventory_backlog(min_days=45)
+
+    assert len(captured) == 3
+    assert all("api.business_overview_inventory_backlog_module" not in query for query, _ in captured)
+    assert all("api.inventory_backlog_summary_module" not in query for query, _ in captured)
+    assert any("FROM mart.inventory_snapshot_latest" in query for query, _ in captured)
+    assert any("FROM mart.inventory_snapshot_change" in query for query, _ in captured)
+    assert any("FROM semantic.fact_orders_atomic" in query for query, _ in captured)
+
+    sales_query, sales_params = next((query, params) for query, params in captured if "FROM semantic.fact_orders_atomic" in query)
+    assert "metric_date::date >= CURRENT_DATE - INTERVAL '30 days'" in sales_query
+    assert "GROUP BY platform_code, shop_id, platform_sku, product_sku" in sales_query
+    assert sales_params == {}
+
+    assert result["summary"] == {
+        "total_value": 400.0,
+        "backlog_30d_value": 400.0,
+        "backlog_60d_value": 100.0,
+        "backlog_90d_value": 100.0,
+        "backlog_30d_ratio": 100.0,
+        "backlog_60d_ratio": 25.0,
+        "backlog_90d_ratio": 25.0,
+        "total_quantity": 110,
+        "high_risk_sku_count": 1,
+        "medium_risk_sku_count": 1,
+        "low_risk_sku_count": 0,
+    }
+    assert [row["platform_sku"] for row in result["top_products"]] == ["SKU-2", "SKU-1"]
+    assert result["top_products"][0]["rank"] == 1
+    assert result["top_products"][0]["risk_level"] == "high"
+    assert result["top_products"][1]["daily_avg_sales"] == 2.0
+    assert result["top_products"][1]["estimated_turnover_days"] == 50.0
+    assert result["top_products"][1]["stock_delta"] == -5.0
+    assert result["top_products"][1]["inventory_value_delta"] == -50.0
+    assert result["top_products"][1]["estimated_stagnant_days"] == 7.0
+    assert result["top_products"][1]["stagnant_snapshot_count"] == 1
+
+
 @pytest.mark.pg_only
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_comparison_loads_total_month_target_when_rows_have_none(monkeypatch):

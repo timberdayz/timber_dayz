@@ -10,12 +10,21 @@ from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS = 10 * 60
 
 
 async def _async_process_refresh_queue_task() -> dict:
     db = AsyncSessionLocal()
     try:
         queue_service = RefreshQueueService(db)
+        recovered_count = await queue_service.recover_stale_running_tasks(
+            timeout_seconds=REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS
+        )
+        if recovered_count:
+            logger.warning(
+                "[RefreshQueue] recovered %s stale running refresh tasks",
+                recovered_count,
+            )
         task = await queue_service.claim_next_refresh_task()
         if task is None:
             return {"status": "skipped", "reason": "no_pending_refresh_queue_task"}

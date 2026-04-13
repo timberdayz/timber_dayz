@@ -254,3 +254,77 @@ async def test_on_verification_required_marks_manual_continue_types_as_manual_in
     assert value is None
     assert task.status == "manual_intervention_required"
     assert task.current_step == "等待人工处理"
+
+
+@pytest.mark.asyncio
+async def test_on_verification_required_stops_waiting_when_task_cancelled(monkeypatch):
+    from backend.routers.collection_tasks import _on_verification_required
+
+    task = _make_task(status="running")
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock()
+    session.add = MagicMock()
+
+    class _SessionManager:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeLoop:
+        def __init__(self):
+            self.now = 0.0
+
+        def time(self):
+            return self.now
+
+    fake_loop = _FakeLoop()
+
+    async def _fake_sleep(seconds):
+        fake_loop.now += seconds
+
+    redis = MagicMock()
+    redis.delete = AsyncMock()
+    get_calls = {"count": 0}
+
+    async def _fake_get(_key):
+        get_calls["count"] += 1
+        if get_calls["count"] == 1:
+            task.status = "cancelled"
+        return None
+
+    redis.get = AsyncMock(side_effect=_fake_get)
+
+    mirror_task = AsyncMock()
+    broadcast = AsyncMock()
+
+    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _SessionManager())
+    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", mirror_task)
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.connection_manager.send_verification_required",
+        broadcast,
+    )
+    monkeypatch.setattr("backend.routers.collection_tasks.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.asyncio.get_running_loop",
+        lambda: fake_loop,
+    )
+    monkeypatch.setattr("backend.routers.collection_tasks.VERIFICATION_WAIT_TIMEOUT", 0.3)
+    monkeypatch.setattr("backend.routers.collection_tasks.VERIFICATION_POLL_INTERVAL", 0.1)
+
+    app = SimpleNamespace(state=SimpleNamespace(redis=redis))
+    value = await _on_verification_required(
+        task_id="task-1",
+        verification_type="graphical_captcha",
+        screenshot_path="temp/task.png",
+        app=app,
+    )
+
+    assert value is None
+    assert get_calls["count"] == 1

@@ -2,7 +2,7 @@
   <div class="expense-management erp-page-container erp-page--admin">
     <PageHeader
       title="费用管理"
-      subtitle="按月份或按店铺维护费用数据，保留现有双视图业务逻辑。"
+      subtitle="按月份或按店铺维护费用数据。该模块中的相关费用列统一表示营销费用，不再作为员工工资录入入口。"
       family="admin"
     />
 
@@ -102,9 +102,9 @@
         <el-col :span="4">
           <el-card>
             <div class="stat-item">
-              <div class="stat-label">本月工资</div>
+              <div class="stat-label">本月营销费用</div>
               <div class="stat-value">
-                ¥{{ formatNumber(monthlySummary.total_salary) }}
+                ¥{{ formatNumber(monthlySummary.total_marketing_fee) }}
               </div>
             </div>
           </el-card>
@@ -195,14 +195,14 @@
             </template>
           </el-table-column>
           <el-table-column
-            prop="salary"
-            label="工资(¥)"
+            prop="marketing_fee"
+            label="营销费用(¥)"
             width="130"
             align="right"
           >
             <template #default="{ row }">
               <el-input-number
-                v-model="row.salary"
+                v-model="row.marketing_fee"
                 :min="0"
                 :precision="2"
                 :controls="false"
@@ -363,9 +363,9 @@
         <el-col :span="4">
           <el-card>
             <div class="stat-item">
-              <div class="stat-label">年度工资</div>
+              <div class="stat-label">年度营销费用</div>
               <div class="stat-value">
-                ¥{{ formatNumber(shopSummary.total_salary) }}
+                ¥{{ formatNumber(shopSummary.total_marketing_fee) }}
               </div>
             </div>
           </el-card>
@@ -438,14 +438,14 @@
             </template>
           </el-table-column>
           <el-table-column
-            prop="salary"
-            label="工资(¥)"
+            prop="marketing_fee"
+            label="营销费用(¥)"
             width="130"
             align="right"
           >
             <template #default="{ row }">
               <el-input-number
-                v-model="row.salary"
+                v-model="row.marketing_fee"
                 :min="0"
                 :precision="2"
                 :controls="false"
@@ -569,7 +569,7 @@ const batchSaving = ref(false)
 const monthlySummary = reactive({
   total_amount: 0,
   total_rent: 0,
-  total_salary: 0,
+  total_marketing_fee: 0,
   total_utilities: 0,
   total_other: 0
 })
@@ -578,7 +578,7 @@ const monthlySummary = reactive({
 const yearlySummary = reactive({
   total_amount: 0,
   total_rent: 0,
-  total_salary: 0,
+  total_marketing_fee: 0,
   total_utilities: 0,
   total_other_costs: 0
 })
@@ -592,7 +592,7 @@ const shopTableData = ref([])
 const shopSummary = reactive({
   total_amount: 0,
   total_rent: 0,
-  total_salary: 0,
+  total_marketing_fee: 0,
   total_utilities: 0,
   total_other_costs: 0,
   month_count: 0
@@ -609,6 +609,14 @@ const taskContext = reactive({
 const formatNumber = (num) => {
   if (num === null || num === undefined) return '0.00'
   return Number(num).toFixed(2)
+}
+
+const normalizeExpenseRow = (item = {}) => {
+  const marketingFee = Number(item.marketing_fee) || 0
+  return {
+    ...item,
+    marketing_fee: marketingFee
+  }
 }
 
 const initTaskContext = () => {
@@ -695,7 +703,7 @@ const loadMonthlyExpenses = async () => {
         shop_name: shop.shop_name,
         year_month: selectedMonth.value,
         rent: 0,
-        salary: 0,
+        marketing_fee: 0,
         utilities: 0,
         other_costs: 0,
         total: 0,
@@ -707,7 +715,7 @@ const loadMonthlyExpenses = async () => {
       ...existingData
         .filter((item) => item.year_month === selectedMonth.value)
         .map((item) => ({
-          ...item,
+          ...normalizeExpenseRow(item),
           shop_name:
             availableShops.value.find((s) => s.shop_id === item.shop_id)
               ?.shop_name || item.shop_id,
@@ -723,7 +731,7 @@ const loadMonthlyExpenses = async () => {
     if (yearlyRes) {
       yearlySummary.total_amount = yearlyRes.total_amount || 0
       yearlySummary.total_rent = yearlyRes.total_rent || 0
-      yearlySummary.total_salary = yearlyRes.total_salary || 0
+      yearlySummary.total_marketing_fee = yearlyRes.total_marketing_fee || 0
       yearlySummary.total_utilities = yearlyRes.total_utilities || 0
       yearlySummary.total_other_costs = yearlyRes.total_other_costs || 0
     }
@@ -745,7 +753,7 @@ const loadMonthlyExpenses = async () => {
 const calculateMonthlySummary = () => {
   monthlySummary.total_amount = 0
   monthlySummary.total_rent = 0
-  monthlySummary.total_salary = 0
+  monthlySummary.total_marketing_fee = 0
   monthlySummary.total_utilities = 0
   monthlySummary.total_other = 0
 
@@ -755,7 +763,7 @@ const calculateMonthlySummary = () => {
     .forEach((item) => {
       monthlySummary.total_amount += Number(item.total) || 0
       monthlySummary.total_rent += Number(item.rent) || 0
-      monthlySummary.total_salary += Number(item.salary) || 0
+      monthlySummary.total_marketing_fee += Number(item.marketing_fee) || 0
       monthlySummary.total_utilities += Number(item.utilities) || 0
       monthlySummary.total_other += Number(item.other_costs) || 0
     })
@@ -765,7 +773,7 @@ const calculateMonthlySummary = () => {
 const updateRowTotal = (row) => {
   row.total =
     (Number(row.rent) || 0) +
-    (Number(row.salary) || 0) +
+    (Number(row.marketing_fee) || 0) +
     (Number(row.utilities) || 0) +
     (Number(row.other_costs) || 0)
   calculateMonthlySummary()
@@ -807,7 +815,7 @@ const handleAddAllShops = () => {
       shop_name: shop.shop_name,
       year_month: selectedMonth.value,
       rent: 0,
-      salary: 0,
+      marketing_fee: 0,
       utilities: 0,
       other_costs: 0,
       total: 0,
@@ -841,7 +849,7 @@ const handleSaveRow = async (row) => {
       shop_id: row.shop_id,
       year_month: selectedMonth.value,
       rent: Number(row.rent) || 0,
-      salary: Number(row.salary) || 0,
+      marketing_fee: Number(row.marketing_fee) || 0,
       utilities: Number(row.utilities) || 0,
       other_costs: Number(row.other_costs) || 0
     }
@@ -895,7 +903,7 @@ const handleBatchSave = async () => {
     (row) =>
       row.shop_id &&
       (row.rent > 0 ||
-        row.salary > 0 ||
+        row.marketing_fee > 0 ||
         row.utilities > 0 ||
         row.other_costs > 0)
   )
@@ -922,7 +930,7 @@ const handleBatchSave = async () => {
           shop_id: row.shop_id,
           year_month: selectedMonth.value,
           rent: Number(row.rent) || 0,
-          salary: Number(row.salary) || 0,
+          marketing_fee: Number(row.marketing_fee) || 0,
           utilities: Number(row.utilities) || 0,
           other_costs: Number(row.other_costs) || 0
         }
@@ -983,7 +991,7 @@ const loadShopExpenses = async () => {
 
     // 处理数据
     shopTableData.value = (res.items || []).map((item) => ({
-      ...item,
+      ...normalizeExpenseRow(item),
       saving: false
     }))
 
@@ -991,7 +999,7 @@ const loadShopExpenses = async () => {
     if (res.summary) {
       shopSummary.total_amount = res.summary.total_amount || 0
       shopSummary.total_rent = res.summary.total_rent || 0
-      shopSummary.total_salary = res.summary.total_salary || 0
+      shopSummary.total_marketing_fee = res.summary.total_marketing_fee || 0
       shopSummary.total_utilities = res.summary.total_utilities || 0
       shopSummary.total_other_costs = res.summary.total_other_costs || 0
       shopSummary.month_count = res.summary.month_count || 0
@@ -1010,7 +1018,7 @@ const loadShopExpenses = async () => {
 const resetShopSummary = () => {
   shopSummary.total_amount = 0
   shopSummary.total_rent = 0
-  shopSummary.total_salary = 0
+  shopSummary.total_marketing_fee = 0
   shopSummary.total_utilities = 0
   shopSummary.total_other_costs = 0
   shopSummary.month_count = 0
@@ -1020,7 +1028,7 @@ const resetShopSummary = () => {
 const updateShopRowTotal = (row) => {
   row.total =
     (Number(row.rent) || 0) +
-    (Number(row.salary) || 0) +
+    (Number(row.marketing_fee) || 0) +
     (Number(row.utilities) || 0) +
     (Number(row.other_costs) || 0)
 }
@@ -1037,7 +1045,7 @@ const handleAddMonthRow = () => {
     shop_id: selectedShopId.value,
     year_month: '',
     rent: 0,
-    salary: 0,
+    marketing_fee: 0,
     utilities: 0,
     other_costs: 0,
     total: 0,
@@ -1058,7 +1066,7 @@ const handleSaveShopRow = async (row) => {
       shop_id: selectedShopId.value,
       year_month: row.year_month,
       rent: Number(row.rent) || 0,
-      salary: Number(row.salary) || 0,
+      marketing_fee: Number(row.marketing_fee) || 0,
       utilities: Number(row.utilities) || 0,
       other_costs: Number(row.other_costs) || 0
     }

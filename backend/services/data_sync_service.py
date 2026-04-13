@@ -166,6 +166,136 @@ class DataSyncService:
             if message:
                 auto_meta["last_reason"] = message
         self._save_auto_meta(catalog_file, meta, auto_meta)
+
+    @staticmethod
+    def _format_header_change_reason(header_changes: Dict[str, Any]) -> str:
+        added_fields = header_changes.get("added_fields", []) or []
+        removed_fields = header_changes.get("removed_fields", []) or []
+        match_rate = header_changes.get("match_rate", 0) or 0
+
+        if added_fields or removed_fields:
+            return f"新增{len(added_fields)}个字段, 删除{len(removed_fields)}个字段 (匹配率: {match_rate:.1f}%)"
+        return f"字段顺序变化 (匹配率: {match_rate:.1f}%)"
+
+    async def evaluate_catalog_file_template_status(
+        self,
+        catalog_file: CatalogFile,
+        *,
+        template=None,
+        use_template_header_row: bool = True,
+    ) -> Dict[str, Any]:
+        normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
+        template = template or await self.template_matcher.find_best_template(
+            platform=catalog_file.platform_code,
+            data_domain=catalog_file.data_domain,
+            granularity=catalog_file.granularity,
+            sub_domain=normalized_sub_domain,
+        )
+
+        if not template:
+            return {
+                "template_status": "missing",
+                "has_template": False,
+                "template_name": None,
+                "template_header_row": None,
+                "template_update_required": False,
+                "update_reason": None,
+                "error_code": "NO_TEMPLATE",
+                "should_auto_sync": False,
+            }
+
+        if not getattr(template, "header_columns", None):
+            return {
+                "template_status": "ready",
+                "has_template": True,
+                "template_name": template.template_name,
+                "template_header_row": getattr(template, "header_row", None),
+                "template_update_required": False,
+                "update_reason": None,
+                "error_code": None,
+                "should_auto_sync": True,
+            }
+
+        try:
+            file_path = self._safe_resolve_path(catalog_file.file_path)
+            loop = asyncio.get_running_loop()
+            file_exists = await loop.run_in_executor(None, lambda: Path(file_path).exists())
+            if not file_exists:
+                raise FileNotFoundError(file_path)
+
+            header_row = 0
+            if use_template_header_row and getattr(template, "header_row", None) is not None:
+                header_row = template.header_row
+
+            executor_manager = get_executor_manager()
+            df = await executor_manager.run_cpu_intensive(
+                ExcelParser.read_excel,
+                file_path,
+                header=header_row,
+                nrows=1,
+            )
+            current_columns = df.columns.tolist()
+            header_changes = await self.template_matcher.detect_header_changes(
+                template_id=template.id,
+                current_columns=current_columns,
+            )
+
+            if header_changes.get("detected") and not header_changes.get("is_exact_match", False):
+                return {
+                    "template_status": "update_required",
+                    "has_template": True,
+                    "template_name": template.template_name,
+                    "template_header_row": getattr(template, "header_row", None),
+                    "template_update_required": True,
+                    "update_reason": self._format_header_change_reason(header_changes),
+                    "error_code": "HEADER_CHANGED",
+                    "header_changes": header_changes,
+                    "should_auto_sync": False,
+                }
+        except Exception as exc:
+            logger.warning(
+                "[DataSync] evaluate template status failed for %s: %s",
+                catalog_file.file_name,
+                exc,
+            )
+
+        return {
+            "template_status": "ready",
+            "has_template": True,
+            "template_name": template.template_name,
+            "template_header_row": getattr(template, "header_row", None),
+            "template_update_required": False,
+            "update_reason": None,
+            "error_code": None,
+            "should_auto_sync": True,
+        }
+
+    async def get_file_sync_readiness(
+        self,
+        file_id: int,
+        *,
+        use_template_header_row: bool = True,
+    ) -> Dict[str, Any]:
+        result = await self.db.execute(select(CatalogFile).where(CatalogFile.id == file_id))
+        catalog_file = result.scalar_one_or_none()
+        if not catalog_file:
+            return {
+                "ready": False,
+                "template_status": "missing",
+                "message": "文件不存在",
+                "should_auto_sync": False,
+            }
+
+        template_status = await self.evaluate_catalog_file_template_status(
+            catalog_file,
+            use_template_header_row=use_template_header_row,
+        )
+        return {
+            "ready": template_status["template_status"] == "ready",
+            **template_status,
+            "file_id": catalog_file.id,
+            "file_name": catalog_file.file_name,
+        }
     
     async def sync_single_file(
         self,

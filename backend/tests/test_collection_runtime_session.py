@@ -296,3 +296,35 @@ async def test_probe_runtime_login_gate_checks_homepage_after_current_page_miss(
     assert ready is True
     assert gate_result.reason == "homepage probe confirmed"
     assert page.goto_calls == ["https://seller.tiktok.com/homepage"]
+
+
+@pytest.mark.asyncio
+async def test_check_login_gate_ready_accepts_miaoshou_root_shell_cookie_backed_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DetectorResult:
+        status = type("Status", (), {"value": "logged_in"})()
+        confidence = 0.65
+        matched_pattern = "JSESSIONID"
+        detected_by = "cookie"
+
+    class _Detector:
+        def __init__(self, platform: str, debug: bool = False):
+            self.platform = platform
+
+        async def detect(self, page, wait_for_redirect: bool = True):
+            return _DetectorResult()
+
+    monkeypatch.setattr(
+        "modules.utils.login_status_detector.LoginStatusDetector",
+        _Detector,
+    )
+
+    ok, gate_result = await check_login_gate_ready(
+        page=type("Page", (), {"url": "https://erp.91miaoshou.com/"})(),
+        platform="miaoshou",
+    )
+
+    assert ok is True
+    assert gate_result.status is GateStatus.READY
+    assert gate_result.reason == "login confirmed"

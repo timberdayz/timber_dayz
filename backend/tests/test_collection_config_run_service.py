@@ -226,6 +226,27 @@ async def test_mark_running_runs_failed_marks_only_active_running_runs(config_ru
     service = CollectionConfigRunService(config_run_session)
     running_run, _ = await service.enqueue_config_run(config, trigger_type="scheduled")
     await service.claim_next_queued_run()
+    config_run_session.add(
+        CollectionTask(
+            task_id="stale-verification-task",
+            config_id=config.id,
+            config_run_id=running_run.id,
+            platform=config.platform,
+            account="shop-sg-1",
+            status="verification_submitted",
+            progress=50,
+            trigger_type="scheduled",
+            data_domains=["orders"],
+            sub_domains=None,
+            granularity="daily",
+            date_range={"start_date": "2026-04-09", "end_date": "2026-04-09"},
+            total_domains=1,
+            completed_domains=[],
+            failed_domains=[],
+            current_domain="orders",
+            debug_mode=False,
+        )
+    )
     queued_run = CollectionConfigRun(
         run_id="queued-run",
         config_id=config.id,
@@ -259,6 +280,15 @@ async def test_mark_running_runs_failed_marks_only_active_running_runs(config_ru
 
     refreshed_queued = await service._get_run(queued_run.id)
     assert refreshed_queued.status == "queued"
+
+    recovered_task = (
+        await config_run_session.execute(
+            select(CollectionTask).where(CollectionTask.task_id == "stale-verification-task")
+        )
+    ).scalar_one()
+    assert recovered_task.status == "failed"
+    assert recovered_task.completed_at is not None
+    assert recovered_task.error_message == "service restarted before config run completed"
 
 
 @pytest.mark.asyncio

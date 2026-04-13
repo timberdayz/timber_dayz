@@ -42,6 +42,7 @@ export const menuGroups = [
       '/data-sync/tasks',        // 数据同步 - 同步任务
       '/data-sync/history',      // 数据同步 - 同步历史
       '/data-sync/templates',    // 数据同步 - 模板管理
+      '/data-sync/refresh-queue', // 数据同步 - 刷新队列
       '/data-quarantine',        // 数据隔离区
       // ⚠️ v4.12.0移除：数据浏览器功能已移除
       // '/data-browser',           // 数据浏览器
@@ -262,6 +263,7 @@ export const routeDisplayNames = {
   '/data-sync/tasks': '同步任务',
   '/data-sync/history': '同步历史',
   '/data-sync/templates': '模板管理',
+  '/data-sync/refresh-queue': '刷新队列',
   // ⭐ Phase 8.1新增：组件录制工具
   '/component-recorder': '组件录制工具',
   // ⭐ Phase 9.4新增：组件版本管理

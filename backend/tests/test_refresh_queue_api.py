@@ -82,3 +82,32 @@ async def test_refresh_queue_api_lists_tasks_and_filters_by_status(refresh_queue
     assert failed_payload["success"] is True
     assert len(failed_payload["data"]) == 1
     assert failed_payload["data"][0]["job_id"] == "job-failed"
+
+
+@pytest.mark.asyncio
+async def test_refresh_queue_api_can_retry_failed_task(refresh_queue_client):
+    client, session_factory = refresh_queue_client
+
+    async with session_factory() as session:
+        session.add(
+            RefreshQueueTask(
+                job_id="job-retry",
+                trigger_type="data_ingested",
+                pipeline_name="data_ingested_refresh",
+                dedupe_key="retry-key",
+                targets_json=["semantic.fact_services_atomic"],
+                context_json={"file_id": 9},
+                status="failed",
+                attempt_count=2,
+                last_error="boom",
+            )
+        )
+        await session.commit()
+
+    response = await client.post("/api/refresh-queue/tasks/1/retry")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["status"] == "pending"
+    assert payload["data"]["attempt_count"] == 0
+    assert payload["data"]["last_error"] is None

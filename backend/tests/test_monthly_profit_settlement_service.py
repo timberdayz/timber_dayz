@@ -242,6 +242,32 @@ async def test_load_follow_payload_preserves_zero_approved_income():
 
 
 @pytest.mark.asyncio
+async def test_load_personnel_payload_uses_only_payroll_total_cost():
+    module = _load_service_module()
+    db = _make_db()
+    service = module.MonthlyProfitSettlementService(db)
+
+    payroll_rows = [
+        SimpleNamespace(id=10, employee_code="EMP001", total_cost=26000.0),
+    ]
+    db.execute = AsyncMock(return_value=_ScalarResult(payroll_rows))
+
+    payload = await service._load_personnel_payload("2026-04")
+
+    assert payload["actual_amount"] == pytest.approx(26000.0)
+    assert payload["details"] == [
+        {
+            "detail_type": "payroll_total_cost",
+            "amount": 26000.0,
+            "employee_code": "EMP001",
+            "source_module": "payroll_records",
+            "source_record_id": "10",
+            "remark": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_approve_rejects_duplicate_approval():
     module = _load_service_module()
     db = _make_db()

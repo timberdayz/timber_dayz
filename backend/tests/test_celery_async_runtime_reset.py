@@ -81,3 +81,67 @@ def test_sync_single_file_task_resets_async_engine_before_asyncio_run(monkeypatc
 
     assert result["success"] is True
     assert calls[:2] == ["reset", "run"]
+
+
+def test_auto_ingest_pending_files_skips_template_update_required(monkeypatch):
+    from backend.tasks import scheduled_tasks as scheduled_module
+    original_asyncio_run = asyncio.run
+
+    class _FakeScalarResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [101]
+
+    class _FakeSession:
+        def execute(self, _stmt):
+            return _FakeScalarResult()
+
+        def close(self):
+            return None
+
+    class _FakeAsyncSession:
+        async def rollback(self):
+            return None
+
+        async def close(self):
+            return None
+
+    class _FakeDataSyncService:
+        def __init__(self, db):
+            self.db = db
+
+        async def get_file_sync_readiness(self, file_id, use_template_header_row=True):
+            return {
+                "ready": False,
+                "file_id": file_id,
+                "file_name": "sample.xlsx",
+                "template_status": "update_required",
+                "should_auto_sync": False,
+                "update_reason": "新增3个字段, 删除2个字段 (匹配率: 61.5%)",
+            }
+
+        async def sync_single_file(self, *args, **kwargs):
+            raise AssertionError("sync_single_file should not run when template update is required")
+
+    monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
+    monkeypatch.setattr(
+        scheduled_module,
+        "reset_async_engine_pool_for_new_loop",
+        lambda: None,
+        raising=False,
+    )
+    monkeypatch.setattr("backend.services.data_sync_service.DataSyncService", _FakeDataSyncService)
+    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
+
+    def _fake_async_run(coro):
+        return original_asyncio_run(coro)
+
+    monkeypatch.setattr(scheduled_module.asyncio, "run", _fake_async_run)
+
+    result = scheduled_module.auto_ingest_pending_files(max_files=1)
+
+    assert result["status"] == "success"
+    assert result["summary"]["skipped"] == 1
+    assert result["summary"]["skipped_template_update"] == 1

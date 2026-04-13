@@ -260,7 +260,7 @@ VITE_SUPERSET_URL=http://localhost:8088
 |------|------|------|
 | `sales_targets` | ✅ 已创建 | id, shop_id, year_month, target_sales_amount, target_order_count, created_at, created_by |
 | `campaign_targets` | ✅ 已创建 | id, platform_code, campaign_name, campaign_type, start_date, end_date, target_gmv, target_roi, budget_amount, created_at, created_by |
-| `operating_costs` | ⚠️ 动态创建 | id, shop_id, year_month, rent, salary, marketing, logistics, utilities, other, created_at, created_by |
+| `operating_costs` | ⚠️ 动态创建 | id, shop_id, year_month, rent, salary(业务语义：marketing_fee), marketing, logistics, utilities, other, created_at, created_by |
 
 **注意**: `operating_costs`表会在首次POST请求时自动创建（如果不存在）。
 

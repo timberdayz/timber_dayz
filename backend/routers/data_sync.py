@@ -322,6 +322,7 @@ async def list_files(
         
         # 3. 检查模板匹配状态
         template_matcher = get_template_matcher(db)
+        data_sync_service = DataSyncService(db)
         file_list = []
         
         # [*] v4.18.2修复:在循环外获取事件循环,避免重复获取
@@ -381,6 +382,11 @@ async def list_files(
                 except Exception as e:
                     logger.warning(f"[DataSync Files] 获取文件大小失败: {file_path_str}, 错误: {e}")
             
+            template_status_info = await data_sync_service.evaluate_catalog_file_template_status(
+                file_record,
+                template=template,
+            )
+
             file_list.append({
                 "id": file_record.id,
                 "file_name": file_record.file_name,
@@ -391,9 +397,12 @@ async def list_files(
                 "file_size": file_size,
                 "file_path": str(resolved_path),  # [*] 新增:返回解析后的文件路径(用于调试)
                 "collected_at": file_record.first_seen_at.isoformat() if file_record.first_seen_at else None,
-                "has_template": template is not None,
-                "template_name": template.template_name if template else None,
-                "template_header_row": template.header_row if template and hasattr(template, 'header_row') else None,  # [*] 新增:模板表头行
+                "has_template": template_status_info["has_template"],
+                "template_status": template_status_info["template_status"],
+                "template_update_required": template_status_info["template_update_required"],
+                "update_reason": template_status_info["update_reason"],
+                "template_name": template_status_info["template_name"],
+                "template_header_row": template_status_info["template_header_row"],
                 "status": file_record.status
             })
         
@@ -2227,6 +2236,28 @@ async def get_governance_stats(
             select(func.count(CatalogFile.id)).where(CatalogFile.status == 'pending')
         )
         pending_count = pending_result.scalar() or 0
+
+        pending_files_result = await db.execute(
+            select(CatalogFile.id).where(CatalogFile.status == 'pending')
+        )
+        pending_file_ids = pending_files_result.scalars().all()
+        ready_to_sync_count = 0
+        template_update_required_count = 0
+        missing_template_count = 0
+        data_sync_service = DataSyncService(db)
+
+        for file_id in pending_file_ids:
+            readiness = await data_sync_service.get_file_sync_readiness(
+                file_id,
+                use_template_header_row=True,
+            )
+            template_status = readiness.get("template_status")
+            if template_status == "ready":
+                ready_to_sync_count += 1
+            elif template_status == "update_required":
+                template_update_required_count += 1
+            elif template_status == "missing":
+                missing_template_count += 1
         
         # 统计已同步文件(status='ingested')
         ingested_result = await db.execute(
@@ -2260,7 +2291,10 @@ async def get_governance_stats(
                 "ingested_count": ingested_count,
                 "failed_count": failed_count,  # 仅failed状态的文件数
                 "total_count": total_count,  # [*] v4.18.1修复:总文件数从数据库查询
-                "status_counts": status_counts  # [*] 各状态的详细数量
+                "status_counts": status_counts,  # [*] 各状态的详细数量
+                "ready_to_sync_count": ready_to_sync_count,
+                "template_update_required_count": template_update_required_count,
+                "missing_template_count": missing_template_count,
             },
             message="数据治理统计查询成功"
         )
@@ -2296,27 +2330,22 @@ async def sync_all_with_template(
     v4.18.2修复:使用 asyncio.create_task() 替代 BackgroundTasks,避免阻塞事件循环
     """
     try:
-        from backend.services.template_matcher import get_template_matcher
-        
         # 1. 查询所有待同步文件([*] v4.18.2:使用 await)
         result = await db.execute(
             select(CatalogFile).where(CatalogFile.status == 'pending')
         )
         pending_files = result.scalars().all()
         
-        # 2. 筛选有模板的文件
-        template_matcher = get_template_matcher(db)
+        # 2. 筛选真正可同步的文件(有模板且模板无需更新)
+        data_sync_service = DataSyncService(db)
         files_with_template = []
         
         for file_record in pending_files:
-            # [*] v4.18.2:添加 await
-            template = await template_matcher.find_best_template(
-                platform=file_record.platform_code or "",
-                data_domain=file_record.data_domain or "",
-                granularity=file_record.granularity or "",
-                sub_domain=file_record.sub_domain
+            readiness = await data_sync_service.get_file_sync_readiness(
+                file_record.id,
+                use_template_header_row=True,
             )
-            if template:
+            if readiness.get("should_auto_sync"):
                 files_with_template.append(file_record.id)
         
         if not files_with_template:

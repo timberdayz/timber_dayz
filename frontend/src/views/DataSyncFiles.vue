@@ -43,9 +43,20 @@ v4.6.0新增：独立的数据同步系统
             <el-icon><Check /></el-icon>
           </div>
           <div class="stat-content">
-            <div class="stat-label">已同步文件</div>
+            <div class="stat-label">可同步文件</div>
             <div class="stat-value">
-              {{ governanceStats.ingested_count || 0 }}
+              {{ governanceStats.ready_to_sync_count || 0 }}
+            </div>
+          </div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-icon stat-icon-warning">
+            <el-icon><Warning /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">需更新模板</div>
+            <div class="stat-value">
+              {{ governanceStats.template_update_required_count || 0 }}
             </div>
           </div>
         </div>
@@ -74,10 +85,10 @@ v4.6.0新增：独立的数据同步系统
           type="success"
           @click="handleSyncAll"
           :loading="syncingAll"
-          :disabled="(governanceStats.pending_count || 0) === 0"
+          :disabled="(governanceStats.ready_to_sync_count || 0) === 0"
         >
           <el-icon><Upload /></el-icon>
-          同步全部待同步文件（有模板）
+          同步全部可同步文件
         </el-button>
         <el-button
           type="warning"
@@ -304,9 +315,27 @@ v4.6.0新增：独立的数据同步系统
         <el-table-column prop="sub_domain" label="子类型" width="120" />
         <el-table-column label="模板状态" width="120">
           <template #default="{ row }">
-            <el-tag v-if="row.has_template" type="success" size="small">
+            <el-tooltip
+              v-if="row.template_status === 'update_required' && row.update_reason"
+              :content="row.update_reason"
+              placement="top"
+            >
+              <el-tag type="danger" size="small">
+                <el-icon><Warning /></el-icon>
+                需更新
+              </el-tag>
+            </el-tooltip>
+            <el-tag
+              v-else-if="row.template_status === 'update_required'"
+              type="danger"
+              size="small"
+            >
+              <el-icon><Warning /></el-icon>
+              需更新
+            </el-tag>
+            <el-tag v-else-if="row.has_template" type="success" size="small">
               <el-icon><Check /></el-icon>
-              有模板
+              可同步
             </el-tag>
             <el-tag v-else type="warning" size="small">
               <el-icon><Warning /></el-icon>
@@ -695,6 +724,9 @@ const syncingAll = ref(false)
 const cleaning = ref(false)
 const governanceStats = ref({
   pending_count: 0,
+  ready_to_sync_count: 0,
+  template_update_required_count: 0,
+  missing_template_count: 0,
   ingested_count: 0,
   failed_count: 0,
   total_count: 0

@@ -20,7 +20,8 @@
 
 注意:
 - 使用 a_class.operating_costs 表(中文字段名)
-- 字段: 店铺ID, 年月, 租金, 工资, 水电费, 其他成本
+- 底层兼容保留 "工资" 列名，但业务语义已统一为 "营销费用"
+- 字段: 店铺ID, 年月, 租金, 营销费用, 水电费, 其他成本
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
@@ -154,7 +155,7 @@ async def get_expense_summary(
                     "年月",
                     COUNT(DISTINCT "店铺ID") as shop_count,
                     COALESCE(SUM("租金"), 0) as total_rent,
-                    COALESCE(SUM("工资"), 0) as total_salary,
+                    COALESCE(SUM("工资"), 0) as total_marketing_fee,
                     COALESCE(SUM("水电费"), 0) as total_utilities,
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
                     COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) as total_amount
@@ -170,7 +171,7 @@ async def get_expense_summary(
                     "年月",
                     COUNT(DISTINCT "店铺ID") as shop_count,
                     COALESCE(SUM("租金"), 0) as total_rent,
-                    COALESCE(SUM("工资"), 0) as total_salary,
+                    COALESCE(SUM("工资"), 0) as total_marketing_fee,
                     COALESCE(SUM("水电费"), 0) as total_utilities,
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
                     COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) as total_amount
@@ -186,7 +187,7 @@ async def get_expense_summary(
                 "year_month": row[0],
                 "shop_count": row[1],
                 "total_rent": float(row[2] or 0),
-                "total_salary": float(row[3] or 0),
+                "total_marketing_fee": float(row[3] or 0),
                 "total_utilities": float(row[4] or 0),
                 "total_other_costs": float(row[5] or 0),
                 "total_amount": float(row[6] or 0),
@@ -220,7 +221,7 @@ async def get_yearly_expense_summary(
     
     返回:
     - 年度总费用（所有月份所有店铺汇总）
-    - 各类费用汇总（租金、工资、水电费、其他成本）
+    - 各类费用汇总（租金、营销费用、水电费、其他成本）
     """
     try:
         cache_params = {"year": year}
@@ -234,7 +235,7 @@ async def get_yearly_expense_summary(
         query = text("""
             SELECT 
                 COALESCE(SUM("租金"), 0) as total_rent,
-                COALESCE(SUM("工资"), 0) as total_salary,
+                COALESCE(SUM("工资"), 0) as total_marketing_fee,
                 COALESCE(SUM("水电费"), 0) as total_utilities,
                 COALESCE(SUM("其他成本"), 0) as total_other_costs,
                 COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) as total_amount,
@@ -251,7 +252,7 @@ async def get_yearly_expense_summary(
                 "data": {
                     "year": year,
                     "total_rent": float(row[0] or 0),
-                    "total_salary": float(row[1] or 0),
+                    "total_marketing_fee": float(row[1] or 0),
                     "total_utilities": float(row[2] or 0),
                     "total_other_costs": float(row[3] or 0),
                     "total_amount": float(row[4] or 0),
@@ -265,7 +266,7 @@ async def get_yearly_expense_summary(
                 "data": {
                     "year": year,
                     "total_rent": 0,
-                    "total_salary": 0,
+                    "total_marketing_fee": 0,
                     "total_utilities": 0,
                     "total_other_costs": 0,
                     "total_amount": 0,
@@ -315,7 +316,7 @@ async def list_expenses_by_shop(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as salary,
+                "工资" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -333,10 +334,10 @@ async def list_expenses_by_shop(
         total_amount = 0
         for row in rows:
             rent = float(row.rent or 0)
-            salary = float(row.salary or 0)
+            marketing_fee = float(row.marketing_fee or 0)
             utilities = float(row.utilities or 0)
             other_costs = float(row.other_costs or 0)
-            row_total = rent + salary + utilities + other_costs
+            row_total = rent + marketing_fee + utilities + other_costs
             total_amount += row_total
             
             items.append({
@@ -344,7 +345,7 @@ async def list_expenses_by_shop(
                 "shop_id": row.shop_id,
                 "year_month": row.year_month,
                 "rent": rent,
-                "salary": salary,
+                "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "other_costs": other_costs,
                 "total": row_total,
@@ -356,7 +357,7 @@ async def list_expenses_by_shop(
         summary = {
             "total_amount": total_amount,
             "total_rent": sum(item["rent"] for item in items),
-            "total_salary": sum(item["salary"] for item in items),
+            "total_marketing_fee": sum(item["marketing_fee"] for item in items),
             "total_utilities": sum(item["utilities"] for item in items),
             "total_other_costs": sum(item["other_costs"] for item in items),
             "month_count": len(items),
@@ -426,7 +427,7 @@ async def list_expenses(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as salary,
+                "工资" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -446,17 +447,17 @@ async def list_expenses(
         items = []
         for row in rows:
             rent = float(row.rent or 0)
-            salary = float(row.salary or 0)
+            marketing_fee = float(row.marketing_fee or 0)
             utilities = float(row.utilities or 0)
             other_costs = float(row.other_costs or 0)
-            total_amount = rent + salary + utilities + other_costs
+            total_amount = rent + marketing_fee + utilities + other_costs
             
             items.append({
                 "id": row.id,
                 "shop_id": row.shop_id,
                 "year_month": row.year_month,
                 "rent": rent,
-                "salary": salary,
+                "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "other_costs": other_costs,
                 "total": total_amount,
@@ -502,7 +503,7 @@ async def get_expense(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as salary,
+                "工资" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -524,10 +525,10 @@ async def get_expense(
             )
         
         rent = float(row.rent or 0)
-        salary = float(row.salary or 0)
+        marketing_fee = float(row.marketing_fee or 0)
         utilities = float(row.utilities or 0)
         other_costs = float(row.other_costs or 0)
-        total_amount = rent + salary + utilities + other_costs
+        total_amount = rent + marketing_fee + utilities + other_costs
         
         return {
             "success": True,
@@ -536,7 +537,7 @@ async def get_expense(
                 "shop_id": row.shop_id,
                 "year_month": row.year_month,
                 "rent": rent,
-                "salary": salary,
+                "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "other_costs": other_costs,
                 "total": total_amount,
@@ -574,7 +575,7 @@ async def create_or_update_expense(
             INSERT INTO a_class.operating_costs 
                 ("店铺ID", "年月", "租金", "工资", "水电费", "其他成本", "创建时间", "更新时间")
             VALUES 
-                (:shop_id, :year_month, :rent, :salary, :utilities, :other_costs, NOW(), NOW())
+                (:shop_id, :year_month, :rent, :marketing_fee, :utilities, :other_costs, NOW(), NOW())
             ON CONFLICT ("店铺ID", "年月") 
             DO UPDATE SET 
                 "租金" = EXCLUDED."租金",
@@ -587,7 +588,7 @@ async def create_or_update_expense(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as salary,
+                "工资" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -598,7 +599,7 @@ async def create_or_update_expense(
             "shop_id": request.shop_id,
             "year_month": request.year_month,
             "rent": request.rent,
-            "salary": request.salary,
+            "marketing_fee": request.marketing_fee,
             "utilities": request.utilities,
             "other_costs": request.other_costs,
         })
@@ -623,10 +624,10 @@ async def create_or_update_expense(
             logger.warning(f"[ExpenseManagement] employee task sync failed: {task_err}")
         
         rent = float(row.rent or 0)
-        salary = float(row.salary or 0)
+        marketing_fee = float(row.marketing_fee or 0)
         utilities = float(row.utilities or 0)
         other_costs = float(row.other_costs or 0)
-        total_amount = rent + salary + utilities + other_costs
+        total_amount = rent + marketing_fee + utilities + other_costs
         
         return {
             "success": True,
@@ -635,7 +636,7 @@ async def create_or_update_expense(
                 "shop_id": row.shop_id,
                 "year_month": row.year_month,
                 "rent": rent,
-                "salary": salary,
+                "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "other_costs": other_costs,
                 "total": total_amount,
@@ -676,7 +677,7 @@ async def update_expense(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as salary,
+                "工资" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs
             FROM a_class.operating_costs
@@ -706,11 +707,11 @@ async def update_expense(
         else:
             params["rent"] = float(row.rent or 0)
             
-        if "salary" in update_data:
-            update_fields.append('"工资" = :salary')
-            params["salary"] = update_data["salary"]
+        if "marketing_fee" in update_data:
+            update_fields.append('"工资" = :marketing_fee')
+            params["marketing_fee"] = update_data["marketing_fee"]
         else:
-            params["salary"] = float(row.salary or 0)
+            params["marketing_fee"] = float(row.marketing_fee or 0)
             
         if "utilities" in update_data:
             update_fields.append('"水电费" = :utilities')
@@ -743,7 +744,7 @@ async def update_expense(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as salary,
+                "工资" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -758,10 +759,10 @@ async def update_expense(
             raise Exception("更新操作未返回数据")
         
         rent = float(updated_row.rent or 0)
-        salary = float(updated_row.salary or 0)
+        marketing_fee = float(updated_row.marketing_fee or 0)
         utilities = float(updated_row.utilities or 0)
         other_costs = float(updated_row.other_costs or 0)
-        total_amount = rent + salary + utilities + other_costs
+        total_amount = rent + marketing_fee + utilities + other_costs
         
         return {
             "success": True,
@@ -770,7 +771,7 @@ async def update_expense(
                 "shop_id": updated_row.shop_id,
                 "year_month": updated_row.year_month,
                 "rent": rent,
-                "salary": salary,
+                "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "other_costs": other_costs,
                 "total": total_amount,

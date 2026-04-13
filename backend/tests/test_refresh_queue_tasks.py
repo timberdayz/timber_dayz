@@ -17,6 +17,10 @@ def test_process_refresh_queue_task_returns_skipped_when_queue_empty(monkeypatch
         def __init__(self, db):
             self.db = db
 
+        async def recover_stale_running_tasks(self, timeout_seconds: int):
+            calls.append(("recover", timeout_seconds))
+            return 0
+
         async def claim_next_refresh_task(self):
             return None
 
@@ -64,6 +68,10 @@ async def test_process_refresh_queue_task_claims_executes_and_completes(monkeypa
         def __init__(self, db):
             self.db = db
 
+        async def recover_stale_running_tasks(self, timeout_seconds: int):
+            calls.append(("recover", timeout_seconds))
+            return 0
+
         async def claim_next_refresh_task(self):
             calls.append("claim")
             return _FakeTask()
@@ -88,9 +96,10 @@ async def test_process_refresh_queue_task_claims_executes_and_completes(monkeypa
 
     assert result["status"] == "success"
     assert result["job_id"] == "job-1"
-    assert calls[0] == "claim"
-    assert calls[1][0] == "execute"
-    assert calls[2] == ("completed", 1)
+    assert calls[0][0] == "recover"
+    assert calls[1] == "claim"
+    assert calls[2][0] == "execute"
+    assert calls[3] == ("completed", 1)
 
 
 @pytest.mark.asyncio
@@ -121,6 +130,10 @@ async def test_process_refresh_queue_task_marks_failed_on_exception(monkeypatch)
         def __init__(self, db):
             self.db = db
 
+        async def recover_stale_running_tasks(self, timeout_seconds: int):
+            calls.append(("recover", timeout_seconds))
+            return 0
+
         async def claim_next_refresh_task(self):
             return _FakeTask()
 
@@ -142,6 +155,7 @@ async def test_process_refresh_queue_task_marks_failed_on_exception(monkeypatch)
     result = await task_module._async_process_refresh_queue_task()
 
     assert result["status"] == "failed"
-    assert calls[0][0] == "failed"
-    assert calls[0][1] == 7
-    assert "boom" in calls[0][2]
+    assert calls[0][0] == "recover"
+    assert calls[1][0] == "failed"
+    assert calls[1][1] == 7
+    assert "boom" in calls[1][2]

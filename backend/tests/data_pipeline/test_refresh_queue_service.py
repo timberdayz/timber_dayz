@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
@@ -154,3 +156,26 @@ async def test_claim_next_refresh_task_skips_when_another_task_is_running(refres
 
     refreshed_pending = await refresh_queue_session.get(RefreshQueueTask, pending_task.id)
     assert refreshed_pending.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_running_tasks_marks_timed_out_rows_failed(refresh_queue_session):
+    from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
+
+    service = RefreshQueueService(refresh_queue_session)
+    task = await service.enqueue_refresh(
+        trigger_type="data_ingested",
+        pipeline_name="pipeline-stale",
+        targets=["semantic.stale"],
+        context={"file_id": 20},
+    )
+    task.status = "running"
+    task.started_at = datetime.now(timezone.utc) - timedelta(minutes=15)
+    await refresh_queue_session.commit()
+
+    recovered = await service.recover_stale_running_tasks(timeout_seconds=60)
+
+    assert recovered == 1
+    refreshed = await refresh_queue_session.get(RefreshQueueTask, task.id)
+    assert refreshed.status == "failed"
+    assert "timed out" in (refreshed.last_error or "")
