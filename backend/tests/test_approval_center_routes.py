@@ -149,6 +149,32 @@ async def test_approval_center_requests_endpoint_returns_items(
 
 
 @pytest.mark.asyncio
+async def test_approval_center_history_endpoint_returns_actor_actions(
+    approval_center_async_client_approver,
+    seeded_approval_data,
+):
+    await approval_center_async_client_approver.post(
+        "/api/approval-center/approval:leave_request_approval:leave:2026-04:1/approve",
+        json={"comment": "approved"},
+    )
+
+    response = await approval_center_async_client_approver.get("/api/approval-center/history")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["items"][0]["action_type"] == "approve"
+
+
+@pytest.mark.asyncio
+async def test_approval_center_templates_endpoint_returns_items(
+    approval_center_async_client,
+):
+    response = await approval_center_async_client.get("/api/approval-center/templates")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["items"][0]["template_code"] == "leave_request_approval"
+
+
+@pytest.mark.asyncio
 async def test_approval_center_detail_endpoint_returns_steps(
     approval_center_async_client,
     seeded_approval_data,
