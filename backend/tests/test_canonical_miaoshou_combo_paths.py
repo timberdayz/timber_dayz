@@ -16,7 +16,7 @@ class _FakeExportResult:
     def __init__(self):
         self.success = True
         self.message = "exported"
-        self.file_path = "data/raw/2026/miaoshou_analytics_monthly_20260327_120000.xlsx"
+        self.file_path = "downloads/miaoshou/acc/shop/analytics/monthly/export.xlsx"
 
 
 class _FakeLoginComponent:
@@ -54,7 +54,7 @@ async def test_miaoshou_login_export_combo_uses_shared_context():
     assert login_result.success is True
     assert login_result.message == "logged-in"
     assert export_result.success is True
-    assert export_result.file_path == "data/raw/2026/miaoshou_analytics_monthly_20260327_120000.xlsx"
+    assert export_result.file_path == "downloads/miaoshou/acc/shop/analytics/monthly/export.xlsx"
 
 
 def test_miaoshou_inventory_domain_routes_to_inventory_snapshot_export_component():

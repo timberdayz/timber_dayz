@@ -14,7 +14,7 @@ root_dir = get_project_root()
 sys.path.insert(0, str(root_dir))
 
 from backend.celery_app import celery_app
-from backend.models.database import SessionLocal
+from backend.models.database import SessionLocal, reset_async_engine_pool_for_new_loop
 from modules.core.db import CatalogFile
 from sqlalchemy import select, text
 import logging
@@ -330,6 +330,7 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
             max_concurrent
         )
         
+        reset_async_engine_pool_for_new_loop()
         results = asyncio.run(_process_ids_concurrent(pending_ids))
 
         summary = {

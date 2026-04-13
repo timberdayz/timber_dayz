@@ -199,7 +199,9 @@ async def test_preflight_create_task_rejects_when_export_component_has_no_stable
 
     async def _override_get_async_db():
         session = MagicMock()
-        session.execute = AsyncMock()
+        session.execute = AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: None)
+        )
         session.commit = AsyncMock()
         session.refresh = AsyncMock()
         session.add = MagicMock()
@@ -239,29 +241,41 @@ async def test_preflight_create_task_rejects_when_export_component_has_no_stable
 
 @pytest.mark.asyncio
 async def test_scheduler_runtime_manifest_helper_uses_stable_resolver(monkeypatch):
-    from backend.services.collection_scheduler import resolve_runtime_manifests_for_config
+    from backend.services.collection_config_execution import _resolve_runnable_scope_runtime
 
     expected = {
         "login": {"component_name": "shopee/login"},
+        "exports": [{"component_name": "shopee/orders_export"}],
         "exports_by_domain": {"orders": {"component_name": "shopee/orders_export"}},
     }
 
     class _FakeResolver:
-        async def resolve_task_manifests(self, **kwargs):
-            assert kwargs["platform"] == "shopee"
-            assert kwargs["data_domains"] == ["orders"]
-            assert kwargs["sub_domains"] is None
-            return expected
+        async def resolve_login_component(self, platform):
+            assert platform == "shopee"
+            return expected["login"]
+
+        async def resolve_export_component(self, *, platform, data_domain, sub_domain):
+            assert platform == "shopee"
+            assert data_domain == "orders"
+            assert sub_domain is None
+            return expected["exports_by_domain"]["orders"]
 
     monkeypatch.setattr(
-        "backend.services.collection_scheduler.ComponentRuntimeResolver.from_async_session",
+        "backend.services.collection_config_execution.ComponentRuntimeResolver.from_async_session",
         lambda db: _FakeResolver(),
     )
 
-    config = SimpleNamespace(platform="shopee", data_domains=["orders"], sub_domains=None)
-    manifests = await resolve_runtime_manifests_for_config(db=object(), config=config)
+    domains, sub_domains, manifests, skipped = await _resolve_runnable_scope_runtime(
+        db=object(),
+        platform="shopee",
+        data_domains=["orders"],
+        sub_domains=None,
+    )
 
+    assert domains == ["orders"]
+    assert sub_domains is None
     assert manifests == expected
+    assert skipped == []
 
 
 @pytest.mark.asyncio

@@ -236,6 +236,32 @@ class _DelayedBusinessPage(_TabPage):
         return _FakeLocator(visible=False)
 
 
+class _DelayedReadinessPage(_FakePage):
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+        self.loading_visible = True
+        self.empty_visible = True
+        self.export_visible = False
+        self.wait_count = 0
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        self.wait_calls.append(ms)
+        self.wait_count += 1
+        if self.wait_count >= 2:
+            self.loading_visible = False
+            self.empty_visible = False
+            self.export_visible = True
+
+    def locator(self, selector: str):
+        if selector in ('[data-tid="m4b_loading"]', ".theme-arco-spin", ".theme-m4b-loading"):
+            return _FakeLocator(visible=self.loading_visible)
+        if selector == "text=\u6682\u65e0\u6570\u636e":
+            return _FakeLocator(visible=self.empty_visible)
+        if selector == 'button:has-text("\u5bfc\u51fa\u6570\u636e")':
+            return _FakeLocator(visible=self.export_visible)
+        return super().locator(selector)
+
+
 def test_tiktok_services_agent_export_detects_service_page_url() -> None:
     component = TiktokServicesAgentExport(_ctx())
 
@@ -622,6 +648,16 @@ async def test_tiktok_services_agent_export_waits_for_ready_state_before_running
     collect_mock.assert_awaited_once_with(page)
     assert result.success is True
     assert result.file_path == "temp/services-agent.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_readiness_ignores_stale_empty_state_while_loading() -> None:
+    page = _DelayedReadinessPage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "weekly"}))
+
+    state = await component._wait_export_readiness_state(page, timeout_ms=1000, poll_ms=200)
+
+    assert state == "ready"
 
 
 @pytest.mark.asyncio

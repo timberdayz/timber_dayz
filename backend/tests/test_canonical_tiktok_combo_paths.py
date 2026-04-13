@@ -21,7 +21,7 @@ class _FakeExportResult:
     def __init__(self):
         self.success = True
         self.message = "exported"
-        self.file_path = "data/raw/2026/tiktok_services_agent_daily_20260327_120000.xlsx"
+        self.file_path = "downloads/tiktok/acc/shop/services/agent/daily/export.xlsx"
 
 
 class _FakeLoginComponent:
@@ -75,4 +75,4 @@ async def test_tiktok_login_shop_switch_export_combo_uses_shared_context():
     assert switch_result.success is True
     assert switch_result.message == "shop-selected"
     assert export_result.success is True
-    assert export_result.file_path == "data/raw/2026/tiktok_services_agent_daily_20260327_120000.xlsx"
+    assert export_result.file_path == "downloads/tiktok/acc/shop/services/agent/daily/export.xlsx"

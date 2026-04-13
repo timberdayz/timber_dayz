@@ -340,6 +340,30 @@ AsyncSessionLocal = async_sessionmaker(
 
 logger.info(f"[async] 异步数据库连接已配置: {ASYNC_DATABASE_URL.split('@')[-1] if '@' in ASYNC_DATABASE_URL else 'SQLite'}")
 
+
+def reset_async_engine_pool_for_new_loop() -> None:
+    """
+    Dispose pooled async connections before entering a fresh asyncio.run() loop.
+
+    Celery sync tasks create a new event loop per invocation. asyncpg
+    connections retained in the global pool can still be attached to the
+    previous loop and raise cross-loop runtime errors when reused.
+    """
+
+    async def _dispose() -> None:
+        await async_engine.dispose()
+
+    try:
+        asyncio.run(_dispose())
+        logger.info("[async] disposed async engine pool before creating a new event loop")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_dispose())
+        finally:
+            loop.close()
+        logger.info("[async] disposed async engine pool using fallback event loop")
+
 # ==================== FastAPI依赖注入 ====================
 
 def get_db() -> Generator[Session, None, None]:

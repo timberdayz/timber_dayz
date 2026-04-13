@@ -127,9 +127,6 @@
 - `fact_shopee_orders_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
 - `fact_shopee_products_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
 - `fact_shopee_products_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
-- `fact_shopee_products_shopee_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
-- `fact_shopee_products_shopee_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
-- `fact_shopee_products_shopee_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
 - `fact_shopee_products_weekly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
 - `fact_shopee_services_agent_daily` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
 - `fact_shopee_services_agent_monthly` in `['b_class']` class=`generated_runtime_fact` wave=`wave_2_runtime_generated`
@@ -227,4 +224,3 @@
 - Start with the wave-1 runtime-critical table family.
 - Treat schema-placement mismatches and time-column mismatches as immediate alignment targets.
 - Keep duplicate cleanup for non-wave-1 tables behind proof-based follow-up waves.
-

@@ -663,6 +663,11 @@ class TiktokServicesAgentExport(ExportComponent):
     ) -> str:
         waited = 0
         while waited <= timeout_ms:
+            if await self._any_visible(page, self._loading_selectors(), timeout=150):
+                if hasattr(page, "wait_for_timeout"):
+                    await page.wait_for_timeout(poll_ms)
+                waited += poll_ms
+                continue
             if await self._no_exportable_data(page):
                 return "empty"
             if await self._export_button_enabled(page):

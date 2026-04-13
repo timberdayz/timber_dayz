@@ -164,6 +164,98 @@ def test_executor_does_not_infer_orders_sub_domain_from_platform_segment_for_non
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("platform", "data_domain", "download_relative_path", "expected_prefix"),
+    [
+        (
+            "shopee",
+            "products",
+            Path("temp/downloads/task-1/shopee/acc/shop/products/daily/parentskudetail.20260412_20260412.xlsx"),
+            "shopee_products_daily_",
+        ),
+        (
+            "shopee",
+            "analytics",
+            Path("temp/downloads/task-1/shopee/acc/shop/analytics/daily/traffic_overview_20260412_20260412.xlsx"),
+            "shopee_analytics_daily_",
+        ),
+        (
+            "tiktok",
+            "products",
+            Path("temp/downloads/task-1/tiktok/acc/shop/products/daily/product_list.xlsx"),
+            "tiktok_products_daily_",
+        ),
+        (
+            "tiktok",
+            "analytics",
+            Path("temp/downloads/task-1/tiktok/acc/shop/analytics/daily/Overview_My Business Performance_20260413105132.xlsx"),
+            "tiktok_analytics_daily_",
+        ),
+    ],
+)
+async def test_executor_process_files_does_not_add_platform_sub_domain_for_products_or_analytics(
+    tmp_path,
+    monkeypatch,
+    platform: str,
+    data_domain: str,
+    download_relative_path: Path,
+    expected_prefix: str,
+):
+    raw_dir = tmp_path / "custom-raw-root"
+    download_file = tmp_path / download_relative_path
+    download_file.parent.mkdir(parents=True, exist_ok=True)
+    download_file.write_text("demo", encoding="utf-8")
+
+    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+
+    captured = {}
+
+    import modules.services.catalog_scanner as catalog_scanner_module
+    from modules.services.metadata_manager import MetadataManager
+
+    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+
+    def _capture_meta(file_path, business_metadata, collection_info):
+        captured["business_metadata"] = business_metadata
+        captured["collection_info"] = collection_info
+        return Path(str(file_path) + ".meta.json")
+
+    monkeypatch.setattr(
+        MetadataManager,
+        "create_meta_file",
+        staticmethod(_capture_meta),
+    )
+
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+
+    processed = await CollectionExecutorV2._process_files(
+        executor,
+        [str(download_file)],
+        platform=platform,
+        data_domains=[data_domain],
+        granularity="daily",
+        account={"label": "acc", "shop_id": "shop"},
+        date_range={"start_date": "2026-04-12", "end_date": "2026-04-12"},
+    )
+
+    assert processed
+    generated_name = Path(processed[0]).name
+    assert generated_name.startswith(expected_prefix)
+
+    parsed = StandardFileName.parse(generated_name)
+    assert parsed["source_platform"] == platform
+    assert parsed["data_domain"] == data_domain
+    assert parsed["sub_domain"] == ""
+    assert parsed["granularity"] == "daily"
+
+    assert captured["business_metadata"]["source_platform"] == platform
+    assert captured["business_metadata"]["data_domain"] == data_domain
+    assert captured["business_metadata"]["sub_domain"] == ""
+    assert captured["collection_info"]["collection_platform"] == platform
+    assert captured["collection_info"]["original_path"] == str(download_file)
+
+
+@pytest.mark.asyncio
 async def test_executor_process_files_normalizes_miaoshou_orders_into_business_platform_files(tmp_path, monkeypatch):
     raw_dir = tmp_path / "custom-raw-root"
     download_root = tmp_path / "temp" / "downloads" / "task-1" / "miaoshou" / "acc" / "shop" / "orders" / "tiktok" / "manual"

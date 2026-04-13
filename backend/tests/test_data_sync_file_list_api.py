@@ -67,14 +67,14 @@ async def test_list_files_does_not_mark_services_file_as_template_covered_when_o
         )
         session.add(
             CatalogFile(
-                file_path="data/raw/2026/tiktok_services_tiktok_daily_20260413_185520.xlsx",
-                file_name="tiktok_services_tiktok_daily_20260413_185520.xlsx",
+                file_path="data/raw/2026/tiktok_services_ai_assistant_daily_20260413_185520.xlsx",
+                file_name="tiktok_services_ai_assistant_daily_20260413_185520.xlsx",
                 source="data/raw",
                 platform_code="tiktok",
                 source_platform="tiktok",
                 data_domain="services",
                 granularity="daily",
-                sub_domain="tiktok",
+                sub_domain="ai_assistant",
                 status="pending",
                 first_seen_at=datetime.now(timezone.utc),
             )
@@ -91,6 +91,6 @@ async def test_list_files_does_not_mark_services_file_as_template_covered_when_o
     assert payload["success"] is True
     assert payload["data"]["total"] == 1
     file_row = payload["data"]["files"][0]
-    assert file_row["sub_domain"] == "tiktok"
+    assert file_row["sub_domain"] == "ai_assistant"
     assert file_row["has_template"] is False
     assert file_row["template_name"] is None

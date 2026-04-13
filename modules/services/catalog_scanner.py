@@ -216,8 +216,6 @@ def _resolve_catalog_dimensions(
 
     if data_domain == "orders":
         sub_domain = ""
-    elif data_domain == "services" and not sub_domain:
-        sub_domain = "agent"
 
     collection_platform = normalize_platform(collection_info.get("collection_platform") or "")
     source_platform = collection_platform or platform_code
@@ -585,11 +583,6 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                     
                     # 4. 标准化与校验(v4.3.5: 强制小写化 + 白名单)
                     # norm_platform和norm_domain已在上面计算
-                    # [*] 新增:services数据域,如果sub_domain为空,默认设置为'agent'(适用于所有平台)
-                    if norm_domain == 'services' and not norm_sub_domain:
-                        norm_sub_domain = 'agent'
-                        logger.info(f"[{file_path.name}] services数据域缺少sub_domain,自动设置为'agent'")
-                    
                     # 白名单校验(严格模式)
                     if not is_valid_platform(norm_platform):
                         logger.warning(f"跳过无效平台: {file_path.name} (platform={norm_platform})")
@@ -956,11 +949,6 @@ def register_single_file(file_path: str) -> Optional[int]:
         )
         
         # 6. 标准化与校验
-        # [*] 新增:services数据域,如果sub_domain为空,默认设置为'agent'(适用于所有平台)
-        if norm_domain == 'services' and not norm_sub_domain:
-            norm_sub_domain = 'agent'
-            logger.info(f"[{file_path_obj.name}] services数据域缺少sub_domain,自动设置为'agent'")
-        
         if not is_valid_platform(norm_platform):
             logger.warning(f"跳过无效平台: {file_path_obj.name} (platform={norm_platform})")
             return None

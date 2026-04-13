@@ -109,3 +109,64 @@ async def test_inventory_data_ingested_event_triggers_inventory_age_refresh(
     assert run_id == "run-1"
     assert calls["pipeline"] == 1
     assert calls["inventory_age"] == 1
+
+
+@pytest.mark.asyncio
+async def test_data_ingested_refresh_runs_serially_within_same_process(
+    monkeypatch,
+):
+    from backend.services.event_listeners import run_pipeline_refresh_for_data_ingested_event
+
+    state = {"active": 0, "max_active": 0}
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def commit(self):
+            return None
+
+    class _FakeAsyncSessionLocal:
+        def __call__(self):
+            return _FakeSession()
+
+    async def _fake_execute_refresh_plan(*args, **kwargs):
+        state["active"] += 1
+        state["max_active"] = max(state["max_active"], state["active"])
+        await asyncio.sleep(0.01)
+        state["active"] -= 1
+        return "run-serial"
+
+    monkeypatch.setattr(
+        "backend.services.event_listeners.AsyncSessionLocal",
+        _FakeAsyncSessionLocal(),
+    )
+    monkeypatch.setattr(
+        "backend.services.event_listeners.execute_refresh_plan",
+        _fake_execute_refresh_plan,
+    )
+
+    event_a = DataIngestedEvent(
+        file_id=1,
+        platform_code="shopee",
+        data_domain="services",
+        granularity="daily",
+        row_count=1,
+    )
+    event_b = DataIngestedEvent(
+        file_id=2,
+        platform_code="shopee",
+        data_domain="services",
+        granularity="daily",
+        row_count=1,
+    )
+
+    await asyncio.gather(
+        run_pipeline_refresh_for_data_ingested_event(event_a),
+        run_pipeline_refresh_for_data_ingested_event(event_b),
+    )
+
+    assert state["max_active"] == 1

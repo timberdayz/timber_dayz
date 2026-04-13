@@ -16,6 +16,7 @@ from backend.celery_app import celery_app
 from typing import List
 import asyncio
 from modules.core.logger import get_logger
+from backend.models.database import reset_async_engine_pool_for_new_loop
 
 logger = get_logger(__name__)
 
@@ -145,6 +146,7 @@ def sync_single_file_task(
     
     # 在同步函数中运行异步代码
     try:
+        reset_async_engine_pool_for_new_loop()
         result = asyncio.run(_async_task())
         return result
     except Exception as exc:
@@ -485,6 +487,7 @@ def sync_batch_task(
     
     # 在同步函数中运行异步代码
     try:
+        reset_async_engine_pool_for_new_loop()
         result = asyncio.run(_async_task())
         return result
     except Exception as exc:
@@ -512,4 +515,3 @@ def sync_batch_task(
                 'status': 'failed',
                 'message': str(exc)
             }
-

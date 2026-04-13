@@ -19,6 +19,9 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
+DATA_INGESTED_REFRESH_LOCK = asyncio.Lock()
+
+
 DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
     "orders": [
         "api.business_overview_kpi_module",
@@ -74,41 +77,42 @@ async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent)
         )
         return None
 
-    async with AsyncSessionLocal() as session:
-        run_id = await execute_refresh_plan(
-            session,
-            targets=targets,
-            pipeline_name="data_ingested_refresh",
-            trigger_source="data_ingested_event",
-            context={
-                "file_id": event.file_id,
-                "platform_code": event.platform_code,
-                "data_domain": event.data_domain,
-                "granularity": event.granularity,
-                "row_count": event.row_count,
-                "timestamp": event.timestamp,
-            },
-            continue_on_error=True,
-            max_attempts=2,
-            retry_backoff_seconds=0.1,
-        )
-        await session.commit()
-        logger.info(
-            "[EventListener] PostgreSQL refresh pipeline completed: "
-            f"run_id={run_id}, file_id={event.file_id}, domain={event.data_domain}, targets={len(targets)}"
-        )
-
-        if event.data_domain == "inventory":
-            inventory_age_result = await InventoryAgeRefreshService(session).refresh(
-                force_full=False
+    async with DATA_INGESTED_REFRESH_LOCK:
+        async with AsyncSessionLocal() as session:
+            run_id = await execute_refresh_plan(
+                session,
+                targets=targets,
+                pipeline_name="data_ingested_refresh",
+                trigger_source="data_ingested_event",
+                context={
+                    "file_id": event.file_id,
+                    "platform_code": event.platform_code,
+                    "data_domain": event.data_domain,
+                    "granularity": event.granularity,
+                    "row_count": event.row_count,
+                    "timestamp": event.timestamp,
+                },
+                continue_on_error=True,
+                max_attempts=2,
+                retry_backoff_seconds=0.1,
             )
             await session.commit()
             logger.info(
-                "[EventListener] Inventory age replay completed: "
-                f"file_id={event.file_id}, result={inventory_age_result}"
+                "[EventListener] PostgreSQL refresh pipeline completed: "
+                f"run_id={run_id}, file_id={event.file_id}, domain={event.data_domain}, targets={len(targets)}"
             )
 
-        return run_id
+            if event.data_domain == "inventory":
+                inventory_age_result = await InventoryAgeRefreshService(session).refresh(
+                    force_full=False
+                )
+                await session.commit()
+                logger.info(
+                    "[EventListener] Inventory age replay completed: "
+                    f"file_id={event.file_id}, result={inventory_age_result}"
+                )
+
+            return run_id
 
 
 class EventListener:
