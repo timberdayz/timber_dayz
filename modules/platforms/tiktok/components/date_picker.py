@@ -672,6 +672,26 @@ class TiktokDatePicker(DatePickerComponent):
                 continue
         return False
 
+    async def _select_natural_day_tab(self, page: Any) -> bool:
+        for selector in (
+            "div[role='tab']:has-text('自然日')",
+            "[role='tab']:has-text('自然日')",
+            "button:has-text('自然日')",
+            "text=自然日",
+        ):
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() <= 0:
+                    continue
+                if not await locator.is_visible(timeout=300):
+                    continue
+                await locator.click(timeout=1500)
+                await page.wait_for_timeout(200)
+                return True
+            except Exception:
+                continue
+        return False
+
     def _parse_month_header(self, text: str | None) -> tuple[int, int] | None:
         value = str(text or "").strip()
         if not value:
@@ -1302,10 +1322,40 @@ class TiktokDatePicker(DatePickerComponent):
             return DatePickResult(success=False, message="failed to confirm date range", option=option)
         return DatePickResult(success=True, message="ok", option=option)
 
+    async def _run_services_natural_day_single(self, page: Any, option: DateOption) -> DatePickResult:
+        start_date, end_date = self._resolve_range_for_context(option)
+        if start_date != end_date:
+            return DatePickResult(success=False, message="services single-day path requires identical dates", option=option)
+        if await self._current_range_matches(page, option):
+            return DatePickResult(success=True, message="ok", option=option)
+
+        if not await self._open_panel(page):
+            return DatePickResult(success=False, message="failed to open date picker panel", option=option)
+        if not await self._select_natural_day_tab(page):
+            return DatePickResult(success=False, message="failed to open natural day tab", option=option)
+
+        target_value = datetime.strptime(start_date, "%Y-%m-%d")
+        if not await self._navigate_left_to_month(page, target_value.year, target_value.month):
+            return DatePickResult(success=False, message="failed to navigate natural day panel to target month", option=option)
+
+        day_scope = await self._pane_body_scope(page, "left")
+        if day_scope is None:
+            return DatePickResult(success=False, message="failed to locate natural day panel body", option=option)
+        if not await self._select_day_in_scope(day_scope, target_value.day):
+            return DatePickResult(success=False, message="failed to select natural day", option=option)
+        if not await self._confirm_range_applied(page, start_date=start_date, end_date=end_date):
+            return DatePickResult(success=False, message="failed to confirm natural day selection", option=option)
+        return DatePickResult(success=True, message="ok", option=option)
+
     async def run(self, page: Any, option: DateOption) -> DatePickResult:
         kind = self._page_kind(str(getattr(page, "url", "") or ""))
         if kind == "products":
             return await self._run_products_range(page, option)
+
+        if kind == "services":
+            start_date, end_date = self._resolve_range_for_context(option)
+            if start_date == end_date:
+                return await self._run_services_natural_day_single(page, option)
 
         if kind not in {"analytics", "services"}:
             return DatePickResult(success=False, message="unsupported page for shared tiktok date picker", option=option)

@@ -341,6 +341,255 @@ async def test_products_ensure_date_ready_uses_shopee_date_picker(
     assert run_picker.await_count == 1
 
 
+@pytest.mark.asyncio
+async def test_products_ensure_date_selection_uses_shopee_date_picker_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={"granularity": "weekly"})
+    component = ShopeeProductsExport(ctx)
+    run_picker = AsyncMock(return_value=Mock(success=True, message="ok"))
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "run",
+        run_picker,
+    )
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_resolve_option_from_context",
+        lambda self: Mock(),
+    )
+    monkeypatch.setattr(
+        component,
+        "_open_date_picker",
+        AsyncMock(side_effect=AssertionError("_ensure_date_selection should not use legacy date flow")),
+        raising=False,
+    )
+
+    await component._ensure_date_selection(_FakePage())
+
+    assert run_picker.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_products_ensure_shop_selected_uses_shopee_shop_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.shop_switch as shopee_shop_switch_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={"shop_name": "Demo Shop"})
+    component = ShopeeProductsExport(ctx)
+    run_switch = AsyncMock(return_value=Mock(success=True, message="ok"))
+
+    monkeypatch.setattr(shopee_shop_switch_module.ShopeeShopSwitch, "run", run_switch)
+    monkeypatch.setattr(
+        component,
+        "_first_visible_locator",
+        AsyncMock(side_effect=AssertionError("_ensure_shop_selected should not use legacy inline shop flow")),
+        raising=False,
+    )
+
+    await component._ensure_shop_selected(_FakePage())
+
+    assert run_switch.await_count == 1
+
+
+def test_products_resolve_custom_target_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={
+            "granularity": "weekly",
+            "time_selection": {
+                "mode": "custom",
+                "start_date": "2026-03-30",
+                "end_date": "2026-04-05",
+            },
+        },
+    )
+    component = ShopeeProductsExport(ctx)
+
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_resolve_custom_target",
+        lambda self, config: {
+            "granularity": "weekly",
+            "target_iso_date": "2099-01-01",
+            "target_day": 99,
+        },
+    )
+
+    target = component._resolve_custom_target(component.ctx.config or {})
+
+    assert target["target_iso_date"] == "2099-01-01"
+    assert target["target_day"] == 99
+
+
+def test_products_region_text_candidates_use_shopee_shop_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.shop_switch as shopee_shop_switch_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+
+    monkeypatch.setattr(
+        shopee_shop_switch_module.ShopeeShopSwitch,
+        "_region_text_candidates",
+        lambda self, region_value: ("wrapped-region",),
+    )
+
+    candidates = component._region_text_candidates("MY")
+
+    assert candidates == ("wrapped-region",)
+
+
+@pytest.mark.asyncio
+async def test_products_find_month_panel_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    sentinel = object()
+
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_find_month_panel",
+        AsyncMock(return_value=sentinel),
+    )
+
+    result = await component._find_month_panel(_FakePage())
+
+    assert result is sentinel
+
+
+@pytest.mark.asyncio
+async def test_products_find_date_picker_trigger_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+    sentinel = object()
+
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_find_date_picker_trigger",
+        AsyncMock(return_value=sentinel),
+    )
+
+    result = await component._find_date_picker_trigger(_FakePage())
+
+    assert result is sentinel
+
+
+def test_products_parse_date_summary_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_parse_date_summary",
+        lambda self, summary: {"label": "wrapped-summary"},
+    )
+
+    result = component._parse_date_summary("过去7天 01-03-2026 - 07-03-2026")
+
+    assert result == {"label": "wrapped-summary"}
+
+
+@pytest.mark.asyncio
+async def test_products_hover_text_option_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_hover_text_option",
+        AsyncMock(return_value=True),
+    )
+
+    clicked = await component._hover_text_option(_FakePage(), "按周")
+
+    assert clicked is True
+
+
+@pytest.mark.asyncio
+async def test_products_select_month_value_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_select_month_value",
+        AsyncMock(return_value=True),
+    )
+
+    selected = await component._select_month_value(_FakePage(), "2026-03-01")
+
+    assert selected is True
+
+
+@pytest.mark.asyncio
+async def test_products_navigate_calendar_panel_to_month_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_navigate_calendar_panel_to_month",
+        AsyncMock(return_value=True),
+    )
+
+    reached = await component._navigate_calendar_panel_to_month(_FakePage(), 2026, 3)
+
+    assert reached is True
+
+
+@pytest.mark.asyncio
+async def test_products_select_week_range_value_uses_shopee_date_picker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.date_picker as shopee_date_picker_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={})
+    component = ShopeeProductsExport(ctx)
+
+    monkeypatch.setattr(
+        shopee_date_picker_module.ShopeeDatePicker,
+        "_select_week_range_value",
+        AsyncMock(return_value=True),
+    )
+
+    selected = await component._select_week_range_value(_FakePage(), "2026-03-30", "2026-04-05")
+
+    assert selected is True
+
+
 def test_direct_download_components_do_not_inherit_products_or_services_semantics() -> None:
     assert not issubclass(ShopeeAnalyticsExport, ShopeeProductsExport)
     assert not issubclass(ShopeeServicesAiAssistantExport, ShopeeServicesExportBase)
@@ -757,16 +1006,69 @@ async def test_analytics_run_returns_success_from_direct_download_collection(
 
 
 @pytest.mark.asyncio
-async def test_analytics_ensure_page_ready_requires_business_content(
+async def test_analytics_ensure_page_ready_delegates_to_products_page_ready(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = ExecutionContext(platform="shopee", account={}, config={})
     component = ShopeeAnalyticsExport(ctx)
-    monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock(), raising=False)
-    monkeypatch.setattr(component, "_wait_analytics_business_ready", AsyncMock(return_value=False), raising=False)
+    ensure_ready = AsyncMock()
+    monkeypatch.setattr(component, "_ensure_products_page_ready", ensure_ready, raising=False)
 
-    with pytest.raises(RuntimeError, match="analytics page shell loaded but business content not ready"):
-        await component.ensure_page_ready(_FakePage())
+    await component.ensure_page_ready(_FakePage())
+
+    ensure_ready.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_analytics_ensure_date_selection_uses_shopee_date_picker_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from modules.platforms.shopee.components import analytics_export as analytics_export_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={"granularity": "daily"})
+    component = ShopeeAnalyticsExport(ctx)
+    run_picker = AsyncMock(return_value=Mock(success=True, message="ok"))
+
+    monkeypatch.setattr(analytics_export_module.ShopeeDatePicker, "run", run_picker)
+    monkeypatch.setattr(
+        analytics_export_module.ShopeeDatePicker,
+        "_resolve_option_from_context",
+        lambda self: Mock(),
+    )
+    monkeypatch.setattr(
+        component._shared,
+        "_ensure_date_selection",
+        AsyncMock(side_effect=AssertionError("analytics _ensure_date_selection should not use legacy shared flow")),
+        raising=False,
+    )
+
+    await component._ensure_date_selection(_FakePage())
+
+    assert run_picker.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_analytics_ensure_shop_selected_uses_shopee_shop_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from modules.platforms.shopee.components import analytics_export as analytics_export_module
+    import modules.platforms.shopee.components.shop_switch as shopee_shop_switch_module
+
+    ctx = ExecutionContext(platform="shopee", account={}, config={"shop_name": "Demo Shop"})
+    component = ShopeeAnalyticsExport(ctx)
+    run_switch = AsyncMock(return_value=Mock(success=True, message="ok"))
+
+    monkeypatch.setattr(shopee_shop_switch_module.ShopeeShopSwitch, "run", run_switch)
+    monkeypatch.setattr(
+        component._shared,
+        "_ensure_shop_selected",
+        AsyncMock(side_effect=AssertionError("analytics _ensure_shop_selected should not use legacy shared flow")),
+        raising=False,
+    )
+
+    await component._ensure_shop_selected(_FakePage())
+
+    assert run_switch.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -1220,3 +1522,62 @@ async def test_services_ai_assistant_run_uses_direct_download_collection_without
 
     assert result.success is True
     assert result.file_path == "C:/tmp/services-ai.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_services_ai_assistant_ensure_date_selection_uses_shopee_date_picker_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from modules.platforms.shopee.components import services_ai_assistant_export as ai_export_module
+
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"granularity": "daily", "services_subtype": "ai_assistant"},
+    )
+    component = ShopeeServicesAiAssistantExport(ctx)
+    run_picker = AsyncMock(return_value=Mock(success=True, message="ok"))
+
+    monkeypatch.setattr(ai_export_module.ShopeeDatePicker, "run", run_picker)
+    monkeypatch.setattr(
+        ai_export_module.ShopeeDatePicker,
+        "_resolve_option_from_context",
+        lambda self: Mock(),
+    )
+    monkeypatch.setattr(
+        component._shared,
+        "_ensure_date_selection",
+        AsyncMock(side_effect=AssertionError("services ai _ensure_date_selection should not use legacy shared flow")),
+        raising=False,
+    )
+
+    await component._ensure_date_selection(_FakePage())
+
+    assert run_picker.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_services_ai_assistant_ensure_shop_selected_uses_shopee_shop_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modules.platforms.shopee.components.shop_switch as shopee_shop_switch_module
+
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={},
+        config={"shop_name": "Demo Shop", "services_subtype": "ai_assistant"},
+    )
+    component = ShopeeServicesAiAssistantExport(ctx)
+    run_switch = AsyncMock(return_value=Mock(success=True, message="ok"))
+
+    monkeypatch.setattr(shopee_shop_switch_module.ShopeeShopSwitch, "run", run_switch)
+    monkeypatch.setattr(
+        component._shared,
+        "_ensure_shop_selected",
+        AsyncMock(side_effect=AssertionError("services ai _ensure_shop_selected should not use legacy shared flow")),
+        raising=False,
+    )
+
+    await component._ensure_shop_selected(_FakePage())
+
+    assert run_switch.await_count == 1

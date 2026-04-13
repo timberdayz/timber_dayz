@@ -27,6 +27,7 @@ class ShopeeDatePicker(DatePickerComponent):
         super().__init__(ctx)
         cfg = self.ctx.config or {}
         domain = str(cfg.get("data_domain") or "products").strip().lower()
+        self.data_domain = domain
         subtype = str(
             cfg.get("services_subtype")
             or cfg.get("sub_domain")
@@ -56,6 +57,10 @@ class ShopeeDatePicker(DatePickerComponent):
     def _build_loose_text_pattern(self, text: str):
         escaped = [re.escape(char) for char in str(text or "").strip()]
         return re.compile(r"\s*".join(escaped), re.IGNORECASE)
+
+    def _build_month_leaf_pattern(self, text: str):
+        escaped = re.escape(str(text or "").strip())
+        return re.compile(rf"^\s*{escaped}\s*$")
 
     async def _first_visible_locator(self, page: Any, selectors: tuple[str, ...]) -> Any | None:
         for selector in selectors:
@@ -525,6 +530,45 @@ class ShopeeDatePicker(DatePickerComponent):
         )
         return start_value, end_value
 
+    def _month_leaf_labels(self, iso_date: str) -> tuple[str, ...]:
+        try:
+            target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
+        except ValueError:
+            return ()
+
+        zh_months = (
+            "",
+            "\u4e00\u6708",
+            "\u4e8c\u6708",
+            "\u4e09\u6708",
+            "\u56db\u6708",
+            "\u4e94\u6708",
+            "\u516d\u6708",
+            "\u4e03\u6708",
+            "\u516b\u6708",
+            "\u4e5d\u6708",
+            "\u5341\u6708",
+            "\u5341\u4e00\u6708",
+            "\u5341\u4e8c\u6708",
+        )
+        return (zh_months[target_date.month],)
+
+    def _month_grid_labels(self) -> tuple[str, ...]:
+        return (
+            "\u4e00\u6708",
+            "\u4e8c\u6708",
+            "\u4e09\u6708",
+            "\u56db\u6708",
+            "\u4e94\u6708",
+            "\u516d\u6708",
+            "\u4e03\u6708",
+            "\u516b\u6708",
+            "\u4e5d\u6708",
+            "\u5341\u6708",
+            "\u5341\u4e00\u6708",
+            "\u5341\u4e8c\u6708",
+        )
+
     def _month_summary_signatures(self, iso_date: str) -> tuple[str, ...]:
         try:
             target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
@@ -621,13 +665,281 @@ class ShopeeDatePicker(DatePickerComponent):
         return any(signature and signature in normalized_summary for signature in normalized_signatures)
 
     def _resolve_custom_target(self, config: dict[str, Any]) -> dict[str, Any]:
-        return self._delegate._resolve_custom_target(config)
+        granularity = str(config.get("granularity") or "").strip().lower()
+        start_date, end_date = self._custom_range_bounds(config)
+        target_iso_date = start_date or end_date
+        if not target_iso_date:
+            raise ValueError("custom date selection requires start_date")
+
+        target_date = datetime.strptime(str(target_iso_date), "%Y-%m-%d")
+        return {
+            "granularity": granularity,
+            "target_iso_date": target_iso_date,
+            "target_year": target_date.year,
+            "target_month": target_date.month,
+            "target_day": target_date.day,
+            "target_month_label_zh": self._month_leaf_labels(target_iso_date)[0],
+            "start_date": start_date,
+            "end_date": end_date,
+        }
 
     def _calendar_month_key(self, year: int, month: int) -> int:
         return year * 12 + month
 
+    async def _find_month_panel(self, page: Any) -> Any | None:
+        common_selectors = (
+            ".arco-trigger-popup",
+            ".arco-picker-dropdown",
+            ".ant-picker-dropdown",
+            '[class*="picker-dropdown"]',
+            '[class*="dropdown"]',
+            '[class*="popup"]',
+            "body > div",
+        )
+
+        best_panel = None
+        best_score: tuple[int, int, int] | None = None
+        for selector in common_selectors:
+            try:
+                locator = page.locator(selector)
+                count = await locator.count()
+                for idx in range(count - 1, -1, -1):
+                    candidate = locator.nth(idx)
+                    if not await candidate.is_visible(timeout=500):
+                        continue
+                    try:
+                        text_content = await candidate.text_content() or ""
+                    except Exception:
+                        text_content = ""
+                    score = (
+                        1 if self._parse_month_panel_year(text_content) is not None else 0,
+                        sum(1 for label in self._month_grid_labels() if label in text_content),
+                        len(text_content),
+                    )
+                    if best_score is None or score > best_score:
+                        best_panel = candidate
+                        best_score = score
+            except Exception:
+                continue
+        return best_panel
+
+    async def _find_month_panel_header(self, page: Any) -> Any | None:
+        panel = await self._find_month_panel(page)
+        containers = [panel] if panel is not None else [page]
+        selectors = (
+            ".arco-picker-header",
+            ".ant-picker-header",
+            '[class*="picker-header"]',
+            '[class*="calendar-header"]',
+            '[class*="header"]',
+        )
+        for container in containers:
+            if container is None:
+                continue
+            for selector in selectors:
+                try:
+                    locator = container.locator(selector)
+                    count = await locator.count()
+                    for idx in range(count):
+                        candidate = locator.nth(idx)
+                        if not await candidate.is_visible(timeout=500):
+                            continue
+                        text_content = await candidate.text_content()
+                        if self._parse_month_panel_year(text_content) is not None:
+                            return candidate
+                    if count > 0:
+                        first = locator.first
+                        if await first.is_visible(timeout=500):
+                            text_content = await first.text_content()
+                            if self._parse_month_panel_year(text_content) is not None:
+                                return first
+                except Exception:
+                    continue
+        return None
+
+    async def _current_month_panel_year_text(self, page: Any) -> str | None:
+        header = await self._find_month_panel_header(page)
+        panel = await self._find_month_panel(page)
+        containers = [header, panel, page]
+        selectors = (
+            ".arco-picker-header",
+            ".ant-picker-header",
+            '[class*="picker-header"]',
+            '[class*="calendar-header"]',
+            '[class*="header"]',
+        )
+        for container in containers:
+            if container is None:
+                continue
+            for selector in selectors:
+                try:
+                    locator = container.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                        text_content = await locator.text_content()
+                        if self._parse_month_panel_year(text_content) is not None:
+                            return text_content
+                except Exception:
+                    continue
+        for container in containers:
+            if container is None:
+                continue
+            try:
+                locator = await self._pick_visible_locator(container.get_by_text(re.compile(r"20\d{2}"), exact=False))
+                if locator is None:
+                    continue
+                text_content = await locator.text_content()
+                if self._parse_month_panel_year(text_content) is not None:
+                    return text_content
+            except Exception:
+                continue
+        return None
+
+    async def _wait_month_panel_year_changed(
+        self,
+        page: Any,
+        previous_header: str | None,
+        *,
+        timeout_ms: int = 1500,
+        poll_ms: int = 150,
+    ) -> str | None:
+        previous = str(previous_header or "").strip()
+        waited = 0
+        while waited <= timeout_ms:
+            current = await self._current_month_panel_year_text(page)
+            if str(current or "").strip() and str(current or "").strip() != previous:
+                return current
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return None
+
+    async def _click_month_panel_year_nav_button(self, page: Any, direction: str) -> bool:
+        selector_map = {
+            "prev": (
+                'button[aria-label*="previous year"]',
+                'button[aria-label*="previous"]',
+                '.arco-picker-header-super-prev-btn',
+                '.arco-picker-header-prev-btn:not([class*="super"])',
+                '.ant-picker-header-super-prev-btn',
+                '.ant-picker-header-prev-btn:not([class*="super"])',
+                '[class*="super-prev"]',
+                '[class*="prev-btn"]:not([class*="super"])',
+                '[class*="prev"]:not([class*="super"])',
+                '[class*="double-left"]',
+            ),
+            "next": (
+                'button[aria-label*="next year"]',
+                'button[aria-label*="next"]',
+                '.arco-picker-header-super-next-btn',
+                '.arco-picker-header-next-btn:not([class*="super"])',
+                '.ant-picker-header-super-next-btn',
+                '.ant-picker-header-next-btn:not([class*="super"])',
+                '[class*="super-next"]',
+                '[class*="next-btn"]:not([class*="super"])',
+                '[class*="next"]:not([class*="super"])',
+                '[class*="double-right"]',
+            ),
+        }
+        header = await self._find_month_panel_header(page)
+        panel = await self._find_month_panel(page)
+        containers = [header, panel, page]
+        for container in containers:
+            if container is None:
+                continue
+            for selector in selector_map.get(direction, ()):
+                try:
+                    locator = container.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                        await locator.click(timeout=5000)
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(250)
+                        return True
+                except Exception:
+                    continue
+        return False
+
+    async def _find_month_grid_cell(self, page: Any, month_label: str) -> Any | None:
+        panel = await self._find_month_panel(page)
+        containers = [panel, page] if panel is not None else [page]
+        pattern = self._build_month_leaf_pattern(month_label)
+        for container in containers:
+            if container is None:
+                continue
+            try:
+                locator = await self._pick_visible_locator(container.get_by_text(pattern, exact=False))
+                if locator is not None:
+                    return locator
+            except Exception:
+                continue
+        for container in containers:
+            if container is None:
+                continue
+            try:
+                locator = await self._pick_visible_locator(container.get_by_text(month_label, exact=True))
+                if locator is not None:
+                    return locator
+            except Exception:
+                continue
+        return None
+
     def _parse_calendar_header_month_year_zh(self, header_text: str | None) -> tuple[int, int] | None:
-        return self._delegate._parse_calendar_header_month_year_zh(header_text)
+        text = str(header_text or "").strip()
+        if not text:
+            return None
+
+        year_match = re.search(r"(20\d{2})", text)
+        if not year_match:
+            return None
+        year = int(year_match.group(1))
+
+        month_match = re.search(r"(\d{1,2})\s*\u6708", text)
+        if month_match:
+            return year, int(month_match.group(1))
+
+        month_year_numeric_match = re.search(r"(\d{1,2})\s*\u6708\s*(20\d{2})", text)
+        if month_year_numeric_match:
+            return int(month_year_numeric_match.group(2)), int(month_year_numeric_match.group(1))
+
+        month_labels = (
+            ("\u5341\u4e00\u6708", 11),
+            ("\u5341\u4e8c\u6708", 12),
+            ("\u5341\u6708", 10),
+            ("\u4e00\u6708", 1),
+            ("\u4e8c\u6708", 2),
+            ("\u4e09\u6708", 3),
+            ("\u56db\u6708", 4),
+            ("\u4e94\u6708", 5),
+            ("\u516d\u6708", 6),
+            ("\u4e03\u6708", 7),
+            ("\u516b\u6708", 8),
+            ("\u4e5d\u6708", 9),
+            ("january", 1),
+            ("february", 2),
+            ("march", 3),
+            ("april", 4),
+            ("may", 5),
+            ("june", 6),
+            ("july", 7),
+            ("august", 8),
+            ("september", 9),
+            ("october", 10),
+            ("november", 11),
+            ("december", 12),
+        )
+        lowered = text.lower()
+        for label, month in month_labels:
+            if label in lowered:
+                return year, month
+        return None
+
+    def _parse_month_panel_year(self, header_text: str | None) -> int | None:
+        text = str(header_text or "").strip()
+        if not text:
+            return None
+        normalized = re.sub(r"[<>\u00ab\u00bb\u300a\u300b\s\u5e74]+", "", text)
+        if not re.fullmatch(r"20\d{2}", normalized):
+            return None
+        return int(normalized)
 
     async def _current_popup_header_text(self, page: Any) -> str | None:
         panel = await self._find_date_panel(page)
@@ -757,6 +1069,21 @@ class ShopeeDatePicker(DatePickerComponent):
             header_text = updated_header
         return self._parse_calendar_header_month_year_zh(header_text) == (target_year, target_month)
 
+    async def _navigate_month_panel_to_year(self, page: Any, target_year: int) -> bool:
+        header_text = await self._current_month_panel_year_text(page)
+        for _ in range(8):
+            current_year = self._parse_month_panel_year(header_text)
+            if current_year == target_year:
+                return True
+            direction = "next" if current_year is not None and current_year < target_year else "prev"
+            if not await self._click_month_panel_year_nav_button(page, direction):
+                return False
+            updated_header = await self._wait_month_panel_year_changed(page, header_text)
+            if updated_header is None:
+                return False
+            header_text = updated_header
+        return self._parse_month_panel_year(header_text) == target_year
+
     async def _wait_custom_date_selection_applied(
         self,
         page: Any,
@@ -807,7 +1134,45 @@ class ShopeeDatePicker(DatePickerComponent):
             return False
         if not await self._navigate_calendar_panel_to_month(page, target_date.year, target_date.month):
             return False
-        return await self._delegate._select_calendar_day(page, target_date.day)
+        return await self._select_calendar_day(page, target_date.day)
+
+    async def _select_calendar_day(self, page: Any, day: int) -> bool:
+        day_candidates = (str(day), f"{day:02d}")
+        panel = await self._find_date_panel(page)
+        containers = [panel] if panel is not None else [page]
+        in_view_selectors = (
+            ".arco-picker-cell-in-view",
+            ".ant-picker-cell-in-view",
+            '[class*="cell-in-view"]',
+            '[class*="in-view"]',
+        )
+        for container in containers:
+            if container is None:
+                continue
+            for candidate in day_candidates:
+                for in_view_selector in in_view_selectors:
+                    try:
+                        in_view_scope = container.locator(in_view_selector)
+                        matches = in_view_scope.get_by_text(candidate, exact=True)
+                        locator = await self._pick_visible_locator(matches, timeout_ms=1000)
+                        if locator is not None:
+                            await locator.click(timeout=5000)
+                            if hasattr(page, "wait_for_timeout"):
+                                await page.wait_for_timeout(300)
+                            return True
+                    except Exception:
+                        continue
+                try:
+                    matches = container.get_by_text(candidate, exact=True)
+                    locator = await self._pick_visible_locator(matches, timeout_ms=1000)
+                    if locator is not None:
+                        await locator.click(timeout=5000)
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(300)
+                        return True
+                except Exception:
+                    continue
+        return False
 
     async def _select_week_range_value(self, page: Any, start_date: str, end_date: str) -> bool:
         try:
@@ -816,10 +1181,33 @@ class ShopeeDatePicker(DatePickerComponent):
             return False
         if not await self._navigate_calendar_panel_to_month(page, start_value.year, start_value.month):
             return False
-        return await self._delegate._select_calendar_day(page, start_value.day)
+        return await self._select_calendar_day(page, start_value.day)
 
     async def _select_month_value(self, page: Any, iso_date: str) -> bool:
-        return await self._delegate._select_month_value(page, iso_date)
+        try:
+            target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
+        except ValueError:
+            return False
+
+        if not await self._navigate_month_panel_to_year(page, target_date.year):
+            return False
+
+        month_labels = self._month_leaf_labels(iso_date)
+        if not month_labels:
+            return False
+        locator = await self._find_month_grid_cell(page, month_labels[0])
+        if locator is None:
+            return False
+        try:
+            await locator.hover(timeout=5000)
+        except Exception:
+            pass
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(150)
+        await locator.click(timeout=5000)
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(300)
+        return True
 
     def _resolve_option_from_context(self) -> DateOption:
         config = self.ctx.config or {}
@@ -847,7 +1235,7 @@ class ShopeeDatePicker(DatePickerComponent):
         return DateOption.YESTERDAY
 
     def _target_date_label(self, config: dict[str, Any]) -> str:
-        domain = str((self.ctx.config or {}).get("data_domain") or "products").strip().lower()
+        domain = str((self.ctx.config or {}).get("data_domain") or self.data_domain or "products").strip().lower()
         time_selection = config.get("time_selection")
         if isinstance(time_selection, dict):
             if str(time_selection.get("mode") or "").strip().lower() == "preset" and time_selection.get("preset"):
@@ -907,8 +1295,8 @@ class ShopeeDatePicker(DatePickerComponent):
 
     async def _run_custom_selection(self, page: Any) -> None:
         config = self.ctx.config or {}
-        target = self._delegate._resolve_custom_target(config)
-        granularity = self._delegate._normalize_custom_granularity(target["granularity"])
+        target = self._resolve_custom_target(config)
+        granularity = self._normalize_custom_granularity(target["granularity"])
         start_date = target["start_date"]
         end_date = target["end_date"]
 
@@ -975,7 +1363,7 @@ class ShopeeDatePicker(DatePickerComponent):
             return
 
         await self._open_date_picker(page)
-        if target_text == self._delegate.sel.preset_labels.get("yesterday"):
+        if target_text == self.sel.preset_labels.get("yesterday"):
             direct_clicked = await self._click_text_option(page, target_text)
             if direct_clicked:
                 applied = await self._wait_date_selection_applied(page, target_text)
@@ -1006,7 +1394,7 @@ class ShopeeDatePicker(DatePickerComponent):
     async def run(self, page: Any, option: DateOption | None = None) -> DatePickResult:  # type: ignore[override]
         resolved_option = option or self._resolve_option_from_context()
         try:
-            custom_selection = self._delegate._custom_time_selection(self.ctx.config or {})
+            custom_selection = self._custom_time_selection(self.ctx.config or {})
             if custom_selection is not None:
                 await self._run_custom_selection(page)
             else:

@@ -926,6 +926,47 @@ async def test_tiktok_date_picker_services_run_uses_custom_tab_and_explicit_star
 
 
 @pytest.mark.asyncio
+async def test_tiktok_date_picker_services_single_day_uses_natural_day_single_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+
+    monkeypatch.setattr(
+        component,
+        "_resolve_range_for_context",
+        lambda option, today=None: ("2026-04-12", "2026-04-12"),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_current_range_matches", AsyncMock(return_value=False), raising=False)
+    monkeypatch.setattr(component, "_open_panel", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_natural_day_tab", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_pane_body_scope", AsyncMock(return_value=object()), raising=False)
+    monkeypatch.setattr(component, "_select_day_in_scope", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_custom_tab", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+
+    result = await component.run(page, DateOption.YESTERDAY)
+
+    assert result.success is True
+    component._select_natural_day_tab.assert_awaited_once_with(page)
+    component._navigate_left_to_month.assert_awaited_once_with(page, 2026, 4)
+    component._pane_body_scope.assert_awaited_once_with(page, "left")
+    component._select_day_in_scope.assert_awaited_once()
+    component._confirm_range_applied.assert_awaited_once_with(
+        page,
+        start_date="2026-04-12",
+        end_date="2026-04-12",
+    )
+    component._select_custom_tab.assert_not_awaited()
+    component._select_start_input.assert_not_awaited()
+    component._select_end_input.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_tiktok_date_picker_active_boundary_reads_active_input_from_range_html() -> None:
     component = TiktokDatePicker(_ctx())
     page = _SummaryPage()

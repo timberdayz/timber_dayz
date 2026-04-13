@@ -3,17 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from typing import Any
-
 from modules.components.base import ExecutionContext
 from modules.components.export.base import ExportComponent, ExportMode, ExportResult
 from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
+from modules.platforms.shopee.components.navigation import ShopeeNavigation
+from modules.platforms.shopee.components.shop_switch import ShopeeShopSwitch
 from modules.platforms.shopee.components import _download_helpers as download_helpers
-from modules.platforms.shopee.components.business_analysis_common import (
-    granularity_label,
-    normalize_time_request,
-    preset_label,
-)
 from modules.platforms.shopee.components.products_config import ProductsSelectors
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
 from modules.platforms.shopee.components.services_config import ServicesSelectors
@@ -45,12 +40,6 @@ class ShopeeServicesAiAssistantExport(ExportComponent):
         self._shared = ShopeeProductsExport(ctx, selectors=self.sel)
         self._shared._target_date_label = self._target_date_label  # type: ignore[method-assign]
 
-    def _products_page_looks_ready(self, url: str) -> bool:
-        current = str(url or "").strip().lower()
-        if not current:
-            return False
-        return self.service_sel.service_paths["ai_assistant"] in current
-
     def _validate_services_preset(self, value: str) -> str:
         normalized = str(value or "").strip().lower()
         if normalized == "today_realtime":
@@ -58,63 +47,22 @@ class ShopeeServicesAiAssistantExport(ExportComponent):
         return normalized
 
     async def _ensure_products_page_ready(self, page: Any) -> None:
-        if self._products_page_looks_ready(str(getattr(page, "url", "") or "")):
-            return
-        target_url = f"https://seller.shopee.cn{self.service_sel.service_paths['ai_assistant']}"
-        await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-        if hasattr(page, "wait_for_timeout"):
-            await page.wait_for_timeout(1200)
-        if not self._products_page_looks_ready(str(getattr(page, "url", "") or "")):
-            raise RuntimeError("services page is not ready")
+        await ShopeeNavigation(self.ctx).ensure_overview_ready(
+            page,
+            overview_path=self.service_sel.service_paths["ai_assistant"],
+            error_message="services page is not ready",
+        )
 
     def _target_date_label(self, config: dict[str, Any]) -> str:
-        time_selection = config.get("time_selection")
-        if isinstance(time_selection, dict):
-            if str(time_selection.get("mode") or "").strip().lower() == "preset" and time_selection.get("preset"):
-                normalized = normalize_time_request(
-                    "services",
-                    time_mode="preset",
-                    value=self._validate_services_preset(str(time_selection["preset"])),
-                )
-                return preset_label(normalized["value"])
-
-        if config.get("date_preset"):
-            normalized = normalize_time_request(
-                "services",
-                time_mode="preset",
-                value=self._validate_services_preset(str(config["date_preset"])),
+        picker = ShopeeDatePicker(
+            ExecutionContext(
+                platform=self.ctx.platform,
+                account=self.ctx.account,
+                config={**(self.ctx.config or {}), "data_domain": "services", "services_subtype": "ai_assistant"},
+                logger=self.logger,
             )
-            return preset_label(normalized["value"])
-
-        if "preset" in config:
-            normalized = normalize_time_request(
-                "services",
-                time_mode="preset",
-                value=self._validate_services_preset(str(config["preset"])),
-            )
-            return preset_label(normalized["value"])
-
-        granularity = str(config.get("granularity") or "daily").strip().lower()
-        preset_by_granularity = {
-            "day": "yesterday",
-            "daily": "yesterday",
-            "d": "yesterday",
-            "week": "last_7_days",
-            "weekly": "last_7_days",
-            "w": "last_7_days",
-            "month": "last_30_days",
-            "monthly": "last_30_days",
-            "m": "last_30_days",
-        }
-        preset_value = preset_by_granularity.get(granularity)
-        if preset_value:
-            return preset_label(preset_value)
-        normalized = normalize_time_request(
-            "services",
-            time_mode="granularity",
-            value=granularity,
         )
-        return granularity_label(normalized["value"])
+        return picker._target_date_label(config)
 
     async def _first_visible_locator(self, page: Any, selectors: tuple[str, ...]) -> Any | None:
         return await self._shared._first_visible_locator(page, selectors)
@@ -123,10 +71,15 @@ class ShopeeServicesAiAssistantExport(ExportComponent):
         return await self._shared._detect_export_throttled(page)
 
     async def _ensure_shop_selected(self, page: Any) -> None:
-        await self._shared._ensure_shop_selected(page)
+        result = await ShopeeShopSwitch(self.ctx).run(page)
+        if not getattr(result, "success", False):
+            raise RuntimeError(getattr(result, "message", "shop switch failed"))
 
     async def _ensure_date_selection(self, page: Any) -> None:
-        await self._shared._ensure_date_selection(page)
+        picker = ShopeeDatePicker(self.ctx)
+        result = await picker.run(page, picker._resolve_option_from_context())
+        if not getattr(result, "success", False):
+            raise RuntimeError(getattr(result, "message", "date picker failed"))
 
     async def ensure_page_ready(self, page: Any) -> None:
         await self._ensure_products_page_ready(page)

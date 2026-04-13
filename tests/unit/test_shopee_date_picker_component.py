@@ -136,6 +136,46 @@ class _NavAdvanceLocator(_FakeTextLocator):
         self._on_click()
 
 
+class _SelectableScope:
+    def __init__(self, text_map: dict[str, _FakeTextLocator]) -> None:
+        self._text_map = text_map
+
+    def get_by_text(self, text, exact: bool = False):
+        key = str(text)
+        locator = self._text_map.get(key)
+        if locator is None:
+            return _FakeLocatorSequence([])
+        return _FakeLocatorSequence([locator])
+
+
+class _SelectableContainer:
+    def __init__(
+        self,
+        *,
+        in_view_map: dict[str, _FakeTextLocator] | None = None,
+        direct_map: dict[str, _FakeTextLocator] | None = None,
+    ) -> None:
+        self._in_view_map = in_view_map or {}
+        self._direct_map = direct_map or {}
+
+    def locator(self, selector: str):
+        if selector in (
+            ".arco-picker-cell-in-view",
+            ".ant-picker-cell-in-view",
+            '[class*="cell-in-view"]',
+            '[class*="in-view"]',
+        ):
+            return _SelectableScope(self._in_view_map)
+        return _FakeLocatorSequence([])
+
+    def get_by_text(self, text, exact: bool = False):
+        key = str(text)
+        locator = self._direct_map.get(key) or self._in_view_map.get(key)
+        if locator is None:
+            return _FakeLocatorSequence([])
+        return _FakeLocatorSequence([locator])
+
+
 @pytest.mark.asyncio
 async def test_shopee_date_picker_custom_weekly_uses_week_mode_delegate_flow(
     monkeypatch: pytest.MonkeyPatch,
@@ -288,3 +328,108 @@ async def test_shopee_date_picker_navigate_calendar_panel_to_month_advances_unti
 
     assert result is True
     assert picker._click_popup_month_nav_button.await_count == 3
+
+
+def test_shopee_date_picker_resolve_custom_target_is_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(
+            platform="shopee",
+            account={},
+            config={
+                "data_domain": "services",
+                "services_subtype": "agent",
+                "granularity": "weekly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-03-30",
+                    "end_date": "2026-04-05",
+                },
+            },
+        )
+    )
+    monkeypatch.setattr(
+        picker._delegate,
+        "_resolve_custom_target",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not call delegate")),
+        raising=False,
+    )
+
+    target = picker._resolve_custom_target(picker.ctx.config or {})
+
+    assert target["granularity"] == "weekly"
+    assert target["target_iso_date"] == "2026-03-30"
+    assert target["target_year"] == 2026
+    assert target["target_month"] == 3
+    assert target["target_day"] == 30
+    assert target["start_date"] == "2026-03-30"
+    assert target["end_date"] == "2026-04-05"
+
+
+def test_shopee_date_picker_parse_calendar_header_month_year_is_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(platform="shopee", account={}, config={"data_domain": "services"})
+    )
+    monkeypatch.setattr(
+        picker._delegate,
+        "_parse_calendar_header_month_year_zh",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not call delegate")),
+        raising=False,
+    )
+
+    parsed = picker._parse_calendar_header_month_year_zh("三月2026")
+
+    assert parsed == (2026, 3)
+
+
+@pytest.mark.asyncio
+async def test_shopee_date_picker_select_calendar_day_is_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(platform="shopee", account={}, config={"data_domain": "services"})
+    )
+    page = _FakePage()
+    day_locator = _FakeTextLocator("30")
+    container = _SelectableContainer(in_view_map={"30": day_locator})
+    monkeypatch.setattr(picker, "_find_date_panel", AsyncMock(return_value=container), raising=False)
+    monkeypatch.setattr(
+        picker._delegate,
+        "_select_calendar_day",
+        AsyncMock(side_effect=AssertionError("should not call delegate")),
+        raising=False,
+    )
+
+    selected = await picker._select_calendar_day(page, 30)
+
+    assert selected is True
+    assert day_locator.clicked is True
+
+
+@pytest.mark.asyncio
+async def test_shopee_date_picker_select_month_value_is_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(platform="shopee", account={}, config={"data_domain": "services"})
+    )
+    page = _FakePage()
+    month_locator = _FakeTextLocator("三月")
+    monkeypatch.setattr(picker, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(picker, "_find_month_grid_cell", AsyncMock(return_value=month_locator), raising=False)
+    monkeypatch.setattr(
+        picker._delegate,
+        "_select_month_value",
+        AsyncMock(side_effect=AssertionError("should not call delegate")),
+        raising=False,
+    )
+
+    selected = await picker._select_month_value(page, "2026-03-30")
+
+    assert selected is True
+    picker._navigate_month_panel_to_year.assert_awaited_once_with(page, 2026)
+    picker._find_month_grid_cell.assert_awaited_once_with(page, "三月")
+    assert month_locator.clicked is True
