@@ -854,6 +854,19 @@ async def approve_user(
         },
     )
 
+    try:
+        from backend.services.approval_center_service import sync_user_registration_approval_decision
+
+        await sync_user_registration_approval_decision(
+            db=db,
+            user_id=user.user_id,
+            actor_user_id=current_user.user_id,
+            action="approve",
+            comment=request_body.notes,
+        )
+    except Exception as exc:
+        logger.warning(f"[approval-center] failed to sync user approval decision: {exc}")
+
     from backend.routers.notifications import notify_user_approved
 
     await notify_user_approved(
@@ -934,6 +947,19 @@ async def reject_user(
             "reason": request_body.reason,
         },
     )
+
+    try:
+        from backend.services.approval_center_service import sync_user_registration_approval_decision
+
+        await sync_user_registration_approval_decision(
+            db=db,
+            user_id=user.user_id,
+            actor_user_id=current_user.user_id,
+            action="reject",
+            comment=request_body.reason,
+        )
+    except Exception as exc:
+        logger.warning(f"[approval-center] failed to sync user rejection decision: {exc}")
 
     from backend.routers.notifications import notify_user_rejected
 

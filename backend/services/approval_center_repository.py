@@ -19,6 +19,12 @@ class ApprovalCenterRepository:
         )
         return result.scalar_one_or_none()
 
+    async def create_template(self, **fields: Any) -> ApprovalTemplate:
+        template = ApprovalTemplate(**fields)
+        self.db.add(template)
+        await self.db.flush()
+        return template
+
     async def create_instance(self, **fields: Any) -> ApprovalInstance:
         instance = ApprovalInstance(**fields)
         self.db.add(instance)
@@ -30,6 +36,22 @@ class ApprovalCenterRepository:
             select(ApprovalInstance).where(ApprovalInstance.approval_id == approval_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_latest_instance_by_template_and_business_key(
+        self,
+        *,
+        template_code: str,
+        business_key: str,
+    ) -> ApprovalInstance | None:
+        result = await self.db.execute(
+            select(ApprovalInstance)
+            .where(
+                ApprovalInstance.template_code == template_code,
+                ApprovalInstance.business_key == business_key,
+            )
+            .order_by(ApprovalInstance.created_at.desc(), ApprovalInstance.id.desc())
+        )
+        return result.scalars().first()
 
     async def update_instance(self, instance: ApprovalInstance, **updates: Any) -> ApprovalInstance:
         for key, value in updates.items():

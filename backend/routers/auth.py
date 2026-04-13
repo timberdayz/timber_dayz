@@ -101,6 +101,18 @@ async def register(
             user_agent=user_agent,
             details={"username": existing_user_by_username.username, "email": existing_user_by_username.email, "action": "re-register"}
         )
+
+        try:
+            from backend.services.approval_center_service import submit_user_registration_approval
+
+            await submit_user_registration_approval(
+                db=db,
+                applicant_user_id=existing_user_by_username.user_id,
+                username=existing_user_by_username.username,
+                email=existing_user_by_username.email,
+            )
+        except Exception as exc:
+            logger.warning(f"[approval-center] failed to submit re-registration approval: {exc}")
         
         # v4.19.0: 通知管理员有新用户注册
         from backend.routers.notifications import notify_user_registered
@@ -172,6 +184,18 @@ async def register(
         user_agent=user_agent,
         details={"username": user.username, "email": user.email}
     )
+
+    try:
+        from backend.services.approval_center_service import submit_user_registration_approval
+
+        await submit_user_registration_approval(
+            db=db,
+            applicant_user_id=user.user_id,
+            username=user.username,
+            email=user.email,
+        )
+    except Exception as exc:
+        logger.warning(f"[approval-center] failed to submit user registration approval: {exc}")
     
     # v4.19.0: 通知管理员有新用户注册
     from backend.routers.notifications import notify_user_registered

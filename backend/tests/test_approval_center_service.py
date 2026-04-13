@@ -45,6 +45,7 @@ async def approval_center_session():
             [
                 DimUser(user_id=1, username="applicant", email="applicant@example.com", password_hash="x", status="active", is_active=True),
                 DimUser(user_id=2, username="approver", email="approver@example.com", password_hash="x", status="active", is_active=True),
+                DimUser(user_id=9, username="admin", email="admin@example.com", password_hash="x", status="active", is_active=True, is_superuser=True),
                 ApprovalTemplate(
                     template_code="leave_request_approval",
                     template_name="Leave Request Approval",
@@ -137,3 +138,46 @@ async def test_withdraw_approval_closes_pending_projection(approval_center_sessi
 
     assert withdrawn["status"] == "cancelled"
     assert withdrawn["timeline"][-1]["action_type"] == "withdraw"
+
+
+@pytest.mark.asyncio
+async def test_submit_user_registration_approval_creates_registration_instance(approval_center_session):
+    from backend.services.approval_center_service import submit_user_registration_approval
+
+    detail = await submit_user_registration_approval(
+        db=approval_center_session,
+        applicant_user_id=1,
+        username="applicant",
+        email="applicant@example.com",
+    )
+
+    assert detail["template_code"] == "user_registration_approval"
+    assert detail["status"] == "submitted"
+    assert detail["steps"][0]["approver_user_id"] == 9
+
+
+@pytest.mark.asyncio
+async def test_sync_user_registration_approval_decision_updates_latest_instance(approval_center_session):
+    from backend.services.approval_center_service import (
+        submit_user_registration_approval,
+        sync_user_registration_approval_decision,
+    )
+
+    detail = await submit_user_registration_approval(
+        db=approval_center_session,
+        applicant_user_id=1,
+        username="applicant",
+        email="applicant@example.com",
+    )
+
+    approved = await sync_user_registration_approval_decision(
+        db=approval_center_session,
+        user_id=1,
+        actor_user_id=9,
+        action="approve",
+        comment="ok",
+    )
+
+    assert approved is not None
+    assert approved["approval_id"] == detail["approval_id"]
+    assert approved["status"] == "approved"
