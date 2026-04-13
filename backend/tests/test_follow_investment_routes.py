@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -20,11 +21,13 @@ def _make_user(role_code: str = "finance", user_id: int = 1) -> SimpleNamespace:
 @pytest.mark.asyncio
 async def test_follow_investment_settlement_calculate_route_returns_service_payload(monkeypatch):
     from backend.routers import follow_investment as follow_investment_router
+    submit_mock = AsyncMock()
 
     class _ServiceStub:
         async def calculate_settlement(self, year_month, platform_code, shop_id, distribution_ratio):
             return {
                 "settlement": {
+                    "id": 12,
                     "period_month": year_month,
                     "platform_code": platform_code,
                     "shop_id": shop_id,
@@ -38,8 +41,10 @@ async def test_follow_investment_settlement_calculate_route_returns_service_payl
                 ],
             }
 
+    db_token = object()
+
     async def _override_db():
-        yield object()
+        yield db_token
 
     app = FastAPI()
     app.include_router(follow_investment_router.router)
@@ -48,6 +53,10 @@ async def test_follow_investment_settlement_calculate_route_returns_service_payl
     monkeypatch.setattr(
         "backend.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.services.approval_center_service.submit_follow_investment_settlement_approval",
+        submit_mock,
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
@@ -66,6 +75,15 @@ async def test_follow_investment_settlement_calculate_route_returns_service_payl
     assert body["success"] is True
     assert body["data"]["settlement"]["distributable_amount"] == 32000
     assert len(body["data"]["details"]) == 2
+    submit_mock.assert_awaited_once()
+    assert submit_mock.await_args.kwargs == {
+        "db": db_token,
+        "applicant_user_id": 1,
+        "settlement_id": 12,
+        "period_month": "2026-03",
+        "platform_code": "shopee",
+        "shop_id": "shop-1",
+    }
 
 
 @pytest.mark.asyncio
@@ -191,6 +209,7 @@ async def test_follow_investment_archive_route_returns_service_payload(monkeypat
 @pytest.mark.asyncio
 async def test_follow_investment_approve_route_returns_service_payload(monkeypatch):
     from backend.routers import follow_investment as follow_investment_router
+    sync_mock = AsyncMock()
 
     class _ServiceStub:
         async def approve_settlement(self, settlement_id, approver):
@@ -201,8 +220,10 @@ async def test_follow_investment_approve_route_returns_service_payload(monkeypat
                 "approved_by_name": "财务经理",
             }
 
+    db_token = object()
+
     async def _override_db():
-        yield object()
+        yield db_token
 
     app = FastAPI()
     app.include_router(follow_investment_router.router)
@@ -211,6 +232,10 @@ async def test_follow_investment_approve_route_returns_service_payload(monkeypat
     monkeypatch.setattr(
         "backend.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.services.approval_center_service.sync_follow_investment_settlement_approval_decision",
+        sync_mock,
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
@@ -221,6 +246,14 @@ async def test_follow_investment_approve_route_returns_service_payload(monkeypat
     assert body["success"] is True
     assert body["data"]["status"] == "approved"
     assert body["data"]["approved_by_name"] == "财务经理"
+    sync_mock.assert_awaited_once()
+    assert sync_mock.await_args.kwargs == {
+        "db": db_token,
+        "settlement_id": 12,
+        "actor_user_id": 9,
+        "action": "approve",
+        "comment": "follow_investment_settlement approved",
+    }
 
 
 @pytest.mark.asyncio

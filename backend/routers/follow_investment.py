@@ -12,9 +12,11 @@ from backend.schemas.follow_investment import (
 )
 from backend.services.follow_investment_service import FollowInvestmentService
 from backend.utils.api_response import success_response
+from modules.core.logger import get_logger
 
 router = APIRouter(prefix="/api/finance/follow-investments", tags=["follow-investment"])
 _ALLOWED_ROLES = {"admin", "manager", "finance"}
+logger = get_logger(__name__)
 
 
 def _extract_role_codes(current_user) -> set[str]:
@@ -41,7 +43,7 @@ def _require_finance_role(current_user=Depends(get_current_user)):
 async def calculate_follow_investment_settlement(
     body: FollowInvestmentSettlementCalculateRequest,
     db: AsyncSession = Depends(get_async_db),
-    _current_user=Depends(_require_finance_role),
+    current_user=Depends(_require_finance_role),
 ):
     service = FollowInvestmentService(db)
     try:
@@ -53,6 +55,23 @@ async def calculate_follow_investment_settlement(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    settlement = payload.get("settlement", {})
+    settlement_id = settlement.get("id")
+    if settlement_id:
+        try:
+            from backend.services.approval_center_service import submit_follow_investment_settlement_approval
+
+            await submit_follow_investment_settlement_approval(
+                db=db,
+                applicant_user_id=int(getattr(current_user, "user_id", 0) or 0),
+                settlement_id=int(settlement_id),
+                period_month=body.period_month,
+                platform_code=body.platform_code,
+                shop_id=body.shop_id,
+            )
+        except Exception as exc:
+            logger.warning(f"[approval-center] failed to submit follow investment settlement approval: {exc}")
     return success_response(data=payload)
 
 
@@ -127,6 +146,19 @@ async def approve_follow_investment_settlement(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        from backend.services.approval_center_service import sync_follow_investment_settlement_approval_decision
+
+        await sync_follow_investment_settlement_approval_decision(
+            db=db,
+            settlement_id=settlement_id,
+            actor_user_id=int(getattr(current_user, "user_id", 0) or 0),
+            action="approve",
+            comment="follow_investment_settlement approved",
+        )
+    except Exception as exc:
+        logger.warning(f"[approval-center] failed to sync follow investment settlement approval decision: {exc}")
     return success_response(data=payload)
 
 

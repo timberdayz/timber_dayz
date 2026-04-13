@@ -121,6 +121,49 @@ async def test_user_registration():
 
 
 @pytest.mark.asyncio
+async def test_user_registration_submits_approval_center_instance(monkeypatch):
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[_scalar_result(None), _scalar_result(None)])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    added = []
+
+    def _add(obj):
+        if isinstance(obj, DimUser):
+            obj.user_id = 102
+        added.append(obj)
+
+    db.add.side_effect = _add
+    submit_mock = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.approval_center_service.submit_user_registration_approval",
+        submit_mock,
+    )
+
+    response = await auth_router.register(
+        request_body=RegisterRequest(
+            username="approval_user",
+            email="approval_user@test.com",
+            password="test123456",
+            full_name="Approval User",
+        ),
+        request=_request_stub(),
+        db=db,
+    )
+
+    data = _payload(response)
+    assert data["success"] is True
+    submit_mock.assert_awaited_once()
+    assert submit_mock.await_args.kwargs == {
+        "db": db,
+        "applicant_user_id": 102,
+        "username": "approval_user",
+        "email": "approval_user@test.com",
+    }
+
+
+@pytest.mark.asyncio
 async def test_user_registration_duplicate_username():
     existing_user = SimpleNamespace(user_id=1, status="active")
     db = MagicMock()
@@ -169,7 +212,7 @@ async def test_user_login_pending_status():
 
 
 @pytest.mark.asyncio
-async def test_user_approval():
+async def test_user_approval(monkeypatch):
     user = DimUser(
         user_id=201,
         username="approve_user",
@@ -199,6 +242,11 @@ async def test_user_approval():
     db.refresh = AsyncMock()
     db.commit = AsyncMock()
     db.add = MagicMock()
+    sync_mock = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.approval_center_service.sync_user_registration_approval_decision",
+        sync_mock,
+    )
 
     response = await users_admin_router.approve_user(
         user_id=201,
@@ -214,10 +262,18 @@ async def test_user_approval():
     assert user.status == "active"
     assert user.is_active is True
     assert user.approved_by == current_user.user_id
+    sync_mock.assert_awaited_once()
+    assert sync_mock.await_args.kwargs == {
+        "db": db,
+        "user_id": 201,
+        "actor_user_id": 999,
+        "action": "approve",
+        "comment": "审批通过",
+    }
 
 
 @pytest.mark.asyncio
-async def test_user_rejection():
+async def test_user_rejection(monkeypatch):
     user = DimUser(
         user_id=202,
         username="reject_user",
@@ -234,6 +290,11 @@ async def test_user_rejection():
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.add = MagicMock()
+    sync_mock = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.approval_center_service.sync_user_registration_approval_decision",
+        sync_mock,
+    )
 
     response = await users_admin_router.reject_user(
         user_id=202,
@@ -249,6 +310,14 @@ async def test_user_rejection():
     assert user.status == "rejected"
     assert user.is_active is False
     assert user.rejection_reason == "不符合要求"
+    sync_mock.assert_awaited_once()
+    assert sync_mock.await_args.kwargs == {
+        "db": db,
+        "user_id": 202,
+        "actor_user_id": 999,
+        "action": "reject",
+        "comment": "不符合要求",
+    }
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 import json
 from importlib import import_module
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -70,6 +71,7 @@ async def test_get_monthly_profit_settlement_route_returns_service_payload(monke
 @pytest.mark.asyncio
 async def test_rebuild_monthly_profit_settlement_route_returns_service_payload(monkeypatch):
     module = _load_router_module()
+    submit_mock = AsyncMock()
 
     class _ServiceStub:
         async def rebuild_month(
@@ -95,14 +97,20 @@ async def test_rebuild_monthly_profit_settlement_route_returns_service_payload(m
                 "adjustments": [],
             }
 
+    db_token = object()
+
     async def _override_db():
-        yield object()
+        yield db_token
 
     app = FastAPI()
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(
+        "backend.services.approval_center_service.submit_monthly_profit_settlement_approval",
+        submit_mock,
+    )
 
     payload = {
         "period_month": "2026-04",
@@ -120,6 +128,13 @@ async def test_rebuild_monthly_profit_settlement_route_returns_service_payload(m
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"]["summary"]["personnel_target_ratio"] == pytest.approx(0.3)
+    submit_mock.assert_awaited_once()
+    assert submit_mock.await_args.kwargs == {
+        "db": db_token,
+        "applicant_user_id": 1,
+        "settlement_id": 12,
+        "period_month": "2026-04",
+    }
 
 
 @pytest.mark.asyncio
@@ -208,6 +223,7 @@ async def test_update_monthly_profit_settlement_targets_route_returns_service_pa
 @pytest.mark.asyncio
 async def test_approve_monthly_profit_settlement_route_returns_service_payload(monkeypatch):
     module = _load_router_module()
+    sync_mock = AsyncMock()
 
     class _ServiceStub:
         async def approve(self, settlement_id, approver):
@@ -217,14 +233,20 @@ async def test_approve_monthly_profit_settlement_route_returns_service_payload(m
                 "approved_by": approver,
             }
 
+    db_token = object()
+
     async def _override_db():
-        yield object()
+        yield db_token
 
     app = FastAPI()
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance", user_id=9)
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(
+        "backend.services.approval_center_service.sync_monthly_profit_settlement_approval_decision",
+        sync_mock,
+    )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post("/api/finance/monthly-profit-settlement/12/approve")
@@ -234,6 +256,14 @@ async def test_approve_monthly_profit_settlement_route_returns_service_payload(m
     assert body["success"] is True
     assert body["data"]["status"] == "approved"
     assert body["data"]["approved_by"] == "9"
+    sync_mock.assert_awaited_once()
+    assert sync_mock.await_args.kwargs == {
+        "db": db_token,
+        "settlement_id": 12,
+        "actor_user_id": 9,
+        "action": "approve",
+        "comment": "monthly_profit_settlement approved",
+    }
 
 
 @pytest.mark.asyncio

@@ -154,10 +154,17 @@ test('hr approval and messaging pages follow personal view operation classificat
   const sessions = findRoute('/settings/sessions')
   assert.deepEqual(sessions.roles, ['admin', 'manager', 'operator', 'finance'])
 
-  for (const routePath of ['/my-tasks', '/my-requests', '/approval-history', '/workflow-config']) {
-    const route = findRoute(routePath)
-    assert.deepEqual(route.roles, ['admin'])
-  }
+  const myTasks = findRoute('/my-tasks')
+  assert.deepEqual(myTasks.roles, ['admin', 'manager', 'operator', 'finance'])
+
+  const myRequests = findRoute('/my-requests')
+  assert.deepEqual(myRequests.roles, ['admin', 'manager', 'operator', 'finance'])
+
+  const approvalHistory = findRoute('/approval-history')
+  assert.deepEqual(approvalHistory.roles, ['admin', 'manager', 'operator', 'finance'])
+
+  const workflowConfig = findRoute('/workflow-config')
+  assert.deepEqual(workflowConfig.roles, ['admin'])
 
   const systemNotifications = findRoute('/system-notifications')
   assert.deepEqual(systemNotifications.roles, ['admin', 'manager', 'operator', 'finance'])
