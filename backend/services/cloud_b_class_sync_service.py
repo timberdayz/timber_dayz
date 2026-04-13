@@ -248,48 +248,67 @@ class CloudBClassSyncService:
             )
             data_domain = self._infer_data_domain(table_name)
             self.mirror_manager.ensure_cloud_mirror_table(table_name, data_domain)
+            total_written_rows = 0
 
-            rows = await self._maybe_await(
-                self.source_batch_reader(
-                    table_name=table_name,
-                    checkpoint=checkpoint,
-                    batch_size=batch_size,
+            while True:
+                rows = await self._maybe_await(
+                    self.source_batch_reader(
+                        table_name=table_name,
+                        checkpoint=checkpoint,
+                        batch_size=batch_size,
+                    )
                 )
-            )
-            rows = list(rows)
-            payload_rows = [build_sync_payload(row) for row in rows]
+                rows = list(rows)
+                payload_rows = [build_sync_payload(row) for row in rows]
 
-            if not rows:
-                return {
-                    "status": "completed",
-                    "table_name": table_name,
-                    "written_rows": 0,
-                }
+                if not rows:
+                    return {
+                        "status": "completed",
+                        "table_name": table_name,
+                        "written_rows": total_written_rows,
+                    }
 
-            write_result = await self._maybe_await(
-                self.remote_writer(
-                    table_name=table_name,
-                    rows=payload_rows,
-                    data_domain=data_domain,
-                )
-            )
-
-            write_succeeded = bool(write_result.get("success"))
-            if self._should_advance_checkpoint(write_succeeded, dry_run=bool(write_result.get("dry_run"))):
-                last_row = rows[-1]
-                self.checkpoint_service.advance_checkpoint(
-                    table_name=table_name,
-                    ingest_timestamp=last_row["ingest_timestamp"],
-                    source_id=last_row["id"],
-                    status="completed",
-                    table_schema=self.checkpoint_scope,
+                write_result = await self._maybe_await(
+                    self.remote_writer(
+                        table_name=table_name,
+                        rows=payload_rows,
+                        data_domain=data_domain,
+                    )
                 )
 
-            return {
-                "status": "completed" if write_succeeded else "failed",
-                "table_name": table_name,
-                "written_rows": write_result.get("written_rows", len(rows) if write_succeeded else 0),
-            }
+                write_succeeded = bool(write_result.get("success"))
+                if not write_succeeded:
+                    return {
+                        "status": "failed",
+                        "table_name": table_name,
+                        "written_rows": total_written_rows,
+                        "error": write_result.get("error") or write_result.get("detail") or "sync_failed",
+                        "error_code": write_result.get("error_code") or "sync_failed",
+                    }
+
+                total_written_rows += int(write_result.get("written_rows", len(rows)))
+                if self._should_advance_checkpoint(write_succeeded, dry_run=bool(write_result.get("dry_run"))):
+                    last_row = rows[-1]
+                    self.checkpoint_service.advance_checkpoint(
+                        table_name=table_name,
+                        ingest_timestamp=last_row["ingest_timestamp"],
+                        source_id=last_row["id"],
+                        status="completed",
+                        table_schema=self.checkpoint_scope,
+                    )
+                else:
+                    return {
+                        "status": "completed",
+                        "table_name": table_name,
+                        "written_rows": total_written_rows,
+                    }
+
+                if len(rows) < batch_size:
+                    return {
+                        "status": "completed",
+                        "table_name": table_name,
+                        "written_rows": total_written_rows,
+                    }
         except Exception as exc:
             self.checkpoint_service.mark_failure(
                 table_name,

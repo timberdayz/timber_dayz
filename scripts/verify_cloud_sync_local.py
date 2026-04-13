@@ -28,13 +28,21 @@ def _run_command(command: list[str], env: dict[str, str] | None = None) -> None:
         raise RuntimeError(f"Command failed ({completed.returncode}): {' '.join(command)}")
 
 
+def _build_verify_database_url(verify_db: str) -> str:
+    override_url = os.getenv("CLOUD_SYNC_VERIFY_DATABASE_URL")
+    if override_url:
+        return override_url
+
+    return f"postgresql://localhost:15432/{verify_db}"
+
+
 def run_verification(*, verify_db: str, table: str | None) -> bool:
     _run_command([sys.executable, "scripts/migrate_cloud_sync_tables.py"])
     _run_command([sys.executable, "scripts/sync_b_class_to_cloud.py", "--dry-run", "--batch-size", "10"])
 
     if table:
         env = dict(os.environ)
-        env["CLOUD_DATABASE_URL"] = f"postgresql://erp_user:erp_pass_2025@localhost:15432/{verify_db}"
+        env["CLOUD_DATABASE_URL"] = _build_verify_database_url(verify_db)
         _run_command(
             [
                 sys.executable,

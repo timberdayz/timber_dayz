@@ -110,6 +110,27 @@ def test_worker_marks_partial_success_when_projection_fails():
         db.close()
 
 
+def test_worker_marks_failed_when_sync_executor_returns_failed_status():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db)
+
+        executor = FakeSyncExecutor(sync_ok=False, projection_ok=True)
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=executor)
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert refreshed.status == "failed"
+        assert refreshed.next_retry_at is None
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
 def test_stale_lease_can_be_reclaimed():
     db = _build_session()
     try:
@@ -159,6 +180,26 @@ def test_worker_supports_async_sync_executor():
         db.close()
 
 
+def test_worker_sets_finished_at_after_successful_run():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db, source_table_name="fact_shopee_orders_daily_finished_at")
+
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=FakeSyncExecutor())
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert refreshed.status == "completed"
+        assert refreshed.finished_at is not None
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
 def test_worker_heartbeat_extends_lease():
     db = _build_session()
     try:
@@ -175,6 +216,36 @@ def test_worker_heartbeat_extends_lease():
 
         assert refreshed.heartbeat_at is not None
         assert refreshed.lease_expires_at >= original_lease
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
+def test_worker_renews_lease_while_async_sync_is_running():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db, source_table_name="fact_shopee_orders_daily_long_run")
+
+        class SlowAsyncExecutor:
+            async def sync_table(self, source_table_name: str):
+                await asyncio.sleep(0.12)
+                return {
+                    "status": "completed",
+                    "projection_status": "completed",
+                    "source_table_name": source_table_name,
+                }
+
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=SlowAsyncExecutor(), lease_seconds=0.05)
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert refreshed.status == "completed"
+        assert refreshed.heartbeat_at is not None
+        assert refreshed.heartbeat_at > refreshed.last_attempt_started_at
     finally:
         db.rollback()
         db.query(CloudBClassSyncTask).delete()

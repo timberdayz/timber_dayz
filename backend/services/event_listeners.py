@@ -154,7 +154,13 @@ class EventListener:
     """Event listener entrypoints used by ingestion and background workflows."""
 
     @staticmethod
-    def handle_data_ingested(event: DataIngestedEvent) -> None:
+    def dispatch_service_factory():
+        db = SessionLocal()
+        service = CloudBClassAutoSyncDispatchService(db)
+        return db, service
+
+    @staticmethod
+    def handle_data_ingested(event: DataIngestedEvent) -> dict | None:
         logger.info(
             "[EventListener] Received DATA_INGESTED event: "
             f"file_id={event.file_id}, domain={event.data_domain}, granularity={event.granularity}, "
@@ -164,17 +170,10 @@ class EventListener:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            try:
-                job_id = asyncio.run(enqueue_refresh_for_data_ingested_event(event))
-                logger.info(
-                    "[EventListener] Synchronous PostgreSQL refresh enqueue completed: "
-                    f"file_id={event.file_id}, job_id={job_id}"
-                )
-            except Exception as exc:
-                logger.warning(
-                    f"[EventListener] DATA_INGESTED synchronous PostgreSQL refresh enqueue failed: {exc}",
-                    exc_info=True,
-                )
+            logger.info(
+                "[EventListener] No running event loop; skip inline PostgreSQL refresh scheduling: "
+                f"file_id={event.file_id}"
+            )
         else:
             task = asyncio.create_task(enqueue_refresh_for_data_ingested_event(event))
             logger.info(
@@ -184,21 +183,28 @@ class EventListener:
 
         if event.source_table_name:
             try:
-                db = SessionLocal()
+                factory_result = EventListener.dispatch_service_factory()
+                if isinstance(factory_result, tuple):
+                    db, service = factory_result
+                else:
+                    db = None
+                    service = factory_result
                 try:
-                    service = CloudBClassAutoSyncDispatchService(db)
                     result = service.enqueue_or_coalesce(event)
                 finally:
-                    db.close()
+                    if db is not None:
+                        db.close()
                 logger.info(
                     "[EventListener] Cloud sync task queued: "
                     f"job_id={result['job_id']}, coalesced={result['coalesced']}"
                 )
+                return result
             except Exception as exc:
                 logger.warning(
                     f"[EventListener] DATA_INGESTED cloud sync enqueue failed: {exc}",
                     exc_info=True,
                 )
+        return None
 
     @staticmethod
     def handle_mv_refreshed(event: MVRefreshedEvent) -> None:
