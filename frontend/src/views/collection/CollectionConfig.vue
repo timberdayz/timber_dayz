@@ -138,10 +138,21 @@
           :key="run.run_id"
           class="queue-item"
         >
-          <div class="queue-item-title">
-            <el-tag :type="getConfigRunTagType(run.status)" size="small">{{ getConfigRunStatusLabel(run.status) }}</el-tag>
-            <span>{{ run.main_account_id }}</span>
-            <span class="queue-run-id">{{ run.run_id }}</span>
+          <div class="queue-item-header">
+            <div class="queue-item-title">
+              <el-tag :type="getConfigRunTagType(run.status)" size="small">{{ getConfigRunStatusLabel(run.status) }}</el-tag>
+              <span>{{ run.main_account_id }}</span>
+              <span class="queue-run-id">{{ run.run_id }}</span>
+            </div>
+            <el-button
+              v-if="run.status === 'queued'"
+              size="small"
+              type="danger"
+              plain
+              @click="cancelConfigRun(run)"
+            >
+              取消
+            </el-button>
           </div>
           <div class="queue-item-meta">
             <span>配置 #{{ run.config_id }}</span>
@@ -477,7 +488,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { MagicStick, Plus, Refresh } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
 import {
@@ -921,6 +932,19 @@ async function loadConfigRuns() {
   }
 }
 
+async function cancelConfigRun(run) {
+  try {
+    await ElMessageBox.confirm('确定要取消这个排队中的配置执行吗？', '确认')
+    await collectionApi.cancelConfigRun(run.run_id)
+    ElMessage.success('已取消排队中的配置执行')
+    await loadConfigRuns()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(`取消失败: ${error.message}`)
+    }
+  }
+}
+
 async function reloadPageData() {
   await Promise.all([loadConfigs(), loadAccounts(), loadCoverage(), loadConfigRuns()])
 }
@@ -1232,6 +1256,13 @@ onMounted(() => {
   border-radius: 10px;
   padding: 12px 14px;
   background: #fafafa;
+}
+
+.queue-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .queue-item-title {

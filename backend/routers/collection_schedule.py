@@ -22,6 +22,7 @@ from backend.schemas.collection import (
     ScheduledJobsResponse,
     HealthCheckResponse,
 )
+from backend.schemas.common import SuccessResponse
 
 logger = get_logger(__name__)
 
@@ -61,6 +62,26 @@ async def get_config_run(
     if run is None:
         raise HTTPException(status_code=404, detail="config run not found")
     return run
+
+
+@router.delete("/config-runs/{run_id}", response_model=SuccessResponse[None])
+async def cancel_config_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    from backend.services.collection_config_run_service import CollectionConfigRunService
+
+    service = CollectionConfigRunService(db)
+    try:
+        await service.cancel_run_by_run_id(run_id)
+    except ValueError as exc:
+        detail = str(exc)
+        if detail.startswith("CollectionConfigRun not found:"):
+            raise HTTPException(status_code=404, detail="config run not found") from exc
+        if detail == "only queued config runs can be cancelled":
+            raise HTTPException(status_code=409, detail=detail) from exc
+        raise HTTPException(status_code=400, detail=detail) from exc
+    return SuccessResponse(success=True, message="config run cancelled", data=None)
 
 
 @router.post("/configs/{config_id}/schedule", response_model=ScheduleResponse)

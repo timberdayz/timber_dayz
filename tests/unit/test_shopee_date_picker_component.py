@@ -433,3 +433,113 @@ async def test_shopee_date_picker_select_month_value_is_local(
     picker._navigate_month_panel_to_year.assert_awaited_once_with(page, 2026)
     picker._find_month_grid_cell.assert_awaited_once_with(page, "三月")
     assert month_locator.clicked is True
+
+
+def test_shopee_date_picker_monthly_custom_summary_matches_products_header() -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(
+            platform="shopee",
+            account={},
+            config={
+                "data_domain": "products",
+                "granularity": "monthly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-03-31",
+                },
+            },
+        )
+    )
+
+    matched = picker._custom_date_summary_matches(
+        "\u6309\u6708 2026.03 (GMT+08)",
+        granularity="monthly",
+        start_date="2026-03-01",
+        end_date="2026-03-31",
+    )
+
+    assert matched is True
+
+
+def test_shopee_date_picker_monthly_custom_summary_matches_month_token_only() -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(
+            platform="shopee",
+            account={},
+            config={
+                "data_domain": "products",
+                "granularity": "monthly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-03-31",
+                },
+            },
+        )
+    )
+
+    matched = picker._custom_date_summary_matches(
+        "2026.03 (GMT+08)",
+        granularity="monthly",
+        start_date="2026-03-01",
+        end_date="2026-03-31",
+    )
+
+    assert matched is True
+
+
+@pytest.mark.asyncio
+async def test_shopee_date_picker_current_summary_prefers_richer_trigger_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(platform="shopee", account={}, config={"data_domain": "products"})
+    )
+    page = _FakePage()
+    summary_locator = _FakeTextLocator("统计时间")
+    trigger_locator = _FakeTextLocator("按月 2026.03 (GMT+08)")
+
+    monkeypatch.setattr(picker, "_find_date_summary_container", AsyncMock(return_value=summary_locator), raising=False)
+    monkeypatch.setattr(picker, "_find_date_picker_trigger", AsyncMock(return_value=trigger_locator), raising=False)
+
+    summary = await picker._current_date_summary_text(page)
+
+    assert summary == "按月 2026.03 (GMT+08)"
+
+
+@pytest.mark.asyncio
+async def test_shopee_date_picker_wait_custom_selection_uses_trigger_text_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(
+            platform="shopee",
+            account={},
+            config={
+                "data_domain": "products",
+                "granularity": "monthly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-03-31",
+                },
+            },
+        )
+    )
+    page = _FakePage()
+    trigger_locator = _FakeTextLocator("按月 2026.03 (GMT+08)")
+
+    monkeypatch.setattr(picker, "_current_date_summary_text", AsyncMock(return_value="统计时间"), raising=False)
+    monkeypatch.setattr(picker, "_find_date_picker_trigger", AsyncMock(return_value=trigger_locator), raising=False)
+
+    applied = await picker._wait_custom_date_selection_applied(
+        page,
+        granularity="monthly",
+        start_date="2026-03-01",
+        end_date="2026-03-31",
+        timeout_ms=10,
+        poll_ms=1,
+    )
+
+    assert applied is True

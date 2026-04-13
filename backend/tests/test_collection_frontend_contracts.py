@@ -127,6 +127,15 @@ def test_collection_config_run_uses_queue_run_feedback_not_task_id_redirect():
     assert "task_ids" not in text or "taskIds" not in text
 
 
+def test_collection_config_exposes_cancel_action_for_queued_runs():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+    api_text = (PROJECT_ROOT / "frontend/src/api/collection.js").read_text(encoding="utf-8")
+
+    assert "collectionApi.cancelConfigRun(run.run_id)" in text
+    assert "run.status === 'queued'" in text
+    assert "cancelConfigRun" in api_text
+
+
 def test_collection_config_exposes_main_account_scoping_hooks():
     text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
 

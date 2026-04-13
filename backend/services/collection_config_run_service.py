@@ -85,6 +85,24 @@ class CollectionConfigRunService:
         await self.db.refresh(queued)
         return queued
 
+    async def cancel_run_by_run_id(self, run_id: str) -> CollectionConfigRun:
+        run = (
+            await self.db.execute(
+                select(CollectionConfigRun).where(CollectionConfigRun.run_id == run_id)
+            )
+        ).scalars().first()
+        if run is None:
+            raise ValueError(f"CollectionConfigRun not found: {run_id}")
+        if run.status != "queued":
+            raise ValueError("only queued config runs can be cancelled")
+
+        run.status = "cancelled"
+        run.completed_at = datetime.now(timezone.utc)
+        run.error_message = "user cancelled queued config run"
+        await self.db.commit()
+        await self.db.refresh(run)
+        return run
+
     async def mark_run_failed(
         self,
         run_id: int,

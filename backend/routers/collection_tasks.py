@@ -1332,6 +1332,7 @@ async def _execute_collection_task_background(
                             date_range=date_range,
                             granularity=granularity,
                             browser=browser,
+                            browser_type=p.chromium,
                             max_parallel=max_parallel,
                             debug_mode=debug_mode,
                             runtime_manifests=runtime_manifests,
@@ -1347,8 +1348,10 @@ async def _execute_collection_task_background(
                             date_range=date_range,
                             granularity=granularity,
                             browser=browser,
+                            browser_type=p.chromium,
                             debug_mode=debug_mode,
                             runtime_manifests=runtime_manifests,
+                            session_runtime_mode="persistent_profile",
                         )
 
                     task.status = result.status

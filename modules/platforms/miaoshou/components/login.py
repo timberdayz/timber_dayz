@@ -161,11 +161,16 @@ class MiaoshouLogin(LoginComponent):
     async def run(self, page: Any) -> LoginResult:
         acc = self.ctx.account or {}
         config = self.ctx.config or {}
+        reused_session = bool(config.get("reused_session"))
+        params = config.get("params") or {}
+        reused_session = reused_session or bool(params.get("reused_session"))
+        if reused_session and self._login_looks_successful(str(getattr(page, "url", "") or "")):
+            await self._cleanup_after_login(page)
+            return LoginResult(success=True, message="already logged in")
         if await self._homepage_ready(page):
             await self._cleanup_after_login(page)
             return LoginResult(success=True, message="already logged in")
 
-        params = config.get("params") or {}
         resumed_code = (params.get("captcha_code") or params.get("otp") or "").strip()
         if resumed_code:
             return await self._submit_captcha_from_resume(page, resumed_code)

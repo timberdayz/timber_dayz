@@ -259,3 +259,30 @@ async def test_mark_running_runs_failed_marks_only_active_running_runs(config_ru
 
     refreshed_queued = await service._get_run(queued_run.id)
     assert refreshed_queued.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_by_run_id_marks_queued_run_cancelled(config_run_session):
+    from backend.services.collection_config_run_service import CollectionConfigRunService
+
+    config = await _seed_config(config_run_session)
+    service = CollectionConfigRunService(config_run_session)
+    queued_run, _ = await service.enqueue_config_run(config, trigger_type="manual")
+
+    cancelled = await service.cancel_run_by_run_id(queued_run.run_id)
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_by_run_id_rejects_non_queued_run(config_run_session):
+    from backend.services.collection_config_run_service import CollectionConfigRunService
+
+    config = await _seed_config(config_run_session)
+    service = CollectionConfigRunService(config_run_session)
+    queued_run, _ = await service.enqueue_config_run(config, trigger_type="manual")
+    await service.claim_next_queued_run()
+
+    with pytest.raises(ValueError, match="only queued config runs can be cancelled"):
+        await service.cancel_run_by_run_id(queued_run.run_id)

@@ -215,21 +215,19 @@ class ComponentTester:
         return cfg
 
     def _get_session_owner_id(self, account_info: Optional[Dict[str, Any]]) -> str:
-        account = account_info or {}
-        main_account_id = str(
-            account.get("main_account_id")
-            or account.get("parent_account")
-            or ""
-        ).strip()
-        if main_account_id:
-            return main_account_id
+        from modules.apps.collection_center.runtime_session import (
+            resolve_runtime_session_scope,
+        )
 
-        shop_account_id = str(
-            self.account_id
-            or account.get("shop_account_id")
-            or account.get("account_id")
-            or ""
-        ).strip() or "unknown"
+        account = account_info or {}
+        scope = resolve_runtime_session_scope(
+            requested_account_id=self.account_id,
+            account=account,
+        )
+        if scope.session_owner_id:
+            return scope.session_owner_id
+
+        shop_account_id = scope.shop_account_id or "unknown"
         raise ValueError(
             f"Missing main_account_id for component test session scope: shop_account_id={shop_account_id}"
         )
@@ -414,33 +412,34 @@ class ComponentTester:
             return False
 
         try:
-            from modules.apps.collection_center.executor_v2 import _save_session_async
-            return await _save_session_async(self.platform, account_id, storage_state)
+            from modules.apps.collection_center.runtime_session import (
+                persist_runtime_session_state,
+            )
+            return await persist_runtime_session_state(
+                platform=self.platform,
+                session_owner_id=account_id,
+                storage_state=storage_state,
+            )
         except Exception as e:
             logger.warning("Failed to save session for %s/%s: %s", self.platform, account_id, e)
             return False
 
     async def _check_login_gate(self, page, result: ComponentTestResult, component_name: str) -> bool:
-        from modules.utils.login_status_detector import LoginStatusDetector
-
-        detector = LoginStatusDetector(self.platform, debug=False)
         await self._wait_for_probe_page_ready(page)
         await self._allow_tiktok_login_shell_recovery(page)
-        detection_result = await detector.detect(page, wait_for_redirect=True)
-        gate_result = evaluate_login_ready(
-            status=detection_result.status.value,
-            confidence=detection_result.confidence,
-            current_url=str(getattr(page, "url", "") or ""),
-            matched_signal=detection_result.matched_pattern or detection_result.detected_by,
+        from modules.apps.collection_center.runtime_session import (
+            check_login_gate_ready,
         )
-        if gate_result.status is GateStatus.READY:
+
+        ok, gate_result = await check_login_gate_ready(page=page, platform=self.platform)
+        if ok:
             return True
 
         result.phase = "login"
         result.phase_component_name = component_name
         result.error = (
-            f"login gate not ready: status={detection_result.status.value}, "
-            f"confidence={detection_result.confidence:.2f}, url={getattr(page, 'url', '')}"
+            f"login gate not ready: status={gate_result.status.value}, "
+            f"reason={gate_result.reason}, url={getattr(page, 'url', '')}"
         )
         return False
 
@@ -927,34 +926,18 @@ class ComponentTester:
         storage_state: Optional[Dict[str, Any]] = None,
         headless: Optional[bool] = None,
     ) -> Dict[str, Any]:
-        context_options: Dict[str, Any] = {}
-        if account_id:
-            try:
-                from modules.apps.collection_center.executor_v2 import (
-                    _build_playwright_context_options_from_fingerprint,
-                    _get_fingerprint_context_options_async,
-                )
+        from modules.apps.collection_center.runtime_session import (
+            build_runtime_context_options,
+        )
 
-                fp_options = await _get_fingerprint_context_options_async(
-                    self.platform,
-                    account_id,
-                    account_info,
-                )
-                context_options = _build_playwright_context_options_from_fingerprint(fp_options)
-            except Exception as e:
-                logger.warning("Fingerprint load failed for component browser context: %s", e)
-
-        context_options.setdefault("accept_downloads", True)
-        if storage_state:
-            context_options["storage_state"] = storage_state
-        if not context_options.get("viewport"):
-            effective_headless = self.headless if headless is None else headless
-            context_options["viewport"] = (
-                None if not effective_headless else {"width": 1920, "height": 1080}
-            )
-        if "locale" not in context_options:
-            context_options["locale"] = "zh-CN"
-        return context_options
+        effective_headless = self.headless if headless is None else headless
+        return await build_runtime_context_options(
+            platform=self.platform,
+            session_owner_id=account_id,
+            account=account_info,
+            storage_state=storage_state,
+            headless=effective_headless,
+        )
 
     async def _recreate_context_with_saved_session(
         self,
@@ -967,33 +950,38 @@ class ComponentTester:
         storage_state = None
         if account_id:
             try:
-                from modules.apps.collection_center.executor_v2 import _load_or_bootstrap_session_async
+                from modules.apps.collection_center.runtime_session import (
+                    load_or_bootstrap_runtime_storage_state,
+                )
 
-                session_data = await _load_or_bootstrap_session_async(
-                    self.platform,
-                    account_id,
-                    account_info,
+                storage_state = await load_or_bootstrap_runtime_storage_state(
+                    platform=self.platform,
+                    session_owner_id=account_id,
+                    account=account_info,
                     max_age_days=30,
                 )
-                if session_data and isinstance(session_data.get("storage_state"), dict):
-                    storage_state = session_data["storage_state"]
             except Exception as e:
                 logger.warning("Reload saved session failed for %s/%s: %s", self.platform, account_id, e)
-
-        context_options = await self._build_component_browser_context_options(
-            account_id=account_id,
-            account_info=account_info,
-            storage_state=storage_state,
-            headless=self.headless,
-        )
 
         try:
             await old_context.close()
         except Exception as e:
             logger.debug("Close old context before session recreation failed: %s", e)
 
-        new_context = await browser.new_context(**context_options)
-        new_page = await new_context.new_page()
+        from modules.apps.collection_center.runtime_session import (
+            open_storage_state_runtime_bundle,
+        )
+
+        runtime_bundle = await open_storage_state_runtime_bundle(
+            browser=browser,
+            platform=self.platform,
+            session_owner_id=account_id,
+            account=account_info,
+            storage_state=storage_state,
+            headless=self.headless,
+        )
+        new_context = runtime_bundle.context
+        new_page = runtime_bundle.page
         await self._prime_page_for_login_gate(new_page, account_info)
         return new_context, new_page
 
@@ -1268,28 +1256,26 @@ class ComponentTester:
                 allow_session_reuse = bool(session_owner_id) and component_type != 'login'
                 if allow_session_reuse:
                     try:
-                        from modules.apps.collection_center.executor_v2 import (
-                            _load_or_bootstrap_session_async,
-                            _get_fingerprint_context_options_async,
-                            _build_playwright_context_options_from_fingerprint,
+                        from modules.apps.collection_center.runtime_session import (
+                            build_runtime_context_options,
+                            load_or_bootstrap_runtime_storage_state,
                         )
-                        session_data = await _load_or_bootstrap_session_async(
-                            self.platform,
-                            session_owner_id,
-                            account_info,
+                        storage_state = await load_or_bootstrap_runtime_storage_state(
+                            platform=self.platform,
+                            session_owner_id=session_owner_id,
+                            account=account_info,
                             max_age_days=30,
                         )
-                        if session_data and isinstance(session_data.get('storage_state'), dict):
-                            storage_state = session_data['storage_state']
-                        fp_options = await _get_fingerprint_context_options_async(
-                            self.platform, session_owner_id, account_info
+                        context_options = await build_runtime_context_options(
+                            platform=self.platform,
+                            session_owner_id=session_owner_id,
+                            account=account_info,
+                            storage_state=storage_state,
+                            headless=self.headless,
                         )
-                        context_options = _build_playwright_context_options_from_fingerprint(fp_options)
                     except Exception as e:
                         logger.warning("Session/fingerprint load failed, using default context: %s", e)
                 context_options.setdefault('accept_downloads', True)
-                if storage_state:
-                    context_options['storage_state'] = storage_state
                 if not context_options.get('viewport'):
                     context_options['viewport'] = (
                         None if not self.headless else {'width': 1920, 'height': 1080}
@@ -1298,8 +1284,19 @@ class ComponentTester:
                     context_options['locale'] = 'zh-CN'
 
                 use_persistent_profile = bool(session_owner_id) and self._use_persistent_profile_for_python_component(component_type)
-                context = await browser.new_context(**context_options)
-                page = await context.new_page()
+                from modules.apps.collection_center.runtime_session import (
+                    open_storage_state_runtime_bundle,
+                )
+                runtime_bundle = await open_storage_state_runtime_bundle(
+                    browser=browser,
+                    platform=self.platform,
+                    session_owner_id=session_owner_id or str(self.account_id or ""),
+                    account=account_info,
+                    storage_state=storage_state,
+                    headless=self.headless,
+                )
+                context = runtime_bundle.context
+                page = runtime_bundle.page
 
                 # 非登录组件统一走 login gate：先检查复用会话是否已满足，否则执行登录前置
                 if component_type in non_login_types and not self.skip_login:
@@ -1725,8 +1722,10 @@ class ComponentTester:
                 if use_persistent_context:
                     # 使用持久化浏览器上下文（复用登录状态）
                     try:
-                        from modules.utils.sessions.device_fingerprint import DeviceFingerprintManager
-                        fingerprint_manager = DeviceFingerprintManager()
+                        from modules.apps.collection_center.runtime_session import (
+                            open_persistent_runtime_bundle,
+                            open_storage_state_runtime_bundle,
+                        )
                         
                         # 获取 profile 路径
                         account_id = session_owner_id or self.account_id or account_info.get('account_id', 'default')
@@ -1745,38 +1744,20 @@ class ComponentTester:
                             profile_path = Path(ephemeral_profile_dir)
                             logger.info(f"[PERSISTENT] Using ephemeral persistent context: {profile_path}")
                             print(f"  [PERSISTENT] Using ephemeral persistent session for {self.platform}/{account_id}")
-                        
-                        # 获取指纹配置
-                        fingerprint = fingerprint_manager.get_or_create_fingerprint(
-                            self.platform, account_id, account_info
-                        )
-                        
-                        # 构建上下文选项
-                        context_options = {
-                            'viewport': None if not self.headless else fingerprint.get('viewport', {'width': 1920, 'height': 1080}),
-                            'user_agent': fingerprint.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'),
-                            'locale': fingerprint.get('locale', 'zh-CN'),
-                            'timezone_id': fingerprint.get('timezone', 'Asia/Shanghai'),
-                        }
-                        
-                        # 使用 launch_persistent_context
-                        context = await p.chromium.launch_persistent_context(
-                            user_data_dir=str(profile_path),
-                            **self._build_browser_launch_kwargs(
+
+                        runtime_bundle = await open_persistent_runtime_bundle(
+                            browser_type=p.chromium,
+                            platform=self.platform,
+                            session_owner_id=account_id,
+                            account=account_info,
+                            launch_kwargs=self._build_browser_launch_kwargs(
                                 args=['--start-maximized'] if not self.headless else [],
                                 slow_mo=50,
                             ),
-                            **context_options
+                            profile_path_override=str(profile_path),
                         )
-                        
-                        # 持久化上下文可能已有页面
-                        if context.pages:
-                            page = context.pages[0]
-                            # 关闭多余页面
-                            for extra_page in context.pages[1:]:
-                                await extra_page.close()
-                        else:
-                            page = await context.new_page()
+                        context = runtime_bundle.context
+                        page = runtime_bundle.page
                             
                     except Exception as e:
                         logger.warning(f"Failed to create persistent context: {e}, falling back to normal context")
@@ -1787,10 +1768,16 @@ class ComponentTester:
                                 args=['--start-maximized'] if not self.headless else []
                             )
                         )
-                        context = await browser.new_context(
-                            viewport=None if not self.headless else {'width': 1920, 'height': 1080}
+                        runtime_bundle = await open_storage_state_runtime_bundle(
+                            browser=browser,
+                            platform=self.platform,
+                            session_owner_id=account_id,
+                            account=account_info,
+                            storage_state=None,
+                            headless=self.headless,
                         )
-                        page = await context.new_page()
+                        context = runtime_bundle.context
+                        page = runtime_bundle.page
                 else:
                     # 普通模式：创建新的浏览器上下文（有头时最大化便于观察）
                     browser = await p.chromium.launch(
@@ -1798,10 +1785,20 @@ class ComponentTester:
                             args=['--start-maximized'] if not self.headless else []
                         )
                     )
-                    context = await browser.new_context(
-                        viewport=None if not self.headless else {'width': 1920, 'height': 1080}
+                    from modules.apps.collection_center.runtime_session import (
+                        open_storage_state_runtime_bundle,
                     )
-                    page = await context.new_page()
+
+                    runtime_bundle = await open_storage_state_runtime_bundle(
+                        browser=browser,
+                        platform=self.platform,
+                        session_owner_id=session_owner_id or str(self.account_id or ""),
+                        account=account_info,
+                        storage_state=None,
+                        headless=self.headless,
+                    )
+                    context = runtime_bundle.context
+                    page = runtime_bundle.page
                 
                 # #region agent log
                 with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:

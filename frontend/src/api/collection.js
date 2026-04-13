@@ -89,6 +89,10 @@ export const getConfigRun = async (runId) => {
   return response
 }
 
+export const cancelConfigRun = async (runId) => {
+  await api.delete(`/collection/config-runs/${runId}`)
+}
+
 // ============================================================
 // 账号 API
 // ============================================================
@@ -441,6 +445,7 @@ export default {
   runConfig,
   getConfigRuns,
   getConfigRun,
+  cancelConfigRun,
   
   // 账号管理
   getAccounts,

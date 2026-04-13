@@ -471,6 +471,15 @@ class ShopeeDatePicker(DatePickerComponent):
         except Exception:
             return None
 
+    async def _current_date_trigger_text(self, page: Any) -> str | None:
+        trigger = await self._find_date_picker_trigger(page)
+        if trigger is None:
+            return None
+        try:
+            return await trigger.text_content()
+        except Exception:
+            return None
+
     async def _current_date_label(self, page: Any) -> str | None:
         trigger = await self._find_date_picker_trigger(page)
         if trigger is not None:
@@ -620,6 +629,15 @@ class ShopeeDatePicker(DatePickerComponent):
             return False
 
         normalized_granularity = self._normalize_custom_granularity(granularity)
+        if normalized_granularity == "monthly" and start_date:
+            try:
+                target_date = datetime.strptime(str(start_date), "%Y-%m-%d")
+            except ValueError:
+                target_date = None
+            month_value = self._extract_summary_month_value(summary)
+            if target_date is not None and month_value == (target_date.year, target_date.month):
+                return True
+
         parsed_summary = self._parse_date_summary(summary)
         if parsed_summary and parsed_summary.get("mode"):
             if normalized_granularity == "daily":
@@ -1099,6 +1117,14 @@ class ShopeeDatePicker(DatePickerComponent):
             summary = await self._current_date_summary_text(page)
             if self._custom_date_summary_matches(
                 summary,
+                granularity=granularity,
+                start_date=start_date,
+                end_date=end_date,
+            ):
+                return True
+            trigger_text = await self._current_date_trigger_text(page)
+            if trigger_text and trigger_text != summary and self._custom_date_summary_matches(
+                trigger_text,
                 granularity=granularity,
                 start_date=start_date,
                 end_date=end_date,
