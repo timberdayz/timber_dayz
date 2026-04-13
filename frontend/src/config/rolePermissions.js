@@ -63,7 +63,7 @@ export const ROLE_CONFIG = {
       'sales-dashboard-v3', 'sales-analysis', 'sales-detail', 'customer-management', 'order-management',
       'store-management', 'store-analytics',
       'employee-management', 'my-income', 'performance:read', 'inventory:view', 'inventory-dashboard:view',
-      'my-tasks',
+      'my-tasks', 'my-requests', 'approval-history',
       'system-notifications', 'alerts', 'message-settings',
       'personal-settings',
       'sales-dashboard', 'sales-reports', 'inventory-reports', 'vendor-reports', 'message-center', 'notifications'
@@ -79,7 +79,7 @@ export const ROLE_CONFIG = {
       'financial-management', 'expense-management', 'finance-reports', 'finance-reports-detail', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
       'employee-management', 'my-income', 'performance:read',
-      'my-tasks',
+      'my-tasks', 'my-requests', 'approval-history',
       'system-notifications', 'alerts', 'message-settings',
       'personal-settings',
       'sales-dashboard', 'report-center', 'message-center', 'notifications'

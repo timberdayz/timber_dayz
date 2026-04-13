@@ -46,6 +46,8 @@ async def approval_center_route_session():
             [
                 DimUser(user_id=1, username="applicant", email="applicant@example.com", password_hash="x", status="active", is_active=True),
                 DimUser(user_id=2, username="approver", email="approver@example.com", password_hash="x", status="active", is_active=True),
+                DimUser(user_id=3, username="outsider", email="outsider@example.com", password_hash="x", status="active", is_active=True),
+                DimUser(user_id=9, username="admin", email="admin@example.com", password_hash="x", status="active", is_active=True, is_superuser=True),
                 ApprovalTemplate(
                     template_code="leave_request_approval",
                     template_name="Leave Request Approval",
@@ -124,6 +126,66 @@ async def approval_center_async_client_approver(approval_center_route_session):
 
 
 @pytest_asyncio.fixture
+async def approval_center_async_client_outsider(approval_center_route_session):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 3
+        username = "outsider"
+        is_active = True
+        is_superuser = False
+        roles = []
+
+    async def override_get_async_db():
+        yield approval_center_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        yield client
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest_asyncio.fixture
+async def approval_center_async_client_admin(approval_center_route_session):
+    from backend.main import app
+    from backend.models.database import get_async_db
+    from backend.dependencies.auth import get_current_user
+
+    class MockUser:
+        user_id = 9
+        username = "admin"
+        is_active = True
+        is_superuser = True
+        roles = []
+
+    async def override_get_async_db():
+        yield approval_center_route_session
+
+    async def override_current_user():
+        return MockUser()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        yield client
+
+    app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest_asyncio.fixture
 async def seeded_approval_data(approval_center_route_session):
     from backend.services.approval_center_service import ApprovalCenterService
 
@@ -166,9 +228,9 @@ async def test_approval_center_history_endpoint_returns_actor_actions(
 
 @pytest.mark.asyncio
 async def test_approval_center_templates_endpoint_returns_items(
-    approval_center_async_client,
+    approval_center_async_client_admin,
 ):
-    response = await approval_center_async_client.get("/api/approval-center/templates")
+    response = await approval_center_async_client_admin.get("/api/approval-center/templates")
 
     assert response.status_code == 200
     assert response.json()["data"]["items"][0]["template_code"] == "leave_request_approval"
@@ -211,3 +273,37 @@ async def test_approval_center_withdraw_endpoint(
 
     assert response.status_code == 200
     assert response.json()["data"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_approval_center_detail_endpoint_rejects_unrelated_user(
+    approval_center_async_client_outsider,
+    seeded_approval_data,
+):
+    response = await approval_center_async_client_outsider.get(
+        "/api/approval-center/approval:leave_request_approval:leave:2026-04:1"
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_approval_center_approve_endpoint_rejects_non_approver(
+    approval_center_async_client,
+    seeded_approval_data,
+):
+    response = await approval_center_async_client.post(
+        "/api/approval-center/approval:leave_request_approval:leave:2026-04:1/approve",
+        json={"comment": "forbidden"},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_approval_center_templates_endpoint_requires_admin(
+    approval_center_async_client,
+):
+    response = await approval_center_async_client.get("/api/approval-center/templates")
+
+    assert response.status_code == 403

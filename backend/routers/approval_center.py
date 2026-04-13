@@ -15,6 +15,17 @@ from modules.core.db import ApprovalActionLog, ApprovalInstance, ApprovalTemplat
 router = APIRouter(prefix="/approval-center", tags=["审批中心"])
 
 
+def _is_admin_actor(current_user) -> bool:
+    if getattr(current_user, "is_superuser", False):
+        return True
+    for role in getattr(current_user, "roles", []) or []:
+        role_code = getattr(role, "role_code", None)
+        role_name = getattr(role, "role_name", None)
+        if role_code == "admin" or role_name == "admin":
+            return True
+    return False
+
+
 @router.get("/requests")
 async def list_my_requests(
     db: AsyncSession = Depends(get_async_db),
@@ -71,8 +82,10 @@ async def list_my_approval_history(
 @router.get("/templates")
 async def list_approval_templates(
     db: AsyncSession = Depends(get_async_db),
-    _current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
+    if not _is_admin_actor(current_user):
+        raise HTTPException(status_code=403, detail="Only administrators may access approval templates")
     rows = (
         await db.execute(
             select(ApprovalTemplate).order_by(ApprovalTemplate.template_name.asc(), ApprovalTemplate.id.asc())
@@ -100,7 +113,13 @@ async def get_approval_detail(
 ):
     service = ApprovalCenterService(db)
     try:
-        payload = await service.get_approval_detail(approval_id)
+        payload = await service.get_approval_detail(
+            approval_id,
+            actor_user_id=current_user.user_id,
+            actor_is_admin=_is_admin_actor(current_user),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return success_response(data=payload)
@@ -114,7 +133,15 @@ async def approve_approval(
     current_user=Depends(get_current_user),
 ):
     service = ApprovalCenterService(db)
-    payload = await service.approve_step(approval_id, actor_user_id=current_user.user_id, comment=body.comment)
+    try:
+        payload = await service.approve_step(
+            approval_id,
+            actor_user_id=current_user.user_id,
+            comment=body.comment,
+            actor_is_admin=_is_admin_actor(current_user),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return success_response(data=payload)
 
 
@@ -126,7 +153,15 @@ async def reject_approval(
     current_user=Depends(get_current_user),
 ):
     service = ApprovalCenterService(db)
-    payload = await service.reject_step(approval_id, actor_user_id=current_user.user_id, comment=body.comment)
+    try:
+        payload = await service.reject_step(
+            approval_id,
+            actor_user_id=current_user.user_id,
+            comment=body.comment,
+            actor_is_admin=_is_admin_actor(current_user),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return success_response(data=payload)
 
 
@@ -138,5 +173,8 @@ async def withdraw_approval(
     current_user=Depends(get_current_user),
 ):
     service = ApprovalCenterService(db)
-    payload = await service.withdraw_approval(approval_id, actor_user_id=current_user.user_id, comment=body.comment)
+    try:
+        payload = await service.withdraw_approval(approval_id, actor_user_id=current_user.user_id, comment=body.comment)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return success_response(data=payload)

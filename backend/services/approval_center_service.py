@@ -184,9 +184,19 @@ async def sync_monthly_profit_settlement_approval_decision(
     if instance is None:
         return None
     if action == "approve":
-        return await service.approve_step(instance.approval_id, actor_user_id=actor_user_id, comment=comment)
+        return await service.approve_step(
+            instance.approval_id,
+            actor_user_id=actor_user_id,
+            comment=comment,
+            actor_is_admin=True,
+        )
     if action == "reject":
-        return await service.reject_step(instance.approval_id, actor_user_id=actor_user_id, comment=comment)
+        return await service.reject_step(
+            instance.approval_id,
+            actor_user_id=actor_user_id,
+            comment=comment,
+            actor_is_admin=True,
+        )
     raise ValueError(f"Unsupported monthly profit settlement approval action: {action}")
 
 
@@ -245,9 +255,19 @@ async def sync_follow_investment_settlement_approval_decision(
     if instance is None:
         return None
     if action == "approve":
-        return await service.approve_step(instance.approval_id, actor_user_id=actor_user_id, comment=comment)
+        return await service.approve_step(
+            instance.approval_id,
+            actor_user_id=actor_user_id,
+            comment=comment,
+            actor_is_admin=True,
+        )
     if action == "reject":
-        return await service.reject_step(instance.approval_id, actor_user_id=actor_user_id, comment=comment)
+        return await service.reject_step(
+            instance.approval_id,
+            actor_user_id=actor_user_id,
+            comment=comment,
+            actor_is_admin=True,
+        )
     raise ValueError(f"Unsupported follow investment settlement approval action: {action}")
 
 
@@ -271,12 +291,14 @@ async def sync_user_registration_approval_decision(
             instance.approval_id,
             actor_user_id=actor_user_id,
             comment=comment,
+            actor_is_admin=True,
         )
     if action == "reject":
         return await service.reject_step(
             instance.approval_id,
             actor_user_id=actor_user_id,
             comment=comment,
+            actor_is_admin=True,
         )
     raise ValueError(f"Unsupported user registration approval action: {action}")
 
@@ -341,11 +363,19 @@ class ApprovalCenterService:
         await self.db.commit()
         return await self.get_approval_detail(approval_id)
 
-    async def approve_step(self, approval_id: str, *, actor_user_id: int, comment: str | None = None) -> dict:
+    async def approve_step(
+        self,
+        approval_id: str,
+        *,
+        actor_user_id: int,
+        comment: str | None = None,
+        actor_is_admin: bool = False,
+    ) -> dict:
         instance = await self._get_instance(approval_id)
         step = await self.repository.get_pending_step(instance.id)
         if step is None:
             raise ValueError("No pending approval step found")
+        await self._assert_can_review_step(step, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
         await self.repository.update_step(step, status="approved", acted_at=datetime.now(timezone.utc))
         await self.repository.update_instance(
             instance,
@@ -361,13 +391,21 @@ class ApprovalCenterService:
             comment=comment,
         )
         await self.db.commit()
-        return await self.get_approval_detail(approval_id)
+        return await self.get_approval_detail(approval_id, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
 
-    async def reject_step(self, approval_id: str, *, actor_user_id: int, comment: str | None = None) -> dict:
+    async def reject_step(
+        self,
+        approval_id: str,
+        *,
+        actor_user_id: int,
+        comment: str | None = None,
+        actor_is_admin: bool = False,
+    ) -> dict:
         instance = await self._get_instance(approval_id)
         step = await self.repository.get_pending_step(instance.id)
         if step is None:
             raise ValueError("No pending approval step found")
+        await self._assert_can_review_step(step, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
         await self.repository.update_step(step, status="rejected", acted_at=datetime.now(timezone.utc))
         await self.repository.update_instance(
             instance,
@@ -383,7 +421,7 @@ class ApprovalCenterService:
             comment=comment,
         )
         await self.db.commit()
-        return await self.get_approval_detail(approval_id)
+        return await self.get_approval_detail(approval_id, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
 
     async def withdraw_approval(self, approval_id: str, *, actor_user_id: int, comment: str | None = None) -> dict:
         instance = await self._get_instance(approval_id)
@@ -402,12 +440,26 @@ class ApprovalCenterService:
             comment=comment,
         )
         await self.db.commit()
-        return await self.get_approval_detail(approval_id)
+        return await self.get_approval_detail(approval_id, actor_user_id=actor_user_id)
 
-    async def get_approval_detail(self, approval_id: str) -> dict:
+    async def get_approval_detail(
+        self,
+        approval_id: str,
+        *,
+        actor_user_id: int | None = None,
+        actor_is_admin: bool = False,
+    ) -> dict:
         instance = await self._get_instance(approval_id)
         steps = await self.repository.list_steps(instance.id)
         logs = await self.repository.list_action_logs(instance.id)
+        if actor_user_id is not None:
+            await self._assert_can_view_instance(
+                instance,
+                steps,
+                logs,
+                actor_user_id=actor_user_id,
+                actor_is_admin=actor_is_admin,
+            )
         return ApprovalInstancePayload(
             approval_id=instance.approval_id,
             template_code=instance.template_code,
@@ -437,6 +489,38 @@ class ApprovalCenterService:
                 for log in logs
             ],
         ).model_dump()
+
+    async def _assert_can_review_step(
+        self,
+        step,
+        *,
+        actor_user_id: int,
+        actor_is_admin: bool,
+    ) -> None:
+        if actor_is_admin:
+            return
+        if step.approver_user_id == actor_user_id:
+            return
+        raise PermissionError("Only the current approver or an admin may review this approval")
+
+    async def _assert_can_view_instance(
+        self,
+        instance,
+        steps,
+        logs,
+        *,
+        actor_user_id: int,
+        actor_is_admin: bool,
+    ) -> None:
+        if actor_is_admin:
+            return
+        if instance.applicant_user_id == actor_user_id:
+            return
+        if any(step.status == "pending" and step.approver_user_id == actor_user_id for step in steps):
+            return
+        if any(log.actor_user_id == actor_user_id for log in logs):
+            return
+        raise PermissionError("You do not have access to this approval")
 
     async def _get_instance(self, approval_id: str):
         instance = await self.repository.get_instance_by_approval_id(approval_id)

@@ -1002,7 +1002,7 @@ const routes = [
       title: '我的申请',
       icon: 'Document',
       permission: 'my-requests',
-      roles: ['admin']
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {
@@ -1013,7 +1013,7 @@ const routes = [
       title: '审批历史',
       icon: 'Clock',
       permission: 'approval-history',
-      roles: ['admin']
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {
