@@ -373,6 +373,49 @@ def _normalize_period_start(value: str) -> date_cls:
     raise ValueError("Unsupported period/date format")
 
 
+def _start_of_quarter(day: date_cls) -> date_cls:
+    quarter_month = ((day.month - 1) // 3) * 3 + 1
+    return date_cls(day.year, quarter_month, 1)
+
+
+def _start_of_next_month(day: date_cls) -> date_cls:
+    if day.month == 12:
+        return date_cls(day.year + 1, 1, 1)
+    return date_cls(day.year, day.month + 1, 1)
+
+
+def _resolve_store_analysis_effective_granularity(platform: str, granularity: str) -> str:
+    normalized_platform = str(platform or "").strip().lower()
+    normalized_granularity = str(granularity or "").strip().lower()
+    if normalized_granularity not in {"daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError("granularity must be one of daily/weekly/monthly/quarterly/yearly")
+    if normalized_granularity == "daily":
+        return "hourly" if normalized_platform == "shopee" else "daily"
+    if normalized_granularity == "yearly":
+        return "monthly"
+    return "daily"
+
+
+def _resolve_store_analysis_window(granularity: str, target_date: str) -> tuple[date_cls, date_cls]:
+    period_start = _normalize_period_start(target_date)
+    normalized_granularity = str(granularity or "").strip().lower()
+    if normalized_granularity == "daily":
+        return period_start, period_start
+    if normalized_granularity == "weekly":
+        return period_start, period_start + timedelta(days=6)
+    if normalized_granularity == "monthly":
+        month_start = date_cls(period_start.year, period_start.month, 1)
+        return month_start, _start_of_next_month(month_start) - timedelta(days=1)
+    if normalized_granularity == "quarterly":
+        quarter_start = _start_of_quarter(period_start)
+        quarter_end = _start_of_next_month(_start_of_next_month(_start_of_next_month(quarter_start))) - timedelta(days=1)
+        return quarter_start, quarter_end
+    if normalized_granularity == "yearly":
+        year_start = date_cls(period_start.year, 1, 1)
+        return year_start, date_cls(period_start.year, 12, 31)
+    raise ValueError("granularity must be one of daily/weekly/monthly/quarterly/yearly")
+
+
 class PostgresqlDashboardService:
     async def _fetch_rows(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         async with AsyncSessionLocal() as session:
@@ -818,6 +861,158 @@ class PostgresqlDashboardService:
             for row in rows
         ]
         return rank_traffic_rows(normalized_rows, dimension=dimension)
+
+    async def get_store_analysis_capabilities(
+        self,
+        platform: str,
+        shop_id: str,
+    ) -> dict[str, Any]:
+        normalized_platform = str(platform or "").strip().lower()
+        normalized_shop_id = str(shop_id or "").strip()
+        query = """
+            SELECT platform_code, shop_id, supports_hourly_daily, supported_daily_mode, supported_long_range_mode
+            FROM api.store_analysis_capability_module
+            WHERE platform_code = :platform_code
+              AND shop_id = :shop_id
+        """
+        rows = await self._fetch_rows(
+            query,
+            {
+                "platform_code": normalized_platform,
+                "shop_id": normalized_shop_id,
+            },
+        )
+        if rows:
+            row = rows[0]
+            return {
+                "platform_code": row.get("platform_code"),
+                "shop_id": row.get("shop_id"),
+                "supports_hourly_daily": bool(row.get("supports_hourly_daily")),
+                "supported_daily_mode": row.get("supported_daily_mode"),
+                "supported_long_range_mode": row.get("supported_long_range_mode"),
+            }
+        return {
+            "platform_code": normalized_platform,
+            "shop_id": normalized_shop_id,
+            "supports_hourly_daily": normalized_platform == "shopee",
+            "supported_daily_mode": "hourly" if normalized_platform == "shopee" else "daily",
+            "supported_long_range_mode": "monthly",
+        }
+
+    async def get_store_analysis_traffic_summary(
+        self,
+        platform: str,
+        shop_id: str,
+        granularity: str,
+        target_date: str,
+    ) -> dict[str, Any]:
+        period_start, period_end = _resolve_store_analysis_window(granularity, target_date)
+        query = """
+            SELECT period_start, period_end, visitor_count, page_views, conversion_rate, page_views_per_visitor
+            FROM api.store_analysis_traffic_summary_module
+            WHERE platform_code = :platform_code
+              AND shop_id = :shop_id
+              AND period_start >= :period_start
+              AND period_end <= :period_end
+        """
+        rows = await self._fetch_rows(
+            query,
+            {
+                "platform_code": str(platform or "").strip().lower(),
+                "shop_id": str(shop_id or "").strip(),
+                "period_start": period_start,
+                "period_end": period_end,
+            },
+        )
+        visitor_count = _sum_present_values(rows, "visitor_count")
+        page_views = _sum_present_values(rows, "page_views")
+        conversion_rate = None
+        if visitor_count is not None and page_views is not None:
+            if visitor_count > 0:
+                conversion_rate = round(page_views * 100.0 / visitor_count, 2)
+            elif visitor_count == 0 and page_views == 0:
+                conversion_rate = 0
+        page_views_per_visitor = None
+        if visitor_count is not None and page_views is not None:
+            if visitor_count > 0:
+                page_views_per_visitor = round(page_views / visitor_count, 2)
+            elif visitor_count == 0 and page_views == 0:
+                page_views_per_visitor = 0
+        return {
+            "platform_code": str(platform or "").strip().lower(),
+            "shop_id": str(shop_id or "").strip(),
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "visitor_count": _round_or_none(visitor_count, 2),
+            "page_views": _round_or_none(page_views, 2),
+            "conversion_rate": conversion_rate,
+            "page_views_per_visitor": page_views_per_visitor,
+        }
+
+    async def get_store_analysis_traffic_trend(
+        self,
+        platform: str,
+        shop_id: str,
+        granularity: str,
+        target_date: str,
+    ) -> dict[str, Any]:
+        normalized_platform = str(platform or "").strip().lower()
+        normalized_shop_id = str(shop_id or "").strip()
+        requested_granularity = str(granularity or "").strip().lower()
+        effective_granularity = _resolve_store_analysis_effective_granularity(normalized_platform, requested_granularity)
+        period_start, period_end = _resolve_store_analysis_window(requested_granularity, target_date)
+
+        params: dict[str, Any] = {
+            "platform_code": normalized_platform,
+            "shop_id": normalized_shop_id,
+            "requested_granularity": requested_granularity,
+            "period_start": period_start,
+        }
+
+        if effective_granularity == "hourly":
+            query = """
+                SELECT requested_granularity, effective_granularity, period_key, visitor_count, page_views, conversion_rate
+                FROM api.store_analysis_traffic_trend_module
+                WHERE platform_code = :platform_code
+                  AND shop_id = :shop_id
+                  AND requested_granularity = :requested_granularity
+                  AND period_key >= :period_start
+                  AND period_key < :period_end_exclusive
+                ORDER BY period_key
+            """
+            params["period_end_exclusive"] = period_end + timedelta(days=1)
+        else:
+            query = """
+                SELECT requested_granularity, effective_granularity, period_key, visitor_count, page_views, conversion_rate
+                FROM api.store_analysis_traffic_trend_module
+                WHERE platform_code = :platform_code
+                  AND shop_id = :shop_id
+                  AND requested_granularity = :requested_granularity
+                  AND period_key >= :period_start
+                  AND period_key <= :period_end
+                ORDER BY period_key
+            """
+            params["period_end"] = period_end
+
+        rows = await self._fetch_rows(query, params)
+        items = [
+            {
+                "period_key": row.get("period_key").isoformat() if row.get("period_key") is not None else None,
+                "visitor_count": _to_optional_float(row.get("visitor_count")),
+                "page_views": _to_optional_float(row.get("page_views")),
+                "conversion_rate": _to_optional_float(row.get("conversion_rate")),
+            }
+            for row in rows
+        ]
+        return {
+            "platform_code": normalized_platform,
+            "shop_id": normalized_shop_id,
+            "requested_granularity": requested_granularity,
+            "effective_granularity": effective_granularity,
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "items": items,
+        }
 
     async def get_business_overview_operational_metrics(
         self,

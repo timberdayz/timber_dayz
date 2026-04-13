@@ -342,6 +342,107 @@ async def get_business_overview_operational_metrics_postgresql(
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
 
 
+@router.get("/store-analysis/capabilities")
+async def get_store_analysis_capabilities_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_capabilities(platform=platform, shop_id=shop_id)
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_capabilities",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis capabilities query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/traffic-summary")
+async def get_store_analysis_traffic_summary_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+    granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
+    date: str = Query(..., description="anchor date"),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_traffic_summary(
+                platform=platform,
+                shop_id=shop_id,
+                granularity=granularity,
+                target_date=date,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_traffic_summary",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis traffic summary query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/traffic-trend")
+async def get_store_analysis_traffic_trend_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+    granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
+    date: str = Query(..., description="anchor date"),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_traffic_trend(
+                platform=platform,
+                shop_id=shop_id,
+                granularity=granularity,
+                target_date=date,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_traffic_trend",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis traffic trend query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
 @router.get("/b-cost-analysis/overview")
 async def get_b_cost_analysis_overview_postgresql(
     request: Request,

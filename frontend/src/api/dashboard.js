@@ -156,5 +156,26 @@ export default {
    */
   async queryBCostAnalysisOrderDetail(params = {}) {
     return await api._get('/dashboard/b-cost-analysis/order-detail', { params })
+  },
+
+  /**
+   * 店铺分析 - 平台/店铺能力矩阵
+   */
+  async queryStoreAnalysisCapabilities(params = {}) {
+    return await api._get('/dashboard/store-analysis/capabilities', { params })
+  },
+
+  /**
+   * 店铺分析 - 流量摘要
+   */
+  async queryStoreAnalysisTrafficSummary(params = {}) {
+    return await api._get('/dashboard/store-analysis/traffic-summary', { params })
+  },
+
+  /**
+   * 店铺分析 - 流量趋势
+   */
+  async queryStoreAnalysisTrafficTrend(params = {}) {
+    return await api._get('/dashboard/store-analysis/traffic-trend', { params })
   }
 }

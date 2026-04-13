@@ -1,3 +1,0 @@
-﻿backend/routers/dashboard_api.py
-backend/routers/target_management.py
-backend/routers/component_versions.py
