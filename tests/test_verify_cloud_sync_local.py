@@ -1,4 +1,8 @@
-from scripts.verify_cloud_sync_local import parse_args, main
+from scripts.verify_cloud_sync_local import (
+    main,
+    parse_args,
+    run_verification,
+)
 
 
 def test_parse_args_supports_verify_db_name():
@@ -29,3 +33,22 @@ def test_main_returns_non_zero_when_verification_fails():
         runner=lambda **kwargs: False,
     )
     assert code == 2
+
+
+def test_run_verification_uses_env_override_for_cloud_database_url(monkeypatch):
+    commands = []
+
+    def fake_run_command(command, env=None):
+        commands.append((command, env))
+
+    monkeypatch.setenv(
+        "CLOUD_SYNC_VERIFY_DATABASE_URL",
+        "postgresql://override-user:override-pass@127.0.0.1:15432/custom_verify_db",
+    )
+    monkeypatch.setattr("scripts.verify_cloud_sync_local._run_command", fake_run_command)
+
+    run_verification(verify_db="xihong_erp_cloud_sync_verify", table="fact_shopee_orders_monthly")
+
+    assert commands[-1][1]["CLOUD_DATABASE_URL"] == (
+        "postgresql://override-user:override-pass@127.0.0.1:15432/custom_verify_db"
+    )

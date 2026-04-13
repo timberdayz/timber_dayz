@@ -27,6 +27,8 @@ class FakeCheckpointService:
 
     def advance_checkpoint(self, table_name, ingest_timestamp, source_id, status, table_schema="b_class"):
         self.advanced.append((table_name, ingest_timestamp, source_id, status, table_schema))
+        self.checkpoint.last_ingest_timestamp = ingest_timestamp
+        self.checkpoint.last_source_id = source_id
 
     def mark_failure(self, table_name, message, table_schema="b_class"):
         self.failures.append((table_name, message, table_schema))
@@ -172,6 +174,44 @@ def test_sync_table_uses_isolated_checkpoint_scope_for_target_database():
     assert checkpoint_service.requests == [
         ("get", "fact_shopee_orders_daily", "cloud_sync:target_a")
     ]
+
+
+def test_sync_table_drains_multiple_batches_before_returning_completed():
+    checkpoint_service = FakeCheckpointService()
+    mirror_manager = FakeMirrorManager()
+
+    batch_one = [
+        {"id": 1, "ingest_timestamp": datetime(2026, 3, 24, 0, 0, tzinfo=timezone.utc)},
+        {"id": 2, "ingest_timestamp": datetime(2026, 3, 24, 0, 5, tzinfo=timezone.utc)},
+    ]
+    batch_two = [
+        {"id": 3, "ingest_timestamp": datetime(2026, 3, 24, 0, 10, tzinfo=timezone.utc)},
+    ]
+
+    def source_batch_reader(*args, **kwargs):
+        checkpoint = kwargs["checkpoint"]
+        if checkpoint.last_source_id in (None, 0):
+            return batch_one
+        if checkpoint.last_source_id == 2:
+            return batch_two
+        return []
+
+    service = CloudBClassSyncService(
+        checkpoint_service=checkpoint_service,
+        mirror_manager=mirror_manager,
+        source_batch_reader=source_batch_reader,
+        remote_writer=lambda *args, **kwargs: {"success": True, "written_rows": len(kwargs["rows"])},
+    )
+
+    result = asyncio.run(service.sync_table("fact_shopee_orders_daily", batch_size=2))
+
+    assert result["status"] == "completed"
+    assert result["written_rows"] == 3
+    assert checkpoint_service.advanced == [
+        ("fact_shopee_orders_daily", batch_one[-1]["ingest_timestamp"], batch_one[-1]["id"], "completed", "b_class"),
+        ("fact_shopee_orders_daily", batch_two[-1]["ingest_timestamp"], batch_two[-1]["id"], "completed", "b_class"),
+    ]
+    assert mirror_manager.ensured == [("fact_shopee_orders_daily", "orders")]
 
 
 def test_source_reader_builds_checkpointed_select_sql():

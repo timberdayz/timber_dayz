@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 from datetime import datetime, timedelta, timezone
@@ -115,6 +116,45 @@ class CloudBClassAutoSyncWorker:
             return await value
         return value
 
+    async def _run_with_lease_heartbeat(self, task_id: int, worker_id: str, operation):
+        if not inspect.isawaitable(operation):
+            return operation
+
+        stop_event = asyncio.Event()
+
+        async def _heartbeat_loop() -> None:
+            interval_seconds = max(float(self.lease_seconds) / 2.0, 0.05)
+            while not stop_event.is_set():
+                try:
+                    await asyncio.sleep(interval_seconds)
+                    if stop_event.is_set():
+                        break
+                    self.heartbeat(task_id, worker_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    break
+
+        heartbeat_task = asyncio.create_task(_heartbeat_loop())
+        try:
+            return await operation
+        finally:
+            stop_event.set()
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+    @staticmethod
+    def _result_error_code(result: dict) -> str:
+        return (
+            result.get("error_code")
+            or result.get("error")
+            or result.get("detail")
+            or "sync_failed"
+        )
+
     async def run_one(self, worker_id: str) -> CloudBClassSyncTask | None:
         task_center = TaskCenterSyncService(self.db)
         task = self.claim_next_task(worker_id=worker_id)
@@ -122,16 +162,26 @@ class CloudBClassAutoSyncWorker:
             return None
 
         try:
-            result = await self._maybe_await(
-                self.sync_executor.sync_table(task.source_table_name)
+            result = await self._run_with_lease_heartbeat(
+                task.id,
+                worker_id,
+                self.sync_executor.sync_table(task.source_table_name),
             )
+            sync_status = result.get("status", "completed")
             projection_status = result.get("projection_status", "completed")
-            final_status = "completed" if projection_status == "completed" else "partial_success"
-            task.status = final_status
-            task.projection_status = projection_status
-            task.last_error = None
-            task.error_code = None
-            task.next_retry_at = None
+            if sync_status != "completed":
+                task.status = "failed"
+                task.projection_status = projection_status
+                task.last_error = result.get("error") or result.get("detail") or "sync_failed"
+                task.error_code = self._result_error_code(result)
+                task.next_retry_at = None
+            else:
+                final_status = "completed" if projection_status == "completed" else "partial_success"
+                task.status = final_status
+                task.projection_status = projection_status
+                task.last_error = None
+                task.error_code = None
+                task.next_retry_at = None
         except Exception as exc:
             error_code = str(exc)
             task.last_error = str(exc)
@@ -147,6 +197,8 @@ class CloudBClassAutoSyncWorker:
                 task.next_retry_at = None
         finally:
             task.last_attempt_finished_at = datetime.now(timezone.utc)
+            if task.status in {"completed", "partial_success", "failed"}:
+                task.finished_at = task.last_attempt_finished_at
             task.lease_expires_at = None
             self.db.commit()
             self.db.refresh(task)
