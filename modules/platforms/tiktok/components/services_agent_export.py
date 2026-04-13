@@ -498,6 +498,7 @@ class TiktokServicesAgentExport(ExportComponent):
                 "table",
                 "text=Customer Service",
                 "text=\u5ba2\u670d\u8868\u73b0\u8be6\u60c5",
+                "text=\u6682\u65e0\u6570\u636e",
             ),
             timeout=150,
         ):
@@ -505,22 +506,56 @@ class TiktokServicesAgentExport(ExportComponent):
 
         return False
 
+    async def _wait_agent_detail_business_ready(
+        self,
+        page: Any,
+        selectors: tuple[str, ...],
+        *,
+        timeout_ms: int = 15000,
+        poll_ms: int = 300,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            selected = await self._tab_looks_selected(page, selectors)
+            business_ready = False
+            if selected:
+                business_ready = await self._agent_detail_business_ready(page)
+                if business_ready:
+                    return True
+                if await self._no_exportable_data(page):
+                    return True
+
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+
+        selected = await self._tab_looks_selected(page, selectors)
+        business_ready = selected and await self._agent_detail_business_ready(page)
+        empty_state = selected and await self._no_exportable_data(page)
+        loading_visible = await self._any_visible(page, self._loading_selectors(), timeout=150)
+        export_visible = await self._export_button_locator(page) is not None
+        self._log_info(
+            "services_agent_export detail business wait timed out: selected=%s business_ready=%s empty_state=%s loading_visible=%s export_visible=%s",
+            selected,
+            business_ready,
+            empty_state,
+            loading_visible,
+            export_visible,
+        )
+        return bool(business_ready or empty_state)
+
     async def _ensure_agent_detail_ready(self, page: Any) -> bool:
         if not await self._wait_tab_area_ready(page):
             return False
 
         selectors = self._agent_detail_tab_selectors()
         if await self._tab_looks_selected(page, selectors):
-            if await self._agent_detail_business_ready(page):
-                return True
-            return await self._wait_loading_gone(page)
+            return await self._wait_agent_detail_business_ready(page, selectors)
 
         if not await self._activate_agent_detail_tab(page, selectors):
             return False
 
-        if await self._agent_detail_business_ready(page):
-            return True
-        return await self._wait_loading_gone(page)
+        return await self._wait_agent_detail_business_ready(page, selectors)
 
     async def _wait_for_entry_state(
         self,

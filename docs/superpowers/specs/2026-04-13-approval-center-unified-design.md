@@ -117,6 +117,29 @@ These are recommended because they already map closely to existing backend behav
 - clear approve / reject outcome
 - clear audit value
 
+## Current Implementation Status
+
+This design is now partially implemented on `main`.
+
+Implemented and available:
+- unified approval-center backend domain
+- approval-center API
+- approval-center frontend pages:
+  - `我的申请`
+  - `审批历史`
+  - `流程配置` (read-only)
+- approval-center permission controls
+- first-wave integrations completed for:
+  - `user_registration_approval`
+  - `monthly_profit_settlement_approval`
+  - `follow_investment_settlement_approval`
+
+Still deferred:
+- `leave_request_approval`
+- `overtime_request_approval`
+- editable workflow configuration
+- richer approval detail page and broader approval-template administration
+
 ## What Should Stay In Task Center, Not Approval Center
 
 These should remain task / confirmation domain work, not first-wave approval templates:

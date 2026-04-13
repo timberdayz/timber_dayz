@@ -116,8 +116,11 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
     class _ExecutorStub:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            self.execute_parallel_domains = AsyncMock()
+            self.execute_calls = []
 
         async def execute(self, **kwargs):
+            self.execute_calls.append(kwargs)
             return SimpleNamespace(
                 status="completed",
                 files_collected=1,
@@ -200,6 +203,110 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
         files_collected=1,
         error_message=None,
     )
+    assert browser_launch_calls == []
+
+
+@pytest.mark.asyncio
+async def test_execute_collection_task_background_parallel_mode_still_launches_browser(
+    monkeypatch,
+):
+    from backend.routers.collection_tasks import _execute_collection_task_background
+
+    task = _make_task(status="pending", progress=0, current_step=None)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+
+    db_session = MagicMock()
+    db_session.execute = AsyncMock(return_value=result)
+    db_session.commit = AsyncMock()
+
+    class _DbSessionManager:
+        async def __aenter__(self):
+            return db_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _ExecutorStub:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def execute_parallel_domains(self, **kwargs):
+            return SimpleNamespace(
+                status="completed",
+                files_collected=1,
+                error_message=None,
+                duration_seconds=12,
+                completed_domains=["orders:tiktok"],
+                failed_domains=[],
+            )
+
+    class _BrowserStub:
+        close = AsyncMock()
+
+    class _ChromiumStub:
+        def __init__(self):
+            self.launch = AsyncMock(return_value=_BrowserStub())
+
+    class _PlaywrightStub:
+        def __init__(self):
+            self.chromium = _ChromiumStub()
+
+    class _PlaywrightManager:
+        async def __aenter__(self):
+            return _PlaywrightStub()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    browser_launch_calls = []
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal", lambda: _DbSessionManager()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "backend.services.account_loader_service.get_account_loader_service",
+        lambda: SimpleNamespace(
+            load_account_async=AsyncMock(return_value={"account_id": "acc-1"})
+        ),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.CollectionExecutorV2",
+        _ExecutorStub,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.browser_config_helper.get_browser_launch_args",
+        lambda debug_mode=False, execution_mode=None: browser_launch_calls.append(
+            {"debug_mode": debug_mode, "execution_mode": execution_mode}
+        )
+        or {},
+    )
+    monkeypatch.setattr(
+        "playwright.async_api.async_playwright", lambda: _PlaywrightManager()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.connection_manager.send_complete",
+        AsyncMock(),
+    )
+
+    await _execute_collection_task_background(
+        task_id=task.task_id,
+        platform=task.platform,
+        account_id=task.account,
+        data_domains=["orders"],
+        sub_domains={"orders": ["tiktok"]},
+        date_range={"start": "2026-03-01", "end": "2026-03-01"},
+        granularity="daily",
+        debug_mode=False,
+        execution_mode="headless",
+        parallel_mode=True,
+        max_parallel=1,
+        runtime_manifests={},
+        app=None,
+    )
+
     assert browser_launch_calls == [{"debug_mode": False, "execution_mode": "headless"}]
 
 

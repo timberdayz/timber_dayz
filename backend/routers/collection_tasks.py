@@ -209,6 +209,31 @@ async def _mirror_collection_task_log(
 
 
 def _build_task_response_payload(task: CollectionTask) -> dict:
+    return _build_task_response_payload_with_runtime_metadata(task, runtime_metadata=None)
+
+
+def _extract_runtime_metadata_from_logs(logs: List[Any]) -> Optional[dict]:
+    for log in logs or []:
+        details = getattr(log, "details", None) or {}
+        if not isinstance(details, dict):
+            continue
+        if "actual_execution_mode" not in details and "runtime_session_mode" not in details and "login_gate_ready" not in details:
+            continue
+        return {
+            "actual_execution_mode": details.get("actual_execution_mode"),
+            "runtime_session_mode": details.get("runtime_session_mode"),
+            "login_gate_ready": details.get("login_gate_ready"),
+            "login_gate_reason": details.get("login_gate_reason"),
+            "login_gate_url": details.get("login_gate_url"),
+        }
+    return None
+
+
+def _build_task_response_payload_with_runtime_metadata(
+    task: CollectionTask,
+    *,
+    runtime_metadata: Optional[Dict[str, Any]],
+) -> dict:
     normalized_date_range = normalize_collection_date_range(
         getattr(task, "date_range", None)
     )
@@ -266,7 +291,27 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
         "verification_input_mode": (
             verification_input_mode(verification_type) if verification_type else None
         ),
+        "actual_execution_mode": runtime_metadata.get("actual_execution_mode") if runtime_metadata else None,
+        "runtime_session_mode": runtime_metadata.get("runtime_session_mode") if runtime_metadata else None,
+        "login_gate_ready": runtime_metadata.get("login_gate_ready") if runtime_metadata else None,
+        "login_gate_reason": runtime_metadata.get("login_gate_reason") if runtime_metadata else None,
+        "login_gate_url": runtime_metadata.get("login_gate_url") if runtime_metadata else None,
+        "runtime_metadata": runtime_metadata,
     }
+
+
+async def _load_task_runtime_metadata(
+    db: AsyncSession,
+    task: CollectionTask,
+) -> Optional[dict]:
+    result = await db.execute(
+        select(CollectionTaskLog)
+        .where(CollectionTaskLog.task_id == task.id)
+        .order_by(desc(CollectionTaskLog.timestamp), desc(CollectionTaskLog.id))
+        .limit(50)
+    )
+    logs = result.scalars().all()
+    return _extract_runtime_metadata_from_logs(logs)
 
 
 def _build_task_verification_item(task: CollectionTask) -> Optional[dict]:
@@ -570,7 +615,11 @@ async def get_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    return _build_task_response_payload(task)
+    runtime_metadata = await _load_task_runtime_metadata(db, task)
+    return _build_task_response_payload_with_runtime_metadata(
+        task,
+        runtime_metadata=runtime_metadata,
+    )
 
 
 @router.delete("/tasks/{task_id}", response_model=SuccessResponse[None])
@@ -1312,14 +1361,15 @@ async def _execute_collection_task_background(
                     get_browser_launch_args,
                 )
 
-                browser = await p.chromium.launch(
-                    **get_browser_launch_args(
-                        debug_mode=debug_mode,
-                        execution_mode=execution_mode,
-                    )
-                )
+                browser = None
                 try:
                     if parallel_mode:
+                        browser = await p.chromium.launch(
+                            **get_browser_launch_args(
+                                debug_mode=debug_mode,
+                                execution_mode=execution_mode,
+                            )
+                        )
                         logger.info(
                             f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})"
                         )
@@ -1347,7 +1397,7 @@ async def _execute_collection_task_background(
                             sub_domains=sub_domains,
                             date_range=date_range,
                             granularity=granularity,
-                            browser=browser,
+                            browser=None,
                             browser_type=p.chromium,
                             debug_mode=debug_mode,
                             runtime_manifests=runtime_manifests,
@@ -1383,7 +1433,8 @@ async def _execute_collection_task_background(
                         f"Task {task_id} completed: {result.status}, files={result.files_collected}"
                     )
                 finally:
-                    await browser.close()
+                    if browser is not None:
+                        await browser.close()
 
         except Exception as e:
             logger.exception(f"Background task {task_id} failed: {e}")

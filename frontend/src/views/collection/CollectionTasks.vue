@@ -356,6 +356,21 @@
             <el-descriptions-item label="总耗时">{{ formatDuration(detailTask) }}</el-descriptions-item>
             <el-descriptions-item label="来源配置">{{ detailTask.config_id || '-' }}</el-descriptions-item>
             <el-descriptions-item label="执行模式">{{ getExecutionModeLabel(detailTask.execution_mode) }}</el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.actual_execution_mode" label="实际执行模式">
+              {{ getExecutionModeLabel(detailTask.actual_execution_mode) }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.runtime_session_mode" label="会话运行时">
+              {{ detailTask.runtime_session_mode }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.login_gate_ready !== null && detailTask.login_gate_ready !== undefined" label="登录态检查">
+              {{ detailTask.login_gate_ready ? '已命中复用会话' : '未命中复用会话' }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.login_gate_reason" label="登录态原因">
+              {{ detailTask.login_gate_reason }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.login_gate_url" label="登录态检查页">
+              {{ detailTask.login_gate_url }}
+            </el-descriptions-item>
             <el-descriptions-item label="数据域">
               <el-tag v-for="d in (detailTask.data_domains || [])" :key="d" size="small" class="erp-mr-xs">{{ getDomainLabel(d) }}</el-tag>
             </el-descriptions-item>

@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 from backend.services.platform_login_entry_service import get_platform_login_entry
 from modules.apps.collection_center.browser_config_helper import (
@@ -423,6 +424,75 @@ async def persist_runtime_session_state(
     return await _save_session_async(platform, session_owner_id, storage_state)
 
 
+def _normalize_probe_base_url(
+    platform: str,
+    account: Optional[Dict[str, Any]],
+) -> str:
+    login_url = str(
+        (account or {}).get("login_url") or get_platform_login_entry(platform) or ""
+    ).strip()
+    if not login_url:
+        return ""
+
+    parsed = urlparse(login_url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return login_url.rstrip("/")
+
+
+def _homepage_probe_url(
+    platform: str,
+    account: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    base_url = _normalize_probe_base_url(platform, account)
+    if not base_url:
+        return None
+
+    if platform == "tiktok":
+        return f"{base_url}/homepage"
+    if platform == "miaoshou":
+        return f"{base_url}/welcome"
+    if platform == "shopee":
+        return f"{base_url}/"
+    return base_url
+
+
+def _login_gate_probe_url(
+    platform: str,
+    account: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    return str(
+        (account or {}).get("login_url") or get_platform_login_entry(platform) or ""
+    ).strip() or None
+
+
+def build_runtime_login_gate_probe_urls(
+    *,
+    platform: str,
+    account: Optional[Dict[str, Any]],
+) -> list[str]:
+    candidates = [
+        _homepage_probe_url(platform, account),
+        _login_gate_probe_url(platform, account),
+    ]
+    urls: list[str] = []
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value and value not in urls:
+            urls.append(value)
+    return urls
+
+
+async def _wait_for_probe_page_ready(page: Any, *, settle_ms: int = 800) -> None:
+    for state, timeout in (("domcontentloaded", 5000), ("load", 5000), ("networkidle", 3000)):
+        try:
+            await page.wait_for_load_state(state, timeout=timeout)
+        except Exception:
+            continue
+    if hasattr(page, "wait_for_timeout"):
+        await page.wait_for_timeout(settle_ms)
+
+
 async def prime_runtime_page_for_login_gate(
     *,
     page: Any,
@@ -440,8 +510,7 @@ async def prime_runtime_page_for_login_gate(
         return
 
     await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-    if hasattr(page, "wait_for_timeout"):
-        await page.wait_for_timeout(800)
+    await _wait_for_probe_page_ready(page, settle_ms=800)
 
 
 async def check_login_gate_ready(
@@ -470,3 +539,27 @@ async def check_login_gate_ready(
         matched_signal=detection_result.matched_pattern or detection_result.detected_by,
     )
     return gate_result.status is GateStatus.READY, gate_result
+
+
+async def probe_runtime_login_gate(
+    *,
+    page: Any,
+    platform: str,
+    account: Optional[Dict[str, Any]],
+) -> tuple[bool, GateResult]:
+    await _wait_for_probe_page_ready(page, settle_ms=500)
+    ready, gate_result = await check_login_gate_ready(page=page, platform=platform)
+    if ready:
+        return ready, gate_result
+
+    current_url = str(getattr(page, "url", "") or "").strip()
+    for probe_url in build_runtime_login_gate_probe_urls(platform=platform, account=account):
+        if probe_url == current_url:
+            continue
+        await page.goto(probe_url, wait_until="domcontentloaded", timeout=60000)
+        await _wait_for_probe_page_ready(page, settle_ms=800)
+        ready, gate_result = await check_login_gate_ready(page=page, platform=platform)
+        if ready:
+            return ready, gate_result
+
+    return ready, gate_result

@@ -168,6 +168,14 @@ def test_collection_tasks_mentions_main_account_coordination_steps():
     assert "target_shop_ready" in text or "目标店铺已就绪" in text
 
 
+def test_collection_tasks_detail_drawer_shows_runtime_metadata():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+
+    assert "actual_execution_mode" in text
+    assert "runtime_session_mode" in text
+    assert "login_gate_reason" in text
+
+
 def test_account_management_does_not_offer_free_form_login_url_editing():
     text = (PROJECT_ROOT / "frontend/src/views/AccountManagement.vue").read_text(encoding="utf-8")
 

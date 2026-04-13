@@ -11,8 +11,18 @@ from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
 
 
 class _FakePage:
+    def __init__(self, text_map: dict[str, _FakeTextLocator] | None = None) -> None:
+        self._text_map = text_map or {}
+
     async def wait_for_timeout(self, _ms: int) -> None:
         return None
+
+    def get_by_text(self, text, exact: bool = False):
+        key = str(text)
+        locator = self._text_map.get(key)
+        if locator is None:
+            return _FakeLocatorSequence([])
+        return _FakeLocatorSequence([locator])
 
 
 class _FakeTextLocator:
@@ -489,6 +499,56 @@ def test_shopee_date_picker_monthly_custom_summary_matches_month_token_only() ->
     assert matched is True
 
 
+def test_shopee_date_picker_extracts_summary_state_from_products_monthly_bar() -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(platform="shopee", account={}, config={"data_domain": "products"})
+    )
+
+    state = picker._selection_state_from_text("统计时间 按月 2026.02 (GMT+08)")
+
+    assert state is not None
+    assert state["mode"] == "monthly"
+    assert state["label"] == "按月"
+    assert state["value_text"] == "2026.02 (GMT+08)"
+    assert state["year"] == 2026
+    assert state["month"] == 2
+
+
+def test_shopee_date_picker_extracts_monthly_state_without_relying_on_full_parse() -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(platform="shopee", account={}, config={"data_domain": "products"})
+    )
+
+    state = picker._selection_state_from_text("按月 2026.03 (GMT+08)")
+
+    assert state is not None
+    assert state["mode"] == "monthly"
+    assert state["year"] == 2026
+    assert state["month"] == 3
+
+
+def test_shopee_date_picker_selection_state_matches_weekly_target() -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(platform="shopee", account={}, config={"data_domain": "services"})
+    )
+    state = {
+        "mode": "weekly",
+        "label": "按周",
+        "value_text": "26-03-2026 - 01-04-2026 (GMT+08)",
+        "start_date": "2026-03-26",
+        "end_date": "2026-04-01",
+    }
+
+    matched = picker._selection_state_matches_target(
+        state,
+        granularity="weekly",
+        start_date="2026-03-26",
+        end_date="2026-04-01",
+    )
+
+    assert matched is True
+
+
 @pytest.mark.asyncio
 async def test_shopee_date_picker_current_summary_prefers_richer_trigger_text(
     monkeypatch: pytest.MonkeyPatch,
@@ -532,6 +592,48 @@ async def test_shopee_date_picker_wait_custom_selection_uses_trigger_text_fallba
 
     monkeypatch.setattr(picker, "_current_date_summary_text", AsyncMock(return_value="统计时间"), raising=False)
     monkeypatch.setattr(picker, "_find_date_picker_trigger", AsyncMock(return_value=trigger_locator), raising=False)
+
+    applied = await picker._wait_custom_date_selection_applied(
+        page,
+        granularity="monthly",
+        start_date="2026-03-01",
+        end_date="2026-03-31",
+        timeout_ms=10,
+        poll_ms=1,
+    )
+
+    assert applied is True
+
+
+@pytest.mark.asyncio
+async def test_shopee_date_picker_wait_custom_selection_allows_mode_and_token_hint_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    picker = ShopeeDatePicker(
+        ExecutionContext(
+            platform="shopee",
+            account={},
+            config={
+                "data_domain": "products",
+                "granularity": "monthly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-03-31",
+                },
+            },
+        )
+    )
+    page = _FakePage(
+        text_map={
+            "按月": _FakeTextLocator("按月"),
+            "2026.03": _FakeTextLocator("2026.03"),
+        }
+    )
+
+    monkeypatch.setattr(picker, "_current_selection_state", AsyncMock(return_value=None), raising=False)
+    monkeypatch.setattr(picker, "_current_date_summary_text", AsyncMock(return_value="统计时间"), raising=False)
+    monkeypatch.setattr(picker, "_current_date_trigger_text", AsyncMock(return_value="统计时间"), raising=False)
 
     applied = await picker._wait_custom_date_selection_applied(
         page,

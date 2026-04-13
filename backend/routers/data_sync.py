@@ -308,18 +308,17 @@ async def list_files(
         )
         all_templates = templates_result.scalars().all()
         
-        # 构建模板索引(按 platform/data_domain/granularity/sub_domain)
-        # 使用字典存储,key 为匹配键,value 为模板对象
-        template_cache = {}
+        # 文件列表页的模板可用性判断必须与 TemplateMatcher 一致。
+        # 否则会出现“页面显示有模板,实际同步报无模板”的假阳性。
+        exact_template_cache = {}
+        loose_template_cache = {}
         for t in all_templates:
-            # Level 1 精确匹配键
             key1 = f"{t.platform}:{t.data_domain}:{t.granularity or ''}:{t.sub_domain or ''}"
-            if key1 not in template_cache:
-                template_cache[key1] = t
-            # Level 2 宽松匹配键(忽略 sub_domain)
+            if key1 not in exact_template_cache:
+                exact_template_cache[key1] = t
             key2 = f"{t.platform}:{t.data_domain}:{t.granularity or ''}:"
-            if key2 not in template_cache:
-                template_cache[key2] = t
+            if key2 not in loose_template_cache:
+                loose_template_cache[key2] = t
         
         # 3. 检查模板匹配状态
         template_matcher = get_template_matcher(db)
@@ -336,17 +335,17 @@ async def list_files(
             granularity = file_record.granularity or ""
             sub_domain = file_record.sub_domain or ""
             
-            # Level 1: 精确匹配(包含 sub_domain)
             key1 = f"{platform}:{data_domain}:{granularity}:{sub_domain}"
-            if key1 in template_cache:
-                template = template_cache[key1]
+            if key1 in exact_template_cache:
+                template = exact_template_cache[key1]
             else:
-                # Level 2: 宽松匹配(忽略 sub_domain)
+                allow_loose_match = not (
+                    data_domain.lower() == "services" and bool(sub_domain)
+                )
                 key2 = f"{platform}:{data_domain}:{granularity}:"
-                if key2 in template_cache:
-                    template = template_cache[key2]
+                if allow_loose_match and key2 in loose_template_cache:
+                    template = loose_template_cache[key2]
                 else:
-                    # 降级:使用模板匹配器(如果缓存未命中)
                     template = await template_matcher.find_best_template(
                         platform=platform,
                         data_domain=data_domain,

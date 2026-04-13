@@ -310,6 +310,44 @@ async def test_execute_task_forwards_runtime_manifests_to_background_executor(
 
 
 @pytest.mark.asyncio
+async def test_execute_task_forwards_app_to_background_executor(
+    queue_runner_session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from backend.services.collection_queue_runner import CollectionQueueRunner
+
+    runner = CollectionQueueRunner(
+        session_factory=queue_runner_session_factory,
+        poll_interval_seconds=0.01,
+    )
+    runner.app = SimpleNamespace(state=SimpleNamespace(redis=object()))
+    task = SimpleNamespace(
+        task_id="task-2",
+        platform="tiktok",
+        account="shop-sg-2",
+        data_domains=["products"],
+        sub_domains=None,
+        date_range={"start_date": "2026-04-10", "end_date": "2026-04-10"},
+        granularity="daily",
+        debug_mode=False,
+    )
+
+    captured = {}
+
+    async def _fake_background(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._execute_collection_task_background",
+        _fake_background,
+    )
+
+    await runner._execute_task(task, runtime_manifests=None)
+
+    assert captured["app"] is runner.app
+
+
+@pytest.mark.asyncio
 async def test_process_once_marks_run_failed_when_processing_raises(queue_runner_session_factory):
     from backend.services.collection_config_run_service import CollectionConfigRunService
     from backend.services.collection_queue_runner import CollectionQueueRunner

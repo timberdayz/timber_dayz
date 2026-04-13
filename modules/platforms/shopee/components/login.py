@@ -391,7 +391,7 @@ class ShopeeLogin(LoginComponent):
             if await self._session_shell_looks_ready(page, current_url):
                 session_shell_hits += 1
                 if session_shell_hits >= 2:
-                    return "manual_intervention"
+                    return "success"
             else:
                 session_shell_hits = 0
 

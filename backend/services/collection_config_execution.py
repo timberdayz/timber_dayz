@@ -32,6 +32,15 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+ACTIVE_COLLECTION_TASK_STATUSES = [
+    "running",
+    "queued",
+    "paused",
+    "verification_required",
+    "verification_submitted",
+    "manual_intervention_required",
+]
+
 
 async def _resolve_runnable_scope_runtime(
     db: AsyncSession,
@@ -169,7 +178,7 @@ async def create_tasks_for_config(
                 select(CollectionTask).where(
                     CollectionTask.account == scope.shop_account_id,
                     CollectionTask.platform == config.platform,
-                    CollectionTask.status.in_(["running", "queued", "paused"]),
+                    CollectionTask.status.in_(ACTIVE_COLLECTION_TASK_STATUSES),
                 )
             )
         ).scalar_one_or_none()

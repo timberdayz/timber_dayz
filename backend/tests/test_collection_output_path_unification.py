@@ -138,6 +138,31 @@ def test_executor_infers_services_ai_assistant_without_collapsing_to_agent():
     assert inferred == "ai_assistant"
 
 
+def test_executor_infers_analytics_from_traffic_overview_path_without_false_services_match():
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+
+    inferred = CollectionExecutorV2._infer_data_domain_from_path(
+        executor,
+        r"temp\downloads\task-1\shopee\zewei_toys.sg\zewei_toys.sg__1407964586\analytics\daily\traffic_overview_20260412_20260412.xlsx",
+        data_domains=["services", "services", "analytics"],
+        index=0,
+    )
+
+    assert inferred == "analytics"
+
+
+def test_executor_does_not_infer_orders_sub_domain_from_platform_segment_for_non_orders_domain():
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+
+    inferred = CollectionExecutorV2._infer_sub_domain_from_path(
+        executor,
+        r"temp\downloads\task-1\shopee\zewei_toys.sg\zewei_toys.sg__1407964586\analytics\daily\traffic_overview_20260412_20260412.xlsx",
+        data_domain="analytics",
+    )
+
+    assert inferred == ""
+
+
 @pytest.mark.asyncio
 async def test_executor_process_files_normalizes_miaoshou_orders_into_business_platform_files(tmp_path, monkeypatch):
     raw_dir = tmp_path / "custom-raw-root"

@@ -604,6 +604,7 @@ async def lifespan(app: FastAPI):
 
                 queue_runner = CollectionQueueRunner(
                     session_factory=AsyncSessionLocal,
+                    app=app,
                 )
                 await queue_runner.start()
                 app.state.collection_queue_runner = queue_runner

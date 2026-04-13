@@ -271,6 +271,80 @@ class TestShopeeSellerShellFalsePositive:
         assert "login form" in result.reason.lower()
 
 
+class _StatefulLocator:
+    def __init__(self, page: "_StatefulShopeePage", selector: str) -> None:
+        self._page = page
+        self._selector = selector
+        self.first = self
+
+    async def count(self) -> int:
+        return 1 if self._page.is_selector_visible(self._selector) else 0
+
+    async def is_visible(self, timeout: int | None = None) -> bool:  # noqa: ARG002
+        return self._page.is_selector_visible(self._selector)
+
+
+class _StatefulShopeePage:
+    def __init__(self) -> None:
+        self.url = "https://seller.shopee.cn/account/signin?next=%2F"
+        self._phase = 0
+        self.context = MagicMock()
+        self.context.cookies = AsyncMock(side_effect=self._cookies)
+
+    async def _cookies(self):
+        if self._phase >= 1:
+            return [{"name": "SPC_EC", "value": "ok"}]
+        return []
+
+    async def wait_for_timeout(self, ms: int) -> None:  # noqa: ARG002
+        self._phase += 1
+        self.url = "https://seller.shopee.cn/portal/merchant/setting?cnsc_shop_id=1227491331"
+
+    def is_selector_visible(self, selector: str) -> bool:
+        if self._phase == 0:
+            return selector in {
+                "input[type='password']",
+                "input[name='password']",
+            }
+        return selector in {
+            "[data-testid='seller-menu']",
+            ".navbar-user",
+            "[class*='user-avatar']",
+            ".chat-icon-entry",
+            "[data-testid='customer-service-entry']",
+        }
+
+    def locator(self, selector: str):
+        return _StatefulLocator(self, selector)
+
+    def get_by_text(self, text: str):
+        return _StatefulLocator(self, f"text={text}")
+
+    def get_by_role(self, role: str, name=None):  # noqa: ANN001
+        return _StatefulLocator(self, f"role={role}[name={name}]")
+
+    def get_by_placeholder(self, placeholder: str):
+        return _StatefulLocator(self, f"placeholder={placeholder}")
+
+    def get_by_label(self, label: str):
+        return _StatefulLocator(self, f"label={label}")
+
+
+class TestShopeeSellerShellStability:
+    """锁定 Shopee 登录壳层在页面稳定后应判定为已登录。"""
+
+    @pytest.mark.anyio
+    async def test_detect_waits_for_stable_shell_before_treating_signin_page_as_not_logged_in(self):
+        detector = LoginStatusDetector("shopee")
+        page = _StatefulShopeePage()
+
+        result = await detector.detect(page, wait_for_redirect=False)
+
+        assert result.status == LoginStatus.LOGGED_IN
+        assert result.detected_by in {"element", "combined"}
+        assert page._phase >= 1
+
+
 class TestCombinedResults:
     """测试综合判断逻辑"""
     

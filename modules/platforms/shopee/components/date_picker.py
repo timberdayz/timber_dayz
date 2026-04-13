@@ -453,6 +453,103 @@ class ShopeeDatePicker(DatePickerComponent):
 
         return {"label": label}
 
+    def _selection_state_from_text(self, summary: str | None) -> dict[str, Any] | None:
+        text = str(summary or "").strip()
+        if not text:
+            return None
+        state: dict[str, Any] = {
+            "raw_text": text,
+            "value_text": text,
+        }
+
+        label = self._match_known_date_label(text)
+        if label:
+            state["label"] = label
+            normalized_label = self._normalize_date_text(label)
+            if normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("daily")):
+                state["mode"] = "daily"
+            elif normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("weekly")):
+                state["mode"] = "weekly"
+            elif normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("monthly")):
+                state["mode"] = "monthly"
+            else:
+                preset_value = self._preset_value_from_label(label)
+                if preset_value is not None:
+                    state["mode"] = "preset"
+                    state["value"] = preset_value
+
+            if label in text:
+                _, _, suffix = text.partition(label)
+                stripped_suffix = str(suffix or "").strip()
+                if stripped_suffix:
+                    state["value_text"] = stripped_suffix
+
+        month_value = self._extract_summary_month_value(text)
+        if month_value is not None:
+            year, month = month_value
+            state["year"] = year
+            state["month"] = month
+            state.setdefault("mode", "monthly")
+
+        summary_dates = self._extract_summary_date_values(text)
+        if len(summary_dates) >= 2:
+            state["start_date"] = summary_dates[0]
+            state["end_date"] = summary_dates[1]
+            state.setdefault("mode", "weekly")
+        elif len(summary_dates) == 1:
+            state["date"] = summary_dates[0]
+            state.setdefault("mode", "daily")
+
+        if "mode" not in state:
+            return None
+        return state
+
+    def _selection_state_matches_target(
+        self,
+        state: dict[str, Any] | None,
+        *,
+        granularity: str,
+        start_date: str | None,
+        end_date: str | None,
+    ) -> bool:
+        if not state:
+            return False
+
+        normalized_granularity = self._normalize_custom_granularity(granularity)
+        if normalized_granularity == "daily":
+            expected_date = start_date or end_date
+            return state.get("mode") == "daily" and state.get("date") == expected_date
+
+        if normalized_granularity == "weekly":
+            return (
+                state.get("mode") == "weekly"
+                and state.get("start_date") == start_date
+            )
+
+        if normalized_granularity == "monthly" and start_date:
+            try:
+                target_date = datetime.strptime(str(start_date), "%Y-%m-%d")
+            except ValueError:
+                target_date = None
+            if target_date is None:
+                return False
+            return (
+                state.get("mode") == "monthly"
+                and state.get("year") == target_date.year
+                and state.get("month") == target_date.month
+            )
+
+        return False
+
+    async def _current_selection_state(self, page: Any) -> dict[str, Any] | None:
+        summary_text = await self._current_date_summary_text(page)
+        state = self._selection_state_from_text(summary_text)
+        if state is not None:
+            return state
+
+        trigger_text = await self._current_date_trigger_text(page)
+        return self._selection_state_from_text(trigger_text)
+
     async def _current_date_summary_text(self, page: Any) -> str | None:
         summary_container = await self._find_date_summary_container(page)
         if summary_container is not None:
@@ -615,6 +712,39 @@ class ShopeeDatePicker(DatePickerComponent):
             target_date.strftime("%Y-%m-%d"),
             target_date.strftime("%Y/%m/%d"),
         )
+
+    async def _hint_text_visible(self, page: Any, text: str) -> bool:
+        try:
+            locator = page.get_by_text(text, exact=False).first
+            return bool(await locator.is_visible(timeout=300))
+        except Exception:
+            return False
+
+    async def _selection_hints_visible(
+        self,
+        page: Any,
+        *,
+        granularity: str,
+        start_date: str | None,
+        end_date: str | None,
+    ) -> bool:
+        normalized_granularity = self._normalize_custom_granularity(granularity)
+        mode_label = self.sel.granularity_labels.get(normalized_granularity)
+        if not mode_label or not await self._hint_text_visible(page, mode_label):
+            return False
+
+        tokens: tuple[str, ...] = ()
+        if normalized_granularity == "daily":
+            tokens = self._date_value_signatures(start_date or end_date)
+        elif normalized_granularity == "weekly":
+            tokens = self._date_value_signatures(start_date)
+        elif normalized_granularity == "monthly" and start_date:
+            tokens = self._month_summary_signatures(start_date)
+
+        for token in tokens:
+            if token and await self._hint_text_visible(page, token):
+                return True
+        return False
 
     def _custom_date_summary_matches(
         self,
@@ -1114,7 +1244,15 @@ class ShopeeDatePicker(DatePickerComponent):
     ) -> bool:
         waited = 0
         while waited <= timeout_ms:
-            summary = await self._current_date_summary_text(page)
+            state = await self._current_selection_state(page)
+            if self._selection_state_matches_target(
+                state,
+                granularity=granularity,
+                start_date=start_date,
+                end_date=end_date,
+            ):
+                return True
+            summary = state.get("raw_text") if state else await self._current_date_summary_text(page)
             if self._custom_date_summary_matches(
                 summary,
                 granularity=granularity,
@@ -1125,6 +1263,13 @@ class ShopeeDatePicker(DatePickerComponent):
             trigger_text = await self._current_date_trigger_text(page)
             if trigger_text and trigger_text != summary and self._custom_date_summary_matches(
                 trigger_text,
+                granularity=granularity,
+                start_date=start_date,
+                end_date=end_date,
+            ):
+                return True
+            if await self._selection_hints_visible(
+                page,
                 granularity=granularity,
                 start_date=start_date,
                 end_date=end_date,

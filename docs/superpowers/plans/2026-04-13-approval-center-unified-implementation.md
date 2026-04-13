@@ -258,6 +258,43 @@ git commit -m "feat: add approval center api"
 - Modify: `backend/tests/test_monthly_profit_settlement_routes.py`
 - Modify: `backend/tests/test_follow_investment_routes.py`
 
+## Current Delivery Snapshot
+
+As of 2026-04-13, the following items are complete on `main`:
+
+- approval-center ORM models and migration
+- approval-center lifecycle service
+- approval-center API
+- frontend pages for:
+  - `我的申请`
+  - `审批历史`
+  - `流程配置` (read-only template view)
+- approval-center permission hardening for:
+  - detail visibility
+  - approve / reject actions
+  - template-list admin-only access
+- existing approval-flow integrations:
+  - user registration approval
+  - monthly profit settlement approval
+  - follow-investment settlement approval
+
+## Deferred Optimization Backlog
+
+The following items are intentionally deferred to later optimization rounds:
+
+1. HR leave approval integration
+   - blocked on current `hr_attendance.py` permission / approver model cleanup
+2. HR overtime approval integration
+   - same prerequisite as leave approval
+3. workflow-config editing
+   - current page is read-only template visibility, not a full editor
+4. explicit template-configured approver rules
+   - current registration / settlement approvals still use lightweight admin fallback
+5. dedicated approval detail route
+   - current frontend uses list + drawer detail pattern
+6. richer pending-queue projection UX
+   - approval tasks already project into the unified inbox, but frontend grouping and jump flow can be improved
+
 - [ ] **Step 1: Write failing integration assertions**
 
 Cover:

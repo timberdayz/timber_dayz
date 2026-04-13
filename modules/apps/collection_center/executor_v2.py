@@ -711,6 +711,28 @@ class CollectionExecutorV2:
             headless=bool((launch_kwargs or {}).get("headless", True)),
         )
 
+    @staticmethod
+    def _build_runtime_launch_kwargs(*, debug_mode: bool) -> Dict[str, Any]:
+        if debug_mode:
+            return {"headless": False, "args": ["--start-maximized"]}
+        return {"headless": True}
+
+    @staticmethod
+    def _runtime_metadata_details(
+        *,
+        params: Dict[str, Any],
+        login_gate_ready: bool,
+        login_gate_reason: str,
+        login_gate_url: Optional[str],
+    ) -> Dict[str, Any]:
+        return {
+            "actual_execution_mode": params.get("_actual_execution_mode"),
+            "runtime_session_mode": params.get("_runtime_session_mode"),
+            "login_gate_ready": login_gate_ready,
+            "login_gate_reason": login_gate_reason,
+            "login_gate_url": login_gate_url,
+        }
+
     async def _execute_shared_login_phase(
         self,
         *,
@@ -733,6 +755,54 @@ class CollectionExecutorV2:
         await self._update_status(task_id, 5, "正在登录...")
         await self._check_cancelled(task_id)
         await self.popup_handler.close_popups(page, platform=platform)
+
+        if str(params.get("_runtime_session_mode") or "").strip().lower() == "persistent_profile":
+            runtime_ready, gate_result = await runtime_session.probe_runtime_login_gate(
+                page=page,
+                platform=platform,
+                account=account,
+            )
+            await self._update_status(
+                task_id,
+                5,
+                "检查持久会话登录态",
+                details={
+                    "step_id": "login_gate_probe",
+                    **self._runtime_metadata_details(
+                        params=params,
+                        login_gate_ready=runtime_ready,
+                        login_gate_reason=gate_result.reason,
+                        login_gate_url=gate_result.current_url,
+                    ),
+                },
+            )
+            if runtime_ready:
+                if params.get("shop_account_id"):
+                    await self._update_status(
+                        task_id,
+                        12,
+                        MAIN_ACCOUNT_SESSION_STEP_MESSAGES["switching_target_shop"],
+                    )
+                await self._update_status(
+                    task_id,
+                    15,
+                    MAIN_ACCOUNT_SESSION_STEP_MESSAGES["target_shop_ready"],
+                    details={
+                        "step_id": "login_gate_result",
+                        **self._runtime_metadata_details(
+                            params=params,
+                            login_gate_ready=True,
+                            login_gate_reason=gate_result.reason,
+                            login_gate_url=gate_result.current_url,
+                        ),
+                    },
+                )
+                logger.info(
+                    "Task %s: [Python] Reused persistent profile session before login component",
+                    task_id,
+                )
+                context.current_component_index = 1
+                return play_context, page, None
 
         login_success = False
         while True:
@@ -1318,7 +1388,9 @@ class CollectionExecutorV2:
                         session_owner_id=session_owner_id,
                         runtime_account=runtime_account,
                         storage_state=None,
-                        launch_kwargs={"headless": True},
+                        launch_kwargs=self._build_runtime_launch_kwargs(
+                            debug_mode=debug_mode,
+                        ),
                         proxy=proxy,
                     )
                     params = _build_runtime_task_params(
@@ -1335,6 +1407,11 @@ class CollectionExecutorV2:
                     if shop_account_id:
                         params["shop_account_id"] = shop_account_id
                     params["_runtime_session_mode"] = runtime_bundle.mode
+                    params["_actual_execution_mode"] = (
+                        "headless"
+                        if self._build_runtime_launch_kwargs(debug_mode=debug_mode).get("headless", True)
+                        else "headed"
+                    )
                     params["_legacy_direct_page_mode"] = legacy_direct_page_mode
                     adapter = None
                     if runtime_manifests is None:
@@ -1396,7 +1473,9 @@ class CollectionExecutorV2:
                     session_owner_id=session_owner_id,
                     runtime_account=runtime_account,
                     storage_state=None,
-                    launch_kwargs={"headless": True},
+                    launch_kwargs=self._build_runtime_launch_kwargs(
+                        debug_mode=debug_mode,
+                    ),
                     proxy=proxy,
                 )
                 params = _build_runtime_task_params(
@@ -1413,6 +1492,11 @@ class CollectionExecutorV2:
                 if shop_account_id:
                     params["shop_account_id"] = shop_account_id
                 params["_runtime_session_mode"] = runtime_bundle.mode
+                params["_actual_execution_mode"] = (
+                    "headless"
+                    if self._build_runtime_launch_kwargs(debug_mode=debug_mode).get("headless", True)
+                    else "headed"
+                )
                 params["_legacy_direct_page_mode"] = legacy_direct_page_mode
                 play_context = runtime_bundle.context
                 page = runtime_bundle.page
@@ -3817,7 +3901,9 @@ class CollectionExecutorV2:
         Returns:
             str: 数据域
         """
-        path_lower = file_path.lower()
+        import re
+
+        path_lower = file_path.lower().replace("\\", "/")
         
         # 优先从路径中推断
         domain_keywords = {
@@ -3831,7 +3917,11 @@ class CollectionExecutorV2:
         
         for domain, keywords in domain_keywords.items():
             for keyword in keywords:
-                if keyword in path_lower:
+                if len(keyword) <= 2:
+                    pattern = rf"(^|[/_.-]){re.escape(keyword)}($|[/_.-])"
+                    if re.search(pattern, path_lower):
+                        return domain
+                elif keyword in path_lower:
                     return domain
         
         # 降级:使用 data_domains 列表
@@ -3862,10 +3952,8 @@ class CollectionExecutorV2:
         candidate_domains: List[str] = []
         if data_domain:
             candidate_domains.append(str(data_domain).strip().lower())
-        candidate_domains.extend(
-            domain for domain in DATA_DOMAIN_SUB_TYPES.keys()
-            if domain not in candidate_domains
-        )
+        else:
+            candidate_domains.extend(DATA_DOMAIN_SUB_TYPES.keys())
 
         for domain in candidate_domains:
             allowed_subtypes = [str(item).strip().lower() for item in DATA_DOMAIN_SUB_TYPES.get(domain, [])]
@@ -3879,9 +3967,10 @@ class CollectionExecutorV2:
                     if subtype in trailing_parts:
                         return subtype
 
-            for subtype in allowed_subtypes:
-                if f"/{subtype}/" in path_lower:
-                    return subtype
+            if not data_domain:
+                for subtype in allowed_subtypes:
+                    if f"/{subtype}/" in path_lower:
+                        return subtype
 
         return ""
     
@@ -4089,7 +4178,9 @@ class CollectionExecutorV2:
                 session_owner_id=session_owner_id,
                 runtime_account=runtime_account,
                 storage_state=None,
-                launch_kwargs={"headless": True},
+                launch_kwargs=self._build_runtime_launch_kwargs(
+                    debug_mode=debug_mode,
+                ),
                 proxy=None,
             )
             storage_state = None

@@ -97,6 +97,10 @@ LOGIN_DETECTION_CONFIG: Dict[str, Dict[str, Any]] = {
             "[class*='shop-name']",
             "[class*='user-avatar']",
             ".navbar-user",
+            ".chat-icon-entry",
+            "[data-testid='customer-service-entry']",
+            "[class*='customer-service']",
+            "button[aria-haspopup='menu']",
         ],
         "auth_cookies": ["SPC_EC", "SPC_U", "SPC_SI"],
         # 元素检测超时(毫秒)
@@ -360,16 +364,17 @@ class LoginStatusDetector:
             
             # 如果URL明确表示已登录,快速返回
             if url_result.status == LoginStatus.LOGGED_IN and url_result.confidence >= 0.85:
-                login_form_result = await self._check_login_form_elements(
-                    page,
-                    self.config.get("element_check_timeout", 5000),
-                )
+                element_stability_result = await self._check_elements(page)
                 if details is not None:
-                    details["login_form_override_check"] = login_form_result.__dict__
-                if login_form_result.status == LoginStatus.NOT_LOGGED_IN:
-                    self._log_result("element_override", login_form_result, start_time)
-                    self._update_cache(current_url, login_form_result)
-                    return login_form_result
+                    details["login_form_override_check"] = element_stability_result.__dict__
+                if element_stability_result.status == LoginStatus.NOT_LOGGED_IN:
+                    self._log_result("element_override", element_stability_result, start_time)
+                    self._update_cache(current_url, element_stability_result)
+                    return element_stability_result
+                if element_stability_result.status == LoginStatus.LOGGED_IN:
+                    self._log_result("element", element_stability_result, start_time)
+                    self._update_cache(current_url, element_stability_result)
+                    return element_stability_result
                 self._log_result("url", url_result, start_time)
                 self._update_cache(current_url, url_result)
                 return url_result
@@ -614,6 +619,14 @@ class LoginStatusDetector:
             # 1. 检查登录表单元素(未登录标识)
             login_form_result = await self._check_login_form_elements(page, timeout)
             if login_form_result.status == LoginStatus.NOT_LOGGED_IN:
+                if retry < max_retries - 1:
+                    logger.info(
+                        "[LoginDetector] Login form visible, waiting for page stability before final judgment (%s/%s)...",
+                        retry + 1,
+                        max_retries,
+                    )
+                    await page.wait_for_timeout(1000)
+                    continue
                 return login_form_result
             
             # 2. 检查已登录元素

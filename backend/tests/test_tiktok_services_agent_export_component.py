@@ -149,11 +149,13 @@ class _TabPage(_FakePage):
         self.detail_selected = False
         self.clicked_selectors: list[str] = []
         self.loading_visible = False
+        self.business_ready = False
 
     async def wait_for_timeout(self, ms: int) -> None:
         self.wait_calls.append(ms)
         if self.loading_visible:
             self.loading_visible = False
+            self.business_ready = True
 
     def locator(self, selector: str):
         if selector == '[role="tab"]:has-text("聊天详情")':
@@ -162,6 +164,8 @@ class _TabPage(_FakePage):
             return _TabLocator(self, selector, visible=True)
         if selector in ('[data-tid="m4b_loading"]', ".theme-arco-spin", ".theme-m4b-loading"):
             return _FakeLocator(visible=self.loading_visible)
+        if selector == 'button:has-text("\u5bfc\u51fa\u6570\u636e")':
+            return _FakeLocator(visible=self.business_ready)
         return _FakeLocator(visible=False)
 
 
@@ -186,6 +190,50 @@ class _FlakyTabPage(_TabPage):
         if selector == '[role="tab"]:has-text("\u804a\u5929\u6982\u89c8")':
             return _FlakyTabLocator(self, selector, visible=True)
         return super().locator(selector)
+
+
+class _DelayedBusinessPage(_TabPage):
+    def __init__(
+        self,
+        url: str,
+        *,
+        detail_selected: bool = False,
+        export_visible_after_waits: int | None = None,
+        empty_visible_after_waits: int | None = None,
+        loading_clears_after_waits: int | None = None,
+    ) -> None:
+        super().__init__(url)
+        self.detail_selected = detail_selected
+        self.loading_visible = detail_selected
+        self.export_visible_after_waits = export_visible_after_waits
+        self.empty_visible_after_waits = empty_visible_after_waits
+        self.loading_clears_after_waits = loading_clears_after_waits
+        self.wait_count = 0
+        self.export_visible = False
+        self.empty_visible = False
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        self.wait_calls.append(ms)
+        self.wait_count += 1
+        if self.export_visible_after_waits is not None and self.wait_count >= self.export_visible_after_waits:
+            self.export_visible = True
+        if self.empty_visible_after_waits is not None and self.wait_count >= self.empty_visible_after_waits:
+            self.empty_visible = True
+        if self.loading_clears_after_waits is not None and self.wait_count >= self.loading_clears_after_waits:
+            self.loading_visible = False
+
+    def locator(self, selector: str):
+        if selector == '[role="tab"]:has-text("\u804a\u5929\u8be6\u60c5")':
+            return _TabLocator(self, selector, visible=True)
+        if selector == '[role="tab"]:has-text("\u804a\u5929\u6982\u89c8")':
+            return _TabLocator(self, selector, visible=True)
+        if selector in ('[data-tid="m4b_loading"]', ".theme-arco-spin", ".theme-m4b-loading"):
+            return _FakeLocator(visible=self.loading_visible)
+        if selector == 'button:has-text("\u5bfc\u51fa\u6570\u636e")':
+            return _FakeLocator(visible=self.export_visible)
+        if selector == "text=\u6682\u65e0\u6570\u636e":
+            return _FakeLocator(visible=self.empty_visible)
+        return _FakeLocator(visible=False)
 
 
 def test_tiktok_services_agent_export_detects_service_page_url() -> None:
@@ -397,6 +445,42 @@ async def test_tiktok_services_agent_export_accepts_business_ready_detail_page_e
     ready = await component._ensure_agent_detail_ready(page)
 
     assert ready is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_waits_for_delayed_business_signal_when_detail_already_selected() -> None:
+    page = _DelayedBusinessPage(
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY",
+        detail_selected=True,
+        export_visible_after_waits=2,
+        loading_clears_after_waits=999,
+    )
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY"}))
+
+    ready = await component._ensure_agent_detail_ready(page)
+
+    assert ready is True
+    assert page.detail_selected is True
+    assert page.export_visible is True
+    assert page.loading_visible is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_waits_for_delayed_business_signal_after_switching_detail_tab() -> None:
+    page = _DelayedBusinessPage(
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY",
+        detail_selected=False,
+        export_visible_after_waits=2,
+        loading_clears_after_waits=999,
+    )
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY"}))
+
+    ready = await component._ensure_agent_detail_ready(page)
+
+    assert ready is True
+    assert page.clicked_selectors == ['[role="tab"]:has-text("\u804a\u5929\u8be6\u60c5")']
+    assert page.detail_selected is True
+    assert page.export_visible is True
 
 
 @pytest.mark.asyncio

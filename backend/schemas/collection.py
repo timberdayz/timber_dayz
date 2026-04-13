@@ -236,6 +236,12 @@ class TaskResponse(BaseModel):
     verification_expires_at: Optional[str] = Field(None, description="验证码过期时间")
     verification_attempt_count: int = Field(0, description="验证码提交次数")
     verification_input_mode: Optional[str] = Field(None, description="验证码交互方式")
+    actual_execution_mode: Optional[Literal["headless", "headed"]] = None
+    runtime_session_mode: Optional[str] = None
+    login_gate_ready: Optional[bool] = None
+    login_gate_reason: Optional[str] = None
+    login_gate_url: Optional[str] = None
+    runtime_metadata: Optional[Dict[str, Any]] = None
 
 
 class CollectionConfigRunResponse(BaseModel):
@@ -503,4 +509,3 @@ class HealthCheckResponse(BaseModel):
     browser_pool: BrowserPoolStatus
     database: str
     scheduler: str
-

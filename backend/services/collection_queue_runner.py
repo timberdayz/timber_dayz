@@ -21,12 +21,14 @@ class CollectionQueueRunner:
         session_factory: async_sessionmaker[AsyncSession],
         poll_interval_seconds: float = 2.0,
         run_processor: Optional[Callable[[object], Awaitable[None]]] = None,
+        app: object | None = None,
     ):
         self.session_factory = session_factory
         self.poll_interval_seconds = poll_interval_seconds
         self._task: asyncio.Task | None = None
         self._shutdown = asyncio.Event()
         self._run_processor = run_processor
+        self.app = app
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -132,7 +134,7 @@ class CollectionQueueRunner:
             parallel_mode=False,
             max_parallel=1,
             runtime_manifests=runtime_manifests,
-            app=None,
+            app=self.app,
         )
 
     async def _finalize_run(self, run: object) -> None:
