@@ -10,6 +10,7 @@ This avoids Redis port conflicts, duplicate container names, and mixed manual st
 - PostgreSQL: Docker
 - Redis: Docker
 - Celery Worker: Docker
+- Celery Beat: Docker
 - Backend API: local process
 - Frontend Vite: local process
 
@@ -67,10 +68,20 @@ These are the underlying compose commands:
 
 ```powershell
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev up -d redis postgres
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d celery-worker
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d celery-worker celery-beat
 ```
 
 In normal usage, `python run.py --local` should handle this for you.
+
+### 2.1 Keep the scheduler alive
+
+Automatic data sync depends on `celery-beat`, not just `celery-worker`.
+
+If only the worker is running:
+
+- manual sync can still work
+- newly registered `catalog_files` will remain `pending`
+- periodic auto-ingest will never fire
 
 ### 3. Restart the local backend after `.env` changes
 

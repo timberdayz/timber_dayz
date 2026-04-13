@@ -201,6 +201,56 @@ services:
     profiles:
       - dev-full
 
+  # Celery Beat（开发环境自动同步调度）
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: xihong_erp_celery_beat
+    restart: unless-stopped
+    command: celery -A backend.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      RUN_MIGRATIONS: "0"
+      APP_ENV: development
+      DEBUG: "true"
+      PROJECT_ROOT: /app
+      DATA_DIR: /app/data
+      DATA_RAW_DIR: /app/data/raw
+    volumes:
+      - ./backend:/app/backend
+      - ./modules:/app/modules
+      - ./migrations:/app/migrations
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - erp_network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, redis; r=redis.from_url(os.environ['CELERY_BROKER_URL']); r.ping(); print('ok')",
+        ]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    profiles:
+      - dev-full
+
   # Nginx 反向代理（开发环境测试）
   nginx:
     image: nginx:alpine

@@ -15,7 +15,7 @@
 
 使用方法:
     python run.py                      # 传统模式（需先启动 Postgres/Redis）
-    python run.py --local              # 本地采集测试：Docker 起 postgres、redis、celery-worker，本机起后端+前端
+    python run.py --local              # 本地采集测试：Docker 起 postgres、redis、celery-worker、celery-beat，本机起后端+前端
     python run.py --use-docker         # 后端 Docker + 前端本地模式（推荐）
     python run.py --backend-only       # 仅启动后端
     python run.py --frontend-only      # 仅启动前端
@@ -789,21 +789,23 @@ def start_services_with_docker_compose(use_collection=False):
             safe_print("    docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d backend")
             return False
         
-        # 启动Celery Worker（生产模式：必须在Docker中运行）
-        safe_print("  [启动] Celery Worker...")
+        # 启动Celery Worker / Beat（生产模式：必须在Docker中运行）
+        safe_print("  [启动] Celery Worker / Beat...")
         safe_print("  提示: 首次构建可能需要几分钟，请耐心等待...")
         celery_container = "xihong_erp_celery_worker"
+        celery_beat_container = "xihong_erp_celery_beat"
         try:
-            cmd = compose_command + compose_files + ["--profile", profile_name, "up", "-d", "celery-worker"]
+            cmd = compose_command + compose_files + ["--profile", profile_name, "up", "-d", "celery-worker", "celery-beat"]
             # [FIX] 增加超时到300秒（5分钟）
             result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore')
             
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "未知错误"
                 if "xihong_erp_migrate" in error_msg or "migrate" in error_msg.lower():
-                    return _report_migrate_failure("数据库迁移任务失败，Celery Worker 未启动")
-                safe_print(f"  [ERROR] Celery Worker启动失败: {error_msg[:200]}")
-                safe_print(f"  容器状态: {get_docker_container_status(celery_container)}")
+                    return _report_migrate_failure("数据库迁移任务失败，Celery Worker / Beat 未启动")
+                safe_print(f"  [ERROR] Celery Worker / Beat 启动失败: {error_msg[:200]}")
+                safe_print(f"  Worker状态: {get_docker_container_status(celery_container)}")
+                safe_print(f"  Beat状态: {get_docker_container_status(celery_beat_container)}")
                 safe_print("  容器日志:")
                 logs = show_docker_container_logs(celery_container, 30)
                 for line in logs.split('\n')[-20:]:
@@ -811,27 +813,32 @@ def start_services_with_docker_compose(use_collection=False):
                         safe_print(f"    {line}")
                 return False
             
-            # [CHECK] 验证Celery Worker容器是否真的在运行
-            safe_print("  [验证] 检查Celery Worker容器状态...")
+            # [CHECK] 验证Celery Worker / Beat容器是否真的在运行
+            safe_print("  [验证] 检查Celery Worker / Beat 容器状态...")
             time.sleep(3)
             
             max_retries = 10
             for i in range(max_retries):
-                if check_docker_container_running(celery_container):
-                    safe_print(f"  [OK] Celery Worker容器正在运行（尝试 {i+1}/{max_retries}）")
+                worker_running = check_docker_container_running(celery_container)
+                beat_running = check_docker_container_running(celery_beat_container)
+                if worker_running and beat_running:
+                    safe_print(f"  [OK] Celery Worker / Beat 容器正在运行（尝试 {i+1}/{max_retries}）")
                     break
                 else:
                     status = get_docker_container_status(celery_container)
-                    safe_print(f"  [等待] 容器状态: {status} (尝试 {i+1}/{max_retries})")
+                    beat_status = get_docker_container_status(celery_beat_container)
+                    safe_print(f"  [等待] Worker={status}, Beat={beat_status} (尝试 {i+1}/{max_retries})")
                     if i < max_retries - 1:
                         time.sleep(2)
             else:
                 status = get_docker_container_status(celery_container)
-                safe_print(f"  [ERROR] Celery Worker容器启动失败")
+                beat_status = get_docker_container_status(celery_beat_container)
+                safe_print(f"  [ERROR] Celery Worker / Beat 容器启动失败")
                 if get_docker_container_status("xihong_erp_migrate") not in ("missing", "unknown", ""):
-                    _report_migrate_failure("数据库迁移任务可能失败，导致 Celery Worker 未能启动")
-                safe_print(f"  容器状态: {status}")
-                safe_print("  容器日志（最后30行）:")
+                    _report_migrate_failure("数据库迁移任务可能失败，导致 Celery Worker / Beat 未能启动")
+                safe_print(f"  Worker状态: {status}")
+                safe_print(f"  Beat状态: {beat_status}")
+                safe_print("  Worker日志（最后30行）:")
                 logs = show_docker_container_logs(celery_container, 30)
                 for line in logs.split('\n')[-30:]:
                     if line.strip():
@@ -839,14 +846,14 @@ def start_services_with_docker_compose(use_collection=False):
                 safe_print("\n  诊断建议:")
                 safe_print("    1. 查看完整日志: docker logs xihong_erp_celery_worker")
                 safe_print("    2. 检查容器状态: docker ps -a | grep celery")
-                safe_print("    3. 手动启动: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d celery-worker")
+                safe_print("    3. 手动启动: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d celery-worker celery-beat")
                 return False
                 
         except subprocess.TimeoutExpired:
-            safe_print("  [ERROR] Celery Worker构建超时")
+            safe_print("  [ERROR] Celery Worker / Beat 构建超时")
             safe_print("  提示: 请手动构建和启动:")
             safe_print("    docker-compose -f docker-compose.yml -f docker-compose.dev.yml build celery-worker")
-            safe_print("    docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d celery-worker")
+            safe_print("    docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d celery-worker celery-beat")
             return False
         
         return True
@@ -1078,7 +1085,7 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
     """本地模式下启动并等待 Postgres/Redis/Celery Docker 基础设施就绪。"""
     safe_print(
         "\n[本地模式] 使用 Docker 启动 Postgres、Redis"
-        + (" 与 Celery Worker" if with_celery else "")
+        + (" 与 Celery Worker/Celery Beat" if with_celery else "")
         + "..."
     )
     if not pre_flight_check_docker(project_root):
@@ -1106,8 +1113,8 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
     services = ["redis", "postgres"]
     required_names = ["xihong_erp_postgres", "xihong_erp_redis"]
     if with_celery:
-        services.append("celery-worker")
-        required_names.append("xihong_erp_celery_worker")
+        services.extend(["celery-worker", "celery-beat"])
+        required_names.extend(["xihong_erp_celery_worker", "xihong_erp_celery_beat"])
 
     try:
         ps_result = subprocess.run(
@@ -1186,7 +1193,7 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
 
         safe_print("  [OK] PostgreSQL 连接正常")
         if with_celery:
-            safe_print("  [OK] Celery Worker 使用 Docker 容器，与本机无时钟漂移")
+            safe_print("  [OK] Celery Worker/Celery Beat 使用 Docker 容器，本地自动同步调度可用")
         return True
     except Exception as exc:
         safe_print(f"  [ERROR] 启动本地 Docker 基础服务异常: {exc}")
@@ -1268,7 +1275,7 @@ def main():
     parser.add_argument(
         "--local",
         action="store_true",
-        help="本地采集测试模式：Docker 启动 postgres、redis、celery-worker，本机启动后端与前端",
+        help="本地采集测试模式：Docker 启动 postgres、redis、celery-worker、celery-beat，本机启动后端与前端",
     )
     args = parser.parse_args()
 
@@ -1277,12 +1284,12 @@ def main():
     warn_legacy_shop_session_artifacts(project_root)
 
     if args.local and not args.use_docker and not args.frontend_only:
-        safe_print("\n[模式] 本地采集测试模式（Docker: postgres、redis、celery-worker；本机: 后端、前端）")
+        safe_print("\n[模式] 本地采集测试模式（Docker: postgres、redis、celery-worker、celery-beat；本机: 后端、前端）")
         if not ensure_postgres_redis_docker(project_root, with_celery=True):
             safe_print("\n[ERROR] Docker 基础服务启动失败，请检查 Docker 与 compose 配置")
             raise SystemExit(1)
         args.no_celery = True
-        safe_print("  [OK] Docker 基础服务 postgres、redis、celery-worker 已就绪，接下来启动本机后端与前端...\n")
+        safe_print("  [OK] Docker 基础服务 postgres、redis、celery-worker、celery-beat 已就绪，接下来启动本机后端与前端...\n")
 
     if args.use_docker:
         safe_print("\n[模式] 后端 Docker + 前端本地模式")

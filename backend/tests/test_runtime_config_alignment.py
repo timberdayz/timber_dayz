@@ -100,11 +100,13 @@ def test_dev_compose_uses_dedicated_migrate_service_and_disables_runtime_migrati
     migrate = services["migrate"]
     backend_env = services["backend"]["environment"]
     worker_env = services["celery-worker"]["environment"]
+    beat_env = services["celery-beat"]["environment"]
 
     assert migrate["command"] == "alembic upgrade heads"
     assert migrate["environment"]["RUN_MIGRATIONS"] == "1"
     assert backend_env["RUN_MIGRATIONS"] == "0"
     assert worker_env["RUN_MIGRATIONS"] == "0"
+    assert beat_env["RUN_MIGRATIONS"] == "0"
 
 
 def test_dev_celery_healthcheck_uses_worker_readiness():
@@ -115,6 +117,19 @@ def test_dev_celery_healthcheck_uses_worker_readiness():
     assert "inspect" in health_joined
     assert "ping" in health_joined
     assert "redis.from_url" not in health_joined
+
+
+def test_dev_compose_includes_celery_beat_for_automatic_sync_scheduling():
+    compose = _read_yaml("docker-compose.dev.yml")
+    services = compose["services"]
+
+    assert "celery-beat" in services
+    beat = services["celery-beat"]
+
+    assert beat["command"] == "celery -A backend.celery_app beat --loglevel=info"
+    assert "dev-full" in beat["profiles"]
+    assert "CELERY_BROKER_URL" in beat["environment"]
+    assert "CELERY_RESULT_BACKEND" in beat["environment"]
 
 
 def test_prod_compose_uses_dedicated_migrate_service_and_disables_runtime_migrations():

@@ -7,7 +7,7 @@
 | Profile      | 用途说明                     | 典型启动命令 |
 |-------------|------------------------------|--------------|
 | `dev`       | 仅基础设施（postgres、redis） | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev up -d` |
-| `dev-full`  | 开发全栈（含 backend、celery-worker） | `python run.py --use-docker` 或同上加 `--profile dev-full up -d backend celery-worker` |
+| `dev-full`  | 开发全栈（含 backend、celery-worker、celery-beat） | `python run.py --use-docker` 或同上加 `--profile dev-full up -d backend celery-worker celery-beat` |
 | `production`| 生产部署（backend、frontend、nginx、celery 等） | `docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production up -d` |
 | `full`      | 生产全栈（与 production 重叠，视具体 compose 定义） | 见 docker-compose.prod.yml |
 
@@ -24,7 +24,7 @@ python run.py --use-docker --with-metabase
 上述命令会：
 
 - 使用 `docker-compose.yml` + `docker-compose.dev.yml`（及 Metabase 相关 compose）
-- 使用 Profile：`dev`（先起 postgres/redis）、`dev-full`（再起 backend）
+- 使用 Profile：`dev`（先起 postgres/redis）、`dev-full`（再起 backend、celery-worker、celery-beat）
 - 前端仍在本地以 `npm run dev` 运行，访问 `http://localhost:5173`
 
 ## 生产 / 云端部署
