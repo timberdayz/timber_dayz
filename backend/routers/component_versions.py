@@ -141,6 +141,26 @@ def _get_test_verification_store_path(test_dir) -> Path:
     return test_dir / "verification_state.json"
 
 
+def _write_subprocess_runtime_log(
+    runtime_log_path: Path,
+    *,
+    stdout: str | None,
+    stderr: str | None,
+    returncode: int | None,
+) -> None:
+    runtime_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(runtime_log_path, "a", encoding="utf-8") as f:
+        f.write(f"=== subprocess returncode={returncode} ===\n")
+        f.write("=== STDOUT ===\n")
+        f.write(stdout or "")
+        if stdout and not str(stdout).endswith("\n"):
+            f.write("\n")
+        f.write("=== STDERR ===\n")
+        f.write(stderr or "")
+        if stderr and not str(stderr).endswith("\n"):
+            f.write("\n")
+
+
 def _get_canonical_component_names(platform: Optional[str] = None) -> list[str]:
     """Return canonical component_name values for a platform or all platforms."""
     project_root = Path(__file__).parent.parent.parent
@@ -1630,6 +1650,7 @@ async def test_component_version(
         config_path = test_dir / "config.json"
         result_path = test_dir / "result.json"
         progress_path = test_dir / "progress.json"
+        runtime_log_path = test_dir / "runtime.log"
 
         # 写入配置文件
         import json as json_lib
@@ -1688,6 +1709,12 @@ async def test_component_version(
 
                 # 等待子进程完成(子进程会写入进度文件)
                 stdout, stderr = proc.communicate()
+                _write_subprocess_runtime_log(
+                    runtime_log_path,
+                    stdout=stdout,
+                    stderr=stderr,
+                    returncode=proc.returncode,
+                )
 
                 if proc.returncode != 0:
                     logger.error(f"Subprocess exited with code {proc.returncode}")

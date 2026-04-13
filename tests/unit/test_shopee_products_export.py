@@ -795,6 +795,7 @@ async def test_find_date_panel_for_services_does_not_require_today_realtime_anch
 async def test_shopee_date_picker_runs_custom_range_using_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    page = _FakePage()
     ctx = ExecutionContext(
         platform="shopee",
         account={},
@@ -809,12 +810,25 @@ async def test_shopee_date_picker_runs_custom_range_using_context(
         },
     )
     picker = ShopeeDatePicker(ctx)
-    monkeypatch.setattr(picker._delegate, "_ensure_date_selection", AsyncMock(), raising=False)
+    monkeypatch.setattr(picker, "_current_date_summary_text", AsyncMock(return_value="旧范围"), raising=False)
+    monkeypatch.setattr(picker, "_custom_date_summary_matches", lambda *args, **kwargs: False, raising=False)
+    monkeypatch.setattr(picker, "_resolve_custom_target", lambda config: {
+        "granularity": "weekly",
+        "start_date": "2026-03-30",
+        "end_date": "2026-04-05",
+        "target_iso_date": "2026-03-30",
+    }, raising=False)
+    monkeypatch.setattr(picker, "_normalize_custom_granularity", lambda value: "weekly", raising=False)
+    monkeypatch.setattr(picker, "_open_date_picker", AsyncMock(), raising=False)
+    monkeypatch.setattr(picker, "_hover_text_option", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(picker, "_select_week_range_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(picker, "_wait_custom_date_selection_applied", AsyncMock(return_value=True), raising=False)
 
-    result = await picker.run(_FakePage(), picker._resolve_option_from_context())
+    result = await picker.run(page, picker._resolve_option_from_context())
 
     assert result.success is True
-    picker._delegate._ensure_date_selection.assert_awaited_once()
+    picker._open_date_picker.assert_awaited_once()
+    picker._hover_text_option.assert_awaited_once_with(page, "按周")
 
 
 @pytest.mark.asyncio

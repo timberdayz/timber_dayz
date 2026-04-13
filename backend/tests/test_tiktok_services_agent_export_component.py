@@ -10,7 +10,19 @@ from modules.components.export.base import ExportResult
 from modules.platforms.tiktok.components.services_agent_export import TiktokServicesAgentExport
 
 
-def _ctx(config: dict | None = None) -> ExecutionContext:
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.infos: list[str] = []
+        self.warnings: list[str] = []
+
+    def info(self, message: str, *args) -> None:
+        self.infos.append(message % args if args else message)
+
+    def warning(self, message: str, *args) -> None:
+        self.warnings.append(message % args if args else message)
+
+
+def _ctx(config: dict | None = None, *, logger=None) -> ExecutionContext:
     return ExecutionContext(
         platform="tiktok",
         account={
@@ -19,7 +31,7 @@ def _ctx(config: dict | None = None) -> ExecutionContext:
             "store_name": "Tiktok 2店",
             "shop_region": "MY",
         },
-        logger=None,
+        logger=logger,
         config=config or {"shop_region": "MY", "granularity": "monthly"},
     )
 
@@ -151,6 +163,29 @@ class _TabPage(_FakePage):
         if selector in ('[data-tid="m4b_loading"]', ".theme-arco-spin", ".theme-m4b-loading"):
             return _FakeLocator(visible=self.loading_visible)
         return _FakeLocator(visible=False)
+
+
+class _FlakyTabLocator(_TabLocator):
+    async def click(self, timeout: int | None = None) -> None:
+        self._page.clicked_selectors.append(self._selector)
+        if "\u804a\u5929\u8be6\u60c5" in self._selector:
+            self._page.detail_click_attempts += 1
+            if self._page.detail_click_attempts >= 2:
+                self._page.detail_selected = True
+                self._page.loading_visible = True
+
+
+class _FlakyTabPage(_TabPage):
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+        self.detail_click_attempts = 0
+
+    def locator(self, selector: str):
+        if selector == '[role="tab"]:has-text("\u804a\u5929\u8be6\u60c5")':
+            return _FlakyTabLocator(self, selector, visible=True)
+        if selector == '[role="tab"]:has-text("\u804a\u5929\u6982\u89c8")':
+            return _FlakyTabLocator(self, selector, visible=True)
+        return super().locator(selector)
 
 
 def test_tiktok_services_agent_export_detects_service_page_url() -> None:
@@ -316,6 +351,36 @@ async def test_tiktok_services_agent_export_enters_normal_chinese_agent_detail_t
     assert page.clicked_selectors == ['[role="tab"]:has-text("聊天详情")']
     assert page.detail_selected is True
     assert page.loading_visible is False
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_retries_when_first_detail_tab_click_does_not_switch() -> None:
+    page = _FlakyTabPage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY"}))
+
+    ready = await component._ensure_agent_detail_ready(page)
+
+    assert ready is True
+    assert page.detail_selected is True
+    assert page.detail_click_attempts == 2
+    assert page.clicked_selectors == [
+        '[role="tab"]:has-text("\u804a\u5929\u8be6\u60c5")',
+        '[role="tab"]:has-text("\u804a\u5929\u8be6\u60c5")',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_logs_detail_tab_state_when_first_click_does_not_switch() -> None:
+    page = _FlakyTabPage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+    logger = _FakeLogger()
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY"}, logger=logger))
+
+    ready = await component._ensure_agent_detail_ready(page)
+
+    assert ready is True
+    assert any("detail tab attempt 1" in message for message in logger.infos)
+    assert any("aria-selected=false" in message for message in logger.infos)
+    assert any("selected_after_click=False" in message for message in logger.infos)
 
 
 @pytest.mark.asyncio

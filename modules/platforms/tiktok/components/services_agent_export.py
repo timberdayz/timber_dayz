@@ -29,6 +29,7 @@ class TiktokServicesAgentExport(ExportComponent):
 
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
+        self._runtime_logger = getattr(ctx, "logger", None)
         if self.ctx.config is None:
             self.ctx.config = {}
         params = dict((self.ctx.config or {}).get("params") or {})
@@ -36,6 +37,14 @@ class TiktokServicesAgentExport(ExportComponent):
         self.ctx.config["sub_domain"] = "agent"
         self.ctx.config["params"] = params
         self._download_capture = None
+
+    def _log_info(self, message: str, *args) -> None:
+        if self._runtime_logger is None:
+            return
+        try:
+            self._runtime_logger.info(message, *args)
+        except Exception:
+            pass
 
     def _target_region(self) -> str | None:
         config = self.ctx.config or {}
@@ -320,6 +329,35 @@ class TiktokServicesAgentExport(ExportComponent):
                 continue
         return False
 
+    async def _tab_state_snapshot(self, page: Any, selectors: tuple[str, ...]) -> str:
+        snapshots: list[str] = []
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() <= 0:
+                    snapshots.append(f"{selector}:missing")
+                    continue
+                if not await locator.is_visible(timeout=200):
+                    snapshots.append(f"{selector}:hidden")
+                    continue
+                aria_selected = None
+                css_class = None
+                try:
+                    aria_selected = await locator.get_attribute("aria-selected")
+                except Exception:
+                    aria_selected = None
+                try:
+                    css_class = await locator.get_attribute("class")
+                except Exception:
+                    css_class = None
+                snapshots.append(
+                    f"{selector}:aria-selected={str(aria_selected or '').strip() or '<none>'},"
+                    f"class={str(css_class or '').strip() or '<none>'}"
+                )
+            except Exception as exc:
+                snapshots.append(f"{selector}:error={exc}")
+        return " | ".join(snapshots)
+
     async def _wait_tab_area_ready(
         self,
         page: Any,
@@ -343,7 +381,7 @@ class TiktokServicesAgentExport(ExportComponent):
         page: Any,
         selectors: tuple[str, ...],
         *,
-        timeout_ms: int = 2000,
+        timeout_ms: int = 3000,
         poll_ms: int = 200,
     ) -> bool:
         waited = 0
@@ -353,6 +391,63 @@ class TiktokServicesAgentExport(ExportComponent):
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
             waited += poll_ms
+        return False
+
+    async def _activate_agent_detail_tab(
+        self,
+        page: Any,
+        selectors: tuple[str, ...],
+        *,
+        max_attempts: int = 3,
+    ) -> bool:
+        for attempt in range(max_attempts):
+            await self._wait_loading_gone(page, timeout_ms=1500, poll_ms=150)
+
+            before_state = await self._tab_state_snapshot(page, selectors)
+            self._log_info(
+                "services_agent_export detail tab attempt %s/%s before click: %s",
+                attempt + 1,
+                max_attempts,
+                before_state,
+            )
+
+            clicked = await self._click_first(page, selectors, timeout=2000)
+            self._log_info(
+                "services_agent_export detail tab attempt %s/%s click_result=%s",
+                attempt + 1,
+                max_attempts,
+                clicked,
+            )
+            if not clicked:
+                return False
+
+            selected = await self._wait_agent_detail_selected(page, selectors)
+            after_state = await self._tab_state_snapshot(page, selectors)
+            self._log_info(
+                "services_agent_export detail tab attempt %s/%s selected_after_click=%s after click: %s",
+                attempt + 1,
+                max_attempts,
+                selected,
+                after_state,
+            )
+            if selected:
+                return True
+
+            if attempt >= max_attempts - 1:
+                break
+
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(300)
+
+            tab_area_ready = await self._wait_tab_area_ready(page, timeout_ms=1500, poll_ms=150)
+            self._log_info(
+                "services_agent_export detail tab attempt %s/%s retry_wait_tab_area_ready=%s",
+                attempt + 1,
+                max_attempts,
+                tab_area_ready,
+            )
+            if not tab_area_ready:
+                return False
         return False
 
     async def _wait_loading_gone(
@@ -420,11 +515,7 @@ class TiktokServicesAgentExport(ExportComponent):
                 return True
             return await self._wait_loading_gone(page)
 
-        clicked = await self._click_first(page, selectors, timeout=2000)
-        if not clicked:
-            return False
-
-        if not await self._wait_agent_detail_selected(page, selectors):
+        if not await self._activate_agent_detail_tab(page, selectors):
             return False
 
         if await self._agent_detail_business_ready(page):
