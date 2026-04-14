@@ -27,6 +27,7 @@ import pandas as pd
 from backend.models.database import get_db, get_async_db, SessionLocal, AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.data_sync_service import DataSyncService
+from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
 from backend.services.sync_progress_tracker import SyncProgressTracker
 from backend.dependencies.auth import get_current_user, require_admin  # [*] Phase 4.2: 用户认证
 from backend.services.user_task_quota import get_user_task_quota_service  # [*] Phase 4.2: 用户任务配额
@@ -2054,6 +2055,7 @@ async def get_detailed_template_coverage(
         covered_list = []
         missing_list = []
         needs_update_list = []
+        template_status_service = DataSyncTemplateStatusService(db)
         
         for platform, domain, sub_domain, granularity in all_combinations:
             if not platform or not domain or not granularity:
@@ -2091,6 +2093,8 @@ async def get_detailed_template_coverage(
                 # 检查模板是否需要更新(通过检测最近文件的表头变化)
                 needs_update = False
                 update_reason = None
+                template_status = "ready"
+                semantic_match = True
                 
                 # [*] v4.15.0修复:获取该组合的一个示例文件(优先pending,其次ingested)
                 # [*] v4.18.2:使用 await
@@ -2115,7 +2119,6 @@ async def get_detailed_template_coverage(
                 if sample_file:
                     try:
                         from backend.services.excel_parser import ExcelParser
-                        import pandas as pd
                         
                         # [*] v4.18.2修复:使用 run_in_executor 包装文件读取,避免阻塞事件循环
                         loop = asyncio.get_running_loop()
@@ -2127,15 +2130,18 @@ async def get_detailed_template_coverage(
                             1  # nrows=1
                         )
                         current_columns = df.columns.tolist()
-                        
-                        # 检测表头变化([*] v4.18.2:添加 await)
-                        header_changes = await template_matcher.detect_header_changes(
-                            template_id=template.id,
-                            current_columns=current_columns
+
+                        status_info = await template_status_service.evaluate_catalog_file(
+                            sample_file,
+                            template=template,
+                            current_columns=current_columns,
                         )
-                        
-                        if header_changes.get('detected') and header_changes.get('match_rate', 100) < 90:
+                        template_status = status_info.get("template_status", "ready")
+                        semantic_match = status_info.get("semantic_match", False)
+
+                        if template_status == "update_required":
                             needs_update = True
+                            header_changes = status_info.get("header_changes", {})
                             added = header_changes.get('added_fields', [])
                             removed = header_changes.get('removed_fields', [])
                             if added or removed:
@@ -2151,8 +2157,10 @@ async def get_detailed_template_coverage(
                     'template_id': template.id,
                     'template_name': template.template_name,
                     'template_version': template.version,
+                    'template_status': template_status,
                     'needs_update': needs_update,
-                    'update_reason': update_reason
+                    'update_reason': update_reason,
+                    'semantic_match': semantic_match,
                 })
                 
                 if needs_update:
@@ -2252,7 +2260,7 @@ async def get_governance_stats(
                 use_template_header_row=True,
             )
             template_status = readiness.get("template_status")
-            if template_status == "ready":
+            if readiness.get("should_auto_sync"):
                 ready_to_sync_count += 1
             elif template_status == "update_required":
                 template_update_required_count += 1

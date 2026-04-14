@@ -229,6 +229,8 @@ def _extract_runtime_metadata_from_logs(logs: List[Any]) -> Optional[dict]:
             "shop_account_id": details.get("shop_account_id"),
             "persistent_profile_path": details.get("persistent_profile_path"),
             "profile_contains_state": details.get("profile_contains_state"),
+            "runtime_strategy_reason": details.get("runtime_strategy_reason"),
+            "session_source": details.get("session_source"),
             "probe_urls": details.get("probe_urls"),
         }
     return None
@@ -301,6 +303,8 @@ def _build_task_response_payload_with_runtime_metadata(
         "login_gate_ready": runtime_metadata.get("login_gate_ready") if runtime_metadata else None,
         "login_gate_reason": runtime_metadata.get("login_gate_reason") if runtime_metadata else None,
         "login_gate_url": runtime_metadata.get("login_gate_url") if runtime_metadata else None,
+        "runtime_strategy_reason": runtime_metadata.get("runtime_strategy_reason") if runtime_metadata else None,
+        "session_source": runtime_metadata.get("session_source") if runtime_metadata else None,
         "runtime_metadata": runtime_metadata,
     }
 

@@ -220,6 +220,8 @@ class RuntimeContextBundle:
     context_options: Dict[str, Any] = field(default_factory=dict)
     session_owner_id: str = ""
     profile_path: Optional[str] = None
+    strategy_reason: Optional[str] = None
+    session_source: Optional[str] = None
 
 
 @dataclass(frozen=True)

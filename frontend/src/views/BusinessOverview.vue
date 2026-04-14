@@ -2431,7 +2431,7 @@ const loadTrafficRanking = async () => {
 const loadInventoryBacklog = async () => {
   loadingInventory.value = true
   try {
-    const response = await api.getBusinessOverviewInventoryBacklog()
+    const response = await api.getBusinessOverviewInventoryBacklog({ limit: 20 })
 
     // 响应拦截器已处理success字段，直接使用data
     if (response) {
@@ -2469,6 +2469,7 @@ const loadClearanceRanking = async (granularity) => {
     }
 
     params.granularity = granularity
+    params.limit = 10
 
     // 响应拦截器已处理success字段，直接使用data
     const response = await api.getClearanceRanking(params)

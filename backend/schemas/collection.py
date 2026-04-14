@@ -241,6 +241,8 @@ class TaskResponse(BaseModel):
     login_gate_ready: Optional[bool] = None
     login_gate_reason: Optional[str] = None
     login_gate_url: Optional[str] = None
+    runtime_strategy_reason: Optional[str] = None
+    session_source: Optional[str] = None
     runtime_metadata: Optional[Dict[str, Any]] = None
 
 

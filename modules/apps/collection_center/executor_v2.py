@@ -36,6 +36,7 @@ from modules.apps.collection_center.browser_config_helper import (
 )
 from modules.apps.collection_center.popup_handler import UniversalPopupHandler, StepPopupHandler
 from modules.apps.collection_center.python_component_adapter import PythonComponentAdapter, create_adapter
+from modules.apps.collection_center.landing_semantics import resolve_business_granularity
 from modules.apps.collection_center.transition_gates import (
     GateStatus,
     evaluate_export_complete,
@@ -703,9 +704,17 @@ class CollectionExecutorV2:
                 parallel_mode=False,
             )
             normalized_mode = strategy.mode
+        else:
+            strategy = runtime_session.RuntimeStrategyDecision(
+                mode=normalized_mode,
+                reason=normalized_mode,
+                used_storage_state=normalized_mode == "storage_state_fanout",
+                used_persistent_profile=normalized_mode == "persistent_profile",
+                fallback_allowed=normalized_mode == "storage_state_fanout",
+            )
 
         if normalized_mode == "persistent_profile":
-            return await runtime_session.open_persistent_runtime_bundle(
+            bundle = await runtime_session.open_persistent_runtime_bundle(
                 browser_type=browser_type,
                 platform=platform,
                 session_owner_id=session_owner_id,
@@ -713,6 +722,12 @@ class CollectionExecutorV2:
                 launch_kwargs=launch_kwargs,
                 proxy=proxy,
             )
+            self._annotate_runtime_bundle(
+                bundle,
+                strategy_reason=strategy.reason,
+                session_source="persistent_profile",
+            )
+            return bundle
 
         if effective_storage_state is None and session_owner_id:
             session_data = await _load_or_bootstrap_session_async(
@@ -723,7 +738,7 @@ class CollectionExecutorV2:
             if session_data and isinstance(session_data.get("storage_state"), dict):
                 effective_storage_state = session_data["storage_state"]
 
-        return await runtime_session.open_storage_state_runtime_bundle(
+        bundle = await runtime_session.open_storage_state_runtime_bundle(
             browser=browser,
             platform=platform,
             session_owner_id=session_owner_id,
@@ -732,6 +747,25 @@ class CollectionExecutorV2:
             proxy=proxy,
             headless=bool((launch_kwargs or {}).get("headless", True)),
         )
+        self._annotate_runtime_bundle(
+            bundle,
+            strategy_reason=strategy.reason,
+            session_source="storage_state" if effective_storage_state else "fresh_login",
+        )
+        return bundle
+
+    @staticmethod
+    def _annotate_runtime_bundle(
+        bundle: Any,
+        *,
+        strategy_reason: Optional[str],
+        session_source: Optional[str],
+    ) -> None:
+        try:
+            setattr(bundle, "strategy_reason", strategy_reason)
+            setattr(bundle, "session_source", session_source)
+        except Exception:
+            pass
 
     @staticmethod
     def _build_runtime_launch_kwargs(*, debug_mode: bool) -> Dict[str, Any]:
@@ -771,6 +805,8 @@ class CollectionExecutorV2:
             "shop_account_id": params.get("shop_account_id"),
             "persistent_profile_path": getattr(runtime_bundle, "profile_path", None),
             "profile_contains_state": bool(getattr(runtime_bundle, "reused_session", False)),
+            "runtime_strategy_reason": getattr(runtime_bundle, "strategy_reason", None),
+            "session_source": getattr(runtime_bundle, "session_source", None),
             "probe_urls": runtime_session.build_runtime_login_gate_probe_urls(
                 platform=platform,
                 account=params.get("account") if isinstance(params.get("account"), dict) else None,
@@ -3875,13 +3911,17 @@ class CollectionExecutorV2:
                     data_domain=data_domain,
                     sub_domain=sub_domain,
                 )
+                resolved_granularity = resolve_business_granularity(
+                    data_domain=data_domain,
+                    task_granularity=granularity,
+                )
 
                 # 1. 生成标准文件名
                 ext = source_path.suffix.lstrip('.') or 'xlsx'
                 standard_filename = StandardFileName.generate(
                     source_platform=landing_semantics["business_platform"],
                     data_domain=data_domain,
-                    granularity=granularity,
+                    granularity=resolved_granularity,
                     sub_domain=landing_semantics["landing_sub_domain"],
                     ext=ext
                 )
@@ -3911,7 +3951,7 @@ class CollectionExecutorV2:
                         "source_platform": landing_semantics["business_platform"],
                         "data_domain": data_domain,
                         "sub_domain": landing_semantics["landing_sub_domain"],
-                        "granularity": granularity,
+                        "granularity": resolved_granularity,
                         "date_from": date_from,
                         "date_to": date_to,
                         "shop_id": shop_id

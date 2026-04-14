@@ -113,21 +113,16 @@ async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(mo
 async def test_postgresql_dashboard_service_inventory_backlog_honors_limit(monkeypatch):
     service = PostgresqlDashboardService()
 
-    async def fake_load_rows():
-        return [
-            {
-                "platform_code": "shopee",
-                "platform_sku": f"SKU-{index}",
-                "inventory_value": 200 - index,
-                "estimated_turnover_days": 45,
-                "estimated_stagnant_days": 10,
-                "stagnant_snapshot_count": 2,
-                "available_stock": 10,
-            }
-            for index in range(25)
-        ]
+    async def fake_summary():
+        return {"total_value": 1000}
 
-    monkeypatch.setattr(service, "_load_inventory_backlog_rows", fake_load_rows)
+    async def fake_ranked_rows(*, source_table, min_days, limit):
+        assert source_table == "api.business_overview_inventory_backlog_module"
+        assert min_days == 30
+        return [{"rank": index} for index in range(1, limit + 1)]
+
+    monkeypatch.setattr(service, "_load_inventory_backlog_summary", fake_summary)
+    monkeypatch.setattr(service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows)
 
     result = await service.get_business_overview_inventory_backlog(min_days=30, limit=20)
 
@@ -312,10 +307,10 @@ async def test_postgresql_dashboard_service_comparison_reads_from_granularity_sp
     assert len(captured) == 1
     assert all("FROM mart.shop_month_kpi" in query for query, _ in captured)
     assert all("api.business_overview_comparison_module" not in query for query, _ in captured)
-    assert "period_month >= :period_start" in captured[0][0]
-    assert "period_month <= :period_end" in captured[0][0]
-    assert str(captured[0][1]["period_start"]) == "2026-03-01"
-    assert str(captured[0][1]["period_end"]) == "2026-04-01"
+    assert "period_month >= :range_start" in captured[0][0]
+    assert "period_month <= :range_end" in captured[0][0]
+    assert str(captured[0][1]["range_start"]) == "2026-03-01"
+    assert str(captured[0][1]["range_end"]) == "2026-04-01"
 
 
 @pytest.mark.asyncio
@@ -605,27 +600,27 @@ async def test_postgresql_dashboard_service_operational_metrics_preserves_today_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_inventory_backlog_builds_from_snapshot_and_sales_queries(monkeypatch):
+async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_modules(monkeypatch):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
     async def fake_fetch_rows(query, params):
         captured.append((query, params))
-        if "FROM mart.inventory_snapshot_latest" in query:
+        if "FROM api.inventory_backlog_summary_module" in query:
             return [
                 {
-                    "snapshot_date": "2026-04-14",
-                    "platform_code": "shopee",
-                    "shop_id": "shop-a",
-                    "product_id": "P1",
-                    "product_name": "Alpha",
-                    "platform_sku": "SKU-1",
-                    "product_sku": "PSKU-1",
-                    "warehouse_name": "WH-1",
-                    "available_stock": 100,
-                    "on_hand_stock": 120,
-                    "inventory_value": 300,
-                },
+                    "total_value": 400,
+                    "backlog_30d_value": 400,
+                    "backlog_60d_value": 100,
+                    "backlog_90d_value": 100,
+                    "total_quantity": 110,
+                    "high_risk_sku_count": 1,
+                    "medium_risk_sku_count": 1,
+                    "low_risk_sku_count": 0,
+                }
+            ]
+        if "FROM api.business_overview_inventory_backlog_module" in query:
+            return [
                 {
                     "snapshot_date": "2026-04-14",
                     "platform_code": "shopee",
@@ -636,53 +631,56 @@ async def test_postgresql_dashboard_service_inventory_backlog_builds_from_snapsh
                     "product_sku": "PSKU-2",
                     "warehouse_name": "WH-1",
                     "available_stock": 10,
-                    "on_hand_stock": 12,
                     "inventory_value": 100,
+                    "daily_avg_sales": 0,
+                    "estimated_turnover_days": 100,
+                    "stock_delta": 0,
+                    "inventory_value_delta": 0,
+                    "is_stagnant": True,
+                    "snapshot_gap_days": 7,
+                    "estimated_stagnant_days": 14,
+                    "stagnant_snapshot_count": 3,
+                    "risk_level": "high",
+                    "clearance_priority_score": 1100,
                 },
-            ]
-        if "FROM mart.inventory_snapshot_change" in query:
-            return [
                 {
+                    "snapshot_date": "2026-04-14",
                     "platform_code": "shopee",
                     "shop_id": "shop-a",
+                    "product_id": "P1",
+                    "product_name": "Alpha",
                     "platform_sku": "SKU-1",
                     "product_sku": "PSKU-1",
                     "warehouse_name": "WH-1",
-                    "stock_delta": -5,
-                    "inventory_value_delta": -50,
+                    "available_stock": 100,
+                    "inventory_value": 300,
+                    "daily_avg_sales": 2.0,
+                    "estimated_turnover_days": 50.0,
+                    "stock_delta": -5.0,
+                    "inventory_value_delta": -50.0,
                     "is_stagnant": True,
                     "snapshot_gap_days": 7,
-                    "estimated_stagnant_days": 7,
+                    "estimated_stagnant_days": 7.0,
                     "stagnant_snapshot_count": 1,
-                }
-            ]
-        if "FROM semantic.fact_orders_atomic" in query:
-            return [
-                {
-                    "platform_code": "shopee",
-                    "shop_id": "shop-a",
-                    "platform_sku": "SKU-1",
-                    "product_sku": "PSKU-1",
-                    "sold_units_30d": 60,
-                    "active_days_30d": 30,
+                    "risk_level": "medium",
+                    "clearance_priority_score": 800,
                 }
             ]
         raise AssertionError(f"unexpected query: {query}")
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-    result = await service.get_business_overview_inventory_backlog(min_days=45)
+    result = await service.get_business_overview_inventory_backlog(min_days=45, limit=20)
 
-    assert len(captured) == 3
-    assert all("api.business_overview_inventory_backlog_module" not in query for query, _ in captured)
-    assert all("api.inventory_backlog_summary_module" not in query for query, _ in captured)
-    assert any("FROM mart.inventory_snapshot_latest" in query for query, _ in captured)
-    assert any("FROM mart.inventory_snapshot_change" in query for query, _ in captured)
-    assert any("FROM semantic.fact_orders_atomic" in query for query, _ in captured)
-
-    sales_query, sales_params = next((query, params) for query, params in captured if "FROM semantic.fact_orders_atomic" in query)
-    assert "metric_date::date >= CURRENT_DATE - INTERVAL '30 days'" in sales_query
-    assert "GROUP BY platform_code, shop_id, platform_sku, product_sku" in sales_query
-    assert sales_params == {}
+    assert len(captured) == 2
+    summary_query, summary_params = next((query, params) for query, params in captured if "FROM api.inventory_backlog_summary_module" in query)
+    rows_query, rows_params = next((query, params) for query, params in captured if "FROM api.business_overview_inventory_backlog_module" in query)
+    assert "FROM mart.inventory_snapshot_latest" not in summary_query
+    assert "FROM mart.inventory_snapshot_change" not in summary_query
+    assert "FROM semantic.fact_orders_atomic" not in summary_query
+    assert "ORDER BY clearance_priority_score DESC" in rows_query
+    assert "LIMIT :limit" in rows_query
+    assert rows_params == {"min_days": 45, "limit": 20}
+    assert summary_params == {}
 
     assert result["summary"] == {
         "total_value": 400.0,
@@ -706,6 +704,42 @@ async def test_postgresql_dashboard_service_inventory_backlog_builds_from_snapsh
     assert result["top_products"][1]["inventory_value_delta"] == -50.0
     assert result["top_products"][1]["estimated_stagnant_days"] == 7.0
     assert result["top_products"][1]["stagnant_snapshot_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_module(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        if "FROM api.clearance_ranking_module" in query:
+            return [
+                {
+                    "platform_code": "shopee",
+                    "platform_sku": "SKU-2",
+                    "inventory_value": 100,
+                    "estimated_turnover_days": 100,
+                    "estimated_stagnant_days": 14,
+                    "stagnant_snapshot_count": 3,
+                    "risk_level": "high",
+                    "clearance_priority_score": 1100,
+                }
+            ]
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_clearance_ranking(min_days=45, limit=10)
+
+    assert len(result) == 1
+    query, params = captured[0]
+    assert "FROM api.clearance_ranking_module" in query
+    assert "ORDER BY clearance_priority_score DESC" in query
+    assert "LIMIT :limit" in query
+    assert params == {"min_days": 45, "limit": 10}
+    assert result[0]["rank"] == 1
+    assert result[0]["risk_level"] == "high"
 
 
 @pytest.mark.pg_only
@@ -766,23 +800,19 @@ async def test_postgresql_dashboard_service_comparison_loads_total_month_target_
         service = PostgresqlDashboardService()
 
         async def fake_fetch_rows(query, params):
-            if "business_overview_comparison_module" in query:
-                period_key = params.get("period_key")
-                if str(period_key) == "2025-09-01":
-                    return [
-                        {
-                            "sales_amount": 5000,
-                            "sales_quantity": 50,
-                            "traffic": 1000,
-                            "conversion_rate": 5,
-                            "avg_order_value": 100,
-                            "attach_rate": 1.2,
-                            "profit": 300,
-                            "target_sales_amount": None,
-                            "target_sales_quantity": None,
-                        }
-                    ]
-                return []
+            if "FROM mart.shop_month_kpi" in query:
+                return [
+                    {
+                        "period_key": "2025-09-01",
+                        "sales_amount": 5000,
+                        "sales_quantity": 50,
+                        "traffic": 1000,
+                        "conversion_rate": 5,
+                        "avg_order_value": 100,
+                        "attach_rate": 1.2,
+                        "profit": 300,
+                    }
+                ]
             return []
 
         monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
@@ -1049,7 +1079,23 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
         async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS b_class"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS semantic"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS core.platform_accounts (
+                        id SERIAL PRIMARY KEY,
+                        account_id VARCHAR(100) NOT NULL,
+                        platform VARCHAR(50) NOT NULL,
+                        account_alias VARCHAR(200),
+                        store_name VARCHAR(200) NOT NULL,
+                        shop_id VARCHAR(256)
+                    )
+                    """
+                )
+            )
             await session.execute(
                 text(
                     """
@@ -1083,13 +1129,13 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
             await session.execute(
                 text(
                     """
-                    INSERT INTO semantic.fact_orders_atomic (
-                        platform_code, shop_id, granularity, metric_date,
-                        paid_amount, order_id, product_quantity, profit
-                    )
-                    VALUES (
-                        'shopee', 'shop-a', 'daily', DATE '2026-03-01',
-                        100, 'o-1', 12, 30
+                    CREATE TABLE IF NOT EXISTS b_class.fact_shopee_orders_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
                     )
                     """
                 )
@@ -1097,11 +1143,97 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
             await session.execute(
                 text(
                     """
-                    INSERT INTO semantic.fact_analytics_atomic (
-                        platform_code, shop_id, granularity, metric_date, visitor_count, page_views
+                    CREATE TABLE IF NOT EXISTS b_class.fact_tiktok_orders_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS b_class.fact_miaoshou_orders_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS b_class.fact_shopee_analytics_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS b_class.fact_tiktok_analytics_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS b_class.fact_miaoshou_analytics_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
                     )
                     VALUES (
-                        'shopee', 'shop-a', 'daily', DATE '2026-03-01', 200, 300
+                        'shopee', 'shop-a', DATE '2026-03-01',
+                        '{"order_id":"o-1","paid_amount":"100","product_quantity":"12","profit":"30"}'::jsonb,
+                        'month-order-1', TIMESTAMP '2026-03-01 10:00:00'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_analytics_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    )
+                    VALUES (
+                        'shopee', 'shop-a', DATE '2026-03-01',
+                        '{"visitor_count":"200","page_views":"300"}'::jsonb,
+                        'month-analytics-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
                     """
                 )
@@ -1126,11 +1258,11 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
         service = PostgresqlDashboardService()
         result = await service.get_business_overview_kpi("2026-03-01", None)
 
-        assert result["gmv"] is None
-        assert result["order_count"] is None
-        assert result["visitor_count"] is None
-        assert result["avg_order_value"] is None
-        assert result["attach_rate"] is None
+        assert result["gmv"] == 100
+        assert result["order_count"] == 1
+        assert result["visitor_count"] == 200
+        assert result["avg_order_value"] == 100
+        assert result["attach_rate"] == 12
 
         await engine.dispose()
 

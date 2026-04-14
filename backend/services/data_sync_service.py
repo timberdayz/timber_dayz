@@ -37,6 +37,7 @@ from backend.services.excel_parser import ExcelParser
 from backend.services.data_ingestion_service import DataIngestionService
 from backend.services.c_class_data_validator import get_c_class_data_validator
 from backend.services.executor_manager import get_executor_manager  # v4.19.0新增:使用统一执行器管理器
+from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
 
 logger = get_logger(__name__)
 
@@ -67,6 +68,7 @@ class DataSyncService:
         self.db = db
         self.template_matcher = get_template_matcher(db)
         self.ingestion_service = DataIngestionService(db)
+        self.template_status_service = DataSyncTemplateStatusService(db)
     
     def _safe_resolve_path(self, file_path: str) -> str:
         """
@@ -193,16 +195,10 @@ class DataSyncService:
         )
 
         if not template:
-            return {
-                "template_status": "missing",
-                "has_template": False,
-                "template_name": None,
-                "template_header_row": None,
-                "template_update_required": False,
-                "update_reason": None,
-                "error_code": "NO_TEMPLATE",
-                "should_auto_sync": False,
-            }
+            return await self.template_status_service.evaluate_catalog_file(
+                catalog_file,
+                template=None,
+            )
 
         if not getattr(template, "header_columns", None):
             return {
@@ -214,6 +210,8 @@ class DataSyncService:
                 "update_reason": None,
                 "error_code": None,
                 "should_auto_sync": True,
+                "exact_match": True,
+                "semantic_match": True,
             }
 
         try:
@@ -235,23 +233,15 @@ class DataSyncService:
                 nrows=1,
             )
             current_columns = df.columns.tolist()
-            header_changes = await self.template_matcher.detect_header_changes(
-                template_id=template.id,
+            status = await self.template_status_service.evaluate_catalog_file(
+                catalog_file,
+                template=template,
                 current_columns=current_columns,
             )
-
-            if header_changes.get("detected") and not header_changes.get("is_exact_match", False):
-                return {
-                    "template_status": "update_required",
-                    "has_template": True,
-                    "template_name": template.template_name,
-                    "template_header_row": getattr(template, "header_row", None),
-                    "template_update_required": True,
-                    "update_reason": self._format_header_change_reason(header_changes),
-                    "error_code": "HEADER_CHANGED",
-                    "header_changes": header_changes,
-                    "should_auto_sync": False,
-                }
+            if status.get("template_status") == "update_required":
+                status["update_reason"] = self._format_header_change_reason(status.get("header_changes", {}))
+                return status
+            return status
         except Exception as exc:
             logger.warning(
                 "[DataSync] evaluate template status failed for %s: %s",
@@ -268,6 +258,8 @@ class DataSyncService:
             "update_reason": None,
             "error_code": None,
             "should_auto_sync": True,
+            "exact_match": True,
+            "semantic_match": True,
         }
 
     async def get_file_sync_readiness(

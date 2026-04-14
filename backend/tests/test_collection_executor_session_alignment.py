@@ -440,6 +440,8 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
                 "shop_account_id": "shop-1",
                 "persistent_profile_path": "profiles/tiktok/main-1",
                 "profile_contains_state": True,
+                "runtime_strategy_reason": "storage_state_missing",
+                "session_source": "persistent_profile",
                 "probe_urls": [
                     "https://seller.tiktok.com/homepage",
                     "https://seller.tiktok.com/account/login",
@@ -455,6 +457,8 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
     assert details["shop_account_id"] == "shop-1"
     assert details["persistent_profile_path"] == "profiles/tiktok/main-1"
     assert details["profile_contains_state"] is True
+    assert details["runtime_strategy_reason"] == "storage_state_missing"
+    assert details["session_source"] == "persistent_profile"
     assert details["probe_urls"] == [
         "https://seller.tiktok.com/homepage",
         "https://seller.tiktok.com/account/login",

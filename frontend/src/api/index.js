@@ -2176,6 +2176,7 @@ export default {
   async getBusinessOverviewInventoryBacklog(params = {}) {
     const queryParams = new URLSearchParams()
     if (params.days) queryParams.append('days', params.days)
+    if (params.limit) queryParams.append('limit', params.limit)
     const queryString = queryParams.toString()
     return await this._get(
       `/dashboard/business-overview/inventory-backlog${

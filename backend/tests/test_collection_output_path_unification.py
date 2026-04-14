@@ -301,3 +301,65 @@ async def test_executor_process_files_normalizes_miaoshou_orders_into_business_p
     assert captured["business_metadata"]["source_platform"] == "tiktok"
     assert captured["business_metadata"]["sub_domain"] == ""
     assert captured["collection_info"]["collection_platform"] == "miaoshou"
+
+
+def test_inventory_domain_resolves_snapshot_even_when_task_granularity_is_monthly():
+    from modules.apps.collection_center.landing_semantics import resolve_business_granularity
+
+    assert resolve_business_granularity(data_domain="inventory", task_granularity="monthly") == "snapshot"
+
+
+def test_orders_domain_keeps_task_granularity():
+    from modules.apps.collection_center.landing_semantics import resolve_business_granularity
+
+    assert resolve_business_granularity(data_domain="orders", task_granularity="monthly") == "monthly"
+
+
+@pytest.mark.asyncio
+async def test_executor_process_files_forces_inventory_snapshot_granularity(tmp_path, monkeypatch):
+    raw_dir = tmp_path / "custom-raw-root"
+    download_file = tmp_path / "inventory_source.xlsx"
+    download_file.write_text("demo", encoding="utf-8")
+
+    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+
+    captured = {}
+
+    import modules.services.catalog_scanner as catalog_scanner_module
+    from modules.services.metadata_manager import MetadataManager
+
+    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+
+    def _capture_meta(file_path, business_metadata, collection_info):
+        captured["file_path"] = file_path
+        captured["business_metadata"] = business_metadata
+        captured["collection_info"] = collection_info
+        return Path(str(file_path) + ".meta.json")
+
+    monkeypatch.setattr(
+        MetadataManager,
+        "create_meta_file",
+        staticmethod(_capture_meta),
+    )
+
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: "inventory"
+    executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: ""
+
+    processed = await CollectionExecutorV2._process_files(
+        executor,
+        [str(download_file)],
+        platform="miaoshou",
+        data_domains=["inventory"],
+        granularity="monthly",
+        account={"label": "acc", "shop_id": "shop"},
+        date_range={"start_date": "2026-04-12", "end_date": "2026-04-12"},
+    )
+
+    assert processed
+    generated_name = Path(processed[0]).name
+    parsed = StandardFileName.parse(generated_name)
+
+    assert parsed["data_domain"] == "inventory"
+    assert parsed["granularity"] == "snapshot"
+    assert captured["business_metadata"]["granularity"] == "snapshot"

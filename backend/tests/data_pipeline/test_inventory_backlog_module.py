@@ -61,6 +61,9 @@ def test_inventory_backlog_base_sql_asset():
     sql_text = Path("sql/mart/inventory_backlog_base.sql").read_text(encoding="utf-8")
     assert "current_snapshot AS" not in sql_text
     assert "previous_snapshot AS" not in sql_text
+    assert "joined_backlog AS" in sql_text
+    assert "turnover_enriched AS" in sql_text
+    assert "base.estimated_turnover_days" in sql_text
 
 
 def test_inventory_backlog_module_sql_asset():

@@ -26,6 +26,7 @@ from modules.core.db import FieldMappingTemplate
 # FieldMappingTemplateItem,  # v4.6.0移除:不再使用明细表,改用header_columns JSONB
 from modules.core.logger import get_logger
 from backend.services.currency_extractor import get_currency_extractor  # [*] v4.15.0新增
+from backend.services.template_alias_registry import get_header_alias_mapping
 
 logger = get_logger(__name__)
 
@@ -82,6 +83,18 @@ class TemplateMatcher:
 
         currency_extractor = get_currency_extractor()
         return currency_extractor.normalize_field_list(columns)
+
+    def _apply_header_aliases(
+        self,
+        platform: str,
+        data_domain: str,
+        granularity: str,
+        columns: List[str],
+    ) -> List[str]:
+        alias_mapping = get_header_alias_mapping(platform, data_domain, granularity)
+        if not alias_mapping:
+            return list(columns)
+        return [alias_mapping.get(column, column) for column in columns]
 
     async def find_best_template(
         self, 
@@ -480,15 +493,32 @@ class TemplateMatcher:
                 template_columns,
             )
             
+            semantic_current = self._apply_header_aliases(
+                template.platform,
+                template.data_domain,
+                template.granularity or "",
+                normalized_current,
+            )
+            semantic_template = self._apply_header_aliases(
+                template.platform,
+                template.data_domain,
+                template.granularity or "",
+                normalized_template,
+            )
+
             # 使用归一化后的字段名进行比较
             current_set = set(normalized_current)
             template_set = set(normalized_template)
+            semantic_current_set = set(semantic_current)
+            semantic_template_set = set(semantic_template)
             
             # 1. 检测新增字段(current中有,template中没有)
             added_fields = list(current_set - template_set)
             
             # 2. 检测删除字段(template中有,current中没有)
             removed_fields = list(template_set - current_set)
+            normalized_added_fields = list(semantic_current_set - semantic_template_set)
+            normalized_removed_fields = list(semantic_template_set - semantic_current_set)
             
             # [*] v4.14.0安全版本:移除相似度匹配逻辑
             # 任何字段名变化都需要用户手动确认
@@ -505,6 +535,11 @@ class TemplateMatcher:
                 len(removed_fields) == 0 and 
                 normalized_current == normalized_template  # 顺序也要一致(基于归一化后的字段名)
             )
+            is_semantic_match = (
+                len(normalized_added_fields) == 0
+                and len(normalized_removed_fields) == 0
+                and semantic_current == semantic_template
+            )
             
             # 5. 判断是否检测到变化
             # [WARN] 安全原则:任何变化(新增、删除、顺序变化)都视为变化
@@ -516,10 +551,15 @@ class TemplateMatcher:
                 'removed_fields': removed_fields,
                 'match_rate': round(match_rate, 1),
                 'is_exact_match': is_exact_match,
+                'is_semantic_match': is_semantic_match,
                 'template_columns': template_columns,  # 返回原始模板字段列表(供前端对比,保留货币代码)
                 'current_columns': current_columns,     # 返回原始当前字段列表(供前端对比,保留货币代码)
                 'normalized_template_columns': normalized_template,  # [*] v4.15.0新增:归一化后的模板字段
-                'normalized_current_columns': normalized_current     # [*] v4.15.0新增:归一化后的当前字段
+                'normalized_current_columns': normalized_current,     # [*] v4.15.0新增:归一化后的当前字段
+                'semantic_template_columns': semantic_template,
+                'semantic_current_columns': semantic_current,
+                'normalized_added_fields': normalized_added_fields,
+                'normalized_removed_fields': normalized_removed_fields,
             }
             
             if detected:

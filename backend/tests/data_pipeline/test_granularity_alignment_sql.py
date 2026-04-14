@@ -20,10 +20,12 @@ def test_shop_week_kpi_does_not_fallback_to_daily():
 def test_shop_month_kpi_does_not_fallback_to_daily():
     sql_text = _read_sql("sql/mart/shop_month_kpi.sql")
 
-    assert "WHERE granularity = 'monthly'" in sql_text
-    assert "WHERE granularity = 'daily'" not in sql_text
-    assert "monthly_order_candidates" not in sql_text
-    assert "monthly_traffic_candidates" not in sql_text
+    assert "fact_shopee_orders_monthly" in sql_text
+    assert "fact_tiktok_orders_daily" not in sql_text
+    assert "fact_miaoshou_orders_weekly" not in sql_text
+    assert "fact_shopee_analytics_monthly" in sql_text
+    assert "fact_tiktok_analytics_daily" not in sql_text
+    assert "fact_miaoshou_analytics_weekly" not in sql_text
 
 
 def test_shop_week_kpi_preserves_missing_metrics_without_forcing_zero():
@@ -75,19 +77,18 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
         async with session_factory() as session:
-            await session.execute(text("CREATE SCHEMA IF NOT EXISTS semantic"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS b_class"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
             await session.execute(
                 text(
                     """
-                    CREATE TABLE semantic.fact_orders_atomic (
-                        platform_code VARCHAR(32),
-                        shop_id VARCHAR(256),
-                        granularity VARCHAR(32),
-                        metric_date DATE,
-                        paid_amount NUMERIC,
-                        order_id VARCHAR(128),
-                        product_quantity NUMERIC,
-                        profit NUMERIC
+                    CREATE TABLE core.platform_accounts (
+                        id SERIAL PRIMARY KEY,
+                        account_id VARCHAR(100) NOT NULL,
+                        platform VARCHAR(50) NOT NULL,
+                        account_alias VARCHAR(200),
+                        store_name VARCHAR(200) NOT NULL,
+                        shop_id VARCHAR(256)
                     )
                     """
                 )
@@ -95,13 +96,13 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
             await session.execute(
                 text(
                     """
-                    CREATE TABLE semantic.fact_analytics_atomic (
+                    CREATE TABLE b_class.fact_shopee_orders_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
-                        granularity VARCHAR(32),
                         metric_date DATE,
-                        visitor_count NUMERIC,
-                        page_views NUMERIC
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
                     )
                     """
                 )
@@ -109,23 +110,102 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
             await session.execute(
                 text(
                     """
-                    INSERT INTO semantic.fact_orders_atomic (
-                        platform_code, shop_id, granularity, metric_date,
-                        paid_amount, order_id, product_quantity, profit
-                    ) VALUES
-                        ('shopee', 'shop-a', 'daily', DATE '2026-03-01', 100, 'daily-1', 1, 10),
-                        ('shopee', 'shop-a', 'monthly', DATE '2026-03-01', 500, 'month-1', 5, 50)
+                    CREATE TABLE b_class.fact_tiktok_orders_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
                     """
                 )
             )
             await session.execute(
                 text(
                     """
-                    INSERT INTO semantic.fact_analytics_atomic (
-                        platform_code, shop_id, granularity, metric_date, visitor_count, page_views
-                    ) VALUES
-                        ('shopee', 'shop-a', 'daily', DATE '2026-03-01', 20, 30),
-                        ('shopee', 'shop-a', 'monthly', DATE '2026-03-01', 200, 300)
+                    CREATE TABLE b_class.fact_miaoshou_orders_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE b_class.fact_shopee_analytics_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE b_class.fact_tiktok_analytics_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE b_class.fact_miaoshou_analytics_monthly (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        metric_date DATE,
+                        raw_data JSONB,
+                        data_hash VARCHAR(128),
+                        ingest_timestamp TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    ) VALUES (
+                        'shopee',
+                        'shop-a',
+                        DATE '2026-03-01',
+                        '{"order_id":"month-1","paid_amount":"500","product_quantity":"5","profit":"50"}'::jsonb,
+                        'month-order-1',
+                        TIMESTAMP '2026-03-02 10:00:00'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_analytics_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    ) VALUES (
+                        'shopee',
+                        'shop-a',
+                        DATE '2026-03-01',
+                        '{"visitor_count":"200","page_views":"300"}'::jsonb,
+                        'month-traffic-1',
+                        TIMESTAMP '2026-03-02 10:00:00'
+                    )
                     """
                 )
             )

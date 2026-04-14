@@ -200,7 +200,7 @@ FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 --     ('tiktok', '春节狂欢', 'new_year', '2025-01-20', '2025-02-05', 3000000.00, 4.0, 750000.00, 'admin');
 
 -- 插入示例经营成本
--- INSERT INTO operating_costs (shop_id, year_month, rent, salary, marketing, logistics, other, created_by)
+-- INSERT INTO operating_costs (shop_id, year_month, rent, marketing_fee, marketing, logistics, other, created_by)
 -- VALUES 
 --     ('shop_001', '2025-01', 50000.00, 200000.00, 100000.00, 80000.00, 30000.00, 'admin'),
 --     ('shop_001', '2025-02', 50000.00, 210000.00, 120000.00, 85000.00, 35000.00, 'admin'),

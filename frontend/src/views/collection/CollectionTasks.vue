@@ -362,6 +362,12 @@
             <el-descriptions-item v-if="detailTask.runtime_session_mode" label="会话运行时">
               {{ detailTask.runtime_session_mode }}
             </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.session_source" label="会话来源">
+              {{ getSessionSourceLabel(detailTask.session_source) }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.runtime_strategy_reason" label="会话策略原因">
+              {{ detailTask.runtime_strategy_reason }}
+            </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.login_gate_ready !== null && detailTask.login_gate_ready !== undefined" label="登录态检查">
               {{ detailTask.login_gate_ready ? '已命中复用会话' : '未命中复用会话' }}
             </el-descriptions-item>
@@ -981,6 +987,15 @@ const getStatusLabel = (status) => {
 
 const getExecutionModeLabel = (mode) => {
   return mode === 'headed' ? '有头模式' : '无头模式'
+}
+
+const getSessionSourceLabel = (source) => {
+  const labels = {
+    storage_state: 'storage_state',
+    persistent_profile: 'persistent_profile',
+    fresh_login: 'fresh_login'
+  }
+  return labels[source] || source || '-'
 }
 
 const MAIN_ACCOUNT_COORDINATION_STEP_LABELS = {

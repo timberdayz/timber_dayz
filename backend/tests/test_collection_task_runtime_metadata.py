@@ -52,6 +52,8 @@ def test_extract_runtime_metadata_from_logs_preserves_session_diagnostics() -> N
                 "shop_account_id": "shop-1",
                 "persistent_profile_path": "profiles/tiktok/main-1",
                 "profile_contains_state": True,
+                "runtime_strategy_reason": "storage_state_available",
+                "session_source": "storage_state",
                 "probe_urls": [
                     "https://seller.tiktok.com/homepage",
                     "https://seller.tiktok.com/account/login",
@@ -66,6 +68,8 @@ def test_extract_runtime_metadata_from_logs_preserves_session_diagnostics() -> N
     assert metadata["shop_account_id"] == "shop-1"
     assert metadata["persistent_profile_path"] == "profiles/tiktok/main-1"
     assert metadata["profile_contains_state"] is True
+    assert metadata["runtime_strategy_reason"] == "storage_state_available"
+    assert metadata["session_source"] == "storage_state"
     assert metadata["probe_urls"] == [
         "https://seller.tiktok.com/homepage",
         "https://seller.tiktok.com/account/login",

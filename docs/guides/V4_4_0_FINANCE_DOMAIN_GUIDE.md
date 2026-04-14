@@ -201,7 +201,7 @@ http://localhost:5173/#/financial-management
 1. 准备费用Excel（使用标准模板）
    期间    费用类型    金额       货币    税率
    2025-01 租金       12316.0    CNY    0.09
-   2025-01 工资       14437.6    CNY    0
+   2025-01 营销费用   14437.6    CNY    0
    ...
 
 2. 前端上传
@@ -486,12 +486,12 @@ expenses = [
         "memo": "铁像寺水街店1月租金"
     },
     {
-        "expense_type_raw": "工资",
+        "expense_type_raw": "营销费用",
         "amount": 14437.6,
         "currency": "CNY",
         "tax_rate": 0,
         "shop_id": "shopee_sg_3c",  # 指定店铺，不需分摊
-        "memo": "KA员工1月工资"
+        "memo": "KA店铺1月营销费用"
     }
 ]
 
@@ -874,7 +874,7 @@ ORDER BY approved_at DESC;
 | field_code | cn_name | 说明 |
 |------------|---------|------|
 | expense_rent | 租金 | 店铺/仓库租金 |
-| expense_salary | 工资 | 员工薪资 |
+| expense_salary | 营销费用 | 历史字段编码，当前费用管理链路按营销费用解释 |
 | expense_advertising | 广告费 | 品牌推广/LED广告 |
 | expense_utilities | 水电费 | 水/电/暖气费 |
 | expense_bank_fee | 刷卡手续费 | 支付手续费 |

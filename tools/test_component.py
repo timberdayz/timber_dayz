@@ -241,9 +241,6 @@ class ComponentTester:
             return "reused"
         return None
 
-    def _use_persistent_profile_for_python_component(self, component_type: str) -> bool:
-        return False
-
     def _choose_runtime_strategy(
         self,
         *,
@@ -259,9 +256,7 @@ class ComponentTester:
             session_owner_id=session_owner_id,
             has_storage_state=has_storage_state,
             has_persistent_profile=has_persistent_profile,
-            force_persistent_profile=bool(
-                session_owner_id and self._use_persistent_profile_for_python_component(component_type or "")
-            ),
+            force_persistent_profile=False,
             execution_kind="component_test",
             component_type=component_type,
             parallel_mode=False,

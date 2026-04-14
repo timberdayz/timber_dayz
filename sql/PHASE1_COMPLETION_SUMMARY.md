@@ -129,7 +129,7 @@ INSERT INTO sales_targets (shop_id, year_month, target_sales_amount, target_orde
 VALUES ('shop_001', '2025-01', 1000000.00, 5000, 'admin');
 
 -- 插入经营成本
-INSERT INTO operating_costs (shop_id, year_month, rent, salary, marketing, logistics, other, created_by)
+INSERT INTO operating_costs (shop_id, year_month, rent, marketing_fee, marketing, logistics, other, created_by)
 VALUES ('shop_001', '2025-01', 50000.00, 200000.00, 100000.00, 80000.00, 30000.00, 'admin');
 
 -- 刷新物化视图

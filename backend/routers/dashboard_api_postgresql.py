@@ -289,14 +289,18 @@ async def get_business_overview_traffic_ranking_postgresql(
 async def get_business_overview_inventory_backlog_postgresql(
     request: Request,
     days: Optional[int] = Query(30, description="minimum turnover days"),
+    limit: int = Query(20, ge=1, le=200, description="row limit"),
 ):
     try:
-        params = {"days": days}
+        params = {"days": days, "limit": limit}
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
-            result = await service.get_business_overview_inventory_backlog(min_days=days or 30)
+            result = await service.get_business_overview_inventory_backlog(
+                min_days=days or 30,
+                limit=limit,
+            )
             return json.loads(success_response(data=result).body.decode())
 
         payload, cache_status = await _resolve_cached_payload(

@@ -63,16 +63,17 @@ def test_component_tester_uses_reused_persistent_context_for_export():
     assert tester._persistent_context_mode("export") == "reused"
 
 
-def test_component_tester_does_not_force_profile_level_reuse_for_tiktok_python_export():
+def test_component_tester_runtime_strategy_does_not_force_profile_level_reuse():
     tester = ComponentTester(platform="tiktok", account_id="acc-1")
 
-    assert tester._use_persistent_profile_for_python_component("export") is False
+    decision = tester._choose_runtime_strategy(
+        session_owner_id="main-1",
+        has_storage_state=True,
+        has_persistent_profile=True,
+        component_type="export",
+    )
 
-
-def test_component_tester_does_not_force_profile_level_reuse_for_shopee_python_export():
-    tester = ComponentTester(platform="shopee", account_id="acc-1")
-
-    assert tester._use_persistent_profile_for_python_component("export") is False
+    assert decision.mode == "storage_state_fanout"
 
 
 def test_component_tester_and_formal_collection_share_storage_state_first_default():

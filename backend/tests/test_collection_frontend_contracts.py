@@ -174,6 +174,8 @@ def test_collection_tasks_detail_drawer_shows_runtime_metadata():
     assert "actual_execution_mode" in text
     assert "runtime_session_mode" in text
     assert "login_gate_reason" in text
+    assert "runtime_strategy_reason" in text
+    assert "session_source" in text
 
 
 def test_account_management_does_not_offer_free_form_login_url_editing():
