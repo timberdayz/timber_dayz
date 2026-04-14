@@ -1,0 +1,7 @@
+interface:
+  display_name: "SEA Business Models"
+  short_description: "统一比较精品、精铺、铺货模式及团队适配和转型路径。"
+  default_prompt: "Use $sea-business-models to compare boutique, curated assortment, and broad listing models for this SEA e-commerce business."
+
+policy:
+  allow_implicit_invocation: true

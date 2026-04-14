@@ -1,0 +1,7 @@
+interface:
+  display_name: "SEA Funnel Action Playbook"
+  short_description: "把 Shopee / TikTok 漏斗数据表现转换成标准动作。"
+  default_prompt: "Use $sea-funnel-action-playbook to convert these funnel signals into bottlenecks, standard actions, and review metrics."
+
+policy:
+  allow_implicit_invocation: true

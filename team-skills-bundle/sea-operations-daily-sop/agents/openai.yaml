@@ -1,0 +1,7 @@
+interface:
+  display_name: "SEA Operations Daily SOP"
+  short_description: "把精品运营标准转成每日时间分配、优先级和动作安排。"
+  default_prompt: "Use $sea-operations-daily-sop to plan today's SEA e-commerce operations with clear time blocks and priorities."
+
+policy:
+  allow_implicit_invocation: true

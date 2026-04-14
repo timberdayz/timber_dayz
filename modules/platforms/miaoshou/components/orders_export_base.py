@@ -249,11 +249,6 @@ class MiaoshouOrdersExportBase(ExportComponent):
                     "end_time": time_selection.get("end_time", "23:59:59"),
                 }
 
-            await page.goto(
-                self._orders_detail_url(subtype),
-                wait_until="domcontentloaded",
-                timeout=60000,
-            )
             nav_result = await self.navigation_component.run(page, TargetPage.ORDERS)
             if not nav_result.success:
                 raise RuntimeError(nav_result.message or "navigation failed")

@@ -1,0 +1,7 @@
+interface:
+  display_name: "SEA Product Selection"
+  short_description: "按统一评分卡和阈值判断候选产品是否 go / hold / reject。"
+  default_prompt: "Use $sea-product-selection to evaluate these Southeast Asia product candidates with the standard scorecard and thresholds."
+
+policy:
+  allow_implicit_invocation: true

@@ -43,6 +43,44 @@ def test_orders_rmb_fields_do_not_silently_overwrite_legacy_fields():
     assert normalized["estimated_settlement_rmb"] == "45.5"
 
 
+def test_orders_rmb_fields_avoid_collision_for_settlement_amount_pairs():
+    from backend.services.data_ingestion_service import normalize_row_fields_for_domain
+
+    normalized = normalize_row_fields_for_domain(
+        domain="orders",
+        row={
+            "已结算金额": "100.0",
+            "已结算金额(RMB)": "700.0",
+        },
+    )
+
+    assert normalized["已结算金额"] == "100.0"
+    assert normalized["已结算金额_rmb"] == "700.0"
+
+
+def test_orders_rmb_fields_avoid_collision_for_real_tiktok_orders_amount_pairs():
+    from backend.services.data_ingestion_service import normalize_row_fields_for_domain
+
+    normalized = normalize_row_fields_for_domain(
+        domain="orders",
+        row={
+            "利润": "12.5",
+            "利润(RMB)": "88.1",
+            "已结算金额": "100.0",
+            "已结算金额(RMB)": "700.0",
+            "买家实付金额": "90.0",
+            "买家实付金额(RMB)": "630.0",
+        },
+    )
+
+    assert normalized["profit"] == "12.5"
+    assert normalized["profit_rmb"] == "88.1"
+    assert normalized["已结算金额"] == "100.0"
+    assert normalized["已结算金额_rmb"] == "700.0"
+    assert normalized["买家实付金额"] == "90.0"
+    assert normalized["买家实付金额_rmb"] == "630.0"
+
+
 def test_non_orders_domains_keep_existing_currency_suffix_stripping_behavior():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 

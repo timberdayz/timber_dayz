@@ -210,6 +210,27 @@ async def claim_shop_account_alias(
         raise HTTPException(status_code=400, detail="alias_value is required")
     alias_normalized = _normalize_alias(alias_value)
 
+    current_primary_alias = (
+        await db.execute(
+            select(ShopAccountAlias).where(
+                ShopAccountAlias.shop_account_id == shop_account.id,
+                ShopAccountAlias.is_active == True,
+                ShopAccountAlias.is_primary == True,
+            )
+        )
+    ).scalar_one_or_none()
+    if (
+        current_primary_alias is not None
+        and current_primary_alias.alias_normalized != alias_normalized
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"shop account id '{payload.shop_account_id}' already has an active primary alias "
+                f"'{current_primary_alias.alias_value}'"
+            ),
+        )
+
     await _clear_primary_aliases(db, shop_account.id)
     existing = (
         await db.execute(

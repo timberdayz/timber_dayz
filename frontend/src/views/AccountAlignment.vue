@@ -174,7 +174,7 @@
             v-model="quickClaimForm.shop_account_id"
             filterable
             clearable
-            placeholder="请选择目标店铺账号"
+            placeholder="请选择未认领的目标店铺账号"
             class="dialog-select"
           >
             <el-option
@@ -213,7 +213,7 @@
             v-model="batchClaimForm.shop_account_id"
             filterable
             clearable
-            placeholder="请选择目标店铺账号"
+            placeholder="请选择未认领的目标店铺账号"
             class="dialog-select"
           >
             <el-option
@@ -269,6 +269,15 @@ const batchClaimForm = ref({
 
 const shopAccountByDbId = computed(() => {
   return new Map(shopAccounts.value.map((item) => [item.id, item]))
+})
+
+const occupiedPrimaryShopAccountIds = computed(() => {
+  return new Set(
+    configuredAliases.value
+      .filter((item) => item.is_active && item.is_primary)
+      .map((item) => Number(item.shop_account_id))
+      .filter((item) => Number.isFinite(item))
+  )
 })
 
 const configuredAliasesForDisplay = computed(() => {
@@ -335,6 +344,7 @@ function filteredShopAccountOptions(platform) {
   const normalizedPlatform = normalizeText(platform)
   return shopAccounts.value.filter((item) => {
     if (!item.enabled) return false
+    if (occupiedPrimaryShopAccountIds.value.has(item.id)) return false
     if (!normalizedPlatform) return true
     return normalizeText(item.platform) === normalizedPlatform
   })
@@ -514,7 +524,7 @@ async function clearPrimaryAlias(row) {
   saving.value = true
   try {
     await accountsApi.clearShopAccountPrimaryAlias(row.shop_account_code)
-    ElMessage.success('主别名已清除')
+    ElMessage.success('主别名已清除，该店铺账号已重新回到可认领状态')
     await loadData()
   } catch (error) {
     console.error('清除主别名失败:', error)

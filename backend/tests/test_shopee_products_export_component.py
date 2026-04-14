@@ -41,6 +41,16 @@ class _FakePage:
         return _FakeLocator(visible=False, count=0)
 
 
+class _GotoPage(_FakePage):
+    def __init__(self, url: str = "") -> None:
+        super().__init__(url)
+        self.goto_calls: list[str] = []
+
+    async def goto(self, url: str, **kwargs) -> None:
+        self.goto_calls.append(url)
+        self.url = url
+
+
 class _FakeDownload:
     def __init__(self, suggested_filename: str = "products-export.xlsx", *, payload: bytes | None = None, no_op: bool = False) -> None:
         self.suggested_filename = suggested_filename
@@ -269,6 +279,76 @@ def test_shopee_products_export_rejects_non_products_url() -> None:
     assert component._products_page_looks_ready(
         "https://seller.shopee.cn/datacenter/home?cnsc_shop_id=1"
     ) is False
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_business_ready_rejects_404_shell_even_under_products_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _DateFallbackPage(
+        "https://seller.shopee.cn/datacenter/product/performance?cnsc_shop_id=1",
+        {
+            "抱歉，是不是网址打错了啊？找不到该页": _FakeLocator("404", visible=True),
+        },
+    )
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(
+        component,
+        "_first_visible_locator",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+
+    ready = await component._products_page_business_ready(page)
+
+    assert ready is False
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_business_ready_accepts_real_products_page_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _DateFallbackPage(
+        "https://seller.shopee.cn/datacenter/product/performance?cnsc_shop_id=1",
+        {},
+    )
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(
+        component,
+        "_first_visible_locator",
+        AsyncMock(return_value=_FakeLocator("导出数据", visible=True)),
+        raising=False,
+    )
+
+    ready = await component._products_page_business_ready(page)
+
+    assert ready is True
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_ensure_page_ready_waits_for_late_business_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _GotoPage()
+    component = ShopeeProductsExport(_ctx())
+    readiness_checks: list[int] = []
+
+    async def _business_ready(_page) -> bool:
+        readiness_checks.append(len(page.wait_calls))
+        return len(readiness_checks) >= 3
+
+    monkeypatch.setattr(component, "_current_shop_id", lambda _page: "1", raising=False)
+    monkeypatch.setattr(component, "_products_page_business_ready", _business_ready, raising=False)
+
+    await component._ensure_products_page_ready(page)
+
+    assert page.goto_calls == [
+        "https://seller.shopee.cn/datacenter/product/performance?cnsc_shop_id=1"
+    ]
+    assert readiness_checks == [1, 2, 3]
+    assert page.wait_calls == [1200, 500, 500]
 
 
 def test_shopee_products_export_detects_throttled_text() -> None:
@@ -1348,6 +1428,33 @@ async def test_shopee_products_export_fails_when_throttled_and_never_recovers(
 
     assert result.success is False
     assert "throttled" in result.message
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_run_switches_shop_before_checking_products_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/")
+    component = ShopeeProductsExport(_ctx())
+    call_order: list[str] = []
+
+    async def _shop_ready(_page):
+        call_order.append("shop")
+
+    async def _page_ready(_page):
+        call_order.append("page")
+
+    monkeypatch.setattr(component, "ensure_shop_ready", _shop_ready)
+    monkeypatch.setattr(component, "ensure_page_ready", _page_ready)
+    monkeypatch.setattr(component, "ensure_date_ready", AsyncMock())
+    monkeypatch.setattr(component, "trigger_export", AsyncMock())
+    monkeypatch.setattr(component, "_wait_export_post_action_state", AsyncMock(return_value="download_started"))
+    monkeypatch.setattr(component, "_wait_download_complete", AsyncMock(return_value="F:/tmp/products.xlsx"))
+
+    result = await component.run(page, mode=ExportMode.STANDARD)
+
+    assert result.success is True
+    assert call_order[:2] == ["shop", "page"]
 
 
 @pytest.mark.asyncio

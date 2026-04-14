@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 
 import pytest
 import pytest_asyncio
@@ -27,7 +28,7 @@ def test_orders_template_header_normalization_preserves_rmb_suffixes():
     assert normalized == ["订单编号", "利润", "利润(RMB)", "买家支付(RMB)"]
 
 
-def test_non_orders_template_header_normalization_keeps_existing_suffix_stripping():
+def test_non_orders_template_header_normalization_preserves_raw_headers_for_template_storage():
     from backend.routers.field_mapping_templates import _normalize_template_headers_for_domain
 
     normalized = _normalize_template_headers_for_domain(
@@ -35,7 +36,7 @@ def test_non_orders_template_header_normalization_keeps_existing_suffix_strippin
         header_columns=["利润(RMB)"],
     )
 
-    assert normalized == ["利润"]
+    assert normalized == ["利润(RMB)"]
 
 
 @pytest_asyncio.fixture
@@ -262,14 +263,56 @@ async def test_save_mapping_template_accepts_async_session(
 
     async with session_factory() as session:
         result = await session.execute(
-            text("SELECT template_name FROM core.field_mapping_templates WHERE id = :id"),
+            text("SELECT template_name, header_columns FROM core.field_mapping_templates WHERE id = :id"),
             {"id": template_id},
         )
-        assert result.scalar_one() == "async_save_template_test"
+        row = result.mappings().one()
+        assert row["template_name"] == "async_save_template_test"
+        header_columns = row["header_columns"]
+        if isinstance(header_columns, str):
+            header_columns = json.loads(header_columns)
+        assert header_columns == ["order_id", "profit(RMB)", "buyer_payment(RMB)"]
 
 
 @pytest.mark.asyncio
-async def test_template_update_context_orders_treats_rmb_suffix_as_real_header_difference(
+async def test_save_mapping_template_preserves_raw_non_orders_headers(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "products",
+            "granularity": "monthly",
+            "header_row": 1,
+            "header_columns": ["Current Item Status", "销售额（已下订单） (COP)"],
+            "deduplication_fields": ["Current Item Status"],
+            "template_name": "raw_header_preserve_test",
+            "created_by": "test",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("SELECT header_columns FROM core.field_mapping_templates WHERE id = :id"),
+            {"id": template_id},
+        )
+        row = result.mappings().one()
+        header_columns = row["header_columns"]
+        if isinstance(header_columns, str):
+            header_columns = json.loads(header_columns)
+        assert header_columns == ["Current Item Status", "销售额（已下订单） (COP)"]
+
+
+@pytest.mark.asyncio
+async def test_template_update_context_orders_ignores_currency_suffix_difference(
     template_update_context_client,
     monkeypatch,
 ):
@@ -351,12 +394,10 @@ async def test_template_update_context_orders_treats_rmb_suffix_as_real_header_d
     assert payload["success"] is True
 
     data = payload["data"]
-    assert "利润(RMB)" in data["added_fields"]
-    assert "买家支付(RMB)" in data["added_fields"]
-    assert "利润" in data["removed_fields"]
-    assert "买家支付" in data["removed_fields"]
-    assert data["header_changes"]["detected"] is True
-    assert data["header_changes"]["is_exact_match"] is False
+    assert data["added_fields"] == []
+    assert data["removed_fields"] == []
+    assert data["header_changes"]["detected"] is False
+    assert data["header_changes"]["is_exact_match"] is True
 @pytest.mark.asyncio
 async def test_detect_header_changes_endpoint_returns_resolved_payload(
     template_update_context_client,

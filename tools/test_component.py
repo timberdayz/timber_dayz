@@ -1498,7 +1498,7 @@ class ComponentTester:
                 if not exec_result.success:
                     result.phase = component_type
                     result.phase_component_name = f"{self.platform}/{component_name}"
-                    result.error = result.error or getattr(exec_result, "message", None) or "执行失败"
+                    result.error = getattr(exec_result, "message", None) or "执行失败"
 
                 success_criteria_passed = True
                 if exec_result.success:

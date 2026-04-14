@@ -10,6 +10,8 @@ class MiaoshouFilters(ComponentBase):
     platform = "miaoshou"
     component_type = "filters"
     data_domain = None
+    _ALL_STATUS_SUMMARY_TOKEN = "+ 4"
+    _KNOWN_ORDER_STATUS_LABELS = ("待发货", "已发货", "已完成", "售后中", "已关闭")
 
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
@@ -63,10 +65,24 @@ class MiaoshouFilters(ComponentBase):
         except Exception:
             return False
 
+    async def _collapsed_summary_already_shows_all_selected(self, page: Any) -> bool:
+        try:
+            summary = page.get_by_text("订单状态", exact=True).first.locator("xpath=ancestor::*[1]").first
+            summary_text = " ".join(((await summary.text_content()) or "").split())
+        except Exception:
+            return False
+
+        if self._ALL_STATUS_SUMMARY_TOKEN not in summary_text:
+            return False
+        return any(label in summary_text for label in self._KNOWN_ORDER_STATUS_LABELS)
+
     async def run(self, page: Any, filters: dict[str, Any] | None = None) -> ResultBase:  # type: ignore[override]
         filters = filters or {}
         statuses = list(filters.get("order_statuses") or [])
         select_all = filters.get("select_all", True)
+
+        if select_all and await self._collapsed_summary_already_shows_all_selected(page):
+            return ResultBase(success=True, message="ok", details={"select_all": select_all, "statuses": statuses, "skipped": True})
 
         trigger = page.get_by_role("combobox", name=re.compile(r"^订单状态\s*[:：]?$", re.IGNORECASE)).first
         await trigger.click(timeout=1500)

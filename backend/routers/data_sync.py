@@ -66,7 +66,7 @@ from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import CatalogFile
 from modules.core.logger import get_logger
-from sqlalchemy import select, func, and_, distinct
+from sqlalchemy import select, func, and_, distinct, case
 
 # v4.18.0: 导入schemas(Contract-First架构)
 from backend.schemas.data_sync import (
@@ -2014,7 +2014,7 @@ async def get_detailed_template_coverage(
                     'template': template
                 }
         
-        # 3. 查询所有文件的唯一组合(包括pending和ingested,用于统计文件数)
+        # 3. 查询所有文件的唯一组合(包括pending/failed/ingested,用于统计文件数)
         files_stmt = select(
             CatalogFile.platform_code,
             CatalogFile.data_domain,
@@ -2024,7 +2024,7 @@ async def get_detailed_template_coverage(
             CatalogFile.platform_code.isnot(None),
             CatalogFile.data_domain.isnot(None),
             CatalogFile.granularity.isnot(None),
-            CatalogFile.status.in_(['pending', 'ingested'])  # [*] 包括已同步的文件
+            CatalogFile.status.in_(['pending', 'failed', 'ingested'])  # [*] 包括失败待修复的文件
         ).distinct()
         
         # [*] v4.18.2:使用 await
@@ -2069,14 +2069,14 @@ async def get_detailed_template_coverage(
                 sub_domain=sub_domain
             )
             
-            # [*] v4.15.0修复:统计该组合的文件数(包括pending和ingested)
+            # [*] 统计该组合的文件数(包括pending/failed/ingested)
             # [*] v4.18.2:使用 await
             file_count_stmt = select(func.count(CatalogFile.id)).where(
                 CatalogFile.platform_code == platform,
                 CatalogFile.data_domain == domain,
                 CatalogFile.granularity == granularity,
                 CatalogFile.sub_domain == sub_domain,
-                CatalogFile.status.in_(['pending', 'ingested'])  # [*] 包括已同步的文件
+                CatalogFile.status.in_(['pending', 'failed', 'ingested'])  # [*] 包括失败待修复的文件
             )
             file_count_result = await db.execute(file_count_stmt)
             file_count = file_count_result.scalar() or 0
@@ -2096,7 +2096,7 @@ async def get_detailed_template_coverage(
                 template_status = "ready"
                 semantic_match = True
                 
-                # [*] v4.15.0修复:获取该组合的一个示例文件(优先pending,其次ingested)
+                # [*] 获取该组合的一个示例文件(优先pending,其次failed,最后ingested)
                 # [*] v4.18.2:使用 await
                 sample_file_result = await db.execute(
                     select(CatalogFile).where(
@@ -2104,10 +2104,14 @@ async def get_detailed_template_coverage(
                         CatalogFile.data_domain == domain,
                         CatalogFile.granularity == granularity,
                         CatalogFile.sub_domain == sub_domain,
-                        CatalogFile.status.in_(['pending', 'ingested'])  # [*] 包括已同步的文件
+                        CatalogFile.status.in_(['pending', 'failed', 'ingested'])  # [*] 包括失败待修复的文件
                     ).order_by(
-                        # 优先pending,其次ingested
-                        CatalogFile.status.desc()  # 'pending' > 'ingested' (字母序)
+                        case(
+                            (CatalogFile.status == 'pending', 0),
+                            (CatalogFile.status == 'failed', 1),
+                            else_=2,
+                        ),
+                        CatalogFile.first_seen_at.desc()
                     ).limit(1)
                 )
                 sample_file = sample_file_result.scalar_one_or_none()

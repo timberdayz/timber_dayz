@@ -164,6 +164,7 @@ def test_component_tester_headed_persistent_context_does_not_force_fixed_viewpor
     assert "open_storage_state_runtime_bundle" in source
     assert "has_persistent_profile=bool(session_owner_id)" not in source
     assert "runtime_profile_exists(" in source
+    assert 'result.error = result.error or getattr(exec_result, "message", None)' not in source
 
 
 class _FakeProbePage:

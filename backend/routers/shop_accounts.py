@@ -140,6 +140,35 @@ async def _get_shop_account_or_404(db: AsyncSession, shop_account_id: str) -> Sh
     return record
 
 
+async def _assert_platform_shop_id_unique(
+    db: AsyncSession,
+    *,
+    platform: str,
+    platform_shop_id: str | None,
+    exclude_id: int | None = None,
+) -> None:
+    normalized_platform_shop_id = (platform_shop_id or "").strip()
+    if not normalized_platform_shop_id:
+        return
+
+    stmt = select(ShopAccount).where(
+        ShopAccount.platform == platform,
+        ShopAccount.platform_shop_id == normalized_platform_shop_id,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(ShopAccount.id != exclude_id)
+
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"platform_shop_id '{normalized_platform_shop_id}' already exists "
+                f"for platform '{platform}' on shop_account_id '{existing.shop_account_id}'"
+            ),
+        )
+
+
 async def _assert_main_account_exists(
     db: AsyncSession, platform: str, main_account_id: str
 ) -> None:
@@ -178,6 +207,11 @@ async def create_shop_account(
     db: AsyncSession = Depends(get_async_db),
 ):
     await _assert_main_account_exists(db, payload.platform, payload.main_account_id)
+    await _assert_platform_shop_id_unique(
+        db,
+        platform=payload.platform,
+        platform_shop_id=payload.platform_shop_id,
+    )
     existing = await db.execute(
         select(ShopAccount).where(
             ShopAccount.platform == payload.platform,
@@ -268,6 +302,13 @@ async def update_shop_account(
     record = await _get_shop_account_or_404(db, shop_account_id)
     update_data = payload.model_dump(exclude_unset=True)
     capabilities = update_data.pop("capabilities", None)
+    if "platform_shop_id" in update_data:
+        await _assert_platform_shop_id_unique(
+            db,
+            platform=record.platform,
+            platform_shop_id=update_data["platform_shop_id"],
+            exclude_id=record.id,
+        )
     for field, value in update_data.items():
         setattr(record, field, value)
     await _ensure_capability_rows(
@@ -278,7 +319,11 @@ async def update_shop_account(
     )
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = "system"
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     await db.refresh(record)
     return await _serialize_shop_account(db, record)
 

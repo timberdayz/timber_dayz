@@ -723,6 +723,37 @@ class ShopeeProductsExport(ExportComponent):
             or None
         )
 
+    def _products_page_looks_ready(self, url: str | None) -> bool:
+        current = str(url or "").strip().lower()
+        if not current:
+            return False
+        return build_domain_path("products").lower() in current
+
+    def _known_invalid_products_page_texts(self) -> tuple[str, ...]:
+        return (
+            "抱歉，是不是网址打错了啊？找不到该页",
+            "找不到该页",
+            "是不是网址打错了啊",
+        )
+
+    async def _products_page_business_ready(self, page: Any) -> bool:
+        if not self._products_page_looks_ready(str(getattr(page, "url", "") or "")):
+            return False
+
+        for text in self._known_invalid_products_page_texts():
+            if await self._visible_text(page, text):
+                return False
+
+        export_button = await self._first_visible_locator(page, self.sel.export_buttons)
+        if export_button is not None:
+            return True
+
+        for text in ("商品表现", "导出数据", "查看详情"):
+            if await self._visible_text(page, text):
+                return True
+
+        return False
+
     async def _cancel_download_waiter(self) -> None:
         waiter = self._download_waiter
         self._download_waiter = None
@@ -750,6 +781,8 @@ class ShopeeProductsExport(ExportComponent):
             overview_path=build_domain_path("products"),
             target_url=target_url,
             error_message="products performance page is not ready",
+            business_ready=self._products_page_business_ready,
+            business_error_message="products performance page is not ready",
         )
 
     async def _wait_latest_report_panel(
@@ -1449,8 +1482,8 @@ class ShopeeProductsExport(ExportComponent):
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
-            await self.ensure_page_ready(page)
             await self.ensure_shop_ready(page)
+            await self.ensure_page_ready(page)
             await self.ensure_date_ready(page)
 
             await self.trigger_export(page)

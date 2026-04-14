@@ -96,6 +96,14 @@ def normalize_field_name_for_domain(
     if domain and domain.lower() == "orders" and field_name in ORDERS_EXPLICIT_FIELD_MAP:
         return ORDERS_EXPLICIT_FIELD_MAP[field_name]
 
+    if domain and domain.lower() == "orders":
+        orders_rmb_match = re.match(r"^(.*?)[(（]\s*RMB\s*[)）]\s*$", field_name, flags=re.IGNORECASE)
+        if orders_rmb_match:
+            base_field_name = orders_rmb_match.group(1).strip()
+            extractor = currency_extractor or get_currency_extractor()
+            normalized_base_field = extractor.normalize_field_name(base_field_name)
+            return f"{normalized_base_field}_rmb"
+
     extractor = currency_extractor or get_currency_extractor()
     return extractor.normalize_field_name(field_name)
 
@@ -468,6 +476,7 @@ class DataIngestionService:
             staged = 0
             imported = 0
             amount_imported = 0
+            raw_import_error = None
             
             if not task_id:
                 task_id = f"single_file_{file_id}"
@@ -703,7 +712,25 @@ class DataIngestionService:
                     # 如果RawDataImporter失败,记录错误但不抛出异常(让后续流程继续)
                     imported = 0
                     staged = 0
+                    raw_import_error = str(e)
                     import_result = None  # [*] v4.16.0修复:确保import_result被定义,避免后续访问错误
+
+                    return {
+                        "success": False,
+                        "message": f"数据入库失败:RawDataImporter异常,{raw_import_error}",
+                        "staged": 0,
+                        "imported": 0,
+                        "amount_imported": 0,
+                        "quarantined": 0,
+                        "skipped": False,
+                        "import_stats": {
+                            'inserted': 0,
+                            'updated': 0,
+                            'skipped': 0,
+                        },
+                        "image_extraction_started": False,
+                        "normalization_report": normalization_report,
+                    }
             
             # 12. 更新文件状态
             try:

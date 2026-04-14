@@ -128,7 +128,7 @@ async def test_claim_alias_repairs_mojibake_value(alias_client):
 
 
 @pytest.mark.asyncio
-async def test_claim_alias_replaces_existing_primary_alias(alias_client):
+async def test_claim_alias_allows_new_primary_after_clear(alias_client):
     await _seed_shop_account(alias_client)
 
     first_response = await alias_client.post(
@@ -140,6 +140,9 @@ async def test_claim_alias_replaces_existing_primary_alias(alias_client):
         },
     )
     assert first_response.status_code == 200
+
+    clear_response = await alias_client.delete("/api/shop-account-aliases/primary/shopee_sg_hongxi_local")
+    assert clear_response.status_code == 200
 
     second_response = await alias_client.post(
         "/api/shop-account-aliases/claim",
@@ -166,6 +169,33 @@ async def test_claim_alias_replaces_existing_primary_alias(alias_client):
     shop_accounts_response = await alias_client.get("/api/shop-accounts")
     assert shop_accounts_response.status_code == 200
     assert shop_accounts_response.json()[0]["account_alias"] == "HongXi SG New"
+
+
+@pytest.mark.asyncio
+async def test_claim_alias_rejects_shop_account_with_different_active_primary_alias(alias_client):
+    await _seed_shop_account(alias_client)
+
+    first_response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": "HongXi SG Raw",
+            "shop_account_id": "shopee_sg_hongxi_local",
+        },
+    )
+    assert first_response.status_code == 200
+
+    second_response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": "Another Raw Alias",
+            "shop_account_id": "shopee_sg_hongxi_local",
+        },
+    )
+
+    assert second_response.status_code == 409
+    assert "already has an active primary alias" in second_response.json()["detail"]
 
 
 @pytest.mark.asyncio

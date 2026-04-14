@@ -30,6 +30,8 @@ class ShopeeNavigation:
         wait_ms: int = 1200,
         business_ready: Callable[[Any], Awaitable[bool]] | None = None,
         business_error_message: str | None = None,
+        business_timeout_ms: int = 10000,
+        business_poll_ms: int = 500,
     ) -> None:
         if not self.page_looks_ready(str(getattr(page, "url", "") or ""), overview_path):
             resolved_target = str(target_url or f"https://seller.shopee.cn{overview_path}")
@@ -41,6 +43,13 @@ class ShopeeNavigation:
             raise RuntimeError(error_message)
 
         if business_ready is not None:
-            ready = await business_ready(page)
-            if not ready:
-                raise RuntimeError(business_error_message or error_message)
+            waited = 0
+            while True:
+                ready = await business_ready(page)
+                if ready:
+                    break
+                if waited >= business_timeout_ms:
+                    raise RuntimeError(business_error_message or error_message)
+                if hasattr(page, "wait_for_timeout"):
+                    await page.wait_for_timeout(business_poll_ms)
+                waited += business_poll_ms

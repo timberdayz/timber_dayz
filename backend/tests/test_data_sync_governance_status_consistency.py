@@ -205,3 +205,52 @@ async def test_file_list_and_governance_share_alias_only_and_update_required_sta
     assert len(coverage["needs_update"]) == 1
     assert coverage["needs_update"][0]["sample_file_name"] == "tiktok_orders_drift.xlsx"
     assert coverage["covered"][0]["template_status"] in {"alias_only", "update_required"}
+
+
+@pytest.mark.asyncio
+async def test_governance_detailed_coverage_includes_failed_header_changed_files_as_update_samples(
+    data_sync_client,
+):
+    client, session_factory, tmp_path = data_sync_client
+    now = datetime.now(timezone.utc)
+
+    failed_path = tmp_path / "tiktok_orders_drift_failed.xlsx"
+    failed_path.write_text("demo", encoding="utf-8")
+
+    async with session_factory() as session:
+        session.add(
+            FieldMappingTemplate(
+                platform="tiktok",
+                data_domain="orders",
+                granularity="monthly",
+                sub_domain=None,
+                template_name="tiktok_orders__monthly_v2",
+                version=2,
+                status="published",
+                header_row=1,
+                header_columns=["订单编号", "金额"],
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            CatalogFile(
+                file_path=str(failed_path),
+                file_name=failed_path.name,
+                source="data/raw",
+                platform_code="tiktok",
+                source_platform="tiktok",
+                data_domain="orders",
+                granularity="monthly",
+                status="failed",
+                first_seen_at=now,
+            )
+        )
+        await session.commit()
+
+    response = await client.get("/api/data-sync/governance/detailed-coverage")
+
+    assert response.status_code == 200
+    coverage = response.json()["data"]
+    assert coverage["summary"]["needs_update_count"] == 1
+    assert coverage["needs_update"][0]["sample_file_name"] == "tiktok_orders_drift_failed.xlsx"

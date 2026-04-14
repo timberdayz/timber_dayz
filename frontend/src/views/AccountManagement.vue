@@ -878,6 +878,22 @@ function openCreateDialogForSelectedMainAccount() {
   showCreateDialog.value = true
 }
 
+function findPlatformShopIdConflict() {
+  const normalizedShopId = String(accountForm.shop_id || '').trim()
+  if (!normalizedShopId) {
+    return null
+  }
+
+  const editingAccountId = editingAccount.value?.account_id || null
+  return (accountsStore.accounts || []).find((account) => {
+    if (editingAccountId && account.account_id === editingAccountId) {
+      return false
+    }
+    return account.platform === accountForm.platform
+      && String(account.shop_id || '').trim() === normalizedShopId
+  }) || null
+}
+
 function resetBatchForm() {
   Object.assign(batchForm, {
     parent_account: '',
@@ -1002,6 +1018,13 @@ function handleEdit(account) {
 async function handleSaveAccount() {
   try {
     await accountFormRef.value.validate()
+    const conflictingAccount = findPlatformShopIdConflict()
+    if (conflictingAccount) {
+      ElMessage.error(
+        `平台店铺ID "${String(accountForm.shop_id || '').trim()}" 已被店铺账号 "${conflictingAccount.account_id}" (${conflictingAccount.store_name}) 占用`
+      )
+      return
+    }
     
     const data = { ...accountForm }
     

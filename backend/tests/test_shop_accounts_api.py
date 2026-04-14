@@ -208,3 +208,58 @@ async def test_update_shop_account_persists_capabilities(shop_account_client):
         "finance": False,
         "inventory": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_update_shop_account_returns_409_when_platform_shop_id_conflicts(shop_account_client):
+    create_main = await shop_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "hongxikeji:main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    assert create_main.status_code == 200
+
+    first_shop = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_existing_shop",
+            "main_account_id": "hongxikeji:main",
+            "store_name": "Existing Shop",
+            "platform_shop_id": "xihong",
+            "shop_region": "MY",
+            "shop_type": "local",
+            "enabled": True,
+        },
+    )
+    assert first_shop.status_code == 200
+
+    second_shop = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_target_shop",
+            "main_account_id": "hongxikeji:main",
+            "store_name": "Target Shop",
+            "shop_region": "MY",
+            "shop_type": "local",
+            "enabled": True,
+        },
+    )
+    assert second_shop.status_code == 200
+
+    update_response = await shop_account_client.put(
+        "/api/shop-accounts/shopee_target_shop",
+        json={
+            "platform_shop_id": "xihong",
+            "platform_shop_id_status": "manual_confirmed",
+        },
+    )
+
+    assert update_response.status_code == 409
+    assert "platform_shop_id 'xihong'" in update_response.json()["detail"]

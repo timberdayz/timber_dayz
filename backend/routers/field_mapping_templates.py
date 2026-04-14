@@ -113,13 +113,9 @@ def _normalize_template_headers_for_domain(
     data_domain: str,
     header_columns: list[str],
 ) -> list[str]:
-    if data_domain and str(data_domain).lower() == "orders":
-        return list(header_columns)
-
-    from backend.services.currency_extractor import get_currency_extractor
-
-    currency_extractor = get_currency_extractor()
-    return currency_extractor.normalize_field_list(header_columns)
+    # 模板存储必须保留原始表头，避免保存阶段污染 header_columns。
+    # 货币/地区代码归一化只用于比较、匹配和同步入库，不用于模板本体。
+    return list(header_columns)
 
 
 @router.post("/templates/save", response_model=TemplateSaveResponse)
@@ -147,24 +143,9 @@ async def save_mapping_template(
         if not header_columns:
             raise ValueError("header_columns参数必填(DSS架构:保存原始表头字段列表)")
 
-        original_header_columns = header_columns.copy()
-        normalized_header_columns = _normalize_template_headers_for_domain(
-            request.data_domain,
-            header_columns,
-        )
-
-        if normalized_header_columns != original_header_columns:
-            changed_fields = []
-            for orig, norm in zip(original_header_columns, normalized_header_columns):
-                if orig != norm:
-                    changed_fields.append(f"{orig} -> {norm}")
-
-            logger.info(
-                f"[Template] [v4.16.0] 自动归一化header_columns: "
-                f"{len(changed_fields)}个字段发生归一化: {changed_fields[:5]}..."
-            )
-
-        header_columns = normalized_header_columns
+        # 模板本体必须保留原始表头，避免保存阶段污染 header_columns。
+        # 货币代码/地区代码归一化只用于“比较/匹配”逻辑，不用于模板存储。
+        header_columns = list(header_columns)
         header_row = request.header_row
         if not isinstance(header_row, int) or header_row < 0 or header_row > 100:
             raise ValueError(f"header_row必须在0-100之间, 当前值: {header_row}")
@@ -424,17 +405,8 @@ async def get_template_update_context(
                 current_header_columns,
             )
             current_lookup = {str(field).lower(): field for field in current_header_columns}
-            template_lookup = {str(field).lower(): field for field in template_header_columns}
-            added_fields = [
-                field
-                for field in current_header_columns
-                if str(field).lower() not in template_lookup
-            ]
-            removed_fields = [
-                field
-                for field in template_header_columns
-                if str(field).lower() not in current_lookup
-            ]
+            added_fields = header_changes.get("added_fields", [])
+            removed_fields = header_changes.get("removed_fields", [])
             available_fields, missing_fields = _split_existing_deduplication_fields(
                 template_deduplication_fields,
                 current_header_columns,
@@ -442,9 +414,6 @@ async def get_template_update_context(
             recommended_fields = [
                 field for field in default_fields if str(field).lower() in current_lookup
             ]
-            header_changes["added_fields"] = added_fields
-            header_changes["removed_fields"] = removed_fields
-
             response_data.update(
                 {
                     "current_file": file_preview["file"],

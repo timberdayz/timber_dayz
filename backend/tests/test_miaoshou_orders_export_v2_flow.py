@@ -11,8 +11,8 @@ def _source() -> str:
 def test_orders_export_navigates_to_orders_detail_url_in_run_flow():
     source = _source()
 
-    assert "_orders_detail_url(" in source
-    assert "page.goto(" in source
+    assert "await self.navigation_component.run(page, TargetPage.ORDERS)" in source
+    assert "await page.goto(" not in source
 
 
 def test_orders_export_searches_before_export_menu_and_download():

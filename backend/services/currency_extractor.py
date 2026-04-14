@@ -148,6 +148,16 @@ class CurrencyExtractor:
             )
             return currency_code
         
+        generic_iso_pattern = re.compile(r'(?<![A-Za-z0-9])([A-Z]{3})(?![A-Za-z0-9])', re.IGNORECASE)
+        for match in generic_iso_pattern.finditer(field_name):
+            currency_code = match.group(1).upper()
+            if currency_code in self.valid_codes:
+                logger.debug(
+                    f"[CurrencyExtractor] 通过任意位置ISO代码提取: {currency_code} "
+                    f"(字段名: {field_name}, 位置: {match.start()})"
+                )
+                return currency_code
+        
         # 2. 尝试货币符号格式
         for pattern in self.SYMBOL_PATTERNS:
             match = pattern.search(field_name)
@@ -274,6 +284,14 @@ class CurrencyExtractor:
         
         # 4. 清理尾随和开头的分隔符、空格、括号
         normalized = normalized.strip()
+        extracted_code = self.extract_currency_code(field_name)
+        if extracted_code:
+            normalized = re.sub(
+                rf'(?<![A-Za-z0-9]){re.escape(extracted_code)}(?![A-Za-z0-9])',
+                '',
+                normalized,
+                flags=re.IGNORECASE,
+            )
         # 清理尾随的分隔符(但保留中文括号)
         normalized = re.sub(r'[_\s\-\(\)、,,]+$', '', normalized)
         # 清理开头的分隔符(但保留中文括号)
@@ -446,4 +464,3 @@ def get_currency_extractor() -> CurrencyExtractor:
     if _currency_extractor is None:
         _currency_extractor = CurrencyExtractor()
     return _currency_extractor
-

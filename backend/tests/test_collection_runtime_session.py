@@ -69,7 +69,7 @@ async def test_open_persistent_runtime_bundle_uses_launch_persistent_context(
         AsyncMock(
             return_value={
                 "locale": "zh-CN",
-                "viewport": {"width": 1600, "height": 900},
+                "viewport": {"width": 1920, "height": 1080},
                 "accept_downloads": True,
             }
         ),
@@ -253,7 +253,35 @@ async def test_build_runtime_context_options_drops_fixed_viewport_in_headed_mode
     )
 
     assert options["locale"] == "zh-CN"
-    assert options["viewport"] is None
+    assert options["viewport"] == {"width": 1920, "height": 1080}
+
+
+@pytest.mark.asyncio
+async def test_build_runtime_context_options_uses_standard_headless_viewport_even_when_fingerprint_is_oversized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session._get_fingerprint_context_options_async",
+        AsyncMock(
+            return_value={
+                "locale": "zh-CN",
+                "viewport": {"width": 2880, "height": 1800},
+                "accept_downloads": True,
+            }
+        ),
+    )
+
+    options = await build_runtime_context_options(
+        platform="shopee",
+        session_owner_id="main-1",
+        account={
+            "login_url": "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"
+        },
+        headless=True,
+    )
+
+    assert options["locale"] == "zh-CN"
+    assert options["viewport"] == {"width": 1920, "height": 1080}
 
 
 def test_build_runtime_login_gate_probe_urls_uses_homepage_then_login_url() -> None:

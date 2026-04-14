@@ -91,6 +91,21 @@ class _FakeTooltip:
         raise AssertionError(f"unexpected tooltip.get_by_text({text!r})")
 
 
+class _FakeTextLocator:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    @property
+    def first(self) -> "_FakeTextLocator":
+        return self
+
+    def locator(self, query: str):  # noqa: ANN001
+        return self
+
+    async def text_content(self) -> str:
+        return self.text
+
+
 class _FakePage:
     def __init__(
         self,
@@ -98,10 +113,12 @@ class _FakePage:
         trigger: _FakeLocator,
         full_select: _FakeLocator,
         tooltip: _FakeTooltip | None = None,
+        summary_text: str = "",
     ) -> None:
         self.trigger = trigger
         self.full_select = full_select
         self.tooltip = tooltip
+        self.summary_text = summary_text
         self.keyboard = _FakeKeyboard()
 
     def get_by_role(self, role: str, name=None):  # noqa: ANN001
@@ -112,6 +129,11 @@ class _FakePage:
         if role == "tooltip" and self.tooltip is not None:
             return self.tooltip
         raise AssertionError(f"unexpected get_by_role({role!r}, {name!r})")
+
+    def get_by_text(self, text: str, exact: bool = False):  # noqa: ANN001
+        if text == "订单状态":
+            return _FakeTextLocator(self.summary_text)
+        raise AssertionError(f"unexpected get_by_text({text!r}, {exact!r})")
 
 
 @pytest.mark.asyncio
@@ -173,3 +195,20 @@ async def test_miaoshou_filters_uses_visible_overlay_instead_of_waiting_on_hidde
     assert trigger.clicked == 1
     assert full_select_label.clicked == 1
     assert page.keyboard.pressed == ["Escape"]
+
+
+@pytest.mark.asyncio
+async def test_miaoshou_filters_skips_overlay_when_summary_already_shows_all_selected() -> None:
+    component = MiaoshouFilters(_ctx())
+    trigger = _FakeLocator()
+    full_select = _FakeLocator(
+        checked=False,
+        evaluate_checked=False,
+    )
+    page = _FakePage(trigger=trigger, full_select=full_select, summary_text="订单状态 待发货 + 4")
+
+    result = await component.run(page, {"select_all": True})
+
+    assert result.success is True
+    assert trigger.clicked == 0
+    assert page.keyboard.pressed == []

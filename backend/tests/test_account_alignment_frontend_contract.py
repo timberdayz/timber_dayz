@@ -22,3 +22,14 @@ def test_account_alignment_view_no_longer_depends_on_legacy_account_alignment_en
     assert "/account-alignment/distinct-raw-stores" not in text
     assert "/account-alignment/add-alias" not in text
     assert "/account-alignment/batch-add-aliases" not in text
+
+
+def test_account_alignment_view_filters_claim_dropdown_by_active_primary_alias():
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "frontend/src/views/AccountAlignment.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "occupiedPrimaryShopAccountIds" in text
+    assert ".filter((item) => item.is_active && item.is_primary)" in text
+    assert "occupiedPrimaryShopAccountIds.value.has(item.id)" in text

@@ -22,6 +22,8 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+STANDARD_HEADLESS_VIEWPORT = {"width": 1920, "height": 1080}
+
 _executor_pool: Optional[ThreadPoolExecutor] = None
 
 
@@ -187,6 +189,19 @@ def _build_playwright_context_options_from_fingerprint(
         if key in allowed and value is not None:
             result[key] = value
     return result
+
+
+def _apply_runtime_viewport_policy(
+    context_options: Dict[str, Any],
+    *,
+    headless: Optional[bool],
+) -> Dict[str, Any]:
+    normalized = dict(context_options or {})
+    if headless is False:
+        normalized["viewport"] = dict(STANDARD_HEADLESS_VIEWPORT)
+    elif headless is True:
+        normalized["viewport"] = dict(STANDARD_HEADLESS_VIEWPORT)
+    return normalized
 
 
 def _profile_contains_state(profile_path: Path) -> bool:
@@ -366,14 +381,12 @@ async def build_runtime_context_options(
         context_options["storage_state"] = storage_state
     if "locale" not in context_options:
         context_options["locale"] = "zh-CN"
-    if headless is False:
-        # Headed debugging/component-test flows should use the actual browser window size
-        # instead of an oversized fingerprint viewport that can push key UI out of view.
-        context_options["viewport"] = None
-    elif not context_options.get("viewport") and headless is not None:
-        context_options["viewport"] = (
-            {"width": 1920, "height": 1080} if headless else None
-        )
+    # Runtime viewport is a shared baseline and should not inherit oversized
+    # account-fingerprint viewport values.
+    context_options = _apply_runtime_viewport_policy(
+        context_options,
+        headless=headless,
+    )
     return context_options
 
 

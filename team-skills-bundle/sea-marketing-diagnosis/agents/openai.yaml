@@ -1,0 +1,7 @@
+interface:
+  display_name: "SEA Marketing Diagnosis"
+  short_description: "统一诊断 Shopee 广告、TikTok 内容、直播、达人与 ROAS / MER 问题。"
+  default_prompt: "Use $sea-marketing-diagnosis to diagnose this SEA e-commerce marketing performance and recommend standard actions."
+
+policy:
+  allow_implicit_invocation: true

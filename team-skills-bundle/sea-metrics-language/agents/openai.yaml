@@ -1,0 +1,7 @@
+interface:
+  display_name: "SEA Metrics Language"
+  short_description: "统一东南亚跨境经营指标口径、状态与使用边界。"
+  default_prompt: "Use $sea-metrics-language to explain and standardize the metric definitions for this Southeast Asia e-commerce task."
+
+policy:
+  allow_implicit_invocation: true

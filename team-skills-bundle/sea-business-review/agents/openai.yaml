@@ -1,0 +1,7 @@
+interface:
+  display_name: "SEA Business Review"
+  short_description: "按统一顺序复盘 Shopee / TikTok 经营表现并输出动作。"
+  default_prompt: "Use $sea-business-review to diagnose this Southeast Asia business review and output a structured conclusion."
+
+policy:
+  allow_implicit_invocation: true

@@ -92,7 +92,7 @@ async def test_detect_header_changes_reports_update_required_for_tiktok_business
     [
         ["订单编号", "利润(RMB)", "买家支付(USD)"],
         ["订单编号", "RMB利润", "USD买家支付"],
-        ["订单编号", "利润RMB明细", "买家USD支付"],
+        ["订单编号", "利润USD", "买家RMB支付"],
     ],
 )
 @pytest.mark.asyncio
