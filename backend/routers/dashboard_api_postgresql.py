@@ -30,6 +30,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard-postgresql"])
 _B_COST_ALLOWED_ROLES = {"admin", "manager", "finance"}
 _DASHBOARD_SINGLEFLIGHT_LOCK_TTL = 60
 _DASHBOARD_SINGLEFLIGHT_WAIT_TIMEOUT = 35.0
+_STORE_ANALYSIS_ALLOWED_ROLES = {"admin", "manager", "operator"}
 
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
@@ -95,6 +96,18 @@ def _require_b_cost_role(current_user: Any) -> Any:
 
 async def _get_b_cost_authorized_user(current_user: Any = Depends(get_current_user)) -> Any:
     return _require_b_cost_role(current_user)
+
+
+def _require_store_analysis_role(current_user: Any) -> Any:
+    if getattr(current_user, "is_superuser", False):
+        return current_user
+    if _extract_user_role_codes(current_user) & _STORE_ANALYSIS_ALLOWED_ROLES:
+        return current_user
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+async def _get_store_analysis_authorized_user(current_user: Any = Depends(get_current_user)) -> Any:
+    return _require_store_analysis_role(current_user)
 
 
 @router.get("/business-overview/kpi")
@@ -352,6 +365,252 @@ async def get_business_overview_operational_metrics_postgresql(
     except Exception as e:
         logger.error(f"PostgreSQL compatibility operational metrics query failed: {e}", exc_info=True)
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/capabilities")
+async def get_store_analysis_capabilities_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_capabilities(platform=platform, shop_id=shop_id)
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_capabilities",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis capabilities query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/shops")
+async def get_store_analysis_shops_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
+):
+    try:
+        params = {"platform": platform}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_shops(platform=platform)
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_shops",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis shops query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/overview")
+async def get_store_analysis_overview_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+    granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
+    date: str = Query(..., description="anchor date"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_overview(
+                platform=platform,
+                shop_id=shop_id,
+                granularity=granularity,
+                target_date=date,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_overview",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis overview query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/comparison")
+async def get_store_analysis_comparison_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+    granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
+    date: str = Query(..., description="anchor date"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_comparison(
+                platform=platform,
+                shop_id=shop_id,
+                granularity=granularity,
+                target_date=date,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_comparison",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis comparison query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/top-products")
+async def get_store_analysis_top_products_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+    granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
+    date: str = Query(..., description="anchor date"),
+    limit: int = Query(10, ge=1, le=50, description="top product count"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date, "limit": limit}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_top_products(
+                platform=platform,
+                shop_id=shop_id,
+                granularity=granularity,
+                target_date=date,
+                limit=limit,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_top_products",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis top products query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/traffic-summary")
+async def get_store_analysis_traffic_summary_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+    granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
+    date: str = Query(..., description="anchor date"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_traffic_summary(
+                platform=platform,
+                shop_id=shop_id,
+                granularity=granularity,
+                target_date=date,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_traffic_summary",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis traffic summary query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/store-analysis/traffic-trend")
+async def get_store_analysis_traffic_trend_postgresql(
+    request: Request,
+    platform: str = Query(..., description="single platform code"),
+    shop_id: str = Query(..., description="shop id"),
+    granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
+    date: str = Query(..., description="anchor date"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
+):
+    try:
+        params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_store_analysis_traffic_trend(
+                platform=platform,
+                shop_id=shop_id,
+                granularity=granularity,
+                target_date=date,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "store_analysis_traffic_trend",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"Store analysis traffic trend query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
 
 
 @router.get("/b-cost-analysis/overview")

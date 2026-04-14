@@ -156,5 +156,54 @@ export default {
    */
   async queryBCostAnalysisOrderDetail(params = {}) {
     return await api._get('/dashboard/b-cost-analysis/order-detail', { params })
+  },
+
+  /**
+   * 店铺分析 - 真实可用店铺列表
+   */
+  async queryStoreAnalysisShops(params = {}) {
+    return await api._get('/dashboard/store-analysis/shops', { params })
+  },
+
+  /**
+   * 店铺分析 - 概览
+   */
+  async queryStoreAnalysisOverview(params = {}) {
+    return await api._get('/dashboard/store-analysis/overview', { params })
+  },
+
+  /**
+   * 店铺分析 - 当前周期 vs 上一周期对比
+   */
+  async queryStoreAnalysisComparison(params = {}) {
+    return await api._get('/dashboard/store-analysis/comparison', { params })
+  },
+
+  /**
+   * 店铺分析 - 商品贡献 Top 列表
+   */
+  async queryStoreAnalysisTopProducts(params = {}) {
+    return await api._get('/dashboard/store-analysis/top-products', { params })
+  },
+
+  /**
+   * 店铺分析 - 平台/店铺能力矩阵
+   */
+  async queryStoreAnalysisCapabilities(params = {}) {
+    return await api._get('/dashboard/store-analysis/capabilities', { params })
+  },
+
+  /**
+   * 店铺分析 - 流量摘要
+   */
+  async queryStoreAnalysisTrafficSummary(params = {}) {
+    return await api._get('/dashboard/store-analysis/traffic-summary', { params })
+  },
+
+  /**
+   * 店铺分析 - 流量趋势
+   */
+  async queryStoreAnalysisTrafficTrend(params = {}) {
+    return await api._get('/dashboard/store-analysis/traffic-trend', { params })
   }
 }
