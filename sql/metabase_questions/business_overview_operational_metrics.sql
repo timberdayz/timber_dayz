@@ -70,7 +70,7 @@ a_targets AS (
 
 -- A类数据：预估费用（使用中文字段名）
 a_costs AS (
-    SELECT COALESCE(SUM(c."租金" + c."工资" + c."水电费" + c."其他成本"), 0) AS estimated_expenses
+    SELECT COALESCE(SUM(c."租金" + c."营销费用" + c."水电费" + c."其他成本"), 0) AS estimated_expenses
     FROM a_class.operating_costs c
     CROSS JOIN scope s
     WHERE c."年月" = to_char(s.month_start, 'YYYY-MM')

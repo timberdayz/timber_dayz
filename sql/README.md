@@ -187,7 +187,7 @@ SELECT * FROM view_campaigns_atomic WHERE campaign_status = 'In Progress';
 ```sql
 -- 插入经营成本
 INSERT INTO operating_costs (
-    shop_id, year_month, rent, salary, marketing, logistics, other, created_by
+    shop_id, year_month, rent, marketing_fee, marketing, logistics, other, created_by
 )
 VALUES (
     'shop_001', '2025-01', 50000.00, 200000.00, 100000.00, 80000.00, 30000.00, 'admin'

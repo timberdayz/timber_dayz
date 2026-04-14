@@ -8,6 +8,7 @@ import pytest
 from modules.apps.collection_center.runtime_session import (
     RuntimeContextBundle,
     RuntimeSessionScope,
+    choose_runtime_strategy,
     build_runtime_login_gate_probe_urls,
     build_runtime_context_options,
     check_login_gate_ready,
@@ -239,6 +240,24 @@ def test_build_runtime_login_gate_probe_urls_uses_homepage_then_login_url() -> N
     ]
 
 
+def test_formal_sequential_runtime_prefers_storage_state_when_available() -> None:
+    decision = choose_runtime_strategy(
+        platform="miaoshou",
+        session_owner_id="main-1",
+        has_storage_state=True,
+        has_persistent_profile=True,
+        force_persistent_profile=False,
+        execution_kind="formal_collection",
+        component_type="export",
+        parallel_mode=False,
+    )
+
+    assert decision.mode == "storage_state_fanout"
+    assert decision.reason == "storage_state_available"
+    assert decision.used_storage_state is True
+    assert decision.used_persistent_profile is False
+
+
 @pytest.mark.asyncio
 async def test_probe_runtime_login_gate_checks_homepage_after_current_page_miss(
     monkeypatch: pytest.MonkeyPatch,
@@ -327,4 +346,4 @@ async def test_check_login_gate_ready_accepts_miaoshou_root_shell_cookie_backed_
 
     assert ok is True
     assert gate_result.status is GateStatus.READY
-    assert gate_result.reason == "login confirmed"
+    assert gate_result.reason == "cookie-backed session confirmed"

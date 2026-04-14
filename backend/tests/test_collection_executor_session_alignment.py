@@ -75,6 +75,43 @@ async def test_executor_open_runtime_bundle_uses_storage_state_helper_for_fanout
 
 
 @pytest.mark.asyncio
+async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    persistent_open = AsyncMock(return_value="persistent-bundle")
+    storage_open = AsyncMock(return_value="storage-bundle")
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
+        persistent_open,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.open_storage_state_runtime_bundle",
+        storage_open,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
+        AsyncMock(return_value={"cookies": [], "origins": []}),
+    )
+
+    result = await executor._open_runtime_bundle(
+        session_runtime_mode="auto",
+        browser=object(),
+        browser_type=object(),
+        platform="miaoshou",
+        session_owner_id="main-1",
+        runtime_account={"login_url": "https://erp.91miaoshou.com/login"},
+        storage_state=None,
+        launch_kwargs={"headless": True},
+    )
+
+    assert result == "storage-bundle"
+    storage_open.assert_awaited_once()
+    persistent_open.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_shared_login_phase_skips_login_when_persistent_runtime_gate_is_ready(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -117,6 +154,61 @@ async def test_shared_login_phase_skips_login_when_persistent_runtime_gate_is_re
         adapter=object(),
         runtime_manifests=None,
         session_platform="tiktok",
+        session_account_id="acc-1",
+        save_session_after_login=False,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    assert login_result is None
+    assert play_context is not None
+    assert page is not None
+    executor._execute_python_component.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_shared_login_phase_skips_login_when_storage_state_runtime_gate_is_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._execute_python_component = AsyncMock(
+        side_effect=AssertionError("login component should be skipped")
+    )
+    executor._ensure_login_gate_ready = AsyncMock()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.probe_runtime_login_gate",
+        AsyncMock(
+            return_value=(
+                True,
+                GateResult(
+                    stage="login_gate",
+                    status=GateStatus.READY,
+                    reason="storage_state gate confirmed",
+                ),
+            )
+        ),
+    )
+
+    play_context, page, login_result = await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="miaoshou",
+        account={"account_id": "acc-1", "login_url": "https://erp.91miaoshou.com"},
+        params={"_runtime_session_mode": "storage_state_fanout"},
+        context=type(
+            "Ctx",
+            (),
+            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        )(),
+        browser=object(),
+        play_context=object(),
+        page=object(),
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="miaoshou",
         session_account_id="acc-1",
         save_session_after_login=False,
         start_time=__import__("datetime").datetime.now(),
@@ -206,6 +298,127 @@ async def test_shared_login_phase_records_ready_gate_after_login_refresh(
         and details.get("login_gate_reason") == "login confirmed after refresh"
         for details in runtime_details
     )
+
+
+@pytest.mark.asyncio
+async def test_shared_login_phase_persists_refreshed_storage_state_after_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._execute_python_component = AsyncMock(return_value=True)
+    executor._ensure_login_gate_ready = AsyncMock(
+        return_value=GateResult(
+            stage="login_gate",
+            status=GateStatus.READY,
+            reason="login confirmed after refresh",
+            current_url="https://erp.91miaoshou.com/welcome",
+        )
+    )
+
+    saved = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._save_session_async",
+        saved,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.probe_runtime_login_gate",
+        AsyncMock(
+            return_value=(
+                False,
+                GateResult(
+                    stage="login_gate",
+                    status=GateStatus.FAILED,
+                    reason="login form visible",
+                    current_url="https://erp.91miaoshou.com/login",
+                ),
+            )
+        ),
+    )
+
+    page = type(
+        "Page",
+        (),
+        {
+            "url": "https://erp.91miaoshou.com/welcome",
+            "context": type(
+                "CtxObj",
+                (),
+                {"storage_state": AsyncMock(return_value={"cookies": ["fresh"], "origins": []})},
+            )(),
+        },
+    )()
+
+    await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="miaoshou",
+        account={"account_id": "acc-1", "login_url": "https://erp.91miaoshou.com"},
+        params={"_runtime_session_mode": "storage_state_fanout"},
+        context=type(
+            "Ctx",
+            (),
+            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        )(),
+        browser=object(),
+        play_context=object(),
+        page=page,
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="miaoshou",
+        session_account_id="main-1",
+        save_session_after_login=True,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    saved.assert_awaited_once_with(
+        "miaoshou",
+        "main-1",
+        {"cookies": ["fresh"], "origins": []},
+    )
+
+
+@pytest.mark.asyncio
+async def test_executor_open_runtime_bundle_auto_falls_back_to_persistent_profile_when_storage_state_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    persistent_open = AsyncMock(return_value="persistent-bundle")
+    storage_open = AsyncMock(return_value="storage-bundle")
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
+        persistent_open,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.open_storage_state_runtime_bundle",
+        storage_open,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.runtime_profile_exists",
+        lambda platform, session_owner_id: True,
+    )
+
+    result = await executor._open_runtime_bundle(
+        session_runtime_mode="auto",
+        browser=object(),
+        browser_type=object(),
+        platform="miaoshou",
+        session_owner_id="main-1",
+        runtime_account={"login_url": "https://erp.91miaoshou.com/login"},
+        storage_state=None,
+        launch_kwargs={"headless": True},
+    )
+
+    assert result == "persistent-bundle"
+    persistent_open.assert_awaited_once()
+    storage_open.assert_not_awaited()
 
 
 def test_build_runtime_launch_kwargs_uses_headed_when_debug_mode_enabled() -> None:

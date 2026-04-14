@@ -4353,7 +4353,7 @@ class OperatingCost(Base):
     - 店铺ID: character varying(256)
     - 年月: character varying(7)
     - 租金: numeric(15,2)
-    - 工资: numeric(15,2)
+    - 营销费用: numeric(15,2)
     - 水电费: numeric(15,2)
     - 其他成本: numeric(15,2)
     - 创建时间: timestamp
@@ -4366,7 +4366,7 @@ class OperatingCost(Base):
     shop_id = Column("店铺ID", String(256), nullable=False)
     year_month = Column("年月", String(7), nullable=False)
     rent = Column("租金", Numeric(15, 2), nullable=False, default=0.0)
-    salary = Column("工资", Numeric(15, 2), nullable=False, default=0.0)
+    marketing_fee = Column("营销费用", Numeric(15, 2), nullable=False, default=0.0)
     utilities = Column("水电费", Numeric(15, 2), nullable=False, default=0.0)
     other_costs = Column("其他成本", Numeric(15, 2), nullable=False, default=0.0)
     created_at = Column("创建时间", DateTime(timezone=True), server_default=func.now(), nullable=False)

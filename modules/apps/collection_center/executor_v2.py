@@ -681,6 +681,29 @@ class CollectionExecutorV2:
         proxy: Optional[Dict[str, Any]] = None,
     ):
         normalized_mode = str(session_runtime_mode or "storage_state_fanout").strip().lower()
+        effective_storage_state = storage_state
+
+        if normalized_mode == "auto":
+            if effective_storage_state is None and session_owner_id:
+                effective_storage_state = await runtime_session.load_or_bootstrap_runtime_storage_state(
+                    platform=platform,
+                    session_owner_id=session_owner_id,
+                    account=runtime_account,
+                )
+            strategy = runtime_session.choose_runtime_strategy(
+                platform=platform,
+                session_owner_id=session_owner_id,
+                has_storage_state=bool(effective_storage_state),
+                has_persistent_profile=bool(
+                    session_owner_id and runtime_session.runtime_profile_exists(platform, session_owner_id)
+                ),
+                force_persistent_profile=False,
+                execution_kind="formal_collection",
+                component_type="export",
+                parallel_mode=False,
+            )
+            normalized_mode = strategy.mode
+
         if normalized_mode == "persistent_profile":
             return await runtime_session.open_persistent_runtime_bundle(
                 browser_type=browser_type,
@@ -691,7 +714,6 @@ class CollectionExecutorV2:
                 proxy=proxy,
             )
 
-        effective_storage_state = storage_state
         if effective_storage_state is None and session_owner_id:
             session_data = await _load_or_bootstrap_session_async(
                 platform,
@@ -778,7 +800,8 @@ class CollectionExecutorV2:
         await self._check_cancelled(task_id)
         await self.popup_handler.close_popups(page, platform=platform)
 
-        if str(params.get("_runtime_session_mode") or "").strip().lower() == "persistent_profile":
+        runtime_mode = str(params.get("_runtime_session_mode") or "").strip().lower()
+        if runtime_mode in {"persistent_profile", "storage_state_fanout"}:
             runtime_ready, gate_result = await runtime_session.probe_runtime_login_gate(
                 page=page,
                 platform=platform,
@@ -787,7 +810,7 @@ class CollectionExecutorV2:
             await self._update_status(
                 task_id,
                 5,
-                "检查持久会话登录态",
+                "检查复用会话登录态",
                 details={
                     "step_id": "login_gate_probe",
                     **self._runtime_metadata_details(

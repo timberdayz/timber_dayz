@@ -44,7 +44,7 @@ BEGIN
             SELECT
                 to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
                 shop_id AS shop_id,
-                SUM(rent + salary + utilities + other_costs) AS estimated_expenses
+                SUM(rent + marketing_fee + utilities + other_costs) AS estimated_expenses
             FROM a_class.operating_costs
             GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
         ),
@@ -145,7 +145,7 @@ BEGIN
             SELECT
                 to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
                 "店铺ID" AS shop_id,
-                SUM("租金" + "工资" + "水电费" + "其他成本") AS estimated_expenses
+                SUM("租金" + "营销费用" + "水电费" + "其他成本") AS estimated_expenses
             FROM a_class.operating_costs
             GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
         ),

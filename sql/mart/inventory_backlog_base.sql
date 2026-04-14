@@ -15,6 +15,7 @@ WITH latest_snapshot AS (
         on_hand_stock,
         inventory_value
     FROM mart.inventory_snapshot_latest
+),
 snapshot_change AS (
     SELECT
         snapshot_date,

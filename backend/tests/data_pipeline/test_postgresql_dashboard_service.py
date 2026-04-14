@@ -75,6 +75,67 @@ def test_reduce_business_overview_kpi_rows_multi_platform():
     assert result["avg_order_value"] == 10.0
     assert result["attach_rate"] == 1.31
 
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "period_month": "2026-04-01",
+                "platform_code": "shopee",
+                "gmv": 100,
+                "order_count": 10,
+                "visitor_count": 200,
+                "conversion_rate": 5,
+                "avg_order_value": 10,
+                "attach_rate": 1.2,
+                "total_items": 12,
+                "profit": 30,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    result = await service.get_business_overview_kpi(month="2026-04-01", platform=None)
+
+    assert result["gmv"] == 100
+    assert len(captured) == 1
+    query, params = captured[0]
+    assert "FROM mart.platform_month_kpi" in query
+    assert "api.business_overview_kpi_module" not in query
+    assert str(params["period_month"]) == "2026-04-01"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_inventory_backlog_honors_limit(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_load_rows():
+        return [
+            {
+                "platform_code": "shopee",
+                "platform_sku": f"SKU-{index}",
+                "inventory_value": 200 - index,
+                "estimated_turnover_days": 45,
+                "estimated_stagnant_days": 10,
+                "stagnant_snapshot_count": 2,
+                "available_stock": 10,
+            }
+            for index in range(25)
+        ]
+
+    monkeypatch.setattr(service, "_load_inventory_backlog_rows", fake_load_rows)
+
+    result = await service.get_business_overview_inventory_backlog(min_days=30, limit=20)
+
+    assert len(result["top_products"]) == 20
+    assert result["top_products"][0]["rank"] == 1
+    assert result["top_products"][-1]["rank"] == 20
+
+
 def test_get_postgresql_dashboard_service_returns_singleton():
     service_a = get_postgresql_dashboard_service()
     service_b = get_postgresql_dashboard_service()
@@ -202,6 +263,105 @@ def test_rank_shop_racing_rows_desc_by_gmv():
     assert result[0]["name"] == "shop-a"
     assert result[0]["rank"] == 1
     assert result[1]["rank"] == 2
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_comparison_reads_from_granularity_specific_mart(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "period_key": "2026-04-01",
+                "sales_amount": 5000,
+                "sales_quantity": 50,
+                "traffic": 1000,
+                "conversion_rate": 5,
+                "avg_order_value": 100,
+                "attach_rate": 1.2,
+                "profit": 300,
+            },
+            {
+                "period_key": "2026-03-01",
+                "sales_amount": 4000,
+                "sales_quantity": 40,
+                "traffic": 800,
+                "conversion_rate": 5,
+                "avg_order_value": 100,
+                "attach_rate": 1.1,
+                "profit": 200,
+            },
+        ]
+
+    async def fake_load_target_summary(granularity, period_start, period_end, platform=None):
+        return {"target_amount": 6000, "target_quantity": 60}
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+
+    result = await service.get_business_overview_comparison(
+        granularity="monthly",
+        target_date="2026-04-01",
+        platform=None,
+    )
+
+    assert result["metrics"]["sales_amount"]["today"] == 5000
+    assert result["target"]["sales_amount"] == 6000
+    assert len(captured) == 1
+    assert all("FROM mart.shop_month_kpi" in query for query, _ in captured)
+    assert all("api.business_overview_comparison_module" not in query for query, _ in captured)
+    assert "period_month >= :period_start" in captured[0][0]
+    assert "period_month <= :period_end" in captured[0][0]
+    assert str(captured[0][1]["period_start"]) == "2026-03-01"
+    assert str(captured[0][1]["period_end"]) == "2026-04-01"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_comparison_reuses_current_rows_for_monthly_average(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "period_key": "2026-04-01",
+                "sales_amount": 5000,
+                "sales_quantity": 50,
+                "traffic": 1000,
+                "conversion_rate": 5,
+                "avg_order_value": 100,
+                "attach_rate": 1.2,
+                "profit": 300,
+            },
+            {
+                "period_key": "2026-03-01",
+                "sales_amount": 4000,
+                "sales_quantity": 40,
+                "traffic": 800,
+                "conversion_rate": 5,
+                "avg_order_value": 100,
+                "attach_rate": 1.1,
+                "profit": 200,
+            },
+        ]
+
+    async def fake_load_target_summary(granularity, period_start, period_end, platform=None):
+        return {"target_amount": 6000, "target_quantity": 60}
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+
+    result = await service.get_business_overview_comparison(
+        granularity="monthly",
+        target_date="2026-04-01",
+        platform=None,
+    )
+
+    assert result["metrics"]["sales_amount"]["average"] == 5000
+    assert len(captured) == 1
 
 
 @pytest.mark.asyncio

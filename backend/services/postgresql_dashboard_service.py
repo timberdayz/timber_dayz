@@ -258,6 +258,16 @@ def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def _comparison_source_for_granularity(granularity: str) -> tuple[str, str]:
+    if granularity == "daily":
+        return "mart.shop_day_kpi", "period_date"
+    if granularity == "weekly":
+        return "mart.shop_week_kpi", "period_week"
+    if granularity == "monthly":
+        return "mart.shop_month_kpi", "period_month"
+    raise ValueError("granularity must be daily, weekly or monthly")
+
+
 def rank_inventory_backlog_rows(
     rows: list[dict[str, Any]],
     min_days: int = 30,
@@ -695,7 +705,7 @@ class PostgresqlDashboardService:
                 result = await session.execute(
                     text(
                         """
-                        SELECT SUM(rent + salary + utilities + other_costs)
+                        SELECT SUM(rent + marketing_fee + utilities + other_costs)
                         FROM a_class.operating_costs
                         WHERE year_month = :year_month
                         """
@@ -708,7 +718,7 @@ class PostgresqlDashboardService:
                     result = await session.execute(
                         text(
                             """
-                            SELECT COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0)
+                            SELECT COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0)
                             FROM a_class.operating_costs
                             WHERE "年月" = :year_month
                             """
@@ -739,7 +749,7 @@ class PostgresqlDashboardService:
                 attach_rate,
                 total_items,
                 profit
-            FROM api.business_overview_kpi_module
+            FROM mart.platform_month_kpi
             WHERE period_month = :period_month
         """
         params: dict[str, Any] = {"period_month": period_month}
@@ -772,19 +782,25 @@ class PostgresqlDashboardService:
         else:
             raise ValueError("granularity must be daily, weekly or monthly")
 
+        source_table, period_column = _comparison_source_for_granularity(granularity)
         query = """
-            SELECT *
-            FROM api.business_overview_comparison_module
-            WHERE granularity = :granularity
-              AND period_key = :period_key
-        """
+            SELECT
+                gmv AS sales_amount,
+                order_count AS sales_quantity,
+                visitor_count AS traffic,
+                conversion_rate,
+                avg_order_value,
+                attach_rate,
+                profit
+            FROM {source_table}
+            WHERE {period_column} = :period_key
+        """.format(source_table=source_table, period_column=period_column)
         if platform:
             query += " AND platform_code = :platform_code"
 
         current_rows = await self._fetch_rows(
             query,
             {
-                "granularity": granularity,
                 "period_key": current_start,
                 "platform_code": platform,
             },
@@ -792,30 +808,37 @@ class PostgresqlDashboardService:
         previous_rows = await self._fetch_rows(
             query,
             {
-                "granularity": granularity,
                 "period_key": previous_start,
                 "platform_code": platform,
             },
         )
         average_query = """
-            SELECT *
-            FROM api.business_overview_comparison_module
-            WHERE granularity = :granularity
-              AND period_key >= :period_start
-              AND period_key <= :period_end
-        """
+            SELECT
+                gmv AS sales_amount,
+                order_count AS sales_quantity,
+                visitor_count AS traffic,
+                conversion_rate,
+                avg_order_value,
+                attach_rate,
+                profit
+            FROM {source_table}
+            WHERE {period_column} >= :period_start
+              AND {period_column} <= :period_end
+        """.format(source_table=source_table, period_column=period_column)
         if platform:
             average_query += " AND platform_code = :platform_code"
 
-        average_rows = await self._fetch_rows(
-            average_query,
-            {
-                "granularity": granularity,
-                "period_start": average_start,
-                "period_end": current_start,
-                "platform_code": platform,
-            },
-        )
+        if average_start == current_start:
+            average_rows = current_rows
+        else:
+            average_rows = await self._fetch_rows(
+                average_query,
+                {
+                    "period_start": average_start,
+                    "period_end": current_start,
+                    "platform_code": platform,
+                },
+            )
 
         current_comparison = aggregate_comparison_source_rows(current_rows)
         previous_comparison = aggregate_comparison_source_rows(previous_rows)

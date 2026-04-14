@@ -502,7 +502,7 @@ Audit path:
 Check:
 
 - `estimated_gross_profit = m.profit`
-- `estimated_expenses = rent + marketing_fee(底层仍映射历史 salary 列) + utilities + other_costs`
+- `estimated_expenses = rent + marketing_fee + utilities + other_costs`
 - `operating_result = profit - estimated_expenses`
 
 ### `clearance_ranking`

@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS operating_costs (
     shop_id VARCHAR(100) NOT NULL,
     year_month VARCHAR(7) NOT NULL,
     rent DECIMAL(15,2) DEFAULT 0,
-    salary DECIMAL(15,2) DEFAULT 0,
+    marketing_fee DECIMAL(15,2) DEFAULT 0,
     marketing DECIMAL(15,2) DEFAULT 0,
     logistics DECIMAL(15,2) DEFAULT 0,
     utilities DECIMAL(15,2) DEFAULT 0,

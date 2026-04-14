@@ -81,14 +81,14 @@ CREATE TABLE IF NOT EXISTS operating_costs (
     shop_id VARCHAR(100) NOT NULL,
     year_month VARCHAR(7) NOT NULL,  -- Format: YYYY-MM
     rent DECIMAL(15, 2) DEFAULT 0 CHECK (rent >= 0),
-    salary DECIMAL(15, 2) DEFAULT 0 CHECK (salary >= 0),
+    marketing_fee DECIMAL(15, 2) DEFAULT 0 CHECK (marketing_fee >= 0),
     marketing DECIMAL(15, 2) DEFAULT 0 CHECK (marketing >= 0),
     logistics DECIMAL(15, 2) DEFAULT 0 CHECK (logistics >= 0),
     utilities DECIMAL(15, 2) DEFAULT 0 CHECK (utilities >= 0),
     other DECIMAL(15, 2) DEFAULT 0 CHECK (other >= 0),
     total DECIMAL(15, 2) GENERATED ALWAYS AS (
         COALESCE(rent, 0) + 
-        COALESCE(salary, 0) + 
+        COALESCE(marketing_fee, 0) + 
         COALESCE(marketing, 0) + 
         COALESCE(logistics, 0) + 
         COALESCE(utilities, 0) + 
@@ -113,7 +113,7 @@ COMMENT ON TABLE operating_costs IS 'A类数据：经营成本配置表';
 COMMENT ON COLUMN operating_costs.shop_id IS '店铺ID（关联dim_shops.shop_id）';
 COMMENT ON COLUMN operating_costs.year_month IS '成本月份（YYYY-MM格式）';
 COMMENT ON COLUMN operating_costs.rent IS '租金成本（CNY）';
-COMMENT ON COLUMN operating_costs.salary IS '工资成本（CNY）';
+COMMENT ON COLUMN operating_costs.marketing_fee IS '营销费用（CNY）';
 COMMENT ON COLUMN operating_costs.marketing IS '营销成本（CNY）';
 COMMENT ON COLUMN operating_costs.logistics IS '物流成本（CNY）';
 COMMENT ON COLUMN operating_costs.utilities IS '水电等公用事业成本（CNY）';

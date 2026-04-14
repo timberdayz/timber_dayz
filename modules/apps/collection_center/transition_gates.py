@@ -23,32 +23,102 @@ class GateResult:
     screenshot_path: Optional[str] = None
 
 
-def evaluate_login_ready(
+@dataclass(frozen=True)
+class LoginGateEvidence:
+    detector_status: str
+    detector_confidence: float
+    auth_cookies_present: bool
+    login_form_visible: bool
+    logged_in_markers_present: bool
+    current_url: Optional[str] = None
+    matched_signal: Optional[str] = None
+    detected_by: Optional[str] = None
+
+
+def evaluate_login_gate_evidence(
     *,
-    status: str,
-    confidence: float,
-    current_url: Optional[str] = None,
-    matched_signal: Optional[str] = None,
+    platform: str,
+    evidence: LoginGateEvidence,
 ) -> GateResult:
-    normalized = str(status or "").strip().lower()
-    if normalized == "logged_in" and confidence >= 0.7:
+    normalized_status = str(evidence.detector_status or "").strip().lower()
+    normalized_url = str(evidence.current_url or "").strip().lower()
+    login_page_markers = ("/login", "/signin", "/account/login", "redirect=")
+
+    if evidence.login_form_visible:
+        return GateResult(
+            stage="login_gate",
+            status=GateStatus.FAILED,
+            reason="login form visible",
+            confidence=evidence.detector_confidence,
+            current_url=evidence.current_url,
+            matched_signal=evidence.matched_signal,
+        )
+
+    if evidence.logged_in_markers_present:
+        return GateResult(
+            stage="login_gate",
+            status=GateStatus.READY,
+            reason="logged-in markers confirmed",
+            confidence=evidence.detector_confidence,
+            current_url=evidence.current_url,
+            matched_signal=evidence.matched_signal,
+        )
+
+    if (
+        normalized_status == "logged_in"
+        and evidence.auth_cookies_present
+        and not any(marker in normalized_url for marker in login_page_markers)
+    ):
+        return GateResult(
+            stage="login_gate",
+            status=GateStatus.READY,
+            reason="cookie-backed session confirmed",
+            confidence=evidence.detector_confidence,
+            current_url=evidence.current_url,
+            matched_signal=evidence.matched_signal,
+        )
+
+    if normalized_status == "logged_in" and evidence.detector_confidence >= 0.7:
         return GateResult(
             stage="login_gate",
             status=GateStatus.READY,
             reason="login confirmed",
-            confidence=confidence,
-            current_url=current_url,
-            matched_signal=matched_signal,
+            confidence=evidence.detector_confidence,
+            current_url=evidence.current_url,
+            matched_signal=evidence.matched_signal,
         )
 
     return GateResult(
         stage="login_gate",
         status=GateStatus.FAILED,
         reason="login not confirmed",
-        confidence=confidence,
+        confidence=evidence.detector_confidence,
+        current_url=evidence.current_url,
+        matched_signal=evidence.matched_signal,
+    )
+
+
+def evaluate_login_ready(
+    *,
+    status: str,
+    confidence: float,
+    current_url: Optional[str] = None,
+    matched_signal: Optional[str] = None,
+    detected_by: Optional[str] = None,
+) -> GateResult:
+    normalized = str(status or "").strip().lower()
+    normalized_detector = str(detected_by or "").strip().lower()
+    evidence = LoginGateEvidence(
+        detector_status=status,
+        detector_confidence=confidence,
+        auth_cookies_present=normalized == "logged_in" and normalized_detector == "cookie",
+        login_form_visible=normalized == "not_logged_in" and normalized_detector == "element",
+        logged_in_markers_present=normalized == "logged_in" and normalized_detector == "element",
         current_url=current_url,
         matched_signal=matched_signal,
+        detected_by=detected_by,
     )
+    return evaluate_login_gate_evidence(platform="generic", evidence=evidence)
 
 
 def _allows_missing_export_file(

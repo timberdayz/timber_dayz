@@ -41,7 +41,7 @@ shop_orders AS (
 shop_costs AS (
     SELECT
         oc."店铺ID" AS shop_key,
-        SUM(COALESCE(oc.租金, 0) + COALESCE(oc.工资, 0) + COALESCE(oc.水电费, 0) + COALESCE(oc.其他成本, 0)) AS total_cost_a
+        SUM(COALESCE(oc.租金, 0) + COALESCE(oc.营销费用, 0) + COALESCE(oc.水电费, 0) + COALESCE(oc.其他成本, 0)) AS total_cost_a
     FROM a_class.operating_costs oc
     CROSS JOIN period_scope s
     WHERE oc."年月" >= to_char(s.period_start, 'YYYY-MM')

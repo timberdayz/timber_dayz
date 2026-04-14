@@ -1498,7 +1498,7 @@ async def _execute_collection_task_background_v2(
                         browser_type=p.chromium,
                         debug_mode=debug_mode,
                         runtime_manifests=runtime_manifests,
-                        session_runtime_mode="persistent_profile",
+                        session_runtime_mode="auto",
                     )
             finally:
                 if browser is not None:
@@ -1693,7 +1693,7 @@ async def _execute_collection_task_background(
                             browser_type=p.chromium,
                             debug_mode=debug_mode,
                             runtime_manifests=runtime_manifests,
-                            session_runtime_mode="persistent_profile",
+                            session_runtime_mode="auto",
                         )
 
                     task.status = result.status

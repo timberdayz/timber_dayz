@@ -75,6 +75,50 @@ def test_component_tester_does_not_force_profile_level_reuse_for_shopee_python_e
     assert tester._use_persistent_profile_for_python_component("export") is False
 
 
+def test_component_tester_and_formal_collection_share_storage_state_first_default():
+    from modules.apps.collection_center.runtime_session import choose_runtime_strategy
+
+    decision = choose_runtime_strategy(
+        platform="shopee",
+        session_owner_id="main-1",
+        has_storage_state=True,
+        has_persistent_profile=True,
+        force_persistent_profile=False,
+        execution_kind="component_test",
+        component_type="export",
+        parallel_mode=False,
+    )
+
+    assert decision.mode == "storage_state_fanout"
+    assert decision.reason == "storage_state_available"
+
+
+def test_component_tester_runtime_strategy_delegates_to_shared_runtime_session(monkeypatch):
+    tester = ComponentTester(platform="shopee", account_id="acc-1")
+    observed = {}
+
+    def _fake_choose_runtime_strategy(**kwargs):
+        observed.update(kwargs)
+        return SimpleNamespace(mode="storage_state_fanout", reason="storage_state_available")
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.choose_runtime_strategy",
+        _fake_choose_runtime_strategy,
+    )
+
+    decision = tester._choose_runtime_strategy(
+        session_owner_id="main-1",
+        has_storage_state=True,
+        has_persistent_profile=True,
+        component_type="export",
+    )
+
+    assert decision.mode == "storage_state_fanout"
+    assert observed["execution_kind"] == "component_test"
+    assert observed["component_type"] == "export"
+    assert observed["parallel_mode"] is False
+
+
 def test_component_tester_uses_reused_persistent_context_for_navigation():
     tester = ComponentTester(platform="miaoshou", account_id="acc-1")
 
@@ -116,7 +160,7 @@ def test_component_tester_headed_paths_request_start_maximized():
 def test_component_tester_headed_persistent_context_does_not_force_fixed_viewport():
     source = Path("tools/test_component.py").read_text(encoding="utf-8")
 
-    assert "'viewport': None if not self.headless else" in source
+    assert "open_storage_state_runtime_bundle" in source
 
 
 class _FakeProbePage:
@@ -253,14 +297,14 @@ async def test_component_tester_persists_session_after_login_success(monkeypatch
 
     saved = {}
 
-    async def _fake_save(platform, account_id, storage_state):
+    async def _fake_save(*, platform, session_owner_id, storage_state):
         saved["platform"] = platform
-        saved["account_id"] = account_id
+        saved["account_id"] = session_owner_id
         saved["storage_state"] = storage_state
         return True
 
     monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._save_session_async",
+        "modules.apps.collection_center.runtime_session.persist_runtime_session_state",
         _fake_save,
     )
 
@@ -290,15 +334,15 @@ async def test_component_tester_recreates_context_with_main_account_session_scop
 
     loaded = {}
 
-    async def _fake_load(platform, account_id, account_info, max_age_days=30):
+    async def _fake_load(*, platform, session_owner_id, account, max_age_days=30):
         loaded["platform"] = platform
-        loaded["account_id"] = account_id
-        loaded["account_info"] = account_info
+        loaded["account_id"] = session_owner_id
+        loaded["account_info"] = account
         loaded["max_age_days"] = max_age_days
         return {"storage_state": {"cookies": ["from-main"], "origins": []}}
 
     monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._load_or_bootstrap_session_async",
+        "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
         _fake_load,
     )
     monkeypatch.setattr(

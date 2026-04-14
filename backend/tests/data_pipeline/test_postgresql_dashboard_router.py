@@ -349,7 +349,7 @@ def test_postgresql_dashboard_router_exposes_compatibility_paths():
 
 def test_postgresql_inventory_backlog_route_returns_summary_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_inventory_backlog(self, min_days):
+        async def get_business_overview_inventory_backlog(self, min_days, limit):
             return {
                 "summary": {"total_value": 1000, "backlog_30d_value": 300},
                 "top_products": [
@@ -372,6 +372,7 @@ def test_postgresql_inventory_backlog_route_returns_summary_payload(monkeypatch)
         get_business_overview_inventory_backlog_postgresql(
             request=_make_request("/api/dashboard/business-overview/inventory-backlog"),
             days=30,
+            limit=20,
         )
     )
 
@@ -381,12 +382,39 @@ def test_postgresql_inventory_backlog_route_returns_summary_payload(monkeypatch)
     assert body["data"]["top_products"][0]["risk_level"] == "medium"
 
 
+def test_postgresql_inventory_backlog_route_forwards_limit(monkeypatch):
+    captured = {}
+
+    class _ServiceStub:
+        async def get_business_overview_inventory_backlog(self, min_days, limit):
+            captured["min_days"] = min_days
+            captured["limit"] = limit
+            return {"summary": {"total_value": 1000}, "top_products": []}
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_inventory_backlog_postgresql(
+            request=_make_request("/api/dashboard/business-overview/inventory-backlog"),
+            days=30,
+            limit=20,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert captured == {"min_days": 30, "limit": 20}
+
+
 @pytest.mark.asyncio
 async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_timeouts(monkeypatch):
     cache_calls = []
 
     class _ServiceStub:
-        async def get_business_overview_inventory_backlog(self, min_days):
+        async def get_business_overview_inventory_backlog(self, min_days, limit):
             return {"summary": {"total_value": 1000}, "top_products": []}
 
     class _CacheServiceStub:
@@ -413,13 +441,14 @@ async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_tim
     ) as client:
         response = await client.get(
             "/api/dashboard/business-overview/inventory-backlog",
-            params={"days": 30},
+            params={"days": 30, "limit": 20},
         )
 
     assert response.status_code == 200
     singleflight_call = next(call for call in cache_calls if call[0] == "get_or_set_singleflight")
     assert singleflight_call[1] == "dashboard_inventory_backlog"
     assert singleflight_call[2]["days"] == "30"
+    assert singleflight_call[2]["limit"] == "20"
     assert singleflight_call[2]["lock_ttl"] >= 60
     assert singleflight_call[2]["wait_timeout"] >= 30
 

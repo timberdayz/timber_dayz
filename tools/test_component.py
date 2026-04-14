@@ -244,6 +244,29 @@ class ComponentTester:
     def _use_persistent_profile_for_python_component(self, component_type: str) -> bool:
         return False
 
+    def _choose_runtime_strategy(
+        self,
+        *,
+        session_owner_id: str,
+        has_storage_state: bool,
+        has_persistent_profile: bool,
+        component_type: Optional[str],
+    ):
+        from modules.apps.collection_center.runtime_session import choose_runtime_strategy
+
+        return choose_runtime_strategy(
+            platform=self.platform,
+            session_owner_id=session_owner_id,
+            has_storage_state=has_storage_state,
+            has_persistent_profile=has_persistent_profile,
+            force_persistent_profile=bool(
+                session_owner_id and self._use_persistent_profile_for_python_component(component_type or "")
+            ),
+            execution_kind="component_test",
+            component_type=component_type,
+            parallel_mode=False,
+        )
+
     def _login_readiness_candidates(self, component_name: str) -> List[tuple[str, str]]:
         base_candidates: List[tuple[str, str]] = [
             ("input[type='password']", "input[type='password']"),
@@ -1283,7 +1306,13 @@ class ComponentTester:
                 if 'locale' not in context_options:
                     context_options['locale'] = 'zh-CN'
 
-                use_persistent_profile = bool(session_owner_id) and self._use_persistent_profile_for_python_component(component_type)
+                runtime_strategy = self._choose_runtime_strategy(
+                    session_owner_id=session_owner_id or str(self.account_id or ""),
+                    has_storage_state=bool(storage_state),
+                    has_persistent_profile=bool(session_owner_id),
+                    component_type=component_type,
+                )
+                use_persistent_profile = runtime_strategy.mode == "persistent_profile"
                 from modules.apps.collection_center.runtime_session import (
                     open_storage_state_runtime_bundle,
                 )

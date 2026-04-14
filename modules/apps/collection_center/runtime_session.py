@@ -195,6 +195,14 @@ def _profile_contains_state(profile_path: Path) -> bool:
         return False
 
 
+def runtime_profile_exists(platform: str, session_owner_id: str) -> bool:
+    from modules.utils.sessions.session_manager import SessionManager
+
+    manager = SessionManager()
+    profile_path = manager.get_persistent_profile_path(platform, session_owner_id)
+    return _profile_contains_state(profile_path)
+
+
 @dataclass(frozen=True)
 class RuntimeSessionScope:
     session_owner_id: str
@@ -212,6 +220,71 @@ class RuntimeContextBundle:
     context_options: Dict[str, Any] = field(default_factory=dict)
     session_owner_id: str = ""
     profile_path: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RuntimeStrategyDecision:
+    mode: str
+    reason: str
+    used_storage_state: bool
+    used_persistent_profile: bool
+    fallback_allowed: bool
+
+
+def choose_runtime_strategy(
+    *,
+    platform: str,
+    session_owner_id: str | None,
+    has_storage_state: bool,
+    has_persistent_profile: bool,
+    force_persistent_profile: bool,
+    execution_kind: str,
+    component_type: str | None,
+    parallel_mode: bool,
+) -> RuntimeStrategyDecision:
+    if force_persistent_profile:
+        return RuntimeStrategyDecision(
+            mode="persistent_profile",
+            reason="forced",
+            used_storage_state=False,
+            used_persistent_profile=True,
+            fallback_allowed=False,
+        )
+
+    if parallel_mode:
+        return RuntimeStrategyDecision(
+            mode="persistent_profile",
+            reason="parallel_bootstrap",
+            used_storage_state=False,
+            used_persistent_profile=True,
+            fallback_allowed=True,
+        )
+
+    if has_storage_state:
+        return RuntimeStrategyDecision(
+            mode="storage_state_fanout",
+            reason="storage_state_available",
+            used_storage_state=True,
+            used_persistent_profile=False,
+            fallback_allowed=bool(has_persistent_profile or session_owner_id),
+        )
+
+    if has_persistent_profile:
+        return RuntimeStrategyDecision(
+            mode="persistent_profile",
+            reason="storage_state_missing",
+            used_storage_state=False,
+            used_persistent_profile=True,
+            fallback_allowed=True,
+        )
+
+    return RuntimeStrategyDecision(
+        mode="storage_state_fanout",
+        reason="fresh_login_required",
+        used_storage_state=False,
+        used_persistent_profile=False,
+        fallback_allowed=bool(session_owner_id),
+    )
 
 
 def resolve_runtime_session_scope(
@@ -537,6 +610,7 @@ async def check_login_gate_ready(
         confidence=detection_result.confidence,
         current_url=str(getattr(page, "url", "") or ""),
         matched_signal=detection_result.matched_pattern or detection_result.detected_by,
+        detected_by=getattr(detection_result, "detected_by", None),
     )
     return gate_result.status is GateStatus.READY, gate_result
 

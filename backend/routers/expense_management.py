@@ -20,7 +20,7 @@
 
 注意:
 - 使用 a_class.operating_costs 表(中文字段名)
-- 底层兼容保留 "工资" 列名，但业务语义已统一为 "营销费用"
+- 底层物理列已迁移为 "营销费用"
 - 字段: 店铺ID, 年月, 租金, 营销费用, 水电费, 其他成本
 """
 
@@ -155,10 +155,10 @@ async def get_expense_summary(
                     "年月",
                     COUNT(DISTINCT "店铺ID") as shop_count,
                     COALESCE(SUM("租金"), 0) as total_rent,
-                    COALESCE(SUM("工资"), 0) as total_marketing_fee,
+                    COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                     COALESCE(SUM("水电费"), 0) as total_utilities,
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                    COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) as total_amount
+                    COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0) as total_amount
                 FROM a_class.operating_costs
                 WHERE "年月" = :year_month
                 GROUP BY "年月"
@@ -171,10 +171,10 @@ async def get_expense_summary(
                     "年月",
                     COUNT(DISTINCT "店铺ID") as shop_count,
                     COALESCE(SUM("租金"), 0) as total_rent,
-                    COALESCE(SUM("工资"), 0) as total_marketing_fee,
+                    COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                     COALESCE(SUM("水电费"), 0) as total_utilities,
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                    COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) as total_amount
+                    COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0) as total_amount
                 FROM a_class.operating_costs
                 GROUP BY "年月"
                 ORDER BY "年月" DESC
@@ -235,10 +235,10 @@ async def get_yearly_expense_summary(
         query = text("""
             SELECT 
                 COALESCE(SUM("租金"), 0) as total_rent,
-                COALESCE(SUM("工资"), 0) as total_marketing_fee,
+                COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                 COALESCE(SUM("水电费"), 0) as total_utilities,
                 COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) as total_amount,
+                COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0) as total_amount,
                 COUNT(DISTINCT "店铺ID") as shop_count,
                 COUNT(DISTINCT "年月") as month_count
             FROM a_class.operating_costs
@@ -316,7 +316,7 @@ async def list_expenses_by_shop(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as marketing_fee,
+                "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -427,7 +427,7 @@ async def list_expenses(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as marketing_fee,
+                "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -503,7 +503,7 @@ async def get_expense(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as marketing_fee,
+                "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -573,13 +573,13 @@ async def create_or_update_expense(
         # 使用UPSERT语法(ON CONFLICT DO UPDATE)
         upsert_query = text("""
             INSERT INTO a_class.operating_costs 
-                ("店铺ID", "年月", "租金", "工资", "水电费", "其他成本", "创建时间", "更新时间")
+                ("店铺ID", "年月", "租金", "营销费用", "水电费", "其他成本", "创建时间", "更新时间")
             VALUES 
                 (:shop_id, :year_month, :rent, :marketing_fee, :utilities, :other_costs, NOW(), NOW())
             ON CONFLICT ("店铺ID", "年月") 
             DO UPDATE SET 
                 "租金" = EXCLUDED."租金",
-                "工资" = EXCLUDED."工资",
+                "营销费用" = EXCLUDED."营销费用",
                 "水电费" = EXCLUDED."水电费",
                 "其他成本" = EXCLUDED."其他成本",
                 "更新时间" = NOW()
@@ -588,7 +588,7 @@ async def create_or_update_expense(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as marketing_fee,
+                "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
@@ -677,7 +677,7 @@ async def update_expense(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as marketing_fee,
+                "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs
             FROM a_class.operating_costs
@@ -708,7 +708,7 @@ async def update_expense(
             params["rent"] = float(row.rent or 0)
             
         if "marketing_fee" in update_data:
-            update_fields.append('"工资" = :marketing_fee')
+            update_fields.append('"营销费用" = :marketing_fee')
             params["marketing_fee"] = update_data["marketing_fee"]
         else:
             params["marketing_fee"] = float(row.marketing_fee or 0)
@@ -744,7 +744,7 @@ async def update_expense(
                 "店铺ID" as shop_id,
                 "年月" as year_month,
                 "租金" as rent,
-                "工资" as marketing_fee,
+                "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "其他成本" as other_costs,
                 "创建时间" as created_at,
