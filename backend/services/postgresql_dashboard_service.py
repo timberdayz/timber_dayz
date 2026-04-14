@@ -416,6 +416,30 @@ def _resolve_store_analysis_window(granularity: str, target_date: str) -> tuple[
     raise ValueError("granularity must be one of daily/weekly/monthly/quarterly/yearly")
 
 
+def _previous_store_analysis_anchor(granularity: str, target_date: str) -> str:
+    period_start = _normalize_period_start(target_date)
+    normalized_granularity = str(granularity or "").strip().lower()
+    if normalized_granularity == "daily":
+        return (period_start - timedelta(days=1)).isoformat()
+    if normalized_granularity == "weekly":
+        return (period_start - timedelta(days=7)).isoformat()
+    if normalized_granularity == "monthly":
+        if period_start.month == 1:
+            return f"{period_start.year - 1}-12"
+        return f"{period_start.year}-{period_start.month - 1:02d}"
+    if normalized_granularity == "quarterly":
+        quarter_start = _start_of_quarter(period_start)
+        month = quarter_start.month - 3
+        year = quarter_start.year
+        if month <= 0:
+            month += 12
+            year -= 1
+        return f"{year}-{month:02d}"
+    if normalized_granularity == "yearly":
+        return str(period_start.year - 1)
+    raise ValueError("granularity must be one of daily/weekly/monthly/quarterly/yearly")
+
+
 class PostgresqlDashboardService:
     async def _fetch_rows(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         async with AsyncSessionLocal() as session:
@@ -898,6 +922,212 @@ class PostgresqlDashboardService:
             "supported_daily_mode": "hourly" if normalized_platform == "shopee" else "daily",
             "supported_long_range_mode": "monthly",
         }
+
+    async def get_store_analysis_shops(
+        self,
+        platform: str,
+    ) -> list[dict[str, Any]]:
+        normalized_platform = str(platform or "").strip().lower()
+        rows = await self._fetch_rows(
+            """
+            SELECT platform_code, shop_id, supported_daily_mode, supported_long_range_mode
+            FROM api.store_analysis_capability_module
+            WHERE platform_code = :platform_code
+              AND COALESCE(shop_id, '') NOT IN ('', 'none', 'unknown')
+            ORDER BY shop_id
+            """,
+            {"platform_code": normalized_platform},
+        )
+        return [
+            {
+                "platform_code": row.get("platform_code"),
+                "shop_id": row.get("shop_id"),
+                "supported_daily_mode": row.get("supported_daily_mode"),
+                "supported_long_range_mode": row.get("supported_long_range_mode"),
+            }
+            for row in rows
+        ]
+
+    async def get_store_analysis_overview(
+        self,
+        platform: str,
+        shop_id: str,
+        granularity: str,
+        target_date: str,
+    ) -> dict[str, Any]:
+        normalized_platform = str(platform or "").strip().lower()
+        normalized_shop_id = str(shop_id or "").strip()
+        requested_granularity = str(granularity or "").strip().lower()
+        period_start, period_end = _resolve_store_analysis_window(requested_granularity, target_date)
+
+        if requested_granularity in {"daily", "weekly", "monthly"}:
+            trend_query = """
+                SELECT gmv, order_count, avg_order_value, profit, target_amount, achievement_rate
+                FROM api.business_overview_shop_racing_module
+                WHERE granularity = :granularity
+                  AND period_key = :period_key
+                  AND platform_code = :platform_code
+                  AND shop_id = :shop_id
+            """
+            trend_rows = await self._fetch_rows(
+                trend_query,
+                {
+                    "granularity": requested_granularity,
+                    "period_key": period_start,
+                    "platform_code": normalized_platform,
+                    "shop_id": normalized_shop_id,
+                },
+            )
+        else:
+            trend_query = """
+                SELECT gmv, order_count, avg_order_value, profit, target_amount, achievement_rate
+                FROM api.business_overview_shop_racing_module
+                WHERE granularity = 'monthly'
+                  AND period_key >= :period_start
+                  AND period_key <= :period_end
+                  AND platform_code = :platform_code
+                  AND shop_id = :shop_id
+            """
+            trend_rows = await self._fetch_rows(
+                trend_query,
+                {
+                    "period_start": period_start,
+                    "period_end": period_end,
+                    "platform_code": normalized_platform,
+                    "shop_id": normalized_shop_id,
+                },
+            )
+
+        gmv = _sum_present_values(trend_rows, "gmv")
+        order_count_raw = _sum_present_values(trend_rows, "order_count")
+        profit = _sum_present_values(trend_rows, "profit")
+        target_amount = _sum_present_values(trend_rows, "target_amount")
+        order_count = int(order_count_raw) if order_count_raw is not None else None
+        avg_order_value = None
+        if gmv is not None and order_count is not None:
+            if order_count > 0:
+                avg_order_value = round(gmv / order_count, 2)
+            elif order_count == 0 and gmv == 0:
+                avg_order_value = 0
+        achievement_rate = None
+        if gmv is not None and target_amount is not None:
+            if target_amount > 0:
+                achievement_rate = round(gmv * 100.0 / target_amount, 2)
+            elif target_amount == 0 and gmv == 0:
+                achievement_rate = 0
+
+        period_month = date_cls(period_start.year, period_start.month, 1)
+        operational_rows = await self._fetch_rows(
+            """
+            SELECT monthly_target, monthly_achievement_rate, time_gap, operating_result, operating_result_text
+            FROM api.business_overview_operational_metrics_module
+            WHERE period_month = :period_month
+              AND platform_code = :platform_code
+              AND shop_id = :shop_id
+            """,
+            {
+                "period_month": period_month,
+                "platform_code": normalized_platform,
+                "shop_id": normalized_shop_id,
+            },
+        )
+        operational = operational_rows[0] if operational_rows else {}
+
+        return {
+            "platform_code": normalized_platform,
+            "shop_id": normalized_shop_id,
+            "requested_granularity": requested_granularity,
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "gmv": _round_or_none(gmv, 2),
+            "order_count": order_count,
+            "avg_order_value": avg_order_value,
+            "achievement_rate": achievement_rate,
+            "profit": _round_or_none(profit, 2),
+            "monthly_target": _to_optional_float(operational.get("monthly_target")),
+            "monthly_achievement_rate": _to_optional_float(operational.get("monthly_achievement_rate")),
+            "time_gap": _to_optional_float(operational.get("time_gap")),
+            "operating_result": _to_optional_float(operational.get("operating_result")),
+            "operating_result_text": operational.get("operating_result_text"),
+        }
+
+    async def get_store_analysis_comparison(
+        self,
+        platform: str,
+        shop_id: str,
+        granularity: str,
+        target_date: str,
+    ) -> dict[str, Any]:
+        previous_anchor = _previous_store_analysis_anchor(granularity, target_date)
+        current_overview = await self.get_store_analysis_overview(platform, shop_id, granularity, target_date)
+        current_summary = await self.get_store_analysis_traffic_summary(platform, shop_id, granularity, target_date)
+        previous_overview = await self.get_store_analysis_overview(platform, shop_id, granularity, previous_anchor)
+        previous_summary = await self.get_store_analysis_traffic_summary(platform, shop_id, granularity, previous_anchor)
+
+        def _metric(current: Any, previous: Any) -> dict[str, Any]:
+            cur = _to_optional_float(current)
+            prev = _to_optional_float(previous)
+            return {
+                "current": _round_or_none(cur, 2),
+                "previous": _round_or_none(prev, 2),
+                "change_pct": _change_pct(cur, prev),
+            }
+
+        return {
+            "requested_granularity": granularity,
+            "current_period_label": current_overview.get("period_start"),
+            "previous_period_label": previous_overview.get("period_start"),
+            "metrics": {
+                "gmv": _metric(current_overview.get("gmv"), previous_overview.get("gmv")),
+                "order_count": _metric(current_overview.get("order_count"), previous_overview.get("order_count")),
+                "visitor_count": _metric(current_summary.get("visitor_count"), previous_summary.get("visitor_count")),
+                "page_views": _metric(current_summary.get("page_views"), previous_summary.get("page_views")),
+                "conversion_rate": _metric(current_summary.get("conversion_rate"), previous_summary.get("conversion_rate")),
+                "profit": _metric(current_overview.get("profit"), previous_overview.get("profit")),
+            },
+        }
+
+    async def get_store_analysis_top_products(
+        self,
+        platform: str,
+        shop_id: str,
+        granularity: str,
+        target_date: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        period_start, period_end = _resolve_store_analysis_window(granularity, target_date)
+        rows = await self._fetch_rows(
+            """
+            SELECT product_name, platform_sku, sales_amount, order_count, sales_volume, page_views, unique_visitors, conversion_rate
+            FROM mart.product_day_kpi
+            WHERE platform_code = :platform_code
+              AND shop_id = :shop_id
+              AND period_date >= :period_start
+              AND period_date <= :period_end
+            ORDER BY sales_amount DESC, order_count DESC, product_name
+            LIMIT :limit
+            """,
+            {
+                "platform_code": str(platform or "").strip().lower(),
+                "shop_id": str(shop_id or "").strip(),
+                "period_start": period_start,
+                "period_end": period_end,
+                "limit": limit,
+            },
+        )
+        return [
+            {
+                "product_name": row.get("product_name"),
+                "platform_sku": row.get("platform_sku"),
+                "sales_amount": _to_optional_float(row.get("sales_amount")),
+                "order_count": _to_optional_float(row.get("order_count")),
+                "sales_volume": _to_optional_float(row.get("sales_volume")),
+                "page_views": _to_optional_float(row.get("page_views")),
+                "unique_visitors": _to_optional_float(row.get("unique_visitors")),
+                "conversion_rate": _to_optional_float(row.get("conversion_rate")),
+            }
+            for row in rows
+        ]
 
     async def get_store_analysis_traffic_summary(
         self,
