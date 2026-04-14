@@ -186,3 +186,126 @@ async def test_list_files_marks_template_as_update_required_when_headers_changed
     assert file_row["template_status"] == "update_required"
     assert file_row["template_update_required"] is True
     assert "匹配率: 61.5%" in file_row["update_reason"]
+
+
+@pytest.mark.asyncio
+async def test_list_files_marks_file_as_parse_failed_when_template_status_evaluation_cannot_read_file(
+    file_list_client,
+    monkeypatch,
+    tmp_path,
+):
+    client, session_factory = file_list_client
+
+    excel_path = tmp_path / "miaoshou_inventory_snapshot_20260413_232430.xls"
+    excel_path.write_text("placeholder", encoding="utf-8")
+
+    async with session_factory() as session:
+        session.add(
+            FieldMappingTemplate(
+                platform="miaoshou",
+                data_domain="inventory",
+                granularity="snapshot",
+                sub_domain=None,
+                template_name="miaoshou_inventory__snapshot_v1",
+                version=1,
+                status="published",
+                header_row=0,
+                header_columns=["SKU", "库存"],
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        session.add(
+            CatalogFile(
+                file_path=str(excel_path),
+                file_name=excel_path.name,
+                source="data/raw",
+                platform_code="miaoshou",
+                source_platform="miaoshou",
+                data_domain="inventory",
+                granularity="snapshot",
+                sub_domain=None,
+                status="pending",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    class _BrokenExecutorManager:
+        async def run_cpu_intensive(self, *args, **kwargs):
+            raise ValueError("无法读取大型.xls文件(10.96MB),文件可能损坏。建议:用Excel重新导出为标准.xlsx格式。")
+
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.get_executor_manager",
+        lambda: _BrokenExecutorManager(),
+    )
+
+    response = await client.get(
+        "/api/data-sync/files",
+        params={"platform": "miaoshou", "domain": "inventory", "granularity": "snapshot"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    file_row = payload["data"]["files"][0]
+    assert file_row["has_template"] is True
+    assert file_row["template_status"] == "parse_failed"
+    assert file_row["template_update_required"] is False
+    assert "无法读取大型.xls文件" in file_row["update_reason"]
+
+
+@pytest.mark.asyncio
+async def test_list_files_marks_missing_file_as_file_missing_when_catalog_path_does_not_exist(
+    file_list_client,
+    tmp_path,
+):
+    client, session_factory = file_list_client
+
+    missing_path = tmp_path / "missing_inventory_snapshot.xls"
+
+    async with session_factory() as session:
+        session.add(
+            FieldMappingTemplate(
+                platform="miaoshou",
+                data_domain="inventory",
+                granularity="snapshot",
+                sub_domain=None,
+                template_name="miaoshou_inventory__snapshot_v1",
+                version=1,
+                status="published",
+                header_row=0,
+                header_columns=["SKU", "库存"],
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        session.add(
+            CatalogFile(
+                file_path=str(missing_path),
+                file_name=missing_path.name,
+                source="data/raw",
+                platform_code="miaoshou",
+                source_platform="miaoshou",
+                data_domain="inventory",
+                granularity="snapshot",
+                sub_domain=None,
+                status="failed",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    response = await client.get(
+        "/api/data-sync/files",
+        params={"platform": "miaoshou", "domain": "inventory", "granularity": "snapshot", "status": "failed"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    file_row = payload["data"]["files"][0]
+    assert file_row["has_template"] is True
+    assert file_row["template_status"] == "file_missing"
+    assert file_row["template_update_required"] is False
+    assert "文件不存在" in file_row["update_reason"]

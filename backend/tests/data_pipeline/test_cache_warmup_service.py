@@ -31,8 +31,8 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
             called.append(("traffic_ranking", granularity, target_date, dimension))
             return []
 
-        async def get_business_overview_inventory_backlog(self, min_days=30):
-            called.append(("inventory_backlog", min_days))
+        async def get_business_overview_inventory_backlog(self, min_days, limit):
+            called.append(("inventory_backlog", min_days, limit))
             return []
 
         async def get_business_overview_operational_metrics(self, month, platform):
@@ -60,6 +60,7 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
     assert len(stored) == 7
     assert any(item[0] == "dashboard_kpi" for item in stored)
     assert any(call[0] == "kpi" for call in called)
+    assert ("inventory_backlog", 30, 20) in called
     assert any(call[0] == "clearance_ranking" for call in called)
 
 

@@ -131,6 +131,27 @@ async def test_postgresql_dashboard_service_inventory_backlog_honors_limit(monke
     assert result["top_products"][-1]["rank"] == 20
 
 
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_inventory_backlog_defaults_to_board_limit(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_summary():
+        return {"total_value": 1000}
+
+    async def fake_ranked_rows(*, source_table, min_days, limit):
+        assert source_table == "api.business_overview_inventory_backlog_module"
+        assert min_days == 30
+        assert limit == 20
+        return [{"rank": 1}]
+
+    monkeypatch.setattr(service, "_load_inventory_backlog_summary", fake_summary)
+    monkeypatch.setattr(service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows)
+
+    result = await service.get_business_overview_inventory_backlog(min_days=30)
+
+    assert result["top_products"] == [{"rank": 1}]
+
+
 def test_get_postgresql_dashboard_service_returns_singleton():
     service_a = get_postgresql_dashboard_service()
     service_b = get_postgresql_dashboard_service()
@@ -1240,16 +1261,18 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
             )
             await session.commit()
 
-        async with session_factory() as session:
-            for target in (
-                "mart.shop_day_kpi",
-                "mart.shop_week_kpi",
-                "mart.shop_month_kpi",
-                "mart.platform_month_kpi",
-                "api.business_overview_kpi_module",
-            ):
-                await execute_sql_target(session, target)
-            await session.commit()
+            async with session_factory() as session:
+                for target in (
+                    "mart.shop_day_kpi",
+                    "mart.shop_week_kpi",
+                    "semantic.fact_orders_monthly_atomic",
+                    "semantic.fact_analytics_monthly_atomic",
+                    "mart.shop_month_kpi",
+                    "mart.platform_month_kpi",
+                    "api.business_overview_kpi_module",
+                ):
+                    await execute_sql_target(session, target)
+                await session.commit()
 
         monkeypatch.setattr(
             "backend.services.postgresql_dashboard_service.AsyncSessionLocal",

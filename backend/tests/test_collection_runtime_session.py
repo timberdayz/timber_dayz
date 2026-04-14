@@ -228,6 +228,34 @@ async def test_build_runtime_context_options_uses_storage_state_when_provided(
     assert options["storage_state"] == {"cookies": [{"name": "a"}], "origins": []}
 
 
+@pytest.mark.asyncio
+async def test_build_runtime_context_options_drops_fixed_viewport_in_headed_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session._get_fingerprint_context_options_async",
+        AsyncMock(
+            return_value={
+                "locale": "zh-CN",
+                "viewport": {"width": 2880, "height": 1800},
+                "accept_downloads": True,
+            }
+        ),
+    )
+
+    options = await build_runtime_context_options(
+        platform="shopee",
+        session_owner_id="main-1",
+        account={
+            "login_url": "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"
+        },
+        headless=False,
+    )
+
+    assert options["locale"] == "zh-CN"
+    assert options["viewport"] is None
+
+
 def test_build_runtime_login_gate_probe_urls_uses_homepage_then_login_url() -> None:
     urls = build_runtime_login_gate_probe_urls(
         platform="tiktok",

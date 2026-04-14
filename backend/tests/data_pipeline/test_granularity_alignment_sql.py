@@ -19,13 +19,17 @@ def test_shop_week_kpi_does_not_fallback_to_daily():
 
 def test_shop_month_kpi_does_not_fallback_to_daily():
     sql_text = _read_sql("sql/mart/shop_month_kpi.sql")
+    orders_sql_text = _read_sql("sql/semantic/orders_monthly_atomic.sql")
+    analytics_sql_text = _read_sql("sql/semantic/analytics_monthly_atomic.sql")
 
-    assert "fact_shopee_orders_monthly" in sql_text
-    assert "fact_tiktok_orders_daily" not in sql_text
-    assert "fact_miaoshou_orders_weekly" not in sql_text
-    assert "fact_shopee_analytics_monthly" in sql_text
-    assert "fact_tiktok_analytics_daily" not in sql_text
-    assert "fact_miaoshou_analytics_weekly" not in sql_text
+    assert "semantic.fact_orders_monthly_atomic" in sql_text
+    assert "semantic.fact_analytics_monthly_atomic" in sql_text
+    assert "fact_shopee_orders_monthly" in orders_sql_text
+    assert "fact_tiktok_orders_daily" not in orders_sql_text
+    assert "fact_miaoshou_orders_weekly" not in orders_sql_text
+    assert "fact_shopee_analytics_monthly" in analytics_sql_text
+    assert "fact_tiktok_analytics_daily" not in analytics_sql_text
+    assert "fact_miaoshou_analytics_weekly" not in analytics_sql_text
 
 
 def test_shop_week_kpi_preserves_missing_metrics_without_forcing_zero():
@@ -209,6 +213,8 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     """
                 )
             )
+            await execute_sql_target(session, "semantic.fact_orders_monthly_atomic")
+            await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic")
             await execute_sql_target(session, "mart.shop_month_kpi")
             await session.commit()
 

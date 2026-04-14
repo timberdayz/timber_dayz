@@ -326,6 +326,30 @@ v4.6.0新增：独立的数据同步系统
               </el-tag>
             </el-tooltip>
             <el-tag
+              v-else-if="row.template_status === 'file_missing'"
+              type="warning"
+              size="small"
+            >
+              <el-icon><Warning /></el-icon>
+              文件缺失
+            </el-tag>
+            <el-tag
+              v-else-if="row.template_status === 'parse_failed' && row.update_reason"
+              type="danger"
+              size="small"
+            >
+              <el-icon><Warning /></el-icon>
+              文件异常
+            </el-tag>
+            <el-tag
+              v-else-if="row.template_status === 'parse_failed'"
+              type="danger"
+              size="small"
+            >
+              <el-icon><Warning /></el-icon>
+              文件异常
+            </el-tag>
+            <el-tag
               v-else-if="row.template_status === 'update_required'"
               type="danger"
               size="small"

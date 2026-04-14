@@ -17,6 +17,7 @@ import uuid
 from modules.core.logger import get_logger
 from modules.core.db import ComponentTestHistory
 from backend.services.encryption_service import get_encryption_service
+from backend.services.platform_login_entry_service import normalize_main_account_login_url
 
 logger = get_logger(__name__)
 
@@ -50,25 +51,22 @@ class ComponentTestService:
             )
             raise ValueError("密码解密失败,请检查账号配置")
         
-        # 规范化 login_url：仅保留 origin（去掉 path/query），避免 ?redirect= 导致 goto 超时
-        login_url = account.login_url or ""
-        if login_url and "?" in login_url:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(login_url)
-                if parsed.netloc:
-                    login_url = f"{parsed.scheme or 'https'}://{parsed.netloc}"
-            except Exception as e:
-                logger.warning(f"Normalize login_url failed, use raw: {e}")
+        platform = getattr(account, "platform", None)
+        raw_login_url = getattr(account, "login_url", None)
+        try:
+            login_url = normalize_main_account_login_url(platform, raw_login_url)
+        except Exception as e:
+            logger.warning(f"Normalize login_url failed, use raw: {e}")
+            login_url = raw_login_url or ""
         account_info = {
             'account_id': getattr(account, 'account_id', None) or getattr(account, 'shop_account_id', None),
             'shop_account_id': getattr(account, 'shop_account_id', None) or getattr(account, 'account_id', None),
             'main_account_id': getattr(account, 'main_account_id', None) or getattr(account, 'parent_account', None) or '',
-            'platform': getattr(account, 'platform', None),
+            'platform': platform,
             'username': account.username,
             'password': plaintext_password,  # 使用明文密码
             'store_name': account.store_name,
-            'login_url': login_url or account.login_url,
+            'login_url': login_url or raw_login_url,
             'email': getattr(account, 'email', None) or '',
             'phone': getattr(account, 'phone', None) or '',
             'region': getattr(account, 'region', None) or '',

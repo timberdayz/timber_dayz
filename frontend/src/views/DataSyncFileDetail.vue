@@ -34,7 +34,15 @@ v4.6.0新增：独立的数据同步系统
           {{ fileInfo.sub_domain || "N/A" }}
         </el-descriptions-item>
         <el-descriptions-item label="模板状态">
-          <el-tag v-if="fileInfo.has_template" type="success" size="small">
+          <el-tag v-if="fileInfo.template_status === 'file_missing'" type="warning" size="small">
+            <el-icon><Warning /></el-icon>
+            文件缺失
+          </el-tag>
+          <el-tag v-else-if="fileInfo.template_status === 'parse_failed'" type="danger" size="small">
+            <el-icon><Warning /></el-icon>
+            文件异常
+          </el-tag>
+          <el-tag v-else-if="fileInfo.has_template" type="success" size="small">
             <el-icon><Check /></el-icon>
             有模板 ({{ fileInfo.template_name }})
           </el-tag>

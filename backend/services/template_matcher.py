@@ -78,11 +78,16 @@ class TemplateMatcher:
         data_domain: str,
         columns: List[str],
     ) -> List[str]:
-        if data_domain and str(data_domain).lower() == "orders":
-            return list(columns)
-
         currency_extractor = get_currency_extractor()
-        return currency_extractor.normalize_field_list(columns)
+        normalized: List[str] = []
+        for column in columns:
+            field_name = str(column)
+            currency_code = currency_extractor.extract_currency_code(field_name)
+            if currency_code:
+                normalized.append(currency_extractor.normalize_field_name(field_name))
+            else:
+                normalized.append(field_name)
+        return normalized
 
     def _apply_header_aliases(
         self,

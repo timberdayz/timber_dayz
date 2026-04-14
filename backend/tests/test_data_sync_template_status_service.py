@@ -30,17 +30,16 @@ async def template_status_session_factory(tmp_path):
         await engine.dispose()
 
 
-def test_tiktok_orders_monthly_alias_registry_maps_old_and_new_labels():
+def test_tiktok_orders_monthly_alias_registry_does_not_whitelist_business_field_renames():
     from backend.services.template_alias_registry import get_header_alias_mapping
 
     mapping = get_header_alias_mapping("tiktok", "orders", "monthly")
 
-    assert mapping["TikTok Shop平台佣金"] == "TikTok 平台佣金"
-    assert mapping["马来西亚税费SST"] == "SST"
+    assert mapping == {}
 
 
 @pytest.mark.asyncio
-async def test_detect_header_changes_reports_semantic_match_for_alias_only_drift(
+async def test_detect_header_changes_reports_update_required_for_tiktok_business_field_rename(
     template_status_session_factory,
 ):
     from backend.services.template_matcher import TemplateMatcher
@@ -83,14 +82,22 @@ async def test_detect_header_changes_reports_semantic_match_for_alias_only_drift
         )
 
     assert result["is_exact_match"] is False
-    assert result["is_semantic_match"] is True
-    assert result["normalized_added_fields"] == []
-    assert result["normalized_removed_fields"] == []
+    assert result["is_semantic_match"] is False
+    assert "TikTok 平台佣金" in result["added_fields"]
+    assert "TikTok Shop平台佣金" in result["removed_fields"]
 
 
+@pytest.mark.parametrize(
+    "current_columns",
+    [
+        ["订单编号", "利润(RMB)", "买家支付(USD)"],
+        ["订单编号", "RMB利润", "USD买家支付"],
+        ["订单编号", "利润RMB明细", "买家USD支付"],
+    ],
+)
 @pytest.mark.asyncio
-async def test_template_status_service_returns_alias_only_for_semantic_match(
-    template_status_session_factory, tmp_path
+async def test_template_status_service_treats_currency_code_differences_as_ready(
+    template_status_session_factory, tmp_path, current_columns
 ):
     from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
 
@@ -108,7 +115,7 @@ async def test_template_status_service_returns_alias_only_for_semantic_match(
             version=2,
             status="published",
             header_row=1,
-            header_columns=["订单编号", "TikTok Shop平台佣金", "马来西亚税费SST"],
+            header_columns=["订单编号", "利润", "买家支付"],
             created_at=now,
             updated_at=now,
         )
@@ -132,10 +139,10 @@ async def test_template_status_service_returns_alias_only_for_semantic_match(
         status = await service.evaluate_catalog_file(
             catalog_file,
             template=template,
-            current_columns=["订单编号", "TikTok 平台佣金", "SST"],
+            current_columns=current_columns,
         )
 
-    assert status["template_status"] == "alias_only"
+    assert status["template_status"] == "ready"
     assert status["template_update_required"] is False
     assert status["semantic_match"] is True
 
@@ -185,6 +192,58 @@ async def test_template_status_service_returns_update_required_for_true_structur
             catalog_file,
             template=template,
             current_columns=["订单编号", "TikTok 平台佣金", "全新业务字段"],
+        )
+
+    assert status["template_status"] == "update_required"
+    assert status["template_update_required"] is True
+    assert status["semantic_match"] is False
+
+
+@pytest.mark.asyncio
+async def test_template_status_service_requires_update_for_tiktok_business_field_rename(
+    template_status_session_factory, tmp_path
+):
+    from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
+
+    file_path = tmp_path / "tiktok_orders_monthly.xlsx"
+    file_path.write_text("demo", encoding="utf-8")
+    now = datetime.now(timezone.utc)
+
+    async with template_status_session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="tiktok",
+            data_domain="orders",
+            granularity="monthly",
+            sub_domain=None,
+            template_name="tiktok_orders__monthly_v2",
+            version=2,
+            status="published",
+            header_row=1,
+            header_columns=["订单编号", "TikTok Shop平台佣金", "马来西亚税费SST"],
+            created_at=now,
+            updated_at=now,
+        )
+        catalog_file = CatalogFile(
+            file_path=str(file_path),
+            file_name=file_path.name,
+            source="data/raw",
+            platform_code="tiktok",
+            source_platform="tiktok",
+            data_domain="orders",
+            granularity="monthly",
+            status="pending",
+            first_seen_at=now,
+        )
+        session.add_all([template, catalog_file])
+        await session.commit()
+        await session.refresh(template)
+        await session.refresh(catalog_file)
+
+        service = DataSyncTemplateStatusService(session)
+        status = await service.evaluate_catalog_file(
+            catalog_file,
+            template=template,
+            current_columns=["订单编号", "TikTok 平台佣金", "SST"],
         )
 
     assert status["template_status"] == "update_required"

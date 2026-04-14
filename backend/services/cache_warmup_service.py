@@ -212,7 +212,10 @@ async def _query_postgresql_dashboard(service, target_name: str, params: Dict[st
         )
     if target_name == "business_overview_inventory_backlog":
         days = params.get("days")
-        return await service.get_business_overview_inventory_backlog(min_days=int(days) if days else 30)
+        return await service.get_business_overview_inventory_backlog(
+            min_days=int(days) if days else 30,
+            limit=20,
+        )
     if target_name == "business_overview_operational_metrics":
         return await service.get_business_overview_operational_metrics(
             month=params.get("month"),

@@ -19,6 +19,33 @@ logger = get_logger(__name__)
 
 class ExcelParser:
     """智能Excel解析器"""
+
+    @staticmethod
+    def _try_pandas_engines(
+        file_path: Path,
+        *,
+        engines: list[str],
+        header: Optional[int],
+        nrows: Optional[int],
+        **kwargs,
+    ) -> Optional[pd.DataFrame]:
+        last_error = None
+        for engine in engines:
+            try:
+                logger.info(f"尝试使用{engine}引擎读取: {file_path.name}")
+                return pd.read_excel(
+                    file_path,
+                    engine=engine,
+                    header=header,
+                    nrows=nrows,
+                    **kwargs,
+                )
+            except Exception as exc:
+                last_error = exc
+                logger.debug(f"{engine}读取失败: {type(exc).__name__}: {str(exc)[:100]}")
+        if last_error is not None:
+            logger.debug(f"pandas引擎均失败: {type(last_error).__name__}")
+        return None
     
     @staticmethod
     def detect_file_format(file_path: Union[str, Path]) -> str:
@@ -95,20 +122,30 @@ class ExcelParser:
         # Step 2: 根据格式选择解析方法
         if real_format == 'xlsx':
             # 标准XLSX文件(ZIP格式)
-            logger.debug("使用openpyxl引擎读取.xlsx")
-            # [*] v4.19.8修复:移除engine_kwargs避免参数冲突(pandas会自动处理读取模式)
-            df = pd.read_excel(
+            df = ExcelParser._try_pandas_engines(
                 file_path,
-                engine='openpyxl',
+                engines=['calamine', 'openpyxl'],
                 header=header,
                 nrows=nrows,
-                **kwargs
+                **kwargs,
             )
+            if df is None:
+                raise ValueError(f"无法读取.xlsx文件: {file_path.name}")
             
         elif real_format == 'xlsx_with_ole':
             # OLE格式但扩展名为.xlsx(Excel 97-2003含图片文件,妙手特殊导出)
             logger.warning(f"检测到OLE格式XLSX文件(可能含大量图片),文件大小: {file_path.stat().st_size / (1024*1024):.2f}MB")
-            
+            df = ExcelParser._try_pandas_engines(
+                file_path,
+                engines=['calamine'],
+                header=header,
+                nrows=nrows,
+                **kwargs,
+            )
+            if df is not None:
+                logger.info(f"calamine成功读取OLE格式XLSX: {len(df)}行 x {len(df.columns)}列")
+                return df
+             
             # 方案:尝试xlrd读取OLE格式,忽略图片
             try:
                 import xlrd
@@ -145,7 +182,17 @@ class ExcelParser:
         elif real_format == 'xls':
             # OLE二进制格式的.xls文件
             logger.warning(f"检测到.xls格式文件(OLE二进制),但扩展名可能是.xlsx")
-            
+            df = ExcelParser._try_pandas_engines(
+                file_path,
+                engines=['calamine'],
+                header=header,
+                nrows=nrows,
+                **kwargs,
+            )
+            if df is not None:
+                logger.info(f"calamine成功读取.xls文件: {len(df)}行 x {len(df.columns)}列")
+                return df
+             
             # 尝试使用xlrd(可能版本不兼容或文件损坏)
             try:
                 import xlrd
@@ -174,14 +221,16 @@ class ExcelParser:
                 # [*] 新增兜底策略1:尝试用openpyxl强制读取(忽略扩展名)
                 try:
                     logger.info("尝试openpyxl强制读取.xls文件(可能是xlsx伪装)")
-                    df = pd.read_excel(
+                    df = ExcelParser._try_pandas_engines(
                         file_path,
-                        engine='openpyxl',
+                        engines=['openpyxl'],
                         header=header,
-                        nrows=nrows
+                        nrows=nrows,
                     )
-                    logger.info(f"openpyxl成功读取: {len(df)}行 x {len(df.columns)}列")
-                    return df
+                    if df is not None:
+                        logger.info(f"openpyxl成功读取: {len(df)}行 x {len(df.columns)}列")
+                        return df
+                    raise ValueError("openpyxl读取失败")
                 except Exception as openpyxl_err:
                     logger.debug(f"openpyxl失败: {type(openpyxl_err).__name__}: {str(openpyxl_err)[:100]}")
                 

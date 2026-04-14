@@ -48,19 +48,44 @@ def test_shop_month_kpi_sql_asset():
         "sql/mart/shop_month_kpi.sql",
         "CREATE OR REPLACE VIEW mart.shop_month_kpi AS",
         (
-            "b_class.fact_shopee_orders_monthly",
-            "b_class.fact_tiktok_orders_monthly",
-            "b_class.fact_miaoshou_orders_monthly",
-            "b_class.fact_shopee_analytics_monthly",
-            "b_class.fact_tiktok_analytics_monthly",
-            "b_class.fact_miaoshou_analytics_monthly",
-            "core.platform_accounts",
+            "semantic.fact_orders_monthly_atomic",
+            "semantic.fact_analytics_monthly_atomic",
             "gmv",
             "order_count",
             "visitor_count",
             "avg_order_value",
             "attach_rate",
             "profit",
+        ),
+    )
+
+
+def test_orders_monthly_atomic_sql_asset():
+    _assert_sql_asset(
+        "sql/semantic/orders_monthly_atomic.sql",
+        "CREATE OR REPLACE VIEW semantic.fact_orders_monthly_atomic AS",
+        (
+            "b_class.fact_shopee_orders_monthly",
+            "b_class.fact_tiktok_orders_monthly",
+            "b_class.fact_miaoshou_orders_monthly",
+            "core.platform_accounts",
+            "paid_amount",
+            "product_quantity",
+            "profit",
+        ),
+    )
+
+
+def test_analytics_monthly_atomic_sql_asset():
+    _assert_sql_asset(
+        "sql/semantic/analytics_monthly_atomic.sql",
+        "CREATE OR REPLACE VIEW semantic.fact_analytics_monthly_atomic AS",
+        (
+            "b_class.fact_shopee_analytics_monthly",
+            "b_class.fact_tiktok_analytics_monthly",
+            "b_class.fact_miaoshou_analytics_monthly",
+            "visitor_count",
+            "page_views",
         ),
     )
 

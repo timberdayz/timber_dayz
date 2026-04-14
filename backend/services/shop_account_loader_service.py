@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.encryption_service import get_encryption_service
+from backend.services.platform_login_entry_service import normalize_main_account_login_url
 from modules.core.db import MainAccount, ShopAccount, ShopAccountCapability
 from modules.core.logger import get_logger
 
@@ -21,16 +22,19 @@ class ShopAccountLoaderService:
     def _decrypt_password(self, encrypted: str) -> str:
         return self.encryption_service.decrypt_password(encrypted)
 
-    def _normalize_login_url(self, login_url: Optional[str]) -> str:
+    def _normalize_login_url(self, platform: str, login_url: Optional[str]) -> str:
         raw = str(login_url or "").strip()
         if not raw:
             return ""
         try:
-            parsed = urlparse(raw)
-            if parsed.netloc:
-                return f"{parsed.scheme or 'https'}://{parsed.netloc}"
+            return normalize_main_account_login_url(platform, raw)
         except Exception:
-            pass
+            try:
+                parsed = urlparse(raw)
+                if parsed.netloc:
+                    return f"{parsed.scheme or 'https'}://{parsed.netloc}"
+            except Exception:
+                pass
         return raw
 
     def _build_payload(
@@ -40,7 +44,10 @@ class ShopAccountLoaderService:
         capabilities: dict[str, bool],
     ) -> Dict[str, Any]:
         plaintext_password = self._decrypt_password(main_account.password_encrypted)
-        normalized_login_url = self._normalize_login_url(main_account.login_url)
+        normalized_login_url = self._normalize_login_url(
+            main_account.platform,
+            main_account.login_url,
+        )
         compat_account = {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,

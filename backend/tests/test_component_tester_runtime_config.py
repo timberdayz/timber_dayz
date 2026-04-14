@@ -162,6 +162,8 @@ def test_component_tester_headed_persistent_context_does_not_force_fixed_viewpor
     source = Path("tools/test_component.py").read_text(encoding="utf-8")
 
     assert "open_storage_state_runtime_bundle" in source
+    assert "has_persistent_profile=bool(session_owner_id)" not in source
+    assert "runtime_profile_exists(" in source
 
 
 class _FakeProbePage:
@@ -179,7 +181,7 @@ async def test_component_tester_primes_login_gate_page_when_storage_state_starts
 
     await tester._prime_page_for_login_gate(
         page,
-        {"login_url": "https://seller.shopee.cn"},
+        {"login_url": "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"},
     )
 
     page.goto.assert_awaited_once_with(
@@ -195,7 +197,10 @@ async def test_component_tester_primes_login_gate_page_skips_when_already_on_rea
     tester = ComponentTester(platform="shopee", account_id="acc-1")
     page = _FakeProbePage("https://seller.shopee.cn/")
 
-    await tester._prime_page_for_login_gate(page, {"login_url": "https://seller.shopee.cn"})
+    await tester._prime_page_for_login_gate(
+        page,
+        {"login_url": "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"},
+    )
 
     page.goto.assert_not_awaited()
     assert page.wait_for_load_state.await_count >= 2

@@ -176,6 +176,11 @@ def test_collection_tasks_detail_drawer_shows_runtime_metadata():
     assert "login_gate_reason" in text
     assert "runtime_strategy_reason" in text
     assert "session_source" in text
+    assert "getRuntimeSessionModeLabel" in text
+    assert "getSessionSourceLabel" in text
+    assert "getRuntimeStrategyReasonLabel" in text
+    assert "已找到可复用的 storage_state" in text
+    assert "storage_state 快照" in text
 
 
 def test_account_management_does_not_offer_free_form_login_url_editing():

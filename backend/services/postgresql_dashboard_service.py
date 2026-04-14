@@ -965,7 +965,7 @@ class PostgresqlDashboardService:
     async def get_business_overview_inventory_backlog(
         self,
         min_days: int = 30,
-        limit: int = 100,
+        limit: int = 20,
     ) -> dict[str, Any]:
         return {
             "summary": await self._load_inventory_backlog_summary(),

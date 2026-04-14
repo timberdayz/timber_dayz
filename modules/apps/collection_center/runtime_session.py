@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+import inspect
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -365,7 +366,11 @@ async def build_runtime_context_options(
         context_options["storage_state"] = storage_state
     if "locale" not in context_options:
         context_options["locale"] = "zh-CN"
-    if not context_options.get("viewport") and headless is not None:
+    if headless is False:
+        # Headed debugging/component-test flows should use the actual browser window size
+        # instead of an oversized fingerprint viewport that can push key UI out of view.
+        context_options["viewport"] = None
+    elif not context_options.get("viewport") and headless is not None:
         context_options["viewport"] = (
             {"width": 1920, "height": 1080} if headless else None
         )
@@ -565,7 +570,9 @@ async def _wait_for_probe_page_ready(page: Any, *, settle_ms: int = 800) -> None
         except Exception:
             continue
     if hasattr(page, "wait_for_timeout"):
-        await page.wait_for_timeout(settle_ms)
+        maybe_wait = page.wait_for_timeout(settle_ms)
+        if inspect.isawaitable(maybe_wait):
+            await maybe_wait
 
 
 async def prime_runtime_page_for_login_gate(

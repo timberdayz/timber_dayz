@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from backend.services.shop_account_loader_service import ShopAccountLoaderService
 
 
-def test_shop_account_loader_service_normalizes_login_url_to_origin():
+def test_shop_account_loader_service_uses_platform_login_entry():
     service = ShopAccountLoaderService()
     service._decrypt_password = lambda encrypted: "plain-password"
 
@@ -34,5 +34,11 @@ def test_shop_account_loader_service_normalizes_login_url_to_origin():
         {"analytics": True},
     )
 
-    assert payload["compat_account"]["login_url"] == "https://seller.shopee.cn"
-    assert payload["main_account"]["login_url"] == "https://seller.shopee.cn"
+    assert (
+        payload["compat_account"]["login_url"]
+        == "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"
+    )
+    assert (
+        payload["main_account"]["login_url"]
+        == "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"
+    )

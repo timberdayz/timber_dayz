@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+from modules.apps.collection_center.executor_v2 import CollectionExecutorV2, CollectionResult
 from modules.apps.collection_center.transition_gates import GateResult, GateStatus
 
 
@@ -419,6 +419,73 @@ async def test_executor_open_runtime_bundle_auto_falls_back_to_persistent_profil
     assert result == "persistent-bundle"
     persistent_open.assert_awaited_once()
     storage_open.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_auto_mode_launchs_browser_when_no_browser_or_page_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    launched_browser = object()
+    browser_type = type("BrowserType", (), {"launch": AsyncMock(return_value=launched_browser)})()
+
+    monkeypatch.setattr(
+        executor,
+        "_open_runtime_bundle",
+        AsyncMock(
+            return_value=type(
+                "Bundle",
+                (),
+                {
+                    "context": object(),
+                    "page": object(),
+                    "reused_session": True,
+                    "mode": "storage_state_fanout",
+                },
+            )()
+        ),
+    )
+    async def _fake_lock(**kwargs):
+        return await kwargs["operation"]()
+
+    monkeypatch.setattr(
+        executor,
+        "_run_with_main_account_session_lock",
+        AsyncMock(side_effect=_fake_lock),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_execute_shared_login_phase",
+        AsyncMock(return_value=(object(), object(), None)),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_execute_with_python_components",
+        AsyncMock(
+            return_value=CollectionResult(
+                task_id="task-1",
+                status="completed",
+                files_collected=0,
+            )
+        ),
+    )
+
+    result = await executor.execute(
+        task_id="task-1",
+        platform="miaoshou",
+        account_id="acc-1",
+        account={"username": "u", "password": "p", "main_account_id": "main-1", "shop_account_id": "acc-1"},
+        data_domains=["orders"],
+        date_range={"start": "2025-01-01", "end": "2025-01-31"},
+        granularity="daily",
+        browser=None,
+        page=None,
+        browser_type=browser_type,
+        session_runtime_mode="auto",
+    )
+
+    assert result.status == "completed"
+    browser_type.launch.assert_awaited_once()
 
 
 def test_build_runtime_launch_kwargs_uses_headed_when_debug_mode_enabled() -> None:

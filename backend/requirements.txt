@@ -28,10 +28,11 @@ redis==5.0.1
 slowapi==0.1.9
 
 # 数据处理
-pandas==2.1.4
+pandas==2.3.3
 numpy==1.24.4
 openpyxl==3.1.2
 xlrd==1.2.0
+python-calamine==0.6.2
 lxml==4.9.3
 beautifulsoup4==4.12.2
 html5lib==1.1
@@ -53,5 +54,3 @@ flake8==6.1.0
 # 性能测试和监控
 aiohttp==3.9.1
 psutil==5.9.6
-pandas==2.1.4
-numpy==1.24.4

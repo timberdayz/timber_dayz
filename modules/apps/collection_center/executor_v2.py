@@ -14,6 +14,7 @@ import asyncio
 import time
 import uuid
 import shutil
+import inspect
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Tuple, Union
@@ -1455,6 +1456,7 @@ class CollectionExecutorV2:
 
         # 获取 browser: 优先使用入参 browser, 否则从 page 取(后关闭传入的 page/context)
         browser_instance = browser
+        created_browser_instance = None
         page_context_to_close = None
         if browser_instance is None and page is not None:
             try:
@@ -1462,9 +1464,19 @@ class CollectionExecutorV2:
                 page_context_to_close = page.context
             except Exception as e:
                 logger.warning("Could not get browser from page: %s", e)
-        if browser_instance is None and str(session_runtime_mode).strip().lower() != "persistent_profile":
+        normalized_runtime_mode = str(session_runtime_mode).strip().lower()
+        if (
+            browser_instance is None
+            and normalized_runtime_mode in {"auto", "storage_state_fanout"}
+            and browser_type is not None
+        ):
+            browser_instance = await browser_type.launch(
+                **self._build_runtime_launch_kwargs(debug_mode=debug_mode)
+            )
+            created_browser_instance = browser_instance
+        if browser_instance is None and normalized_runtime_mode != "persistent_profile":
             raise ValueError("execute() requires either browser= or page= to be provided")
-        if str(session_runtime_mode).strip().lower() == "persistent_profile" and browser_type is None:
+        if normalized_runtime_mode == "persistent_profile" and browser_type is None:
             raise ValueError("execute() requires browser_type= when session_runtime_mode='persistent_profile'")
 
         try:
@@ -1942,6 +1954,13 @@ class CollectionExecutorV2:
                     await play_context.close()
             except Exception as _e:
                 logger.debug("Close play_context: %s", _e)
+            try:
+                if created_browser_instance is not None and hasattr(created_browser_instance, "close"):
+                    maybe_close = created_browser_instance.close()
+                    if inspect.isawaitable(maybe_close):
+                        await maybe_close
+            except Exception as _e:
+                logger.debug("Close created browser_instance: %s", _e)
 
     def _record_version_usage(self, component: Dict[str, Any], success: bool) -> None:
         """

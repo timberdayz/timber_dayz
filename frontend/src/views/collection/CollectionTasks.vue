@@ -360,13 +360,13 @@
               {{ getExecutionModeLabel(detailTask.actual_execution_mode) }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.runtime_session_mode" label="会话运行时">
-              {{ detailTask.runtime_session_mode }}
+              {{ getRuntimeSessionModeLabel(detailTask.runtime_session_mode) }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.session_source" label="会话来源">
               {{ getSessionSourceLabel(detailTask.session_source) }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.runtime_strategy_reason" label="会话策略原因">
-              {{ detailTask.runtime_strategy_reason }}
+              {{ getRuntimeStrategyReasonLabel(detailTask.runtime_strategy_reason) }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.login_gate_ready !== null && detailTask.login_gate_ready !== undefined" label="登录态检查">
               {{ detailTask.login_gate_ready ? '已命中复用会话' : '未命中复用会话' }}
@@ -989,13 +989,35 @@ const getExecutionModeLabel = (mode) => {
   return mode === 'headed' ? '有头模式' : '无头模式'
 }
 
+const getRuntimeSessionModeLabel = (mode) => {
+  const labels = {
+    storage_state_fanout: 'storage_state 复用',
+    persistent_profile: '持久化浏览器档案',
+    auto: '自动选择'
+  }
+  return labels[mode] || mode || '-'
+}
+
 const getSessionSourceLabel = (source) => {
   const labels = {
-    storage_state: 'storage_state',
-    persistent_profile: 'persistent_profile',
-    fresh_login: 'fresh_login'
+    storage_state: 'storage_state 快照',
+    persistent_profile: '持久化浏览器档案',
+    fresh_login: '本次重新登录'
   }
   return labels[source] || source || '-'
+}
+
+const getRuntimeStrategyReasonLabel = (reason) => {
+  const labels = {
+    storage_state_available: '已找到可复用的 storage_state',
+    storage_state_missing: '未找到可复用的 storage_state，回退到 profile',
+    fresh_login_required: '无可复用会话，需要重新登录',
+    parallel_bootstrap: '并行模式先做主会话引导',
+    persistent_profile: '固定使用持久化浏览器档案',
+    storage_state_fanout: '固定使用 storage_state 复用',
+    forced: '已强制指定会话运行策略'
+  }
+  return labels[reason] || reason || '-'
 }
 
 const MAIN_ACCOUNT_COORDINATION_STEP_LABELS = {

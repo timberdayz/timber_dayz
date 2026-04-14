@@ -64,6 +64,41 @@ def test_prepare_account_info_preserves_phone_email_and_shop_region(monkeypatch)
     assert account_info["shop_region"] == "SG"
 
 
+def test_prepare_account_info_uses_platform_login_entry_for_shopee(monkeypatch):
+    class _FakeAccount:
+        account_id = "shopee_ph_demo_local"
+        platform = "shopee"
+        username = "hongxikeji:main"
+        password_encrypted = "encrypted"
+        store_name = "demo.ph"
+        login_url = "https://seller.shopee.cn"
+        cookies_file = None
+        capabilities = {"products": True}
+        email = ""
+        phone = ""
+        region = "CN"
+        currency = "CNY"
+        shop_region = "PH"
+        notes = "demo"
+
+    class _FakeEncryptionService:
+        def decrypt_password(self, encrypted):  # noqa: ANN001
+            assert encrypted == "encrypted"
+            return "plain-password"
+
+    monkeypatch.setattr(
+        "backend.services.component_test_service.get_encryption_service",
+        lambda: _FakeEncryptionService(),
+    )
+
+    account_info = ComponentTestService.prepare_account_info(_FakeAccount())
+
+    assert (
+        account_info["login_url"]
+        == "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"
+    )
+
+
 def test_component_versions_router_uses_shop_account_loader_without_platform_account_fallback():
     text = (
         Path(__file__).resolve().parents[2]

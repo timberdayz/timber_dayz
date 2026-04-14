@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+from urllib.parse import urlparse
 
 # [*] 注意（2025-12-21）：
 # Windows 上 Playwright 需要 ProactorEventLoop（默认），因为需要 create_subprocess_exec
@@ -327,6 +328,13 @@ class ComponentTester:
         ).strip().rstrip("/")
         if not login_url:
             return None
+
+        try:
+            parsed = urlparse(login_url)
+            if parsed.scheme and parsed.netloc:
+                login_url = f"{parsed.scheme}://{parsed.netloc}"
+        except Exception:
+            pass
 
         if self.platform == "tiktok":
             return f"{login_url}/homepage"
@@ -1277,6 +1285,7 @@ class ComponentTester:
                         from modules.apps.collection_center.runtime_session import (
                             build_runtime_context_options,
                             load_or_bootstrap_runtime_storage_state,
+                            runtime_profile_exists,
                         )
                         storage_state = await load_or_bootstrap_runtime_storage_state(
                             platform=self.platform,
@@ -1304,7 +1313,9 @@ class ComponentTester:
                 runtime_strategy = self._choose_runtime_strategy(
                     session_owner_id=session_owner_id or str(self.account_id or ""),
                     has_storage_state=bool(storage_state),
-                    has_persistent_profile=bool(session_owner_id),
+                    has_persistent_profile=bool(
+                        session_owner_id and runtime_profile_exists(self.platform, session_owner_id)
+                    ),
                     component_type=component_type,
                 )
                 use_persistent_profile = runtime_strategy.mode == "persistent_profile"

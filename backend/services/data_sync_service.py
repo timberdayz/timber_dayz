@@ -179,6 +179,24 @@ class DataSyncService:
             return f"新增{len(added_fields)}个字段, 删除{len(removed_fields)}个字段 (匹配率: {match_rate:.1f}%)"
         return f"字段顺序变化 (匹配率: {match_rate:.1f}%)"
 
+    @staticmethod
+    def _format_header_match_rate(match_rate: Any) -> str:
+        try:
+            value = float(match_rate or 0)
+        except Exception:
+            value = 0.0
+        return f"{value:.1f}%"
+
+    @staticmethod
+    def _is_blocking_header_change(header_changes: Dict[str, Any]) -> bool:
+        if not header_changes.get("detected"):
+            return False
+        if header_changes.get("is_exact_match", False):
+            return False
+        if header_changes.get("is_semantic_match", False):
+            return False
+        return True
+
     async def evaluate_catalog_file_template_status(
         self,
         catalog_file: CatalogFile,
@@ -214,6 +232,8 @@ class DataSyncService:
                 "semantic_match": True,
             }
 
+        parse_error: Optional[Exception] = None
+        missing_file = False
         try:
             file_path = self._safe_resolve_path(catalog_file.file_path)
             loop = asyncio.get_running_loop()
@@ -243,6 +263,8 @@ class DataSyncService:
                 return status
             return status
         except Exception as exc:
+            parse_error = exc
+            missing_file = isinstance(exc, FileNotFoundError)
             logger.warning(
                 "[DataSync] evaluate template status failed for %s: %s",
                 catalog_file.file_name,
@@ -250,16 +272,18 @@ class DataSyncService:
             )
 
         return {
-            "template_status": "ready",
+            "template_status": "file_missing" if missing_file else "parse_failed",
             "has_template": True,
             "template_name": template.template_name,
             "template_header_row": getattr(template, "header_row", None),
             "template_update_required": False,
-            "update_reason": None,
-            "error_code": None,
-            "should_auto_sync": True,
-            "exact_match": True,
-            "semantic_match": True,
+            "update_reason": (
+                f"文件不存在: {parse_error}" if missing_file else str(parse_error) if parse_error else "文件读取失败"
+            ),
+            "error_code": "FILE_MISSING" if missing_file else "FILE_PARSE_FAILED",
+            "should_auto_sync": False,
+            "exact_match": False,
+            "semantic_match": False,
         }
 
     async def get_file_sync_readiness(
@@ -501,10 +525,7 @@ class DataSyncService:
                     removed_fields = header_changes.get('removed_fields', [])
                     match_rate = header_changes.get('match_rate', 0)
                     
-                    # 检查是否是完全匹配(字段名和顺序都一致)
-                    is_exact_match = header_changes.get('is_exact_match', False)
-                    
-                    if not is_exact_match:
+                    if self._is_blocking_header_change(header_changes):
                         # 表头不匹配,阻止同步
                         catalog_file.status = 'failed'
                         error_reason = []
@@ -523,13 +544,13 @@ class DataSyncService:
                             f"模板={template.template_name if template else 'None'}, "
                             f"新增字段={len(added_fields)}个, "
                             f"删除字段={len(removed_fields)}个, "
-                            f"匹配率={match_rate:.1%}"
+                            f"匹配率={self._format_header_match_rate(match_rate)}"
                         )
                         
                         # [*] v4.16.0增强:构建详细的错误消息,包含文件名和变化详情
                         error_message_parts = [f"文件{catalog_file.file_name}的表头字段已变化"]
                         error_message_parts.append("; ".join(error_reason))
-                        error_message_parts.append(f"(匹配率: {match_rate:.1%})")
+                        error_message_parts.append(f"(匹配率: {self._format_header_match_rate(match_rate)})")
                         error_message = ",".join(error_message_parts) + ",请更新模板后再同步"
                         
                         self._record_status(catalog_file, "failed", f'header_changed: {"; ".join(error_reason)}')

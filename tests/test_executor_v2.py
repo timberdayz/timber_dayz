@@ -20,6 +20,7 @@ from modules.apps.collection_center.executor_v2 import (
 from modules.apps.collection_center.component_loader import ComponentLoader
 from modules.apps.collection_center.popup_handler import UniversalPopupHandler
 from modules.apps.collection_center.python_component_adapter import AdapterResult
+from modules.apps.collection_center.transition_gates import GateResult, GateStatus
 
 # 配置pytest-asyncio
 pytestmark = pytest.mark.anyio
@@ -151,6 +152,14 @@ class TestCollectionExecutorV2:
         with patch(
             "modules.apps.collection_center.executor_v2.create_adapter",
             return_value=mock_adapter,
+        ), patch(
+            "modules.apps.collection_center.runtime_session.probe_runtime_login_gate",
+            AsyncMock(
+                return_value=(
+                    False,
+                    GateResult(stage="login_gate", status=GateStatus.FAILED, reason="test-forced-login"),
+                )
+            ),
         ):
             result = await executor.execute(
                 task_id="test-task-1",
@@ -223,17 +232,26 @@ class TestCollectionExecutorV2:
             side_effect=[_LoginComponent, _OrdersExportComponent]
         )
 
-        result = await executor.execute(
-            task_id="manifest-task-1",
-            platform="shopee",
-            account_id="account-1",
-            account={"username": "test", "password": "pass"},
-            data_domains=["orders"],
-            date_range={"start": "2025-01-01", "end": "2025-01-31"},
-            granularity="daily",
-            page=mock_page,
-            runtime_manifests=runtime_manifests,
-        )
+        with patch(
+            "modules.apps.collection_center.runtime_session.probe_runtime_login_gate",
+            AsyncMock(
+                return_value=(
+                    False,
+                    GateResult(stage="login_gate", status=GateStatus.FAILED, reason="test-forced-login"),
+                )
+            ),
+        ):
+            result = await executor.execute(
+                task_id="manifest-task-1",
+                platform="shopee",
+                account_id="account-1",
+                account={"username": "test", "password": "pass"},
+                data_domains=["orders"],
+                date_range={"start": "2025-01-01", "end": "2025-01-31"},
+                granularity="daily",
+                page=mock_page,
+                runtime_manifests=runtime_manifests,
+            )
 
         assert result.status == "completed"
         assert executor.component_loader.load_python_component_from_path.call_count == 2
@@ -301,6 +319,14 @@ class TestCollectionExecutorV2:
         with patch(
             "modules.apps.collection_center.executor_v2.create_adapter",
             side_effect=AssertionError("formal runtime should not call create_adapter"),
+        ), patch(
+            "modules.apps.collection_center.runtime_session.probe_runtime_login_gate",
+            AsyncMock(
+                return_value=(
+                    False,
+                    GateResult(stage="login_gate", status=GateStatus.FAILED, reason="test-forced-login"),
+                )
+            ),
         ):
             result = await executor.execute(
                 task_id="manifest-task-2",

@@ -63,6 +63,7 @@ def test_inventory_backlog_base_sql_asset():
     assert "previous_snapshot AS" not in sql_text
     assert "joined_backlog AS" in sql_text
     assert "turnover_enriched AS" in sql_text
+    assert "FROM joined_backlog base" in sql_text
     assert "base.estimated_turnover_days" in sql_text
 
 
