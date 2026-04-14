@@ -28,6 +28,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard-postgresql"])
 _B_COST_ALLOWED_ROLES = {"admin", "manager", "finance"}
+_STORE_ANALYSIS_ALLOWED_ROLES = {"admin", "manager", "operator"}
 
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
@@ -87,6 +88,18 @@ def _require_b_cost_role(current_user: Any) -> Any:
 
 async def _get_b_cost_authorized_user(current_user: Any = Depends(get_current_user)) -> Any:
     return _require_b_cost_role(current_user)
+
+
+def _require_store_analysis_role(current_user: Any) -> Any:
+    if getattr(current_user, "is_superuser", False):
+        return current_user
+    if _extract_user_role_codes(current_user) & _STORE_ANALYSIS_ALLOWED_ROLES:
+        return current_user
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+async def _get_store_analysis_authorized_user(current_user: Any = Depends(get_current_user)) -> Any:
+    return _require_store_analysis_role(current_user)
 
 
 @router.get("/business-overview/kpi")
@@ -347,6 +360,7 @@ async def get_store_analysis_capabilities_postgresql(
     request: Request,
     platform: str = Query(..., description="single platform code"),
     shop_id: str = Query(..., description="shop id"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
         params = {"platform": platform, "shop_id": shop_id}
@@ -375,6 +389,7 @@ async def get_store_analysis_capabilities_postgresql(
 async def get_store_analysis_shops_postgresql(
     request: Request,
     platform: str = Query(..., description="single platform code"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
         params = {"platform": platform}
@@ -406,6 +421,7 @@ async def get_store_analysis_overview_postgresql(
     shop_id: str = Query(..., description="shop id"),
     granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
     date: str = Query(..., description="anchor date"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
@@ -442,6 +458,7 @@ async def get_store_analysis_comparison_postgresql(
     shop_id: str = Query(..., description="shop id"),
     granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
     date: str = Query(..., description="anchor date"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
@@ -479,6 +496,7 @@ async def get_store_analysis_top_products_postgresql(
     granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
     date: str = Query(..., description="anchor date"),
     limit: int = Query(10, ge=1, le=50, description="top product count"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date, "limit": limit}
@@ -516,6 +534,7 @@ async def get_store_analysis_traffic_summary_postgresql(
     shop_id: str = Query(..., description="shop id"),
     granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
     date: str = Query(..., description="anchor date"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
@@ -552,6 +571,7 @@ async def get_store_analysis_traffic_trend_postgresql(
     shop_id: str = Query(..., description="shop id"),
     granularity: str = Query(..., description="daily/weekly/monthly/quarterly/yearly"),
     date: str = Query(..., description="anchor date"),
+    _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}

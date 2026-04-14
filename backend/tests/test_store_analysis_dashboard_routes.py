@@ -1,10 +1,27 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from backend.dependencies.auth import get_current_user
 from backend.routers.dashboard_api_postgresql import router
+
+
+def _make_user(*roles, is_superuser=False):
+    return SimpleNamespace(
+        is_superuser=is_superuser,
+        roles=[SimpleNamespace(role_code=role, role_name=role) for role in roles],
+    )
+
+
+def _build_app(role_codes=None):
+    app = FastAPI()
+    app.include_router(router)
+    if role_codes is not None:
+        app.dependency_overrides[get_current_user] = lambda: _make_user(*role_codes)
+    return app
 
 
 def test_store_analysis_routes_are_registered():
@@ -20,8 +37,7 @@ def test_store_analysis_routes_are_registered():
 
 @pytest.mark.asyncio
 async def test_store_analysis_traffic_trend_route_rejects_missing_params():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -34,8 +50,7 @@ async def test_store_analysis_traffic_trend_route_rejects_missing_params():
 
 @pytest.mark.asyncio
 async def test_store_analysis_capability_route_rejects_missing_platform_or_shop():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -48,8 +63,7 @@ async def test_store_analysis_capability_route_rejects_missing_platform_or_shop(
 
 @pytest.mark.asyncio
 async def test_store_analysis_shops_route_requires_platform():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -74,8 +88,7 @@ async def test_store_analysis_shops_route_returns_shop_options(monkeypatch):
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -94,8 +107,7 @@ async def test_store_analysis_shops_route_returns_shop_options(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_store_analysis_overview_route_requires_platform_shop_granularity_and_date():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -131,8 +143,7 @@ async def test_store_analysis_overview_route_returns_overview_payload(monkeypatc
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -157,8 +168,7 @@ async def test_store_analysis_overview_route_returns_overview_payload(monkeypatc
 
 @pytest.mark.asyncio
 async def test_store_analysis_comparison_route_requires_platform_shop_granularity_and_date():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -188,8 +198,7 @@ async def test_store_analysis_comparison_route_returns_payload(monkeypatch):
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -214,8 +223,7 @@ async def test_store_analysis_comparison_route_returns_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_store_analysis_top_products_route_requires_platform_shop_granularity_and_date():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -240,8 +248,7 @@ async def test_store_analysis_top_products_route_returns_payload(monkeypatch):
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -279,8 +286,7 @@ async def test_store_analysis_daily_tiktok_does_not_return_hourly_effective_gran
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -317,8 +323,7 @@ async def test_store_analysis_daily_shopee_returns_hourly_effective_granularity(
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app(["operator"])
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -338,3 +343,36 @@ async def test_store_analysis_daily_shopee_returns_hourly_effective_granularity(
     body = json.loads(response.content.decode("utf-8"))
     assert body["success"] is True
     assert body["data"]["effective_granularity"] == "hourly"
+
+
+@pytest.mark.asyncio
+async def test_store_analysis_route_returns_401_when_unauthenticated():
+    app = FastAPI()
+    app.include_router(router)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/store-analysis/shops",
+            params={"platform": "shopee"},
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_store_analysis_route_returns_403_when_role_not_allowed():
+    app = _build_app(["finance"])
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/store-analysis/shops",
+            params={"platform": "shopee"},
+        )
+
+    assert response.status_code == 403
