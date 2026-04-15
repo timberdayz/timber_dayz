@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
+from modules.core.db import ShopProfitBasis
 
 
 def _shop_key(platform_code: Any, shop_id: Any) -> str:
@@ -89,6 +90,30 @@ class ProfitBasisService:
             "profit_basis_amount": profit_basis_amount,
             "basis_version": basis_version,
         }
+
+    async def upsert_profit_basis_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        record = (
+            await self.db.execute(
+                select(ShopProfitBasis).where(
+                    ShopProfitBasis.period_month == payload["period_month"],
+                    ShopProfitBasis.platform_code == payload["platform_code"],
+                    ShopProfitBasis.shop_id == payload["shop_id"],
+                    ShopProfitBasis.basis_version == payload["basis_version"],
+                )
+            )
+        ).scalar_one_or_none()
+
+        if record is None:
+            record = ShopProfitBasis(**payload)
+            self.db.add(record)
+        else:
+            record.orders_profit_amount = payload["orders_profit_amount"]
+            record.a_class_cost_amount = payload["a_class_cost_amount"]
+            record.b_class_cost_amount = payload["b_class_cost_amount"]
+            record.profit_basis_amount = payload["profit_basis_amount"]
+
+        await self.db.commit()
+        return payload
 
     @staticmethod
     def calculate_distributable_amount(

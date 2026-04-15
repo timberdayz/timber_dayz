@@ -29,6 +29,25 @@ def test_business_overview_shop_racing_module_sql_asset():
     )
 
 
+def test_business_overview_shop_racing_monthly_module_sql_asset():
+    _assert_sql_asset(
+        "sql/api_modules/business_overview_shop_racing_monthly_module.sql",
+        "CREATE MATERIALIZED VIEW api.business_overview_shop_racing_monthly_module AS",
+        (
+            "semantic.fact_orders_monthly_atomic",
+            "a_class.target_breakdown",
+            "a_class.sales_targets",
+            "gmv",
+            "order_count",
+            "avg_order_value",
+            "attach_rate",
+            "target_amount",
+            "achievement_rate",
+            "ix_business_overview_shop_racing_monthly_period",
+        ),
+    )
+
+
 def test_business_overview_traffic_ranking_module_sql_asset():
     _assert_sql_asset(
         "sql/api_modules/business_overview_traffic_ranking_module.sql",

@@ -21,6 +21,9 @@ class _MockMappingsResult:
     def first(self):
         return self._rows[0] if self._rows else None
 
+    def scalar_one_or_none(self):
+        return self._rows[0] if self._rows else None
+
 
 @pytest.mark.asyncio
 async def test_build_profit_basis_uses_orders_profit_minus_a_class_costs(monkeypatch):
@@ -163,3 +166,70 @@ async def test_build_profit_basis_passes_date_objects_to_a_class_cost_query(monk
     )
 
     assert basis["profit_basis_amount"] == pytest.approx(2500)
+
+
+@pytest.mark.asyncio
+async def test_upsert_profit_basis_snapshot_creates_new_snapshot():
+    db = AsyncMock()
+    added = []
+    db.add = lambda row: added.append(row)
+    service = ProfitBasisService(db)
+
+    db.execute = AsyncMock(return_value=_MockMappingsResult([]))
+
+    payload = {
+        "period_month": "2026-03",
+        "platform_code": "shopee",
+        "shop_id": "shop-1",
+        "orders_profit_amount": 4000.0,
+        "a_class_cost_amount": 1500.0,
+        "b_class_cost_amount": 0.0,
+        "profit_basis_amount": 2500.0,
+        "basis_version": "A_ONLY_V1",
+    }
+
+    result = await service.upsert_profit_basis_snapshot(payload)
+
+    assert result == payload
+    assert len(added) == 1
+    assert getattr(added[0], "period_month") == "2026-03"
+    assert getattr(added[0], "shop_id") == "shop-1"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_upsert_profit_basis_snapshot_updates_existing_snapshot():
+    db = AsyncMock()
+    db.add = lambda row: None
+    service = ProfitBasisService(db)
+
+    existing = SimpleNamespace(
+        period_month="2026-03",
+        platform_code="shopee",
+        shop_id="shop-1",
+        orders_profit_amount=100.0,
+        a_class_cost_amount=50.0,
+        b_class_cost_amount=0.0,
+        profit_basis_amount=50.0,
+        basis_version="A_ONLY_V1",
+    )
+    db.execute = AsyncMock(return_value=_MockMappingsResult([existing]))
+
+    payload = {
+        "period_month": "2026-03",
+        "platform_code": "shopee",
+        "shop_id": "shop-1",
+        "orders_profit_amount": 4000.0,
+        "a_class_cost_amount": 1500.0,
+        "b_class_cost_amount": 0.0,
+        "profit_basis_amount": 2500.0,
+        "basis_version": "A_ONLY_V1",
+    }
+
+    result = await service.upsert_profit_basis_snapshot(payload)
+
+    assert result == payload
+    assert existing.orders_profit_amount == pytest.approx(4000.0)
+    assert existing.a_class_cost_amount == pytest.approx(1500.0)
+    assert existing.profit_basis_amount == pytest.approx(2500.0)
+    db.commit.assert_awaited_once()

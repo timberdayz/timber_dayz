@@ -312,6 +312,43 @@ async def test_tiktok_services_agent_export_navigates_to_services_page_and_runs_
 
 
 @pytest.mark.asyncio
+async def test_tiktok_services_agent_export_switches_shop_context_before_opening_service_analytics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+
+    async def _switch_on_homepage(current_page):
+        assert "/homepage" in str(current_page.url)
+        assert "/compass/service-analytics" not in str(current_page.url)
+        current_page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"
+        return type("R", (), {"success": True, "message": "ok"})()
+
+    detail_mock = AsyncMock(return_value=True)
+    date_state_mock = AsyncMock(return_value=True)
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/services-agent-my.xlsx")
+
+    monkeypatch.setattr(component, "_run_shop_switch", _switch_on_homepage)
+    monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_wait_export_readiness_state", AsyncMock(return_value="ready"))
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+
+    result = await component.run(page)
+
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY"
+    ]
+    detail_mock.assert_awaited_once_with(page)
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
+    assert result.success is True
+    assert result.file_path == "temp/services-agent-my.xlsx"
+
+
+@pytest.mark.asyncio
 async def test_tiktok_services_agent_export_returns_success_when_no_exportable_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

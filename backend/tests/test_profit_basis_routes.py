@@ -33,6 +33,9 @@ async def test_profit_basis_routes_return_service_payload(monkeypatch):
                 "basis_version": basis_version,
             }
 
+        async def upsert_profit_basis_snapshot(self, payload):
+            return payload
+
     async def _override_db():
         yield object()
 
@@ -76,3 +79,51 @@ async def test_profit_basis_routes_require_finance_role():
         )
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_profit_basis_rebuild_route_persists_snapshot(monkeypatch):
+    from backend.routers import profit_basis as profit_basis_router
+
+    class _ServiceStub:
+        def __init__(self):
+            self.persisted = []
+
+        async def build_profit_basis(self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"):
+            return {
+                "period_month": year_month,
+                "platform_code": platform_code,
+                "shop_id": shop_id,
+                "orders_profit_amount": 4000,
+                "a_class_cost_amount": 1500,
+                "b_class_cost_amount": 0,
+                "profit_basis_amount": 2500,
+                "basis_version": basis_version,
+            }
+
+        async def upsert_profit_basis_snapshot(self, payload):
+            self.persisted.append(payload)
+            return payload
+
+    stub = _ServiceStub()
+
+    async def _override_db():
+        yield object()
+
+    app = FastAPI()
+    app.include_router(profit_basis_router.router)
+    app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
+    app.dependency_overrides[get_async_db] = _override_db
+    monkeypatch.setattr(
+        "backend.routers.profit_basis.ProfitBasisService",
+        lambda db: stub,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/finance/profit-basis/rebuild",
+            json={"period_month": "2026-03", "platform_code": "shopee", "shop_id": "shop-1", "basis_version": "A_ONLY_V1"},
+        )
+
+    assert response.status_code == 200
+    assert stub.persisted[0]["profit_basis_amount"] == 2500

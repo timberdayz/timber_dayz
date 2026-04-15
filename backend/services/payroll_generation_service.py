@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
-from types import SimpleNamespace
 from typing import Any, Dict
 
-from sqlalchemy import desc, select, text
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -170,6 +169,45 @@ class PayrollGenerationService:
                 )
             ).mappings().all()
             return [SimpleNamespace(**dict(row)) for row in rows]
+
+    # Cleanup-phase override: prefer English ORM columns only.
+    async def _load_employee_commission(self, employee_code: str, year_month: str):
+        return (
+            await self.db.execute(
+                select(EmployeeCommission).where(
+                    EmployeeCommission.employee_code == employee_code,
+                    EmployeeCommission.year_month == year_month,
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def _load_employee_performance(self, employee_code: str, year_month: str):
+        return (
+            await self.db.execute(
+                select(EmployeePerformance).where(
+                    EmployeePerformance.employee_code == employee_code,
+                    EmployeePerformance.year_month == year_month,
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def _load_employee_commission_rows(self, year_month: str):
+        return (
+            await self.db.execute(
+                select(EmployeeCommission).where(
+                    EmployeeCommission.year_month == year_month
+                )
+            )
+        ).scalars().all()
+
+    async def _load_employee_performance_rows(self, year_month: str):
+        return (
+            await self.db.execute(
+                select(EmployeePerformance).where(
+                    EmployeePerformance.year_month == year_month
+                )
+            )
+        ).scalars().all()
 
     async def _is_salary_eligible_employee(self, employee_code: str) -> bool:
         employee = (

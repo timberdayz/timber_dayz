@@ -418,76 +418,30 @@ class HRIncomeCalculationService:
             if sales_amount > 0:
                 commission_rate = commission_amount / sales_amount
 
-            try:
-                comm = (
-                    await self.db.execute(
-                        select(EmployeeCommission).where(
-                            EmployeeCommission.employee_code == employee_code,
-                            EmployeeCommission.year_month == year_month,
-                        )
+            comm = (
+                await self.db.execute(
+                    select(EmployeeCommission).where(
+                        EmployeeCommission.employee_code == employee_code,
+                        EmployeeCommission.year_month == year_month,
                     )
-                ).scalar_one_or_none()
-                if comm:
-                    comm.sales_amount = sales_amount
-                    comm.commission_amount = commission_amount
-                    comm.commission_rate = commission_rate
-                    comm.calculated_at = datetime.now(timezone.utc)
-                else:
-                    self.db.add(
-                        EmployeeCommission(
-                            employee_code=employee_code,
-                            year_month=year_month,
-                            sales_amount=sales_amount,
-                            commission_amount=commission_amount,
-                            commission_rate=commission_rate,
-                            calculated_at=datetime.now(timezone.utc),
-                        )
-                    )
-            except Exception:
-                await self.db.rollback()
-                logger.warning(
-                    "employee_commissions ORM upsert failed, fallback to CN column SQL"
                 )
-                upd = await self.db.execute(
-                    text(
-                        """
-                        update c_class.employee_commissions
-                        set "销售额" = :sales_amount,
-                            "提成金额" = :commission_amount,
-                            "提成比例" = :commission_rate,
-                            "计算时间" = :calculated_at
-                        where "员工编号" = :employee_code
-                          and "年月" = :year_month
-                        """
-                    ),
-                    {
-                        "sales_amount": sales_amount,
-                        "commission_amount": commission_amount,
-                        "commission_rate": commission_rate,
-                        "calculated_at": datetime.now(timezone.utc),
-                        "employee_code": employee_code,
-                        "year_month": year_month,
-                    },
-                )
-                if (upd.rowcount or 0) == 0:
-                    await self.db.execute(
-                        text(
-                            """
-                            insert into c_class.employee_commissions
-                              ("员工编号", "年月", "销售额", "提成金额", "提成比例", "计算时间")
-                            values
-                              (:employee_code, :year_month, :sales_amount, :commission_amount, :commission_rate, :calculated_at)
-                            """
-                        ),
-                        {
-                            "employee_code": employee_code,
-                            "year_month": year_month,
-                            "sales_amount": sales_amount,
-                            "commission_amount": commission_amount,
-                            "commission_rate": commission_rate,
-                            "calculated_at": datetime.now(timezone.utc),
-                        },
+            ).scalar_one_or_none()
+            if comm:
+                comm.sales_amount = sales_amount
+                comm.commission_amount = commission_amount
+                comm.commission_rate = commission_rate
+                comm.calculated_at = datetime.now(timezone.utc)
+            else:
+                self.db.add(
+                    EmployeeCommission(
+                        employee_code=employee_code,
+                        year_month=year_month,
+                        sales_amount=sales_amount,
+                        commission_amount=commission_amount,
+                        commission_rate=commission_rate,
+                        calculated_at=datetime.now(timezone.utc),
                     )
+                )
             commission_upserts += 1
 
         for employee_code, rec in performance_agg.items():
@@ -512,76 +466,30 @@ class HRIncomeCalculationService:
             )
             performance_score = min(max(performance_score, 0.0), 100.0)
 
-            try:
-                perf = (
-                    await self.db.execute(
-                        select(EmployeePerformance).where(
-                            EmployeePerformance.employee_code == employee_code,
-                            EmployeePerformance.year_month == year_month,
-                        )
+            perf = (
+                await self.db.execute(
+                    select(EmployeePerformance).where(
+                        EmployeePerformance.employee_code == employee_code,
+                        EmployeePerformance.year_month == year_month,
                     )
-                ).scalar_one_or_none()
-                if perf:
-                    perf.actual_sales = sales_amount
-                    perf.achievement_rate = achievement_rate
-                    perf.performance_score = performance_score
-                    perf.calculated_at = datetime.now(timezone.utc)
-                else:
-                    self.db.add(
-                        EmployeePerformance(
-                            employee_code=employee_code,
-                            year_month=year_month,
-                            actual_sales=sales_amount,
-                            achievement_rate=achievement_rate,
-                            performance_score=performance_score,
-                            calculated_at=datetime.now(timezone.utc),
-                        )
-                    )
-            except Exception:
-                await self.db.rollback()
-                logger.warning(
-                    "employee_performance ORM upsert failed, fallback to CN column SQL"
                 )
-                upd = await self.db.execute(
-                    text(
-                        """
-                        update c_class.employee_performance
-                        set "实际销售额" = :actual_sales,
-                            "达成率" = :achievement_rate,
-                            "绩效得分" = :performance_score,
-                            "计算时间" = :calculated_at
-                        where "员工编号" = :employee_code
-                          and "年月" = :year_month
-                        """
-                    ),
-                    {
-                        "actual_sales": sales_amount,
-                        "achievement_rate": achievement_rate,
-                        "performance_score": performance_score,
-                        "calculated_at": datetime.now(timezone.utc),
-                        "employee_code": employee_code,
-                        "year_month": year_month,
-                    },
-                )
-                if (upd.rowcount or 0) == 0:
-                    await self.db.execute(
-                        text(
-                            """
-                            insert into c_class.employee_performance
-                              ("员工编号", "年月", "实际销售额", "达成率", "绩效得分", "计算时间")
-                            values
-                              (:employee_code, :year_month, :actual_sales, :achievement_rate, :performance_score, :calculated_at)
-                            """
-                        ),
-                        {
-                            "employee_code": employee_code,
-                            "year_month": year_month,
-                            "actual_sales": sales_amount,
-                            "achievement_rate": achievement_rate,
-                            "performance_score": performance_score,
-                            "calculated_at": datetime.now(timezone.utc),
-                        },
+            ).scalar_one_or_none()
+            if perf:
+                perf.actual_sales = sales_amount
+                perf.achievement_rate = achievement_rate
+                perf.performance_score = performance_score
+                perf.calculated_at = datetime.now(timezone.utc)
+            else:
+                self.db.add(
+                    EmployeePerformance(
+                        employee_code=employee_code,
+                        year_month=year_month,
+                        actual_sales=sales_amount,
+                        achievement_rate=achievement_rate,
+                        performance_score=performance_score,
+                        calculated_at=datetime.now(timezone.utc),
                     )
+                )
             performance_upserts += 1
 
         await self.db.commit()

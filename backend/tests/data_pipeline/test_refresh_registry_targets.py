@@ -7,6 +7,7 @@ from backend.services.data_pipeline.refresh_registry import (
 def test_refresh_registry_includes_remaining_dashboard_api_targets():
     expected_targets = {
         "api.business_overview_shop_racing_module",
+        "api.business_overview_shop_racing_monthly_module",
         "api.business_overview_traffic_ranking_module",
         "api.business_overview_operational_metrics_module",
         "api.b_cost_analysis_overview_module",

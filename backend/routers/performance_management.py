@@ -887,33 +887,25 @@ async def list_performance_scores(
 
         if group_by == "person":
             # 按人员查询时，优先走 ORM；仅在当前运行库仍为中文列结构时回退到兼容 SQL。
-            use_cn_column_fallback = False
             ep_list = []
             all_ep = []
             total = 0
-            try:
-                query = select(EmployeePerformance)
-                if period:
-                    query = query.where(EmployeePerformance.year_month == period)
-                total_query = select(func.count()).select_from(query.subquery())
-                total = (await db.execute(total_query)).scalar() or 0
-                query = query.order_by(EmployeePerformance.performance_score.desc())
-                query = query.offset((page - 1) * page_size).limit(page_size)
-                rows = (await db.execute(query)).scalars().all()
-                ep_list = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in rows]
+            query = select(EmployeePerformance)
+            if period:
+                query = query.where(EmployeePerformance.year_month == period)
+            total_query = select(func.count()).select_from(query.subquery())
+            total = (await db.execute(total_query)).scalar() or 0
+            query = query.order_by(EmployeePerformance.performance_score.desc())
+            query = query.offset((page - 1) * page_size).limit(page_size)
+            rows = (await db.execute(query)).scalars().all()
+            ep_list = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in rows]
 
-                all_query = select(EmployeePerformance)
-                if period:
-                    all_query = all_query.where(EmployeePerformance.year_month == period)
-                all_rows = (await db.execute(all_query)).scalars().all()
-                all_ep = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in all_rows]
-            except Exception:
-                await db.rollback()
-                use_cn_column_fallback = True
-                logger.warning(
-                    "employee_performance ORM query failed; using Chinese-column compatibility SQL path"
-                )
-
+            all_query = select(EmployeePerformance)
+            if period:
+                all_query = all_query.where(EmployeePerformance.year_month == period)
+            all_rows = (await db.execute(all_query)).scalars().all()
+            all_ep = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in all_rows]
+            if False:
                 if period:
                     total_sql = text(
                         """
@@ -993,10 +985,7 @@ async def list_performance_scores(
             # 取员工姓名
             codes = []
             for e in ep_list:
-                if use_cn_column_fallback:
-                    ec = e.get("employee_code")
-                else:
-                    ec = getattr(e, "employee_code", None)
+                ec = getattr(e, "employee_code", None)
                 if ec:
                     codes.append(ec)
             codes = list(set(codes))
@@ -1014,40 +1003,23 @@ async def list_performance_scores(
             sorted_ep = sorted(
                 all_ep,
                 key=lambda x: float(
-                    (
-                        x.get("performance_score")
-                        if use_cn_column_fallback
-                        else getattr(x, "performance_score", 0)
-                    )
+                    getattr(x, "performance_score", 0)
                     or 0
                 ),
                 reverse=True,
             )
             rank_by_code = {}
             for i, e in enumerate(sorted_ep, 1):
-                ec = (
-                    e.get("employee_code")
-                    if use_cn_column_fallback
-                    else getattr(e, "employee_code", None)
-                )
+                ec = getattr(e, "employee_code", None)
                 if ec:
                     rank_by_code[ec] = i
 
             score_responses = []
             for ep in ep_list:
-                if use_cn_column_fallback:
-                    ec = ep.get("employee_code", "")
-                    scr = float(ep.get("performance_score", 0) or 0)
-                    ach = float(ep.get("achievement_rate", 0) or 0) * 100
-                    sales_achieved_raw = ep.get("actual_sales")
-                    sales_achieved = (
-                        float(sales_achieved_raw) if sales_achieved_raw is not None else None
-                    )
-                else:
-                    ec = getattr(ep, "employee_code", "")
-                    scr = float(getattr(ep, "performance_score", 0) or 0)
-                    ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
-                    sales_achieved = getattr(ep, "actual_sales", None)
+                ec = getattr(ep, "employee_code", "")
+                scr = float(getattr(ep, "performance_score", 0) or 0)
+                ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
+                sales_achieved = getattr(ep, "actual_sales", None)
                 score_responses.append({
                     "employee_code": ec,
                     "employee_name": name_map.get(ec, ec),

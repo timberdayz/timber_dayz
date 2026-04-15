@@ -1727,6 +1727,242 @@ class PostgresqlDashboardService:
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
         if granularity == "monthly":
+            query = """
+                SELECT
+                    granularity,
+                    period_key,
+                    platform_code,
+                    shop_id,
+                    gmv,
+                    order_count,
+                    avg_order_value,
+                    attach_rate,
+                    profit,
+                    target_amount,
+                    achievement_rate
+                FROM api.business_overview_shop_racing_monthly_module src
+                WHERE src.period_key = :period_key
+            """
+            params = {"period_key": period_key}
+            if platform:
+                query += " AND src.platform_code = :platform_code"
+                params["platform_code"] = platform
+            try:
+                rows = await self._fetch_rows(query, params)
+            except Exception:
+                rows = await self._fetch_rows_with_statement_timeout(query, params, timeout_ms=120000)
+
+            shop_ids = sorted(
+                {
+                    str(row.get("shop_id") or "").strip()
+                    for row in rows
+                    if str(row.get("shop_id") or "").strip()
+                }
+            )
+            platforms = sorted(
+                {
+                    str(row.get("platform_code") or "").strip().lower()
+                    for row in rows
+                    if str(row.get("platform_code") or "").strip()
+                }
+            )
+
+            dim_shop_map: dict[tuple[str, str], str] = {}
+            account_map: dict[tuple[str, str], dict[str, Any]] = {}
+            main_account_name_map: dict[str, str] = {}
+
+            if shop_ids and platforms:
+                dim_shop_rows = await self._fetch_rows(
+                    """
+                    SELECT platform_code, shop_id, shop_name
+                    FROM core.dim_shops
+                    WHERE platform_code = ANY(:platforms)
+                      AND shop_id = ANY(:shop_ids)
+                    """,
+                    {"platforms": platforms, "shop_ids": shop_ids},
+                )
+                dim_shop_map = {
+                    (
+                        str(row.get("platform_code") or "").strip().lower(),
+                        str(row.get("shop_id") or "").strip(),
+                    ): str(row.get("shop_name") or "").strip()
+                    for row in dim_shop_rows
+                    if row.get("shop_name")
+                }
+
+                account_rows = await self._fetch_rows(
+                    """
+                    SELECT id, platform, shop_account_id, main_account_id, store_name, platform_shop_id
+                    FROM core.shop_accounts
+                    WHERE LOWER(COALESCE(platform, '')) = ANY(:platforms)
+                      AND (
+                          COALESCE(platform_shop_id, '') = ANY(:shop_ids)
+                          OR COALESCE(shop_account_id, '') = ANY(:shop_ids)
+                          OR id::text = ANY(:shop_ids)
+                      )
+                    """,
+                    {"platforms": platforms, "shop_ids": shop_ids},
+                )
+                for row in account_rows:
+                    platform_code = str(row.get("platform") or "").strip().lower()
+                    keys = {
+                        str(row.get("platform_shop_id") or "").strip(),
+                        str(row.get("shop_account_id") or "").strip(),
+                        str(row.get("id") or "").strip(),
+                    }
+                    payload = {
+                        "shop_account_id": row.get("shop_account_id"),
+                        "main_account_id": row.get("main_account_id"),
+                        "account_store_name": row.get("store_name"),
+                    }
+                    for key in keys:
+                        if key:
+                            account_map[(platform_code, key)] = payload
+
+                main_account_ids = sorted(
+                    {
+                        str(row.get("main_account_id") or "").strip()
+                        for row in account_rows
+                        if str(row.get("main_account_id") or "").strip()
+                    }
+                )
+                if main_account_ids:
+                    main_account_rows = await self._fetch_rows(
+                        """
+                        SELECT main_account_id, main_account_name
+                        FROM core.main_accounts
+                        WHERE main_account_id = ANY(:main_account_ids)
+                        """,
+                        {"main_account_ids": main_account_ids},
+                    )
+                    main_account_name_map = {
+                        str(row.get("main_account_id") or "").strip(): str(row.get("main_account_name") or "").strip()
+                        for row in main_account_rows
+                        if row.get("main_account_name")
+                    }
+
+            enriched_rows: list[dict[str, Any]] = []
+            for row in rows:
+                normalized = dict(row)
+                platform_code = str(normalized.get("platform_code") or "").strip().lower()
+                shop_id = str(normalized.get("shop_id") or "").strip()
+                dim_shop_name = dim_shop_map.get((platform_code, shop_id))
+                account_info = account_map.get((platform_code, shop_id), {})
+                main_account_id = normalized.get("main_account_id") or account_info.get("main_account_id")
+                normalized["shop_account_id"] = normalized.get("shop_account_id") or account_info.get("shop_account_id")
+                normalized["main_account_id"] = main_account_id
+                normalized["main_account_name"] = (
+                    normalized.get("main_account_name")
+                    or main_account_name_map.get(str(main_account_id or "").strip())
+                )
+                normalized["account_store_name"] = normalized.get("account_store_name") or account_info.get("account_store_name")
+                normalized["display_name"] = (
+                    normalized.get("display_name")
+                    or dim_shop_name
+                    or normalized.get("account_store_name")
+                    or (shop_id if shop_id.lower() not in {"", "none", "unknown"} else None)
+                )
+                enriched_rows.append(normalized)
+
+            rows = enriched_rows
+            if group_by == "platform":
+                grouped: dict[str, dict[str, Any]] = {}
+                for row in rows:
+                    key = row["platform_code"]
+                    grouped.setdefault(
+                        key,
+                        {
+                            "name": key,
+                            "platform_code": key,
+                            "shop_id": "ALL",
+                            "gmv": 0.0,
+                            "order_count": 0.0,
+                            "avg_order_value": 0.0,
+                            "attach_rate": 0.0,
+                            "target_amount": 0.0,
+                            "achievement_rate": 0.0,
+                        },
+                    )
+                    grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
+                    grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
+                    grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
+                for value in grouped.values():
+                    if value["order_count"]:
+                        value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+                    if value["target_amount"]:
+                        value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+                return rank_shop_racing_rows(list(grouped.values()))
+
+            if group_by == "account":
+                grouped: dict[str, dict[str, Any]] = {}
+                for row in rows:
+                    account_id = row.get("shop_account_id")
+                    main_account_id = row.get("main_account_id")
+                    account_store_name = row.get("account_store_name")
+                    main_account_name = row.get("main_account_name")
+                    display_name = row.get("account_display_name") or " / ".join(
+                        [
+                            part
+                            for part in (
+                                (str(main_account_name).strip() if main_account_name else None),
+                                (str(account_store_name).strip() if account_store_name else None),
+                            )
+                            if part
+                        ]
+                    )
+                    fallback_name = display_name or account_store_name or account_id or "未匹配账号"
+                    key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                    grouped.setdefault(
+                        key,
+                        {
+                            "name": fallback_name,
+                            "platform_code": row.get("platform_code"),
+                            "shop_id": "ALL",
+                            "shop_account_id": account_id,
+                            "main_account_id": main_account_id,
+                            "main_account_name": main_account_name,
+                            "is_unmatched": not bool(account_id),
+                            "gmv": 0.0,
+                            "order_count": 0.0,
+                            "avg_order_value": 0.0,
+                            "attach_rate": 0.0,
+                            "target_amount": 0.0,
+                            "achievement_rate": 0.0,
+                        },
+                    )
+                    grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
+                    grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
+                    grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
+                for value in grouped.values():
+                    if value["order_count"]:
+                        value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+                    if value["target_amount"]:
+                        value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+                return rank_shop_racing_rows(list(grouped.values()))
+
+            normalized_rows = [
+                {
+                    "name": row.get("display_name") or "未匹配店铺",
+                    "platform_code": row.get("platform_code"),
+                    "shop_id": row.get("shop_id") or "unknown",
+                    "shop_account_id": row.get("shop_account_id"),
+                    "main_account_id": row.get("main_account_id"),
+                    "main_account_name": row.get("main_account_name"),
+                    "is_unmatched": not bool(row.get("shop_account_id")),
+                    "gmv": _to_optional_float(row.get("gmv")),
+                    "order_count": _to_optional_float(row.get("order_count")),
+                    "avg_order_value": _to_optional_float(row.get("avg_order_value")),
+                    "attach_rate": _to_optional_float(row.get("attach_rate")),
+                    "profit": _to_optional_float(row.get("profit")),
+                    "target_amount": _to_optional_float(row.get("target_amount")),
+                    "achievement_rate": _to_optional_float(row.get("achievement_rate")),
+                }
+                for row in rows
+            ]
+            return rank_shop_racing_rows(normalized_rows)
+        else:
+            rows = None
+        if False and granularity == "monthly" and rows is None:
             period_start, period_end = _resolve_business_overview_window(granularity, target_date)
             platform_filter_sql = " AND platform_code = :platform_code" if platform else ""
             monthly_fast_query = """

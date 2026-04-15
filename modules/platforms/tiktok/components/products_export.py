@@ -89,6 +89,12 @@ class TiktokProductsExport(ExportComponent):
     def _generic_products_page_url(self) -> str:
         return "https://seller.tiktokshopglobalselling.com/compass/product-analysis"
 
+    def _homepage_url(self, region: str) -> str:
+        return f"https://seller.tiktokshopglobalselling.com/homepage?shop_region={region}"
+
+    def _generic_homepage_url(self) -> str:
+        return "https://seller.tiktokshopglobalselling.com/homepage"
+
     def _date_option_from_context(self) -> DateOption | None:
         config = self.ctx.config or {}
         params = config.get("params") or {}
@@ -137,8 +143,8 @@ class TiktokProductsExport(ExportComponent):
             raise RuntimeError("login required before products export")
 
         region = self._target_region() or self._target_region_from_page_url(current_url)
-        if entry_state != "products":
-            target_url = self._products_page_url(region) if region else self._generic_products_page_url()
+        if entry_state == "unknown":
+            target_url = self._homepage_url(region) if region else self._generic_homepage_url()
             await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(800)
@@ -154,6 +160,13 @@ class TiktokProductsExport(ExportComponent):
         if not region:
             return None
 
+        current_page_url = str(getattr(page, "url", "") or "")
+        if not self._is_homepage(current_page_url):
+            homepage_url = self._homepage_url(region)
+            await page.goto(homepage_url, wait_until="domcontentloaded", timeout=60000)
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(800)
+
         if self.ctx.config is None:
             self.ctx.config = {}
         self.ctx.config["shop_region"] = region
@@ -161,6 +174,22 @@ class TiktokProductsExport(ExportComponent):
         if not getattr(switch_result, "success", False):
             raise RuntimeError(getattr(switch_result, "message", "shop switch failed"))
         return region
+
+    async def ensure_products_ready(self, page: Any) -> str:
+        current_url = str(getattr(page, "url", "") or "")
+        if self._products_page_looks_ready(current_url):
+            return current_url
+
+        region = self._target_region() or self._target_region_from_page_url(current_url)
+        target_url = self._products_page_url(region) if region else self._generic_products_page_url()
+        await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(800)
+
+        current_url = str(getattr(page, "url", "") or "")
+        if self._is_login_page(current_url):
+            raise RuntimeError("login required before products export")
+        return current_url
 
     async def ensure_date_ready(self, page: Any) -> None:
         date_option = self._date_option_from_context()
@@ -245,6 +274,7 @@ class TiktokProductsExport(ExportComponent):
         try:
             current_url = await self.ensure_page_ready(page)
             await self.ensure_shop_ready(page, current_url)
+            await self.ensure_products_ready(page)
             await self.ensure_date_ready(page)
         except RuntimeError as exc:
             return ExportResult(success=False, message=str(exc), file_path=None)

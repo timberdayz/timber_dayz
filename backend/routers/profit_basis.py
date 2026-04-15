@@ -47,6 +47,7 @@ async def get_profit_basis(
         platform_code=platform_code,
         shop_id=shop_id,
     )
+    await service.upsert_profit_basis_snapshot(payload)
     return success_response(data=payload)
 
 
@@ -63,4 +64,5 @@ async def rebuild_profit_basis(
         shop_id=body.shop_id,
         basis_version=body.basis_version,
     )
+    await service.upsert_profit_basis_snapshot(payload)
     return success_response(data=payload)

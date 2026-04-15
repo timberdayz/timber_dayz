@@ -1,6 +1,5 @@
 import asyncio
 import json
-from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -17,17 +16,6 @@ class _ScalarResult:
         return self._value
 
 
-class _MappingsResult:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def mappings(self):
-        return self
-
-    def all(self):
-        return self._rows
-
-
 class _RowsResult:
     def __init__(self, rows):
         self._rows = rows
@@ -35,36 +23,28 @@ class _RowsResult:
     def all(self):
         return self._rows
 
+    def scalars(self):
+        return self
 
-def test_list_performance_scores_person_fallback_cn_columns_serializable():
+
+def test_list_performance_scores_person_reads_english_columns():
     db = AsyncMock()
     calls = {"n": 0}
+    perf_row = SimpleNamespace(
+        employee_code="E001",
+        actual_sales=123.45,
+        achievement_rate=0.88,
+        performance_score=88.0,
+    )
 
     async def _execute(stmt, params=None):
         calls["n"] += 1
-        sql = str(stmt)
-        # 1) ORM 查询 employee_performance 失败，触发 fallback
         if calls["n"] == 1:
-            raise Exception("column employee_performance.year_month does not exist")
-        # 2) fallback total
-        if "select count(1)" in sql and "employee_performance" in sql:
             return _ScalarResult(1)
-        # 3) fallback page
-        if 'from c_class.employee_performance' in sql and '"实际销售额"' in sql:
-            return _MappingsResult(
-                [
-                    {
-                        "employee_code": "E001",
-                        "actual_sales": Decimal("123.45"),
-                        "achievement_rate": Decimal("0.88"),
-                        "performance_score": Decimal("88"),
-                    }
-                ]
-            )
-        # 4) fallback all rows for rank
-        if 'from c_class.employee_performance' in sql and '"绩效得分" as performance_score' in sql:
-            return _MappingsResult([{"employee_code": "E001", "performance_score": Decimal("88")}])
-        # 5) 员工姓名查询
+        if calls["n"] == 2:
+            return _RowsResult([perf_row])
+        if calls["n"] == 3:
+            return _RowsResult([perf_row])
         return _RowsResult([("E001", "Alice")])
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -105,4 +85,4 @@ def test_list_performance_scores_person_fallback_cn_columns_serializable():
     assert row["total_score"] == 88.0
     assert row["performance_coefficient"] is None
     assert isinstance(row["sales_achieved"], float)
-    assert db.rollback.await_count >= 1
+    assert db.rollback.await_count == 0

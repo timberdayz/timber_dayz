@@ -188,7 +188,7 @@ def test_calculate_month_prefers_english_orm_writes_when_available():
     assert db.rollback.await_count == 0
 
 
-def test_calculate_month_upsert_fallback_to_cn_sql_when_orm_columns_missing():
+def test_calculate_month_updates_existing_records_with_english_orm_path():
     db = AsyncMock()
 
     assignment = SimpleNamespace(
@@ -206,6 +206,24 @@ def test_calculate_month_upsert_fallback_to_cn_sql_when_orm_columns_missing():
         allocatable_profit_rate=1.0,
     )
 
+    existing_commission = SimpleNamespace(
+        employee_code="E002",
+        year_month="2026-01",
+        sales_amount=0.0,
+        commission_amount=0.0,
+        commission_rate=0.0,
+        calculated_at=None,
+    )
+    existing_performance = SimpleNamespace(
+        employee_code="E002",
+        year_month="2026-01",
+        actual_sales=0.0,
+        achievement_rate=0.0,
+        performance_score=0.0,
+        calculated_at=None,
+    )
+    executed_sql = []
+
     async def _execute(stmt, params=None):
         if hasattr(stmt, "column_descriptions"):
             entity = stmt.column_descriptions[0].get("entity")
@@ -214,11 +232,12 @@ def test_calculate_month_upsert_fallback_to_cn_sql_when_orm_columns_missing():
             if entity is ShopCommissionConfig:
                 return _MockResult(rows=[cfg])
             if entity is EmployeeCommission:
-                raise Exception("column employee_commissions.employee_code does not exist")
+                return _MockResult(scalar_value=existing_commission)
             if entity is EmployeePerformance:
-                raise Exception("column employee_performance.employee_code does not exist")
+                return _MockResult(scalar_value=existing_performance)
             return _MockResult(rows=[])
         sql = str(stmt)
+        executed_sql.append(sql)
         if "FROM api.business_overview_shop_racing_module" in sql:
             return _MockResult(
                 mapping_rows=[
@@ -231,10 +250,6 @@ def test_calculate_month_upsert_fallback_to_cn_sql_when_orm_columns_missing():
                     }
                 ]
             )
-        if "update c_class.employee_commissions" in sql:
-            return SimpleNamespace(rowcount=0)
-        if "update c_class.employee_performance" in sql:
-            return SimpleNamespace(rowcount=0)
         return _MockResult(rows=[])
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -251,7 +266,13 @@ def test_calculate_month_upsert_fallback_to_cn_sql_when_orm_columns_missing():
     assert result["employee_count"] == 1
     assert result["commission_upserts"] == 1
     assert result["performance_upserts"] == 1
-    assert db.rollback.await_count >= 2
+    assert existing_commission.commission_amount == pytest.approx(180.0)
+    assert existing_performance.performance_score == pytest.approx(70.0)
+    assert db.rollback.await_count == 0
+    assert all("update c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
+    assert all("insert into c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
+    assert all("update c_class.employee_performance" not in sql.lower() for sql in executed_sql)
+    assert all("insert into c_class.employee_performance" not in sql.lower() for sql in executed_sql)
 
 
 def test_load_profit_basis_by_shop_prefers_shop_profit_basis_snapshot(monkeypatch):
