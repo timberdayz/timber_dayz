@@ -545,6 +545,20 @@ def _normalize_period_start(value: str) -> date_cls:
     raise ValueError("Unsupported period/date format")
 
 
+def _resolve_business_overview_window(granularity: str, target_date: str) -> tuple[date_cls, date_cls]:
+    period_start = _normalize_period_start(target_date)
+    normalized_granularity = str(granularity or "").strip().lower()
+    if normalized_granularity == "daily":
+        return period_start, period_start
+    if normalized_granularity == "weekly":
+        week_start = period_start - timedelta(days=period_start.weekday())
+        return week_start, week_start + timedelta(days=6)
+    if normalized_granularity == "monthly":
+        month_start = date_cls(period_start.year, period_start.month, 1)
+        return month_start, _start_of_next_month(month_start) - timedelta(days=1)
+    raise ValueError("granularity must be daily, weekly or monthly")
+
+
 def _start_of_quarter(day: date_cls) -> date_cls:
     quarter_month = ((day.month - 1) // 3) * 3 + 1
     return date_cls(day.year, quarter_month, 1)
@@ -618,22 +632,45 @@ class PostgresqlDashboardService:
             result = await session.execute(text(query), params)
             return [dict(row) for row in result.mappings().all()]
 
-    async def _load_inventory_backlog_summary(self) -> dict[str, Any]:
-        rows = await self._fetch_rows(
-            """
-            SELECT
-                total_value,
-                backlog_30d_value,
-                backlog_60d_value,
-                backlog_90d_value,
-                total_quantity,
-                high_risk_sku_count,
-                medium_risk_sku_count,
-                low_risk_sku_count
-            FROM api.inventory_backlog_summary_module
-            """,
-            {},
-        )
+    async def _load_inventory_backlog_summary(
+        self,
+        period_start: date_cls | None = None,
+        period_end: date_cls | None = None,
+    ) -> dict[str, Any]:
+        if period_start is not None and period_end is not None:
+            rows = await self._fetch_rows(
+                """
+                SELECT
+                    SUM(inventory_value) AS total_value,
+                    SUM(CASE WHEN estimated_turnover_days >= 30 THEN inventory_value ELSE 0 END) AS backlog_30d_value,
+                    SUM(CASE WHEN estimated_turnover_days >= 60 THEN inventory_value ELSE 0 END) AS backlog_60d_value,
+                    SUM(CASE WHEN estimated_turnover_days >= 90 THEN inventory_value ELSE 0 END) AS backlog_90d_value,
+                    SUM(available_stock) AS total_quantity,
+                    COUNT(*) FILTER (WHERE risk_level = 'high') AS high_risk_sku_count,
+                    COUNT(*) FILTER (WHERE risk_level = 'medium') AS medium_risk_sku_count,
+                    COUNT(*) FILTER (WHERE risk_level = 'low') AS low_risk_sku_count
+                FROM api.business_overview_inventory_backlog_module
+                WHERE snapshot_date >= :period_start
+                  AND snapshot_date <= :period_end
+                """,
+                {"period_start": period_start, "period_end": period_end},
+            )
+        else:
+            rows = await self._fetch_rows(
+                """
+                SELECT
+                    total_value,
+                    backlog_30d_value,
+                    backlog_60d_value,
+                    backlog_90d_value,
+                    total_quantity,
+                    high_risk_sku_count,
+                    medium_risk_sku_count,
+                    low_risk_sku_count
+                FROM api.inventory_backlog_summary_module
+                """,
+                {},
+            )
         row = rows[0] if rows else {}
         total_value = _to_optional_float(row.get("total_value")) or 0.0
         backlog_30d_value = _to_optional_float(row.get("backlog_30d_value")) or 0.0
@@ -659,16 +696,25 @@ class PostgresqlDashboardService:
         source_table: str,
         min_days: int,
         limit: int,
+        period_start: date_cls | None = None,
+        period_end: date_cls | None = None,
     ) -> list[dict[str, Any]]:
+        where_clauses = ["estimated_turnover_days >= :min_days"]
+        params: dict[str, Any] = {"min_days": min_days, "limit": limit}
+        if period_start is not None and period_end is not None:
+            where_clauses.append("snapshot_date >= :period_start")
+            where_clauses.append("snapshot_date <= :period_end")
+            params["period_start"] = period_start
+            params["period_end"] = period_end
         rows = await self._fetch_rows(
             """
             SELECT *
             FROM {source_table}
-            WHERE estimated_turnover_days >= :min_days
+            WHERE {where_clause}
             ORDER BY clearance_priority_score DESC, inventory_value DESC, estimated_turnover_days DESC
             LIMIT :limit
-            """.format(source_table=source_table),
-            {"min_days": min_days, "limit": limit},
+            """.format(source_table=source_table, where_clause=" AND ".join(where_clauses)),
+            params,
         )
         ranked: list[dict[str, Any]] = []
         for index, row in enumerate(rows, start=1):
@@ -1050,13 +1096,25 @@ class PostgresqlDashboardService:
         self,
         min_days: int = 30,
         limit: int = 20,
+        granularity: str | None = None,
+        target_date: str | None = None,
     ) -> dict[str, Any]:
+        period_start = None
+        period_end = None
+        if granularity and target_date:
+            period_start, period_end = _resolve_business_overview_window(granularity, target_date)
         return {
-            "summary": await self._load_inventory_backlog_summary(),
+            "summary": await (
+                self._load_inventory_backlog_summary(period_start=period_start, period_end=period_end)
+                if period_start is not None and period_end is not None
+                else self._load_inventory_backlog_summary()
+            ),
             "top_products": await self._load_ranked_inventory_backlog_module_rows(
                 source_table="api.business_overview_inventory_backlog_module",
                 min_days=min_days,
                 limit=limit,
+                period_start=period_start,
+                period_end=period_end,
             ),
         }
 
@@ -1064,11 +1122,19 @@ class PostgresqlDashboardService:
         self,
         min_days: int = 30,
         limit: int = 100,
+        granularity: str | None = None,
+        target_date: str | None = None,
     ) -> list[dict[str, Any]]:
+        period_start = None
+        period_end = None
+        if granularity and target_date:
+            period_start, period_end = _resolve_business_overview_window(granularity, target_date)
         return await self._load_ranked_inventory_backlog_module_rows(
             source_table="api.clearance_ranking_module",
             min_days=min_days,
             limit=limit,
+            period_start=period_start,
+            period_end=period_end,
         )
 
     async def get_business_overview_shop_racing(

@@ -235,6 +235,8 @@ SELECT
     d.platform_code,
     CASE
         WHEN pa.resolved_shop_id IS NOT NULL THEN pa.resolved_shop_id
+        WHEN LOWER(COALESCE(d.source_shop_id, '')) IN ('', 'none', 'unknown', 'xihong')
+        THEN 'unknown'
         ELSE COALESCE(d.source_shop_id, 'unknown')
     END AS shop_id,
     d.order_id,
@@ -260,10 +262,10 @@ LEFT JOIN LATERAL (
           LOWER(COALESCE(sa.store_name, '')) = LOWER(COALESCE(d.store_label_raw, ''))
           OR LOWER(COALESCE(sa.platform_shop_id, '')) = LOWER(COALESCE(d.store_label_raw, ''))
           OR LOWER(COALESCE(saa.alias_value, '')) = LOWER(COALESCE(d.store_label_raw, ''))
-          OR LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '\s+', ' ', 'g')
+          OR LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'), '\s+', ' ', 'g')
       )
     ORDER BY
-        CASE WHEN LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '\s+', ' ', 'g') THEN 0 ELSE 1 END,
+        CASE WHEN LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'), '\s+', ' ', 'g') THEN 0 ELSE 1 END,
         CASE WHEN saa.is_primary THEN 0 ELSE 1 END,
         sa.id
     LIMIT 1

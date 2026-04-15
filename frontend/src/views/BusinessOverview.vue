@@ -1157,6 +1157,7 @@ const useGlobalDate = ref({
   comparison: true,
   shopRacing: true,
   trafficRanking: true,
+  inventory: true,
   operational: true,
   kpi: true, // 仅当全局为月时同步
   clearance: true // 月/周分别对齐
@@ -1239,6 +1240,31 @@ function globalToOperationalDateStr() {
     return ''
   }
   return globalToDateStr()
+}
+
+function normalizeAnchorDate(value, granularity) {
+  const normalizedGranularity = String(granularity || '').trim().toLowerCase()
+  if (typeof value === 'string') {
+    if (normalizedGranularity === 'monthly') {
+      return value.length >= 7 ? `${value.substring(0, 7)}-01` : ''
+    }
+    return value.length >= 10 ? value.substring(0, 10) : value
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const normalizedDate = new Date(value)
+    if (normalizedGranularity === 'weekly') {
+      const dayOfWeek = normalizedDate.getDay()
+      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+      normalizedDate.setDate(normalizedDate.getDate() + diff)
+    } else if (normalizedGranularity === 'monthly') {
+      normalizedDate.setDate(1)
+    }
+    const y = normalizedDate.getFullYear()
+    const m = String(normalizedDate.getMonth() + 1).padStart(2, '0')
+    const d = String(normalizedDate.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  return ''
 }
 
 // 应用全局日期到各跟随模块
@@ -1326,6 +1352,7 @@ function loadModulesAfterGlobalChange() {
     if (useGlobalDate.value.comparison) tasks.push(loadComparisonData())
     if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData())
     if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking())
+    if (useGlobalDate.value.inventory) tasks.push(loadInventoryBacklog())
     if (useGlobalDate.value.operational) tasks.push(loadOperationalMetrics())
     if (useGlobalDate.value.kpi) tasks.push(loadKPIData())
     if (useGlobalDate.value.clearance && (globalGranularity.value === 'monthly' || globalGranularity.value === 'weekly')) {
@@ -1345,6 +1372,7 @@ async function refreshFollowedModules() {
   if (useGlobalDate.value.comparison) tasks.push(loadComparisonData())
   if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData())
   if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking())
+  if (useGlobalDate.value.inventory) tasks.push(loadInventoryBacklog())
   if (useGlobalDate.value.clearance && (globalGranularity.value === 'monthly' || globalGranularity.value === 'weekly')) {
     tasks.push(loadClearanceRanking('monthly'))
     tasks.push(loadClearanceRanking('weekly'))
@@ -1359,6 +1387,7 @@ async function onGlobalGranularityChange() {
     comparison: true,
     shopRacing: true,
     trafficRanking: true,
+    inventory: true,
     operational: true,
     kpi: true,
     clearance: true
@@ -1387,6 +1416,7 @@ async function onGlobalDateChange() {
     comparison: true,
     shopRacing: true,
     trafficRanking: true,
+    inventory: true,
     operational: true,
     kpi: true,
     clearance: true
@@ -1702,6 +1732,47 @@ const onComparisonGranularityChange = () => {
 const onComparisonDateChange = () => {
   if (!_syncingFromGlobal.value) useGlobalDate.value.comparison = false
   loadComparisonData()
+}
+
+const loadComparisonData = async () => {
+  loadingComparison.value = true
+  try {
+    const dateStr = normalizeAnchorDate(comparisonDate.value, comparisonGranularity.value)
+    if (!dateStr) {
+      comparisonData.value = { metrics: {}, today: {}, yesterday: {}, average: {} }
+      comparisonTableData.value = []
+      targetValue.value = 0
+      achievedValue.value = 0
+      targetAchievementRate.value = 0
+      targetUnit.value = ''
+      return
+    }
+
+    const response = await api.getBusinessOverviewComparison({
+      granularity: comparisonGranularity.value,
+      date: dateStr,
+      platform: kpiPlatform.value || undefined
+    })
+
+    const normalizedResponse = response || { metrics: {}, target: {} }
+    comparisonData.value = normalizedResponse
+    targetValue.value = Number(normalizedResponse.target?.sales_amount ?? 0)
+    achievedValue.value = Number(normalizedResponse.metrics?.sales_amount?.today ?? 0)
+    targetAchievementRate.value = Number(normalizedResponse.target?.achievement_rate ?? 0)
+    targetUnit.value = ''
+    updateComparisonTable()
+  } catch (error) {
+    console.error('加载数据对比失败:', error)
+    handleApiError(error, { showMessage: true, logError: true })
+    comparisonData.value = { metrics: {}, today: {}, yesterday: {}, average: {} }
+    comparisonTableData.value = []
+    targetValue.value = 0
+    achievedValue.value = 0
+    targetAchievementRate.value = 0
+    targetUnit.value = ''
+  } finally {
+    loadingComparison.value = false
+  }
 }
 
 // 店铺赛马（独立日/周/月 + 日期，与数据对比约定一致）
@@ -2387,7 +2458,12 @@ const loadTrafficRanking = async () => {
 const loadInventoryBacklog = async () => {
   loadingInventory.value = true
   try {
-    const response = await api.getBusinessOverviewInventoryBacklog({ limit: 20 })
+    const targetDate = normalizeAnchorDate(globalDate.value, globalGranularity.value)
+    const response = await api.getBusinessOverviewInventoryBacklog({
+      limit: 20,
+      granularity: globalGranularity.value,
+      date: targetDate || undefined
+    })
 
     // 响应拦截器已处理success字段，直接使用data
     if (response) {
@@ -2408,20 +2484,10 @@ const loadClearanceRanking = async (granularity) => {
   try {
     const params = {}
     if (granularity === 'monthly' && clearanceMonth.value) {
-      const val = clearanceMonth.value
-      if (typeof val === 'string' && val.length >= 7) {
-        params.month = val.substring(0, 7)
-      } else if (val instanceof Date) {
-        params.month = `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, '0')}`
-      }
+      params.date = normalizeAnchorDate(clearanceMonth.value, 'monthly')
     }
     if (granularity === 'weekly' && clearanceWeek.value) {
-      const val = clearanceWeek.value
-      const d = typeof val === 'string' ? new Date(val) : val
-      if (d instanceof Date && !Number.isNaN(d.getTime())) {
-        const week = getWeekNumber(d)
-        params.week = `${d.getFullYear()}W${String(week).padStart(2, '0')}`
-      }
+      params.date = normalizeAnchorDate(clearanceWeek.value, 'weekly')
     }
 
     params.granularity = granularity
@@ -2500,6 +2566,7 @@ watch(
       comparison: true,
       shopRacing: true,
       trafficRanking: true,
+      inventory: true,
       operational: true,
       kpi: true,
       clearance: true
@@ -2517,6 +2584,7 @@ watch(
       comparison: true,
       shopRacing: true,
       trafficRanking: true,
+      inventory: true,
       operational: true,
       kpi: true,
       clearance: true

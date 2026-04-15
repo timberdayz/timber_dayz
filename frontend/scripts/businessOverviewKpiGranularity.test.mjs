@@ -61,6 +61,16 @@ test('BusinessOverview page refresh forces global sync and refreshes all modules
   assert.equal(viewSource.includes('loadOperationalMetrics()'), true)
 })
 
+test('BusinessOverview defines comparison loader used by global refresh', () => {
+  assert.match(viewSource, /const loadComparisonData = async \(\) => \{/)
+  assert.equal(viewSource.includes('api.getBusinessOverviewComparison({'), true)
+})
+
+test('BusinessOverview global date sync includes inventory backlog follow mode', () => {
+  assert.equal(viewSource.includes('inventory: true'), true)
+  assert.equal(viewSource.includes("if (useGlobalDate.value.inventory) tasks.push(loadInventoryBacklog())"), true)
+})
+
 test('BusinessOverview operational metrics fall back to monthly fields in month mode', () => {
   assert.equal(viewSource.includes('today_sales: response.today_sales ?? response.monthly_total_achieved ?? null'), true)
   assert.equal(viewSource.includes('today_order_count: response.today_order_count ?? response.monthly_order_count ?? null'), true)

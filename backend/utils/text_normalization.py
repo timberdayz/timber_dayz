@@ -67,4 +67,10 @@ def normalize_alias_text(value: str | None) -> str | None:
 
 def normalize_alias_key(value: str | None) -> str:
     normalized = normalize_alias_text(value) or ""
-    return " ".join(normalized.lower().split())
+    normalized = " ".join(normalized.lower().split())
+    return re.sub(
+        r"^(?:shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    ).strip()

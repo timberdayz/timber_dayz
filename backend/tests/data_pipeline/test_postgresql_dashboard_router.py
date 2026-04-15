@@ -425,7 +425,13 @@ def test_postgresql_dashboard_router_exposes_compatibility_paths():
 
 def test_postgresql_inventory_backlog_route_returns_summary_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_inventory_backlog(self, min_days, limit):
+        async def get_business_overview_inventory_backlog(
+            self,
+            min_days,
+            limit,
+            granularity=None,
+            target_date=None,
+        ):
             return {
                 "summary": {"total_value": 1000, "backlog_30d_value": 300},
                 "top_products": [
@@ -462,9 +468,17 @@ def test_postgresql_inventory_backlog_route_forwards_limit(monkeypatch):
     captured = {}
 
     class _ServiceStub:
-        async def get_business_overview_inventory_backlog(self, min_days, limit):
+        async def get_business_overview_inventory_backlog(
+            self,
+            min_days,
+            limit,
+            granularity=None,
+            target_date=None,
+        ):
             captured["min_days"] = min_days
             captured["limit"] = limit
+            captured["granularity"] = granularity
+            captured["target_date"] = target_date
             return {"summary": {"total_value": 1000}, "top_products": []}
 
     monkeypatch.setattr(
@@ -477,12 +491,19 @@ def test_postgresql_inventory_backlog_route_forwards_limit(monkeypatch):
             request=_make_request("/api/dashboard/business-overview/inventory-backlog"),
             days=30,
             limit=20,
+            granularity="weekly",
+            date="2026-03-16",
         )
     )
 
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
-    assert captured == {"min_days": 30, "limit": 20}
+    assert captured == {
+        "min_days": 30,
+        "limit": 20,
+        "granularity": "weekly",
+        "target_date": "2026-03-16",
+    }
 
 
 @pytest.mark.asyncio
@@ -490,7 +511,13 @@ async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_tim
     cache_calls = []
 
     class _ServiceStub:
-        async def get_business_overview_inventory_backlog(self, min_days, limit):
+        async def get_business_overview_inventory_backlog(
+            self,
+            min_days,
+            limit,
+            granularity=None,
+            target_date=None,
+        ):
             return {"summary": {"total_value": 1000}, "top_products": []}
 
     class _CacheServiceStub:
@@ -531,7 +558,13 @@ async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_tim
 
 def test_postgresql_clearance_ranking_route_returns_priority_fields(monkeypatch):
     class _ServiceStub:
-        async def get_clearance_ranking(self, limit):
+        async def get_clearance_ranking(
+            self,
+            limit,
+            min_days=30,
+            granularity=None,
+            target_date=None,
+        ):
             return [
                 {
                     "platform_code": "shopee",
@@ -560,3 +593,44 @@ def test_postgresql_clearance_ranking_route_returns_priority_fields(monkeypatch)
     assert body["success"] is True
     assert body["data"][0]["risk_level"] == "high"
     assert body["data"][0]["clearance_priority_score"] == 456.7
+
+
+def test_postgresql_clearance_ranking_route_forwards_granularity_and_date(monkeypatch):
+    captured = {}
+
+    class _ServiceStub:
+        async def get_clearance_ranking(
+            self,
+            limit,
+            min_days=30,
+            granularity=None,
+            target_date=None,
+        ):
+            captured["limit"] = limit
+            captured["min_days"] = min_days
+            captured["granularity"] = granularity
+            captured["target_date"] = target_date
+            return []
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_clearance_ranking_postgresql(
+            request=_make_request("/api/dashboard/clearance-ranking"),
+            limit=10,
+            granularity="monthly",
+            date="2026-03-01",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert captured == {
+        "limit": 10,
+        "min_days": 30,
+        "granularity": "monthly",
+        "target_date": "2026-03-01",
+    }

@@ -322,9 +322,11 @@ async def get_business_overview_inventory_backlog_postgresql(
     request: Request,
     days: Optional[int] = Query(30, description="minimum turnover days"),
     limit: int = Query(20, ge=1, le=200, description="row limit"),
+    granularity: Optional[str] = Query(None, description="daily/weekly/monthly"),
+    date: Optional[str] = Query(None, description="anchor date"),
 ):
     try:
-        params = {"days": days, "limit": limit}
+        params = {"days": days, "limit": limit, "granularity": granularity, "date": date}
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
@@ -332,6 +334,8 @@ async def get_business_overview_inventory_backlog_postgresql(
             result = await service.get_business_overview_inventory_backlog(
                 min_days=days or 30,
                 limit=limit,
+                granularity=granularity,
+                target_date=date,
             )
             return json.loads(success_response(data=result).body.decode())
 
@@ -768,14 +772,22 @@ async def get_b_cost_analysis_order_detail_postgresql(
 async def get_clearance_ranking_postgresql(
     request: Request,
     limit: int = Query(100, description="row limit"),
+    granularity: Optional[str] = Query(None, description="daily/weekly/monthly"),
+    date: Optional[str] = Query(None, description="anchor date"),
+    month: Optional[str] = Query(None, description="legacy month alias"),
 ):
     try:
-        params = {"limit": limit}
+        target_date = date or month
+        params = {"limit": limit, "granularity": granularity, "date": target_date}
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
-            result = await service.get_clearance_ranking(limit=limit)
+            result = await service.get_clearance_ranking(
+                limit=limit,
+                granularity=granularity,
+                target_date=target_date,
+            )
             return json.loads(success_response(data=result).body.decode())
 
         payload, cache_status = await _resolve_cached_payload(

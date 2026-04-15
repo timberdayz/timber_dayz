@@ -12,6 +12,9 @@ test('business overview inventory backlog api helper serializes limit', () => {
 })
 
 test('BusinessOverview requests dashboard-sized stagnant board payloads', () => {
-  assert.equal(viewSource.includes('api.getBusinessOverviewInventoryBacklog({ limit: 20 })'), true)
+  assert.equal(viewSource.includes('api.getBusinessOverviewInventoryBacklog({'), true)
+  assert.equal(viewSource.includes('limit: 20,'), true)
+  assert.equal(viewSource.includes('granularity: globalGranularity.value'), true)
+  assert.equal(viewSource.includes('date: targetDate || undefined'), true)
   assert.equal(viewSource.includes("params.limit = 10"), true)
 })

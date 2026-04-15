@@ -289,6 +289,61 @@ async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias(
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
+async def test_orders_atomic_marks_account_level_shop_id_without_alias_as_unknown():
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await _create_orders_b_class_tables(session)
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_monthly (
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, period_start_date, period_end_date,
+                        period_start_time, period_end_time, raw_data, header_columns,
+                        data_hash, ingest_timestamp, currency_code
+                    ) VALUES (
+                        'shopee', 'xihong', 'orders', 'monthly',
+                        DATE '2026-03-31', DATE '2026-03-01', DATE '2026-03-31',
+                        TIMESTAMP '2026-03-01 00:00:00', TIMESTAMP '2026-03-31 23:59:59',
+                        '{"店铺":"Shopee未认领店铺","order_id":"SO-UNKNOWN-1","buyer_payment_rmb":"120","profit_rmb":"30"}'::jsonb,
+                        '["店铺","order_id","buyer_payment_rmb","profit_rmb"]'::jsonb,
+                        'hash-shop-unknown-1', TIMESTAMP '2026-04-01 10:00:00', 'SGD'
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            await execute_sql_target(session, "semantic.fact_orders_atomic")
+            await session.commit()
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT platform_code, shop_id, order_id
+                        FROM semantic.fact_orders_atomic
+                        """
+                    )
+                )
+            ).mappings().all()
+
+        assert len(rows) == 1
+        assert rows[0]["platform_code"] == "shopee"
+        assert rows[0]["shop_id"] == "unknown"
+        assert rows[0]["order_id"] == "SO-UNKNOWN-1"
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
 async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fallback():
     with PostgresContainer("postgres:15") as pg:
         sync_url = pg.get_connection_url()

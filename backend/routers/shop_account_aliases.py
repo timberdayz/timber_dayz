@@ -88,7 +88,12 @@ WHERE NOT EXISTS (
     FROM core.shop_account_aliases saa
     WHERE LOWER(COALESCE(saa.platform, '')) = LOWER(g.platform)
       AND LOWER(COALESCE(saa.alias_normalized, '')) = LOWER(
-          REGEXP_REPLACE(TRIM(COALESCE(g.store_label_raw, '')), '[[:space:]_\\-()/]+', '', 'g')
+          REGEXP_REPLACE(
+              REGEXP_REPLACE(TRIM(COALESCE(g.store_label_raw, '')), '^(shopee|tiktok[[:space:]]*shop|tiktok|tk|miaoshou|amazon|lazada)[[:space:]]*', '', 'i'),
+              '[[:space:]_\\-()/]+',
+              '',
+              'g'
+          )
       )
       AND saa.is_active = true
 )

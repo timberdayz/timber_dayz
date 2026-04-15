@@ -2179,6 +2179,8 @@ export default {
     const queryParams = new URLSearchParams()
     if (params.days) queryParams.append('days', params.days)
     if (params.limit) queryParams.append('limit', params.limit)
+    if (params.granularity) queryParams.append('granularity', params.granularity)
+    if (params.date) queryParams.append('date', params.date)
     const queryString = queryParams.toString()
     return await this._get(
       `/dashboard/business-overview/inventory-backlog${

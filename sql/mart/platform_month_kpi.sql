@@ -32,11 +32,11 @@ SELECT
     t.visitor_count,
     CASE
         WHEN o.order_count IS NOT NULL
-         AND t.visitor_count IS NOT NULL
-         AND t.visitor_count > 0
-        THEN ROUND(o.order_count::numeric * 100.0 / t.visitor_count, 2)
+         AND COALESCE(t.page_views, t.visitor_count) IS NOT NULL
+         AND COALESCE(t.page_views, t.visitor_count) > 0
+        THEN ROUND(o.order_count::numeric * 100.0 / COALESCE(t.page_views, t.visitor_count), 2)
         WHEN o.order_count IS NOT NULL
-         AND t.visitor_count = 0
+         AND COALESCE(t.page_views, t.visitor_count) = 0
          AND o.order_count = 0
         THEN 0
         ELSE NULL

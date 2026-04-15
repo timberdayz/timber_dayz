@@ -288,3 +288,4 @@ def test_shop_alias_normalization_strips_platform_prefix():
     assert normalize_alias_key("Shopee新加坡1店") == "新加坡1店"
     assert normalize_alias_key("shopee 新加坡1店") == "新加坡1店"
     assert normalize_alias_key("TikTok Shop 菲律宾2店") == "菲律宾2店"
+    assert normalize_alias_key("TK新加坡1店") == "新加坡1店"

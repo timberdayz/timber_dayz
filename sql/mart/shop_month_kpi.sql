@@ -37,9 +37,9 @@ SELECT
     CASE WHEN t.source_row_count > 0 THEN t.visitor_count END AS visitor_count,
     CASE WHEN t.source_row_count > 0 THEN t.page_views END AS page_views,
     CASE
-        WHEN o.source_row_count > 0 AND t.source_row_count > 0 AND t.visitor_count > 0
-        THEN ROUND(o.order_count * 100.0 / t.visitor_count, 2)
-        WHEN o.source_row_count > 0 AND t.source_row_count > 0 AND t.visitor_count = 0 AND o.order_count = 0
+        WHEN o.source_row_count > 0 AND t.source_row_count > 0 AND COALESCE(t.page_views, t.visitor_count) > 0
+        THEN ROUND(o.order_count * 100.0 / COALESCE(t.page_views, t.visitor_count), 2)
+        WHEN o.source_row_count > 0 AND t.source_row_count > 0 AND COALESCE(t.page_views, t.visitor_count) = 0 AND o.order_count = 0
         THEN 0
         ELSE NULL
     END AS conversion_rate,
