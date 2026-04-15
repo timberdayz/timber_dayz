@@ -166,6 +166,9 @@ class _DateFallbackPage(_FakePage):
         self.text_locators = text_locators
 
     def locator(self, selector: str):
+        for key, locator in self.text_locators.items():
+            if key in selector:
+                return locator
         return _FakeLocator(visible=False, count=0)
 
     def get_by_text(self, text: str, exact: bool = False):
@@ -443,6 +446,21 @@ async def test_shopee_services_business_ready_requires_loading_to_clear_and_stab
 
     assert ready is True
     assert page.wait_calls == [200, 200, 200]
+
+
+@pytest.mark.asyncio
+async def test_shopee_services_business_ready_recognizes_real_chinese_markers() -> None:
+    page = _DynamicSelectorPage(
+        "https://seller.shopee.cn/datacenter/services/agent?cnsc_shop_id=1",
+        [{"signal": True}, {"signal": True}],
+    )
+    component = ShopeeServicesAgentExport(
+        _ctx({"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"})
+    )
+
+    ready = await component._wait_services_business_ready(page, timeout_ms=1, poll_ms=1)
+
+    assert ready is True
 
 
 def test_shopee_products_export_detects_throttled_text() -> None:

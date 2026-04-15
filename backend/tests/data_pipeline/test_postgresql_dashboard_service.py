@@ -505,6 +505,76 @@ async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(
     assert result[0]["achievement_rate"] == 83.33
 
 
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_prefers_resolved_display_name(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "1308200830",
+                "display_name": "Singapore(HX Home)",
+                "gmv": 100,
+                "order_count": 10,
+                "avg_order_value": 10,
+                "attach_rate": 1.2,
+                "profit": 30,
+                "target_amount": 120,
+                "achievement_rate": 83.33,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_shop_racing(
+        granularity="monthly",
+        target_date="2026-03-01",
+        group_by="shop",
+    )
+
+    assert result[0]["name"] == "Singapore(HX Home)"
+    assert result[0]["shop_id"] == "1308200830"
+    assert "LEFT JOIN core.dim_shops" in captured[0][0]
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_masks_unknown_name(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "unknown",
+                "display_name": None,
+                "gmv": 100,
+                "order_count": 10,
+                "avg_order_value": 10,
+                "attach_rate": 1.2,
+                "profit": 30,
+                "target_amount": 0,
+                "achievement_rate": 0,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_shop_racing(
+        granularity="monthly",
+        target_date="2026-03-01",
+        group_by="shop",
+    )
+
+    assert result[0]["name"] == "未匹配店铺"
+
+
 @pytest.mark.pg_only
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_time_targets_without_duplicates(monkeypatch):
@@ -526,6 +596,31 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS api"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE core.dim_shops (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        shop_name VARCHAR(256)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE core.shop_accounts (
+                        id SERIAL PRIMARY KEY,
+                        platform VARCHAR(50),
+                        store_name VARCHAR(200),
+                        platform_shop_id VARCHAR(256),
+                        shop_account_id VARCHAR(100)
+                    )
+                    """
+                )
+            )
 
             await session.execute(
                 text(

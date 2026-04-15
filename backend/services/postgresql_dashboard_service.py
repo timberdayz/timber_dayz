@@ -1146,14 +1146,43 @@ class PostgresqlDashboardService:
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
         query = """
-            SELECT granularity, period_key, platform_code, shop_id, gmv, order_count, avg_order_value, attach_rate, profit, target_amount, achievement_rate
-            FROM api.business_overview_shop_racing_module
-            WHERE granularity = :granularity
-              AND period_key = :period_key
+            SELECT
+                src.granularity,
+                src.period_key,
+                src.platform_code,
+                src.shop_id,
+                COALESCE(
+                    NULLIF(TRIM(ds.shop_name), ''),
+                    NULLIF(TRIM(sa.store_name), ''),
+                    CASE
+                        WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown')
+                        THEN NULL
+                        ELSE src.shop_id
+                    END
+                ) AS display_name,
+                src.gmv,
+                src.order_count,
+                src.avg_order_value,
+                src.attach_rate,
+                src.profit,
+                src.target_amount,
+                src.achievement_rate
+            FROM api.business_overview_shop_racing_module src
+            LEFT JOIN core.dim_shops ds
+              ON ds.platform_code = src.platform_code
+             AND ds.shop_id = src.shop_id
+            LEFT JOIN core.shop_accounts sa
+              ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
+             AND (
+                  COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
+                  OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
+             )
+            WHERE src.granularity = :granularity
+              AND src.period_key = :period_key
             """
         params = {"granularity": granularity, "period_key": period_key}
         if platform:
-            query += " AND platform_code = :platform_code"
+            query += " AND src.platform_code = :platform_code"
             params["platform_code"] = platform
         rows = await self._fetch_rows(query, params)
 
@@ -1187,7 +1216,7 @@ class PostgresqlDashboardService:
 
         normalized_rows = [
             {
-                "name": row.get("shop_id") or "unknown",
+                "name": row.get("display_name") or "未匹配店铺",
                 "platform_code": row.get("platform_code"),
                 "shop_id": row.get("shop_id") or "unknown",
                 "gmv": _to_optional_float(row.get("gmv")),

@@ -107,6 +107,21 @@ def normalize_field_name_for_domain(
 
         return None
 
+    if domain and domain.lower() == "orders" and field_name in {
+        "店铺",
+        "店铺名",
+        "店铺名称",
+        "store_name",
+        "store_label_raw",
+    }:
+        return "store_label_raw"
+
+    if domain and domain.lower() == "orders" and field_name in {
+        "站点",
+        "site",
+    }:
+        return "site"
+
     if domain and domain.lower() == "orders" and field_name in ORDERS_EXPLICIT_FIELD_MAP:
         return ORDERS_EXPLICIT_FIELD_MAP[field_name]
 

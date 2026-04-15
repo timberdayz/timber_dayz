@@ -20,6 +20,21 @@ def test_orders_rmb_fields_preserve_distinct_internal_keys():
     assert normalized["buyer_payment_rmb"] == "64.2"
 
 
+def test_orders_store_label_is_preserved_as_store_label_raw():
+    from backend.services.data_ingestion_service import normalize_row_fields_for_domain
+
+    normalized = normalize_row_fields_for_domain(
+        domain="orders",
+        row={
+            "店铺": "Shopee新加坡1店",
+            "站点": "新加坡",
+        },
+    )
+
+    assert normalized["store_label_raw"] == "Shopee新加坡1店"
+    assert normalized["site"] == "新加坡"
+
+
 def test_orders_rmb_fields_do_not_silently_overwrite_legacy_fields():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
@@ -149,3 +164,11 @@ def test_inventory_domain_preserves_original_sku_header_names():
     )
 
     assert normalized == row
+
+
+def test_field_mapping_ingest_uses_orders_domain_specific_normalization():
+    from pathlib import Path
+
+    text = Path("backend/routers/field_mapping_ingest.py").read_text(encoding="utf-8")
+
+    assert "normalize_row_fields_for_domain(" in text

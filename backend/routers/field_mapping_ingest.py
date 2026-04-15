@@ -30,6 +30,7 @@ from backend.services.data_importer import (
 )
 from backend.services.data_standardizer import standardize_rows
 from backend.services.currency_extractor import get_currency_extractor
+from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 from modules.core.logger import get_logger
 from backend.routers._field_mapping_helpers import _safe_resolve_path
 
@@ -538,10 +539,11 @@ async def ingest_file(
                 currency_codes = []
                 
                 for row in valid_rows:
-                    normalized_row = {}
-                    for field_name, value in row.items():
-                        normalized_field_name = currency_extractor.normalize_field_name(field_name)
-                        normalized_row[normalized_field_name] = value
+                    normalized_row = normalize_row_fields_for_domain(
+                        domain=domain or "products",
+                        row=row,
+                        currency_extractor=currency_extractor,
+                    )
                     normalized_rows.append(normalized_row)
                     
                     currency_code = currency_extractor.extract_currency_from_row(
