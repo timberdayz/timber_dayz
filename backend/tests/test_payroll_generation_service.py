@@ -407,7 +407,7 @@ def test_generate_employee_month_reports_locked_record():
     assert result["locked_conflict_details"][0]["employee_code"] == "EMP011"
 
 
-def test_generate_employee_month_falls_back_to_chinese_c_class_columns():
+def test_generate_employee_month_reads_english_c_class_columns():
     service_cls = _load_service_cls()
     db = AsyncMock()
 
@@ -444,16 +444,11 @@ def test_generate_employee_month_falls_back_to_chinese_c_class_columns():
             if entity is SalaryStructure:
                 return _MockResult(rows=[salary])
             if entity is EmployeeCommission:
-                raise Exception("column employee_commissions.employee_code does not exist")
+                return _MockResult(scalar_value=SimpleNamespace(commission_amount=300.0))
             if entity is EmployeePerformance:
-                raise Exception("column employee_performance.employee_code does not exist")
+                return _MockResult(scalar_value=SimpleNamespace(performance_score=75.0))
             if entity is PayrollRecord:
                 return _MockResult(scalar_value=None)
-        sql = str(stmt).lower()
-        if "from c_class.employee_commissions" in sql:
-            return _MappingsResult([{"commission_amount": 300.0}])
-        if "from c_class.employee_performance" in sql:
-            return _MappingsResult([{"performance_score": 75.0}])
         return _MockResult(rows=[])
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -469,7 +464,7 @@ def test_generate_employee_month_falls_back_to_chinese_c_class_columns():
     assert float(created.performance_salary) == 375.0
 
 
-def test_generate_month_falls_back_to_chinese_c_class_columns():
+def test_generate_month_reads_english_c_class_columns():
     service_cls = _load_service_cls()
     db = AsyncMock()
     added = []
@@ -505,16 +500,11 @@ def test_generate_month_falls_back_to_chinese_c_class_columns():
             if entity is SalaryStructure:
                 return _MockResult(rows=[salary])
             if entity is EmployeeCommission:
-                raise Exception("column employee_commissions.year_month does not exist")
+                return _MockResult(rows=[SimpleNamespace(employee_code="EMP021", commission_amount=300.0)])
             if entity is EmployeePerformance:
-                raise Exception("column employee_performance.year_month does not exist")
+                return _MockResult(rows=[SimpleNamespace(employee_code="EMP021", performance_score=80.0)])
             if entity is PayrollRecord:
                 return _MockResult(rows=[])
-        sql = str(stmt).lower()
-        if "from c_class.employee_commissions" in sql:
-            return _MappingsResult([{"employee_code": "EMP021", "commission_amount": 300.0}])
-        if "from c_class.employee_performance" in sql:
-            return _MappingsResult([{"employee_code": "EMP021", "performance_score": 80.0}])
         return _MockResult(rows=[])
 
     db.execute = AsyncMock(side_effect=_execute)

@@ -112,6 +112,7 @@ class FollowInvestmentService:
         platform_code: str | None = None,
         shop_id: str | None = None,
         status: str | None = None,
+        period_month: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.db is None:
             return []
@@ -122,6 +123,13 @@ class FollowInvestmentService:
             stmt = stmt.where(FollowInvestment.shop_id == shop_id)
         if status:
             stmt = stmt.where(FollowInvestment.status == status)
+        if period_month:
+            month_start = self._to_month_start(period_month)
+            month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
+            stmt = stmt.where(
+                FollowInvestment.contribution_date <= month_end,
+                (FollowInvestment.withdraw_date.is_(None) | (FollowInvestment.withdraw_date >= month_start)),
+            )
         rows = (await self.db.execute(stmt.order_by(FollowInvestment.id.desc()))).scalars().all()
         user_names = await self._load_user_names({int(row.investor_user_id) for row in rows})
         return [

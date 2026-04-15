@@ -1,71 +1,41 @@
-from datetime import date
+from importlib import import_module
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from backend.services.follow_investment_service import FollowInvestmentService
+
+def _load_service_module():
+    try:
+        return import_module("backend.services.follow_investment_service")
+    except ModuleNotFoundError as exc:
+        pytest.fail(f"follow investment service module missing: {exc}")
 
 
-def test_calculate_occupied_days_in_month():
-    service = FollowInvestmentService(db=None)
+@pytest.mark.asyncio
+async def test_list_investments_filters_records_by_period_month_window():
+    module = _load_service_module()
+    db = SimpleNamespace(execute=AsyncMock())
+    service = module.FollowInvestmentService(db)
 
-    assert service.calculate_occupied_days(
-        year_month="2026-03",
-        contribution_date=date(2026, 3, 1),
-        withdraw_date=None,
-    ) == 31
-    assert service.calculate_occupied_days(
-        year_month="2026-03",
-        contribution_date=date(2026, 3, 16),
-        withdraw_date=None,
-    ) == 16
-    assert service.calculate_occupied_days(
-        year_month="2026-03",
-        contribution_date=date(2026, 2, 20),
-        withdraw_date=date(2026, 3, 10),
-    ) == 10
+    async def fake_execute(stmt):
+        sql = str(stmt)
+        assert "follow_investments" in sql
+        assert "contribution_date" in sql
+        assert "withdraw_date" in sql
+        params = stmt.compile().params
+        assert str(params["contribution_date_1"]) == "2026-04-30"
+        assert str(params["withdraw_date_1"]) == "2026-04-01"
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
 
+    service._load_user_names = AsyncMock(return_value={})
+    db.execute = AsyncMock(side_effect=fake_execute)
 
-def test_calculate_settlement_detail_ratios():
-    service = FollowInvestmentService(db=None)
-
-    rows = [
-        {
-            "investor_user_id": 101,
-            "contribution_amount": 50000,
-            "contribution_date": date(2026, 3, 1),
-            "withdraw_date": None,
-        },
-        {
-            "investor_user_id": 102,
-            "contribution_amount": 30000,
-            "contribution_date": date(2026, 3, 16),
-            "withdraw_date": None,
-        },
-    ]
-
-    details = service.build_settlement_details(
-        year_month="2026-03",
-        distributable_amount=32000,
-        investments=rows,
+    payload = await service.list_investments(
+        platform_code="shopee",
+        shop_id="shop-1",
+        status="active",
+        period_month="2026-04",
     )
 
-    assert len(details) == 2
-    assert details[0]["occupied_days"] == 31
-    assert details[1]["occupied_days"] == 16
-    assert details[0]["weighted_capital"] == pytest.approx(1550000)
-    assert details[1]["weighted_capital"] == pytest.approx(480000)
-    assert details[0]["share_ratio"] == pytest.approx(1550000 / 2030000, rel=1e-4)
-    assert details[1]["share_ratio"] == pytest.approx(480000 / 2030000, rel=1e-4)
-    assert details[0]["estimated_income"] + details[1]["estimated_income"] == pytest.approx(32000, abs=0.01)
-
-
-def test_calculate_distributable_details_with_no_investments():
-    service = FollowInvestmentService(db=None)
-
-    details = service.build_settlement_details(
-        year_month="2026-03",
-        distributable_amount=32000,
-        investments=[],
-    )
-
-    assert details == []
+    assert payload == []

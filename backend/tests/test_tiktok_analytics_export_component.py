@@ -111,6 +111,39 @@ async def test_tiktok_analytics_export_navigates_to_analytics_page_and_runs_help
 
 
 @pytest.mark.asyncio
+async def test_tiktok_analytics_export_switches_shop_context_before_opening_data_overview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    component = TiktokAnalyticsExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+
+    async def _switch_on_homepage(current_page):
+        assert "/homepage" in str(current_page.url)
+        assert "/compass/data-overview" not in str(current_page.url)
+        current_page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"
+        return type("R", (), {"success": True, "message": "ok"})()
+
+    date_state_mock = AsyncMock(return_value=True)
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/analytics-my.xlsx")
+
+    monkeypatch.setattr(component, "_run_shop_switch", _switch_on_homepage)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+
+    result = await component.run(page)
+
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=MY"
+    ]
+    trigger_mock.assert_awaited_once_with(page)
+    collect_mock.assert_awaited_once_with(page)
+    assert result.success is True
+    assert result.file_path == "temp/analytics-my.xlsx"
+
+
+@pytest.mark.asyncio
 async def test_tiktok_analytics_export_returns_login_required_when_entry_state_is_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

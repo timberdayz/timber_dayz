@@ -44,3 +44,9 @@ def test_finance_store_exposes_monthly_profit_settlement_state_and_actions():
     assert "updateMonthlyProfitSettlementTargets" in text
     assert "approveMonthlyProfitSettlement" in text
     assert "reopenMonthlyProfitSettlement" in text
+
+
+def test_financial_management_page_queries_follow_investments_with_period_month():
+    text = Path("frontend/src/views/FinancialManagement.vue").read_text(encoding="utf-8")
+
+    assert "period_month: selectedMonth.value" in text

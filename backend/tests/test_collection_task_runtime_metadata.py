@@ -54,6 +54,10 @@ def test_extract_runtime_metadata_from_logs_preserves_session_diagnostics() -> N
                 "profile_contains_state": True,
                 "runtime_strategy_reason": "storage_state_available",
                 "session_source": "storage_state",
+                "user_agent": "Mozilla/5.0 Chrome/136.0.0.0",
+                "runtime_locale": "en-SG",
+                "runtime_timezone": "Asia/Singapore",
+                "runtime_accept_language": "en-SG,en;q=0.9",
                 "probe_urls": [
                     "https://seller.tiktok.com/homepage",
                     "https://seller.tiktok.com/account/login",
@@ -70,6 +74,10 @@ def test_extract_runtime_metadata_from_logs_preserves_session_diagnostics() -> N
     assert metadata["profile_contains_state"] is True
     assert metadata["runtime_strategy_reason"] == "storage_state_available"
     assert metadata["session_source"] == "storage_state"
+    assert metadata["user_agent"] == "Mozilla/5.0 Chrome/136.0.0.0"
+    assert metadata["runtime_locale"] == "en-SG"
+    assert metadata["runtime_timezone"] == "Asia/Singapore"
+    assert metadata["runtime_accept_language"] == "en-SG,en;q=0.9"
     assert metadata["probe_urls"] == [
         "https://seller.tiktok.com/homepage",
         "https://seller.tiktok.com/account/login",

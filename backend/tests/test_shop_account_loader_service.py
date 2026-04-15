@@ -77,3 +77,42 @@ def test_shop_account_loader_service_fills_missing_shopee_shop_id_from_override(
 
     assert payload["compat_account"]["shop_id"] == "1540271744"
     assert payload["shop_context"]["platform_shop_id"] == "1540271744"
+
+
+def test_shop_account_loader_service_exposes_region_and_contact_fields_for_runtime_fingerprint():
+    service = ShopAccountLoaderService()
+    service._decrypt_password = lambda encrypted: "plain-password"
+
+    payload = service._build_payload(
+        SimpleNamespace(
+            id=1,
+            platform="tiktok",
+            main_account_id="tiktok:main",
+            username="demo-user",
+            password_encrypted="enc",
+            login_url="https://seller.tiktokshopglobalselling.com/account/login",
+            email="demo@example.com",
+            phone="+6588889999",
+            enabled=True,
+            notes="",
+        ),
+        SimpleNamespace(
+            id=2,
+            platform="tiktok",
+            shop_account_id="tiktok_sg_demo",
+            main_account_id="tiktok:main",
+            store_name="demo.sg",
+            platform_shop_id="",
+            platform_shop_id_status="missing",
+            shop_region="SG",
+            shop_type="local",
+            enabled=True,
+            notes="",
+        ),
+        {"analytics": True},
+    )
+
+    assert payload["compat_account"]["region"] == "SG"
+    assert payload["compat_account"]["shop_region"] == "SG"
+    assert payload["compat_account"]["email"] == "demo@example.com"
+    assert payload["compat_account"]["phone"] == "+6588889999"

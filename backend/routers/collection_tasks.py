@@ -231,6 +231,10 @@ def _extract_runtime_metadata_from_logs(logs: List[Any]) -> Optional[dict]:
             "profile_contains_state": details.get("profile_contains_state"),
             "runtime_strategy_reason": details.get("runtime_strategy_reason"),
             "session_source": details.get("session_source"),
+            "user_agent": details.get("user_agent"),
+            "runtime_locale": details.get("runtime_locale"),
+            "runtime_timezone": details.get("runtime_timezone"),
+            "runtime_accept_language": details.get("runtime_accept_language"),
             "probe_urls": details.get("probe_urls"),
         }
     return None

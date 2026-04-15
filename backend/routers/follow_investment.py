@@ -80,6 +80,7 @@ async def list_follow_investments(
     platform_code: str | None = Query(None),
     shop_id: str | None = Query(None),
     status: str | None = Query(None),
+    period_month: str | None = Query(None),
     db: AsyncSession = Depends(get_async_db),
     _current_user=Depends(_require_finance_role),
 ):
@@ -88,6 +89,7 @@ async def list_follow_investments(
         platform_code=platform_code,
         shop_id=shop_id,
         status=status,
+        period_month=period_month,
     )
     return success_response(data=payload)
 

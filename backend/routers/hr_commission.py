@@ -46,7 +46,7 @@ def _shop_key(platform_code: str | None, shop_id: str | None) -> str:
     return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
 
 
-async def _load_employee_performance_cn_fallback(
+async def _legacy_employee_performance_loader_unused(
     db: AsyncSession,
     employee_code: Optional[str],
     year_month: Optional[str],
@@ -77,7 +77,7 @@ async def _load_employee_performance_cn_fallback(
     return [EmployeePerformanceResponse.model_validate(dict(row)) for row in rows]
 
 
-async def _load_employee_commissions_cn_fallback(
+async def _legacy_employee_commissions_loader_unused(
     db: AsyncSession,
     employee_code: Optional[str],
     year_month: Optional[str],
@@ -308,19 +308,8 @@ async def list_employee_performance(
         
         return [EmployeePerformanceResponse.model_validate(perf) for perf in performances]
     except Exception as e:
-        await db.rollback()
-        logger.warning(f"employee_performance ORM query failed; using Chinese-column compatibility SQL path: {e}")
-        try:
-            return await _load_employee_performance_cn_fallback(
-                db=db,
-                employee_code=employee_code,
-                year_month=year_month,
-                page=page,
-                page_size=page_size,
-            )
-        except Exception as inner:
-            logger.error(f"获取员工绩效列表失败: {inner}", exc_info=True)
-            return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工绩效列表失败: {str(inner)}", status_code=500)
+        logger.error(f"获取员工绩效列表失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工绩效列表失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -434,19 +423,8 @@ async def list_employee_commissions(
         
         return [EmployeeCommissionResponse.model_validate(comm) for comm in commissions]
     except Exception as e:
-        await db.rollback()
-        logger.warning(f"employee_commissions ORM query failed; using Chinese-column compatibility SQL path: {e}")
-        try:
-            return await _load_employee_commissions_cn_fallback(
-                db=db,
-                employee_code=employee_code,
-                year_month=year_month,
-                page=page,
-                page_size=page_size,
-            )
-        except Exception as inner:
-            logger.error(f"获取员工提成列表失败: {inner}", exc_info=True)
-            return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工提成列表失败: {str(inner)}", status_code=500)
+        logger.error(f"获取员工提成列表失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工提成列表失败: {str(e)}", status_code=500)
 
 
 @router.get("/commissions/shop", response_model=List[ShopCommissionResponse])

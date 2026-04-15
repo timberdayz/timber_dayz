@@ -697,8 +697,10 @@ async def test_postgresql_dashboard_service_comparison_uses_total_items_for_sale
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(monkeypatch):
     service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
 
     async def fake_fetch_rows(query, params):
+        captured.append((query, params))
         return [
             {
                 "granularity": "monthly",
@@ -724,6 +726,11 @@ async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(
 
     assert result[0]["target_amount"] == 120
     assert result[0]["achievement_rate"] == 83.33
+    assert "fact_shopee_orders_monthly" in captured[0][0]
+    assert "fact_tiktok_orders_monthly" in captured[0][0]
+    assert "fact_miaoshou_orders_monthly" in captured[0][0]
+    assert "mart.shop_month_kpi" not in captured[0][0]
+    assert "api.business_overview_shop_racing_module" not in captured[0][0]
 
 
 @pytest.mark.asyncio

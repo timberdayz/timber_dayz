@@ -334,6 +334,15 @@ def _daily_orders_raw_source_sql() -> str:
     """
 
 
+def _normalized_identity_sql(expr: str) -> str:
+    return (
+        "REGEXP_REPLACE("
+        "REGEXP_REPLACE(LOWER(TRIM(COALESCE({expr}, ''))), "
+        "'^(shopee|tiktok\\s*shop|tiktok|tk|miaoshou|amazon|lazada)\\s*', '', 'i'), "
+        "'[[:space:]_()/-]+', '', 'g')"
+    ).format(expr=expr)
+
+
 def _filter_rows_by_period_key(rows: list[dict[str, Any]], target_period: date_cls) -> list[dict[str, Any]]:
     matched: list[dict[str, Any]] = []
     for row in rows:
@@ -684,6 +693,18 @@ def _previous_store_analysis_anchor(granularity: str, target_date: str) -> str:
 class PostgresqlDashboardService:
     async def _fetch_rows(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         async with AsyncSessionLocal() as session:
+            result = await session.execute(text(query), params)
+            return [dict(row) for row in result.mappings().all()]
+
+    async def _fetch_rows_with_statement_timeout(
+        self,
+        query: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int,
+    ) -> list[dict[str, Any]]:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text(f"SET LOCAL statement_timeout = {int(timeout_ms)}"))
             result = await session.execute(text(query), params)
             return [dict(row) for row in result.mappings().all()]
 
@@ -1705,53 +1726,375 @@ class PostgresqlDashboardService:
         platform: str | None = None,
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
-        query = """
-            SELECT
-                src.granularity,
-                src.period_key,
-                src.platform_code,
-                src.shop_id,
-                sa.shop_account_id,
-                sa.main_account_id,
-                ma.main_account_name,
-                sa.store_name AS account_store_name,
-                COALESCE(
-                    NULLIF(TRIM(ds.shop_name), ''),
-                    NULLIF(TRIM(sa.store_name), ''),
+        if granularity == "monthly":
+            period_start, period_end = _resolve_business_overview_window(granularity, target_date)
+            platform_filter_sql = " AND platform_code = :platform_code" if platform else ""
+            monthly_fast_query = """
+                WITH target_summary AS (
+                    SELECT
+                        tb.platform_code,
+                        tb.shop_id,
+                        CASE
+                            WHEN SUM(CASE WHEN tb.breakdown_type = 'shop' THEN tb.target_amount ELSE 0 END) > 0
+                            THEN SUM(CASE WHEN tb.breakdown_type = 'shop' THEN tb.target_amount ELSE 0 END)::numeric
+                            ELSE SUM(CASE WHEN tb.breakdown_type = 'shop_time' THEN tb.target_amount ELSE 0 END)::numeric
+                        END AS target_amount
+                    FROM a_class.target_breakdown tb
+                    INNER JOIN a_class.sales_targets st
+                        ON st.id = tb.target_id
+                       AND st.status = 'active'
+                    WHERE tb.breakdown_type IN ('shop', 'shop_time')
+                      AND tb.period_start <= :period_end
+                      AND tb.period_end >= :period_start
+                    GROUP BY tb.platform_code, tb.shop_id
+                ),
+                raw_orders AS (
+                    {orders_source}
+                ),
+                mapped_orders AS (
+                    SELECT
+                        date_trunc('month', metric_date)::date AS period_key,
+                        platform_code,
+                        NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
+                        NULLIF(TRIM(COALESCE(raw_data->>'店铺', raw_data->>'店铺名', raw_data->>'店铺名称', raw_data->>'store_name', raw_data->>'store_label_raw')), '') AS store_label_raw,
+                        NULLIF(TRIM(COALESCE(raw_data->>'platform_shop_id', raw_data->>'shop_id', raw_data->>'平台店铺ID', raw_data->>'店铺ID')), '') AS source_platform_shop_id,
+                        NULLIF(TRIM(COALESCE(raw_data->>'shop_account_id', raw_data->>'account_id', raw_data->>'店铺账号ID', raw_data->>'账号ID', raw_data->>'account')), '') AS source_shop_account_id,
+                        COALESCE(raw_data->>'订单号', raw_data->>'订单ID', raw_data->>'订单编号', raw_data->>'ID', raw_data->>'order_id', raw_data->>'Order ID', raw_data->>'order_no') AS order_id,
+                        CASE
+                            WHEN COALESCE(raw_data->>'实付金额', raw_data->>'买家实付金额', raw_data->>'总收入', raw_data->>'buyer_payment_rmb', raw_data->>'buyer_payment', raw_data->>'买家支付(RMB)', raw_data->>'买家支付', raw_data->>'买家实付金额(RMB)', raw_data->>'paid_amount', raw_data->>'Paid Amount') IS NULL THEN NULL
+                            ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'实付金额', raw_data->>'买家实付金额', raw_data->>'总收入', raw_data->>'buyer_payment_rmb', raw_data->>'buyer_payment', raw_data->>'买家支付(RMB)', raw_data->>'买家支付', raw_data->>'买家实付金额(RMB)', raw_data->>'paid_amount', raw_data->>'Paid Amount'), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+                        END AS paid_amount,
+                        CASE
+                            WHEN COALESCE(raw_data->>'利润(RMB)', raw_data->>'profit_rmb', raw_data->>'利润', raw_data->>'profit', raw_data->>'毛利', raw_data->>'Profit') IS NULL THEN NULL
+                            ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'利润(RMB)', raw_data->>'profit_rmb', raw_data->>'利润', raw_data->>'profit', raw_data->>'毛利', raw_data->>'Profit'), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+                        END AS profit,
+                        CASE
+                            WHEN COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') IS NULL THEN NULL
+                            ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity'), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+                        END AS product_quantity,
+                        data_hash,
+                        ingest_timestamp
+                    FROM raw_orders
+                    WHERE date_trunc('month', metric_date)::date = :period_key
+                    {platform_filter_sql}
+                ),
+                resolved_orders AS (
+                    SELECT
+                        m.period_key,
+                        m.platform_code,
+                        CASE
+                            WHEN resolved.resolved_shop_id IS NOT NULL THEN resolved.resolved_shop_id
+                            WHEN LOWER(COALESCE(m.source_shop_id, '')) IN ('', 'none', 'unknown', 'xihong') THEN 'unknown'
+                            ELSE COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id, 'unknown')
+                        END AS shop_id,
+                        m.order_id,
+                        m.paid_amount,
+                        m.product_quantity,
+                        m.profit,
+                        m.data_hash,
+                        m.ingest_timestamp
+                    FROM mapped_orders m
+                    LEFT JOIN LATERAL (
+                        SELECT c.resolved_shop_id, c.resolution_priority
+                        FROM semantic.shop_identity_resolution_candidates c
+                        WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
+                          AND c.identity_value_normalized IN (
+                              LOWER(COALESCE(m.source_platform_shop_id, '')),
+                              LOWER(COALESCE(m.source_shop_account_id, '')),
+                              LOWER(COALESCE(m.source_shop_id, '')),
+                              {_source_shop_norm},
+                              {_store_label_norm}
+                          )
+                        ORDER BY c.resolution_priority, c.resolved_shop_id
+                        LIMIT 1
+                    ) resolved ON TRUE
+                ),
+                deduplicated_orders AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY platform_code, COALESCE(shop_id, ''), data_hash
+                               ORDER BY ingest_timestamp DESC
+                           ) AS rn
+                    FROM resolved_orders
+                ),
+                orders_agg AS (
+                    SELECT
+                        period_key,
+                        platform_code,
+                        shop_id,
+                        SUM(paid_amount) AS gmv,
+                        CASE WHEN COUNT(*) > 0 THEN COUNT(DISTINCT order_id)::numeric ELSE NULL END AS order_count,
+                        SUM(product_quantity) AS total_items,
+                        SUM(profit) AS profit
+                    FROM deduplicated_orders
+                    WHERE rn = 1
+                    GROUP BY period_key, platform_code, shop_id
+                ),
+                combined AS (
+                    SELECT
+                        o.period_key,
+                        o.platform_code,
+                        o.shop_id,
+                        o.gmv,
+                        o.order_count,
+                        CASE
+                            WHEN o.gmv IS NOT NULL AND o.order_count > 0 THEN ROUND(o.gmv::numeric / o.order_count, 2)
+                            WHEN o.gmv IS NOT NULL AND o.order_count = 0 AND o.gmv = 0 THEN 0
+                            ELSE NULL
+                        END AS avg_order_value,
+                        CASE
+                            WHEN o.total_items IS NOT NULL AND o.order_count > 0 THEN ROUND(o.total_items::numeric / o.order_count, 2)
+                            WHEN o.total_items IS NOT NULL AND o.order_count = 0 AND o.total_items = 0 THEN 0
+                            ELSE NULL
+                        END AS attach_rate,
+                        o.profit
+                    FROM orders_agg o
+                )
+                SELECT
+                    :granularity AS granularity,
+                    src.period_key,
+                    src.platform_code,
+                    src.shop_id,
+                    sa.shop_account_id,
+                    sa.main_account_id,
+                    ma.main_account_name,
+                    sa.store_name AS account_store_name,
+                    COALESCE(
+                        NULLIF(TRIM(ds.shop_name), ''),
+                        NULLIF(TRIM(sa.store_name), ''),
+                        CASE
+                            WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown') THEN NULL
+                            ELSE src.shop_id
+                        END
+                    ) AS display_name,
+                    src.gmv,
+                    src.order_count,
+                    src.avg_order_value,
+                    src.attach_rate,
+                    src.profit,
+                    COALESCE(t.target_amount, 0) AS target_amount,
                     CASE
-                        WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown')
-                        THEN NULL
-                        ELSE src.shop_id
-                    END
-                ) AS display_name,
-                src.gmv,
-                src.order_count,
-                src.avg_order_value,
-                src.attach_rate,
-                src.profit,
-                src.target_amount,
-                src.achievement_rate
-            FROM api.business_overview_shop_racing_module src
-            LEFT JOIN core.dim_shops ds
-              ON ds.platform_code = src.platform_code
-             AND ds.shop_id = src.shop_id
-            LEFT JOIN core.shop_accounts sa
-              ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
-             AND (
-                  COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
-                  OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
-                  OR sa.id::text = COALESCE(src.shop_id, '')
-             )
-            LEFT JOIN core.main_accounts ma
-              ON ma.main_account_id = sa.main_account_id
-            WHERE src.granularity = :granularity
-              AND src.period_key = :period_key
-            """
-        params = {"granularity": granularity, "period_key": period_key}
-        if platform:
-            query += " AND src.platform_code = :platform_code"
-            params["platform_code"] = platform
-        rows = await self._fetch_rows(query, params)
+                        WHEN COALESCE(t.target_amount, 0) > 0 THEN ROUND(src.gmv::numeric * 100.0 / t.target_amount, 2)
+                        ELSE 0::numeric
+                    END AS achievement_rate
+                FROM combined src
+                LEFT JOIN target_summary t
+                  ON t.platform_code = src.platform_code
+                 AND COALESCE(t.shop_id, '') = COALESCE(src.shop_id, '')
+                LEFT JOIN core.dim_shops ds
+                  ON ds.platform_code = src.platform_code
+                 AND ds.shop_id = src.shop_id
+                LEFT JOIN core.shop_accounts sa
+                  ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
+                 AND (
+                      COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
+                      OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
+                      OR sa.id::text = COALESCE(src.shop_id, '')
+                 )
+                LEFT JOIN core.main_accounts ma
+                  ON ma.main_account_id = sa.main_account_id
+                WHERE src.period_key = :period_key
+                """.format(
+                    orders_source=_monthly_orders_raw_source_sql(),
+                    platform_filter_sql=platform_filter_sql,
+                    _source_shop_norm=_normalized_identity_sql("m.source_shop_id"),
+                    _store_label_norm=_normalized_identity_sql("m.store_label_raw"),
+            )
+            try:
+                rows = await self._fetch_rows_with_statement_timeout(
+                    monthly_fast_query,
+                    {
+                        "granularity": granularity,
+                        "period_key": period_key,
+                        "period_start": period_start,
+                        "period_end": period_end,
+                        "platform_code": platform,
+                    },
+                    timeout_ms=120000,
+                )
+            except Exception:
+                source_table, period_column = _comparison_source_for_granularity(granularity)
+                query = """
+                    SELECT
+                        :granularity AS granularity,
+                        src.{period_column} AS period_key,
+                        src.platform_code,
+                        src.shop_id,
+                        sa.shop_account_id,
+                        sa.main_account_id,
+                        ma.main_account_name,
+                        sa.store_name AS account_store_name,
+                        COALESCE(
+                            NULLIF(TRIM(ds.shop_name), ''),
+                            NULLIF(TRIM(sa.store_name), ''),
+                            CASE
+                                WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown')
+                                THEN NULL
+                                ELSE src.shop_id
+                            END
+                        ) AS display_name,
+                        src.gmv,
+                        src.order_count,
+                        src.avg_order_value,
+                        src.attach_rate,
+                        src.profit,
+                        COALESCE(t.target_amount, 0) AS target_amount,
+                        CASE
+                            WHEN COALESCE(t.target_amount, 0) > 0
+                            THEN ROUND(src.gmv::numeric * 100.0 / t.target_amount, 2)
+                            ELSE 0::numeric
+                        END AS achievement_rate
+                    FROM {source_table} src
+                    LEFT JOIN LATERAL (
+                        WITH shop_target AS (
+                            SELECT COALESCE(SUM(tb.target_amount)::numeric, 0::numeric) AS target_amount
+                            FROM a_class.target_breakdown tb
+                            INNER JOIN a_class.sales_targets st
+                                ON st.id = tb.target_id
+                               AND st.status = 'active'
+                            WHERE tb.breakdown_type = 'shop'
+                              AND tb.platform_code = src.platform_code
+                              AND COALESCE(tb.shop_id, '') = COALESCE(src.shop_id, '')
+                              AND tb.period_start <= :period_end
+                              AND tb.period_end >= :period_start
+                        ),
+                        shop_time_target AS (
+                            SELECT COALESCE(SUM(tb.target_amount)::numeric, 0::numeric) AS target_amount
+                            FROM a_class.target_breakdown tb
+                            INNER JOIN a_class.sales_targets st
+                                ON st.id = tb.target_id
+                               AND st.status = 'active'
+                            WHERE tb.breakdown_type = 'shop_time'
+                              AND tb.platform_code = src.platform_code
+                              AND COALESCE(tb.shop_id, '') = COALESCE(src.shop_id, '')
+                              AND tb.period_start <= :period_end
+                              AND tb.period_end >= :period_start
+                        )
+                        SELECT
+                            CASE
+                                WHEN :granularity = 'monthly' AND (SELECT target_amount FROM shop_target) > 0
+                                THEN (SELECT target_amount FROM shop_target)
+                                WHEN (SELECT target_amount FROM shop_time_target) > 0
+                                THEN (SELECT target_amount FROM shop_time_target)
+                                ELSE (SELECT target_amount FROM shop_target)
+                            END AS target_amount
+                    ) t ON TRUE
+                    LEFT JOIN core.dim_shops ds
+                      ON ds.platform_code = src.platform_code
+                     AND ds.shop_id = src.shop_id
+                    LEFT JOIN core.shop_accounts sa
+                      ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
+                     AND (
+                          COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
+                          OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
+                          OR sa.id::text = COALESCE(src.shop_id, '')
+                     )
+                    LEFT JOIN core.main_accounts ma
+                      ON ma.main_account_id = sa.main_account_id
+                    WHERE src.{period_column} = :period_key
+                    """.format(source_table=source_table, period_column=period_column)
+                params = {
+                    "granularity": granularity,
+                    "period_key": period_key,
+                    "period_start": period_start,
+                    "period_end": period_end,
+                }
+                if platform:
+                    query += " AND src.platform_code = :platform_code"
+                    params["platform_code"] = platform
+                rows = await self._fetch_rows_with_statement_timeout(query, params, timeout_ms=120000)
+        else:
+            source_table, period_column = _comparison_source_for_granularity(granularity)
+            query = """
+                SELECT
+                    :granularity AS granularity,
+                    src.{period_column} AS period_key,
+                    src.platform_code,
+                    src.shop_id,
+                    sa.shop_account_id,
+                    sa.main_account_id,
+                    ma.main_account_name,
+                    sa.store_name AS account_store_name,
+                    COALESCE(
+                        NULLIF(TRIM(ds.shop_name), ''),
+                        NULLIF(TRIM(sa.store_name), ''),
+                        CASE
+                            WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown')
+                            THEN NULL
+                            ELSE src.shop_id
+                        END
+                    ) AS display_name,
+                    src.gmv,
+                    src.order_count,
+                    src.avg_order_value,
+                    src.attach_rate,
+                    src.profit,
+                    COALESCE(t.target_amount, 0) AS target_amount,
+                    CASE
+                        WHEN COALESCE(t.target_amount, 0) > 0
+                        THEN ROUND(src.gmv::numeric * 100.0 / t.target_amount, 2)
+                        ELSE 0::numeric
+                    END AS achievement_rate
+                FROM {source_table} src
+                LEFT JOIN LATERAL (
+                    WITH shop_target AS (
+                        SELECT COALESCE(SUM(tb.target_amount)::numeric, 0::numeric) AS target_amount
+                        FROM a_class.target_breakdown tb
+                        INNER JOIN a_class.sales_targets st
+                            ON st.id = tb.target_id
+                           AND st.status = 'active'
+                        WHERE tb.breakdown_type = 'shop'
+                          AND tb.platform_code = src.platform_code
+                          AND COALESCE(tb.shop_id, '') = COALESCE(src.shop_id, '')
+                          AND tb.period_start <= :period_end
+                          AND tb.period_end >= :period_start
+                    ),
+                    shop_time_target AS (
+                        SELECT COALESCE(SUM(tb.target_amount)::numeric, 0::numeric) AS target_amount
+                        FROM a_class.target_breakdown tb
+                        INNER JOIN a_class.sales_targets st
+                            ON st.id = tb.target_id
+                           AND st.status = 'active'
+                        WHERE tb.breakdown_type = 'shop_time'
+                          AND tb.platform_code = src.platform_code
+                          AND COALESCE(tb.shop_id, '') = COALESCE(src.shop_id, '')
+                          AND tb.period_start <= :period_end
+                          AND tb.period_end >= :period_start
+                    )
+                    SELECT
+                        CASE
+                            WHEN :granularity = 'monthly' AND (SELECT target_amount FROM shop_target) > 0
+                            THEN (SELECT target_amount FROM shop_target)
+                            WHEN (SELECT target_amount FROM shop_time_target) > 0
+                            THEN (SELECT target_amount FROM shop_time_target)
+                            ELSE (SELECT target_amount FROM shop_target)
+                        END AS target_amount
+                ) t ON TRUE
+                LEFT JOIN core.dim_shops ds
+                  ON ds.platform_code = src.platform_code
+                 AND ds.shop_id = src.shop_id
+                LEFT JOIN core.shop_accounts sa
+                  ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
+                 AND (
+                      COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
+                      OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
+                      OR sa.id::text = COALESCE(src.shop_id, '')
+                 )
+                LEFT JOIN core.main_accounts ma
+                  ON ma.main_account_id = sa.main_account_id
+                WHERE src.{period_column} = :period_key
+                """.format(source_table=source_table, period_column=period_column)
+            period_start, period_end = _resolve_business_overview_window(granularity, target_date)
+            params = {
+                "granularity": granularity,
+                "period_key": period_key,
+                "period_start": period_start,
+                "period_end": period_end,
+            }
+            if platform:
+                query += " AND src.platform_code = :platform_code"
+                params["platform_code"] = platform
+            rows = await self._fetch_rows_with_statement_timeout(query, params, timeout_ms=120000)
 
         if group_by == "platform":
             grouped: dict[str, dict[str, Any]] = {}

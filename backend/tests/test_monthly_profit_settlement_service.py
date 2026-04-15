@@ -31,6 +31,9 @@ class _ScalarResult:
     def all(self):
         return self._rows
 
+    def scalar_one_or_none(self):
+        return self._rows[0] if self._rows else None
+
 
 @pytest.mark.asyncio
 async def test_rebuild_monthly_profit_settlement_aggregates_company_totals(monkeypatch):
@@ -265,6 +268,29 @@ async def test_load_personnel_payload_uses_only_payroll_total_cost():
             "remark": None,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_load_personnel_payload_queries_only_confirmed_or_paid_payroll_records():
+    module = _load_service_module()
+    db = _make_db()
+    service = module.MonthlyProfitSettlementService(db)
+
+    async def fake_execute(stmt):
+        sql = str(stmt)
+        assert "payroll_records" in sql
+        assert "year_month" in sql
+        assert "status" in sql
+        params = stmt.compile().params
+        assert tuple(params["status_1"]) == ("confirmed", "paid")
+        return _ScalarResult([])
+
+    db.execute = AsyncMock(side_effect=fake_execute)
+
+    payload = await service._load_personnel_payload("2026-04")
+
+    assert payload["actual_amount"] == pytest.approx(0.0)
+    assert payload["details"] == []
 
 
 @pytest.mark.asyncio

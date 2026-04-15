@@ -801,6 +801,8 @@ class CollectionExecutorV2:
         params: Dict[str, Any],
         runtime_bundle: Any,
     ) -> Dict[str, Any]:
+        context_options = getattr(runtime_bundle, "context_options", {}) or {}
+        extra_headers = context_options.get("extra_http_headers", {}) or {}
         return {
             "session_owner_id": params.get("main_account_id"),
             "shop_account_id": params.get("shop_account_id"),
@@ -808,6 +810,10 @@ class CollectionExecutorV2:
             "profile_contains_state": bool(getattr(runtime_bundle, "reused_session", False)),
             "runtime_strategy_reason": getattr(runtime_bundle, "strategy_reason", None),
             "session_source": getattr(runtime_bundle, "session_source", None),
+            "user_agent": context_options.get("user_agent"),
+            "runtime_locale": context_options.get("locale"),
+            "runtime_timezone": context_options.get("timezone_id"),
+            "runtime_accept_language": extra_headers.get("Accept-Language"),
             "probe_urls": runtime_session.build_runtime_login_gate_probe_urls(
                 platform=platform,
                 account=params.get("account") if isinstance(params.get("account"), dict) else None,

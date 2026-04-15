@@ -118,7 +118,10 @@ class MonthlyProfitSettlementService:
     async def _load_personnel_payload(self, period_month: str) -> dict[str, Any]:
         payroll_rows = (
             await self.db.execute(
-                select(PayrollRecord).where(PayrollRecord.year_month == period_month)
+                select(PayrollRecord).where(
+                    PayrollRecord.year_month == period_month,
+                    PayrollRecord.status.in_(("confirmed", "paid")),
+                )
             )
         ).scalars().all()
 

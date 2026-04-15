@@ -60,3 +60,9 @@ def test_financial_management_page_exposes_formal_settlement_rules():
     assert "status.canSettle" in text
     assert "status.pendingData" in text
     assert "status.hasException" in text
+
+
+def test_financial_management_page_syncs_company_month_when_workspace_month_changes():
+    text = Path("frontend/src/views/FinancialManagement.vue").read_text(encoding="utf-8")
+
+    assert "monthlyForm.value.period_month = selectedMonth.value" in text

@@ -108,36 +108,21 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     assert row["operator_profit"] == 0
 
 
-def test_list_employee_performance_falls_back_to_chinese_columns():
+def test_list_employee_performance_reads_english_columns():
     module = _load_module()
     db = AsyncMock()
-
-    class _MappingsResult:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def mappings(self):
-            return self
-
-        def all(self):
-            return self._rows
+    perf = SimpleNamespace(
+        id=1,
+        employee_code="EMP001",
+        year_month="2025-01",
+        actual_sales=1000.0,
+        achievement_rate=0.8,
+        performance_score=88.0,
+        calculated_at="2025-01-31T00:00:00",
+    )
 
     async def _execute(stmt, params=None):
-        if hasattr(stmt, "column_descriptions"):
-            raise Exception("orm english columns missing")
-        return _MappingsResult(
-                [
-                    {
-                        "id": 1,
-                        "employee_code": "EMP001",
-                        "year_month": "2025-01",
-                        "actual_sales": 1000.0,
-                        "achievement_rate": 0.8,
-                        "performance_score": 88.0,
-                        "calculated_at": "2025-01-31T00:00:00",
-                    }
-                ]
-            )
+        return _ScalarResult([perf])
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -157,36 +142,21 @@ def test_list_employee_performance_falls_back_to_chinese_columns():
     assert float(resp[0].performance_score) == 88.0
 
 
-def test_list_employee_commissions_falls_back_to_chinese_columns():
+def test_list_employee_commissions_reads_english_columns():
     module = _load_module()
     db = AsyncMock()
-
-    class _MappingsResult:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def mappings(self):
-            return self
-
-        def all(self):
-            return self._rows
+    comm = SimpleNamespace(
+        id=2,
+        employee_code="EMP002",
+        year_month="2025-01",
+        sales_amount=2000.0,
+        commission_amount=300.0,
+        commission_rate=0.15,
+        calculated_at="2025-01-31T00:00:00",
+    )
 
     async def _execute(stmt, params=None):
-        if hasattr(stmt, "column_descriptions"):
-            raise Exception("orm english columns missing")
-        return _MappingsResult(
-                [
-                    {
-                        "id": 2,
-                        "employee_code": "EMP002",
-                        "year_month": "2025-01",
-                        "sales_amount": 2000.0,
-                        "commission_amount": 300.0,
-                        "commission_rate": 0.15,
-                        "calculated_at": "2025-01-31T00:00:00",
-                    }
-                ]
-            )
+        return _ScalarResult([comm])
 
     db.execute = AsyncMock(side_effect=_execute)
 
