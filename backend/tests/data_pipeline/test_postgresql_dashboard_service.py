@@ -115,6 +115,46 @@ async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(mo
 
 
 @pytest.mark.asyncio
+async def test_postgresql_dashboard_service_monthly_kpi_uses_raw_monthly_fast_path(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "period_key": "2026-04-01",
+                "platform_code": "shopee",
+                "gmv": 100,
+                "order_count": 10,
+                "visitor_count": 200,
+                "conversion_rate": 5,
+                "avg_order_value": 10,
+                "attach_rate": 1.2,
+                "total_items": 12,
+                "profit": 30,
+            }
+        ]
+
+    async def fake_load_active_employee_count(_period_key):
+        return 0
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+
+    result = await service.get_business_overview_kpi(month="2026-04-01", platform="shopee")
+
+    assert result["gmv"] == 100
+    assert len(captured) == 1
+    query, params = captured[0]
+    assert "fact_shopee_orders_monthly" in query
+    assert "fact_shopee_analytics_monthly" in query
+    assert "mart.platform_month_kpi" not in query
+    assert str(params["period_key"]) == "2026-04-01"
+    assert params["platform_code"] == "shopee"
+
+
+@pytest.mark.asyncio
 async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_platform_sources(monkeypatch):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
@@ -1175,7 +1215,7 @@ async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_mod
 
     async def fake_fetch_rows(query, params):
         captured.append((query, params))
-        if "FROM api.clearance_ranking_module" in query:
+        if "FROM mart.inventory_snapshot_latest" in query:
             return [
                 {
                     "platform_code": "shopee",
@@ -1196,10 +1236,13 @@ async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_mod
 
     assert len(result) == 1
     query, params = captured[0]
-    assert "FROM api.clearance_ranking_module" in query
+    assert "FROM mart.inventory_snapshot_latest" in query
+    assert "fact_shopee_orders_daily" in query
+    assert "fact_tiktok_orders_daily" in query
+    assert "fact_miaoshou_orders_daily" in query
     assert "ORDER BY clearance_priority_score DESC" in query
     assert "LIMIT :limit" in query
-    assert params == {"min_days": 45, "limit": 10}
+    assert params == {"min_days": 45, "limit": 10, "period_start": None, "period_end": None}
     assert result[0]["rank"] == 1
     assert result[0]["risk_level"] == "high"
 
@@ -1552,8 +1595,10 @@ def test_rank_traffic_rows_by_page_views():
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_primary_traffic(monkeypatch):
     service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
 
     async def fake_fetch_rows(query, params):
+        captured.append((query, params))
         return [
             {
                 "granularity": "monthly",
@@ -1586,6 +1631,9 @@ async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_p
     assert result[0]["name"] == "shop-b"
     assert result[0]["page_views"] == 180
     assert result[1]["name"] == "shop-a"
+    assert len(captured) == 1
+    assert "FROM mart.shop_month_kpi" in captured[0][0]
+    assert "api.business_overview_traffic_ranking_module" not in captured[0][0]
 
 
 @pytest.mark.asyncio

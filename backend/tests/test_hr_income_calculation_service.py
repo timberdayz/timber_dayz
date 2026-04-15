@@ -120,6 +120,74 @@ def test_calculate_month_upsert_writes():
     assert commission.commission_rate == pytest.approx(0.12)
 
 
+def test_calculate_month_prefers_english_orm_writes_when_available():
+    db = AsyncMock()
+    added = []
+    executed_sql = []
+
+    assignment = SimpleNamespace(
+        employee_code="E010",
+        platform_code="Shopee",
+        shop_id="S1",
+        commission_ratio=0.1,
+        status="active",
+        year_month="2026-03",
+    )
+    cfg = SimpleNamespace(
+        year_month="2026-03",
+        platform_code="Shopee",
+        shop_id="S1",
+        allocatable_profit_rate=0.8,
+    )
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=[assignment])
+            if entity is ShopCommissionConfig:
+                return _MockResult(rows=[cfg])
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=None)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+            return _MockResult(rows=[])
+        sql = str(stmt)
+        executed_sql.append(sql)
+        return _MockResult(
+            mapping_rows=[
+                {
+                    "platform_code": "Shopee",
+                    "shop_id": "S1",
+                    "gmv": 10000,
+                    "profit": 2000,
+                    "achievement_rate": 80,
+                }
+            ]
+        )
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|s1": {"profit_basis_amount": 1500.0}}
+    )
+    result = asyncio.run(service.calculate_month("2026-03"))
+
+    assert result["commission_upserts"] == 1
+    assert result["performance_upserts"] == 1
+    assert any(isinstance(x, EmployeeCommission) for x in added)
+    assert any(isinstance(x, EmployeePerformance) for x in added)
+    assert all("update c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
+    assert all("insert into c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
+    assert all("update c_class.employee_performance" not in sql.lower() for sql in executed_sql)
+    assert all("insert into c_class.employee_performance" not in sql.lower() for sql in executed_sql)
+    assert db.rollback.await_count == 0
+
+
 def test_calculate_month_upsert_fallback_to_cn_sql_when_orm_columns_missing():
     db = AsyncMock()
 

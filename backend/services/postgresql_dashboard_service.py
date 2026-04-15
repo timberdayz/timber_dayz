@@ -295,6 +295,45 @@ def _platform_kpi_source_for_granularity(granularity: str) -> tuple[str, str]:
     raise ValueError("granularity must be daily, weekly or monthly")
 
 
+def _monthly_orders_raw_source_sql() -> str:
+    return """
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_shopee_orders_monthly
+        UNION ALL
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_tiktok_orders_monthly
+        UNION ALL
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_miaoshou_orders_monthly
+    """
+
+
+def _monthly_analytics_raw_source_sql() -> str:
+    return """
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_shopee_analytics_monthly
+        UNION ALL
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_tiktok_analytics_monthly
+        UNION ALL
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_miaoshou_analytics_monthly
+    """
+
+
+def _daily_orders_raw_source_sql() -> str:
+    return """
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_shopee_orders_daily
+        UNION ALL
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_tiktok_orders_daily
+        UNION ALL
+        SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+        FROM b_class.fact_miaoshou_orders_daily
+    """
+
+
 def _filter_rows_by_period_key(rows: list[dict[str, Any]], target_period: date_cls) -> list[dict[str, Any]]:
     matched: list[dict[str, Any]] = []
     for row in rows:
@@ -1029,6 +1068,307 @@ class PostgresqlDashboardService:
         if effective_target_date is None:
             raise ValueError("target_date or month is required")
         period_key = _normalize_period_start(effective_target_date)
+
+        if effective_granularity == "monthly":
+            platform_filter_sql = " AND platform_code = :platform_code" if platform else ""
+            rows = await self._fetch_rows(
+                """
+                WITH raw_orders AS (
+                    {orders_source}
+                ),
+                mapped_orders AS (
+                    SELECT
+                        platform_code,
+                        NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
+                        COALESCE(
+                            raw_data->>'订单号',
+                            raw_data->>'订单ID',
+                            raw_data->>'订单编号',
+                            raw_data->>'ID',
+                            raw_data->>'order_id',
+                            raw_data->>'Order ID',
+                            raw_data->>'order_no'
+                        ) AS order_id,
+                        CASE
+                            WHEN COALESCE(
+                                raw_data->>'实付金额',
+                                raw_data->>'买家实付金额',
+                                raw_data->>'总收入',
+                                raw_data->>'buyer_payment_rmb',
+                                raw_data->>'buyer_payment',
+                                raw_data->>'买家支付(RMB)',
+                                raw_data->>'买家支付',
+                                raw_data->>'买家实付金额(RMB)',
+                                raw_data->>'paid_amount',
+                                raw_data->>'Paid Amount'
+                            ) IS NULL THEN NULL
+                            ELSE NULLIF(
+                                REGEXP_REPLACE(
+                                    REPLACE(REPLACE(REPLACE(REPLACE(
+                                        COALESCE(
+                                            raw_data->>'实付金额',
+                                            raw_data->>'买家实付金额',
+                                            raw_data->>'总收入',
+                                            raw_data->>'buyer_payment_rmb',
+                                            raw_data->>'buyer_payment',
+                                            raw_data->>'买家支付(RMB)',
+                                            raw_data->>'买家支付',
+                                            raw_data->>'买家实付金额(RMB)',
+                                            raw_data->>'paid_amount',
+                                            raw_data->>'Paid Amount'
+                                        ),
+                                        ',', ''
+                                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                                    '[^0-9.-]',
+                                    '',
+                                    'g'
+                                ),
+                                ''
+                            )::numeric
+                        END AS paid_amount,
+                        CASE
+                            WHEN COALESCE(
+                                raw_data->>'利润(RMB)',
+                                raw_data->>'profit_rmb',
+                                raw_data->>'利润',
+                                raw_data->>'profit',
+                                raw_data->>'毛利',
+                                raw_data->>'Profit'
+                            ) IS NULL THEN NULL
+                            ELSE NULLIF(
+                                REGEXP_REPLACE(
+                                    REPLACE(REPLACE(REPLACE(REPLACE(
+                                        COALESCE(
+                                            raw_data->>'利润(RMB)',
+                                            raw_data->>'profit_rmb',
+                                            raw_data->>'利润',
+                                            raw_data->>'profit',
+                                            raw_data->>'毛利',
+                                            raw_data->>'Profit'
+                                        ),
+                                        ',', ''
+                                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                                    '[^0-9.-]',
+                                    '',
+                                    'g'
+                                ),
+                                ''
+                            )::numeric
+                        END AS profit,
+                        CASE
+                            WHEN COALESCE(
+                                raw_data->>'产品数量',
+                                raw_data->>'商品数量',
+                                raw_data->>'数量',
+                                raw_data->>'件数',
+                                raw_data->>'销售数量',
+                                raw_data->>'出库数量',
+                                raw_data->>'product_quantity',
+                                raw_data->>'quantity',
+                                raw_data->>'qty',
+                                raw_data->>'item_quantity'
+                            ) IS NULL THEN NULL
+                            ELSE NULLIF(
+                                REGEXP_REPLACE(
+                                    REPLACE(REPLACE(REPLACE(REPLACE(
+                                        COALESCE(
+                                            raw_data->>'产品数量',
+                                            raw_data->>'商品数量',
+                                            raw_data->>'数量',
+                                            raw_data->>'件数',
+                                            raw_data->>'销售数量',
+                                            raw_data->>'出库数量',
+                                            raw_data->>'product_quantity',
+                                            raw_data->>'quantity',
+                                            raw_data->>'qty',
+                                            raw_data->>'item_quantity'
+                                        ),
+                                        ',', ''
+                                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                                    '[^0-9.-]',
+                                    '',
+                                    'g'
+                                ),
+                                ''
+                            )::numeric
+                        END AS product_quantity,
+                        data_hash,
+                        ingest_timestamp
+                    FROM raw_orders
+                    WHERE date_trunc('month', metric_date)::date = :period_key
+                    {platform_filter_sql}
+                ),
+                deduplicated_orders AS (
+                    SELECT
+                        *,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY platform_code, COALESCE(source_shop_id, ''), data_hash
+                            ORDER BY ingest_timestamp DESC
+                        ) AS rn
+                    FROM mapped_orders
+                ),
+                monthly_orders AS (
+                    SELECT
+                        :period_key AS period_key,
+                        platform_code,
+                        SUM(paid_amount) AS gmv,
+                        CASE WHEN COUNT(*) > 0 THEN COUNT(DISTINCT order_id)::numeric ELSE NULL END AS order_count,
+                        SUM(product_quantity) AS total_items,
+                        SUM(profit) AS profit
+                    FROM deduplicated_orders
+                    WHERE rn = 1
+                    GROUP BY platform_code
+                ),
+                raw_analytics AS (
+                    {analytics_source}
+                ),
+                mapped_analytics AS (
+                    SELECT
+                        platform_code,
+                        NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
+                        CASE
+                            WHEN COALESCE(
+                                raw_data->>'访客数',
+                                raw_data->>'独立访客',
+                                raw_data->>'去重页面浏览次数',
+                                raw_data->>'unique_visitors',
+                                raw_data->>'Unique Visitors',
+                                raw_data->>'uv',
+                                raw_data->>'visitor_count'
+                            ) IS NULL THEN NULL
+                            ELSE NULLIF(
+                                REGEXP_REPLACE(
+                                    REPLACE(REPLACE(REPLACE(REPLACE(
+                                        COALESCE(
+                                            raw_data->>'访客数',
+                                            raw_data->>'独立访客',
+                                            raw_data->>'去重页面浏览次数',
+                                            raw_data->>'unique_visitors',
+                                            raw_data->>'Unique Visitors',
+                                            raw_data->>'uv',
+                                            raw_data->>'visitor_count'
+                                        ),
+                                        ',', ''
+                                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                                    '[^0-9.-]',
+                                    '',
+                                    'g'
+                                ),
+                                ''
+                            )::numeric
+                        END AS visitor_count,
+                        CASE
+                            WHEN COALESCE(
+                                raw_data->>'浏览量',
+                                raw_data->>'页面浏览数',
+                                raw_data->>'页面浏览次数',
+                                raw_data->>'page_views',
+                                raw_data->>'Page Views',
+                                raw_data->>'views',
+                                raw_data->>'page_view'
+                            ) IS NULL THEN NULL
+                            ELSE NULLIF(
+                                REGEXP_REPLACE(
+                                    REPLACE(REPLACE(REPLACE(REPLACE(
+                                        COALESCE(
+                                            raw_data->>'浏览量',
+                                            raw_data->>'页面浏览数',
+                                            raw_data->>'页面浏览次数',
+                                            raw_data->>'page_views',
+                                            raw_data->>'Page Views',
+                                            raw_data->>'views',
+                                            raw_data->>'page_view'
+                                        ),
+                                        ',', ''
+                                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                                    '[^0-9.-]',
+                                    '',
+                                    'g'
+                                ),
+                                ''
+                            )::numeric
+                        END AS page_views,
+                        data_hash,
+                        ingest_timestamp
+                    FROM raw_analytics
+                    WHERE date_trunc('month', metric_date)::date = :period_key
+                    {platform_filter_sql}
+                ),
+                deduplicated_analytics AS (
+                    SELECT
+                        *,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY platform_code, COALESCE(source_shop_id, ''), data_hash
+                            ORDER BY ingest_timestamp DESC
+                        ) AS rn
+                    FROM mapped_analytics
+                ),
+                monthly_traffic AS (
+                    SELECT
+                        :period_key AS period_key,
+                        platform_code,
+                        SUM(visitor_count) AS visitor_count,
+                        SUM(page_views) AS page_views
+                    FROM deduplicated_analytics
+                    WHERE rn = 1
+                    GROUP BY platform_code
+                )
+                SELECT
+                    COALESCE(o.period_key, t.period_key) AS period_key,
+                    COALESCE(o.platform_code, t.platform_code) AS platform_code,
+                    o.gmv,
+                    o.order_count,
+                    COALESCE(t.page_views, t.visitor_count) AS visitor_count,
+                    CASE
+                        WHEN o.order_count IS NOT NULL
+                         AND COALESCE(t.page_views, t.visitor_count) IS NOT NULL
+                         AND COALESCE(t.page_views, t.visitor_count) > 0
+                        THEN ROUND(o.order_count::numeric * 100.0 / COALESCE(t.page_views, t.visitor_count), 2)
+                        WHEN o.order_count IS NOT NULL
+                         AND COALESCE(t.page_views, t.visitor_count) = 0
+                         AND o.order_count = 0
+                        THEN 0
+                        ELSE NULL
+                    END AS conversion_rate,
+                    CASE
+                        WHEN o.gmv IS NOT NULL AND o.order_count > 0
+                        THEN ROUND(o.gmv::numeric / o.order_count, 2)
+                        WHEN o.gmv IS NOT NULL AND o.order_count = 0 AND o.gmv = 0
+                        THEN 0
+                        ELSE NULL
+                    END AS avg_order_value,
+                    CASE
+                        WHEN o.total_items IS NOT NULL AND o.order_count > 0
+                        THEN ROUND(o.total_items::numeric / o.order_count, 2)
+                        WHEN o.total_items IS NOT NULL AND o.order_count = 0 AND o.total_items = 0
+                        THEN 0
+                        ELSE NULL
+                    END AS attach_rate,
+                    o.total_items,
+                    o.profit
+                FROM monthly_orders o
+                FULL OUTER JOIN monthly_traffic t
+                  ON o.period_key = t.period_key
+                 AND o.platform_code = t.platform_code
+                """.format(
+                    orders_source=_monthly_orders_raw_source_sql(),
+                    analytics_source=_monthly_analytics_raw_source_sql(),
+                    platform_filter_sql=platform_filter_sql,
+                ),
+                {
+                    "period_key": period_key,
+                    "platform_code": platform,
+                },
+            )
+            reduced = reduce_business_overview_kpi_rows(rows)
+            employee_count = await self._load_active_employee_count(period_key)
+            gmv = reduced.get("gmv")
+            if employee_count > 0 and gmv is not None:
+                reduced["labor_efficiency"] = round(float(gmv) / employee_count, 2)
+            else:
+                reduced["labor_efficiency"] = 0
+            return reduced
+
         source_table, period_column = _platform_kpi_source_for_granularity(effective_granularity)
         query = """
             SELECT
@@ -1188,13 +1528,174 @@ class PostgresqlDashboardService:
         period_end = None
         if granularity and target_date:
             period_start, period_end = _resolve_business_overview_window(granularity, target_date)
-        return await self._load_ranked_inventory_backlog_module_rows(
-            source_table="api.clearance_ranking_module",
-            min_days=min_days,
-            limit=limit,
-            period_start=period_start,
-            period_end=period_end,
+
+        where_snapshot = []
+        if period_start is not None and period_end is not None:
+            where_snapshot.append("i.snapshot_date >= :period_start")
+            where_snapshot.append("i.snapshot_date <= :period_end")
+        snapshot_filter_sql = ""
+        if where_snapshot:
+            snapshot_filter_sql = "WHERE " + " AND ".join(where_snapshot)
+
+        rows = await self._fetch_rows(
+            """
+            WITH sales_30d AS (
+                SELECT
+                    platform_code,
+                    COALESCE(raw_data->>'platform_sku', raw_data->>'平台SKU', raw_data->>'SKU', raw_data->>'sku') AS platform_sku,
+                    COALESCE(raw_data->>'product_sku', raw_data->>'商品SKU', raw_data->>'商品货号') AS product_sku,
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN COALESCE(
+                                    raw_data->>'产品数量',
+                                    raw_data->>'商品数量',
+                                    raw_data->>'数量',
+                                    raw_data->>'件数',
+                                    raw_data->>'销售数量',
+                                    raw_data->>'出库数量',
+                                    raw_data->>'product_quantity',
+                                    raw_data->>'quantity',
+                                    raw_data->>'qty',
+                                    raw_data->>'item_quantity'
+                                ) IS NULL THEN 0::numeric
+                                ELSE NULLIF(
+                                    REGEXP_REPLACE(
+                                        REPLACE(REPLACE(REPLACE(REPLACE(
+                                            COALESCE(
+                                                raw_data->>'产品数量',
+                                                raw_data->>'商品数量',
+                                                raw_data->>'数量',
+                                                raw_data->>'件数',
+                                                raw_data->>'销售数量',
+                                                raw_data->>'出库数量',
+                                                raw_data->>'product_quantity',
+                                                raw_data->>'quantity',
+                                                raw_data->>'qty',
+                                                raw_data->>'item_quantity'
+                                            ),
+                                            ',', ''
+                                        ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                                        '[^0-9.-]',
+                                        '',
+                                        'g'
+                                    ),
+                                    ''
+                                )::numeric
+                            END
+                        ),
+                        0
+                    ) AS sold_units_30d,
+                    COUNT(DISTINCT metric_date::date) AS active_days_30d
+                FROM (
+                    {daily_orders_source}
+                ) o
+                WHERE metric_date::date >= CURRENT_DATE - INTERVAL '30 days'
+                  AND metric_date::date <= CURRENT_DATE
+                GROUP BY platform_code, platform_sku, product_sku
+            )
+            SELECT
+                i.snapshot_date,
+                i.platform_code,
+                i.shop_id,
+                i.product_id,
+                i.product_name,
+                i.platform_sku,
+                i.product_sku,
+                i.available_stock,
+                i.inventory_value,
+                COALESCE(
+                    ROUND(s.sold_units_30d::numeric / NULLIF(s.active_days_30d, 0), 2),
+                    0
+                ) AS daily_avg_sales,
+                CASE
+                    WHEN COALESCE(s.sold_units_30d, 0) > 0 AND COALESCE(s.active_days_30d, 0) > 0
+                    THEN ROUND(COALESCE(i.available_stock, 0)::numeric / NULLIF(s.sold_units_30d::numeric / s.active_days_30d, 0), 0)
+                    WHEN COALESCE(i.available_stock, 0) > 0
+                    THEN 9999
+                    ELSE 0
+                END AS estimated_turnover_days,
+                COALESCE(c.stagnant_snapshot_count, 0) AS stagnant_snapshot_count,
+                COALESCE(c.estimated_stagnant_days, 0) AS estimated_stagnant_days,
+                CASE
+                    WHEN (
+                        CASE
+                            WHEN COALESCE(s.sold_units_30d, 0) > 0 AND COALESCE(s.active_days_30d, 0) > 0
+                            THEN ROUND(COALESCE(i.available_stock, 0)::numeric / NULLIF(s.sold_units_30d::numeric / s.active_days_30d, 0), 0)
+                            WHEN COALESCE(i.available_stock, 0) > 0
+                            THEN 9999
+                            ELSE 0
+                        END
+                    ) >= 60
+                    OR COALESCE(c.stagnant_snapshot_count, 0) >= 3
+                    THEN 'high'
+                    WHEN (
+                        CASE
+                            WHEN COALESCE(s.sold_units_30d, 0) > 0 AND COALESCE(s.active_days_30d, 0) > 0
+                            THEN ROUND(COALESCE(i.available_stock, 0)::numeric / NULLIF(s.sold_units_30d::numeric / s.active_days_30d, 0), 0)
+                            WHEN COALESCE(i.available_stock, 0) > 0
+                            THEN 9999
+                            ELSE 0
+                        END
+                    ) >= 30
+                    OR COALESCE(c.stagnant_snapshot_count, 0) >= 2
+                    THEN 'medium'
+                    ELSE 'low'
+                END AS risk_level,
+                (
+                    COALESCE(i.inventory_value, 0) * 0.5
+                    + COALESCE(c.estimated_stagnant_days, 0) * 10
+                    + (
+                        CASE
+                            WHEN COALESCE(s.sold_units_30d, 0) > 0 AND COALESCE(s.active_days_30d, 0) > 0
+                            THEN ROUND(COALESCE(i.available_stock, 0)::numeric / NULLIF(s.sold_units_30d::numeric / s.active_days_30d, 0), 0)
+                            WHEN COALESCE(i.available_stock, 0) > 0
+                            THEN 9999
+                            ELSE 0
+                        END
+                    ) * 2
+                ) AS clearance_priority_score
+            FROM mart.inventory_snapshot_latest i
+            LEFT JOIN sales_30d s
+              ON i.platform_code = s.platform_code
+             AND COALESCE(i.platform_sku, '') = COALESCE(s.platform_sku, '')
+             AND COALESCE(i.product_sku, '') = COALESCE(s.product_sku, '')
+            LEFT JOIN mart.inventory_snapshot_change c
+              ON i.platform_code = c.platform_code
+             AND COALESCE(i.platform_sku, '') = COALESCE(c.platform_sku, '')
+             AND COALESCE(i.product_sku, '') = COALESCE(c.product_sku, '')
+             AND COALESCE(i.warehouse_name, '') = COALESCE(c.warehouse_name, '')
+            {snapshot_filter_sql}
+            AND (
+                CASE
+                    WHEN COALESCE(s.sold_units_30d, 0) > 0 AND COALESCE(s.active_days_30d, 0) > 0
+                    THEN ROUND(COALESCE(i.available_stock, 0)::numeric / NULLIF(s.sold_units_30d::numeric / s.active_days_30d, 0), 0)
+                    WHEN COALESCE(i.available_stock, 0) > 0
+                    THEN 9999
+                    ELSE 0
+                END
+            ) >= :min_days
+            ORDER BY clearance_priority_score DESC, inventory_value DESC, estimated_turnover_days DESC
+            LIMIT :limit
+            """.format(
+                daily_orders_source=_daily_orders_raw_source_sql(),
+                snapshot_filter_sql=(snapshot_filter_sql or "WHERE TRUE"),
+            ),
+            {
+                "min_days": min_days,
+                "limit": limit,
+                "period_start": period_start,
+                "period_end": period_end,
+            },
         )
+        ranked: list[dict[str, Any]] = []
+        for index, row in enumerate(rows, start=1):
+            normalized = dict(row)
+            normalized["risk_level"] = normalized.get("risk_level") or _classify_inventory_backlog_risk(normalized)
+            normalized["clearance_priority_score"] = normalized.get("clearance_priority_score") or _inventory_backlog_priority_score(normalized)
+            normalized["rank"] = index
+            ranked.append(normalized)
+        return ranked
 
     async def get_business_overview_shop_racing(
         self,
@@ -1356,10 +1857,11 @@ class PostgresqlDashboardService:
         platform: str | None = None,
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
+        source_table, period_column = _comparison_source_for_granularity(granularity)
         query = """
             SELECT
-                src.granularity,
-                src.period_key,
+                :granularity AS granularity,
+                src.{period_column} AS period_key,
                 src.platform_code,
                 src.shop_id,
                 sa.shop_account_id,
@@ -1378,7 +1880,7 @@ class PostgresqlDashboardService:
                 src.visitor_count,
                 src.page_views,
                 src.conversion_rate
-            FROM api.business_overview_traffic_ranking_module src
+            FROM {source_table} src
             LEFT JOIN core.dim_shops ds
               ON ds.platform_code = src.platform_code
              AND ds.shop_id = src.shop_id
@@ -1391,9 +1893,8 @@ class PostgresqlDashboardService:
              )
             LEFT JOIN core.main_accounts ma
               ON ma.main_account_id = sa.main_account_id
-            WHERE src.granularity = :granularity
-              AND src.period_key = :period_key
-            """
+            WHERE src.{period_column} = :period_key
+            """.format(period_column=period_column, source_table=source_table)
         params = {"granularity": granularity, "period_key": period_key}
         if platform:
             query += " AND src.platform_code = :platform_code"
