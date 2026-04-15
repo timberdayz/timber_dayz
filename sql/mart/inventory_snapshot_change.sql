@@ -1,11 +1,41 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
 CREATE OR REPLACE VIEW mart.inventory_snapshot_change AS
-WITH ranked_history AS (
+-- Current runtime scope is company-level inventory.
+-- change detection compares company-aggregated snapshots and keeps shop_id as
+-- a reserved output field only.
+WITH company_daily AS (
     SELECT
         snapshot_date,
         platform_code,
-        shop_id,
+        product_id,
+        product_name,
+        platform_sku,
+        sku_id,
+        product_sku,
+        warehouse_name,
+        warehouse_code,
+        SUM(available_stock) AS available_stock,
+        SUM(on_hand_stock) AS on_hand_stock,
+        SUM(inventory_value) AS inventory_value,
+        MAX(source_file_id) AS source_file_id,
+        MAX(ingest_timestamp) AS ingest_timestamp
+    FROM mart.inventory_snapshot_history
+    GROUP BY
+        snapshot_date,
+        platform_code,
+        platform_sku,
+        product_sku,
+        warehouse_name,
+        product_id,
+        product_name,
+        sku_id,
+        warehouse_code
+),
+ranked_history AS (
+    SELECT
+        snapshot_date,
+        platform_code,
         product_id,
         product_name,
         platform_sku,
@@ -19,10 +49,10 @@ WITH ranked_history AS (
         source_file_id,
         ingest_timestamp,
         ROW_NUMBER() OVER (
-            PARTITION BY platform_code, COALESCE(shop_id, ''), COALESCE(platform_sku, ''), COALESCE(product_sku, ''), COALESCE(warehouse_name, '')
+            PARTITION BY platform_code, COALESCE(platform_sku, ''), COALESCE(product_sku, ''), COALESCE(warehouse_name, '')
             ORDER BY snapshot_date DESC, ingest_timestamp DESC
         ) AS snapshot_rank
-    FROM mart.inventory_snapshot_history
+    FROM company_daily
 ),
 top_two_history AS (
     SELECT *
@@ -32,7 +62,6 @@ top_two_history AS (
 grouped_history AS (
     SELECT
         platform_code,
-        shop_id,
         platform_sku,
         product_sku,
         warehouse_name,
@@ -52,7 +81,6 @@ grouped_history AS (
     FROM top_two_history
     GROUP BY
         platform_code,
-        shop_id,
         platform_sku,
         product_sku,
         warehouse_name
@@ -60,7 +88,7 @@ grouped_history AS (
 SELECT
     g.snapshot_date,
     g.platform_code,
-    g.shop_id,
+    NULL::text AS shop_id,
     g.product_id,
     g.product_name,
     g.platform_sku,

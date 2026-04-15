@@ -43,11 +43,10 @@
         />
         <el-button
           type="primary"
-          :icon="Plus"
-          @click="handleAddAllShops"
+          @click="openQuickSplitDialog"
           class="erp-ml-sm"
         >
-          为所有店铺添加
+          快速拆分
         </el-button>
         <el-button
           type="success"
@@ -283,6 +282,60 @@
           </el-table-column>
         </el-table>
       </el-card>
+
+      <el-dialog
+        v-model="quickSplitDialogVisible"
+        title="快速拆分"
+        width="520px"
+      >
+        <div class="quick-split-tip">
+          平均分摊到当前全部店铺。应用后会覆盖当前页面现有金额，保存前仍可逐店修改。
+        </div>
+        <div class="quick-split-meta">当前月份：{{ selectedMonth || '-' }}</div>
+        <div class="quick-split-meta">拆分店铺数：{{ monthlyTableData.length }}</div>
+        <el-form label-position="top" class="quick-split-form">
+          <el-form-item label="总租金(¥)">
+            <el-input-number
+              v-model="quickSplitForm.rent"
+              :min="0"
+              :precision="2"
+              :controls="false"
+              class="erp-w-full"
+            />
+          </el-form-item>
+          <el-form-item label="总营销费用(¥)">
+            <el-input-number
+              v-model="quickSplitForm.marketing_fee"
+              :min="0"
+              :precision="2"
+              :controls="false"
+              class="erp-w-full"
+            />
+          </el-form-item>
+          <el-form-item label="总水电费(¥)">
+            <el-input-number
+              v-model="quickSplitForm.utilities"
+              :min="0"
+              :precision="2"
+              :controls="false"
+              class="erp-w-full"
+            />
+          </el-form-item>
+          <el-form-item label="总其他成本(¥)">
+            <el-input-number
+              v-model="quickSplitForm.other_costs"
+              :min="0"
+              :precision="2"
+              :controls="false"
+              class="erp-w-full"
+            />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="quickSplitDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleApplyQuickSplit">应用拆分</el-button>
+        </template>
+      </el-dialog>
     </div>
 
     <!-- 按店铺查看模式 -->
@@ -564,6 +617,13 @@ const shopError = ref(null) // 店铺数据加载错误状态
 const selectedMonth = ref(null)
 const monthlyTableData = ref([])
 const batchSaving = ref(false)
+const quickSplitDialogVisible = ref(false)
+const quickSplitForm = reactive({
+  rent: 0,
+  marketing_fee: 0,
+  utilities: 0,
+  other_costs: 0
+})
 
 // 月度汇总
 const monthlySummary = reactive({
@@ -757,15 +817,18 @@ const calculateMonthlySummary = () => {
   monthlySummary.total_utilities = 0
   monthlySummary.total_other = 0
 
-  // 只计算已保存的数据（有ID的行）
   monthlyTableData.value
-    .filter((item) => item.id)
     .forEach((item) => {
-      monthlySummary.total_amount += Number(item.total) || 0
-      monthlySummary.total_rent += Number(item.rent) || 0
-      monthlySummary.total_marketing_fee += Number(item.marketing_fee) || 0
-      monthlySummary.total_utilities += Number(item.utilities) || 0
-      monthlySummary.total_other += Number(item.other_costs) || 0
+      const rent = Number(item.rent) || 0
+      const marketingFee = Number(item.marketing_fee) || 0
+      const utilities = Number(item.utilities) || 0
+      const otherCosts = Number(item.other_costs) || 0
+
+      monthlySummary.total_amount += rent + marketingFee + utilities + otherCosts
+      monthlySummary.total_rent += rent
+      monthlySummary.total_marketing_fee += marketingFee
+      monthlySummary.total_utilities += utilities
+      monthlySummary.total_other += otherCosts
     })
 }
 
@@ -797,38 +860,80 @@ const handleMonthChange = () => {
   }
 }
 
-// 为所有店铺添加空白行
-const handleAddAllShops = () => {
+const resetQuickSplitForm = () => {
+  quickSplitForm.rent = 0
+  quickSplitForm.marketing_fee = 0
+  quickSplitForm.utilities = 0
+  quickSplitForm.other_costs = 0
+}
+
+const openQuickSplitDialog = () => {
   if (!selectedMonth.value) {
     ElMessage.warning('请先选择月份')
     return
   }
 
-  const existingShopIds = new Set(
-    monthlyTableData.value.map((row) => row.shop_id)
-  )
-  const newRows = availableShops.value
-    .filter((shop) => !existingShopIds.has(shop.shop_id))
-    .map((shop) => ({
-      id: null,
-      shop_id: shop.shop_id,
-      shop_name: shop.shop_name,
-      year_month: selectedMonth.value,
-      rent: 0,
-      marketing_fee: 0,
-      utilities: 0,
-      other_costs: 0,
-      total: 0,
-      saving: false
-    }))
-
-  if (newRows.length === 0) {
-    ElMessage.info('所有店铺已有数据')
+  if (monthlyTableData.value.length === 0) {
+    ElMessage.warning('当前月份没有可拆分的店铺')
     return
   }
 
-  monthlyTableData.value.push(...newRows)
-  ElMessage.success(`已为 ${newRows.length} 个店铺添加空白行`)
+  resetQuickSplitForm()
+  quickSplitDialogVisible.value = true
+}
+
+const distributeEvenly = (totalAmount, count) => {
+  const totalCents = Math.round((Number(totalAmount) || 0) * 100)
+  const base = Math.floor(totalCents / count)
+  let remainder = totalCents - (base * count)
+
+  return Array.from({ length: count }, () => {
+    const extra = remainder > 0 ? 1 : 0
+    remainder -= extra
+    return (base + extra) / 100
+  })
+}
+
+const handleApplyQuickSplit = async () => {
+  if (!selectedMonth.value) {
+    ElMessage.warning('请先选择月份')
+    return
+  }
+
+  const rowCount = monthlyTableData.value.length
+  if (rowCount === 0) {
+    ElMessage.warning('当前月份没有可拆分的店铺')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `将按 ${rowCount} 个店铺平均拆分，并覆盖当前页面已有金额。是否继续？`,
+      '确认快速拆分',
+      { type: 'warning' }
+    )
+  } catch (error) {
+    if (error === 'cancel') {
+      return
+    }
+    throw error
+  }
+
+  const rentAllocations = distributeEvenly(quickSplitForm.rent, rowCount)
+  const marketingAllocations = distributeEvenly(quickSplitForm.marketing_fee, rowCount)
+  const utilityAllocations = distributeEvenly(quickSplitForm.utilities, rowCount)
+  const otherAllocations = distributeEvenly(quickSplitForm.other_costs, rowCount)
+
+  monthlyTableData.value.forEach((row, index) => {
+    row.rent = rentAllocations[index]
+    row.marketing_fee = marketingAllocations[index]
+    row.utilities = utilityAllocations[index]
+    row.other_costs = otherAllocations[index]
+    updateRowTotal(row)
+  })
+
+  quickSplitDialogVisible.value = false
+  ElMessage.success('快速拆分已应用，当前页面金额已覆盖，可继续逐店修改后保存')
 }
 
 // 保存单行
@@ -1194,5 +1299,21 @@ onMounted(() => {
 .error-state :deep(.el-result__subtitle) {
   font-size: 14px;
   color: #909399;
+}
+
+.quick-split-tip {
+  margin-bottom: 12px;
+  color: #606266;
+  line-height: 1.6;
+}
+
+.quick-split-meta {
+  margin-bottom: 8px;
+  color: #909399;
+  font-size: 13px;
+}
+
+.quick-split-form {
+  margin-top: 16px;
 }
 </style>

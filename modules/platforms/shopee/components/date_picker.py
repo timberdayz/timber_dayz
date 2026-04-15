@@ -325,6 +325,14 @@ class ShopeeDatePicker(DatePickerComponent):
             return
         await trigger.click(timeout=5000)
         await page.wait_for_timeout(600)
+        waited = 0
+        while waited <= 2000:
+            panel = await self._find_date_panel(page)
+            if panel is not None:
+                return
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(200)
+            waited += 200
 
     def _match_known_date_label(self, value: str | None) -> str | None:
         content = self._normalize_date_text(value)

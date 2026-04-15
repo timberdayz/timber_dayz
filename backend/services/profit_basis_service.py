@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -19,10 +19,10 @@ def _to_float(value: Any) -> float:
     return float(value)
 
 
-def _month_bounds(year_month: str) -> tuple[str, str]:
+def _month_bounds(year_month: str) -> tuple[date, date]:
     period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
     next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
-    return period_start.isoformat(), next_month.isoformat()
+    return period_start, next_month
 
 
 class ProfitBasisService:

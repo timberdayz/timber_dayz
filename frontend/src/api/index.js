@@ -2120,6 +2120,8 @@ export default {
   // v4.x.x 更新：支持 month 和 platform 参数
   async getBusinessOverviewKPI(params = {}) {
     const queryParams = new URLSearchParams()
+    if (params.granularity) queryParams.append('granularity', params.granularity)
+    if (params.date) queryParams.append('date', params.date)
     // 新参数：月份（格式：YYYY-MM-DD）和平台筛选
     if (params.month) queryParams.append('month', params.month)
     if (params.platform) queryParams.append('platform', params.platform)

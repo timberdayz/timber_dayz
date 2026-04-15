@@ -40,30 +40,36 @@
         <span class="filter-label">核心KPI指标</span>
         <el-tooltip
           :content="
-            globalGranularity === 'monthly'
-              ? useGlobalDate.kpi
-                ? '已跟随全局日期（仅月粒度）'
-                : '点击恢复跟随全局'
-              : '仅月粒度时跟随，当前全局为' + (globalGranularity === 'weekly' ? '周' : '日')
+            useGlobalDate.kpi
+              ? '已跟随全局日期'
+              : '点击恢复跟随全局'
           "
         >
           <el-button
-            :type="useGlobalDate.kpi && globalGranularity === 'monthly' ? 'primary' : 'default'"
+            :type="useGlobalDate.kpi ? 'primary' : 'default'"
             link
             size="small"
-            :disabled="globalGranularity !== 'monthly'"
             @click="syncModuleToGlobal('kpi')"
           >
             <el-icon><Link /></el-icon>
             {{ useGlobalDate.kpi ? '跟随' : '恢复' }}
           </el-button>
         </el-tooltip>
+        <el-radio-group
+          v-model="kpiGranularity"
+          size="small"
+          @change="onKpiGranularityChange"
+        >
+          <el-radio-button label="daily">日</el-radio-button>
+          <el-radio-button label="weekly">周</el-radio-button>
+          <el-radio-button label="monthly">月</el-radio-button>
+        </el-radio-group>
         <el-date-picker
           v-model="kpiMonth"
-          type="month"
-          format="YYYY-MM"
-          value-format="YYYY-MM-01"
-          placeholder="选择月份"
+          :type="kpiDatePickerType"
+          :format="kpiDatePickerFormat"
+          :value-format="kpiDatePickerValueFormat"
+          :placeholder="kpiDatePickerPlaceholder"
           size="small"
           class="control-w-140"
           @change="onKpiMonthChange"
@@ -142,10 +148,10 @@
               </el-tooltip>
               <el-date-picker
                 v-model="operationalDate"
-                type="date"
-                format="YYYY-MM-DD"
-                value-format="YYYY-MM-DD"
-                placeholder="选择日期"
+                type="month"
+                format="YYYY-MM"
+                value-format="YYYY-MM-01"
+                placeholder="????"
                 size="small"
                 class="control-w-140"
                 @change="onOperationalDateChange"
@@ -611,14 +617,14 @@
             v-if="trafficRankingDimension === 'shop'"
           />
           <el-table-column
-            prop="unique_visitors"
+            prop="visitor_count"
             label="访客数(UV)"
             width="150"
             align="right"
             sortable
           >
             <template #default="{ row }">
-              {{ formatNumber(row.unique_visitors) }}
+              {{ formatNumber(row.visitor_count) }}
             </template>
           </el-table-column>
           <el-table-column
@@ -675,13 +681,13 @@
             </template>
           </el-table-column>
           <el-table-column
-            prop="compare_unique_visitors"
+            prop="compare_visitor_count"
             label="对比期UV"
             width="150"
             align="right"
           >
             <template #default="{ row }">
-              {{ row.compare_unique_visitors != null ? formatNumber(row.compare_unique_visitors) : '--' }}
+              {{ row.compare_visitor_count != null ? formatNumber(row.compare_visitor_count) : '--' }}
             </template>
           </el-table-column>
           <el-table-column
@@ -1277,11 +1283,18 @@ function applyGlobalToModules() {
   if (useGlobalDate.value.operational && opDateStr) {
     operationalDate.value = opDateStr
   }
-  // KPI 仅当全局为月时同步
-  if (gr === 'monthly' && useGlobalDate.value.kpi) {
-    const monthVal = globalDate.value
-    if (typeof monthVal === 'string' && monthVal.length >= 7) {
-      kpiMonth.value = `${monthVal}-01`
+  if (useGlobalDate.value.kpi && dateStr) {
+    kpiGranularity.value = gr
+    if (gr === 'monthly') {
+      const monthVal = globalDate.value
+      if (typeof monthVal === 'string' && monthVal.length >= 7) {
+        kpiMonth.value = `${monthVal}-01`
+      }
+    } else if (gr === 'weekly') {
+      const [y, m, d] = dateStr.split('-').map(Number)
+      kpiMonth.value = new Date(y, m - 1, d)
+    } else {
+      kpiMonth.value = dateStr
     }
   }
   // 清仓排名：仅当全局为月或周时同步（与 KPI 类似）
@@ -1313,7 +1326,7 @@ function loadModulesAfterGlobalChange() {
     if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData())
     if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking())
     if (useGlobalDate.value.operational) tasks.push(loadOperationalMetrics())
-    if (useGlobalDate.value.kpi && globalGranularity.value === 'monthly') tasks.push(loadKPIData())
+    if (useGlobalDate.value.kpi) tasks.push(loadKPIData())
     if (useGlobalDate.value.clearance && (globalGranularity.value === 'monthly' || globalGranularity.value === 'weekly')) {
       tasks.push(loadClearanceRanking('monthly'))
       tasks.push(loadClearanceRanking('weekly'))
@@ -1323,6 +1336,14 @@ function loadModulesAfterGlobalChange() {
 }
 
 function onGlobalGranularityChange() {
+  useGlobalDate.value = {
+    comparison: true,
+    shopRacing: true,
+    trafficRanking: true,
+    operational: true,
+    kpi: true,
+    clearance: true
+  }
   const today = new Date()
   const y = today.getFullYear()
   const m = String(today.getMonth() + 1).padStart(2, '0')
@@ -1344,6 +1365,14 @@ function onGlobalGranularityChange() {
 }
 
 function onGlobalDateChange() {
+  useGlobalDate.value = {
+    comparison: true,
+    shopRacing: true,
+    trafficRanking: true,
+    operational: true,
+    kpi: true,
+    clearance: true
+  }
   applyGlobalToModules()
   loadModulesAfterGlobalChange()
 }
@@ -1355,7 +1384,7 @@ function syncModuleToGlobal(module) {
   else if (module === 'shopRacing') loadShopRacingData()
   else if (module === 'trafficRanking') loadTrafficRanking()
   else if (module === 'operational') loadOperationalMetrics()
-  else if (module === 'kpi' && globalGranularity.value === 'monthly') loadKPIData()
+  else if (module === 'kpi') loadKPIData()
   else if (module === 'clearance' && (globalGranularity.value === 'monthly' || globalGranularity.value === 'weekly')) {
     loadClearanceRanking('monthly')
     loadClearanceRanking('weekly')
@@ -1369,6 +1398,28 @@ const kpiMonth = ref(
     return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-01`
   })()
 )
+const kpiGranularity = ref('monthly')
+
+const kpiDatePickerType = computed(() => {
+  if (kpiGranularity.value === 'monthly') return 'month'
+  if (kpiGranularity.value === 'weekly') return 'week'
+  return 'date'
+})
+const kpiDatePickerFormat = computed(() => {
+  if (kpiGranularity.value === 'monthly') return 'YYYY-MM'
+  if (kpiGranularity.value === 'weekly') return 'YYYY 第 ww 周'
+  return 'YYYY-MM-DD'
+})
+const kpiDatePickerPlaceholder = computed(() => {
+  if (kpiGranularity.value === 'monthly') return '选择月份'
+  if (kpiGranularity.value === 'weekly') return '选择周'
+  return '选择日期'
+})
+const kpiDatePickerValueFormat = computed(() => {
+  if (kpiGranularity.value === 'monthly') return 'YYYY-MM-01'
+  if (kpiGranularity.value === 'weekly') return undefined
+  return 'YYYY-MM-DD'
+})
 const kpiPlatform = ref('') // 默认全部平台
 
 // KPI数据（7 张卡片：转化率、客流量、客单价、GMV、订单数、连带率、人效）
@@ -1520,26 +1571,13 @@ const getTargetProgressColor = (percentage) => {
 
 // 经营指标日期标签（动态显示）
 const operationalDateLabel = computed(() => {
-  if (!operationalDate.value) return '今日'
-
-  // operationalDate.value 格式为 YYYY-MM-DD
-  const today = new Date()
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-
-  // 判断是否是今天
-  if (operationalDate.value === todayStr) {
-    return '今日'
-  }
-
-  // 从 YYYY-MM-DD 格式解析月和日
+  if (!operationalDate.value) return '当月'
   const parts = operationalDate.value.split('-')
-  if (parts.length === 3) {
+  if (parts.length >= 2) {
     const month = parseInt(parts[1], 10)
-    const day = parseInt(parts[2], 10)
-    return `${month}月${day}日`
+    return `${month}月`
   }
-
-  return '今日'
+  return '当月'
 })
 
 // 根据粒度计算日期选择器类型和格式
@@ -1800,8 +1838,7 @@ const operationalDate = ref(
     const today = new Date()
     const year = today.getFullYear()
     const month = String(today.getMonth() + 1).padStart(2, '0')
-    const day = String(today.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
+    return `${year}-${month}-01`
   })()
 )
 const operationalMetrics = ref({
@@ -1896,235 +1933,127 @@ const formatNullablePercent = (value, decimals = 2) =>
 const onKpiMonthChange = () => {
   if (!_syncingFromGlobal.value) useGlobalDate.value.kpi = false
   loadKPIData()
-  loadComparisonData()
-  loadOperationalMetrics()
+}
+
+const onKpiGranularityChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.kpi = false
+  const today = new Date()
+  const y = today.getFullYear()
+  const m = String(today.getMonth() + 1).padStart(2, '0')
+  const d = String(today.getDate()).padStart(2, '0')
+  if (kpiGranularity.value === 'monthly') {
+    kpiMonth.value = `${y}-${m}-01`
+  } else if (kpiGranularity.value === 'weekly') {
+    const dayOfWeek = today.getDay()
+    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+    const mon = new Date(today)
+    mon.setDate(today.getDate() + diff)
+    mon.setHours(0, 0, 0, 0)
+    kpiMonth.value = mon
+  } else {
+    kpiMonth.value = `${y}-${m}-${d}`
+  }
+  loadKPIData()
 }
 
 const onKpiFilterChange = () => {
   loadKPIData()
-  loadComparisonData()
-  loadOperationalMetrics()
 }
 
 // 加载KPI数据
 const loadKPIData = async () => {
   loadingKPI.value = true
   try {
-    // 格式化月份参数
-    let monthStr = ''
+    let kpiDateStr = ''
     if (kpiMonth.value) {
-      const date = new Date(kpiMonth.value)
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      monthStr = `${year}-${month}-01`
+      if (typeof kpiMonth.value === 'string') {
+        kpiDateStr = kpiMonth.value
+      } else if (kpiMonth.value instanceof Date && !Number.isNaN(kpiMonth.value.getTime())) {
+        let date = kpiMonth.value
+        if (kpiGranularity.value === 'weekly') {
+          const dayOfWeek = date.getDay()
+          const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+          date = new Date(date)
+          date.setDate(date.getDate() + diff)
+        }
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        kpiDateStr = `${year}-${month}-${day}`
+      }
+    }
+    if (kpiGranularity.value === 'monthly' && kpiDateStr.length === 7) {
+      kpiDateStr = `${kpiDateStr}-01`
     }
 
     const response = await api.getBusinessOverviewKPI({
-      month: monthStr,
-      platform: kpiPlatform.value || undefined // 空字符串时不传递
+      granularity: kpiGranularity.value,
+      date: kpiDateStr,
+      month: kpiGranularity.value === 'monthly' ? kpiDateStr : undefined,
+      platform: kpiPlatform.value || undefined // ????????
     })
 
-    // 响应拦截器已处理success字段，直接使用data
     if (response) {
       const data = response
-      // 环比展示：有数值时格式化为 +x.xx% / -x.xx%，否则显示 --
       const formatChange = (num) => {
         if (num === null || num === undefined) return '--'
         const n = Number(num)
         if (Number.isNaN(n)) return '--'
         return (n > 0 ? '+' : '') + n.toFixed(2) + '%'
       }
-      // 主值展示：0 也显示，仅无数据时显示 --
       const showValue = (v, formatter) =>
         v != null && v !== '' ? formatter(Number(v)) : '--'
 
-      // 转化率（索引0）
       const conversionRate = data.conversion_rate
-      kpiData.value[0].value = showValue(
-        conversionRate,
-        (n) => `${n.toFixed(2)}%`
-      )
+      kpiData.value[0].value = showValue(conversionRate, (n) => `${n.toFixed(2)}%`)
       kpiData.value[0].change = formatChange(data.conversion_rate_change)
       kpiData.value[0].changeType = getChangeType(data.conversion_rate_change)
       kpiData.value[0].changeIcon = getChangeIcon(data.conversion_rate_change)
 
-      // 客流量/访客数（索引1）
       const visitorCount = data.visitor_count ?? data.traffic?.current
       kpiData.value[1].value = showValue(visitorCount, (n) => formatInteger(n))
       kpiData.value[1].change = formatChange(data.visitor_count_change)
       kpiData.value[1].changeType = getChangeType(data.visitor_count_change)
       kpiData.value[1].changeIcon = getChangeIcon(data.visitor_count_change)
 
-      // 客单价（索引2）
-      const avgOrderValue =
-        data.avg_order_value ?? data.average_order_value?.current
-      kpiData.value[2].value = showValue(avgOrderValue, (n) =>
-        formatCurrency(n)
-      )
+      const avgOrderValue = data.avg_order_value ?? data.average_order_value?.current
+      kpiData.value[2].value = showValue(avgOrderValue, (n) => formatCurrency(n))
       kpiData.value[2].change = formatChange(data.avg_order_value_change)
       kpiData.value[2].changeType = getChangeType(data.avg_order_value_change)
       kpiData.value[2].changeIcon = getChangeIcon(data.avg_order_value_change)
 
-      // GMV（索引3）
       const gmv = data.gmv
       kpiData.value[3].value = showValue(gmv, (n) => formatCurrency(n))
       kpiData.value[3].change = formatChange(data.gmv_change)
       kpiData.value[3].changeType = getChangeType(data.gmv_change)
       kpiData.value[3].changeIcon = getChangeIcon(data.gmv_change)
 
-      // 订单数（索引4）
       const orderCount = data.order_count
       kpiData.value[4].value = showValue(orderCount, (n) => formatInteger(n))
       kpiData.value[4].change = formatChange(data.order_count_change)
       kpiData.value[4].changeType = getChangeType(data.order_count_change)
       kpiData.value[4].changeIcon = getChangeIcon(data.order_count_change)
 
-      // 连带率（索引5）
       const attachRate = data.attach_rate ?? data.attach_rate_obj?.current
       kpiData.value[5].value = showValue(attachRate, (n) => n.toFixed(2))
-      kpiData.value[5].change = formatChange(
-        data.attach_rate_change ?? data.attach_rate_obj?.change
-      )
-      kpiData.value[5].changeType = getChangeType(
-        data.attach_rate_change ?? data.attach_rate_obj?.change
-      )
-      kpiData.value[5].changeIcon = getChangeIcon(
-        data.attach_rate_change ?? data.attach_rate_obj?.change
-      )
+      kpiData.value[5].change = formatChange(data.attach_rate_change ?? data.attach_rate_obj?.change)
+      kpiData.value[5].changeType = getChangeType(data.attach_rate_change ?? data.attach_rate_obj?.change)
+      kpiData.value[5].changeIcon = getChangeIcon(data.attach_rate_change ?? data.attach_rate_obj?.change)
 
-      // 人效（索引6）
-      const laborEfficiency =
-        data.labor_efficiency ?? data.labor_efficiency_obj?.current
-      kpiData.value[6].value = showValue(laborEfficiency, (n) =>
-        formatCurrency(n)
-      )
-      kpiData.value[6].change = formatChange(
-        data.labor_efficiency_change ?? data.labor_efficiency_obj?.change
-      )
-      kpiData.value[6].changeType = getChangeType(
-        data.labor_efficiency_change ?? data.labor_efficiency_obj?.change
-      )
-      kpiData.value[6].changeIcon = getChangeIcon(
-        data.labor_efficiency_change ?? data.labor_efficiency_obj?.change
-      )
+      const laborEfficiency = data.labor_efficiency ?? data.labor_efficiency_obj?.current
+      kpiData.value[6].value = showValue(laborEfficiency, (n) => formatCurrency(n))
+      kpiData.value[6].change = formatChange(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
+      kpiData.value[6].changeType = getChangeType(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
+      kpiData.value[6].changeIcon = getChangeIcon(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
     }
   } catch (error) {
-    console.error('加载KPI数据失败:', error)
+    console.error('??KPI????:', error)
     handleApiError(error, { showMessage: true, logError: true })
   } finally {
     loadingKPI.value = false
   }
 }
 
-// 加载数据对比
-const loadComparisonData = async () => {
-  loadingComparison.value = true
-  try {
-    // 将 comparisonDate 转换为 YYYY-MM-DD 格式的字符串（与 SQL {{date}} 要求一致）
-    let dateStr = ''
-    const val = comparisonDate.value
-
-    if (typeof val === 'string') {
-      dateStr = val.trim()
-    } else if (val instanceof Date && !isNaN(val.getTime())) {
-      // 周度时统一传该周周一（周一～周日），避免同周不同日期导致数据跳变
-      let dateToUse = val
-      if (comparisonGranularity.value === 'weekly') {
-        const dayOfWeek = val.getDay() // 0=周日, 1=周一, ...
-        const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
-        dateToUse = new Date(val)
-        dateToUse.setDate(val.getDate() + diff)
-      }
-      const y = dateToUse.getFullYear()
-      const m = String(dateToUse.getMonth() + 1).padStart(2, '0')
-      const d = String(dateToUse.getDate()).padStart(2, '0')
-      dateStr = `${y}-${m}-${d}`
-    } else {
-      const today = new Date()
-      dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-      console.warn('comparisonDate 格式异常，使用今天:', val)
-    }
-
-    // 月粒度：若为 YYYY-MM 需补成 YYYY-MM-01
-    if (comparisonGranularity.value === 'monthly' && dateStr.length === 7) {
-      dateStr = `${dateStr}-01`
-    }
-
-    const params = {
-      granularity: comparisonGranularity.value,
-      date: dateStr
-    }
-    if (kpiPlatform.value) {
-      params.platform = kpiPlatform.value
-    }
-    console.log(`[loadComparisonData] granularity=${params.granularity}, date=${params.date}${params.platform ? `, platform=${params.platform}` : ''}`)
-
-    const response = await api.getBusinessOverviewComparison(params)
-
-    // 响应拦截器已处理success字段，直接使用data
-    if (response) {
-      comparisonData.value = response
-
-      console.log('对比数据:', response) // 调试信息
-
-      // 更新目标达成率（使用销售额作为主要指标）
-      // 注意：response已经是data字段（拦截器已处理）
-      const metrics = response.metrics || {}
-      const salesAmount = getMetric(metrics, 'sales_amount')
-      achievedValue.value = salesAmount.today ?? 0
-
-      // v4.21.0: 优先使用后端返回的用户设定目标，回退到占位符计算
-      const targetData = response.target || {}
-      const userTargetAmount = targetData.sales_amount || 0
-      const userAchievementRate = targetData.achievement_rate || 0
-      
-      if (userTargetAmount > 0) {
-        // 使用用户在目标管理中设定的真实目标
-        targetValue.value = userTargetAmount
-        targetAchievementRate.value = userAchievementRate
-        console.log('[目标达成率] 使用用户设定目标:', {
-          target: userTargetAmount,
-          achieved: achievedValue.value,
-          rate: userAchievementRate
-        })
-      } else {
-        // 回退：基于平均值的占位符计算（用户未设定目标时）
-        const avgSales = salesAmount.average || 0
-        if (comparisonGranularity.value === 'monthly') {
-          targetValue.value = avgSales * 1.2 // 月度目标 = 平均值的120%
-        } else if (comparisonGranularity.value === 'weekly') {
-          targetValue.value = avgSales * 1.1 // 周度目标 = 平均值的110%
-        } else {
-          targetValue.value = avgSales * 1.05 // 日度目标 = 平均值的105%
-        }
-        targetAchievementRate.value =
-          targetValue.value > 0
-            ? (achievedValue.value / targetValue.value) * 100
-            : 0
-        console.log('[目标达成率] 使用占位符计算（用户未设定目标）:', {
-          target: targetValue.value,
-          achieved: achievedValue.value,
-          rate: targetAchievementRate.value
-        })
-      }
-
-      updateComparisonTable()
-    } else {
-      console.error('API返回失败:', response)
-      // 即使API失败，也保持表格结构（显示7个指标行，数据为--）
-      updateComparisonTable()
-    }
-  } catch (error) {
-    console.error('加载数据对比失败:', error)
-    handleApiError(error, { showMessage: true, logError: true })
-    // 即使出错，也保持表格结构（显示7个指标行，数据为--）
-    updateComparisonTable()
-  } finally {
-    loadingComparison.value = false
-  }
-}
-
-// 按小写键读取指标，与后端 / SQL 列名（如 sales_amount_today）解析结果一致，避免大小写导致取不到
 function getMetric(metricsObj, key) {
   if (!metricsObj || typeof metricsObj !== 'object') return {}
   if (Object.prototype.hasOwnProperty.call(metricsObj, key)) return metricsObj[key] || {}
@@ -2412,11 +2341,11 @@ const loadTrafficRanking = async () => {
       rank: row.rank ?? row['排名'] ?? index + 1,
       name: row.name ?? row['名称'] ?? row.platform_code ?? row['平台'] ?? '平台汇总',
       platform_code: row.platform_code ?? row['平台'],
-      unique_visitors: row.unique_visitors ?? row['访客数'] ?? 0,
+      visitor_count: row.visitor_count ?? row.unique_visitors ?? row['访客数'] ?? 0,
       page_views: row.page_views ?? row['浏览量'] ?? 0,
       uv_change_rate: row.uv_change_rate ?? null,
       pv_change_rate: row.pv_change_rate ?? null,
-      compare_unique_visitors: row.compare_unique_visitors ?? null,
+      compare_visitor_count: row.compare_visitor_count ?? row.compare_unique_visitors ?? null,
       compare_page_views: row.compare_page_views ?? null
     }))
   } catch (error) {
@@ -2503,7 +2432,7 @@ const getWeekNumber = (date) => {
 const refreshData = async () => {
   loading.value = true
   try {
-    await Promise.all([
+    const results = await Promise.allSettled([
       loadKPIData(),
       loadComparisonData(),
       loadShopRacingData(),
@@ -2513,9 +2442,15 @@ const refreshData = async () => {
       loadClearanceRanking('monthly'),
       loadClearanceRanking('weekly')
     ])
+
+    const failedResults = results.filter((result) => result.status === 'rejected')
+    if (failedResults.length > 0) {
+      console.warn('[BusinessOverview] 部分模块刷新失败，但页面已保留可用数据', failedResults)
+      ElMessage.warning('部分模块刷新失败，已显示可用数据')
+      return
+    }
+
     ElMessage.success('数据刷新成功')
-  } catch (error) {
-    ElMessage.error('数据刷新失败')
   } finally {
     loading.value = false
   }

@@ -186,7 +186,10 @@ const fetchPendingApprovalCount = async () => {
     const response = await usersApi.getPendingUsersCount()
     pendingApprovalCount.value = Number(response?.pending_count || 0)
   } catch (error) {
-    console.error('加载待审批用户数量失败:', error)
+    const statusCode = error?.response?.status
+    if (statusCode !== 403) {
+      console.error('加载待审批用户数量失败:', error)
+    }
     pendingApprovalCount.value = 0
   }
 }

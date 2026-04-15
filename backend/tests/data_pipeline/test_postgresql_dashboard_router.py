@@ -39,7 +39,7 @@ def _make_request(path: str):
 
 def test_postgresql_kpi_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_kpi(self, month, platform):
+        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
             return {
                 "gmv": 123,
                 "order_count": 10,
@@ -66,6 +66,82 @@ def test_postgresql_kpi_route_returns_service_payload(monkeypatch):
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert body["data"]["gmv"] == 123
+
+
+def test_postgresql_kpi_route_accepts_granularity_and_date(monkeypatch):
+    captured = {}
+
+    class _ServiceStub:
+        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
+            captured.update(
+                {
+                    "month": month,
+                    "platform": platform,
+                    "granularity": granularity,
+                    "target_date": target_date,
+                }
+            )
+            return {"gmv": 456}
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_kpi_postgresql(
+            request=_make_request("/api/dashboard/business-overview/kpi"),
+            granularity="weekly",
+            date="2026-03-16",
+            month=None,
+            platform="shopee",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"]["gmv"] == 456
+    assert captured["month"] is None
+    assert captured["platform"] == "shopee"
+    assert captured["granularity"] == "weekly"
+    assert captured["target_date"] == "2026-03-16"
+
+
+def test_postgresql_kpi_route_normalizes_legacy_month_param(monkeypatch):
+    captured = {}
+
+    class _ServiceStub:
+        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
+            captured.update(
+                {
+                    "month": month,
+                    "platform": platform,
+                    "granularity": granularity,
+                    "target_date": target_date,
+                }
+            )
+            return {"gmv": 789}
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_kpi_postgresql(
+            request=_make_request("/api/dashboard/business-overview/kpi"),
+            granularity=None,
+            date=None,
+            month="2026-03-01",
+            platform=None,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"]["gmv"] == 789
+    assert captured["granularity"] == "monthly"
+    assert captured["target_date"] == "2026-03-01"
 
 
 def test_postgresql_comparison_route_returns_service_payload(monkeypatch):

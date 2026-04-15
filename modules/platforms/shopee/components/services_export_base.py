@@ -62,11 +62,55 @@ class ShopeeServicesExportBase(ShopeeProductsExport):
             raise ValueError("unsupported preset 'today_realtime' for shopee/services")
         return normalized
 
+    async def _wait_services_business_ready(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 10000,
+        poll_ms: int = 500,
+    ) -> bool:
+        selectors = (
+            'button:has-text("统计时间")',
+            '[role="button"]:has-text("统计时间")',
+            'div:has-text("统计时间")',
+            'button:has-text("昨天")',
+            '[role="button"]:has-text("昨天")',
+            'button:has-text("过去7天")',
+            '[role="button"]:has-text("过去7天")',
+            'button:has-text("过去30天")',
+            '[role="button"]:has-text("过去30天")',
+            'button:has-text("按日")',
+            '[role="button"]:has-text("按日")',
+            'button:has-text("按周")',
+            '[role="button"]:has-text("按周")',
+            'button:has-text("按月")',
+            '[role="button"]:has-text("按月")',
+            'button:has-text("导出数据")',
+            '[role="button"]:has-text("导出数据")',
+            'button:has-text("下载数据")',
+            '[role="button"]:has-text("下载数据")',
+        )
+        waited = 0
+        while waited <= timeout_ms:
+            for selector in selectors:
+                try:
+                    locator = page.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=300):
+                        return True
+                except Exception:
+                    continue
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
+
     async def _ensure_products_page_ready(self, page: Any) -> None:
         await ShopeeNavigation(self.ctx).ensure_overview_ready(
             page,
             overview_path=self._service_path(self._resolved_subtype()),
             error_message="services page is not ready",
+            business_ready=self._wait_services_business_ready,
+            business_error_message="services page shell loaded but business content not ready",
         )
 
     def _target_date_label(self, config: dict[str, Any]) -> str:

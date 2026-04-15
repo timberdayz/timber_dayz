@@ -1,11 +1,14 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
 CREATE OR REPLACE VIEW mart.inventory_backlog_base AS
+-- Current backlog calculation runs on company-level inventory scope.
+-- shop_id remains a reserved interface field and is not part of the current
+-- latest snapshot, sales join, or risk aggregation key.
 WITH latest_snapshot AS (
     SELECT
         snapshot_date,
         platform_code,
-        shop_id,
+        NULL::text AS shop_id,
         product_id,
         product_name,
         platform_sku,
@@ -37,7 +40,6 @@ snapshot_change AS (
 sales_30d AS (
     SELECT
         platform_code,
-        shop_id,
         platform_sku,
         product_sku,
         COALESCE(SUM(product_quantity), 0) AS sold_units_30d,
@@ -45,7 +47,7 @@ sales_30d AS (
     FROM semantic.fact_orders_atomic
     WHERE metric_date::date >= CURRENT_DATE - INTERVAL '30 days'
       AND metric_date::date <= CURRENT_DATE
-    GROUP BY platform_code, shop_id, platform_sku, product_sku
+    GROUP BY platform_code, platform_sku, product_sku
 ),
 joined_backlog AS (
     SELECT
@@ -71,12 +73,10 @@ joined_backlog AS (
     FROM latest_snapshot i
     LEFT JOIN sales_30d s
         ON i.platform_code = s.platform_code
-       AND COALESCE(i.shop_id, '') = COALESCE(s.shop_id, '')
        AND COALESCE(i.platform_sku, '') = COALESCE(s.platform_sku, '')
        AND COALESCE(i.product_sku, '') = COALESCE(s.product_sku, '')
     LEFT JOIN snapshot_change c
         ON i.platform_code = c.platform_code
-       AND COALESCE(i.shop_id, '') = COALESCE(c.shop_id, '')
        AND COALESCE(i.platform_sku, '') = COALESCE(c.platform_sku, '')
        AND COALESCE(i.product_sku, '') = COALESCE(c.product_sku, '')
        AND COALESCE(i.warehouse_name, '') = COALESCE(c.warehouse_name, '')

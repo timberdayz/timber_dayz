@@ -92,6 +92,7 @@ mapped AS (
         COALESCE(
             raw_data->>'平台SKU',
             raw_data->>'*商品SKU',
+            raw_data->>'*商品',
             raw_data->>'platform_sku',
             raw_data->>'Platform SKU',
             raw_data->>'SKU',
@@ -105,6 +106,7 @@ mapped AS (
         COALESCE(
             raw_data->>'商品SKU',
             raw_data->>'*商品SKU',
+            raw_data->>'*商品',
             raw_data->>'product_sku',
             raw_data->>'Product SKU',
             raw_data->>'商品货号'

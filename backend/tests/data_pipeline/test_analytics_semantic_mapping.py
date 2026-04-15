@@ -30,3 +30,12 @@ def test_analytics_atomic_sql_exposes_core_standard_fields():
         "ingest_timestamp",
     ):
         assert field_name in sql_text
+
+
+def test_analytics_sql_supports_shopee_and_tiktok_page_view_aliases():
+    daily_sql = Path("sql/semantic/analytics_atomic.sql").read_text(encoding="utf-8")
+    monthly_sql = Path("sql/semantic/analytics_monthly_atomic.sql").read_text(encoding="utf-8")
+
+    for sql_text in (daily_sql, monthly_sql):
+        assert "页面浏览数" in sql_text
+        assert "页面浏览次数" in sql_text

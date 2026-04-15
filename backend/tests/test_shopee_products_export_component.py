@@ -351,6 +351,32 @@ async def test_shopee_products_export_ensure_page_ready_waits_for_late_business_
     assert page.wait_calls == [1200, 500, 500]
 
 
+@pytest.mark.asyncio
+async def test_shopee_services_page_ready_waits_for_late_business_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _GotoPage()
+    component = ShopeeServicesAgentExport(
+        _ctx({"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"})
+    )
+    readiness_checks: list[int] = []
+
+    async def _business_ready(_page) -> bool:
+        readiness_checks.append(len(page.wait_calls))
+        return len(readiness_checks) >= 3
+
+    monkeypatch.setattr(component, "_resolved_subtype", lambda config=None: "agent", raising=False)
+    monkeypatch.setattr(component, "_wait_services_business_ready", _business_ready, raising=False)
+
+    await component.ensure_page_ready(page)
+
+    assert page.goto_calls == [
+        "https://seller.shopee.cn/datacenter/services/agent"
+    ]
+    assert readiness_checks == [1, 2, 3]
+    assert page.wait_calls == [1200, 500, 500]
+
+
 def test_shopee_products_export_detects_throttled_text() -> None:
     component = ShopeeProductsExport(_ctx())
 
@@ -646,6 +672,33 @@ async def test_shopee_products_export_open_date_picker_falls_back_to_summary_tex
     await component._open_date_picker(page)
 
     assert trigger.clicked is True
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_open_date_picker_waits_for_panel_to_appear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trigger = _FakeLocator("统计时间 今日实时")
+    page = _DateFallbackPage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1",
+        {"统计时间": trigger},
+    )
+    component = ShopeeProductsExport(_ctx())
+    panel_checks: list[int] = []
+
+    async def _find_panel(_page):
+        panel_checks.append(len(page.wait_calls))
+        if len(panel_checks) >= 3:
+            return _FakeLocator("按日 按周 按月 昨天 过去7天 过去30天", visible=True)
+        return None
+
+    monkeypatch.setattr(component, "_find_date_panel", _find_panel, raising=False)
+
+    await component._open_date_picker(page)
+
+    assert trigger.clicked is True
+    assert panel_checks == [1, 2, 3]
+    assert page.wait_calls == [600, 200, 200]
 
 
 @pytest.mark.asyncio

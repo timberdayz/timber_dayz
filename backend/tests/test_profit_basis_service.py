@@ -124,3 +124,42 @@ async def test_build_profit_basis_returns_zero_when_shop_metrics_missing(monkeyp
     assert basis["orders_profit_amount"] == pytest.approx(0)
     assert basis["a_class_cost_amount"] == pytest.approx(0)
     assert basis["profit_basis_amount"] == pytest.approx(0)
+
+
+@pytest.mark.asyncio
+async def test_build_profit_basis_passes_date_objects_to_a_class_cost_query(monkeypatch):
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+
+    async def fake_load_shop_metrics(db_arg, year_month):
+        return {
+            "shopee|shop-1": {
+                "monthly_sales": 10000,
+                "monthly_profit": 4000,
+                "achievement_rate": 80,
+            }
+        }
+
+    async def fake_execute(stmt, params=None):
+        sql = str(stmt)
+        if "fact_expenses_allocated_day_shop_sku" in sql:
+            assert params["period_start"].isoformat() == "2026-04-01"
+            assert params["next_month"].isoformat() == "2026-05-01"
+            assert not isinstance(params["period_start"], str)
+            assert not isinstance(params["next_month"], str)
+            return _MockMappingsResult([{"a_class_cost_amount": Decimal("1500")}])
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.load_shop_monthly_metrics",
+        fake_load_shop_metrics,
+    )
+    db.execute = AsyncMock(side_effect=fake_execute)
+
+    basis = await service.build_profit_basis(
+        year_month="2026-04",
+        platform_code="Shopee",
+        shop_id="shop-1",
+    )
+
+    assert basis["profit_basis_amount"] == pytest.approx(2500)

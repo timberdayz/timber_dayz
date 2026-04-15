@@ -93,6 +93,20 @@ def normalize_field_name_for_domain(
     field_name: str,
     currency_extractor=None,
 ) -> str:
+    if domain and domain.lower() == "inventory":
+        return field_name
+
+    def _normalize_orders_ascii_abbreviation(source_field_name: str) -> Optional[str]:
+        cleaned = re.sub(r"[(（].*$", "", source_field_name).strip()
+        if not cleaned:
+            return None
+
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9\s/_-]*", cleaned):
+            ascii_key = re.sub(r"[^A-Za-z0-9]+", "_", cleaned).strip("_").lower()
+            return ascii_key or None
+
+        return None
+
     if domain and domain.lower() == "orders" and field_name in ORDERS_EXPLICIT_FIELD_MAP:
         return ORDERS_EXPLICIT_FIELD_MAP[field_name]
 
@@ -100,9 +114,16 @@ def normalize_field_name_for_domain(
         orders_rmb_match = re.match(r"^(.*?)[(（]\s*RMB\s*[)）]\s*$", field_name, flags=re.IGNORECASE)
         if orders_rmb_match:
             base_field_name = orders_rmb_match.group(1).strip()
+            ascii_key = _normalize_orders_ascii_abbreviation(base_field_name)
+            if ascii_key:
+                return f"{ascii_key}_rmb"
             extractor = currency_extractor or get_currency_extractor()
             normalized_base_field = extractor.normalize_field_name(base_field_name)
             return f"{normalized_base_field}_rmb"
+
+        ascii_key = _normalize_orders_ascii_abbreviation(field_name)
+        if ascii_key:
+            return ascii_key
 
     extractor = currency_extractor or get_currency_extractor()
     return extractor.normalize_field_name(field_name)

@@ -18,6 +18,7 @@ from modules.core.logger import get_logger
 from modules.core.db import ComponentTestHistory
 from backend.services.encryption_service import get_encryption_service
 from backend.services.platform_login_entry_service import normalize_main_account_login_url
+from backend.services.shopee_shop_id_resolver import resolve_shopee_platform_shop_id
 
 logger = get_logger(__name__)
 
@@ -58,6 +59,13 @@ class ComponentTestService:
         except Exception as e:
             logger.warning(f"Normalize login_url failed, use raw: {e}")
             login_url = raw_login_url or ""
+        resolved_shop_id = resolve_shopee_platform_shop_id(
+            platform=platform,
+            account_id=getattr(account, 'account_id', None) or getattr(account, 'shop_account_id', None),
+            store_name=getattr(account, 'store_name', None),
+            platform_shop_id=getattr(account, 'platform_shop_id', None),
+            shop_id=getattr(account, 'shop_id', None),
+        )
         account_info = {
             'account_id': getattr(account, 'account_id', None) or getattr(account, 'shop_account_id', None),
             'shop_account_id': getattr(account, 'shop_account_id', None) or getattr(account, 'account_id', None),
@@ -72,8 +80,8 @@ class ComponentTestService:
             'region': getattr(account, 'region', None) or '',
             'currency': getattr(account, 'currency', None) or '',
             'shop_region': getattr(account, 'shop_region', None) or '',
-            'shop_id': getattr(account, 'platform_shop_id', None) or getattr(account, 'shop_id', None) or '',
-            'platform_shop_id': getattr(account, 'platform_shop_id', None) or getattr(account, 'shop_id', None) or '',
+            'shop_id': resolved_shop_id,
+            'platform_shop_id': resolved_shop_id,
             'notes': getattr(account, 'notes', None) or '',
             'cookies_file': getattr(account, 'cookies_file', None),
             'capabilities': account.capabilities or {},

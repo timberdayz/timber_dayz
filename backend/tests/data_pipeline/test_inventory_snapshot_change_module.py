@@ -35,3 +35,8 @@ def test_refresh_registry_tracks_inventory_snapshot_assets():
     assert SQL_TARGET_PATHS["mart.inventory_snapshot_history"] == "sql/mart/inventory_snapshot_history.sql"
     assert SQL_TARGET_PATHS["mart.inventory_snapshot_latest"] == "sql/mart/inventory_snapshot_latest.sql"
     assert SQL_TARGET_PATHS["mart.inventory_snapshot_change"] == "sql/mart/inventory_snapshot_change.sql"
+
+
+def test_inventory_snapshot_semantic_sql_accepts_star_product_alias():
+    sql_text = Path("sql/semantic/inventory_snapshot.sql").read_text(encoding="utf-8")
+    assert "*商品" in sql_text

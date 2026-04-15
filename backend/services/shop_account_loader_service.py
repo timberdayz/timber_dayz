@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.encryption_service import get_encryption_service
 from backend.services.platform_login_entry_service import normalize_main_account_login_url
+from backend.services.shopee_shop_id_resolver import resolve_shopee_platform_shop_id
 from modules.core.db import MainAccount, ShopAccount, ShopAccountCapability
 from modules.core.logger import get_logger
 
@@ -48,12 +49,18 @@ class ShopAccountLoaderService:
             main_account.platform,
             main_account.login_url,
         )
+        resolved_shop_id = resolve_shopee_platform_shop_id(
+            platform=shop_account.platform or main_account.platform,
+            account_id=shop_account.shop_account_id,
+            store_name=shop_account.store_name,
+            platform_shop_id=shop_account.platform_shop_id,
+        )
         compat_account = {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,
             "platform": (shop_account.platform or main_account.platform or "").lower(),
             "store_name": shop_account.store_name,
-            "shop_id": shop_account.platform_shop_id or "",
+            "shop_id": resolved_shop_id,
             "shop_region": shop_account.shop_region or "",
             "shop_type": shop_account.shop_type or "",
             "username": main_account.username,
@@ -79,7 +86,7 @@ class ShopAccountLoaderService:
                 "shop_account_id": shop_account.shop_account_id,
                 "main_account_id": shop_account.main_account_id,
                 "store_name": shop_account.store_name,
-                "platform_shop_id": shop_account.platform_shop_id,
+                "platform_shop_id": resolved_shop_id or None,
                 "platform_shop_id_status": shop_account.platform_shop_id_status,
                 "shop_region": shop_account.shop_region or "",
                 "shop_type": shop_account.shop_type or "",

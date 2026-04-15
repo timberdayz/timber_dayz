@@ -25,14 +25,14 @@
         <el-form-item label="月份">
           <el-date-picker v-model="monthlyForm.period_month" type="month" value-format="YYYY-MM" format="YYYY-MM" style="width: 140px" />
         </el-form-item>
-        <el-form-item label="人员成本预算">
-          <el-input-number v-model="monthlyForm.personnel_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" />
+        <el-form-item label="人员成本预算(%)">
+          <el-input-number v-model="monthlyForm.personnel_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" :formatter="formatRatioInput" :parser="parseRatioInput" />
         </el-form-item>
-        <el-form-item label="跟投收益预算">
-          <el-input-number v-model="monthlyForm.follow_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" />
+        <el-form-item label="跟投收益预算(%)">
+          <el-input-number v-model="monthlyForm.follow_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" :formatter="formatRatioInput" :parser="parseRatioInput" />
         </el-form-item>
-        <el-form-item label="公司留存预算">
-          <el-input-number v-model="monthlyForm.company_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" />
+        <el-form-item label="公司留存预算(%)">
+          <el-input-number v-model="monthlyForm.company_target_ratio" :min="0" :max="1" :step="0.05" :precision="2" :formatter="formatRatioInput" :parser="parseRatioInput" />
         </el-form-item>
         <el-form-item label="调整金额">
           <el-input-number v-model="monthlyForm.adjustment_amount" :step="100" :precision="2" />
@@ -468,6 +468,16 @@ const getShopStatus = (shop) => {
     pendingData,
     hasException
   }
+}
+const formatRatioInput = (value) => {
+  if (value == null || value === undefined || value === '') return ''
+  return `${(Number(value) * 100).toFixed(2)}%`
+}
+const parseRatioInput = (value) => {
+  if (value == null || value === undefined || value === '') return 0
+  const numeric = Number(String(value).replace(/[%\s]/g, ''))
+  if (Number.isNaN(numeric)) return 0
+  return numeric / 100
 }
 const formatCurrency = (num) => (!num && num !== 0) ? '0.00' : new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num)
 const formatPercentValue = (num) => (num == null || num === undefined) ? '-' : `${(Number(num) * 100).toFixed(2)}%`

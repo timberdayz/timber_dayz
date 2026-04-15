@@ -106,7 +106,69 @@ async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(mo
     query, params = captured[0]
     assert "FROM mart.platform_month_kpi" in query
     assert "api.business_overview_kpi_module" not in query
-    assert str(params["period_month"]) == "2026-04-01"
+    assert str(params["period_key"]) == "2026-04-01"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_platform_sources(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "period_key": "2026-04-07",
+                "platform_code": "shopee",
+                "gmv": 120,
+                "order_count": 12,
+                "visitor_count": 300,
+                "conversion_rate": 4,
+                "avg_order_value": 10,
+                "attach_rate": 1.5,
+                "total_items": 18,
+                "profit": 36,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_kpi(
+        granularity="daily",
+        target_date="2026-04-07",
+        platform="shopee",
+    )
+
+    assert result["gmv"] == 120
+    assert len(captured) == 1
+    query, params = captured[0]
+    assert "FROM mart.platform_day_kpi" in query
+    assert str(params["period_key"]) == "2026-04-07"
+    assert params["platform_code"] == "shopee"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_annual_summary_kpi_uses_platform_month_aggregate(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {"gmv": 100, "total_cost": 40, "profit": 20},
+            {"gmv": 200, "total_cost": 60, "profit": 50},
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_annual_summary_kpi(granularity="yearly", period="2026")
+
+    assert result["gmv"] == 300
+    assert len(captured) == 1
+    query, params = captured[0]
+    assert "platform_month" in query.lower()
+    assert "annual_summary_shop_month" not in query
+    assert str(params["period_start"]) == "2026-01-01"
 
 
 @pytest.mark.asyncio
@@ -282,7 +344,7 @@ def test_rank_shop_racing_rows_desc_by_gmv():
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_comparison_reads_from_granularity_specific_mart(monkeypatch):
+async def test_postgresql_dashboard_service_comparison_reads_from_platform_aggregate_source(monkeypatch):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -326,10 +388,9 @@ async def test_postgresql_dashboard_service_comparison_reads_from_granularity_sp
     assert result["metrics"]["sales_amount"]["today"] == 5000
     assert result["target"]["sales_amount"] == 6000
     assert len(captured) == 1
-    assert all("FROM mart.shop_month_kpi" in query for query, _ in captured)
-    assert all("api.business_overview_comparison_module" not in query for query, _ in captured)
-    assert "period_month >= :range_start" in captured[0][0]
-    assert "period_month <= :range_end" in captured[0][0]
+    assert all("FROM api.business_overview_comparison_platform_module" in query for query, _ in captured)
+    assert "period_key >= :range_start" in captured[0][0]
+    assert "period_key <= :range_end" in captured[0][0]
     assert str(captured[0][1]["range_start"]) == "2026-03-01"
     assert str(captured[0][1]["range_end"]) == "2026-04-01"
 
@@ -821,7 +882,7 @@ async def test_postgresql_dashboard_service_comparison_loads_total_month_target_
         service = PostgresqlDashboardService()
 
         async def fake_fetch_rows(query, params):
-            if "FROM mart.shop_month_kpi" in query:
+            if "FROM api.business_overview_comparison_platform_module" in query:
                 return [
                     {
                         "period_key": "2025-09-01",
@@ -953,7 +1014,6 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
         )
 
         assert result["monthly_target"] == 1100000
-        assert result["estimated_expenses"] == 1800
         assert result["monthly_total_achieved"] == 25000
 
         await engine.dispose()
@@ -1080,6 +1140,45 @@ def test_rank_traffic_rows_by_page_views():
 
     assert result[0]["name"] == "shop-b"
     assert result[0]["rank"] == 1
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_primary_traffic(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "shop-a",
+                "visitor_count": 100,
+                "page_views": 120,
+                "conversion_rate": 1.0,
+            },
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "shop-b",
+                "visitor_count": 50,
+                "page_views": 180,
+                "conversion_rate": 1.0,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_traffic_ranking(
+        granularity="monthly",
+        target_date="2026-03-01",
+        dimension="shop",
+    )
+
+    assert result[0]["name"] == "shop-b"
+    assert result[0]["page_views"] == 180
+    assert result[1]["name"] == "shop-a"
 
 
 @pytest.mark.pg_only
@@ -1283,9 +1382,148 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
 
         assert result["gmv"] == 100
         assert result["order_count"] == 1
-        assert result["visitor_count"] == 200
+        assert result["visitor_count"] == 300
         assert result["avg_order_value"] == 100
         assert result["attach_rate"] == 12
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_monthly_kpi_uses_page_views_as_unified_traffic(monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    from backend.services.data_pipeline.refresh_runner import execute_sql_target
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS b_class"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS core.platform_accounts (
+                        id SERIAL PRIMARY KEY,
+                        account_id VARCHAR(100) NOT NULL,
+                        platform VARCHAR(50) NOT NULL,
+                        account_alias VARCHAR(200),
+                        store_name VARCHAR(200) NOT NULL,
+                        shop_id VARCHAR(256)
+                    )
+                    """
+                )
+            )
+            for table_name in (
+                "b_class.fact_shopee_orders_monthly",
+                "b_class.fact_tiktok_orders_monthly",
+                "b_class.fact_miaoshou_orders_monthly",
+                "b_class.fact_shopee_analytics_monthly",
+                "b_class.fact_tiktok_analytics_monthly",
+                "b_class.fact_miaoshou_analytics_monthly",
+            ):
+                await session.execute(
+                    text(
+                        f"""
+                        CREATE TABLE IF NOT EXISTS {table_name} (
+                            platform_code VARCHAR(32),
+                            shop_id VARCHAR(256),
+                            metric_date DATE,
+                            raw_data JSONB,
+                            data_hash VARCHAR(128),
+                            ingest_timestamp TIMESTAMP
+                        )
+                        """
+                    )
+                )
+
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    )
+                    VALUES (
+                        'shopee', 'shop-a', DATE '2026-03-01',
+                        '{"order_id":"shopee-order-1","paid_amount":"100","product_quantity":"1","profit":"20"}'::jsonb,
+                        'shopee-order-1', TIMESTAMP '2026-03-01 10:00:00'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_tiktok_orders_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    )
+                    VALUES (
+                        'tiktok', 'shop-b', DATE '2026-03-01',
+                        '{"order_id":"tiktok-order-1","paid_amount":"200","product_quantity":"2","profit":"50"}'::jsonb,
+                        'tiktok-order-1', TIMESTAMP '2026-03-01 10:00:00'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_analytics_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    )
+                    VALUES (
+                        'shopee', 'shop-a', DATE '2026-03-01',
+                        '{"页面浏览数":"300"}'::jsonb,
+                        'shopee-analytics-1', TIMESTAMP '2026-03-01 10:00:00'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_tiktok_analytics_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    )
+                    VALUES (
+                        'tiktok', 'shop-b', DATE '2026-03-01',
+                        '{"页面浏览次数":"80"}'::jsonb,
+                        'tiktok-analytics-1', TIMESTAMP '2026-03-01 10:00:00'
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            for target in (
+                "semantic.fact_orders_monthly_atomic",
+                "semantic.fact_analytics_monthly_atomic",
+                "mart.platform_month_kpi",
+            ):
+                await execute_sql_target(session, target)
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+        result = await service.get_business_overview_kpi("2026-03-01", None)
+
+        assert result["gmv"] == 300
+        assert result["order_count"] == 2
+        assert result["visitor_count"] == 380
+        assert result["conversion_rate"] == 0.53
 
         await engine.dispose()
 

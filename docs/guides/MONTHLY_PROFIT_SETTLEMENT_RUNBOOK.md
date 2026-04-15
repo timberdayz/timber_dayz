@@ -58,10 +58,11 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 - 店铺结算利润：
   - `finance.shop_profit_basis`
-- 店铺提成：
-  - `c_class.employee_commissions`
 - 工资和人工成本：
   - `a_class.payroll_records`
+- 提成中间结果：
+  - `c_class.employee_commissions`
+  - 该表用于生成工资单中的 `commission` 字段，不应在月结人员成本中与工资单总成本重复汇总
 - 跟投收益：
   - `finance.follow_investment_settlements`
   - `finance.follow_investment_details`
@@ -217,19 +218,9 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 ## 7. 当前人员成本组成
 
-当前 Phase 1 中，人员成本来自两类来源：
+当前代码实现中，月结人员成本以工资单为最终结算口径，不再单独叠加 `employee_commissions`。
 
-### 7.1 店铺提成
-
-来源：
-
-- `c_class.employee_commissions`
-
-在月结明细中表现为：
-
-- `detail_type = shop_commission`
-
-### 7.2 工资总成本
+### 7.1 工资总成本
 
 来源：
 
@@ -241,6 +232,9 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 说明：
 
+- `payroll_records.total_cost` 已包含工资单中的底薪、绩效、提成、补贴、奖金，以及公司承担社保、公积金
+- `employee_commissions` 只是工资单生成的中间层，提成会先写入工资单 `commission`，再随 `total_cost` 进入月结
+- 因此月结人员成本不应再单独汇总 `c_class.employee_commissions`，否则会重复计算提成
 - 当前是公司级总成本直接入账
 - 尚未回摊到店铺
 
@@ -301,6 +295,7 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 先检查：
 
 - 店铺提成配置是否正确
+- 个人提成是否已先重算并正确写入工资单 `commission`
 - 工资单是否已重算并确认月度人工字段
 - 是否把公司承担社保、公积金计入工资总成本
 

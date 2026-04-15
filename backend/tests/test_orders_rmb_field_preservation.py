@@ -81,6 +81,29 @@ def test_orders_rmb_fields_avoid_collision_for_real_tiktok_orders_amount_pairs()
     assert normalized["买家实付金额_rmb"] == "630.0"
 
 
+def test_orders_tax_abbreviation_fields_preserve_distinct_ascii_keys():
+    from backend.services.data_ingestion_service import normalize_row_fields_for_domain
+
+    normalized = normalize_row_fields_for_domain(
+        domain="orders",
+        row={
+            "VAT": "1.0",
+            "VAT(RMB)": "7.0",
+            "SST": "2.0",
+            "SST(RMB)": "14.0",
+            "GST": "3.0",
+            "GST(RMB)": "21.0",
+        },
+    )
+
+    assert normalized["vat"] == "1.0"
+    assert normalized["vat_rmb"] == "7.0"
+    assert normalized["sst"] == "2.0"
+    assert normalized["sst_rmb"] == "14.0"
+    assert normalized["gst"] == "3.0"
+    assert normalized["gst_rmb"] == "21.0"
+
+
 def test_non_orders_domains_keep_existing_currency_suffix_stripping_behavior():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
@@ -109,3 +132,20 @@ def test_orders_rmb_source_fields_have_explicit_alias_mappings():
     assert COMPREHENSIVE_ALIAS_DICTIONARY[buyer_payment_rmb] == "buyer_payment_rmb"
     assert COMPREHENSIVE_ALIAS_DICTIONARY[platform_commission_rmb] == "platform_commission_rmb"
     assert COMPREHENSIVE_ALIAS_DICTIONARY[estimated_settlement_rmb] == "estimated_settlement_rmb"
+
+
+def test_inventory_domain_preserves_original_sku_header_names():
+    from backend.services.data_ingestion_service import normalize_row_fields_for_domain
+
+    row = {
+        "*商品SKU": "SBF002-ZSHD-035",
+        "*商品名称": "demo",
+        "可用库存": 102,
+    }
+
+    normalized = normalize_row_fields_for_domain(
+        domain="inventory",
+        row=row,
+    )
+
+    assert normalized == row

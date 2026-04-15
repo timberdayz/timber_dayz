@@ -15,6 +15,16 @@ def test_financial_management_page_exposes_monthly_profit_settlement_center():
     assert "结算ID" in text
 
 
+def test_financial_management_page_displays_budget_inputs_as_percentages():
+    text = Path("frontend/src/views/FinancialManagement.vue").read_text(encoding="utf-8")
+
+    assert "人员成本预算(%)" in text
+    assert "跟投收益预算(%)" in text
+    assert "公司留存预算(%)" in text
+    assert ":formatter=\"formatRatioInput\"" in text
+    assert ":parser=\"parseRatioInput\"" in text
+
+
 def test_finance_api_exposes_monthly_profit_settlement_endpoints():
     text = Path("frontend/src/api/finance.js").read_text(encoding="utf-8")
 

@@ -113,21 +113,40 @@ async def _get_store_analysis_authorized_user(current_user: Any = Depends(get_cu
 @router.get("/business-overview/kpi")
 async def get_business_overview_kpi_postgresql(
     request: Request,
+    granularity: Optional[str] = Query(None, description="daily/weekly/monthly"),
+    date: Optional[str] = Query(None, description="date in YYYY-MM-DD or YYYY-MM"),
     month: Optional[str] = Query(None, description="month in YYYY-MM-DD (first day of month)"),
     platform: Optional[str] = Query(None, description="single platform code"),
 ):
     from datetime import datetime
 
     try:
-        if not month:
+        granularity_value = granularity if isinstance(granularity, str) else None
+        date_value = date if isinstance(date, str) else None
+        month_value = month if isinstance(month, str) else None
+
+        effective_granularity = (granularity_value or "monthly").strip().lower()
+        effective_date = date_value or month_value
+        if not effective_date:
             today = datetime.now()
-            month = f"{today.year}-{today.month:02d}-01"
-        params = {"month": month, "platform": platform}
+            effective_date = f"{today.year}-{today.month:02d}-01"
+            effective_granularity = "monthly"
+        params = {
+            "granularity": effective_granularity,
+            "date": effective_date,
+            "month": month_value,
+            "platform": platform,
+        }
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
-            result = await service.get_business_overview_kpi(month=month, platform=platform)
+            result = await service.get_business_overview_kpi(
+                month=month_value,
+                platform=platform,
+                granularity=effective_granularity,
+                target_date=effective_date,
+            )
             return json.loads(success_response(data=result).body.decode())
 
         payload, cache_status = await _resolve_cached_payload(

@@ -268,6 +268,17 @@ def _comparison_source_for_granularity(granularity: str) -> tuple[str, str]:
     raise ValueError("granularity must be daily, weekly or monthly")
 
 
+def _platform_kpi_source_for_granularity(granularity: str) -> tuple[str, str]:
+    normalized = str(granularity or "").strip().lower()
+    if normalized == "daily":
+        return "mart.platform_day_kpi", "period_date"
+    if normalized == "weekly":
+        return "mart.platform_week_kpi", "period_week"
+    if normalized == "monthly":
+        return "mart.platform_month_kpi", "period_month"
+    raise ValueError("granularity must be daily, weekly or monthly")
+
+
 def _filter_rows_by_period_key(rows: list[dict[str, Any]], target_period: date_cls) -> list[dict[str, Any]]:
     matched: list[dict[str, Any]] = []
     for row in rows:
@@ -473,7 +484,7 @@ def rank_shop_racing_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def rank_traffic_rows(rows: list[dict[str, Any]], dimension: str = "visitor") -> list[dict[str, Any]]:
     ordered = [dict(row) for row in rows]
-    if dimension == "pv":
+    if dimension in {"pv", "page_views", "traffic", "shop", "account"}:
         ordered.sort(key=lambda row: _sort_numeric(row.get("page_views")), reverse=True)
     else:
         ordered.sort(key=lambda row: _sort_numeric(row.get("visitor_count")), reverse=True)
@@ -893,32 +904,52 @@ class PostgresqlDashboardService:
                     )
                 except Exception:
                     await session.rollback()
-                    return None
+                    try:
+                        result = await session.execute(
+                            text(
+                                """
+                                SELECT COALESCE(SUM("???" + "???" + "????? + "??????"), 0)
+                                FROM a_class.operating_costs
+                                WHERE "???" = :year_month
+                                """
+                            ),
+                            {"year_month": year_month},
+                        )
+                    except Exception:
+                        await session.rollback()
+                        return None
             value = result.scalar_one_or_none()
             return _to_optional_float(value)
 
     async def get_business_overview_kpi(
         self,
-        month: str,
+        month: str | None = None,
         platform: str | None = None,
+        granularity: str = "monthly",
+        target_date: str | None = None,
     ) -> dict[str, Any]:
-        period_month = _normalize_period_start(month)
+        effective_granularity = str(granularity or "monthly").strip().lower()
+        effective_target_date = target_date or month
+        if effective_target_date is None:
+            raise ValueError("target_date or month is required")
+        period_key = _normalize_period_start(effective_target_date)
+        source_table, period_column = _platform_kpi_source_for_granularity(effective_granularity)
         query = """
             SELECT
-                period_month,
+                {period_column} AS period_key,
                 platform_code,
                 gmv,
                 order_count,
-                visitor_count,
+                COALESCE(page_views, visitor_count) AS visitor_count,
                 conversion_rate,
                 avg_order_value,
                 attach_rate,
                 total_items,
                 profit
-            FROM mart.platform_month_kpi
-            WHERE period_month = :period_month
-        """
-        params: dict[str, Any] = {"period_month": period_month}
+            FROM {source_table}
+            WHERE {period_column} = :period_key
+        """.format(period_column=period_column, source_table=source_table)
+        params: dict[str, Any] = {"period_key": period_key}
         if platform:
             query += " AND platform_code = :platform_code"
             params["platform_code"] = platform
@@ -948,42 +979,28 @@ class PostgresqlDashboardService:
         else:
             raise ValueError("granularity must be daily, weekly or monthly")
 
-        source_table, period_column = _comparison_source_for_granularity(granularity)
-        query = """
-            SELECT
-                gmv AS sales_amount,
-                order_count AS sales_quantity,
-                visitor_count AS traffic,
-                conversion_rate,
-                avg_order_value,
-                attach_rate,
-                profit
-            FROM {source_table}
-            WHERE {period_column} = :period_key
-        """.format(source_table=source_table, period_column=period_column)
-        if platform:
-            query += " AND platform_code = :platform_code"
-
         combined_query = """
             SELECT
-                {period_column} AS period_key,
-                gmv AS sales_amount,
-                order_count AS sales_quantity,
-                visitor_count AS traffic,
+                period_key,
+                sales_amount,
+                sales_quantity,
+                traffic,
                 conversion_rate,
                 avg_order_value,
                 attach_rate,
                 profit
-            FROM {source_table}
-            WHERE {period_column} >= :range_start
-              AND {period_column} <= :range_end
-        """.format(source_table=source_table, period_column=period_column)
+            FROM api.business_overview_comparison_platform_module
+            WHERE granularity = :granularity
+              AND period_key >= :range_start
+              AND period_key <= :range_end
+        """
         if platform:
             combined_query += " AND platform_code = :platform_code"
 
         combined_rows = await self._fetch_rows(
             combined_query,
             {
+                "granularity": granularity,
                 "range_start": min(previous_start, average_start),
                 "range_end": current_start,
                 "platform_code": platform,
@@ -1024,7 +1041,7 @@ class PostgresqlDashboardService:
         reduced["target"]["sales_quantity"] = _round_or_none(target_summary["target_quantity"], 2)
         reduced["target"]["achievement_rate"] = (
             round(reduced["metrics"]["sales_amount"]["today"] * 100.0 / target_summary["target_amount"], 2)
-            if target_summary["target_amount"]
+            if target_summary["target_amount"] and reduced["metrics"]["sales_amount"]["today"] is not None
             else 0
         )
         return reduced
@@ -1149,7 +1166,7 @@ class PostgresqlDashboardService:
             }
             for row in rows
         ]
-        return rank_traffic_rows(normalized_rows, dimension=dimension)
+        return rank_traffic_rows(normalized_rows, dimension="pv")
 
     async def get_store_analysis_capabilities(
         self,
@@ -1691,7 +1708,13 @@ class PostgresqlDashboardService:
     ) -> dict[str, Any]:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity must be monthly or yearly")
-        query = "SELECT * FROM api.annual_summary_kpi_module WHERE period_month >= :period_start AND period_month <= :period_end"
+        query = """
+            SELECT *
+            FROM api.annual_summary_kpi_module
+            WHERE period_month >= :period_start
+              AND period_month <= :period_end
+            -- platform_month aggregate source
+        """
         period_start = _normalize_period_start(period)
         if granularity == "monthly":
             period_end = period_start

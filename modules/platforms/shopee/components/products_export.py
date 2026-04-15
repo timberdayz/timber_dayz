@@ -1310,6 +1310,14 @@ class ShopeeProductsExport(ExportComponent):
             return
         await trigger.click(timeout=5000)
         await page.wait_for_timeout(600)
+        waited = 0
+        while waited <= 2000:
+            panel = await self._find_date_panel(page)
+            if panel is not None:
+                return
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(200)
+            waited += 200
 
     async def _click_text_option(self, page: Any, text: str) -> bool:
         locator = await self._find_date_option_locator(page, text)

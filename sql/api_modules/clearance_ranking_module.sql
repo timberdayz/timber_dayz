@@ -1,6 +1,7 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
 CREATE OR REPLACE VIEW api.clearance_ranking_module AS
+-- Clearance ranking currently uses company-scope inventory backlog rows.
 SELECT
     b.snapshot_date,
     b.platform_code,

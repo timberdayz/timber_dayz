@@ -34,7 +34,7 @@ async def switched_app(monkeypatch):
 @pytest.mark.asyncio
 async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkeypatch):
     class _PostgresqlServiceStub:
-        async def get_business_overview_kpi(self, month, platform):
+        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
             return {
                 "gmv": 321,
                 "order_count": 10,
@@ -45,7 +45,7 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
                 "labor_efficiency": 0,
             }
 
-        async def get_business_overview_shop_racing(self, granularity, target_date, group_by):
+        async def get_business_overview_shop_racing(self, granularity, target_date, group_by, platform=None):
             return [{"name": "shop-a", "gmv": 123, "rank": 1}]
 
         async def get_business_overview_operational_metrics(self, month, platform):
@@ -76,7 +76,10 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
         transport=ASGITransport(app=switched_app),
         base_url="http://localhost",
     ) as client:
-        response = await client.get("/api/dashboard/business-overview/kpi", params={"month": "2026-03-01"})
+        response = await client.get(
+            "/api/dashboard/business-overview/kpi",
+            params={"granularity": "weekly", "date": "2026-03-16"},
+        )
 
     body = json.loads(response.content.decode("utf-8"))
     assert response.status_code == 200
@@ -136,6 +139,7 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
         async with session_factory() as session:
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS api"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
             await session.execute(
                 text(
                     """
@@ -179,6 +183,45 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         120::numeric AS profit,
                         400::numeric AS target_amount,
                         80::numeric AS achievement_rate
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE OR REPLACE VIEW mart.platform_month_kpi AS
+                    SELECT
+                        DATE '2026-03-01' AS period_month,
+                        'shopee'::varchar AS platform_code,
+                        321::numeric AS gmv,
+                        10::numeric AS order_count,
+                        200::numeric AS visitor_count,
+                        5::numeric AS conversion_rate,
+                        32.1::numeric AS avg_order_value,
+                        1.5::numeric AS attach_rate,
+                        15::numeric AS total_items,
+                        120::numeric AS profit
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE OR REPLACE VIEW api.business_overview_comparison_platform_module AS
+                    SELECT
+                        'monthly'::varchar AS granularity,
+                        DATE '2026-03-01' AS period_key,
+                        'shopee'::varchar AS platform_code,
+                        321::numeric AS sales_amount,
+                        10::numeric AS sales_quantity,
+                        200::numeric AS traffic,
+                        5::numeric AS conversion_rate,
+                        32.1::numeric AS avg_order_value,
+                        1.5::numeric AS attach_rate,
+                        120::numeric AS profit
+                    UNION ALL
+                    SELECT
+                        'monthly', DATE '2026-02-01', 'shopee', 300, 9, 180, 5, 33.3, 1.4, 100
                     """
                 )
             )

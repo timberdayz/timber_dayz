@@ -86,10 +86,12 @@ def test_generate_month_creates_draft_payroll_from_salary_commission_and_perform
     assert result["payroll_upserts"] == 1
     assert result["locked_conflicts"] == 0
     created = next(x for x in added if isinstance(x, PayrollRecord))
+    assert float(created.commission) == 300.0
     assert float(created.performance_salary) == 240.0
     assert float(created.allowances) == 100.0
     assert float(created.gross_salary) == 2140.0
     assert float(created.net_salary) == 2140.0
+    assert float(created.total_cost) == 2140.0
     assert created.status == "draft"
 
 

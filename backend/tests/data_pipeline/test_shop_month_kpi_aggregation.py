@@ -95,12 +95,14 @@ def test_platform_month_kpi_sql_asset():
         "sql/mart/platform_month_kpi.sql",
         "CREATE OR REPLACE VIEW mart.platform_month_kpi AS",
         (
-            "mart.shop_month_kpi",
+            "semantic.fact_orders_monthly_atomic",
+            "semantic.fact_analytics_monthly_atomic",
             "platform_code",
             "period_month",
             "gmv",
             "order_count",
             "visitor_count",
+            "page_views",
         ),
     )
 

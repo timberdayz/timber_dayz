@@ -6,7 +6,7 @@ SELECT
     platform_code,
     gmv,
     order_count,
-    visitor_count,
+    COALESCE(page_views, visitor_count) AS visitor_count,
     conversion_rate,
     avg_order_value,
     attach_rate,

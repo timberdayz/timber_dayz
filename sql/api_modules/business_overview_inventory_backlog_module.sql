@@ -1,6 +1,7 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
 CREATE OR REPLACE VIEW api.business_overview_inventory_backlog_module AS
+-- API module currently exposes company-scope backlog rows.
 SELECT
     snapshot_date,
     platform_code,

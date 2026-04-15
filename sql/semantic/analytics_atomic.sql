@@ -61,6 +61,7 @@ mapped AS (
         ) AS visitor_count_raw,
         COALESCE(
             raw_data->>'浏览量',
+            raw_data->>'页面浏览数',
             raw_data->>'页面浏览次数',
             raw_data->>'page_views',
             raw_data->>'Page Views',

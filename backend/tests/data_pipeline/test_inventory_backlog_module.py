@@ -67,6 +67,27 @@ def test_inventory_backlog_base_sql_asset():
     assert "base.estimated_turnover_days" in sql_text
 
 
+def test_inventory_snapshot_latest_sql_uses_company_scope_not_shop_scope():
+    sql_text = Path("sql/mart/inventory_snapshot_latest.sql").read_text(encoding="utf-8")
+    assert "PARTITION BY platform_code" in sql_text
+    assert "COALESCE(shop_id, '')" not in sql_text
+    assert "SUM(available_stock)" in sql_text
+
+
+def test_inventory_snapshot_change_sql_uses_company_scope_not_shop_scope():
+    sql_text = Path("sql/mart/inventory_snapshot_change.sql").read_text(encoding="utf-8")
+    assert "GROUP BY" in sql_text
+    assert "GROUP BY\n        platform_code,\n        shop_id," not in sql_text
+    assert "SUM(available_stock)" in sql_text
+
+
+def test_inventory_backlog_base_sql_aggregates_sales_without_shop_scope():
+    sql_text = Path("sql/mart/inventory_backlog_base.sql").read_text(encoding="utf-8")
+    assert "GROUP BY platform_code, platform_sku, product_sku" in sql_text
+    assert "COALESCE(i.shop_id, '') = COALESCE(s.shop_id, '')" not in sql_text
+    assert "NULL::text AS shop_id" in sql_text
+
+
 def test_inventory_backlog_module_sql_asset():
     _assert_sql_asset(
         "sql/api_modules/business_overview_inventory_backlog_module.sql",

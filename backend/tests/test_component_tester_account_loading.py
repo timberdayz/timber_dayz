@@ -99,6 +99,74 @@ def test_prepare_account_info_uses_platform_login_entry_for_shopee(monkeypatch):
     )
 
 
+def test_prepare_account_info_fills_missing_shopee_shop_id_from_override(monkeypatch):
+    class _FakeAccount:
+        account_id = "shopee_my_xhkj1_local"
+        platform = "shopee"
+        username = "hongxikeji:main"
+        password_encrypted = "encrypted"
+        store_name = "xhkj1.my"
+        login_url = "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"
+        cookies_file = None
+        capabilities = {"products": True}
+        email = ""
+        phone = ""
+        region = "CN"
+        currency = "CNY"
+        shop_region = "MY"
+        notes = "demo"
+        platform_shop_id = ""
+
+    class _FakeEncryptionService:
+        def decrypt_password(self, encrypted):  # noqa: ANN001
+            assert encrypted == "encrypted"
+            return "plain-password"
+
+    monkeypatch.setattr(
+        "backend.services.component_test_service.get_encryption_service",
+        lambda: _FakeEncryptionService(),
+    )
+
+    account_info = ComponentTestService.prepare_account_info(_FakeAccount())
+
+    assert account_info["shop_id"] == "1540271739"
+    assert account_info["platform_shop_id"] == "1540271739"
+
+
+def test_prepare_account_info_ignores_invalid_nonnumeric_shopee_shop_id_and_uses_override(monkeypatch):
+    class _FakeAccount:
+        account_id = "shopee_sg_hx_home_local"
+        platform = "shopee"
+        username = "leslieshop:main"
+        password_encrypted = "encrypted"
+        store_name = "hx_home.sg"
+        login_url = "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"
+        cookies_file = None
+        capabilities = {"products": True}
+        email = ""
+        phone = ""
+        region = "CN"
+        currency = "CNY"
+        shop_region = "SG"
+        notes = "demo"
+        platform_shop_id = "xihong"
+
+    class _FakeEncryptionService:
+        def decrypt_password(self, encrypted):  # noqa: ANN001
+            assert encrypted == "encrypted"
+            return "plain-password"
+
+    monkeypatch.setattr(
+        "backend.services.component_test_service.get_encryption_service",
+        lambda: _FakeEncryptionService(),
+    )
+
+    account_info = ComponentTestService.prepare_account_info(_FakeAccount())
+
+    assert account_info["shop_id"] == "1391124228"
+    assert account_info["platform_shop_id"] == "1391124228"
+
+
 def test_component_versions_router_uses_shop_account_loader_without_platform_account_fallback():
     text = (
         Path(__file__).resolve().parents[2]
