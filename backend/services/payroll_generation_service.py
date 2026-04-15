@@ -7,6 +7,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
+    Employee,
     EmployeeCommission,
     EmployeePerformance,
     PayrollRecord,
@@ -48,6 +49,19 @@ class PayrollGenerationService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _is_salary_eligible_employee(self, employee_code: str) -> bool:
+        employee = (
+            await self.db.execute(
+                select(Employee).where(Employee.employee_code == employee_code)
+            )
+        ).scalar_one_or_none()
+        if employee is None:
+            return True
+        return (
+            getattr(employee, "status", "active") == "active"
+            and getattr(employee, "employee_identity_type", "employee") == "employee"
+        )
 
     @staticmethod
     def _to_decimal(value: Any) -> Decimal:
@@ -205,6 +219,15 @@ class PayrollGenerationService:
         }
 
     async def generate_employee_month(self, employee_code: str, year_month: str) -> Dict[str, Any]:
+        if not await self._is_salary_eligible_employee(employee_code):
+            return {
+                "employee_code": employee_code,
+                "year_month": year_month,
+                "payroll_upserts": 0,
+                "locked_conflicts": 0,
+                "locked_conflict_details": [],
+                "payroll_record": None,
+            }
         salary_rows = (
             await self.db.execute(
                 select(SalaryStructure)
@@ -344,12 +367,16 @@ class PayrollGenerationService:
             row.employee_code: row for row in existing_rows if getattr(row, "employee_code", None)
         }
 
-        employee_codes = sorted(
+        candidate_employee_codes = (
             set(salary_by_employee)
             | set(commission_by_employee)
             | set(performance_by_employee)
             | set(payroll_by_employee)
         )
+        employee_codes = []
+        for employee_code in sorted(candidate_employee_codes):
+            if await self._is_salary_eligible_employee(employee_code):
+                employee_codes.append(employee_code)
 
         payroll_upserts = 0
         locked_conflicts = 0

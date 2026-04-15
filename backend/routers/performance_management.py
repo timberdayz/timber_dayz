@@ -68,6 +68,46 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
 
 
+def _is_invalid_performance_shop_id(shop_id: Optional[Any]) -> bool:
+    normalized = str(shop_id or "").strip().lower()
+    return normalized in {"", "unknown", "none", "null", "n/a", "-"}
+
+
+async def _load_valid_performance_shop_keys(
+    db: AsyncSession,
+    source_rows: Dict[str, Dict[str, Any]],
+) -> Optional[set[str]]:
+    pairs = {
+        (
+            str((row.get("platform_code") or "")).lower(),
+            str(row.get("shop_id") or ""),
+        )
+        for row in source_rows.values()
+        if not _is_invalid_performance_shop_id(row.get("shop_id"))
+    }
+    if not pairs:
+        return set()
+
+    try:
+        platform_codes = sorted({platform_code for platform_code, _ in pairs})
+        shop_ids = sorted({shop_id for _, shop_id in pairs})
+        rows = (
+            await db.execute(
+                select(DimShop.platform_code, DimShop.shop_id).where(
+                    DimShop.platform_code.in_(platform_codes),
+                    DimShop.shop_id.in_(shop_ids),
+                )
+            )
+        ).all()
+        return {
+            f"{str(platform_code or '').lower()}|{shop_id}"
+            for platform_code, shop_id in rows
+        }
+    except Exception as e:
+        logger.warning("绩效计算有效店铺集合加载失败，降级为仅过滤明显无效 shop_id: %s", e)
+        return None
+
+
 # ==================== Request/Response Models ====================
 
 # ==================== API Endpoints ====================
@@ -451,7 +491,7 @@ def _apply_ranking_policy(
             eligible_rows.append(row)
         else:
             row["rank"] = None
-            row["performance_coefficient"] = None
+            row["performance_coefficient"] = 1.0
 
     eligible_rows.sort(
         key=lambda item: (
@@ -1407,11 +1447,26 @@ async def calculate_performance_scores(
                     }
                 )
 
+        valid_shop_keys = await _load_valid_performance_shop_keys(db, source_rows)
         calc_list = []
         for rec in source_rows.values():
             platform_code = rec["platform_code"]
             current_shop_id = rec["shop_id"]
+            if _is_invalid_performance_shop_id(current_shop_id):
+                logger.warning(
+                    "绩效计算跳过无效店铺数据: platform_code=%s shop_id=%s",
+                    platform_code,
+                    current_shop_id,
+                )
+                continue
             key = f"{platform_code}|{current_shop_id}"
+            if valid_shop_keys is not None and key not in valid_shop_keys:
+                logger.warning(
+                    "绩效计算跳过未建档店铺数据: platform_code=%s shop_id=%s",
+                    platform_code,
+                    current_shop_id,
+                )
+                continue
             target = float(rec["target"] or 0)
             achieved = float(rec["achieved"] or 0)
             target_profit = float(rec.get("target_profit_amount") or 0)
@@ -1568,11 +1623,29 @@ async def calculate_performance_scores(
                 )
             upserts += 1
         await _sync_performance_alerts(db, calc_list, alerts_by_shop)
+        await db.commit()
         income_service = HRIncomeCalculationService(db=db)
         income_result = await income_service.calculate_month(period)
-        payroll_service = PayrollGenerationService(db=db)
-        payroll_result = await payroll_service.generate_month(period)
-        await db.commit()
+        warnings: List[Dict[str, Any]] = []
+        payroll_result: Dict[str, Any] = {
+            "year_month": period,
+            "payroll_upserts": 0,
+            "locked_conflicts": 0,
+            "locked_conflict_details": [],
+        }
+        try:
+            payroll_service = PayrollGenerationService(db=db)
+            payroll_result = await payroll_service.generate_month(period)
+            await db.commit()
+        except Exception as payroll_err:
+            await db.rollback()
+            logger.warning("[PerformanceManagement] payroll generation failed for %s: %s", period, payroll_err)
+            warnings.append(
+                {
+                    "stage": "payroll_generation",
+                    "message": str(payroll_err),
+                }
+            )
         try:
             employee_rows = (
                 await db.execute(
@@ -1613,8 +1686,9 @@ async def calculate_performance_scores(
                 "payroll_upserts": payroll_result.get("payroll_upserts", 0),
                 "payroll_locked_conflicts": payroll_result.get("locked_conflicts", 0),
                 "payroll_locked_conflict_details": payroll_result.get("locked_conflict_details", []),
+                "warnings": warnings,
             },
-            message="绩效计算完成",
+            message="绩效计算完成，工资联动部分失败" if warnings else "绩效计算完成",
         )
     except HTTPException:
         raise

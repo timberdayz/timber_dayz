@@ -133,6 +133,9 @@ async def get_my_income(
     if not employee:
         await _log_me_income_access(request, current_user_id, year_month, "linked_false", db)
         return MyIncomeResponse(linked=False)
+    if getattr(employee, "employee_identity_type", None) not in {None, "employee"}:
+        await _log_me_income_access(request, current_user_id, year_month, "linked_false", db)
+        return MyIncomeResponse(linked=False)
     period = year_month or datetime.now(timezone.utc).strftime("%Y-%m")
     employee_code = employee.employee_code
     base_salary = None

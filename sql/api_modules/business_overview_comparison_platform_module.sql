@@ -1,12 +1,16 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
+DROP VIEW IF EXISTS api.business_overview_comparison_platform_module;
+
 CREATE OR REPLACE VIEW api.business_overview_comparison_platform_module AS
 SELECT
     'daily'::varchar AS granularity,
     period_date AS period_key,
     platform_code,
     gmv AS sales_amount,
-    order_count AS sales_quantity,
+    total_items AS sales_quantity,
+    order_count,
+    total_items,
     COALESCE(page_views, visitor_count) AS traffic,
     conversion_rate,
     avg_order_value,
@@ -19,7 +23,9 @@ SELECT
     period_week AS period_key,
     platform_code,
     gmv AS sales_amount,
-    order_count AS sales_quantity,
+    total_items AS sales_quantity,
+    order_count,
+    total_items,
     COALESCE(page_views, visitor_count) AS traffic,
     conversion_rate,
     avg_order_value,
@@ -32,7 +38,9 @@ SELECT
     period_month AS period_key,
     platform_code,
     gmv AS sales_amount,
-    order_count AS sales_quantity,
+    total_items AS sales_quantity,
+    order_count,
+    total_items,
     COALESCE(page_views, visitor_count) AS traffic,
     conversion_rate,
     avg_order_value,

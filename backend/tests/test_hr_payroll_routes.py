@@ -154,6 +154,35 @@ def test_create_salary_structure_allows_new_version_for_same_employee():
     assert float(resp.base_salary) == 1200.0
 
 
+def test_create_salary_structure_rejects_non_employee_identity():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    employee = SimpleNamespace(employee_code="EMP102", status="active", employee_identity_type="visitor")
+    structure = module.SalaryStructureCreate(
+        employee_code="EMP102",
+        base_salary=1200,
+        position_salary=100,
+        housing_allowance=0,
+        transport_allowance=0,
+        meal_allowance=0,
+        communication_allowance=0,
+        other_allowance=0,
+        performance_ratio=0.1,
+        commission_ratio=0.05,
+        social_insurance_base=1000,
+        housing_fund_base=1000,
+        effective_date=datetime(2025, 4, 1, tzinfo=timezone.utc).date(),
+        status="active",
+    )
+
+    db.execute = AsyncMock(side_effect=[_ResultOne(employee)])
+
+    resp = asyncio.run(module.create_salary_structure(structure, db=db))
+
+    assert resp.status_code == 409
+    assert _json_body(resp)["success"] is False
+
+
 def test_update_salary_structure_updates_selected_version():
     module = _load_hr_salary_module()
     db = AsyncMock()
@@ -190,6 +219,31 @@ def test_update_salary_structure_updates_selected_version():
 
     assert float(resp.base_salary) == 1550.0
     assert float(resp.position_salary) == 150.0
+
+
+def test_update_salary_structure_rejects_non_employee_identity():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    employee = SimpleNamespace(employee_code="EMP103", status="active", employee_identity_type="investor")
+    body = SimpleNamespace(model_dump=lambda exclude_unset=True: {"base_salary": 1550.0})
+    db.execute = AsyncMock(side_effect=[_ResultOne(employee)])
+
+    resp = asyncio.run(module.update_salary_structure("EMP103", body=body, db=db))
+
+    assert resp.status_code == 409
+    assert _json_body(resp)["success"] is False
+
+
+def test_refresh_payroll_record_rejects_non_employee_identity():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    employee = SimpleNamespace(employee_code="EMP201", status="active", employee_identity_type="visitor")
+    db.execute = AsyncMock(return_value=_ResultOne(employee))
+
+    resp = asyncio.run(module.refresh_payroll_record("EMP201", "2025-04", db=db))
+
+    assert resp.status_code == 409
+    assert _json_body(resp)["success"] is False
 
 
 def test_confirm_payroll_record_marks_draft_as_confirmed():

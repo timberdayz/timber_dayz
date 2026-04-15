@@ -2,10 +2,11 @@ from __future__ import annotations
 
 
 PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
+    "semantic.shop_identity_resolution_candidates": [],
     "semantic.fact_orders_atomic": [],
-    "semantic.fact_analytics_atomic": [],
+    "semantic.fact_analytics_atomic": ["semantic.shop_identity_resolution_candidates"],
     "semantic.fact_orders_monthly_atomic": [],
-    "semantic.fact_analytics_monthly_atomic": [],
+    "semantic.fact_analytics_monthly_atomic": ["semantic.shop_identity_resolution_candidates"],
     "semantic.fact_products_atomic": [],
     "semantic.fact_inventory_snapshot": [],
     "semantic.fact_services_atomic": [],
@@ -52,6 +53,7 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
 }
 
 SQL_TARGET_PATHS: dict[str, str] = {
+    "semantic.shop_identity_resolution_candidates": "sql/semantic/shop_identity_resolution_candidates.sql",
     "semantic.fact_orders_atomic": "sql/semantic/orders_atomic.sql",
     "semantic.fact_analytics_atomic": "sql/semantic/analytics_atomic.sql",
     "semantic.fact_orders_monthly_atomic": "sql/semantic/orders_monthly_atomic.sql",

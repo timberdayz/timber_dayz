@@ -72,6 +72,16 @@ class _DynamicSelectorPage(_FakePage):
         return _FakeLocator(visible=visible, count=1 if visible else 0)
 
 
+class _ExactSelectorPage(_FakePage):
+    def __init__(self, url: str, visible_selectors: set[str]) -> None:
+        super().__init__(url)
+        self.visible_selectors = visible_selectors
+
+    def locator(self, selector: str):
+        visible = selector in self.visible_selectors
+        return _FakeLocator(visible=visible, count=1 if visible else 0)
+
+
 class _FakeDownload:
     def __init__(self, suggested_filename: str = "products-export.xlsx", *, payload: bytes | None = None, no_op: bool = False) -> None:
         self.suggested_filename = suggested_filename
@@ -450,15 +460,19 @@ async def test_shopee_services_business_ready_requires_loading_to_clear_and_stab
 
 @pytest.mark.asyncio
 async def test_shopee_services_business_ready_recognizes_real_chinese_markers() -> None:
-    page = _DynamicSelectorPage(
+    page = _ExactSelectorPage(
         "https://seller.shopee.cn/datacenter/services/agent?cnsc_shop_id=1",
-        [{"signal": True}, {"signal": True}],
+        {
+            'button:has-text("统计时间")',
+            'button:has-text("过去30天")',
+            'button:has-text("导出数据")',
+        },
     )
     component = ShopeeServicesAgentExport(
         _ctx({"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"})
     )
 
-    ready = await component._wait_services_business_ready(page, timeout_ms=1, poll_ms=1)
+    ready = await component._wait_services_business_ready(page, timeout_ms=600, poll_ms=200)
 
     assert ready is True
 

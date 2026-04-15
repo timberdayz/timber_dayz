@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy.exc import ProgrammingError
 
 from backend.services.postgresql_dashboard_service import (
     PostgresqlDashboardService,
@@ -99,6 +100,10 @@ async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(mo
         ]
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    async def fake_load_active_employee_count(_period_key):
+        return 0
+
+    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
     result = await service.get_business_overview_kpi(month="2026-04-01", platform=None)
 
     assert result["gmv"] == 100
@@ -132,6 +137,10 @@ async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_pl
         ]
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    async def fake_load_active_employee_count(_period_key):
+        return 0
+
+    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
 
     result = await service.get_business_overview_kpi(
         granularity="daily",
@@ -181,6 +190,90 @@ async def test_postgresql_dashboard_service_kpi_computes_labor_efficiency_from_e
     result = await service.get_business_overview_kpi(month="2026-04-01", platform=None)
 
     assert result["labor_efficiency"] == 5000.0
+
+
+@pytest.mark.asyncio
+async def test_load_active_employee_count_falls_back_when_identity_column_missing(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    class _OrigError(Exception):
+        pass
+
+    class _Result:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    class _Session:
+        def __init__(self):
+            self.calls = 0
+            self.rolled_back = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, stmt):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProgrammingError(
+                    str(stmt),
+                    None,
+                    _OrigError('column "employee_identity_type" does not exist'),
+                )
+            return _Result(7)
+
+        async def rollback(self):
+            self.rolled_back = True
+
+    session = _Session()
+    monkeypatch.setattr(
+        "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+        lambda: session,
+    )
+
+    result = await service._load_active_employee_count("2026-04-01")
+
+    assert result == 7
+    assert session.rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_load_active_employee_count_returns_zero_when_employee_table_missing(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    class _OrigError(Exception):
+        pass
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, stmt):
+            raise ProgrammingError(
+                str(stmt),
+                None,
+                _OrigError('relation "a_class.employees" does not exist'),
+            )
+
+        async def rollback(self):
+            return None
+
+    monkeypatch.setattr(
+        "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+        lambda: _Session(),
+    )
+
+    result = await service._load_active_employee_count("2026-04-01")
+
+    assert result == 0
 
 
 @pytest.mark.asyncio
@@ -510,6 +603,58 @@ async def test_postgresql_dashboard_service_comparison_reuses_current_rows_for_m
 
 
 @pytest.mark.asyncio
+async def test_postgresql_dashboard_service_comparison_uses_total_items_for_sales_quantity_but_order_count_for_rate_and_aov(
+    monkeypatch,
+):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "period_key": "2026-04-01",
+                "sales_amount": 5000,
+                "sales_quantity": 80,
+                "order_count": 50,
+                "total_items": 80,
+                "traffic": 1000,
+                "conversion_rate": 5,
+                "avg_order_value": 100,
+                "attach_rate": 1.6,
+                "profit": 300,
+            },
+            {
+                "period_key": "2026-03-01",
+                "sales_amount": 4000,
+                "sales_quantity": 64,
+                "order_count": 40,
+                "total_items": 64,
+                "traffic": 800,
+                "conversion_rate": 5,
+                "avg_order_value": 100,
+                "attach_rate": 1.6,
+                "profit": 200,
+            },
+        ]
+
+    async def fake_load_target_summary(granularity, period_start, period_end, platform=None):
+        return {"target_amount": 6000, "target_quantity": 60}
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+
+    result = await service.get_business_overview_comparison(
+        granularity="monthly",
+        target_date="2026-04-01",
+        platform=None,
+    )
+
+    assert result["metrics"]["sales_quantity"]["today"] == 80
+    assert result["metrics"]["conversion_rate"]["today"] == 5
+    assert result["metrics"]["avg_order_value"]["today"] == 100
+    assert result["metrics"]["attach_rate"]["today"] == 1.6
+
+
+@pytest.mark.asyncio
 async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(monkeypatch):
     service = PostgresqlDashboardService()
 
@@ -707,9 +852,21 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
             await session.execute(
                 text(
                     """
+                    CREATE TABLE core.main_accounts (
+                        id SERIAL PRIMARY KEY,
+                        main_account_id VARCHAR(100),
+                        main_account_name VARCHAR(200)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
                     CREATE TABLE core.shop_accounts (
                         id SERIAL PRIMARY KEY,
                         platform VARCHAR(50),
+                        main_account_id VARCHAR(100),
                         store_name VARCHAR(200),
                         platform_shop_id VARCHAR(256),
                         shop_account_id VARCHAR(100)
@@ -1748,12 +1905,16 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     await execute_sql_target(session, target)
                 await session.commit()
 
-        monkeypatch.setattr(
-            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
-            session_factory,
-        )
-        service = PostgresqlDashboardService()
-        result = await service.get_business_overview_kpi("2026-03-01", None)
+            monkeypatch.setattr(
+                "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+                session_factory,
+            )
+            service = PostgresqlDashboardService()
+            async def fake_load_active_employee_count(_period_key):
+                return 0
+
+            monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+            result = await service.get_business_overview_kpi("2026-03-01", None)
 
         assert result["gmv"] == 100
         assert result["order_count"] == 1
@@ -1902,12 +2063,16 @@ async def test_postgresql_dashboard_service_monthly_kpi_uses_page_views_as_unifi
                 await execute_sql_target(session, target)
             await session.commit()
 
-        monkeypatch.setattr(
-            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
-            session_factory,
-        )
-        service = PostgresqlDashboardService()
-        result = await service.get_business_overview_kpi("2026-03-01", None)
+            monkeypatch.setattr(
+                "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+                session_factory,
+            )
+            service = PostgresqlDashboardService()
+            async def fake_load_active_employee_count(_period_key):
+                return 0
+
+            monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+            result = await service.get_business_overview_kpi("2026-03-01", None)
 
         assert result["gmv"] == 300
         assert result["order_count"] == 2

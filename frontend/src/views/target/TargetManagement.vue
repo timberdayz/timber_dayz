@@ -475,6 +475,7 @@
             <el-table-column prop="metric_name" label="运营指标" width="160" />
             <el-table-column prop="metric_direction" label="方向" width="140" />
             <el-table-column prop="target_value" label="目标值" width="120" align="right" />
+            <el-table-column prop="achieved_value" label="实际值" width="120" align="right" />
             <el-table-column prop="max_score" label="满分" width="100" align="right" />
             <el-table-column prop="penalty_enabled" label="罚分" width="100">
               <template #default="{ row }">{{ row.penalty_enabled ? '启用' : '关闭' }}</template>
@@ -631,6 +632,9 @@
           </el-form-item>
           <el-form-item label="目标值" prop="target_value">
             <el-input-number v-model="form.target_value" :min="0" :precision="2" class="erp-w-full" />
+          </el-form-item>
+          <el-form-item label="实际值" prop="achieved_value">
+            <el-input-number v-model="form.achieved_value" :min="0" :precision="2" class="erp-w-full" />
           </el-form-item>
           <el-form-item label="满分" prop="max_score">
             <el-input-number v-model="form.max_score" :min="0" :precision="2" class="erp-w-full" />
@@ -1309,6 +1313,7 @@ const openCreateForMonth = async () => {
   form.metric_name = "";
   form.metric_direction = "";
   form.target_value = 0;
+  form.achieved_value = 0;
   form.max_score = 20;
   form.penalty_enabled = false;
   form.penalty_threshold = 0;
@@ -1577,6 +1582,7 @@ const form = reactive({
   metric_name: "",
   metric_direction: "",
   target_value: 0,
+  achieved_value: 0,
   max_score: 20,
   penalty_enabled: false,
   penalty_threshold: 0,
@@ -2090,6 +2096,7 @@ const handleCreate = async () => {
   form.metric_name = "";
   form.metric_direction = "";
   form.target_value = 0;
+  form.achieved_value = 0;
   form.max_score = 20;
   form.penalty_enabled = false;
   form.penalty_threshold = 0;
@@ -2128,6 +2135,7 @@ const handleEdit = async (row) => {
   form.metric_name = row.metric_name || "";
   form.metric_direction = row.metric_direction || "";
   form.target_value = row.target_value || 0;
+  form.achieved_value = row.achieved_value || 0;
   form.max_score = row.max_score || 20;
   form.penalty_enabled = !!row.penalty_enabled;
   form.penalty_threshold = row.penalty_threshold || 0;
@@ -2418,6 +2426,7 @@ const handleSubmit = async () => {
         metric_name: form.metric_name || undefined,
         metric_direction: form.metric_direction || undefined,
         target_value: form.metric_code ? Number(form.target_value) || 0 : undefined,
+        achieved_value: form.metric_code ? Number(form.achieved_value) || 0 : undefined,
         max_score: form.metric_code ? Number(form.max_score) || 0 : undefined,
         penalty_enabled: !!form.penalty_enabled,
         penalty_threshold: form.penalty_enabled ? Number(form.penalty_threshold) || 0 : undefined,
@@ -2476,6 +2485,7 @@ const handleDialogClose = () => {
   form.metric_name = "";
   form.metric_direction = "";
   form.target_value = 0;
+  form.achieved_value = 0;
   form.max_score = 20;
   form.penalty_enabled = false;
   form.penalty_threshold = 0;

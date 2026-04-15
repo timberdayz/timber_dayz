@@ -623,6 +623,18 @@ async def create_target(
                 recovery_suggestion="请调整日期范围,确保结束日期大于等于开始日期",
                 status_code=400
             )
+
+        operation_validation_error = _validate_operation_target_payload(
+            target_type=request.target_type,
+            metric_code=request.metric_code,
+            metric_direction=request.metric_direction,
+            target_value=request.target_value,
+            achieved_value=request.achieved_value,
+            max_score=request.max_score,
+            manual_score_enabled=request.manual_score_enabled,
+        )
+        if operation_validation_error is not None:
+            return operation_validation_error
         
         # 创建目标
         target = SalesTarget(
@@ -748,6 +760,18 @@ async def update_target(
                     recovery_suggestion="请调整日期范围,确保结束日期大于等于开始日期",
                     status_code=400
                 )
+
+        operation_validation_error = _validate_operation_target_payload(
+            target_type=update_data.get("target_type", target.target_type),
+            metric_code=update_data.get("metric_code", target.metric_code),
+            metric_direction=update_data.get("metric_direction", target.metric_direction),
+            target_value=update_data.get("target_value", target.target_value),
+            achieved_value=update_data.get("achieved_value", target.achieved_value),
+            max_score=update_data.get("max_score", target.max_score),
+            manual_score_enabled=update_data.get("manual_score_enabled", target.manual_score_enabled),
+        )
+        if operation_validation_error is not None:
+            return operation_validation_error
         
         for key, value in update_data.items():
             setattr(target, key, value)

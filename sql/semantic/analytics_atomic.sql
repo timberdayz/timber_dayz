@@ -1,5 +1,7 @@
 CREATE SCHEMA IF NOT EXISTS semantic;
 
+DROP VIEW IF EXISTS semantic.fact_analytics_atomic CASCADE;
+
 CREATE OR REPLACE VIEW semantic.fact_analytics_atomic AS
 WITH raw_analytics AS (
     SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
@@ -32,17 +34,42 @@ WITH raw_analytics AS (
 mapped AS (
     SELECT
         platform_code,
-        COALESCE(
-            NULLIF(TRIM(COALESCE(shop_id, '')), ''),
-            NULLIF(TRIM(COALESCE(
-                raw_data->>'店铺',
-                raw_data->>'店铺名',
-                raw_data->>'店铺名称',
-                raw_data->>'store_name',
-                raw_data->>'store_label_raw'
-            )), ''),
-            'unknown'
-        ) AS shop_id,
+        NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
+        NULLIF(
+            TRIM(
+                COALESCE(
+                    raw_data->>'店铺',
+                    raw_data->>'店铺名',
+                    raw_data->>'店铺名称',
+                    raw_data->>'store_name',
+                    raw_data->>'store_label_raw'
+                )
+            ),
+            ''
+        ) AS store_label_raw,
+        NULLIF(
+            TRIM(
+                COALESCE(
+                    raw_data->>'platform_shop_id',
+                    raw_data->>'shop_id',
+                    raw_data->>'平台店铺ID',
+                    raw_data->>'店铺ID'
+                )
+            ),
+            ''
+        ) AS source_platform_shop_id,
+        NULLIF(
+            TRIM(
+                COALESCE(
+                    raw_data->>'shop_account_id',
+                    raw_data->>'account_id',
+                    raw_data->>'店铺账号ID',
+                    raw_data->>'账号ID',
+                    raw_data->>'account'
+                )
+            ),
+            ''
+        ) AS source_shop_account_id,
         data_domain,
         granularity,
         metric_date::date AS metric_date,
@@ -82,10 +109,83 @@ mapped AS (
         currency_code
     FROM raw_analytics
 ),
+resolved AS (
+    SELECT
+        m.platform_code,
+        CASE
+            WHEN resolved_candidate.resolved_shop_id IS NOT NULL THEN resolved_candidate.resolved_shop_id
+            WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL THEN 'unknown'
+            ELSE COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id)
+        END AS shop_id,
+        COALESCE(m.source_shop_id, m.store_label_raw) AS raw_shop_id,
+        m.store_label_raw,
+        resolved_candidate.resolved_shop_account_id,
+        CASE
+            WHEN resolved_candidate.resolved_shop_id IS NOT NULL THEN resolved_candidate.resolution_method
+            WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL THEN 'missing_identity'
+            ELSE 'unclaimed_identity'
+        END AS resolution_method,
+        COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) AS identity_source_value,
+        m.data_domain,
+        m.granularity,
+        m.metric_date,
+        m.period_start_date,
+        m.period_end_date,
+        m.period_start_time,
+        m.period_end_time,
+        m.visitor_count_raw,
+        m.page_views_raw,
+        m.impressions_raw,
+        m.clicks_raw,
+        m.click_rate_raw,
+        m.conversion_rate_raw,
+        m.order_count_raw,
+        m.gmv_raw,
+        m.bounce_rate_raw,
+        m.raw_data,
+        m.header_columns,
+        m.data_hash,
+        m.ingest_timestamp,
+        m.currency_code
+    FROM mapped m
+    LEFT JOIN LATERAL (
+        SELECT
+            c.resolved_shop_id,
+            c.resolved_shop_account_id,
+            c.resolution_method,
+            c.resolution_priority
+        FROM semantic.shop_identity_resolution_candidates c
+        WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
+          AND c.identity_value_normalized IN (
+              LOWER(COALESCE(m.source_platform_shop_id, '')),
+              LOWER(COALESCE(m.source_shop_account_id, '')),
+              LOWER(COALESCE(m.source_shop_id, '')),
+              REGEXP_REPLACE(
+                  REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.source_shop_id, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'),
+                  '[[:space:]_()/-]+',
+                  '',
+                  'g'
+              ),
+              REGEXP_REPLACE(
+                  REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'),
+                  '[[:space:]_()/-]+',
+                  '',
+                  'g'
+              )
+          )
+        ORDER BY c.resolution_priority, c.resolved_shop_id
+        LIMIT 1
+    ) resolved_candidate ON TRUE
+),
 cleaned AS (
     SELECT
         platform_code,
         shop_id,
+        raw_shop_id,
+        store_label_raw,
+        resolved_shop_account_id,
+        resolution_method,
+        identity_source_value,
         data_domain,
         granularity,
         metric_date,
@@ -134,7 +234,7 @@ cleaned AS (
         data_hash,
         ingest_timestamp,
         currency_code
-    FROM mapped
+    FROM resolved
 ),
 deduplicated AS (
     SELECT
@@ -155,6 +255,11 @@ deduplicated AS (
 SELECT
     platform_code,
     shop_id,
+    raw_shop_id,
+    store_label_raw,
+    resolved_shop_account_id,
+    resolution_method,
+    identity_source_value,
     data_domain,
     granularity,
     metric_date,

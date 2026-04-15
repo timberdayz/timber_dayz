@@ -46,6 +46,68 @@ def _shop_key(platform_code: str | None, shop_id: str | None) -> str:
     return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
 
 
+async def _load_employee_performance_cn_fallback(
+    db: AsyncSession,
+    employee_code: Optional[str],
+    year_month: Optional[str],
+    page: int,
+    page_size: int,
+) -> List[EmployeePerformanceResponse]:
+    sql = """
+        select
+          id,
+          "员工编号" as employee_code,
+          "年月" as year_month,
+          "实际销售额" as actual_sales,
+          "达成率" as achievement_rate,
+          "绩效得分" as performance_score,
+          "计算时间" as calculated_at
+        from c_class.employee_performance
+        where 1=1
+    """
+    params: Dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
+    if employee_code:
+        sql += ' and "员工编号" = :employee_code'
+        params["employee_code"] = employee_code
+    if year_month:
+        sql += ' and "年月" = :year_month'
+        params["year_month"] = year_month
+    sql += ' order by "年月" desc, "员工编号" limit :limit offset :offset'
+    rows = (await db.execute(text(sql), params)).mappings().all()
+    return [EmployeePerformanceResponse.model_validate(dict(row)) for row in rows]
+
+
+async def _load_employee_commissions_cn_fallback(
+    db: AsyncSession,
+    employee_code: Optional[str],
+    year_month: Optional[str],
+    page: int,
+    page_size: int,
+) -> List[EmployeeCommissionResponse]:
+    sql = """
+        select
+          id,
+          "员工编号" as employee_code,
+          "年月" as year_month,
+          "销售额" as sales_amount,
+          "提成金额" as commission_amount,
+          "提成比例" as commission_rate,
+          "计算时间" as calculated_at
+        from c_class.employee_commissions
+        where 1=1
+    """
+    params: Dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
+    if employee_code:
+        sql += ' and "员工编号" = :employee_code'
+        params["employee_code"] = employee_code
+    if year_month:
+        sql += ' and "年月" = :year_month'
+        params["year_month"] = year_month
+    sql += ' order by "年月" desc, "员工编号" limit :limit offset :offset'
+    rows = (await db.execute(text(sql), params)).mappings().all()
+    return [EmployeeCommissionResponse.model_validate(dict(row)) for row in rows]
+
+
 async def _list_employee_performance_adjustments(
     *,
     year_month: Optional[str],
@@ -246,8 +308,19 @@ async def list_employee_performance(
         
         return [EmployeePerformanceResponse.model_validate(perf) for perf in performances]
     except Exception as e:
-        logger.error(f"获取员工绩效列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工绩效列表失败: {str(e)}", status_code=500)
+        await db.rollback()
+        logger.warning(f"employee_performance ORM query failed; using Chinese-column compatibility SQL path: {e}")
+        try:
+            return await _load_employee_performance_cn_fallback(
+                db=db,
+                employee_code=employee_code,
+                year_month=year_month,
+                page=page,
+                page_size=page_size,
+            )
+        except Exception as inner:
+            logger.error(f"获取员工绩效列表失败: {inner}", exc_info=True)
+            return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工绩效列表失败: {str(inner)}", status_code=500)
 
 
 # ============================================================================
@@ -361,8 +434,19 @@ async def list_employee_commissions(
         
         return [EmployeeCommissionResponse.model_validate(comm) for comm in commissions]
     except Exception as e:
-        logger.error(f"获取员工提成列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工提成列表失败: {str(e)}", status_code=500)
+        await db.rollback()
+        logger.warning(f"employee_commissions ORM query failed; using Chinese-column compatibility SQL path: {e}")
+        try:
+            return await _load_employee_commissions_cn_fallback(
+                db=db,
+                employee_code=employee_code,
+                year_month=year_month,
+                page=page,
+                page_size=page_size,
+            )
+        except Exception as inner:
+            logger.error(f"获取员工提成列表失败: {inner}", exc_info=True)
+            return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工提成列表失败: {str(inner)}", status_code=500)
 
 
 @router.get("/commissions/shop", response_model=List[ShopCommissionResponse])

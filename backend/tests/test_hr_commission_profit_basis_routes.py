@@ -106,3 +106,101 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     assert row["profit_basis_amount"] == 1500.0
     assert row["supervisor_profit"] == 120.0
     assert row["operator_profit"] == 0
+
+
+def test_list_employee_performance_falls_back_to_chinese_columns():
+    module = _load_module()
+    db = AsyncMock()
+
+    class _MappingsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            raise Exception("orm english columns missing")
+        return _MappingsResult(
+                [
+                    {
+                        "id": 1,
+                        "employee_code": "EMP001",
+                        "year_month": "2025-01",
+                        "actual_sales": 1000.0,
+                        "achievement_rate": 0.8,
+                        "performance_score": 88.0,
+                        "calculated_at": "2025-01-31T00:00:00",
+                    }
+                ]
+            )
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    resp = asyncio.run(
+        module.list_employee_performance(
+            employee_code=None,
+            year_month="2025-01",
+            page=1,
+            page_size=20,
+            db=db,
+        )
+    )
+
+    assert len(resp) == 1
+    assert resp[0].employee_code == "EMP001"
+    assert float(resp[0].actual_sales) == 1000.0
+    assert float(resp[0].performance_score) == 88.0
+
+
+def test_list_employee_commissions_falls_back_to_chinese_columns():
+    module = _load_module()
+    db = AsyncMock()
+
+    class _MappingsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            raise Exception("orm english columns missing")
+        return _MappingsResult(
+                [
+                    {
+                        "id": 2,
+                        "employee_code": "EMP002",
+                        "year_month": "2025-01",
+                        "sales_amount": 2000.0,
+                        "commission_amount": 300.0,
+                        "commission_rate": 0.15,
+                        "calculated_at": "2025-01-31T00:00:00",
+                    }
+                ]
+            )
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    resp = asyncio.run(
+        module.list_employee_commissions(
+            employee_code=None,
+            year_month="2025-01",
+            page=1,
+            page_size=20,
+            db=db,
+        )
+    )
+
+    assert len(resp) == 1
+    assert resp[0].employee_code == "EMP002"
+    assert float(resp[0].sales_amount) == 2000.0
+    assert float(resp[0].commission_amount) == 300.0

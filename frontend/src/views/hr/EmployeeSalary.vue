@@ -415,10 +415,11 @@ const recentMonths = computed(() => {
 
 const filteredEmployees = computed(() => {
   return employees.value.filter((employee) => {
+    const matchesIdentity = employee.employee_identity_type === 'employee'
     const keyword = employeeKeyword.value.trim().toLowerCase()
     const matchesKeyword = !keyword || `${employee.name || ''}${employee.employee_code || ''}`.toLowerCase().includes(keyword)
     const matchesDepartment = !employeeDepartment.value || employee.department_id === employeeDepartment.value
-    return matchesKeyword && matchesDepartment
+    return matchesIdentity && matchesKeyword && matchesDepartment
   })
 })
 

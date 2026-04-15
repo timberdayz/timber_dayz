@@ -463,7 +463,19 @@
                 class="erp-w-full"
                 size="small"
               >
-                <el-table-column prop="name" label="名称" width="120" />
+                <el-table-column prop="name" label="名称" width="160" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <el-button
+                      v-if="isUnmatchedShopRow(row)"
+                      link
+                      type="warning"
+                      @click="showUnmatchedAliasDialog(row)"
+                    >
+                      {{ row.name }}
+                    </el-button>
+                    <span v-else>{{ row.name }}</span>
+                  </template>
+                </el-table-column>
                 <el-table-column prop="target" label="目标" width="80">
                   <template #default="{ row }">
                     {{ formatCurrency(row.target) }}
@@ -609,7 +621,19 @@
             width="200"
             fixed="left"
             show-overflow-tooltip
-          />
+          >
+            <template #default="{ row }">
+              <el-button
+                v-if="isUnmatchedShopRow(row)"
+                link
+                type="warning"
+                @click="showUnmatchedAliasDialog(row)"
+              >
+                {{ row.name }}
+              </el-button>
+              <span v-else>{{ row.name }}</span>
+            </template>
+          </el-table-column>
           <el-table-column
             prop="platform_code"
             label="平台"
@@ -703,6 +727,38 @@
         </el-table>
       </el-card>
     </div>
+
+    <el-dialog
+      v-model="unmatchedAliasDialogVisible"
+      :title="`未匹配店铺别名${unmatchedAliasPlatform ? ` - ${unmatchedAliasPlatform}` : ''}`"
+      width="720px"
+    >
+      <el-table
+        v-loading="unmatchedAliasDialogLoading"
+        :data="unmatchedAliasRows"
+        stripe
+        border
+        max-height="420"
+        empty-text="当前平台暂无未匹配原始别名"
+      >
+        <el-table-column prop="platform" label="平台" width="100" />
+        <el-table-column prop="site" label="站点" width="120">
+          <template #default="{ row }">
+            {{ row.site || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="store_label_raw" label="原始别名" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="order_count" label="订单数" width="100" align="right" />
+        <el-table-column label="金额" width="120" align="right">
+          <template #default="{ row }">
+            {{ Number(row.paid_amount || 0).toFixed(2) }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="unmatchedAliasDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 库存滞销情况 -->
     <div class="inventory-section">
@@ -1834,6 +1890,10 @@ const onShopRacingDateChange = () => {
 const racingGroupBy = ref('shop')
 const shopRacingData = ref([])
 const loadingShopRacing = ref(false)
+const unmatchedAliasDialogVisible = ref(false)
+const unmatchedAliasDialogLoading = ref(false)
+const unmatchedAliasRows = ref([])
+const unmatchedAliasPlatform = ref('')
 
 // 库存滞销
 const inventorySummary = ref({
@@ -2194,10 +2254,10 @@ const updateComparisonTable = () => {
     todayClass: ''
   })
 
-  // 销售数量
+  // 出库数量
   const salesQty = getMetric(metrics, 'sales_quantity')
   tableData.push({
-    metric: '销售数量',
+    metric: '出库数量',
     today: salesQty.today != null ? formatInteger(salesQty.today) : '--',
     yesterday:
       salesQty.yesterday != null ? formatInteger(salesQty.yesterday) : '--',
@@ -2356,6 +2416,30 @@ const loadShopRacingData = async () => {
   }
 }
 
+function isUnmatchedShopRow(row) {
+  return Boolean(row && (row.is_unmatched || row.name === '未匹配店铺'))
+}
+
+async function showUnmatchedAliasDialog(row) {
+  unmatchedAliasDialogVisible.value = true
+  unmatchedAliasDialogLoading.value = true
+  unmatchedAliasPlatform.value = row?.platform_code || ''
+  try {
+    const response = await accountsApi.getUnmatchedShopAliases()
+    const items = Array.isArray(response?.items) ? response.items : []
+    unmatchedAliasRows.value = items.filter((item) => {
+      if (!unmatchedAliasPlatform.value) return true
+      return String(item.platform || '').toLowerCase() === String(unmatchedAliasPlatform.value || '').toLowerCase()
+    })
+  } catch (error) {
+    console.error('加载未匹配店铺别名失败:', error)
+    handleApiError(error, { showMessage: true, logError: true })
+    unmatchedAliasRows.value = []
+  } finally {
+    unmatchedAliasDialogLoading.value = false
+  }
+}
+
 const onOperationalDateChange = () => {
   if (!_syncingFromGlobal.value) useGlobalDate.value.operational = false
   loadOperationalMetrics()
@@ -2440,6 +2524,11 @@ const loadTrafficRanking = async () => {
       rank: row.rank ?? row['排名'] ?? index + 1,
       name: row.name ?? row['名称'] ?? row.platform_code ?? row['平台'] ?? '平台汇总',
       platform_code: row.platform_code ?? row['平台'],
+      shop_id: row.shop_id ?? null,
+      shop_account_id: row.shop_account_id ?? null,
+      main_account_id: row.main_account_id ?? null,
+      main_account_name: row.main_account_name ?? null,
+      is_unmatched: Boolean(row.is_unmatched),
       visitor_count: row.visitor_count ?? row.unique_visitors ?? row['访客数'] ?? 0,
       page_views: row.page_views ?? row['浏览量'] ?? 0,
       uv_change_rate: row.uv_change_rate ?? null,

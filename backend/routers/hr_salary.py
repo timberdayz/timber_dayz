@@ -5,6 +5,8 @@ HR - 薪资与目标管理
 """
 
 from datetime import date
+import inspect
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -40,6 +42,46 @@ def _payroll_success(record: PayrollRecord) -> Dict[str, Any]:
         "success": True,
         "data": PayrollRecordResponse.model_validate(record).model_dump(mode="json"),
     }
+
+
+def _employee_identity_allows_salary(employee: Employee | None) -> bool:
+    if employee is None:
+        return True
+    status = getattr(employee, "status", "active")
+    identity = getattr(employee, "employee_identity_type", "employee")
+    return (
+        status == "active"
+        and identity == "employee"
+    )
+
+
+def _extract_optional_employee(result: Any) -> Employee | None:
+    scalar_getter = getattr(result, "scalar_one_or_none", None)
+    if callable(scalar_getter) and not inspect.iscoroutinefunction(scalar_getter):
+        employee = scalar_getter()
+        if not inspect.isawaitable(employee) and employee is not None and hasattr(employee, "employee_code"):
+            return employee
+
+    scalars_getter = getattr(result, "scalars", None)
+    if callable(scalars_getter) and not inspect.iscoroutinefunction(scalars_getter):
+        scalar_rows = scalars_getter()
+        all_getter = getattr(scalar_rows, "all", None)
+        if callable(all_getter) and not inspect.iscoroutinefunction(all_getter):
+            rows = all_getter()
+            if rows:
+                employee = rows[0]
+                if hasattr(employee, "employee_code"):
+                    return employee
+
+    return None
+
+
+def _salary_identity_rejection():
+    return error_response(
+        ErrorCode.PARAMETER_INVALID,
+        "当前员工身份不允许进入薪资链路",
+        status_code=409,
+    )
 
 
 async def _load_salary_structure_versions(
@@ -130,8 +172,12 @@ async def create_salary_structure(
         employee = await db.execute(
             select(Employee).where(Employee.employee_code == structure.employee_code)
         )
-        if not employee.scalar_one_or_none():
+        employee = _extract_optional_employee(employee)
+        if not employee:
             return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {structure.employee_code}", status_code=400)
+
+        if not _employee_identity_allows_salary(employee):
+            return _salary_identity_rejection()
 
         existing = await db.execute(
             select(SalaryStructure).where(
@@ -162,6 +208,15 @@ async def update_salary_structure(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
+        employee = await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
+        employee = _extract_optional_employee(employee)
+        if not employee:
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"鍛樺伐涓嶅瓨鍦? {employee_code}", status_code=404)
+        if not _employee_identity_allows_salary(employee):
+            return _salary_identity_rejection()
+
         rows = await _load_salary_structure_versions(db, employee_code)
         record = _pick_current_salary_structure(rows)
         if not record:
@@ -184,6 +239,17 @@ async def refresh_payroll_record(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
+        employee = await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
+        employee = _extract_optional_employee(employee)
+        if employee is None:
+            employee = SimpleNamespace(employee_code=employee_code, status="active", employee_identity_type="employee")
+        if not employee:
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"鍛樺伐涓嶅瓨鍦? {employee_code}", status_code=404)
+        if not _employee_identity_allows_salary(employee):
+            return _salary_identity_rejection()
+
         result = await PayrollGenerationService(db).generate_employee_month(employee_code, year_month)
         record = result.get("payroll_record")
         return {

@@ -159,6 +159,27 @@ class ShopeeDatePicker(DatePickerComponent):
             pass
         return None
 
+    async def _find_date_summary_container(self, page: Any) -> Any | None:
+        summary_selectors = (
+            '[class*="picker"]:has-text("统计时间")',
+            '[class*="date"]:has-text("统计时间")',
+            '[class*="time"]:has-text("统计时间")',
+            'div:has-text("统计时间")',
+            'button:has-text("统计时间")',
+            '[role="button"]:has-text("统计时间")',
+        )
+        locator = await self._first_visible_locator(page, summary_selectors)
+        if locator is not None:
+            return locator
+
+        try:
+            text_locator = page.get_by_text("统计时间", exact=False).first
+            if await text_locator.is_visible(timeout=1000):
+                return text_locator
+        except Exception:
+            pass
+        return None
+
     def _date_panel_anchor_texts(self) -> tuple[str, ...]:
         domain = str((self.ctx.config or {}).get("data_domain") or "products").strip().lower()
         anchors: list[str] = [

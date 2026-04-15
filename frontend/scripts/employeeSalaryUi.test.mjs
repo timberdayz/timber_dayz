@@ -28,3 +28,11 @@ test('EmployeeSalary page contains key salary labels and actions', () => {
     assert.equal(source.includes(label), true, `EmployeeSalary.vue should contain label ${label}`)
   }
 })
+
+test('EmployeeSalary page filters salary chain to employee identity', () => {
+  assert.equal(
+    source.includes("employee.employee_identity_type === 'employee'"),
+    true,
+    'EmployeeSalary.vue should only expose employee identity rows in salary page'
+  )
+})

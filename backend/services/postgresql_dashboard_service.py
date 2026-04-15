@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 from backend.models.database import AsyncSessionLocal
 
@@ -223,30 +224,42 @@ def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, An
 
     sales_amount = _sum("sales_amount")
     sales_quantity = _sum("sales_quantity")
+    order_count = _sum("order_count")
+    total_items = _sum("total_items")
     traffic = _sum("traffic")
     profit = _sum("profit")
     target_sales_amount = _sum("target_sales_amount")
     target_sales_quantity = _sum("target_sales_quantity")
 
-    if traffic is None or sales_quantity is None:
+    effective_order_count = order_count if order_count is not None else sales_quantity
+    effective_total_items = total_items if total_items is not None else sales_quantity
+
+    if traffic is None or effective_order_count is None:
         conversion_rate = None
     elif traffic > 0:
-        conversion_rate = round((sales_quantity * 100.0 / traffic), 2)
-    elif traffic == 0 and sales_quantity == 0:
+        conversion_rate = round((effective_order_count * 100.0 / traffic), 2)
+    elif traffic == 0 and effective_order_count == 0:
         conversion_rate = 0
     else:
         conversion_rate = None
 
-    if sales_amount is None or sales_quantity is None:
+    if sales_amount is None or effective_order_count is None:
         avg_order_value = None
-    elif sales_quantity > 0:
-        avg_order_value = round((sales_amount / sales_quantity), 2)
-    elif sales_quantity == 0 and sales_amount == 0:
+    elif effective_order_count > 0:
+        avg_order_value = round((sales_amount / effective_order_count), 2)
+    elif effective_order_count == 0 and sales_amount == 0:
         avg_order_value = 0
     else:
         avg_order_value = None
 
-    attach_rate = None
+    if effective_total_items is None or effective_order_count is None:
+        attach_rate = None
+    elif effective_order_count > 0:
+        attach_rate = round((effective_total_items / effective_order_count), 2)
+    elif effective_order_count == 0 and effective_total_items == 0:
+        attach_rate = 0
+    else:
+        attach_rate = None
 
     return {
         "sales_amount": sales_amount,
@@ -637,16 +650,35 @@ class PostgresqlDashboardService:
 
     async def _load_active_employee_count(self, _period_key: date_cls) -> int:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                text(
-                    """
-                    SELECT COUNT(*) AS active_employee_count
-                    FROM a_class.employees
-                    WHERE status = 'active'
-                      AND employee_identity_type = 'employee'
-                    """
+            try:
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT COUNT(*) AS active_employee_count
+                        FROM a_class.employees
+                        WHERE status = 'active'
+                          AND employee_identity_type = 'employee'
+                        """
+                    )
                 )
-            )
+            except ProgrammingError as exc:
+                await session.rollback()
+                orig_message = str(getattr(exc, "orig", exc)).lower()
+                if 'employee_identity_type' in orig_message:
+                    fallback = await session.execute(
+                        text(
+                            """
+                            SELECT COUNT(*) AS active_employee_count
+                            FROM a_class.employees
+                            WHERE status = 'active'
+                            """
+                        )
+                    )
+                    value = fallback.scalar_one_or_none()
+                    return int(value or 0)
+                if 'a_class.employees' in orig_message or 'relation "a_class.employees"' in orig_message:
+                    return 0
+                raise
             value = result.scalar_one_or_none()
             return int(value or 0)
 
@@ -1055,6 +1087,8 @@ class PostgresqlDashboardService:
                 period_key,
                 sales_amount,
                 sales_quantity,
+                order_count,
+                total_items,
                 traffic,
                 conversion_rate,
                 avg_order_value,
@@ -1274,6 +1308,7 @@ class PostgresqlDashboardService:
                         "shop_account_id": account_id,
                         "main_account_id": main_account_id,
                         "main_account_name": main_account_name,
+                        "is_unmatched": not bool(account_id),
                         "gmv": 0.0,
                         "order_count": 0.0,
                         "avg_order_value": 0.0,
@@ -1322,27 +1357,107 @@ class PostgresqlDashboardService:
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
         query = """
-            SELECT granularity, period_key, platform_code, shop_id, visitor_count, page_views, conversion_rate
-            FROM api.business_overview_traffic_ranking_module
-            WHERE granularity = :granularity
-              AND period_key = :period_key
+            SELECT
+                src.granularity,
+                src.period_key,
+                src.platform_code,
+                src.shop_id,
+                sa.shop_account_id,
+                sa.main_account_id,
+                ma.main_account_name,
+                sa.store_name AS account_store_name,
+                COALESCE(
+                    NULLIF(TRIM(ds.shop_name), ''),
+                    NULLIF(TRIM(sa.store_name), ''),
+                    CASE
+                        WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown')
+                        THEN NULL
+                        ELSE src.shop_id
+                    END
+                ) AS display_name,
+                src.visitor_count,
+                src.page_views,
+                src.conversion_rate
+            FROM api.business_overview_traffic_ranking_module src
+            LEFT JOIN core.dim_shops ds
+              ON ds.platform_code = src.platform_code
+             AND ds.shop_id = src.shop_id
+            LEFT JOIN core.shop_accounts sa
+              ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
+             AND (
+                  COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
+                  OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
+                  OR sa.id::text = COALESCE(src.shop_id, '')
+             )
+            LEFT JOIN core.main_accounts ma
+              ON ma.main_account_id = sa.main_account_id
+            WHERE src.granularity = :granularity
+              AND src.period_key = :period_key
             """
         params = {"granularity": granularity, "period_key": period_key}
         if platform:
-            query += " AND platform_code = :platform_code"
+            query += " AND src.platform_code = :platform_code"
             params["platform_code"] = platform
         rows = await self._fetch_rows(query, params)
-        normalized_rows = [
-            {
-                "name": row.get("shop_id") or row.get("platform_code") or "unknown",
-                "platform_code": row.get("platform_code"),
-                "shop_id": row.get("shop_id") or "unknown",
-                "visitor_count": _to_optional_float(row.get("visitor_count")),
-                "page_views": _to_optional_float(row.get("page_views")),
-                "conversion_rate": _to_optional_float(row.get("conversion_rate")),
-            }
-            for row in rows
-        ]
+
+        if dimension == "account":
+            grouped: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                account_id = row.get("shop_account_id")
+                main_account_id = row.get("main_account_id")
+                account_store_name = row.get("account_store_name")
+                main_account_name = row.get("main_account_name")
+                display_name = row.get("account_display_name") or " / ".join(
+                    [
+                        part
+                        for part in (
+                            (str(main_account_name).strip() if main_account_name else None),
+                            (str(account_store_name).strip() if account_store_name else None),
+                        )
+                        if part
+                    ]
+                )
+                fallback_name = display_name or account_store_name or account_id or "未匹配账号"
+                key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                grouped.setdefault(
+                    key,
+                    {
+                        "name": fallback_name,
+                        "platform_code": row.get("platform_code"),
+                        "shop_id": "ALL",
+                        "shop_account_id": account_id,
+                        "main_account_id": main_account_id,
+                        "main_account_name": main_account_name,
+                        "is_unmatched": not bool(account_id),
+                        "visitor_count": 0.0,
+                        "page_views": 0.0,
+                        "conversion_rate": None,
+                    },
+                )
+                grouped[key]["visitor_count"] += _to_optional_float(row.get("visitor_count")) or 0.0
+                grouped[key]["page_views"] += _to_optional_float(row.get("page_views")) or 0.0
+            normalized_rows = list(grouped.values())
+        else:
+            normalized_rows = [
+                {
+                    "name": row.get("display_name")
+                    or (
+                        row.get("shop_id")
+                        if str(row.get("shop_id") or "").strip().lower() not in {"", "none", "unknown"}
+                        else "未匹配店铺"
+                    ),
+                    "platform_code": row.get("platform_code"),
+                    "shop_id": row.get("shop_id") or "unknown",
+                    "shop_account_id": row.get("shop_account_id"),
+                    "main_account_id": row.get("main_account_id"),
+                    "main_account_name": row.get("main_account_name"),
+                    "is_unmatched": not bool(row.get("shop_account_id")),
+                    "visitor_count": _to_optional_float(row.get("visitor_count")),
+                    "page_views": _to_optional_float(row.get("page_views")),
+                    "conversion_rate": _to_optional_float(row.get("conversion_rate")),
+                }
+                for row in rows
+            ]
         return rank_traffic_rows(normalized_rows, dimension="pv")
 
     async def get_store_analysis_capabilities(
