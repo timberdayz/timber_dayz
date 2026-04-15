@@ -407,3 +407,83 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fal
         assert float(rows[0]["paid_amount"]) == 88.0
 
         await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id():
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await _create_orders_b_class_tables(session)
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_accounts (
+                        platform, shop_account_id, store_name, platform_shop_id
+                    ) VALUES (
+                        'tiktok', 'tiktok_sg_hx_home_local', 'Singapore(HX Home)', NULL
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_account_aliases (
+                        shop_account_id, platform, alias_value, alias_normalized, is_primary, is_active
+                    ) VALUES (
+                        1, 'tiktok', 'TK新加坡2店', '新加坡2店', true, true
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_tiktok_orders_monthly (
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, period_start_date, period_end_date,
+                        period_start_time, period_end_time, raw_data, header_columns,
+                        data_hash, ingest_timestamp, currency_code
+                    ) VALUES (
+                        'tiktok', 'xihong', 'orders', 'monthly',
+                        DATE '2026-03-31', DATE '2026-03-01', DATE '2026-03-31',
+                        TIMESTAMP '2026-03-01 00:00:00', TIMESTAMP '2026-03-31 23:59:59',
+                        '{"店铺":"TK新加坡2店","订单号":"TK-MONTH-1","买家支付(RMB)":"188.23","出库数量":"1","利润(RMB)":"18"}'::jsonb,
+                        '["店铺","订单号","买家支付(RMB)","出库数量","利润(RMB)"]'::jsonb,
+                        'hash-tiktok-monthly-alias-1', TIMESTAMP '2026-04-01 10:00:00', 'SGD'
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(session, "semantic.fact_orders_monthly_atomic")
+            await session.commit()
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT platform_code, shop_id, order_id, paid_amount, profit
+                        FROM semantic.fact_orders_monthly_atomic
+                        """
+                    )
+                )
+            ).mappings().all()
+
+        assert len(rows) == 1
+        assert rows[0]["platform_code"] == "tiktok"
+        assert rows[0]["shop_id"] == "tiktok_sg_hx_home_local"
+        assert rows[0]["order_id"] == "TK-MONTH-1"
+        assert float(rows[0]["paid_amount"]) == 188.23
+        assert float(rows[0]["profit"]) == 18.0
+
+        await engine.dispose()

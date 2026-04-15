@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from modules.core.db import (
+    Employee,
     EmployeeCommission,
     EmployeePerformance,
     PayrollRecord,
@@ -404,3 +405,65 @@ def test_generate_employee_month_reports_locked_record():
     assert result["locked_conflicts"] == 1
     assert result["payroll_record"] is existing
     assert result["locked_conflict_details"][0]["employee_code"] == "EMP011"
+
+
+def test_generate_employee_month_falls_back_to_chinese_c_class_columns():
+    service_cls = _load_service_cls()
+    db = AsyncMock()
+
+    salary = SimpleNamespace(
+        employee_code="EMP020",
+        base_salary=Decimal("2000"),
+        position_salary=Decimal("500"),
+        housing_allowance=Decimal("50"),
+        transport_allowance=Decimal("50"),
+        meal_allowance=Decimal("0"),
+        communication_allowance=Decimal("0"),
+        other_allowance=Decimal("0"),
+        performance_ratio=0.2,
+        status="active",
+        effective_date="2025-01-01",
+        id=120,
+    )
+
+    class _MappingsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return self
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is Employee:
+                return _MockResult(scalar_value=SimpleNamespace(employee_code="EMP020", status="active", employee_identity_type="employee"))
+            if entity is SalaryStructure:
+                return _MockResult(rows=[salary])
+            if entity is EmployeeCommission:
+                raise Exception("column employee_commissions.employee_code does not exist")
+            if entity is EmployeePerformance:
+                raise Exception("column employee_performance.employee_code does not exist")
+            if entity is PayrollRecord:
+                return _MockResult(scalar_value=None)
+        sql = str(stmt).lower()
+        if "from c_class.employee_commissions" in sql:
+            return _MappingsResult([{"commission_amount": 300.0}])
+        if "from c_class.employee_performance" in sql:
+            return _MappingsResult([{"performance_score": 75.0}])
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    added = []
+    db.add = lambda obj: added.append(obj)
+
+    service = service_cls(db=db)
+    result = asyncio.run(service.generate_employee_month("EMP020", "2025-04"))
+
+    assert result["payroll_upserts"] == 1
+    created = next(x for x in added if isinstance(x, PayrollRecord))
+    assert float(created.commission) == 300.0
+    assert float(created.performance_salary) == 375.0
