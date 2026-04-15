@@ -21,6 +21,9 @@ mapped_monthly_orders AS (
                     raw_data->>'店铺',
                     raw_data->>'店铺名',
                     raw_data->>'店铺名称',
+                    raw_data->>'店铺',
+                    raw_data->>'店铺名',
+                    raw_data->>'店铺名称',
                     raw_data->>'store_name',
                     raw_data->>'store_label_raw'
                 )
@@ -32,6 +35,9 @@ mapped_monthly_orders AS (
             raw_data->>'订单号',
             raw_data->>'订单ID',
             raw_data->>'订单编号',
+            raw_data->>'订单编号',
+            raw_data->>'订单号',
+            raw_data->>'ID',
             raw_data->>'order_id',
             raw_data->>'Order ID',
             raw_data->>'order_no'
@@ -41,6 +47,11 @@ mapped_monthly_orders AS (
                 raw_data->>'实付金额',
                 raw_data->>'买家实付金额',
                 raw_data->>'总收入',
+                raw_data->>'buyer_payment_rmb',
+                raw_data->>'buyer_payment',
+                raw_data->>'买家支付(RMB)',
+                raw_data->>'买家支付',
+                raw_data->>'买家实付金额(RMB)',
                 raw_data->>'paid_amount',
                 raw_data->>'Paid Amount'
             ) IS NULL THEN NULL
@@ -51,6 +62,11 @@ mapped_monthly_orders AS (
                             raw_data->>'实付金额',
                             raw_data->>'买家实付金额',
                             raw_data->>'总收入',
+                            raw_data->>'buyer_payment_rmb',
+                            raw_data->>'buyer_payment',
+                            raw_data->>'买家支付(RMB)',
+                            raw_data->>'买家支付',
+                            raw_data->>'买家实付金额(RMB)',
                             raw_data->>'paid_amount',
                             raw_data->>'Paid Amount'
                         ),
@@ -92,6 +108,78 @@ mapped_monthly_orders AS (
                 ''
             )::numeric
         END AS profit,
+        CASE
+            WHEN COALESCE(
+                raw_data->>'original_amount_rmb',
+                raw_data->>'original_amount',
+                raw_data->>'order_original_amount_rmb',
+                raw_data->>'product_original_price_rmb',
+                raw_data->>'product_original_price',
+                raw_data->>'订单原始金额(RMB)',
+                raw_data->>'产品原价(RMB)',
+                raw_data->>'订单原始金额',
+                raw_data->>'产品原价',
+                raw_data->>'order_original_amount'
+            ) IS NULL THEN NULL
+            ELSE NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(REPLACE(REPLACE(REPLACE(
+                        COALESCE(
+                            raw_data->>'original_amount_rmb',
+                            raw_data->>'original_amount',
+                            raw_data->>'order_original_amount_rmb',
+                            raw_data->>'product_original_price_rmb',
+                            raw_data->>'product_original_price',
+                            raw_data->>'订单原始金额(RMB)',
+                            raw_data->>'产品原价(RMB)',
+                            raw_data->>'订单原始金额',
+                            raw_data->>'产品原价',
+                            raw_data->>'order_original_amount'
+                        ),
+                        ',', ''
+                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            )::numeric
+        END AS order_original_amount,
+        CASE
+            WHEN COALESCE(
+                raw_data->>'purchase_amount_rmb',
+                raw_data->>'purchase_cost_rmb',
+                raw_data->>'procurement_cost_rmb',
+                raw_data->>'采购成本(RMB)',
+                raw_data->>'采购成本',
+                raw_data->>'采购金额(RMB)',
+                raw_data->>'purchase_amount',
+                raw_data->>'purchase_cost',
+                raw_data->>'procurement_cost'
+            ) IS NULL THEN NULL
+            ELSE NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(REPLACE(REPLACE(REPLACE(
+                        COALESCE(
+                            raw_data->>'purchase_amount_rmb',
+                            raw_data->>'purchase_cost_rmb',
+                            raw_data->>'procurement_cost_rmb',
+                            raw_data->>'采购成本(RMB)',
+                            raw_data->>'采购成本',
+                            raw_data->>'采购金额(RMB)',
+                            raw_data->>'purchase_amount',
+                            raw_data->>'purchase_cost',
+                            raw_data->>'procurement_cost'
+                        ),
+                        ',', ''
+                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            )::numeric
+        END AS purchase_amount,
         CASE
             WHEN COALESCE(
                 raw_data->>'产品数量',
@@ -146,15 +234,7 @@ SELECT
     date_trunc('month', d.metric_date)::date AS metric_date,
     d.platform_code,
     CASE
-        WHEN (
-            COALESCE(NULLIF(TRIM(pa.shop_id), ''), NULLIF(TRIM(pa.account_id), '')) IS NOT NULL
-            AND (
-                d.source_shop_id IS NULL
-                OR LOWER(d.source_shop_id) IN ('none', 'unknown')
-                OR (d.store_label_raw IS NOT NULL AND LOWER(d.source_shop_id) = LOWER(d.store_label_raw))
-            )
-        )
-        THEN COALESCE(NULLIF(TRIM(pa.shop_id), ''), NULLIF(TRIM(pa.account_id), ''))
+        WHEN pa.resolved_shop_id IS NOT NULL THEN pa.resolved_shop_id
         ELSE COALESCE(d.source_shop_id, 'unknown')
     END AS shop_id,
     d.order_id,
@@ -166,17 +246,26 @@ SELECT
 FROM deduplicated_monthly_orders d
 LEFT JOIN LATERAL (
     SELECT
-        COALESCE(NULLIF(TRIM(pa_inner.shop_id), ''), NULLIF(TRIM(pa_inner.account_id), '')) AS shop_id,
-        pa_inner.account_id
-    FROM core.platform_accounts pa_inner
-    WHERE LOWER(COALESCE(pa_inner.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
+        COALESCE(
+            NULLIF(TRIM(sa.platform_shop_id), ''),
+            NULLIF(TRIM(sa.shop_account_id), ''),
+            sa.id::text
+        ) AS resolved_shop_id
+    FROM core.shop_accounts sa
+    LEFT JOIN core.shop_account_aliases saa
+      ON saa.shop_account_id = sa.id
+     AND saa.is_active = true
+    WHERE LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
       AND (
-          LOWER(COALESCE(pa_inner.account_alias, '')) = LOWER(COALESCE(d.store_label_raw, ''))
-          OR LOWER(COALESCE(pa_inner.store_name, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+          LOWER(COALESCE(sa.store_name, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+          OR LOWER(COALESCE(sa.platform_shop_id, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+          OR LOWER(COALESCE(saa.alias_value, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+          OR LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '\s+', ' ', 'g')
       )
     ORDER BY
-        CASE WHEN LOWER(COALESCE(pa_inner.account_alias, '')) = LOWER(COALESCE(d.store_label_raw, '')) THEN 0 ELSE 1 END,
-        pa_inner.id
+        CASE WHEN LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '\s+', ' ', 'g') THEN 0 ELSE 1 END,
+        CASE WHEN saa.is_primary THEN 0 ELSE 1 END,
+        sa.id
     LIMIT 1
 ) pa ON TRUE
 WHERE d.rn = 1;

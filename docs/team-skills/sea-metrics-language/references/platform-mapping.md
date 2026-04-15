@@ -1,24 +1,25 @@
 # Platform Mapping
 
-本文件只处理“名字相同但口径可能不同”的指标。
+本文档只处理“名字相同但口径可能不同”的指标。
 
 ## conversion_rate
 
-- Shopee：以对应卖家后台或导出定义为准
-- TikTok：Seller Center 与 Ads Manager 可能存在范围和归因差异
-- ERP 统一口径：`order_count / visitor_count * 100`
-- 会议决策口径：默认优先 ERP 统一口径；直接引用平台值时必须说明来源
+- Shopee：平台后台可能展示多种转化率，需区分页面转化、下单转化等
+- TikTok：Seller Center 与 Ads Manager 的转化率定义可能不同
+- ERP 统一口径：默认按 `order_count / visitor_count * 100`
+- 会议决策口径：直接引用平台值时必须明确来源
 
 ## traffic
 
-- Shopee：常见为访客 / 浏览量拆分
-- TikTok：需区分访客、曝光、点击、商品页浏览
-- ERP 统一口径：业务概览默认以 `visitor_count` 为主
-- 会议决策口径：讨论经营时优先 `traffic=visitor_count`，讨论内容和广告时另行说明 `impressions / clicks / page_views`
+- Shopee：常见拆分为页面浏览、访客、进店等指标
+- TikTok：常见拆分为页面浏览次数、店铺访问量、曝光、点击等指标
+- ERP 统一口径：**客流量默认以 `page_views` 为主**
+- 辅助指标：`visitor_count` 表示实际进入店铺的客户数量
+- 会议决策口径：讨论经营时优先 `traffic = page_views`；若讨论进店质量，单独说明 `visitor_count`
 
 ## avg_order_value
 
-- Shopee / TikTok：页面可能直接显示客单价，也可能需从 GMV 与订单数反推
+- Shopee / TikTok：平台页面可能直接展示客单价，也可能需要由 GMV 与订单数反推
 - ERP 统一口径：`gmv / order_count`
 - 会议决策口径：默认使用 ERP 统一口径
 

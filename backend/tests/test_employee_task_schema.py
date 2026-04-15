@@ -4,13 +4,13 @@ from modules.core.db import Base
 
 
 def test_employee_task_tables_are_registered():
-    assert "employee_tasks" in Base.metadata.tables
-    assert "employee_task_logs" in Base.metadata.tables
-    assert "employee_task_participants" in Base.metadata.tables
+    assert "core.employee_tasks" in Base.metadata.tables
+    assert "core.employee_task_logs" in Base.metadata.tables
+    assert "core.employee_task_participants" in Base.metadata.tables
 
 
 def test_employee_task_table_has_core_columns():
-    task_table = Base.metadata.tables["employee_tasks"]
+    task_table = Base.metadata.tables["core.employee_tasks"]
 
     for column_name in (
         "task_id",
@@ -35,7 +35,7 @@ def test_employee_task_table_has_core_columns():
 
 
 def test_employee_task_status_constraint_is_declared():
-    task_table = Base.metadata.tables["employee_tasks"]
+    task_table = Base.metadata.tables["core.employee_tasks"]
 
     constraints = {constraint.name for constraint in task_table.constraints}
 
@@ -57,3 +57,9 @@ def test_employee_task_migration_mentions_all_three_tables():
     assert "employee_tasks" in source
     assert "employee_task_logs" in source
     assert "employee_task_participants" in source
+
+
+def test_employee_task_tables_bind_to_core_schema():
+    assert Base.metadata.tables["core.employee_tasks"].schema == "core"
+    assert Base.metadata.tables["core.employee_task_logs"].schema == "core"
+    assert Base.metadata.tables["core.employee_task_participants"].schema == "core"

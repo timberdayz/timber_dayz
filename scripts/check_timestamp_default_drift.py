@@ -47,7 +47,7 @@ def fetch_actual_defaults(connection, schema_name: str, table_name: str) -> dict
             FROM information_schema.columns
             WHERE table_schema = :schema_name
               AND table_name = :table_name
-              AND column_name IN ('created_at', 'updated_at')
+              AND column_name IN ('created_at', 'updated_at', '创建时间', '更新时间')
             """
         ),
         {"schema_name": schema_name, "table_name": table_name},
@@ -55,11 +55,37 @@ def fetch_actual_defaults(connection, schema_name: str, table_name: str) -> dict
     return {row[0]: row[1] for row in result}
 
 
+def fetch_table_schemas(connection, table_name: str) -> list[str]:
+    result = connection.execute(
+        text(
+            """
+            SELECT table_schema
+            FROM information_schema.tables
+            WHERE table_name = :table_name
+            ORDER BY table_schema
+            """
+        ),
+        {"table_name": table_name},
+    )
+    return [row[0] for row in result]
+
+
 def is_expected_timestamp_default(default_value: str | None) -> bool:
     if default_value is None:
         return False
     normalized = default_value.lower()
     return "now()" in normalized or "current_timestamp" in normalized
+
+
+def resolve_actual_default(actual_defaults: dict[str, str | None], expected_column: str) -> str | None:
+    column_aliases = {
+        "created_at": ("created_at", "创建时间"),
+        "updated_at": ("updated_at", "更新时间"),
+    }
+    for candidate in column_aliases.get(expected_column, (expected_column,)):
+        if candidate in actual_defaults:
+            return actual_defaults[candidate]
+    return None
 
 
 def main() -> int:
@@ -73,11 +99,37 @@ def main() -> int:
 
     engine = create_engine(url, pool_pre_ping=True)
     mismatches = []
+    schema_mismatches = []
     try:
         with engine.connect() as connection:
             for row in expected_timestamp_columns():
                 actual_defaults = fetch_actual_defaults(connection, row["schema"], row["table"])
-                actual_default = actual_defaults.get(row["column"])
+                if not actual_defaults:
+                    other_schemas = [s for s in fetch_table_schemas(connection, row["table"]) if s != row["schema"]]
+                    for other_schema in other_schemas:
+                        other_defaults = fetch_actual_defaults(connection, other_schema, row["table"])
+                        actual_default = resolve_actual_default(other_defaults, row["column"])
+                        if is_expected_timestamp_default(actual_default):
+                            schema_mismatches.append(
+                                {
+                                    "expected_schema": row["schema"],
+                                    "actual_schema": other_schema,
+                                    "table": row["table"],
+                                    "column": row["column"],
+                                }
+                            )
+                            break
+                    else:
+                        mismatches.append(
+                            {
+                                "schema": row["schema"],
+                                "table": row["table"],
+                                "column": row["column"],
+                                "actual_default": None,
+                            }
+                        )
+                    continue
+                actual_default = resolve_actual_default(actual_defaults, row["column"])
                 if not is_expected_timestamp_default(actual_default):
                     mismatches.append(
                         {
@@ -92,6 +144,13 @@ def main() -> int:
 
     if not mismatches:
         print("[OK] No timestamp default drift detected.")
+        if schema_mismatches:
+            print("[WARN] Schema mismatch candidates detected (defaults are present in another schema):")
+            for item in schema_mismatches:
+                print(
+                    f"- expected {item['expected_schema']}.{item['table']}.{item['column']}, "
+                    f"found in {item['actual_schema']}.{item['table']}"
+                )
         return 0
 
     print("[FAIL] Timestamp default drift detected:")
@@ -100,6 +159,13 @@ def main() -> int:
             f"- {item['schema']}.{item['table']}.{item['column']}: "
             f"column_default={item['actual_default']!r}"
         )
+    if schema_mismatches:
+        print("[WARN] Schema mismatch candidates detected (defaults are present in another schema):")
+        for item in schema_mismatches:
+            print(
+                f"- expected {item['expected_schema']}.{item['table']}.{item['column']}, "
+                f"found in {item['actual_schema']}.{item['table']}"
+            )
     return 1
 
 

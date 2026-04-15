@@ -1181,6 +1181,37 @@ async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_p
     assert result[1]["name"] == "shop-a"
 
 
+@pytest.mark.asyncio
+async def test_store_analysis_traffic_summary_uses_page_views_per_visitor_instead_of_conversion_rate(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "period_start": "2026-03-01",
+                "period_end": "2026-03-01",
+                "visitor_count": 50,
+                "page_views": 100,
+                "conversion_rate": 999,
+                "page_views_per_visitor": 2.0,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_store_analysis_traffic_summary(
+        platform="shopee",
+        shop_id="shop-a",
+        granularity="daily",
+        target_date="2026-03-01",
+    )
+
+    assert result["visitor_count"] == 50
+    assert result["page_views"] == 100
+    assert result["conversion_rate"] is None
+    assert result["page_views_per_visitor"] == 2.0
+
+
 @pytest.mark.pg_only
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_daily(monkeypatch):
@@ -1205,13 +1236,27 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
             await session.execute(
                 text(
                     """
-                    CREATE TABLE IF NOT EXISTS core.platform_accounts (
+                    CREATE TABLE IF NOT EXISTS core.shop_accounts (
                         id SERIAL PRIMARY KEY,
-                        account_id VARCHAR(100) NOT NULL,
+                        shop_account_id VARCHAR(100) NOT NULL,
                         platform VARCHAR(50) NOT NULL,
-                        account_alias VARCHAR(200),
                         store_name VARCHAR(200) NOT NULL,
-                        shop_id VARCHAR(256)
+                        platform_shop_id VARCHAR(256)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS core.shop_account_aliases (
+                        id SERIAL PRIMARY KEY,
+                        shop_account_id INTEGER NOT NULL,
+                        platform VARCHAR(50) NOT NULL,
+                        alias_value VARCHAR(200) NOT NULL,
+                        alias_normalized VARCHAR(200) NOT NULL,
+                        is_primary BOOLEAN DEFAULT FALSE,
+                        is_active BOOLEAN DEFAULT TRUE
                     )
                     """
                 )
@@ -1412,13 +1457,27 @@ async def test_postgresql_dashboard_service_monthly_kpi_uses_page_views_as_unifi
             await session.execute(
                 text(
                     """
-                    CREATE TABLE IF NOT EXISTS core.platform_accounts (
+                    CREATE TABLE IF NOT EXISTS core.shop_accounts (
                         id SERIAL PRIMARY KEY,
-                        account_id VARCHAR(100) NOT NULL,
+                        shop_account_id VARCHAR(100) NOT NULL,
                         platform VARCHAR(50) NOT NULL,
-                        account_alias VARCHAR(200),
                         store_name VARCHAR(200) NOT NULL,
-                        shop_id VARCHAR(256)
+                        platform_shop_id VARCHAR(256)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS core.shop_account_aliases (
+                        id SERIAL PRIMARY KEY,
+                        shop_account_id INTEGER NOT NULL,
+                        platform VARCHAR(50) NOT NULL,
+                        alias_value VARCHAR(200) NOT NULL,
+                        alias_normalized VARCHAR(200) NOT NULL,
+                        is_primary BOOLEAN DEFAULT FALSE,
+                        is_active BOOLEAN DEFAULT TRUE
                     )
                     """
                 )

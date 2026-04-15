@@ -280,3 +280,11 @@ def test_shop_account_aliases_unmatched_query_reads_semantic_orders_atomic():
     ).read_text(encoding="utf-8")
 
     assert "FROM semantic.fact_orders_atomic" in text
+
+
+def test_shop_alias_normalization_strips_platform_prefix():
+    from backend.utils.text_normalization import normalize_alias_key
+
+    assert normalize_alias_key("Shopee新加坡1店") == "新加坡1店"
+    assert normalize_alias_key("shopee 新加坡1店") == "新加坡1店"
+    assert normalize_alias_key("TikTok Shop 菲律宾2店") == "菲律宾2店"

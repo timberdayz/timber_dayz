@@ -1122,7 +1122,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, computed } from 'vue'
+import { ref, onMounted, nextTick, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import api from '@/api'
@@ -1162,6 +1162,7 @@ const useGlobalDate = ref({
   clearance: true // 月/周分别对齐
 })
 const _syncingFromGlobal = ref(false)
+const _globalAutoRefreshReady = ref(false)
 
 // 全局日期选择器类型与格式
 const globalDatePickerType = computed(() => {
@@ -1335,7 +1336,25 @@ function loadModulesAfterGlobalChange() {
   }, 250)
 }
 
-function onGlobalGranularityChange() {
+async function refreshFollowedModules() {
+  applyGlobalToModules()
+  await nextTick()
+  const tasks = []
+  if (useGlobalDate.value.kpi) tasks.push(loadKPIData())
+  if (useGlobalDate.value.operational) tasks.push(loadOperationalMetrics())
+  if (useGlobalDate.value.comparison) tasks.push(loadComparisonData())
+  if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData())
+  if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking())
+  if (useGlobalDate.value.clearance && (globalGranularity.value === 'monthly' || globalGranularity.value === 'weekly')) {
+    tasks.push(loadClearanceRanking('monthly'))
+    tasks.push(loadClearanceRanking('weekly'))
+  }
+  if (tasks.length) {
+    await Promise.allSettled(tasks)
+  }
+}
+
+async function onGlobalGranularityChange() {
   useGlobalDate.value = {
     comparison: true,
     shopRacing: true,
@@ -1360,11 +1379,10 @@ function onGlobalGranularityChange() {
   } else {
     globalDate.value = `${y}-${m}-${d}`
   }
-  applyGlobalToModules()
-  loadModulesAfterGlobalChange()
+  await refreshFollowedModules()
 }
 
-function onGlobalDateChange() {
+async function onGlobalDateChange() {
   useGlobalDate.value = {
     comparison: true,
     shopRacing: true,
@@ -1373,8 +1391,7 @@ function onGlobalDateChange() {
     kpi: true,
     clearance: true
   }
-  applyGlobalToModules()
-  loadModulesAfterGlobalChange()
+  await refreshFollowedModules()
 }
 
 function syncModuleToGlobal(module) {
@@ -2244,7 +2261,17 @@ const loadShopRacingData = async () => {
 
     // 后端已转为 { name, target, achieved, achievement_rate, rank } 数组
     if (response && Array.isArray(response)) {
-      shopRacingData.value = response
+      shopRacingData.value = response.map((row) => ({
+        ...row,
+        target: row.target_amount ?? null,
+        achieved: row.gmv ?? null,
+        achievement_rate:
+          row.achievement_rate == null
+            ? 0
+            : Number(row.achievement_rate) > 1
+              ? Number(row.achievement_rate) / 100
+              : Number(row.achievement_rate)
+      }))
     } else {
       shopRacingData.value = []
     }
@@ -2277,7 +2304,7 @@ const loadOperationalMetrics = async () => {
       operationalMetrics.value = {
         monthly_target: response.monthly_target ?? null,
         monthly_total_achieved: response.monthly_total_achieved ?? null,
-        today_sales: response.today_sales ?? null,
+        today_sales: response.today_sales ?? response.monthly_total_achieved ?? null,
         monthly_achievement_rate: response.monthly_achievement_rate ?? null,
         time_gap: response.time_gap ?? null,
         estimated_gross_profit: response.estimated_gross_profit ?? null,
@@ -2285,7 +2312,7 @@ const loadOperationalMetrics = async () => {
         operating_result: response.operating_result ?? null,
         operating_result_text: response.operating_result_text ?? '--',
         monthly_order_count: response.monthly_order_count ?? null,
-        today_order_count: response.today_order_count ?? null
+        today_order_count: response.today_order_count ?? response.monthly_order_count ?? null
       }
     }
   } catch (error) {
@@ -2432,6 +2459,7 @@ const getWeekNumber = (date) => {
 const refreshData = async () => {
   loading.value = true
   try {
+    applyGlobalToModules()
     const results = await Promise.allSettled([
       loadKPIData(),
       loadComparisonData(),
@@ -2460,8 +2488,43 @@ const refreshData = async () => {
 onMounted(() => {
   updateComparisonTable()
   applyGlobalToModules()
+  _globalAutoRefreshReady.value = true
   refreshData()
 })
+
+watch(
+  () => globalGranularity.value,
+  async () => {
+    if (!_globalAutoRefreshReady.value) return
+    useGlobalDate.value = {
+      comparison: true,
+      shopRacing: true,
+      trafficRanking: true,
+      operational: true,
+      kpi: true,
+      clearance: true
+    }
+    await nextTick()
+    refreshData()
+  }
+)
+
+watch(
+  () => globalDate.value,
+  async () => {
+    if (!_globalAutoRefreshReady.value) return
+    useGlobalDate.value = {
+      comparison: true,
+      shopRacing: true,
+      trafficRanking: true,
+      operational: true,
+      kpi: true,
+      clearance: true
+    }
+    await nextTick()
+    refreshData()
+  }
+)
 </script>
 
 <style scoped>

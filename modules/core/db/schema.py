@@ -1131,6 +1131,7 @@ class EmployeeTask(Base):
             "status IN ('pending', 'in_progress', 'pending_confirmation', 'completed', 'rejected', 'closed')",
             name="chk_employee_tasks_status",
         ),
+        {"schema": "core"},
     )
 
 
@@ -1140,7 +1141,7 @@ class EmployeeTaskLog(Base):
     __tablename__ = "employee_task_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    task_pk = Column(Integer, ForeignKey("employee_tasks.id", ondelete="CASCADE"), nullable=False)
+    task_pk = Column(Integer, ForeignKey("core.employee_tasks.id", ondelete="CASCADE"), nullable=False)
     actor_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=True)
     action = Column(String(32), nullable=False)
     message = Column(Text, nullable=False)
@@ -1152,6 +1153,7 @@ class EmployeeTaskLog(Base):
 
     __table_args__ = (
         Index("ix_employee_task_logs_task_created", "task_pk", "created_at"),
+        {"schema": "core"},
     )
 
 
@@ -1161,7 +1163,7 @@ class EmployeeTaskParticipant(Base):
     __tablename__ = "employee_task_participants"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    task_pk = Column(Integer, ForeignKey("employee_tasks.id", ondelete="CASCADE"), nullable=False)
+    task_pk = Column(Integer, ForeignKey("core.employee_tasks.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
     participant_role = Column(String(16), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -1176,6 +1178,7 @@ class EmployeeTaskParticipant(Base):
             "participant_role IN ('cc', 'collaborator')",
             name="chk_employee_task_participant_role",
         ),
+        {"schema": "core"},
     )
 
 

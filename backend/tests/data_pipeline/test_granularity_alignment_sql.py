@@ -86,13 +86,27 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
             await session.execute(
                 text(
                     """
-                    CREATE TABLE core.platform_accounts (
+                    CREATE TABLE core.shop_accounts (
                         id SERIAL PRIMARY KEY,
-                        account_id VARCHAR(100) NOT NULL,
                         platform VARCHAR(50) NOT NULL,
-                        account_alias VARCHAR(200),
+                        shop_account_id VARCHAR(100) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
-                        shop_id VARCHAR(256)
+                        platform_shop_id VARCHAR(256)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE core.shop_account_aliases (
+                        id SERIAL PRIMARY KEY,
+                        shop_account_id INTEGER NOT NULL,
+                        platform VARCHAR(50) NOT NULL,
+                        alias_value VARCHAR(200) NOT NULL,
+                        alias_normalized VARCHAR(200) NOT NULL,
+                        is_primary BOOLEAN DEFAULT FALSE,
+                        is_active BOOLEAN DEFAULT TRUE
                     )
                     """
                 )

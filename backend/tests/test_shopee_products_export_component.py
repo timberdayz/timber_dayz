@@ -11,6 +11,7 @@ from modules.components.base import ExecutionContext
 from modules.components.export.base import ExportMode
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
 from modules.platforms.shopee.components.services_agent_export import ShopeeServicesAgentExport
+from modules.platforms.shopee.components.services_ai_assistant_export import ShopeeServicesAiAssistantExport
 
 
 def _ctx(config: dict | None = None) -> ExecutionContext:
@@ -49,6 +50,26 @@ class _GotoPage(_FakePage):
     async def goto(self, url: str, **kwargs) -> None:
         self.goto_calls.append(url)
         self.url = url
+
+
+class _DynamicSelectorPage(_FakePage):
+    def __init__(self, url: str, states: list[dict[str, bool]]) -> None:
+        super().__init__(url)
+        self._states = states
+
+    def locator(self, selector: str):
+        index = min(len(self.wait_calls), len(self._states) - 1)
+        state = self._states[index]
+        loading_family = {"#loading-screen", ".loading-screen", ".spinning-ring", ".spinning-s"}
+        if selector in state:
+            visible = bool(state.get(selector, False))
+        elif selector in loading_family:
+            visible = False
+        elif selector != "#loading-screen":
+            visible = bool(state.get("signal", False))
+        else:
+            visible = False
+        return _FakeLocator(visible=visible, count=1 if visible else 0)
 
 
 class _FakeDownload:
@@ -375,6 +396,53 @@ async def test_shopee_services_page_ready_waits_for_late_business_markers(
     ]
     assert readiness_checks == [1, 2, 3]
     assert page.wait_calls == [1200, 500, 500]
+
+
+@pytest.mark.asyncio
+async def test_shopee_services_ai_assistant_page_ready_waits_for_late_business_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _GotoPage()
+    component = ShopeeServicesAiAssistantExport(
+        _ctx({"shop_name": "shop-a", "services_subtype": "ai_assistant", "granularity": "daily"})
+    )
+    readiness_checks: list[int] = []
+
+    async def _business_ready(_page) -> bool:
+        readiness_checks.append(len(page.wait_calls))
+        return len(readiness_checks) >= 3
+
+    monkeypatch.setattr(component, "_wait_services_business_ready", _business_ready, raising=False)
+
+    await component.ensure_page_ready(page)
+
+    assert page.goto_calls == [
+        "https://seller.shopee.cn/datacenter/services/shop-ai-assistant"
+    ]
+    assert readiness_checks == [1, 2, 3]
+    assert page.wait_calls == [1200, 500, 500]
+
+
+@pytest.mark.asyncio
+async def test_shopee_services_business_ready_requires_loading_to_clear_and_stabilize() -> None:
+    loading_selector = "#loading-screen"
+    page = _DynamicSelectorPage(
+        "https://seller.shopee.cn/datacenter/services/agent?cnsc_shop_id=1",
+        [
+            {loading_selector: True},
+            {loading_selector: True, "signal": True},
+            {"signal": True},
+            {"signal": True},
+        ],
+    )
+    component = ShopeeServicesAgentExport(
+        _ctx({"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"})
+    )
+
+    ready = await component._wait_services_business_ready(page, timeout_ms=1500, poll_ms=200)
+
+    assert ready is True
+    assert page.wait_calls == [200, 200, 200]
 
 
 def test_shopee_products_export_detects_throttled_text() -> None:

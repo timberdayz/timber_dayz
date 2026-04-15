@@ -12,6 +12,7 @@ from modules.platforms.shopee.components import _download_helpers as download_he
 from modules.platforms.shopee.components.products_config import ProductsSelectors
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
 from modules.platforms.shopee.components.services_config import ServicesSelectors
+from modules.platforms.shopee.components.services_export_base import ShopeeServicesExportBase
 
 
 class ShopeeServicesAiAssistantExport(ExportComponent):
@@ -46,11 +47,31 @@ class ShopeeServicesAiAssistantExport(ExportComponent):
             raise ValueError("unsupported preset 'today_realtime' for shopee/services")
         return normalized
 
+    async def _wait_services_business_ready(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 10000,
+        poll_ms: int = 500,
+    ) -> bool:
+        helper = ShopeeServicesExportBase(
+            self.ctx,
+            selectors=self.sel,
+            service_selectors=self.service_sel,
+        )
+        return await helper._wait_services_business_ready(
+            page,
+            timeout_ms=timeout_ms,
+            poll_ms=poll_ms,
+        )
+
     async def _ensure_products_page_ready(self, page: Any) -> None:
         await ShopeeNavigation(self.ctx).ensure_overview_ready(
             page,
             overview_path=self.service_sel.service_paths["ai_assistant"],
             error_message="services page is not ready",
+            business_ready=self._wait_services_business_ready,
+            business_error_message="services page shell loaded but business content not ready",
         )
 
     def _target_date_label(self, config: dict[str, Any]) -> str:

@@ -38,6 +38,9 @@ test('BusinessOverview global date sync refreshes KPI for all granularities', ()
   assert.equal(viewSource.includes("else if (module === 'kpi') loadKPIData()"), true)
   assert.equal(viewSource.includes('kpiGranularity.value = gr'), true)
   assert.equal(viewSource.includes('useGlobalDate.value = {'), true)
+  assert.equal(viewSource.includes("watch("), true)
+  assert.equal(viewSource.includes("_globalAutoRefreshReady.value = true"), true)
+  assert.equal(viewSource.includes("refreshData()"), true)
 })
 
 test('BusinessOverview removes remaining KPI placeholder garble', () => {
@@ -47,4 +50,24 @@ test('BusinessOverview removes remaining KPI placeholder garble', () => {
   assert.equal(viewSource.includes("return '选择日期'"), true)
   assert.equal(viewSource.includes("return '当月'"), true)
   assert.equal(viewSource.includes('return `${month}月`'), true)
+})
+
+test('BusinessOverview page refresh forces global sync and refreshes all modules', () => {
+  assert.equal(viewSource.includes('applyGlobalToModules()'), true)
+  assert.equal(viewSource.includes('const results = await Promise.allSettled(['), true)
+  assert.equal(viewSource.includes('loadComparisonData()'), true)
+  assert.equal(viewSource.includes('loadShopRacingData()'), true)
+  assert.equal(viewSource.includes('loadTrafficRanking()'), true)
+  assert.equal(viewSource.includes('loadOperationalMetrics()'), true)
+})
+
+test('BusinessOverview operational metrics fall back to monthly fields in month mode', () => {
+  assert.equal(viewSource.includes('today_sales: response.today_sales ?? response.monthly_total_achieved ?? null'), true)
+  assert.equal(viewSource.includes('today_order_count: response.today_order_count ?? response.monthly_order_count ?? null'), true)
+})
+
+test('BusinessOverview shop racing maps API fields to table fields', () => {
+  assert.equal(viewSource.includes('target: row.target_amount'), true)
+  assert.equal(viewSource.includes('achieved: row.gmv'), true)
+  assert.equal(viewSource.includes('Number(row.achievement_rate) > 1'), true)
 })

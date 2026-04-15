@@ -1364,7 +1364,10 @@ class PostgresqlDashboardService:
                 "order_count": _metric(current_overview.get("order_count"), previous_overview.get("order_count")),
                 "visitor_count": _metric(current_summary.get("visitor_count"), previous_summary.get("visitor_count")),
                 "page_views": _metric(current_summary.get("page_views"), previous_summary.get("page_views")),
-                "conversion_rate": _metric(current_summary.get("conversion_rate"), previous_summary.get("conversion_rate")),
+                "page_views_per_visitor": _metric(
+                    current_summary.get("page_views_per_visitor"),
+                    previous_summary.get("page_views_per_visitor"),
+                ),
                 "profit": _metric(current_overview.get("profit"), previous_overview.get("profit")),
             },
         }
@@ -1438,12 +1441,6 @@ class PostgresqlDashboardService:
         )
         visitor_count = _sum_present_values(rows, "visitor_count")
         page_views = _sum_present_values(rows, "page_views")
-        conversion_rate = None
-        if visitor_count is not None and page_views is not None:
-            if visitor_count > 0:
-                conversion_rate = round(page_views * 100.0 / visitor_count, 2)
-            elif visitor_count == 0 and page_views == 0:
-                conversion_rate = 0
         page_views_per_visitor = None
         if visitor_count is not None and page_views is not None:
             if visitor_count > 0:
@@ -1457,7 +1454,7 @@ class PostgresqlDashboardService:
             "period_end": period_end.isoformat(),
             "visitor_count": _round_or_none(visitor_count, 2),
             "page_views": _round_or_none(page_views, 2),
-            "conversion_rate": conversion_rate,
+            "conversion_rate": None,
             "page_views_per_visitor": page_views_per_visitor,
         }
 
@@ -1507,15 +1504,29 @@ class PostgresqlDashboardService:
             params["period_end"] = period_end
 
         rows = await self._fetch_rows(query, params)
-        items = [
-            {
-                "period_key": row.get("period_key").isoformat() if row.get("period_key") is not None else None,
-                "visitor_count": _to_optional_float(row.get("visitor_count")),
-                "page_views": _to_optional_float(row.get("page_views")),
-                "conversion_rate": _to_optional_float(row.get("conversion_rate")),
-            }
-            for row in rows
-        ]
+        items = []
+        for row in rows:
+            visitor_count_value = _to_optional_float(row.get("visitor_count"))
+            page_views_value = _to_optional_float(row.get("page_views"))
+            if visitor_count_value is not None and page_views_value is not None:
+                if visitor_count_value > 0:
+                    page_views_per_visitor = round(page_views_value / visitor_count_value, 2)
+                elif visitor_count_value == 0 and page_views_value == 0:
+                    page_views_per_visitor = 0
+                else:
+                    page_views_per_visitor = None
+            else:
+                page_views_per_visitor = None
+
+            items.append(
+                {
+                    "period_key": row.get("period_key").isoformat() if row.get("period_key") is not None else None,
+                    "visitor_count": visitor_count_value,
+                    "page_views": page_views_value,
+                    "conversion_rate": None,
+                    "page_views_per_visitor": page_views_per_visitor,
+                }
+            )
         return {
             "platform_code": normalized_platform,
             "shop_id": normalized_shop_id,

@@ -69,36 +69,63 @@ class ShopeeServicesExportBase(ShopeeProductsExport):
         timeout_ms: int = 10000,
         poll_ms: int = 500,
     ) -> bool:
+        loading_selectors = (
+            "#loading-screen",
+            ".loading-screen",
+            ".spinning-ring",
+            ".spinning-s",
+        )
         selectors = (
-            'button:has-text("统计时间")',
-            '[role="button"]:has-text("统计时间")',
-            'div:has-text("统计时间")',
-            'button:has-text("昨天")',
-            '[role="button"]:has-text("昨天")',
-            'button:has-text("过去7天")',
-            '[role="button"]:has-text("过去7天")',
-            'button:has-text("过去30天")',
-            '[role="button"]:has-text("过去30天")',
-            'button:has-text("按日")',
-            '[role="button"]:has-text("按日")',
-            'button:has-text("按周")',
-            '[role="button"]:has-text("按周")',
-            'button:has-text("按月")',
-            '[role="button"]:has-text("按月")',
-            'button:has-text("导出数据")',
-            '[role="button"]:has-text("导出数据")',
-            'button:has-text("下载数据")',
-            '[role="button"]:has-text("下载数据")',
+            'button:has-text("??????")',
+            '[role="button"]:has-text("??????")',
+            'div:has-text("??????")',
+            'button:has-text("???")',
+            '[role="button"]:has-text("???")',
+            'button:has-text("???7??)',
+            '[role="button"]:has-text("???7??)',
+            'button:has-text("???30??)',
+            '[role="button"]:has-text("???30??)',
+            'button:has-text("???")',
+            '[role="button"]:has-text("???")',
+            'button:has-text("???")',
+            '[role="button"]:has-text("???")',
+            'button:has-text("???")',
+            '[role="button"]:has-text("???")',
+            'button:has-text("??????")',
+            '[role="button"]:has-text("??????")',
+            'button:has-text("??????")',
+            '[role="button"]:has-text("??????")',
         )
         waited = 0
+        stable_ready_hits = 0
         while waited <= timeout_ms:
+            loading_visible = False
+            for selector in loading_selectors:
+                try:
+                    locator = page.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=150):
+                        loading_visible = True
+                        break
+                except Exception:
+                    continue
+
+            signal_visible = False
             for selector in selectors:
                 try:
                     locator = page.locator(selector).first
                     if await locator.count() > 0 and await locator.is_visible(timeout=300):
-                        return True
+                        signal_visible = True
+                        break
                 except Exception:
                     continue
+
+            if signal_visible and not loading_visible:
+                stable_ready_hits += 1
+                if stable_ready_hits >= 2:
+                    return True
+            else:
+                stable_ready_hits = 0
+
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
             waited += poll_ms

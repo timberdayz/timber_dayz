@@ -37,22 +37,24 @@ def test_orders_atomic_sql_exposes_core_standard_fields():
         assert field_name in sql_text
 
 
-def test_orders_atomic_sql_maps_real_paid_amount_and_store_name_fields():
+def test_orders_atomic_sql_maps_current_orders_amount_and_store_fields():
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8", errors="replace")
 
     assert "paid_amount_raw" in sql_text
-    assert "sales_amount_raw" in sql_text
+    assert "buyer_payment_rmb" in sql_text
+    assert "original_amount_rmb" in sql_text
+    assert "purchase_cost_rmb" in sql_text
     assert "store_label_raw" in sql_text
 
 
-def test_orders_atomic_sql_resolves_shop_aliases_via_platform_accounts():
+def test_orders_atomic_sql_resolves_shop_aliases_via_shop_accounts_and_aliases():
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8", errors="replace")
 
-    assert "core.platform_accounts" in sql_text
-    assert "account_alias" in sql_text
+    assert "core.shop_accounts" in sql_text
+    assert "core.shop_account_aliases" in sql_text
+    assert "alias_normalized" in sql_text
     assert "store_name" in sql_text
-    assert "account_id" in sql_text
-    assert "core.account_aliases" not in sql_text
+    assert "platform_shop_id" in sql_text
 
 
 def _orders_table_names() -> tuple[str, ...]:
@@ -101,13 +103,27 @@ async def _create_orders_b_class_tables(session) -> None:
     await session.execute(
         text(
             """
-            CREATE TABLE core.platform_accounts (
+            CREATE TABLE core.shop_accounts (
                 id SERIAL PRIMARY KEY,
-                account_id VARCHAR(100) NOT NULL,
                 platform VARCHAR(50) NOT NULL,
-                account_alias VARCHAR(200),
+                shop_account_id VARCHAR(100) NOT NULL,
                 store_name VARCHAR(200) NOT NULL,
-                shop_id VARCHAR(256)
+                platform_shop_id VARCHAR(256)
+            )
+            """
+        )
+    )
+    await session.execute(
+        text(
+            """
+            CREATE TABLE core.shop_account_aliases (
+                id SERIAL PRIMARY KEY,
+                shop_account_id INTEGER NOT NULL,
+                platform VARCHAR(50) NOT NULL,
+                alias_value VARCHAR(200) NOT NULL,
+                alias_normalized VARCHAR(200) NOT NULL,
+                is_primary BOOLEAN DEFAULT FALSE,
+                is_active BOOLEAN DEFAULT TRUE
             )
             """
         )
@@ -116,7 +132,7 @@ async def _create_orders_b_class_tables(session) -> None:
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_resolves_shop_alias_via_platform_account_alias():
+async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
     with PostgresContainer("postgres:15") as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
@@ -129,10 +145,21 @@ async def test_orders_atomic_resolves_shop_alias_via_platform_account_alias():
             await session.execute(
                 text(
                     """
-                    INSERT INTO core.platform_accounts (
-                        account_id, platform, account_alias, store_name, shop_id
+                    INSERT INTO core.shop_accounts (
+                        platform, shop_account_id, store_name, platform_shop_id
                     ) VALUES (
-                        'shopee新加坡3C店', 'shopee', '3C店', 'shopee新加坡3C店', 'shopee新加坡3C店'
+                        'shopee', 'shopee_sg_3c_local', 'Shopee SG 3C', 'shop-sg-3c'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_account_aliases (
+                        shop_account_id, platform, alias_value, alias_normalized, is_primary, is_active
+                    ) VALUES (
+                        1, 'shopee', '3C Shop', '3c shop', true, true
                     )
                     """
                 )
@@ -146,11 +173,11 @@ async def test_orders_atomic_resolves_shop_alias_via_platform_account_alias():
                         period_start_time, period_end_time, raw_data, header_columns,
                         data_hash, ingest_timestamp, currency_code
                     ) VALUES (
-                        'shopee', 'none', 'orders', 'monthly',
+                        'shopee', 'xihong', 'orders', 'monthly',
                         DATE '2025-09-25', DATE '2025-09-01', DATE '2025-09-30',
                         TIMESTAMP '2025-09-01 00:00:00', TIMESTAMP '2025-09-30 23:59:59',
-                        '{"店铺":"3C店","站点":"新加坡","订单号":"SO-1","实付金额":"100","产品数量":"2"}'::jsonb,
-                        '["店铺","站点","订单号","实付金额","产品数量"]'::jsonb,
+                        '{"store_name":"3C Shop","order_id":"SO-1","buyer_payment_rmb":"100","product_quantity":"2"}'::jsonb,
+                        '["store_name","order_id","buyer_payment_rmb","product_quantity"]'::jsonb,
                         'hash-shop-alias-1', TIMESTAMP '2025-09-26 10:00:00', 'SGD'
                     )
                     """
@@ -161,19 +188,20 @@ async def test_orders_atomic_resolves_shop_alias_via_platform_account_alias():
         async with session_factory() as session:
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
-            result = await session.execute(
-                text(
-                    """
-                    SELECT platform_code, shop_id, order_id, paid_amount
-                    FROM semantic.fact_orders_atomic
-                    """
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT platform_code, shop_id, order_id, paid_amount
+                        FROM semantic.fact_orders_atomic
+                        """
+                    )
                 )
-            )
-            rows = result.mappings().all()
+            ).mappings().all()
 
         assert len(rows) == 1
         assert rows[0]["platform_code"] == "shopee"
-        assert rows[0]["shop_id"] == "shopee新加坡3C店"
+        assert rows[0]["shop_id"] == "shop-sg-3c"
         assert rows[0]["order_id"] == "SO-1"
         assert float(rows[0]["paid_amount"]) == 100.0
 
@@ -182,7 +210,7 @@ async def test_orders_atomic_resolves_shop_alias_via_platform_account_alias():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_resolves_shop_alias_via_platform_account_store_name_fallback():
+async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias():
     with PostgresContainer("postgres:15") as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
@@ -195,10 +223,89 @@ async def test_orders_atomic_resolves_shop_alias_via_platform_account_store_name
             await session.execute(
                 text(
                     """
-                    INSERT INTO core.platform_accounts (
-                        account_id, platform, account_alias, store_name, shop_id
+                    INSERT INTO core.shop_accounts (
+                        platform, shop_account_id, store_name, platform_shop_id
                     ) VALUES (
-                        'Tiktok 1店', 'tiktok', '', '菲律宾1店', 'Tiktok 1店'
+                        'shopee', 'shopee_sg_xhkj1_local', 'xhkj1.sg', '1391124228'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_account_aliases (
+                        shop_account_id, platform, alias_value, alias_normalized, is_primary, is_active
+                    ) VALUES (
+                        1, 'shopee', '新加坡1店', '新加坡1店', true, true
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_monthly (
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, period_start_date, period_end_date,
+                        period_start_time, period_end_time, raw_data, header_columns,
+                        data_hash, ingest_timestamp, currency_code
+                    ) VALUES (
+                        'shopee', 'xihong', 'orders', 'monthly',
+                        DATE '2026-03-31', DATE '2026-03-01', DATE '2026-03-31',
+                        TIMESTAMP '2026-03-01 00:00:00', TIMESTAMP '2026-03-31 23:59:59',
+                        '{"店铺":"Shopee新加坡1店","order_id":"SO-PREFIX-1","buyer_payment_rmb":"120","profit_rmb":"30"}'::jsonb,
+                        '["店铺","order_id","buyer_payment_rmb","profit_rmb"]'::jsonb,
+                        'hash-shop-prefix-1', TIMESTAMP '2026-04-01 10:00:00', 'SGD'
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            await execute_sql_target(session, "semantic.fact_orders_atomic")
+            await session.commit()
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT platform_code, shop_id, order_id, paid_amount, profit
+                        FROM semantic.fact_orders_atomic
+                        """
+                    )
+                )
+            ).mappings().all()
+
+        assert len(rows) == 1
+        assert rows[0]["platform_code"] == "shopee"
+        assert rows[0]["shop_id"] == "1391124228"
+        assert rows[0]["order_id"] == "SO-PREFIX-1"
+        assert float(rows[0]["paid_amount"]) == 120.0
+        assert float(rows[0]["profit"]) == 30.0
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fallback():
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await _create_orders_b_class_tables(session)
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_accounts (
+                        platform, shop_account_id, store_name, platform_shop_id
+                    ) VALUES (
+                        'tiktok', 'tiktok_ph_1_local', 'Philippines Shop 1', 'tiktok-shop-1'
                     )
                     """
                 )
@@ -212,11 +319,11 @@ async def test_orders_atomic_resolves_shop_alias_via_platform_account_store_name
                         period_start_time, period_end_time, raw_data, header_columns,
                         data_hash, ingest_timestamp, currency_code
                     ) VALUES (
-                        'tiktok', 'none', 'orders', 'monthly',
+                        'tiktok', 'xihong', 'orders', 'monthly',
                         DATE '2025-09-24', DATE '2025-09-01', DATE '2025-09-30',
                         TIMESTAMP '2025-09-01 00:00:00', TIMESTAMP '2025-09-30 23:59:59',
-                        '{"店铺":"菲律宾1店","站点":"菲律宾","订单号":"TK-1","买家实付金额":"88","产品数量":"1"}'::jsonb,
-                        '["店铺","站点","订单号","买家实付金额","产品数量"]'::jsonb,
+                        '{"store_name":"Philippines Shop 1","order_id":"TK-1","buyer_payment":"88","product_quantity":"1"}'::jsonb,
+                        '["store_name","order_id","buyer_payment","product_quantity"]'::jsonb,
                         'hash-account-alias-1', TIMESTAMP '2025-09-25 10:00:00', 'PHP'
                     )
                     """
@@ -227,19 +334,20 @@ async def test_orders_atomic_resolves_shop_alias_via_platform_account_store_name
         async with session_factory() as session:
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
-            result = await session.execute(
-                text(
-                    """
-                    SELECT platform_code, shop_id, order_id, paid_amount
-                    FROM semantic.fact_orders_atomic
-                    """
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT platform_code, shop_id, order_id, paid_amount
+                        FROM semantic.fact_orders_atomic
+                        """
+                    )
                 )
-            )
-            rows = result.mappings().all()
+            ).mappings().all()
 
         assert len(rows) == 1
         assert rows[0]["platform_code"] == "tiktok"
-        assert rows[0]["shop_id"] == "Tiktok 1店"
+        assert rows[0]["shop_id"] == "tiktok-shop-1"
         assert rows[0]["order_id"] == "TK-1"
         assert float(rows[0]["paid_amount"]) == 88.0
 

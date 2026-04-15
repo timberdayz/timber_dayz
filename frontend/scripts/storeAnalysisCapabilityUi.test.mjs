@@ -39,7 +39,7 @@ test('store analytics view is capability-driven for hourly support', () => {
 
 test('store analytics view uses real shop options instead of manual shop id input', () => {
   const text = fs.readFileSync(storeAnalyticsPath, 'utf8')
-  assert.equal(text.includes('placeholder="输入店铺ID"'), false)
+  assert.equal(text.includes('placeholder="杈撳叆搴楅摵ID"'), false)
   assert.match(text, /availableShops/)
   assert.match(text, /v-for="shop in availableShops"/)
 })
@@ -65,4 +65,10 @@ test('store analytics view includes top products contribution block', () => {
   assert.match(text, /queryStoreAnalysisTopProducts/)
   assert.match(text, /topProducts/)
   assert.match(text, /商品贡献/)
+})
+
+test('store analytics view uses page_views_per_visitor for traffic depth display', () => {
+  const text = fs.readFileSync(storeAnalyticsPath, 'utf8')
+  assert.match(text, /page_views_per_visitor/)
+  assert.match(text, /浏览进店比/)
 })

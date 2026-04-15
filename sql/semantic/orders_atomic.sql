@@ -39,6 +39,9 @@ mapped AS (
                     raw_data->>'店铺',
                     raw_data->>'店铺名',
                     raw_data->>'店铺名称',
+                    raw_data->>'店铺',
+                    raw_data->>'店铺名',
+                    raw_data->>'店铺名称',
                     raw_data->>'store_name',
                     raw_data->>'store_label_raw'
                 )
@@ -68,6 +71,9 @@ mapped AS (
             raw_data->>'订单号',
             raw_data->>'订单ID',
             raw_data->>'订单编号',
+            raw_data->>'订单编号',
+            raw_data->>'订单号',
+            raw_data->>'ID',
             raw_data->>'order_id',
             raw_data->>'Order ID',
             raw_data->>'order_no'
@@ -93,6 +99,11 @@ mapped AS (
             raw_data->>'实付金额',
             raw_data->>'买家实付金额',
             raw_data->>'总收入',
+            raw_data->>'buyer_payment_rmb',
+            raw_data->>'buyer_payment',
+            raw_data->>'买家支付(RMB)',
+            raw_data->>'买家支付',
+            raw_data->>'买家实付金额(RMB)',
             raw_data->>'paid_amount',
             raw_data->>'Paid Amount'
         ) AS paid_amount_raw,
@@ -108,6 +119,12 @@ mapped AS (
             NULLIF(TRIM(raw_data->>'采购金额'), ''),
             NULLIF(TRIM(raw_data->>'采购价'), ''),
             NULLIF(TRIM(raw_data->>'产品成本'), ''),
+            NULLIF(TRIM(raw_data->>'purchase_amount_rmb'), ''),
+            NULLIF(TRIM(raw_data->>'purchase_cost_rmb'), ''),
+            NULLIF(TRIM(raw_data->>'procurement_cost_rmb'), ''),
+            NULLIF(TRIM(raw_data->>'采购成本(RMB)'), ''),
+            NULLIF(TRIM(raw_data->>'采购成本'), ''),
+            NULLIF(TRIM(raw_data->>'采购金额(RMB)'), ''),
             NULLIF(TRIM(raw_data->>'cogs'), ''),
             NULLIF(TRIM(raw_data->>'purchase_amount'), ''),
             NULLIF(TRIM(raw_data->>'Purchase Amount'), ''),
@@ -119,6 +136,13 @@ mapped AS (
             NULLIF(TRIM(raw_data->>'产品折后价格'), ''),
             NULLIF(TRIM(raw_data->>'产品折后金额'), ''),
             NULLIF(TRIM(raw_data->>'产品原价'), ''),
+            NULLIF(TRIM(raw_data->>'original_amount_rmb'), ''),
+            NULLIF(TRIM(raw_data->>'original_amount'), ''),
+            NULLIF(TRIM(raw_data->>'order_original_amount_rmb'), ''),
+            NULLIF(TRIM(raw_data->>'product_original_price_rmb'), ''),
+            NULLIF(TRIM(raw_data->>'product_original_price'), ''),
+            NULLIF(TRIM(raw_data->>'订单原始金额(RMB)'), ''),
+            NULLIF(TRIM(raw_data->>'产品原价(RMB)'), ''),
             NULLIF(TRIM(raw_data->>'order_original_amount'), ''),
             NULLIF(TRIM(raw_data->>'Order Original Amount'), ''),
             NULLIF(TRIM(raw_data->>'original_order_amount'), ''),
@@ -380,13 +404,7 @@ alias_resolved AS (
     SELECT
         d.platform_code,
         CASE
-            WHEN account_map.resolved_shop_id IS NOT NULL
-                 AND (
-                    d.shop_id IS NULL
-                    OR LOWER(d.shop_id) IN ('none', 'unknown')
-                    OR (d.store_label_raw IS NOT NULL AND LOWER(d.shop_id) = LOWER(d.store_label_raw))
-                 )
-            THEN account_map.resolved_shop_id
+            WHEN account_map.resolved_shop_id IS NOT NULL THEN account_map.resolved_shop_id
             ELSE COALESCE(d.shop_id, 'unknown')
         END AS shop_id,
         d.data_domain,
@@ -427,16 +445,26 @@ alias_resolved AS (
     FROM deduplicated d
     LEFT JOIN LATERAL (
         SELECT
-            COALESCE(NULLIF(TRIM(pa.shop_id), ''), NULLIF(TRIM(pa.account_id), '')) AS resolved_shop_id
-        FROM core.platform_accounts pa
-        WHERE LOWER(COALESCE(pa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
+            COALESCE(
+                NULLIF(TRIM(sa.platform_shop_id), ''),
+                NULLIF(TRIM(sa.shop_account_id), ''),
+                sa.id::text
+            ) AS resolved_shop_id
+        FROM core.shop_accounts sa
+        LEFT JOIN core.shop_account_aliases saa
+          ON saa.shop_account_id = sa.id
+         AND saa.is_active = true
+        WHERE LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
           AND (
-                LOWER(COALESCE(pa.account_alias, '')) = LOWER(COALESCE(d.store_label_raw, ''))
-                OR LOWER(COALESCE(pa.store_name, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+                LOWER(COALESCE(sa.store_name, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+                OR LOWER(COALESCE(sa.platform_shop_id, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+                OR LOWER(COALESCE(saa.alias_value, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+                OR LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '\s+', ' ', 'g')
           )
         ORDER BY
-            CASE WHEN LOWER(COALESCE(pa.account_alias, '')) = LOWER(COALESCE(d.store_label_raw, '')) THEN 0 ELSE 1 END,
-            pa.id
+            CASE WHEN LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '\s+', ' ', 'g') THEN 0 ELSE 1 END,
+            CASE WHEN saa.is_primary THEN 0 ELSE 1 END,
+            sa.id
         LIMIT 1
     ) account_map ON TRUE
     WHERE d.rn = 1

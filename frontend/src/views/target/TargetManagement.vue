@@ -665,7 +665,7 @@
             <div class="erp-mb-sm">
               <template v-if="form.target_type === 'shop'">
                 <span v-if="availableShops.length" class="breakdown-hint"
-                  >已按全部店铺初始化。修改某店百分比后，仅未修改的店铺会重新均分剩余比例；全部改完后点击「自动计算」回填金额/数量。</span
+                  >{{ shopBreakdownHint }}</span
                 >
                 <span v-else class="breakdown-hint breakdown-hint--warn"
                   >暂无店铺数据，请先在账号管理中维护店铺。</span
@@ -693,7 +693,7 @@
                     @change="(v) => handleShopChange($index, v)"
                   >
                     <el-option
-                      v-for="s in availableShops"
+                      v-for="s in shopBreakdownOptions"
                       :key="getShopKey(s)"
                       :label="s.shop_name"
                       :value="getShopKey(s)"
@@ -1328,6 +1328,7 @@ const applyShopBreakdownFromAvailableShops = () => {
   const list = availableShops.value || [];
   const n = Math.max(1, list.length);
   const pct = Math.round((100 / n) * 100) / 100;
+  shopBreakdownAutoInitialized.value = true;
   shopBreakdown.value = list.map((s, i) => ({
     shopKey: getShopKey(s),
     platform_code: s.platform_code,
@@ -1338,6 +1339,53 @@ const applyShopBreakdownFromAvailableShops = () => {
     target_percent: i === list.length - 1 ? 100 - pct * (list.length - 1) : pct,
     percentLocked: false,
   }));
+};
+
+const buildEditableShopBreakdown = (shopList, totalAmount) => {
+  const total = Number(totalAmount) || 0;
+  const existingByKey = new Map(
+    (shopList || []).map((item) => [
+      `${item.platform_code || ""}|${item.shop_id || ""}`,
+      item,
+    ]),
+  );
+  const merged = (availableShops.value || []).map((shop) => {
+    const key = getShopKey(shop);
+    const existing = existingByKey.get(key);
+    const pct =
+      total > 0 ? ((Number(existing?.target_amount) || 0) / total) * 100 : 0;
+    return {
+      shopKey: key,
+      platform_code: shop.platform_code,
+      shop_id: shop.shop_id,
+      shop_name: existing?.shop_name || shop.shop_name || "",
+      target_amount: existing?.target_amount ?? 0,
+      target_quantity: existing?.target_quantity ?? 0,
+      target_percent: Math.round(pct * 100) / 100,
+      percentLocked: false,
+    };
+  });
+
+  const currentKeys = new Set(merged.map((item) => item.shopKey));
+  (shopList || []).forEach((item) => {
+    const key = `${item.platform_code || ""}|${item.shop_id || ""}`;
+    if (currentKeys.has(key)) return;
+    const pct =
+      total > 0 ? ((Number(item?.target_amount) || 0) / total) * 100 : 0;
+    merged.push({
+      shopKey: key,
+      platform_code: item.platform_code,
+      shop_id: item.shop_id,
+      shop_name: item.shop_name || `${item.platform_code || ""}-${item.shop_id || ""}`,
+      target_amount: item.target_amount ?? 0,
+      target_quantity: item.target_quantity ?? 0,
+      target_percent: Math.round(pct * 100) / 100,
+      percentLocked: false,
+    });
+  });
+
+  shopBreakdownAutoInitialized.value = false;
+  return merged;
 };
 
 const saveWeekdayRatiosMonthly = async () => {
@@ -1540,6 +1588,7 @@ const form = reactive({
 
 // 店铺拆分数据：每行 { shopKey, platform_code, shop_id, shop_name, target_amount, target_quantity, target_percent }
 const shopBreakdown = ref([]);
+const shopBreakdownAutoInitialized = ref(false);
 
 // 时间拆分数据
 const timeBreakdown = ref([]);
@@ -1590,6 +1639,33 @@ const shopBreakdownTotalPercent = computed(() => {
     (sum, item) => sum + (Number(item.target_percent) || 0),
     0,
   );
+});
+
+const shopBreakdownOptions = computed(() => {
+  const merged = new Map();
+  (availableShops.value || []).forEach((shop) => {
+    merged.set(getShopKey(shop), {
+      platform_code: shop.platform_code,
+      shop_id: shop.shop_id,
+      shop_name: shop.shop_name || `${shop.platform_code}-${shop.shop_id}`,
+    });
+  });
+  (shopBreakdown.value || []).forEach((row) => {
+    if (!row?.shopKey || merged.has(row.shopKey)) return;
+    merged.set(row.shopKey, {
+      platform_code: row.platform_code,
+      shop_id: row.shop_id,
+      shop_name: row.shop_name || `${row.platform_code}-${row.shop_id}`,
+    });
+  });
+  return Array.from(merged.values());
+});
+
+const shopBreakdownHint = computed(() => {
+  if (shopBreakdownAutoInitialized.value) {
+    return "该目标暂无店铺拆分，已按当前店铺列表初始化。修改某店百分比后，仅未修改的店铺会重新均分剩余比例；全部改完后点击「自动计算」回填金额/数量。";
+  }
+  return "已加载当前店铺和历史拆分。修改某店百分比后，仅未修改的店铺会重新均分剩余比例；全部改完后点击「自动计算」回填金额/数量。";
 });
 
 function getShopKey(s) {
@@ -2067,20 +2143,20 @@ const handleEdit = async (row) => {
   const breakdowns =
     detailResponse?.breakdowns || detailResponse?.breakdown || [];
   const shopList = breakdowns.filter((b) => b.breakdown_type === "shop");
-  const total = Number(row.target_amount) || 1;
-  shopBreakdown.value = shopList.map((b) => {
-    const pct = total > 0 ? ((Number(b.target_amount) || 0) / total) * 100 : 0;
-    return {
-      shopKey: `${b.platform_code || ""}|${b.shop_id || ""}`,
-      platform_code: b.platform_code,
-      shop_id: b.shop_id,
-      shop_name: b.shop_name || "",
-      target_amount: b.target_amount ?? 0,
-      target_quantity: b.target_quantity ?? 0,
-      target_percent: Math.round(pct * 100) / 100,
-      percentLocked: false,
-    };
-  });
+  if (shopList.length > 0) {
+    shopBreakdown.value = buildEditableShopBreakdown(
+      shopList,
+      row.target_amount,
+    );
+  } else if (form.target_type === "shop") {
+    applyShopBreakdownFromAvailableShops();
+    if (availableShops.value.length > 0) {
+      ElMessage.info("该目标暂无店铺拆分，已按当前店铺列表初始化");
+    }
+  } else {
+    shopBreakdownAutoInitialized.value = false;
+    shopBreakdown.value = [];
+  }
   timeBreakdown.value =
     breakdowns.filter((b) => b.breakdown_type === "time") || [];
 
@@ -2126,7 +2202,9 @@ const handleTargetTypeChange = () => {
       target_percent: i === list.length - 1 ? 100 - pct * (n - 1) : pct,
       percentLocked: false,
     }));
+    shopBreakdownAutoInitialized.value = true;
   } else {
+    shopBreakdownAutoInitialized.value = false;
     shopBreakdown.value = [];
   }
 };
@@ -2406,6 +2484,7 @@ const handleDialogClose = () => {
   form.manual_score_enabled = false;
   form.manual_score_value = 0;
   shopBreakdown.value = [];
+  shopBreakdownAutoInitialized.value = false;
   timeBreakdown.value = [];
 };
 

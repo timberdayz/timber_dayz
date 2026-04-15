@@ -203,9 +203,9 @@
             {{ formatInteger(row.page_views) }}
           </template>
         </el-table-column>
-        <el-table-column prop="conversion_rate" label="转化率" width="140" align="right">
+        <el-table-column prop="page_views_per_visitor" label="浏览进店比" width="140" align="right">
           <template #default="{ row }">
-            {{ formatPercent(row.conversion_rate) }}
+            {{ row.page_views_per_visitor == null ? '-' : Number(row.page_views_per_visitor).toFixed(2) }}
           </template>
         </el-table-column>
       </el-table>
@@ -234,12 +234,12 @@
         <el-table-column prop="label" label="指标" min-width="140" />
         <el-table-column prop="current" label="当前周期" width="160" align="right">
           <template #default="{ row }">
-            {{ row.key === 'conversion_rate' ? formatPercent(row.current) : formatInteger(row.current) }}
+            {{ row.key === 'page_views_per_visitor' ? (row.current == null ? '-' : Number(row.current).toFixed(2)) : formatInteger(row.current) }}
           </template>
         </el-table-column>
         <el-table-column prop="previous" label="上一周期" width="160" align="right">
           <template #default="{ row }">
-            {{ row.key === 'conversion_rate' ? formatPercent(row.previous) : formatInteger(row.previous) }}
+            {{ row.key === 'page_views_per_visitor' ? (row.previous == null ? '-' : Number(row.previous).toFixed(2)) : formatInteger(row.previous) }}
           </template>
         </el-table-column>
         <el-table-column prop="change_pct" label="变化率" width="140" align="right">
@@ -336,7 +336,6 @@ const overview = ref({
 const summary = ref({
   visitor_count: null,
   page_views: null,
-  conversion_rate: null,
   page_views_per_visitor: null
 })
 const topProducts = ref([])
@@ -393,10 +392,9 @@ const summaryCards = computed(() => [
   { key: 'operating_result', label: '经营结果', value: overview.value.operating_result_text || '-' },
   { key: 'visitor_count', label: '访客数', value: formatInteger(summary.value.visitor_count) },
   { key: 'page_views', label: '浏览量', value: formatInteger(summary.value.page_views) },
-  { key: 'conversion_rate', label: '转化率', value: formatPercent(summary.value.conversion_rate) },
   {
     key: 'page_views_per_visitor',
-    label: '人均浏览页数',
+    label: '浏览进店比',
     value: summary.value.page_views_per_visitor == null ? '-' : Number(summary.value.page_views_per_visitor).toFixed(2)
   }
 ])
@@ -425,7 +423,7 @@ const comparisonMetrics = computed(() => {
     order_count: '订单数',
     visitor_count: '访客数',
     page_views: '浏览量',
-    conversion_rate: '转化率',
+    page_views_per_visitor: '浏览进店比',
     profit: '利润'
   }
   return Object.entries(labels).map(([key, label]) => ({
@@ -521,7 +519,6 @@ async function loadSummary() {
     summary.value = {
       visitor_count: null,
       page_views: null,
-      conversion_rate: null,
       page_views_per_visitor: null
     }
     return
@@ -538,7 +535,6 @@ async function loadSummary() {
     summary.value = {
       visitor_count: null,
       page_views: null,
-      conversion_rate: null,
       page_views_per_visitor: null
     }
     handleApiError(error, { showMessage: true, logError: true })
@@ -663,7 +659,7 @@ function renderTrendChart() {
       trigger: 'axis'
     },
     legend: {
-      data: ['访客数', '浏览量', '转化率']
+      data: ['访客数', '浏览量', '浏览进店比']
     },
     grid: {
       left: '3%',
@@ -700,11 +696,11 @@ function renderTrendChart() {
         itemStyle: { color: '#67C23A' }
       },
       {
-        name: '转化率',
+        name: '浏览进店比',
         type: 'line',
         yAxisIndex: 1,
         smooth: true,
-        data: trend.value.items.map((item) => item.conversion_rate ?? 0),
+        data: trend.value.items.map((item) => item.page_views_per_visitor ?? 0),
         itemStyle: { color: '#E6A23C' }
       }
     ]
