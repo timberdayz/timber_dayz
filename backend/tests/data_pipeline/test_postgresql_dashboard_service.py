@@ -148,6 +148,42 @@ async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_pl
 
 
 @pytest.mark.asyncio
+async def test_postgresql_dashboard_service_kpi_computes_labor_efficiency_from_employee_count(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "period_month": "2026-04-01",
+                "platform_code": "shopee",
+                "gmv": 10000,
+                "order_count": 10,
+                "visitor_count": 200,
+                "conversion_rate": 5,
+                "avg_order_value": 1000,
+                "attach_rate": 1.2,
+                "total_items": 12,
+                "profit": 3000,
+            }
+        ]
+
+    async def fake_load_active_employee_count(_period_key):
+        return 2
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(
+        service,
+        "_load_active_employee_count",
+        fake_load_active_employee_count,
+        raising=False,
+    )
+
+    result = await service.get_business_overview_kpi(month="2026-04-01", platform=None)
+
+    assert result["labor_efficiency"] == 5000.0
+
+
+@pytest.mark.asyncio
 async def test_postgresql_dashboard_service_annual_summary_kpi_uses_platform_month_aggregate(monkeypatch):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
@@ -573,6 +609,66 @@ async def test_postgresql_dashboard_service_shop_racing_masks_unknown_name(monke
     )
 
     assert result[0]["name"] == "未匹配店铺"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_account_group_uses_shop_account_hierarchy(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "1308200830",
+                "display_name": "Singapore(HX Home)",
+                "shop_account_id": "shopee_sg_hx_home",
+                "account_display_name": "Main SG / HX Home",
+                "main_account_id": "main_shopee_sg",
+                "main_account_name": "Main SG",
+                "gmv": 100,
+                "order_count": 10,
+                "avg_order_value": 10,
+                "attach_rate": 1.2,
+                "profit": 30,
+                "target_amount": 120,
+                "achievement_rate": 83.33,
+            },
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "1308200831",
+                "display_name": "Singapore(HX Annex)",
+                "shop_account_id": "shopee_sg_hx_home",
+                "account_display_name": "Main SG / HX Home",
+                "main_account_id": "main_shopee_sg",
+                "main_account_name": "Main SG",
+                "gmv": 60,
+                "order_count": 6,
+                "avg_order_value": 10,
+                "attach_rate": 1.1,
+                "profit": 18,
+                "target_amount": 80,
+                "achievement_rate": 75,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_shop_racing(
+        granularity="monthly",
+        target_date="2026-03-01",
+        group_by="account",
+    )
+
+    assert len(result) == 1
+    assert result[0]["name"] == "Main SG / HX Home"
+    assert result[0]["shop_account_id"] == "shopee_sg_hx_home"
+    assert result[0]["main_account_id"] == "main_shopee_sg"
+    assert result[0]["gmv"] == 160
+    assert result[0]["target_amount"] == 200
 
 
 @pytest.mark.pg_only
@@ -1333,6 +1429,86 @@ async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_p
     assert result[0]["name"] == "shop-b"
     assert result[0]["page_views"] == 180
     assert result[1]["name"] == "shop-a"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_traffic_ranking_prefers_resolved_display_name(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "1308200830",
+                "display_name": "Singapore(HX Home)",
+                "visitor_count": 0,
+                "page_views": 31,
+                "conversion_rate": 0,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_traffic_ranking(
+        granularity="monthly",
+        target_date="2026-03-01",
+        dimension="shop",
+    )
+
+    assert result[0]["name"] == "Singapore(HX Home)"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_shop_account_hierarchy(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "1308200830",
+                "display_name": "Singapore(HX Home)",
+                "shop_account_id": "shopee_sg_hx_home",
+                "account_display_name": "Main SG / HX Home",
+                "main_account_id": "main_shopee_sg",
+                "main_account_name": "Main SG",
+                "visitor_count": 0,
+                "page_views": 31,
+                "conversion_rate": 0,
+            },
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "1308200831",
+                "display_name": "Singapore(HX Annex)",
+                "shop_account_id": "shopee_sg_hx_home",
+                "account_display_name": "Main SG / HX Home",
+                "main_account_id": "main_shopee_sg",
+                "main_account_name": "Main SG",
+                "visitor_count": 0,
+                "page_views": 12,
+                "conversion_rate": 0,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_traffic_ranking(
+        granularity="monthly",
+        target_date="2026-03-01",
+        dimension="account",
+    )
+
+    assert len(result) == 1
+    assert result[0]["name"] == "Main SG / HX Home"
+    assert result[0]["shop_account_id"] == "shopee_sg_hx_home"
+    assert result[0]["main_account_id"] == "main_shopee_sg"
+    assert result[0]["page_views"] == 43
 
 
 @pytest.mark.asyncio

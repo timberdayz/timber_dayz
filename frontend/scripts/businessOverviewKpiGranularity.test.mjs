@@ -81,3 +81,10 @@ test('BusinessOverview shop racing maps API fields to table fields', () => {
   assert.equal(viewSource.includes('achieved: row.gmv'), true)
   assert.equal(viewSource.includes('Number(row.achievement_rate) > 1'), true)
 })
+
+test('BusinessOverview shop racing uses account dimension and unmatched alias inspector', () => {
+  assert.equal(viewSource.includes('<el-radio-button label="account">账号</el-radio-button>'), true)
+  assert.equal(viewSource.includes('accountsApi.getUnmatchedShopAliases()'), true)
+  assert.equal(viewSource.includes('showUnmatchedAliasDialog'), true)
+  assert.equal(viewSource.includes('未匹配店铺'), true)
+})

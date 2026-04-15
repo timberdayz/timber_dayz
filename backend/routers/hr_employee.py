@@ -62,6 +62,7 @@ async def get_me_profile(
             name=name,
             user_id=current_user.user_id,
             status="active",
+            employee_identity_type="visitor",
             email=current_user.email,
         )
         db.add(employee)

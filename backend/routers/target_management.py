@@ -62,6 +62,59 @@ from backend.dependencies.auth import get_current_user  # ✅ 2026-01-08: 添加
 logger = get_logger(__name__)
 router = APIRouter(prefix="/targets", tags=["目标管理"])
 
+
+def _validate_operation_target_payload(
+    *,
+    target_type: Optional[str],
+    metric_code: Optional[str],
+    metric_direction: Optional[str],
+    target_value: Optional[float],
+    achieved_value: Optional[float],
+    max_score: Optional[float],
+    manual_score_enabled: Optional[bool],
+):
+    if target_type != "operation":
+        return None
+
+    if not metric_code:
+        return error_response(
+            code=ErrorCode.DATA_REQUIRED_FIELD_MISSING,
+            message="运营目标缺少运营指标",
+            error_type=get_error_type(ErrorCode.DATA_REQUIRED_FIELD_MISSING),
+            recovery_suggestion="请选择运营指标后再保存",
+            status_code=400,
+        )
+
+    if target_value is None:
+        return error_response(
+            code=ErrorCode.DATA_REQUIRED_FIELD_MISSING,
+            message="运营目标缺少目标值",
+            error_type=get_error_type(ErrorCode.DATA_REQUIRED_FIELD_MISSING),
+            recovery_suggestion="请输入目标值后再保存",
+            status_code=400,
+        )
+
+    if max_score is None:
+        return error_response(
+            code=ErrorCode.DATA_REQUIRED_FIELD_MISSING,
+            message="运营目标缺少满分",
+            error_type=get_error_type(ErrorCode.DATA_REQUIRED_FIELD_MISSING),
+            recovery_suggestion="请输入满分后再保存",
+            status_code=400,
+        )
+
+    is_manual_mode = bool(manual_score_enabled) or metric_direction == "manual_score"
+    if not is_manual_mode and achieved_value is None:
+        return error_response(
+            code=ErrorCode.DATA_REQUIRED_FIELD_MISSING,
+            message="运营目标缺少实际值",
+            error_type=get_error_type(ErrorCode.DATA_REQUIRED_FIELD_MISSING),
+            recovery_suggestion="请填写实际值，或切换为人工评分模式",
+            status_code=400,
+        )
+
+    return None
+
 # ✅ 2026-01-08: 添加管理员权限检查
 async def require_admin(current_user: DimUser = Depends(get_current_user)):
     """要求管理员权限"""

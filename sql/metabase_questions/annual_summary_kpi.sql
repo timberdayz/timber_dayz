@@ -39,6 +39,7 @@ employee_count AS (
     SELECT COUNT(*)::numeric AS active_employee_count
     FROM a_class.employees
     WHERE status = 'active'
+      AND employee_identity_type = 'employee'
 ),
 
 -- 订单聚合 - 本期（仅 monthly 粒度）

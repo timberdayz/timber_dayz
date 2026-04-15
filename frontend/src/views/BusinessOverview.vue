@@ -432,7 +432,7 @@
                   @change="loadShopRacingData"
                 >
                     <el-radio-button label="shop">店铺</el-radio-button>
-                    <el-radio-button label="platform">账号</el-radio-button>
+                    <el-radio-button label="account">账号</el-radio-button>
                   </el-radio-group>
                   <el-date-picker
                     v-model="shopRacingDate"
@@ -1126,6 +1126,7 @@ import { ref, onMounted, nextTick, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import api from '@/api'
+import accountsApi from '@/api/accounts'
 import {
   formatCurrency,
   formatNumber as formatNumberUtil,

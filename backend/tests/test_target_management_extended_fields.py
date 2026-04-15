@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -62,6 +63,7 @@ def test_create_target_accepts_profit_and_operation_fields():
         metric_name="客户满意度",
         metric_direction="higher_better",
         target_value=95.0,
+        achieved_value=88.0,
         max_score=20.0,
         penalty_enabled=False,
         manual_score_enabled=False,
@@ -80,7 +82,42 @@ def test_create_target_accepts_profit_and_operation_fields():
     assert result["data"]["metric_code"] == "customer_satisfaction"
     assert result["data"]["metric_direction"] == "higher_better"
     assert result["data"]["target_value"] == 95.0
+    assert result["data"]["achieved_value"] == 88.0
     assert result["data"]["max_score"] == 20.0
+
+
+def test_create_operation_target_requires_achieved_value_when_not_manual():
+    db = AsyncMock()
+
+    request = TargetCreateRequest(
+        target_name="2026-04 运营目标",
+        target_type="operation",
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 30),
+        target_amount=0.0,
+        target_quantity=0,
+        target_profit_amount=0.0,
+        metric_code="exam_score",
+        metric_name="考试",
+        metric_direction="higher_better",
+        target_value=100.0,
+        achieved_value=None,
+        max_score=20.0,
+        penalty_enabled=False,
+        manual_score_enabled=False,
+    )
+
+    resp = asyncio.run(
+        create_target(
+            request=request,
+            db=db,
+            current_user=SimpleNamespace(username="admin"),
+        )
+    )
+
+    body = json.loads(resp.body.decode("utf-8"))
+    assert body["success"] is False
+    assert resp.status_code == 400
 
 
 def test_update_target_accepts_profit_goal_fields():
@@ -139,6 +176,60 @@ def test_update_target_accepts_profit_goal_fields():
     assert result["success"] is True
     assert result["data"]["target_profit_amount"] == 3000.0
     assert result["data"]["achieved_profit_amount"] == 1200.0
+
+
+def test_update_operation_target_accepts_achieved_value():
+    db = AsyncMock()
+    target = SimpleNamespace(
+        id=7,
+        target_name="2026-04 运营目标",
+        target_type="operation",
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 30),
+        target_amount=0.0,
+        target_quantity=0,
+        target_profit_amount=0.0,
+        achieved_amount=0.0,
+        achieved_quantity=0,
+        achieved_profit_amount=0.0,
+        achievement_rate=0.0,
+        status="active",
+        description=None,
+        weekday_ratios=None,
+        created_by="admin",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        metric_code="exam_score",
+        metric_name="考试",
+        metric_direction="higher_better",
+        target_value=100.0,
+        achieved_value=80.0,
+        max_score=20.0,
+        penalty_enabled=False,
+        penalty_threshold=None,
+        penalty_per_unit=None,
+        penalty_max=None,
+        manual_score_enabled=False,
+        manual_score_value=None,
+    )
+
+    db.execute = AsyncMock(return_value=_ScalarOneResult(target))
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    request = TargetUpdateRequest(achieved_value=86.0)
+
+    result = asyncio.run(
+        update_target(
+            target_id=7,
+            request=request,
+            db=db,
+            current_user=SimpleNamespace(username="admin"),
+        )
+    )
+
+    assert result["success"] is True
+    assert result["data"]["achieved_value"] == 86.0
 
 
 def test_create_product_target_accepts_product_identity_fields():

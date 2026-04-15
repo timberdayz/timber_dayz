@@ -37,7 +37,10 @@ def _sort_numeric(value: Any) -> float:
     return maybe_value if maybe_value is not None else float("-inf")
 
 
-def reduce_business_overview_kpi_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def reduce_business_overview_kpi_rows(
+    rows: list[dict[str, Any]],
+    labor_efficiency: float | None = 0,
+) -> dict[str, Any]:
     total_gmv = _sum_present_values(rows, "gmv")
     total_orders_raw = _sum_present_values(rows, "order_count")
     total_visitors_raw = _sum_present_values(rows, "visitor_count")
@@ -81,7 +84,7 @@ def reduce_business_overview_kpi_rows(rows: list[dict[str, Any]]) -> dict[str, A
         "conversion_rate": conversion_rate,
         "avg_order_value": avg_order_value,
         "attach_rate": attach_rate,
-        "labor_efficiency": 0,
+        "labor_efficiency": _round_or_none(labor_efficiency, 2),
         "profit": _round_or_none(total_profit, 2),
     }
 
@@ -632,6 +635,21 @@ class PostgresqlDashboardService:
             result = await session.execute(text(query), params)
             return [dict(row) for row in result.mappings().all()]
 
+    async def _load_active_employee_count(self, _period_key: date_cls) -> int:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT COUNT(*) AS active_employee_count
+                    FROM a_class.employees
+                    WHERE status = 'active'
+                      AND employee_identity_type = 'employee'
+                    """
+                )
+            )
+            value = result.scalar_one_or_none()
+            return int(value or 0)
+
     async def _load_inventory_backlog_summary(
         self,
         period_start: date_cls | None = None,
@@ -1001,7 +1019,14 @@ class PostgresqlDashboardService:
             params["platform_code"] = platform
 
         rows = await self._fetch_rows(query, params)
-        return reduce_business_overview_kpi_rows(rows)
+        reduced = reduce_business_overview_kpi_rows(rows)
+        employee_count = await self._load_active_employee_count(period_key)
+        gmv = reduced.get("gmv")
+        if employee_count > 0 and gmv is not None:
+            reduced["labor_efficiency"] = round(float(gmv) / employee_count, 2)
+        else:
+            reduced["labor_efficiency"] = 0
+        return reduced
 
     async def get_business_overview_comparison(
         self,
@@ -1151,6 +1176,10 @@ class PostgresqlDashboardService:
                 src.period_key,
                 src.platform_code,
                 src.shop_id,
+                sa.shop_account_id,
+                sa.main_account_id,
+                ma.main_account_name,
+                sa.store_name AS account_store_name,
                 COALESCE(
                     NULLIF(TRIM(ds.shop_name), ''),
                     NULLIF(TRIM(sa.store_name), ''),
@@ -1176,7 +1205,10 @@ class PostgresqlDashboardService:
              AND (
                   COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
                   OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
+                  OR sa.id::text = COALESCE(src.shop_id, '')
              )
+            LEFT JOIN core.main_accounts ma
+              ON ma.main_account_id = sa.main_account_id
             WHERE src.granularity = :granularity
               AND src.period_key = :period_key
             """
@@ -1186,7 +1218,7 @@ class PostgresqlDashboardService:
             params["platform_code"] = platform
         rows = await self._fetch_rows(query, params)
 
-        if group_by in ("platform", "account"):
+        if group_by == "platform":
             grouped: dict[str, dict[str, Any]] = {}
             for row in rows:
                 key = row["platform_code"]
@@ -1214,11 +1246,61 @@ class PostgresqlDashboardService:
                     value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
             return rank_shop_racing_rows(list(grouped.values()))
 
+        if group_by == "account":
+            grouped: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                account_id = row.get("shop_account_id")
+                main_account_id = row.get("main_account_id")
+                account_store_name = row.get("account_store_name")
+                main_account_name = row.get("main_account_name")
+                display_name = row.get("account_display_name") or " / ".join(
+                    [
+                        part
+                        for part in (
+                            (str(main_account_name).strip() if main_account_name else None),
+                            (str(account_store_name).strip() if account_store_name else None),
+                        )
+                        if part
+                    ]
+                )
+                fallback_name = display_name or account_store_name or account_id or "未匹配账号"
+                key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                grouped.setdefault(
+                    key,
+                    {
+                        "name": fallback_name,
+                        "platform_code": row.get("platform_code"),
+                        "shop_id": "ALL",
+                        "shop_account_id": account_id,
+                        "main_account_id": main_account_id,
+                        "main_account_name": main_account_name,
+                        "gmv": 0.0,
+                        "order_count": 0.0,
+                        "avg_order_value": 0.0,
+                        "attach_rate": 0.0,
+                        "target_amount": 0.0,
+                        "achievement_rate": 0.0,
+                    },
+                )
+                grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
+                grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
+                grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
+            for value in grouped.values():
+                if value["order_count"]:
+                    value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+                if value["target_amount"]:
+                    value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+            return rank_shop_racing_rows(list(grouped.values()))
+
         normalized_rows = [
             {
                 "name": row.get("display_name") or "未匹配店铺",
                 "platform_code": row.get("platform_code"),
                 "shop_id": row.get("shop_id") or "unknown",
+                "shop_account_id": row.get("shop_account_id"),
+                "main_account_id": row.get("main_account_id"),
+                "main_account_name": row.get("main_account_name"),
+                "is_unmatched": not bool(row.get("shop_account_id")),
                 "gmv": _to_optional_float(row.get("gmv")),
                 "order_count": _to_optional_float(row.get("order_count")),
                 "avg_order_value": _to_optional_float(row.get("avg_order_value")),

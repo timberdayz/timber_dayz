@@ -4492,6 +4492,12 @@ class Employee(Base):
     
     # === 状态 ===
     status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive/probation/leave
+    employee_identity_type = Column(
+        String(32),
+        nullable=False,
+        default="employee",
+        server_default=text("'employee'"),
+    )
     
     # === 用户关联（add-link-user-employee-management）===
     user_id = Column(BigInteger, nullable=True)  # 关联 dim_users.user_id，应用层唯一性校验

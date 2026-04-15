@@ -207,6 +207,7 @@ class EmployeeCreate(BaseModel):
     bank_name: Optional[str] = Field(None, description="开户银行")
     bank_account: Optional[str] = Field(None, description="银行账号")
     status: str = Field("active", description="状态")
+    employee_identity_type: str = Field("employee", description="员工身份类型")
     user_id: Optional[int] = Field(
         None, description="关联登录账号 dim_users.user_id"
     )
@@ -289,6 +290,7 @@ class EmployeeUpdate(BaseModel):
     bank_name: Optional[str] = None
     bank_account: Optional[str] = None
     status: Optional[str] = None
+    employee_identity_type: Optional[str] = None
     user_id: Optional[int] = Field(
         None, description="关联登录账号 dim_users.user_id"
     )
@@ -321,6 +323,7 @@ class EmployeeResponse(BaseModel):
     bank_name: Optional[str] = None
     bank_account: Optional[str] = None
     status: str
+    employee_identity_type: str = "employee"
     username: Optional[str] = None
     created_at: datetime
     updated_at: datetime
