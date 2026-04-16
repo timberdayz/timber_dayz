@@ -26,6 +26,7 @@ export const ROLE_CONFIG = {
       'human-resources', 'employee-management', 'my-income', 'attendance-management', 'performance:read', 'performance:config',
       'my-tasks', 'my-requests', 'approval-history', 'workflow-config',
       'system-notifications', 'alerts', 'message-settings',
+      'training-management', 'training-integration', 'my-training',
       'user-management', 'role-management', 'permission-management',
       'system-settings', 'system-logs', 'data-backup', 'system-maintenance', 'notification-config',
       'personal-settings',
@@ -50,6 +51,7 @@ export const ROLE_CONFIG = {
       'employee-management', 'my-income', 'attendance-management', 'performance:read',
       'my-tasks', 'my-requests', 'approval-history',
       'system-notifications', 'alerts', 'message-settings',
+      'training-management', 'my-training',
       'personal-settings',
       'sales-dashboard', 'procurement', 'report-center', 'approval-center',
       'message-center', 'notifications'
@@ -65,6 +67,7 @@ export const ROLE_CONFIG = {
       'employee-management', 'my-income', 'performance:read', 'inventory:view', 'inventory-dashboard:view',
       'my-tasks', 'my-requests', 'approval-history',
       'system-notifications', 'alerts', 'message-settings',
+      'my-training',
       'personal-settings',
       'sales-dashboard', 'sales-reports', 'inventory-reports', 'vendor-reports', 'message-center', 'notifications'
     ]
@@ -81,6 +84,7 @@ export const ROLE_CONFIG = {
       'employee-management', 'my-income', 'performance:read',
       'my-tasks', 'my-requests', 'approval-history',
       'system-notifications', 'alerts', 'message-settings',
+      'my-training',
       'personal-settings',
       'sales-dashboard', 'report-center', 'message-center', 'notifications'
     ]

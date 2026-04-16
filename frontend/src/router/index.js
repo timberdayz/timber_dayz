@@ -1006,6 +1006,83 @@ const routes = [
     }
   },
   {
+    path: '/training/overview',
+    name: 'TrainingOverview',
+    component: () => import('../views/training/TrainingOverview.vue'),
+    meta: {
+      title: '培训总览',
+      icon: 'Reading',
+      permission: 'training-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/training/programs',
+    name: 'TrainingPrograms',
+    component: () => import('../views/training/TrainingPrograms.vue'),
+    meta: {
+      title: '培训项目',
+      icon: 'Files',
+      permission: 'training-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/training/assignments',
+    name: 'TrainingAssignments',
+    component: () => import('../views/training/TrainingAssignments.vue'),
+    meta: {
+      title: '培训分配',
+      icon: 'UserFilled',
+      permission: 'training-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/training/assignments/:assignmentId',
+    name: 'TrainingAssignmentDetail',
+    component: () => import('../views/training/TrainingAssignmentDetail.vue'),
+    meta: {
+      title: '培训详情',
+      icon: 'Document',
+      permission: 'my-training',
+      roles: ['admin', 'manager', 'operator', 'finance']
+    }
+  },
+  {
+    path: '/training/results',
+    name: 'TrainingResults',
+    component: () => import('../views/training/TrainingResults.vue'),
+    meta: {
+      title: '培训结果',
+      icon: 'Histogram',
+      permission: 'training-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/training/integration',
+    name: 'TrainingIntegration',
+    component: () => import('../views/training/TrainingIntegration.vue'),
+    meta: {
+      title: '飞书接入',
+      icon: 'Connection',
+      permission: 'training-integration',
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/my-training',
+    name: 'MyTraining',
+    component: () => import('../views/training/MyTraining.vue'),
+    meta: {
+      title: '我的培训',
+      icon: 'Notebook',
+      permission: 'my-training',
+      roles: ['admin', 'manager', 'operator', 'finance']
+    }
+  },
+  {
     path: '/my-requests',
     name: 'MyRequests',
     component: () => import('../views/approval/MyRequests.vue'),

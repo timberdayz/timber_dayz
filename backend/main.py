@@ -83,6 +83,7 @@ from backend.routers import (
     users,
     roles,
     notifications,  # v4.19.0: 系统通知API
+    training,
     performance,
     system,  # v4.3.5: 系统配置API
     system_logs,  # v4.20.0: 系统日志API
@@ -1057,6 +1058,7 @@ app.include_router(permission.router, tags=["权限管理"])  # /api/system/perm
 
 # v4.19.0: 通知管理路由
 app.include_router(notifications.router, prefix="/api", tags=["通知管理"])
+app.include_router(training.router, prefix="/api", tags=["培训管理"])
 
 # 开发工具路由
 app.include_router(test_api.router, prefix="/api/test", tags=["测试诊断"])

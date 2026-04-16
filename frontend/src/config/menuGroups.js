@@ -217,6 +217,21 @@ export const menuGroups = [
     ]
   },
   {
+    id: 'training',
+    title: '培训管理',
+    icon: 'Reading',
+    order: 13,
+    defaultExpanded: false,
+    items: [
+      '/training/overview',      // 培训总览
+      '/training/programs',      // 培训项目
+      '/training/assignments',   // 培训分配
+      '/training/results',       // 培训结果
+      '/training/integration',   // 飞书接入
+      '/my-training'             // 我的培训
+    ]
+  },
+  {
     id: 'dev-tools',
     title: '开发工具',
     icon: 'Tools',

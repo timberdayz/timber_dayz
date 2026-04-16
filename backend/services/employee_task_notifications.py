@@ -18,6 +18,10 @@ async def notify_task_assigned(
     title: str,
     content: str,
 ):
+    target_route = f"/my-tasks/{task_id}"
+    if source_module == "training" and source_record_id:
+        target_route = f"/training/assignments/{source_record_id}"
+
     return await create_notification(
         db=db,
         recipient_id=recipient_id,
@@ -30,7 +34,7 @@ async def notify_task_assigned(
             "source_module": source_module,
             "source_record_type": source_record_type,
             "source_record_id": source_record_id,
-            "target_route": f"/my-tasks/{task_id}",
+            "target_route": target_route,
         },
         priority="high",
     )
