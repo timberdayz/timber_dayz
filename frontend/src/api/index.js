@@ -774,7 +774,8 @@ export default {
     headerRow,
     headerColumns,
     subDomain,
-    deduplicationFields
+    deduplicationFields,
+    fieldParseRules = []
   }) {
     // Support both domain and dataDomain parameter names
     const finalDomain = dataDomain || domain
@@ -802,6 +803,7 @@ export default {
       sub_domain: subDomain || null,
       sheet_name: sheetName || null,
       deduplication_fields: deduplicationFields,
+      field_parse_rules: fieldParseRules,
       save_mode: saveMode || 'create',
       base_template_id: baseTemplateId || null,
       ...(resolvedTemplateName ? { template_name: resolvedTemplateName } : {}),

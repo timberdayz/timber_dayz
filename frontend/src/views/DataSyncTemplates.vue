@@ -54,6 +54,7 @@ v4.6.0新增：独立的数据同步系统
       :loading-preview="loadingPreview"
       :saving-template="savingTemplate"
       :deduplication-fields="deduplicationFields"
+      :field-parse-rules="fieldParseRules"
       @platform-change="handlePlatformChange"
       @domain-change="handleDomainChange"
       @file-change="handleFileChange"
@@ -61,6 +62,7 @@ v4.6.0新增：独立的数据同步系统
       @repreview="handleRepreview"
       @save-template="handleSaveTemplate"
       @deduplication-fields-change="handleDeduplicationFieldsChange"
+      @field-parse-rules-change="handleFieldParseRulesChange"
       @validation-change="handleValidationChange"
       @update:selectedFileId="selectedFileId = $event"
       @update:headerRow="headerRow = $event"
@@ -215,6 +217,7 @@ v4.6.0新增：独立的数据同步系统
       :loading-preview="loadingPreview"
       :saving-template="savingTemplate"
       :deduplication-fields="deduplicationFields"
+      :field-parse-rules="fieldParseRules"
       @platform-change="handlePlatformChange"
       @domain-change="handleDomainChange"
       @file-change="handleFileChange"
@@ -222,6 +225,7 @@ v4.6.0新增：独立的数据同步系统
       @repreview="handleRepreview"
       @save-template="handleSaveTemplate"
       @deduplication-fields-change="handleDeduplicationFieldsChange"
+      @field-parse-rules-change="handleFieldParseRulesChange"
       @validation-change="handleValidationChange"
       @update:selectedFileId="selectedFileId = $event"
       @update:headerRow="headerRow = $event"
@@ -279,6 +283,7 @@ const headerColumns = ref([])
 const sampleData = ref({})
 const deduplicationFields = ref([])  // v4.14.0新增：核心字段列表
 const deduplicationFieldsValid = ref(false)  // v4.14.0新增：核心字段验证状态
+const fieldParseRules = ref([])
 
 // 数据治理统计
 const governanceStats = ref({
@@ -540,12 +545,14 @@ const handleFileChange = async (fileId) => {
     fileInfo.value = {}
     previewData.value = []
     headerColumns.value = []
+    fieldParseRules.value = []
     return
   }
 
   const file = availableFiles.value.find(f => f.id === fileId)
   if (file) {
     fileInfo.value = file
+    fieldParseRules.value = []
     // 如果有模板，使用模板的表头行
     if (file.has_template && file.template_header_row !== undefined && file.template_header_row !== null) {
       headerRow.value = file.template_header_row
@@ -610,7 +617,8 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields }) => {
       baseTemplateId: template.id,
       headerRow: template.header_row ?? 0,
       headerColumns: context.current_header_columns,
-      deduplicationFields: selectedFields
+      deduplicationFields: selectedFields,
+      fieldParseRules: template.field_parse_rules || []
     })
 
     if (result && (result.success || result.template_id)) {
@@ -657,7 +665,8 @@ const handleSaveTemplate = async () => {
       saveMode: 'create',
       headerRow: headerRow.value,
       headerColumns: headerColumns.value,
-      deduplicationFields: deduplicationFields.value  // v4.14.0新增：核心字段列表（必填）
+      deduplicationFields: deduplicationFields.value,  // v4.14.0新增：核心字段列表（必填）
+      fieldParseRules: fieldParseRules.value
     })
 
     // 检查响应结果
@@ -698,6 +707,10 @@ const handleSaveTemplate = async () => {
 // v4.14.0新增：处理核心字段变化
 const handleDeduplicationFieldsChange = (fields) => {
   deduplicationFields.value = fields
+}
+
+const handleFieldParseRulesChange = (rules) => {
+  fieldParseRules.value = Array.isArray(rules) ? rules : []
 }
 
 // v4.14.0新增：处理验证状态变化

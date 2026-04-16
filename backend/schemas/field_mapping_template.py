@@ -8,24 +8,42 @@ from pydantic import BaseModel, Field
 TemplateSaveMode = Literal["create", "new_version"]
 TemplateUpdateMode = Literal["with-sample", "core-only"]
 TemplateSaveOperation = Literal["created", "new_version"]
+TemplateFieldParseRuleValueKind = Literal["single_date", "date_range"]
+TemplateFieldParseRuleRangePick = Literal["start", "end"]
+
+
+class TemplateFieldParseRule(BaseModel):
+    target_field: str = Field(..., description="Target standard field")
+    source_column: str = Field(..., description="Original source column")
+    value_kind: TemplateFieldParseRuleValueKind = Field(..., description="single_date or date_range")
+    date_format: str = Field(..., description="Declared date format")
+    strict: bool = Field(True, description="Whether parsing should be strict")
+    range_pick: Optional[TemplateFieldParseRuleRangePick] = Field(
+        None,
+        description="start or end when value_kind is date_range",
+    )
 
 
 class TemplateSaveRequest(BaseModel):
-    platform: str = Field(..., description="平台代码")
-    data_domain: str = Field(..., description="数据域")
-    header_columns: List[str] = Field(..., min_length=1, description="模板表头字段列表")
-    granularity: Optional[str] = Field(None, description="粒度")
-    account: Optional[str] = Field(None, description="账号")
-    template_name: Optional[str] = Field(None, description="模板名称")
-    created_by: str = Field("web_ui", description="创建人")
-    header_row: int = Field(0, description="表头行索引")
-    sub_domain: Optional[str] = Field(None, description="子类型")
-    sheet_name: Optional[str] = Field(None, description="工作表名称")
-    encoding: str = Field("utf-8", description="文件编码")
-    deduplication_fields: Optional[List[str]] = Field(None, description="核心去重字段")
-    mappings: Dict[str, Any] = Field(default_factory=dict, description="兼容旧前端的映射字段")
-    save_mode: TemplateSaveMode = Field("create", description="保存语义")
-    base_template_id: Optional[int] = Field(None, description="作为更新基础的模板ID")
+    platform: str = Field(..., description="Platform code")
+    data_domain: str = Field(..., description="Data domain")
+    header_columns: List[str] = Field(..., min_length=1, description="Original header columns")
+    granularity: Optional[str] = Field(None, description="Granularity")
+    account: Optional[str] = Field(None, description="Account")
+    template_name: Optional[str] = Field(None, description="Template name")
+    created_by: str = Field("web_ui", description="Creator")
+    header_row: int = Field(0, description="Header row index")
+    sub_domain: Optional[str] = Field(None, description="Sub domain")
+    sheet_name: Optional[str] = Field(None, description="Sheet name")
+    encoding: str = Field("utf-8", description="File encoding")
+    deduplication_fields: Optional[List[str]] = Field(None, description="Core deduplication fields")
+    field_parse_rules: Optional[List[TemplateFieldParseRule]] = Field(
+        None,
+        description="Field-level parsing rules",
+    )
+    mappings: Dict[str, Any] = Field(default_factory=dict, description="Legacy compatible mappings payload")
+    save_mode: TemplateSaveMode = Field("create", description="Save mode")
+    base_template_id: Optional[int] = Field(None, description="Base template id")
 
 
 class HeaderChangesPayload(BaseModel):
@@ -41,8 +59,8 @@ class HeaderChangesPayload(BaseModel):
 
 
 class DetectHeaderChangesRequest(BaseModel):
-    template_id: int = Field(..., description="模板ID")
-    current_columns: List[str] = Field(..., min_length=1, description="当前表头字段列表")
+    template_id: int = Field(..., description="Template id")
+    current_columns: List[str] = Field(..., min_length=1, description="Current file columns")
 
 
 class DetectHeaderChangesResponse(BaseModel):
@@ -62,6 +80,7 @@ class TemplateContextSummary(BaseModel):
     status: Optional[str] = None
     field_count: int
     deduplication_fields: List[str] = Field(default_factory=list)
+    field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
 
 
 class TemplateCurrentFileSummary(BaseModel):
@@ -142,6 +161,7 @@ class TemplateListItem(BaseModel):
     status: Optional[str] = None
     field_count: int = 0
     deduplication_fields: List[str] = Field(default_factory=list)
+    field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
     usage_count: int = 0
     success_rate: float = 0.0
     created_by: Optional[str] = None
@@ -169,8 +189,8 @@ class TemplateDeleteResponse(BaseModel):
 
 
 class TemplateApplyRequest(BaseModel):
-    template_id: int = Field(..., description="模板ID")
-    columns: List[str] = Field(..., min_length=1, description="当前列名列表")
+    template_id: int = Field(..., description="Template id")
+    columns: List[str] = Field(..., min_length=1, description="Current columns")
 
 
 class TemplateApplyConfig(BaseModel):

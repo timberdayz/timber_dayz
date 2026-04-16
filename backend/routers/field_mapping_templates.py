@@ -40,6 +40,8 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()
+DATE_TARGET_FIELDS = {"metric_date", "period_start_date", "period_end_date"}
+FILE_DATE_SOURCE_COLUMNS = {"__file_date_from__", "__file_date_to__"}
 
 
 async def _load_file_update_preview(
@@ -117,6 +119,93 @@ def _normalize_template_headers_for_domain(
     # 货币/地区代码归一化只用于比较、匹配和同步入库，不用于模板本体。
     return list(header_columns)
 
+def _extract_standard_field(mapping_info: Any) -> Optional[str]:
+    if isinstance(mapping_info, dict):
+        standard_field = mapping_info.get("standard_field")
+        if isinstance(standard_field, str):
+            return standard_field.strip()
+        standard_value = mapping_info.get("standard")
+        if isinstance(standard_value, str):
+            return standard_value.strip()
+        return None
+    if isinstance(mapping_info, str):
+        return mapping_info.strip()
+    return None
+
+
+def _normalize_field_parse_rules(request_rules: list[Any] | None) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for rule in request_rules or []:
+        if hasattr(rule, "model_dump"):
+            normalized.append(rule.model_dump(exclude_none=True))
+        elif isinstance(rule, dict):
+            normalized.append({k: v for k, v in rule.items() if v is not None})
+    return normalized
+
+
+def _validate_field_parse_rules(
+    mappings: dict[str, Any] | None,
+    header_columns: list[str],
+    field_parse_rules: list[dict[str, Any]],
+) -> None:
+    date_targets = {
+        standard_field
+        for standard_field in (
+            _extract_standard_field(mapping_info)
+            for mapping_info in (mappings or {}).values()
+        )
+        if standard_field in DATE_TARGET_FIELDS
+    }
+    if date_targets and not field_parse_rules:
+        raise ValueError(
+            "field_parse_rules is required when mappings include date targets: "
+            + ", ".join(sorted(date_targets))
+        )
+
+    header_lookup = {str(column).lower(): str(column) for column in header_columns}
+    rules_by_target = {
+        str(rule.get("target_field", "")).strip(): rule
+        for rule in field_parse_rules
+        if str(rule.get("target_field", "")).strip()
+    }
+    for target_field, rule in rules_by_target.items():
+        source_column = str(rule.get("source_column", "")).strip()
+        if not source_column:
+            raise ValueError(f"field_parse_rules for {target_field} must define source_column")
+        if source_column not in FILE_DATE_SOURCE_COLUMNS and source_column.lower() not in header_lookup:
+            raise ValueError(
+                f"field_parse_rules for {target_field} references unknown source_column: {source_column}"
+            )
+        value_kind = str(rule.get("value_kind", "")).strip()
+        if value_kind not in {"single_date", "date_range"}:
+            raise ValueError(
+                f"field_parse_rules for {target_field} must define value_kind as single_date or date_range"
+            )
+        date_format = str(rule.get("date_format", "")).strip()
+        if not date_format:
+            raise ValueError(f"field_parse_rules for {target_field} must define date_format")
+        if value_kind == "date_range":
+            range_pick = str(rule.get("range_pick", "")).strip()
+            if range_pick not in {"start", "end"}:
+                raise ValueError(
+                    f"field_parse_rules for {target_field} must define range_pick as start or end"
+                )
+
+    if not date_targets:
+        return
+
+    missing_targets = sorted(target for target in date_targets if target not in rules_by_target)
+    if missing_targets:
+        raise ValueError(
+            "field_parse_rules is missing required date targets: " + ", ".join(missing_targets)
+        )
+
+    for target_field in sorted(date_targets):
+        if target_field not in rules_by_target:
+            raise ValueError(
+                "field_parse_rules is missing required date targets: " + ", ".join(missing_targets)
+            )
+
 
 @router.post("/templates/save", response_model=TemplateSaveResponse)
 async def save_mapping_template(
@@ -147,6 +236,7 @@ async def save_mapping_template(
         # 货币代码/地区代码归一化只用于“比较/匹配”逻辑，不用于模板存储。
         header_columns = list(header_columns)
         header_row = request.header_row
+        field_parse_rules = _normalize_field_parse_rules(request.field_parse_rules)
         if not isinstance(header_row, int) or header_row < 0 or header_row > 100:
             raise ValueError(f"header_row必须在0-100之间, 当前值: {header_row}")
 
@@ -184,6 +274,12 @@ async def save_mapping_template(
                     f"[Template] [WARN] 以下核心字段不在表头中: {missing_fields}, 表头字段: {header_columns[:10]}..."
                 )
 
+        _validate_field_parse_rules(
+            mappings=request.mappings,
+            header_columns=header_columns,
+            field_parse_rules=field_parse_rules,
+        )
+
         save_result = await template_service.save_template(
             platform=request.platform,
             data_domain=request.data_domain,
@@ -197,6 +293,7 @@ async def save_mapping_template(
             sheet_name=request.sheet_name,
             encoding=request.encoding,
             deduplication_fields=deduplication_fields,
+            field_parse_rules=field_parse_rules,
             save_mode=request.save_mode,
             base_template_id=request.base_template_id,
         )
@@ -214,9 +311,9 @@ async def save_mapping_template(
     except ValueError as exc:
         logger.error(f"保存模板失败(参数错误): {exc}", exc_info=True)
         return error_response(
-            code=ErrorCode.VALIDATION_ERROR,
+            code=ErrorCode.PARAMETER_INVALID,
             message=f"保存模板失败: {str(exc)}",
-            error_type=get_error_type(ErrorCode.VALIDATION_ERROR),
+            error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
             detail=str(exc),
             recovery_suggestion="请检查请求参数是否正确",
             status_code=400,
@@ -337,6 +434,7 @@ async def get_template_update_context(
                 status=template.status,
                 field_count=template.field_count or len(template_header_columns),
                 deduplication_fields=template_deduplication_fields,
+                field_parse_rules=template.field_parse_rules or [],
             ).model_dump(),
             "template_header_columns": template_header_columns,
             "current_file": None,

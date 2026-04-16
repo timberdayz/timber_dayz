@@ -81,6 +81,7 @@ mapped AS (
             raw_data->>'访客数',
             raw_data->>'独立访客',
             raw_data->>'去重页面浏览次数',
+            raw_data->>'店铺页面访问量',
             raw_data->>'unique_visitors',
             raw_data->>'Unique Visitors',
             raw_data->>'uv',

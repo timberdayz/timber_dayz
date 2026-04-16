@@ -275,6 +275,154 @@ async def test_save_mapping_template_accepts_async_session(
 
 
 @pytest.mark.asyncio
+async def test_save_mapping_template_rejects_date_targets_without_parse_rules(
+    template_update_context_client,
+):
+    client, _ = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "orders",
+            "granularity": "daily",
+            "header_row": 1,
+            "header_columns": ["order_id", "order_time"],
+            "deduplication_fields": ["order_id"],
+            "template_name": "missing_metric_date_rules",
+            "created_by": "test",
+            "mappings": {
+                "order_id": {"standard_field": "order_id", "confidence": 1.0},
+                "order_time": {"standard_field": "metric_date", "confidence": 1.0},
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert "field_parse_rules" in response.text
+    assert "metric_date" in response.text
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_persists_field_parse_rules_and_update_context_returns_them(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+    parse_rules = [
+        {
+            "target_field": "metric_date",
+            "source_column": "order_time",
+            "value_kind": "single_date",
+            "date_format": "yyyy-mm-dd hh:mm:ss",
+            "strict": True,
+        }
+    ]
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "orders",
+            "granularity": "daily",
+            "header_row": 1,
+            "header_columns": ["order_id", "order_time"],
+            "deduplication_fields": ["order_id"],
+            "template_name": "metric_date_rules_template",
+            "created_by": "test",
+            "mappings": {
+                "order_id": {"standard_field": "order_id", "confidence": 1.0},
+                "order_time": {"standard_field": "metric_date", "confidence": 1.0},
+            },
+            "field_parse_rules": parse_rules,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"),
+            {"id": template_id},
+        )
+        row = result.mappings().one()
+        field_parse_rules = row["field_parse_rules"]
+        if isinstance(field_parse_rules, str):
+            field_parse_rules = json.loads(field_parse_rules)
+        assert field_parse_rules == parse_rules
+
+    context_response = await client.get(
+        f"/api/field-mapping/templates/{template_id}/update-context",
+        params={"mode": "core-only"},
+    )
+
+    assert context_response.status_code == 200
+    context_payload = context_response.json()
+    assert context_payload["success"] is True
+    returned_rules = context_payload["data"]["template"]["field_parse_rules"]
+    assert len(returned_rules) == 1
+    assert returned_rules[0]["target_field"] == "metric_date"
+    assert returned_rules[0]["source_column"] == "order_time"
+    assert returned_rules[0]["value_kind"] == "single_date"
+    assert returned_rules[0]["date_format"] == "yyyy-mm-dd hh:mm:ss"
+    assert returned_rules[0]["strict"] is True
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_accepts_file_date_token_parse_rules(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+    parse_rules = [
+        {
+            "target_field": "metric_date",
+            "source_column": "__file_date_from__",
+            "value_kind": "single_date",
+            "date_format": "yyyy-mm-dd",
+            "strict": True,
+        }
+    ]
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "products",
+            "granularity": "monthly",
+            "header_row": 0,
+            "header_columns": ["商品编号", "商品", "销售额（已下订单） (SGD)"],
+            "deduplication_fields": ["商品编号"],
+            "template_name": "products_file_date_rule",
+            "created_by": "test",
+            "mappings": {
+                "商品编号": {"standard_field": "platform_sku", "confidence": 1.0},
+                "商品": {"standard_field": "product_name", "confidence": 1.0},
+                "sales": {"standard_field": "metric_date", "confidence": 1.0},
+            },
+            "field_parse_rules": parse_rules,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"),
+            {"id": template_id},
+        )
+        row = result.mappings().one()
+        field_parse_rules = row["field_parse_rules"]
+        if isinstance(field_parse_rules, str):
+            field_parse_rules = json.loads(field_parse_rules)
+        assert field_parse_rules == parse_rules
+
+
+@pytest.mark.asyncio
 async def test_save_mapping_template_preserves_raw_non_orders_headers(
     template_update_context_client,
 ):

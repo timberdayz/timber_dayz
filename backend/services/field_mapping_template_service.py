@@ -41,6 +41,7 @@ class FieldMappingTemplateService:
         sheet_name: str = None,
         encoding: str = "utf-8",
         deduplication_fields: Optional[List[str]] = None,
+        field_parse_rules: Optional[List[Dict[str, Any]]] = None,
         save_mode: str = "create",
         base_template_id: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -104,6 +105,7 @@ class FieldMappingTemplateService:
                 encoding=encoding,
                 header_columns=header_columns,
                 deduplication_fields=deduplication_fields,
+                field_parse_rules=field_parse_rules,
                 template_name=resolved_template_name,
                 version=new_version,
                 status="published",
@@ -192,6 +194,7 @@ class FieldMappingTemplateService:
                         "status": tmpl.status,
                         "field_count": tmpl.field_count,
                         "deduplication_fields": tmpl.deduplication_fields or [],
+                        "field_parse_rules": tmpl.field_parse_rules or [],
                         "usage_count": tmpl.usage_count,
                         "success_rate": tmpl.success_rate,
                         "created_by": tmpl.created_by,
@@ -227,6 +230,7 @@ class FieldMappingTemplateService:
                     "field_count": template.field_count or len(header_columns),
                     "status": template.status,
                     "deduplication_fields": template.deduplication_fields or [],
+                    "field_parse_rules": template.field_parse_rules or [],
                 },
                 "header_columns": header_columns,
             }

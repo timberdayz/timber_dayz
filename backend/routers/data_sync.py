@@ -184,7 +184,9 @@ async def preview_file(
             df, normalization_report = ExcelParser.normalize_table(
                 df,
                 data_domain=catalog_record.data_domain or "products",
-                file_size_mb=file_size_mb
+                file_size_mb=file_size_mb,
+                source_path=safe_path,
+                header_row=request.header_row,
             )
         except Exception as norm_error:
             logger.warning(f"[DataSync Preview] 规范化失败: {norm_error}", exc_info=True)

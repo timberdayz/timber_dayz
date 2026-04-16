@@ -38,6 +38,7 @@
         :loading-preview="loadingPreview"
         :saving-template="savingTemplate"
         :deduplication-fields="deduplicationFields"
+        :field-parse-rules="fieldParseRules"
         @platform-change="$emit('platform-change')"
         @domain-change="$emit('domain-change')"
         @file-change="$emit('file-change', $event)"
@@ -45,6 +46,7 @@
         @repreview="$emit('repreview')"
         @save-template="$emit('save-template')"
         @deduplication-fields-change="$emit('deduplication-fields-change', $event)"
+        @field-parse-rules-change="$emit('field-parse-rules-change', $event)"
         @validation-change="$emit('validation-change', $event)"
         @update:selectedFileId="$emit('update:selectedFileId', $event)"
         @update:headerRow="$emit('update:headerRow', $event)"
@@ -121,6 +123,10 @@ defineProps({
     type: Array,
     default: () => [],
   },
+  fieldParseRules: {
+    type: Array,
+    default: () => [],
+  },
 })
 
 const emit = defineEmits([
@@ -132,6 +138,7 @@ const emit = defineEmits([
   'repreview',
   'save-template',
   'deduplication-fields-change',
+  'field-parse-rules-change',
   'validation-change',
   'update:selectedFileId',
   'update:headerRow',

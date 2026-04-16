@@ -361,6 +361,86 @@ class RawDataImporter:
             pass
         
         return None
+
+    def _extract_period_dates_by_rules(
+        self,
+        row: Dict[str, Any],
+        field_parse_rules: List[Dict[str, Any]],
+    ) -> tuple:
+        """
+        Resolve metric/period dates strictly from template-declared parse rules.
+
+        Returns:
+            (metric_date, period_start_date, period_end_date, period_start_time, period_end_time)
+        """
+        from modules.services.smart_date_parser import parse_date_by_declared_format
+
+        metric_date = None
+        period_start_date = None
+        period_end_date = None
+        period_start_time = None
+        period_end_time = None
+
+        for rule in field_parse_rules or []:
+            target_field = str(rule.get("target_field", "")).strip()
+            source_column = str(rule.get("source_column", "")).strip()
+            if not target_field or not source_column:
+                continue
+
+            if source_column == "__file_date_from__":
+                raw_value = getattr(self, "file_date_from", None)
+            elif source_column == "__file_date_to__":
+                raw_value = getattr(self, "file_date_to", None)
+            else:
+                raw_value = row.get(source_column)
+            try:
+                parsed_date, parsed_datetime = parse_date_by_declared_format(
+                    raw_value,
+                    date_format=str(rule.get("date_format", "")).strip(),
+                    value_kind=str(rule.get("value_kind", "single_date")).strip(),
+                    range_pick=rule.get("range_pick"),
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    f"failed to parse {target_field} from source_column={source_column}: {raw_value}"
+                ) from exc
+            if parsed_date is None:
+                raise ValueError(
+                    f"failed to parse {target_field} from source_column={source_column}: {raw_value}"
+                )
+
+            if target_field == "metric_date":
+                metric_date = parsed_date
+                if parsed_datetime is not None:
+                    period_start_time = parsed_datetime
+                    period_end_time = parsed_datetime
+            elif target_field == "period_start_date":
+                period_start_date = parsed_date
+                if parsed_datetime is not None:
+                    period_start_time = parsed_datetime
+            elif target_field == "period_end_date":
+                period_end_date = parsed_date
+                if parsed_datetime is not None:
+                    period_end_time = parsed_datetime
+
+        if metric_date is None and period_start_date is not None:
+            metric_date = period_start_date
+        if period_start_date is None and metric_date is not None:
+            period_start_date = metric_date
+        if period_end_date is None and metric_date is not None:
+            period_end_date = metric_date
+        if period_start_time is None and period_end_time is not None:
+            period_start_time = period_end_time
+        if period_end_time is None and period_start_time is not None:
+            period_end_time = period_start_time
+
+        return (
+            metric_date,
+            period_start_date,
+            period_end_date,
+            period_start_time,
+            period_end_time,
+        )
     
     def batch_insert_raw_data(
         self,
@@ -420,6 +500,7 @@ class RawDataImporter:
             
             # 准备插入数据
             insert_data = []
+            field_parse_rules = getattr(self, "field_parse_rules", None)
             for i, (row, data_hash) in enumerate(zip(rows, data_hashes)):
                 # [*] v4.18.0增强:提取period_start_date/end_date和period_start_time/end_time
                 period_start_date, period_end_date, period_start_time, period_end_time = \
@@ -435,6 +516,12 @@ class RawDataImporter:
                 
                 # 向后兼容:metric_date使用period_start_date
                 metric_date = period_start_date
+                if field_parse_rules:
+                    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
+                        self._extract_period_dates_by_rules(row, field_parse_rules)
+                    )
+                    if metric_date is None:
+                        raise ValueError("failed to resolve metric_date from field_parse_rules")
                 
                 # [*] v4.15.0新增:获取货币代码
                 currency_code = None
@@ -1204,4 +1291,3 @@ def get_raw_data_importer(db: AsyncSession) -> RawDataImporter:
     [*] v4.19.0更新:移除同步/异步双模式支持,统一为异步架构
     """
     return RawDataImporter(db)
-

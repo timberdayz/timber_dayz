@@ -153,7 +153,9 @@ async def view_raw_excel(
             df, normalization_report = ExcelParser.normalize_table(
                 df,
                 data_domain=catalog_record.data_domain or "products",
-                file_size_mb=file_size_mb  # v4.6.0新增:传入文件大小,大文件只处理关键列
+                file_size_mb=file_size_mb,  # v4.6.0新增:传入文件大小,大文件只处理关键列
+                source_path=safe_path,
+                header_row=header_row,
             )
             if file_size_mb > 10:
                 logger.info(f"[RawLayer] 大文件规范化完成(只处理关键列): {file_size_mb:.2f}MB")
@@ -414,7 +416,9 @@ async def compare_raw_and_staging(
             df, _ = ExcelParser.normalize_table(
                 df, 
                 data_domain=data_domain,
-                file_size_mb=file_size_mb  # v4.6.0新增:传入文件大小
+                file_size_mb=file_size_mb,  # v4.6.0新增:传入文件大小
+                source_path=safe_path,
+                header_row=header_row,
             )
         except Exception:
             pass  # 规范化失败不影响行数统计
@@ -724,4 +728,3 @@ async def compare_raw_and_staging(
             detail=str(e),
             status_code=500
         )
-

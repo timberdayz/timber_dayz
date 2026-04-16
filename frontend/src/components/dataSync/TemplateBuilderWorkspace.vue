@@ -164,6 +164,72 @@
       </el-table>
     </el-card>
 
+    <el-card v-if="headerColumns.length > 0" class="field-parse-rules-card" style="margin-bottom: 20px;">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>日期解析规则（可选但建议配置）</span>
+          <el-button size="small" @click="addFieldParseRule">新增规则</el-button>
+        </div>
+      </template>
+      <el-empty
+        v-if="localFieldParseRules.length === 0"
+        description="如模板需要 metric_date，请在这里声明来源列和日期格式"
+        :image-size="80"
+      />
+      <div v-else class="field-parse-rules-list">
+        <el-card
+          v-for="(rule, index) in localFieldParseRules"
+          :key="index"
+          shadow="never"
+          class="field-parse-rules-item"
+        >
+          <div class="field-parse-rules-grid">
+            <el-select v-model="rule.target_field" placeholder="目标字段" @change="emitFieldParseRulesChange">
+              <el-option label="metric_date" value="metric_date" />
+              <el-option label="period_start_date" value="period_start_date" />
+              <el-option label="period_end_date" value="period_end_date" />
+            </el-select>
+            <el-select v-model="rule.source_column" placeholder="来源列" filterable @change="emitFieldParseRulesChange">
+              <el-option v-for="column in headerColumns" :key="column" :label="column" :value="column" />
+            </el-select>
+            <el-select v-model="rule.value_kind" placeholder="值类型" @change="emitFieldParseRulesChange">
+              <el-option label="single_date" value="single_date" />
+              <el-option label="date_range" value="date_range" />
+            </el-select>
+            <el-select v-model="rule.date_format" placeholder="日期格式" filterable @change="emitFieldParseRulesChange">
+              <el-option label="yyyy-mm-dd" value="yyyy-mm-dd" />
+              <el-option label="yyyy/mm/dd" value="yyyy/mm/dd" />
+              <el-option label="yyyy-mm-dd hh:mm:ss" value="yyyy-mm-dd hh:mm:ss" />
+              <el-option label="yyyy/mm/dd hh:mm:ss" value="yyyy/mm/dd hh:mm:ss" />
+              <el-option label="dd-mm-yyyy" value="dd-mm-yyyy" />
+              <el-option label="dd/mm/yyyy" value="dd/mm/yyyy" />
+              <el-option label="dd-mm-yyyy hh:mm:ss" value="dd-mm-yyyy hh:mm:ss" />
+              <el-option label="dd/mm/yyyy hh:mm:ss" value="dd/mm/yyyy hh:mm:ss" />
+              <el-option label="dd-mm-yyyy-dd-mm-yyyy" value="dd-mm-yyyy-dd-mm-yyyy" />
+              <el-option label="dd/mm/yyyy-dd/mm/yyyy" value="dd/mm/yyyy-dd/mm/yyyy" />
+            </el-select>
+            <el-select
+              v-if="rule.value_kind === 'date_range'"
+              v-model="rule.range_pick"
+              placeholder="区间取值"
+              @change="emitFieldParseRulesChange"
+            >
+              <el-option label="start" value="start" />
+              <el-option label="end" value="end" />
+            </el-select>
+            <el-switch
+              v-model="rule.strict"
+              inline-prompt
+              active-text="严格"
+              inactive-text="宽松"
+              @change="emitFieldParseRulesChange"
+            />
+            <el-button type="danger" text @click="removeFieldParseRule(index)">删除</el-button>
+          </div>
+        </el-card>
+      </div>
+    </el-card>
+
     <DeduplicationFieldsSelector
       v-if="headerColumns.length > 0"
       :available-fields="headerColumns"
@@ -176,7 +242,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Check, Document, QuestionFilled, Refresh, View, Warning } from '@element-plus/icons-vue'
 
 import DeduplicationFieldsSelector from '@/components/DeduplicationFieldsSelector.vue'
@@ -238,6 +304,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  fieldParseRules: {
+    type: Array,
+    default: () => [],
+  },
 })
 
 const emit = defineEmits([
@@ -248,6 +318,7 @@ const emit = defineEmits([
   'repreview',
   'save-template',
   'deduplication-fields-change',
+  'field-parse-rules-change',
   'validation-change',
   'update:selectedFileId',
   'update:headerRow',
@@ -262,4 +333,65 @@ const headerRowModel = computed({
   get: () => props.headerRow,
   set: value => emit('update:headerRow', value),
 })
+
+const localFieldParseRules = ref([])
+
+watch(
+  () => props.fieldParseRules,
+  value => {
+    localFieldParseRules.value = Array.isArray(value)
+      ? value.map(rule => ({ strict: true, ...rule }))
+      : []
+  },
+  { immediate: true, deep: true }
+)
+
+function emitFieldParseRulesChange() {
+  emit(
+    'field-parse-rules-change',
+    localFieldParseRules.value.map(rule => ({
+      target_field: rule.target_field || '',
+      source_column: rule.source_column || '',
+      value_kind: rule.value_kind || 'single_date',
+      date_format: rule.date_format || '',
+      strict: rule.strict !== false,
+      ...(rule.value_kind === 'date_range' ? { range_pick: rule.range_pick || '' } : {}),
+    }))
+  )
+}
+
+function addFieldParseRule() {
+  localFieldParseRules.value.push({
+    target_field: 'metric_date',
+    source_column: '',
+    value_kind: 'single_date',
+    date_format: 'yyyy-mm-dd',
+    strict: true,
+  })
+  emitFieldParseRulesChange()
+}
+
+function removeFieldParseRule(index) {
+  localFieldParseRules.value.splice(index, 1)
+  emitFieldParseRulesChange()
+}
 </script>
+
+<style scoped>
+.field-parse-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-parse-rules-item {
+  border: 1px dashed #dcdfe6;
+}
+
+.field-parse-rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: center;
+}
+</style>

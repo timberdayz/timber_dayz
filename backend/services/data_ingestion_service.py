@@ -399,7 +399,9 @@ class DataIngestionService:
                 df, normalization_report = ExcelParser.normalize_table(
                     df,
                     data_domain=domain or "products",
-                    file_size_mb=file_size_mb  # v4.6.0新增:传入文件大小,大文件只处理关键列
+                    file_size_mb=file_size_mb,  # v4.6.0新增:传入文件大小,大文件只处理关键列
+                    source_path=safe_path,
+                    header_row=header_row,
                 )
                 if file_size_mb > 10:
                     logger.info(f"[Ingest] 大文件规范化完成(只处理关键列): {file_size_mb:.2f}MB")

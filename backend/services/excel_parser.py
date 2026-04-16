@@ -12,9 +12,71 @@
 from pathlib import Path
 from typing import Optional, Union
 import pandas as pd
+import shutil
+import tempfile
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _load_workbook_for_merged_cells(file_path: Union[str, Path]):
+    import openpyxl
+
+    path = Path(file_path)
+    cleanup_path: Optional[Path] = None
+    if path.suffix.lower() != ".xlsx":
+        temp_dir = Path(tempfile.gettempdir()) / "xihong_erp_excel_parser"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        cleanup_path = temp_dir / f"{path.stem}.xlsx"
+        shutil.copyfile(path, cleanup_path)
+        path = cleanup_path
+
+    workbook = openpyxl.load_workbook(path, data_only=True, read_only=False)
+    return workbook, cleanup_path
+
+
+def _restore_orders_merged_order_level_blanks(
+    df: pd.DataFrame,
+    *,
+    source_path: Union[str, Path],
+    header_row: int,
+    order_level_columns: set[str],
+) -> pd.DataFrame:
+    workbook = None
+    cleanup_path: Optional[Path] = None
+    try:
+        workbook, cleanup_path = _load_workbook_for_merged_cells(source_path)
+        worksheet = workbook[workbook.sheetnames[0]]
+        restored = df.copy()
+        header_excel_row = (header_row if header_row is not None else 0) + 1
+        header_map: dict[int, str] = {}
+        for col_idx in range(1, worksheet.max_column + 1):
+            header_value = worksheet.cell(header_excel_row, col_idx).value
+            if header_value is None:
+                continue
+            header_map[col_idx] = str(header_value).strip()
+
+        for merged_range in worksheet.merged_cells.ranges:
+            min_col, min_row, max_col, max_row = merged_range.bounds
+            if max_row <= header_excel_row + 1:
+                continue
+            for col_idx in range(min_col, max_col + 1):
+                column_name = header_map.get(col_idx)
+                if column_name not in order_level_columns:
+                    continue
+                for excel_row in range(min_row + 1, max_row + 1):
+                    data_index = excel_row - header_excel_row - 1
+                    if 0 <= data_index < len(restored.index):
+                        restored.iat[data_index, restored.columns.get_loc(column_name)] = ""
+        return restored
+    finally:
+        if workbook is not None:
+            workbook.close()
+        if cleanup_path and cleanup_path.exists():
+            try:
+                cleanup_path.unlink()
+            except OSError:
+                pass
 
 
 class ExcelParser:
@@ -308,7 +370,13 @@ class ExcelParser:
         return df
     
     @staticmethod
-    def normalize_table(df: pd.DataFrame, data_domain: str | None = None, file_size_mb: float = 0.0):
+    def normalize_table(
+        df: pd.DataFrame,
+        data_domain: str | None = None,
+        file_size_mb: float = 0.0,
+        source_path: Union[str, Path, None] = None,
+        header_row: int = 0,
+    ):
         """
         规范化表格数据,处理合并单元格导致的块状空洞(v4.6.0增强版)。
 
@@ -363,12 +431,43 @@ class ExcelParser:
                 "ID", "id", "编号", "日期", "date", "店铺", "shop"
             ]
 
+        normalized = df.copy()
+
         # v4.6.0新增:启发式填充关键词(非关键列,但需要填充)
         bias_fill_keywords = []
+        orders_order_level_no_fill_columns = set()
         if (data_domain or "").lower() == "orders":
             bias_fill_keywords = ["status", "状态", "customer", "buyer"]
+            # 订单级金额/汇总字段不能向明细行扩散，否则会把整单利润重复累计到每个商品行
+            orders_order_level_no_fill_columns = {
+                "利润(RMB)",
+                "利润",
+                "买家支付(RMB)",
+                "买家支付",
+                "买家实付金额(RMB)",
+                "买家实付金额",
+                "已结算金额(RMB)",
+                "已结算金额",
+                "预估回款金额(RMB)",
+                "预估回款金额",
+                "订单原始金额(RMB)",
+                "订单原始金额",
+                "总收入(RMB)",
+                "总收入",
+            }
 
-        normalized = df.copy()
+            if source_path:
+                try:
+                    normalized = _restore_orders_merged_order_level_blanks(
+                        normalized,
+                        source_path=source_path,
+                        header_row=header_row,
+                        order_level_columns=orders_order_level_no_fill_columns,
+                    )
+                except Exception as merged_err:
+                    logger.warning(
+                        f"orders merged-cell restoration failed, continue with raw dataframe: {merged_err}"
+                    )
         total_filled = 0
         key_columns_filled = []
 
@@ -378,6 +477,9 @@ class ExcelParser:
         for col in normalized.columns:
             col_str = str(col)
             col_lower = col_str.lower()
+
+            if (data_domain or "").lower() == "orders" and col_str in orders_order_level_no_fill_columns:
+                continue
 
             # 黑名单:包含度量关键词,不填充
             if any(k in col_lower for k in never_fill_keywords):

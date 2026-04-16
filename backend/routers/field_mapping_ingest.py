@@ -8,7 +8,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from typing import List, Dict, Any
 from datetime import datetime
 from pathlib import Path
@@ -31,12 +31,103 @@ from backend.services.data_importer import (
 from backend.services.data_standardizer import standardize_rows
 from backend.services.currency_extractor import get_currency_extractor
 from backend.services.data_ingestion_service import normalize_row_fields_for_domain
+from backend.services.excel_parser import ExcelParser
+from modules.services.smart_date_parser import parse_date_by_declared_format
+from modules.core.db import FieldMappingTemplate
 from modules.core.logger import get_logger
 from backend.routers._field_mapping_helpers import _safe_resolve_path
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def _template_rules_match_sample_rows(
+    template: FieldMappingTemplate,
+    sample_rows: list[dict[str, Any]],
+) -> bool:
+    rules = list(template.field_parse_rules or [])
+    if not rules:
+        return False
+
+    for rule in rules:
+        source_column = str(rule.get("source_column", "")).strip()
+        if not source_column:
+            return False
+
+        matched_value = None
+        for row in sample_rows:
+            raw_value = row.get(source_column)
+            if raw_value is None:
+                continue
+            raw_text = str(raw_value).strip()
+            if raw_text and raw_text.lower() != "nan":
+                matched_value = raw_value
+                break
+        if matched_value is None:
+            return False
+
+        try:
+            parsed_date, _ = parse_date_by_declared_format(
+                matched_value,
+                date_format=str(rule.get("date_format", "")).strip(),
+                value_kind=str(rule.get("value_kind", "single_date")).strip(),
+                range_pick=rule.get("range_pick"),
+            )
+        except Exception:
+            return False
+        if parsed_date is None:
+            return False
+
+    return True
+
+
+async def _load_field_parse_rules_for_file(
+    db: AsyncSession,
+    file_record: Any,
+    domain: str,
+    granularity: str,
+) -> list[dict[str, Any]]:
+    if not file_record:
+        return []
+
+    template_result = await db.execute(
+        select(FieldMappingTemplate).where(
+            FieldMappingTemplate.platform == (file_record.platform_code or "").strip(),
+            FieldMappingTemplate.data_domain == (domain or "").strip(),
+            FieldMappingTemplate.granularity == (granularity or "").strip(),
+            FieldMappingTemplate.sub_domain == getattr(file_record, "sub_domain", None),
+            FieldMappingTemplate.status == "published",
+        ).order_by(desc(FieldMappingTemplate.version), desc(FieldMappingTemplate.id))
+    )
+
+    templates = list(template_result.scalars().all())
+    if not templates:
+        return []
+
+    templates_with_rules = [template for template in templates if template.field_parse_rules]
+    if not templates_with_rules:
+        return []
+    if len(templates_with_rules) == 1:
+        return list(templates_with_rules[0].field_parse_rules or [])
+
+    safe_path = _safe_resolve_path(file_record.file_path)
+    sample_cache: dict[int, list[dict[str, Any]]] = {}
+    matched_templates: list[FieldMappingTemplate] = []
+    for template in templates_with_rules:
+        header_row = template.header_row or 0
+        if header_row not in sample_cache:
+            df = ExcelParser.read_excel(safe_path, header=header_row, nrows=5)
+            df.columns = [str(col).strip() for col in df.columns]
+            df = df.dropna(how="all").fillna("")
+            sample_cache[header_row] = df.to_dict("records")
+
+        if _template_rules_match_sample_rows(template, sample_cache[header_row]):
+            matched_templates.append(template)
+
+    if matched_templates:
+        return list(matched_templates[0].field_parse_rules or [])
+    return list(templates_with_rules[0].field_parse_rules or [])
 
 
 def check_if_all_zero_data(rows: List[Dict], domain: str, mappings: Dict = None) -> bool:
@@ -172,7 +263,9 @@ async def preview_file(file_data: dict, db: AsyncSession = Depends(get_async_db)
             df, normalization_report = ExcelParser.normalize_table(
                 df,
                 data_domain=catalog_record.data_domain or "products",
-                file_size_mb=file_size_mb
+                file_size_mb=file_size_mb,
+                source_path=safe_path,
+                header_row=header_row,
             )
             if file_size_mb > 10:
                 logger.info(f"[Preview] 大文件规范化完成(只处理关键列): {file_size_mb:.2f}MB")
@@ -451,7 +544,9 @@ async def ingest_file(
                 df, normalization_report = ExcelParser.normalize_table(
                     df,
                     data_domain=domain or "products",
-                    file_size_mb=file_size_mb
+                    file_size_mb=file_size_mb,
+                    source_path=safe_path,
+                    header_row=header_row,
                 )
                 if file_size_mb > 10:
                     logger.info(f"[Ingest] 大文件规范化完成(只处理关键列): {file_size_mb:.2f}MB")
@@ -557,7 +652,16 @@ async def ingest_file(
                     sub_domain_value = file_record.sub_domain
                 
                 normalized_header_columns = currency_extractor.normalize_field_list(original_header_columns)
-                
+                field_parse_rules = await _load_field_parse_rules_for_file(
+                    db=db,
+                    file_record=file_record,
+                    domain=domain,
+                    granularity=granularity,
+                )
+                raw_data_importer.field_parse_rules = field_parse_rules
+                raw_data_importer.file_date_from = getattr(file_record, "date_from", None)
+                raw_data_importer.file_date_to = getattr(file_record, "date_to", None)
+
                 imported = raw_data_importer.batch_insert_raw_data(
                     rows=normalized_rows,
                     data_hashes=data_hashes,
@@ -582,6 +686,14 @@ async def ingest_file(
             except Exception as dss_error:
                 logger.error(f"[Ingest] DSS架构入库失败,降级到旧逻辑: {dss_error}", exc_info=True)
             
+            if (
+                'raw_data_importer' in locals()
+                and getattr(raw_data_importer, "field_parse_rules", None)
+                and staged == 0
+                and imported == 0
+            ):
+                raise
+
             if domain == "orders":
                 staged = stage_orders(db, valid_rows, ingest_task_id=task_id, file_id=file_id)
                 imported = upsert_orders(db, valid_rows, file_record=file_record)

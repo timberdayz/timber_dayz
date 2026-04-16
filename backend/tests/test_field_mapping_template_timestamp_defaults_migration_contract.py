@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import re
 import subprocess
 import sys
 import time
@@ -15,6 +16,13 @@ def _find_field_mapping_template_timestamp_migration() -> Path:
     matches = sorted(versions_dir.glob("*field_mapping_template*timestamp*.py"))
     assert matches, "expected a field-mapping-template timestamp repair migration in migrations/versions"
     return matches[-1]
+
+
+def _field_mapping_template_timestamp_revision() -> str:
+    source = _find_field_mapping_template_timestamp_migration().read_text(encoding="utf-8")
+    match = re.search(r'^revision\s*=\s*"([^"]+)"', source, re.MULTILINE)
+    assert match, "expected revision identifier in timestamp migration source"
+    return match.group(1)
 
 
 def test_field_mapping_template_timestamp_migration_exists():
@@ -103,7 +111,15 @@ def test_field_mapping_template_timestamp_migration_repairs_drifted_postgres_tab
         env = os.environ.copy()
         env["DATABASE_URL"] = f"postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/{rehearsal_db}"
         result = subprocess.run(
-            [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "alembic.ini",
+                "upgrade",
+                _field_mapping_template_timestamp_revision(),
+            ],
             cwd=str(Path.cwd()),
             env=env,
             capture_output=True,
