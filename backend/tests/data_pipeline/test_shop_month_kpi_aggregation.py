@@ -65,14 +65,29 @@ def test_orders_monthly_atomic_sql_asset():
         "sql/semantic/orders_monthly_atomic.sql",
         "CREATE OR REPLACE VIEW semantic.fact_orders_monthly_atomic AS",
         (
-            "b_class.fact_shopee_orders_monthly",
-            "b_class.fact_tiktok_orders_monthly",
-            "b_class.fact_miaoshou_orders_monthly",
-            "core.shop_accounts",
-            "core.shop_account_aliases",
+            "semantic.fact_orders_monthly_atomic_mv",
             "paid_amount",
             "product_quantity",
             "profit",
+        ),
+    )
+    sql_text = Path("sql/semantic/orders_monthly_atomic.sql").read_text(encoding="utf-8")
+    assert "DROP VIEW IF EXISTS semantic.fact_orders_monthly_atomic" not in sql_text
+
+
+def test_orders_monthly_atomic_mv_sql_asset():
+    _assert_sql_asset(
+        "sql/semantic/orders_monthly_atomic_mv.sql",
+        "CREATE MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv AS",
+        (
+            "b_class.fact_shopee_orders_monthly",
+            "b_class.fact_tiktok_orders_monthly",
+            "b_class.fact_miaoshou_orders_monthly",
+            "semantic.shop_identity_resolution_candidates",
+            "paid_amount",
+            "product_quantity",
+            "profit",
+            "ix_fact_orders_monthly_atomic_mv_period_platform_shop",
         ),
     )
 

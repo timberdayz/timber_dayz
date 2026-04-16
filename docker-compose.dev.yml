@@ -9,6 +9,16 @@ services:
   # 开发环境数据库配置覆盖
   # 统一使用与生产环境相同的数据库配置，避免数据库连接混乱
   postgres:
+    command:
+      - postgres
+      - -c
+      - statement_timeout=120s
+      - -c
+      - work_mem=32MB
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - max_parallel_workers_per_gather=4
     ports:
       # 使用 15432 端口避免与本地 PostgreSQL 冲突
       # 容器内部仍使用 5432 端口，容器间通信使用服务名 postgres:5432

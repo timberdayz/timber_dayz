@@ -207,7 +207,7 @@ async def test_component_tester_primes_login_gate_page_skips_when_already_on_rea
     assert page.wait_for_load_state.await_count >= 2
 
 
-def test_component_tester_uses_tiktok_business_probe_url_before_login_url():
+def test_component_tester_skips_tiktok_business_probe_urls_before_login():
     tester = ComponentTester(
         platform="tiktok",
         account_id="acc-1",
@@ -220,9 +220,39 @@ def test_component_tester_uses_tiktok_business_probe_url_before_login_url():
         account_info={"login_url": "https://seller.tiktokglobalshop.com", "shop_region": "SG"},
     )
 
-    assert urls[0] == "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG"
-    assert urls[1] == "https://seller.tiktokglobalshop.com/homepage"
-    assert urls[2] == "https://seller.tiktokglobalshop.com"
+    assert urls == []
+
+
+def test_component_tester_skips_tiktok_services_probe_urls_before_login():
+    tester = ComponentTester(
+        platform="tiktok",
+        account_id="acc-1",
+        runtime_config={"data_domain": "services", "shop_region": "MY"},
+    )
+
+    urls = tester._login_gate_probe_urls(
+        component_type="export",
+        component_name="services_agent_export",
+        account_info={"login_url": "https://seller.tiktokshopglobalselling.com/account/login", "shop_region": "MY"},
+    )
+
+    assert urls == []
+
+
+def test_component_tester_skips_tiktok_analytics_probe_urls_before_login():
+    tester = ComponentTester(
+        platform="tiktok",
+        account_id="acc-1",
+        runtime_config={"data_domain": "analytics", "shop_region": "MY"},
+    )
+
+    urls = tester._login_gate_probe_urls(
+        component_type="export",
+        component_name="analytics_export",
+        account_info={"login_url": "https://seller.tiktokshopglobalselling.com/account/login", "shop_region": "MY"},
+    )
+
+    assert urls == []
 
 
 @pytest.mark.asyncio

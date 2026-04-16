@@ -1295,8 +1295,9 @@ class TiktokDatePicker(DatePickerComponent):
         if not await self._wait_input_value(page, "start", start_date):
             return DatePickResult(success=False, message="failed to apply start date", option=option)
 
-        if not await self._select_end_input(page):
-            return DatePickResult(success=False, message="failed to focus end date input", option=option)
+        if await self._active_boundary(page) != "end":
+            if not await self._select_end_input(page):
+                return DatePickResult(success=False, message="failed to focus end date input", option=option)
         if not await self._wait_boundary_active(page, "end"):
             return DatePickResult(success=False, message="failed to activate end date input", option=option)
         if not same_month_range:

@@ -46,6 +46,8 @@ def test_business_overview_shop_racing_monthly_module_sql_asset():
             "ix_business_overview_shop_racing_monthly_period",
         ),
     )
+    sql_text = Path("sql/api_modules/business_overview_shop_racing_monthly_module.sql").read_text(encoding="utf-8")
+    assert "DROP VIEW IF EXISTS api.business_overview_shop_racing_monthly_module" not in sql_text
 
 
 def test_business_overview_traffic_ranking_module_sql_asset():

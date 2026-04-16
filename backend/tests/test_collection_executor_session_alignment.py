@@ -530,3 +530,77 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
         "https://seller.tiktok.com/homepage",
         "https://seller.tiktok.com/account/login",
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._process_files = AsyncMock(return_value=[])
+
+    class _DummyLock:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    executor.main_account_session_coordinator.acquire = lambda platform, main_account_id: _DummyLock()
+    executor.main_account_session_coordinator.is_locked = lambda platform, main_account_id: False
+    executor.main_account_session_coordinator.waiter_count = lambda platform, main_account_id: 0
+
+    observed = {}
+
+    async def _fake_open_runtime_bundle(**kwargs):
+        observed.update(kwargs)
+        return type(
+            "Bundle",
+            (),
+            {
+                "reused_session": False,
+                "context": type("Ctx", (), {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])})(),
+                "page": type("Page", (), {"close": AsyncMock()})(),
+                "mode": "storage_state_fanout",
+            },
+        )()
+
+    monkeypatch.setattr(executor, "_open_runtime_bundle", _fake_open_runtime_bundle)
+    monkeypatch.setattr(executor, "_ensure_login_gate_ready", AsyncMock())
+    monkeypatch.setattr(
+        executor,
+        "_run_runtime_manifest_component",
+        AsyncMock(return_value=type("R", (), {"success": True})()),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.runtime_session.snapshot_runtime_storage_state",
+        AsyncMock(return_value={"cookies": [], "origins": []}),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
+        AsyncMock(),
+    )
+
+    result = await executor.execute_parallel_domains(
+        task_id="task-1",
+        platform="tiktok",
+        account_id="shop-1",
+        account={
+            "account_id": "shop-1",
+            "shop_account_id": "shop-1",
+            "main_account_id": "main-1",
+            "login_url": "https://seller.tiktok.com/account/login",
+        },
+        data_domains=[],
+        date_range={"start": "2025-01-01", "end": "2025-01-31"},
+        granularity="daily",
+        browser=object(),
+        browser_type=object(),
+        max_parallel=3,
+        debug_mode=False,
+        runtime_manifests={"login": {}, "exports_by_domain": {}},
+    )
+
+    assert result.status == "completed"
+    assert observed["session_runtime_mode"] == "auto"

@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from modules.apps.collection_center.executor_v2 import VerificationRequiredError
 from backend.services.platform_login_entry_service import get_platform_login_entry
@@ -291,14 +292,41 @@ class TiktokLogin(LoginComponent):
     async def _cleanup_after_login(self, page: Any) -> None:
         await self.stabilize_safe_notices(page, label="post-login cleanup")
 
-    async def _homepage_dom_looks_ready(self, page: Any) -> bool:
+    def _configured_shop_region(self) -> str:
         config = self.ctx.config or {}
         account = self.ctx.account or {}
-        region = str(config.get("shop_region") or account.get("shop_region") or "").strip().upper()
+        return str(
+            config.get("shop_region")
+            or account.get("shop_region")
+            or ""
+        ).strip().upper()
+
+    def _homepage_has_region_context(self, url: str) -> bool:
+        current = str(url or "").strip().lower()
+        if "/homepage" not in current:
+            return False
+
+        expected_region = self._configured_shop_region()
+        if not expected_region:
+            return True
+
+        try:
+            query = dict(parse_qsl(urlsplit(str(url or "")).query))
+        except Exception:
+            return False
+
+        resolved_region = str(query.get("shop_region") or "").strip().upper()
+        return resolved_region == expected_region
+
+    async def _homepage_dom_looks_ready(self, page: Any) -> bool:
+        region = self._configured_shop_region()
         signal_count = 0
         current_url = str(getattr(page, "url", "") or "").strip().lower()
 
-        if "/homepage" in current_url:
+        if "/homepage" in current_url and not self._homepage_has_region_context(current_url):
+            return False
+
+        if self._homepage_has_region_context(current_url):
             signal_count += 1
 
         if region:
@@ -364,6 +392,8 @@ class TiktokLogin(LoginComponent):
         current_url = str(getattr(page, "url", "") or "").strip().lower()
         if not self._login_looks_successful(current_url):
             return False
+        if "/homepage" in current_url and not self._homepage_has_region_context(current_url):
+            return False
         if await self._target_looks_ready(page):
             return False
         if await self._is_otp_visible(page):
@@ -412,7 +442,7 @@ class TiktokLogin(LoginComponent):
                 return False
             return await self._data_overview_dom_looks_ready(page)
 
-        if "/homepage" not in cur:
+        if not self._homepage_has_region_context(cur):
             return False
         return await self._homepage_dom_looks_ready(page)
 
@@ -425,7 +455,6 @@ class TiktokLogin(LoginComponent):
         poll_ms: int = 1000,
     ) -> str:
         elapsed = 0
-        session_shell_hits = 0
         while elapsed <= timeout_ms:
             login_error = await self._find_visible_login_error(page)
             if login_error:
@@ -437,13 +466,6 @@ class TiktokLogin(LoginComponent):
 
             if await self._target_looks_ready(page):
                 return "success"
-
-            if await self._session_shell_looks_ready(page):
-                session_shell_hits += 1
-                if session_shell_hits >= 2:
-                    return "success"
-            else:
-                session_shell_hits = 0
 
             if await self._is_otp_visible(page):
                 if phase == "post_credentials":
@@ -544,9 +566,13 @@ class TiktokLogin(LoginComponent):
             if not password:
                 return LoginResult(success=False, message="password is required in account")
 
-            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-            await page.wait_for_timeout(800)
-            await self._wait_for_login_surface_ready(page)
+            current_url = str(getattr(page, "url", "") or "").strip()
+            if "/account/login" in current_url.lower():
+                await self._wait_for_login_surface_ready(page)
+            else:
+                await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+                await page.wait_for_timeout(800)
+                await self._wait_for_login_surface_ready(page)
 
             if self._login_looks_successful(str(getattr(page, "url", "") or "")):
                 await self._cleanup_after_login(page)

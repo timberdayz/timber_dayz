@@ -542,6 +542,13 @@ def _homepage_probe_url(
         return None
 
     if platform == "tiktok":
+        region = str(
+            (account or {}).get("shop_region")
+            or (account or {}).get("region")
+            or ""
+        ).strip().upper()
+        if region:
+            return f"{base_url}/homepage?shop_region={region}"
         return f"{base_url}/homepage"
     if platform == "miaoshou":
         return f"{base_url}/welcome"
@@ -564,6 +571,9 @@ def build_runtime_login_gate_probe_urls(
     platform: str,
     account: Optional[Dict[str, Any]],
 ) -> list[str]:
+    if str(platform or "").strip().lower() == "tiktok":
+        return []
+
     candidates = [
         _homepage_probe_url(platform, account),
         _login_gate_probe_url(platform, account),

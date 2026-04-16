@@ -223,6 +223,7 @@ def _bootstrap_session_from_profile_sync(
                 accept_downloads=False,
                 **launch_options,
             )
+            runtime_session.apply_stealth_init_scripts_sync(context)
             try:
                 storage_state = context.storage_state()
             finally:
@@ -472,6 +473,7 @@ async def _prepare_runtime_page_bundle(
         params["shop_account_id"] = shop_account_id
 
     play_context = await browser_instance.new_context(**context_options)
+    await runtime_session.apply_stealth_init_scripts(play_context)
     page = await play_context.new_page()
     params["reused_session"] = reused_session
 
@@ -1341,7 +1343,8 @@ class CollectionExecutorV2:
             timezone_id='Asia/Shanghai',
             accept_downloads=True,
         )
-        
+        await runtime_session.apply_stealth_init_scripts(context)
+
         return playwright, browser, context
     
     async def execute(
@@ -2198,6 +2201,7 @@ class CollectionExecutorV2:
             logger.debug("Close old runtime context before session recreation failed: %s", e)
 
         new_context = await browser.new_context(**context_options)
+        await runtime_session.apply_stealth_init_scripts(new_context)
         new_page = await new_context.new_page()
         await self._prime_runtime_page_for_login_gate(new_page, platform, account)
         return new_context, new_page
@@ -2236,6 +2240,7 @@ class CollectionExecutorV2:
                 context_options.setdefault("locale", "zh-CN")
 
                 headed_context = await headed_browser.new_context(**context_options)
+                await runtime_session.apply_stealth_init_scripts(headed_context)
                 try:
                     headed_page = await headed_context.new_page()
                     while True:
@@ -4253,6 +4258,7 @@ class CollectionExecutorV2:
                 f"Missing main_account_id for collection execution: shop_account_id={unresolved_shop_account_id}"
             )
         normalized_date_range = normalize_collection_date_range(date_range)
+        runtime_account = _build_runtime_account(platform, account)
         logger.info(f"Task {task_id}: Starting PARALLEL collection for {len(data_domains)} domains (max_parallel={max_parallel}, use_account_session_fingerprint={use_account_session_fingerprint})")
 
         context = TaskContext(
@@ -4301,7 +4307,7 @@ class CollectionExecutorV2:
                 MAIN_ACCOUNT_SESSION_STEP_MESSAGES["preparing_main_account_session"],
             )
             runtime_bundle = await self._open_runtime_bundle(
-                session_runtime_mode="persistent_profile",
+                session_runtime_mode="auto",
                 browser=browser,
                 browser_type=browser_type,
                 platform=platform,
@@ -4550,6 +4556,7 @@ class CollectionExecutorV2:
         progress = 20 + int(70 * domain_index / total_domains)
         try:
             domain_context = await browser.new_context(**opts)
+            await runtime_session.apply_stealth_init_scripts(domain_context)
             domain_page = await domain_context.new_page()
             logger.info(f"Task {task_id}: [{domain_index+1}/{total_domains}] Starting {data_domain} in parallel context")
             await self._update_status(

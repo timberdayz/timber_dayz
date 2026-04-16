@@ -466,6 +466,7 @@ async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id(
 
         async with session_factory() as session:
             await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(session, "semantic.fact_orders_monthly_atomic_mv")
             await execute_sql_target(session, "semantic.fact_orders_monthly_atomic")
             await session.commit()
             rows = (

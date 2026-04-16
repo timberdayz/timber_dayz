@@ -136,6 +136,17 @@ async def test_tiktok_login_homepage_dom_detection_accepts_left_nav_signals_with
 
 
 @pytest.mark.asyncio
+async def test_tiktok_login_homepage_dom_detection_rejects_intermediate_homepage_without_region_context() -> None:
+    component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&register_libra=")
+    page.text_map["TikTok Shop"] = _FakeLocator()
+    page.text_map["棣栭〉"] = _FakeLocator()
+    page.selector_map['a[href*="/homepage"]'] = _FakeLocator()
+
+    assert await component._homepage_dom_looks_ready(page) is False
+
+
+@pytest.mark.asyncio
 async def test_tiktok_login_data_overview_dom_detection_accepts_probe_or_metric_text() -> None:
     component = TiktokLogin(_ctx(config={"params": {"login_success_target": "data_overview"}}))
     page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG")
@@ -182,13 +193,49 @@ def test_tiktok_login_prefers_email_for_email_mode() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tiktok_login_requires_login_url() -> None:
+async def test_tiktok_login_falls_back_to_platform_login_entry_when_login_url_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     component = TiktokLogin(_ctx(account={"username": "user", "password": "pass"}))
+    page = _FakePage("about:blank")
 
-    result = await component.run(_FakePage("https://seller.tiktokglobalshop.com/account/login"))
+    monkeypatch.setattr(
+        "modules.platforms.tiktok.components.login.get_platform_login_entry",
+        lambda platform: "https://seller.tiktokshopglobalselling.com/account/login",
+    )
+    monkeypatch.setattr(component, "_wait_for_login_surface_ready", AsyncMock(return_value=True))
+    monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
+    monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value="bad credentials"))
 
+    result = await component.run(page)
+
+    assert page.goto_calls == ["https://seller.tiktokshopglobalselling.com/account/login"]
     assert result.success is False
-    assert result.message == "login_url is required in account"
+    assert result.message == "bad credentials"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_login_does_not_repeat_goto_when_already_on_login_page_with_ready_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokLogin(_ctx())
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+
+    wait_login_surface = AsyncMock(return_value=True)
+    monkeypatch.setattr(component, "_wait_for_login_surface_ready", wait_login_surface)
+    monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
+    monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value="bad credentials"))
+
+    result = await component.run(page)
+
+    assert page.goto_calls == []
+    wait_login_surface.assert_awaited()
+    assert result.success is False
+    assert result.message == "bad credentials"
 
 
 @pytest.mark.asyncio
@@ -547,6 +594,42 @@ async def test_tiktok_login_post_otp_wait_accepts_homepage_url_plus_left_nav_sig
 
 
 @pytest.mark.asyncio
+async def test_tiktok_login_post_otp_wait_waits_for_region_scoped_homepage_after_intermediate_homepage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+
+    async def _advance_page(ms: int) -> None:
+        page.timeout_calls.append(ms)
+        if len(page.timeout_calls) == 1:
+            page.url = "https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&register_libra="
+            page.text_map["TikTok Shop"] = _FakeLocator()
+            page.text_map["棣栭〉"] = _FakeLocator()
+            page.selector_map['a[href*="/homepage"]'] = _FakeLocator()
+        elif len(page.timeout_calls) >= 2:
+            page.url = "https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&shop_region=SG"
+            page.text_map["SG"] = _FakeLocator()
+            page.text_map["鏁版嵁鍒嗘瀽"] = _FakeLocator()
+            page.selector_map['a[href*="/compass/"]'] = _FakeLocator()
+
+    monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
+
+    outcome = await component._wait_for_post_login_outcome(
+        page,
+        phase="post_otp_submit",
+        timeout_ms=10,
+        poll_ms=1,
+    )
+
+    assert outcome == "success"
+
+
+@pytest.mark.asyncio
 async def test_tiktok_login_post_otp_wait_accepts_authenticated_shell_without_homepage_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -575,7 +658,7 @@ async def test_tiktok_login_post_otp_wait_accepts_authenticated_shell_without_ho
         poll_ms=1,
     )
 
-    assert outcome == "success"
+    assert outcome == "timeout"
 
 
 @pytest.mark.asyncio

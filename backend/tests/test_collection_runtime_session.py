@@ -52,6 +52,9 @@ async def test_open_persistent_runtime_bundle_uses_launch_persistent_context(
     class _FakeContext:
         pages = [page]
 
+        async def add_init_script(self, script: str) -> None:
+            return None
+
         async def new_page(self):
             raise AssertionError("existing page should be reused")
 
@@ -106,6 +109,9 @@ async def test_open_persistent_runtime_bundle_preserves_headed_launch_kwargs(
     class _FakeContext:
         pages = [object()]
 
+        async def add_init_script(self, script: str) -> None:
+            return None
+
     class _FakeBrowserType:
         async def launch_persistent_context(self, **kwargs):
             launch_kwargs.update(kwargs)
@@ -130,6 +136,41 @@ async def test_open_persistent_runtime_bundle_preserves_headed_launch_kwargs(
 
 
 @pytest.mark.asyncio
+async def test_open_persistent_runtime_bundle_does_not_inject_browser_scripts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    profile_path = tmp_path / "profiles" / "tiktok" / "main-1"
+    profile_path.mkdir(parents=True)
+    (profile_path / "Preferences").write_text("{}", encoding="utf-8")
+
+    class _FakeContext:
+        pages = [object()]
+
+        async def add_init_script(self, script: str) -> None:
+            raise AssertionError("formal runtime should not inject browser scripts")
+
+    class _FakeBrowserType:
+        async def launch_persistent_context(self, **kwargs):
+            return _FakeContext()
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.get_persistent_profile_path",
+        lambda self, platform, account_id: profile_path,
+    )
+
+    bundle = await open_persistent_runtime_bundle(
+        browser_type=_FakeBrowserType(),
+        platform="tiktok",
+        session_owner_id="main-1",
+        account={"login_url": "https://seller.tiktok.com"},
+        launch_kwargs={"headless": False},
+    )
+
+    assert bundle.mode == "persistent_profile"
+
+
+@pytest.mark.asyncio
 async def test_open_storage_state_runtime_bundle_uses_new_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -137,6 +178,9 @@ async def test_open_storage_state_runtime_bundle_uses_new_context(
     new_context_kwargs: dict[str, object] = {}
 
     class _FakeContext:
+        async def add_init_script(self, script: str) -> None:
+            return None
+
         async def new_page(self):
             return page
 
@@ -169,6 +213,45 @@ async def test_open_storage_state_runtime_bundle_uses_new_context(
     assert bundle.page is page
     assert new_context_kwargs["accept_downloads"] is True
     assert new_context_kwargs["storage_state"] == {"cookies": [], "origins": []}
+
+
+@pytest.mark.asyncio
+async def test_open_storage_state_runtime_bundle_does_not_inject_browser_scripts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = object()
+
+    class _FakeContext:
+        async def add_init_script(self, script: str) -> None:
+            raise AssertionError("formal runtime should not inject browser scripts")
+
+        async def new_page(self):
+            return page
+
+    class _FakeBrowser:
+        async def new_context(self, **kwargs):
+            return _FakeContext()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.build_runtime_context_options",
+        AsyncMock(
+            return_value={
+                "locale": "zh-CN",
+                "accept_downloads": True,
+                "storage_state": {"cookies": [], "origins": []},
+            }
+        ),
+    )
+
+    bundle = await open_storage_state_runtime_bundle(
+        browser=_FakeBrowser(),
+        platform="tiktok",
+        session_owner_id="main-1",
+        account={"login_url": "https://seller.tiktok.com"},
+        storage_state={"cookies": [], "origins": []},
+    )
+
+    assert bundle.mode == "storage_state_fanout"
 
 
 @pytest.mark.asyncio
@@ -284,16 +367,25 @@ async def test_build_runtime_context_options_uses_standard_headless_viewport_eve
     assert options["viewport"] == {"width": 1920, "height": 1080}
 
 
-def test_build_runtime_login_gate_probe_urls_uses_homepage_then_login_url() -> None:
+def test_build_runtime_login_gate_probe_urls_skips_tiktok_probe_navigation() -> None:
     urls = build_runtime_login_gate_probe_urls(
         platform="tiktok",
         account={"login_url": "https://seller.tiktok.com/account/login"},
     )
 
-    assert urls == [
-        "https://seller.tiktok.com/homepage",
-        "https://seller.tiktok.com/account/login",
-    ]
+    assert urls == []
+
+
+def test_build_runtime_login_gate_probe_urls_skips_region_scoped_homepage_for_tiktok() -> None:
+    urls = build_runtime_login_gate_probe_urls(
+        platform="tiktok",
+        account={
+            "login_url": "https://seller.tiktokshopglobalselling.com/account/login",
+            "shop_region": "SG",
+        },
+    )
+
+    assert urls == []
 
 
 def test_formal_sequential_runtime_prefers_storage_state_when_available() -> None:
@@ -315,7 +407,7 @@ def test_formal_sequential_runtime_prefers_storage_state_when_available() -> Non
 
 
 @pytest.mark.asyncio
-async def test_probe_runtime_login_gate_checks_homepage_after_current_page_miss(
+async def test_probe_runtime_login_gate_does_not_navigate_for_tiktok_after_current_page_miss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Page:
@@ -344,15 +436,6 @@ async def test_probe_runtime_login_gate_checks_homepage_after_current_page_miss(
                     current_url="https://seller.tiktok.com/some-other-page",
                 ),
             ),
-            (
-                True,
-                GateResult(
-                    stage="login_gate",
-                    status=GateStatus.READY,
-                    reason="homepage probe confirmed",
-                    current_url="https://seller.tiktok.com/homepage",
-                ),
-            ),
         ]
     )
 
@@ -365,12 +448,15 @@ async def test_probe_runtime_login_gate_checks_homepage_after_current_page_miss(
     ready, gate_result = await probe_runtime_login_gate(
         page=page,
         platform="tiktok",
-        account={"login_url": "https://seller.tiktok.com/account/login"},
+        account={
+            "login_url": "https://seller.tiktok.com/account/login",
+            "shop_region": "SG",
+        },
     )
 
-    assert ready is True
-    assert gate_result.reason == "homepage probe confirmed"
-    assert page.goto_calls == ["https://seller.tiktok.com/homepage"]
+    assert ready is False
+    assert gate_result.reason == "current page inconclusive"
+    assert page.goto_calls == []
 
 
 @pytest.mark.asyncio

@@ -62,7 +62,9 @@ def test_refresh_registry_exposes_dependency_order():
 
     assert PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == []
     assert SQL_TARGET_PATHS["semantic.fact_orders_atomic"] == "sql/semantic/orders_atomic.sql"
-    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic"] == []
+    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic_mv"] == ["semantic.shop_identity_resolution_candidates"]
+    assert SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic_mv"] == "sql/semantic/orders_monthly_atomic_mv.sql"
+    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic"] == ["semantic.fact_orders_monthly_atomic_mv"]
     assert SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic"] == "sql/semantic/orders_monthly_atomic.sql"
     assert SQL_TARGET_PATHS["api.business_overview_kpi_module"] == "sql/api_modules/business_overview_kpi_module.sql"
     ordered = topologically_sort_targets(
@@ -70,10 +72,12 @@ def test_refresh_registry_exposes_dependency_order():
             "api.business_overview_kpi_module",
             "mart.platform_month_kpi",
             "mart.shop_month_kpi",
+            "semantic.fact_orders_monthly_atomic_mv",
             "semantic.fact_orders_monthly_atomic",
             "semantic.fact_analytics_monthly_atomic",
         ]
     )
+    assert ordered.index("semantic.fact_orders_monthly_atomic_mv") < ordered.index("semantic.fact_orders_monthly_atomic")
     assert ordered.index("semantic.fact_orders_monthly_atomic") < ordered.index("mart.shop_month_kpi")
     assert ordered.index("semantic.fact_analytics_monthly_atomic") < ordered.index("mart.shop_month_kpi")
     assert ordered.index("mart.shop_month_kpi") < ordered.index("mart.platform_month_kpi")
@@ -85,6 +89,8 @@ def test_refresh_runner_builds_step_plan():
 
     plan = build_refresh_plan(["api.business_overview_kpi_module"])
     assert plan == [
+        "semantic.shop_identity_resolution_candidates",
+        "semantic.fact_orders_monthly_atomic_mv",
         "semantic.fact_orders_monthly_atomic",
         "semantic.fact_analytics_monthly_atomic",
         "mart.shop_month_kpi",

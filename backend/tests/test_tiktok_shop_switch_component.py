@@ -97,6 +97,27 @@ class _DelayedRefreshPage(_FakePage):
             self.store_label = self.pending_label or self.store_label
 
 
+class _LoadingBeforeSwitchPage(_FakePage):
+    def __init__(self, url: str, store_label: str, *, target_region: str, loading_waits: int = 2) -> None:
+        super().__init__(url, store_label)
+        self.target_region = target_region
+        self.loading_waits = loading_waits
+        self.events: list[str] = []
+
+    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 20000) -> None:
+        self.events.append(f"goto:{url}")
+        await super().goto(url, wait_until=wait_until, timeout=timeout)
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        self.events.append(f"wait:{ms}")
+        await super().wait_for_timeout(ms)
+
+    def locator(self, selector: str) -> _FakeLocator:
+        if selector in ('[data-tid="m4b_loading"]', ".theme-arco-spin", ".theme-m4b-loading"):
+            return _FakeLocator(visible=len(self.timeout_calls) < self.loading_waits)
+        return super().locator(selector)
+
+
 @pytest.mark.asyncio
 async def test_tiktok_shop_switch_syncs_current_region_and_display_name_from_page() -> None:
     ctx = _ctx(
@@ -218,3 +239,25 @@ async def test_tiktok_shop_switch_waits_for_delayed_region_refresh_before_confir
     assert ctx.config["shop_region"] == "PH"
     assert ctx.config["shop_display_name"] == "PH Philippines(DAJU Mall)"
     assert len(page.timeout_calls) >= 2
+
+
+@pytest.mark.asyncio
+async def test_tiktok_shop_switch_waits_for_page_to_settle_before_rewriting_region() -> None:
+    ctx = _ctx(
+        account={"label": "acc"},
+        config={"shop_region": "MY"},
+    )
+    page = _LoadingBeforeSwitchPage(
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=SG",
+        "SG Singapore(HX Home)",
+        target_region="MY",
+        loading_waits=2,
+    )
+
+    result = await TiktokShopSwitch(ctx).run(page)
+
+    assert result.success is True
+    goto_event = "goto:https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY"
+    assert goto_event in page.events
+    goto_index = page.events.index(goto_event)
+    assert page.events[:goto_index].count("wait:200") >= 2

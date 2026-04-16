@@ -8,6 +8,7 @@ from modules.components.base import ExecutionContext
 from modules.components.export.base import build_standard_output_root
 from modules.components.date_picker.base import DateOption
 from modules.components.export.base import ExportComponent, ExportMode, ExportResult
+from modules.platforms.tiktok.components._navigation import goto_when_ready, wait_until_page_settles
 from modules.platforms.tiktok.components.date_picker import TiktokDatePicker
 from modules.platforms.tiktok.components._download_helpers import (
     cleanup_download_capture,
@@ -103,6 +104,34 @@ class TiktokServicesAgentExport(ExportComponent):
     def _generic_homepage_url(self) -> str:
         return "https://seller.tiktokshopglobalselling.com/homepage"
 
+    async def _page_body_text(self, page: Any) -> str:
+        try:
+            body = page.locator("body")
+            if hasattr(body, "first"):
+                body = body.first
+            if hasattr(body, "inner_text"):
+                return str(await body.inner_text() or "")
+        except Exception:
+            pass
+        return ""
+
+    async def _is_internal_error_page(self, page: Any) -> bool:
+        error_texts = (
+            "Seller Condition is undefined",
+            "出错了",
+            "请重新加载页面",
+        )
+        for text in error_texts:
+            try:
+                locator = page.get_by_text(text, exact=False).first
+                if await self._locator_is_visible(locator, timeout=200):
+                    return True
+            except Exception:
+                continue
+
+        body_text = await self._page_body_text(page)
+        return any(marker in body_text for marker in error_texts)
+
     def _date_option_from_context(self) -> DateOption | None:
         config = self.ctx.config or {}
         params = config.get("params") or {}
@@ -151,38 +180,37 @@ class TiktokServicesAgentExport(ExportComponent):
     async def _run_export(self, page: Any):
         return await TiktokExport(self.ctx).run(page, mode=ExportMode.STANDARD)
 
-    async def ensure_page_ready(self, page: Any) -> str:
-        entry_state = await self._wait_for_entry_state(page)
-        current_url = str(getattr(page, "url", "") or "")
-
-        if entry_state == "login":
-            raise RuntimeError("login required before services agent export")
-
-        region = self._target_region() or self._target_region_from_page_url(current_url)
-
-        if entry_state == "unknown":
-            target_url = self._homepage_url(region) if region else self._generic_homepage_url()
-            await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(800)
+    async def _wait_services_page_settled(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 5000,
+        poll_ms: int = 200,
+    ) -> str:
+        waited = 0
+        while waited <= timeout_ms:
             current_url = str(getattr(page, "url", "") or "")
+            if self._services_page_looks_ready(current_url):
+                return current_url
+            if self._is_login_page(current_url):
+                return current_url
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return str(getattr(page, "url", "") or "")
 
+    async def ensure_page_ready(self, page: Any) -> str:
+        current_url = await wait_until_page_settles(page)
+        if self._is_login_page(current_url) and await self._login_surface_looks_ready(page):
+            raise RuntimeError("login required before services agent export")
         if self._is_login_page(current_url):
             raise RuntimeError("login required before services agent export")
-
         return current_url
 
     async def ensure_shop_ready(self, page: Any, current_url: str) -> str | None:
         region = self._target_region() or self._target_region_from_page_url(current_url)
         if not region:
             return None
-
-        current_page_url = str(getattr(page, "url", "") or "")
-        if not self._is_homepage(current_page_url):
-            homepage_url = self._homepage_url(region)
-            await page.goto(homepage_url, wait_until="domcontentloaded", timeout=60000)
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(800)
 
         self.ctx.config["shop_region"] = region
         switch_result = await self._run_shop_switch(page)
@@ -191,19 +219,21 @@ class TiktokServicesAgentExport(ExportComponent):
         return region
 
     async def ensure_services_ready(self, page: Any) -> str:
-        current_url = str(getattr(page, "url", "") or "")
-        if self._services_page_looks_ready(current_url):
-            return current_url
-
+        current_url = await wait_until_page_settles(page)
         region = self._target_region() or self._target_region_from_page_url(current_url)
         target_url = self._services_page_url(region) if region else self._generic_services_page_url()
-        await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-        if hasattr(page, "wait_for_timeout"):
-            await page.wait_for_timeout(800)
 
-        current_url = str(getattr(page, "url", "") or "")
+        if not self._services_page_looks_ready(current_url):
+            current_url = await goto_when_ready(page, target_url, goto_timeout=60000, settle_timeout_ms=6000, poll_ms=200)
+
+        if await self._is_internal_error_page(page):
+            self._log_info("services_agent_export detected internal error page on first load, retrying once")
+            current_url = await goto_when_ready(page, target_url, goto_timeout=60000, settle_timeout_ms=6000, poll_ms=200)
+
         if self._is_login_page(current_url):
             raise RuntimeError("login required before services agent export")
+        if await self._is_internal_error_page(page):
+            raise RuntimeError("services page internal error")
         return current_url
 
     async def ensure_date_ready(self, page: Any) -> None:
@@ -391,7 +421,7 @@ class TiktokServicesAgentExport(ExportComponent):
         self,
         page: Any,
         *,
-        timeout_ms: int = 4000,
+        timeout_ms: int = 12000,
         poll_ms: int = 200,
     ) -> bool:
         waited = 0
@@ -400,6 +430,11 @@ class TiktokServicesAgentExport(ExportComponent):
         while waited <= timeout_ms:
             if await self._any_visible(page, overview_selectors) and await self._any_visible(page, detail_selectors):
                 return True
+            if await self._any_visible(page, self._loading_selectors(), timeout=150):
+                if hasattr(page, "wait_for_timeout"):
+                    await page.wait_for_timeout(poll_ms)
+                waited += poll_ms
+                continue
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
             waited += poll_ms
@@ -715,8 +750,8 @@ class TiktokServicesAgentExport(ExportComponent):
             return ExportResult(success=False, message=str(exc), file_path=None)
 
         try:
+            current_url = await self.ensure_services_ready(page)
             await self.ensure_shop_ready(page, current_url)
-            await self.ensure_services_ready(page)
         except RuntimeError as exc:
             return ExportResult(success=False, message=str(exc), file_path=None)
 

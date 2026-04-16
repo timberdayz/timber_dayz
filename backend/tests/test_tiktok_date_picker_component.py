@@ -1325,6 +1325,69 @@ async def test_tiktok_date_picker_products_run_fails_when_summary_confirmation_d
 
 
 @pytest.mark.asyncio
+async def test_tiktok_date_picker_services_run_skips_refocusing_end_input_when_page_auto_activates_end_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+
+    monkeypatch.setattr(
+        component,
+        "_resolve_range_for_context",
+        lambda option, today=None: ("2026-03-01", "2026-03-31"),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_current_range_matches", AsyncMock(return_value=False), raising=False)
+    monkeypatch.setattr(component, "_open_panel", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_custom_tab", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=False), raising=False)
+    monkeypatch.setattr(
+        component,
+        "_wait_boundary_active",
+        AsyncMock(side_effect=[True, True]),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_navigate_right_to_month", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(
+        component,
+        "_active_boundary",
+        AsyncMock(return_value="end"),
+        raising=False,
+    )
+
+    result = await component.run(page, DateOption.LAST_30_DAYS)
+
+    assert result.success is True
+    component._select_end_input.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_tiktok_date_picker_open_panel_treats_visible_shortcuts_as_panel_open() -> None:
     component = TiktokDatePicker(_ctx())
     page = _PanelPage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")

@@ -5,6 +5,7 @@ from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from modules.components.base import ExecutionContext
+from modules.platforms.tiktok.components._navigation import goto_when_ready, page_looks_loading, wait_until_page_settles
 
 
 @dataclass
@@ -94,25 +95,8 @@ class TiktokShopSwitch:
         rewritten_query = urlencode(query)
         return urlunsplit((parts.scheme, parts.netloc, parts.path, rewritten_query, parts.fragment))
 
-    async def _locator_visible(self, page: Any, selector: str, timeout: int = 300) -> bool:
-        try:
-            locator = page.locator(selector).first
-            if await locator.count() <= 0:
-                return False
-            return bool(await locator.is_visible(timeout=timeout))
-        except Exception:
-            return False
-
     async def _page_looks_loading(self, page: Any) -> bool:
-        selectors = (
-            '[data-tid="m4b_loading"]',
-            ".theme-arco-spin",
-            ".theme-m4b-loading",
-        )
-        for selector in selectors:
-            if await self._locator_visible(page, selector, timeout=150):
-                return True
-        return False
+        return await page_looks_loading(page)
 
     async def _confirm_target_region_after_refresh(
         self,
@@ -146,7 +130,7 @@ class TiktokShopSwitch:
         return last_region, last_display_name
 
     async def run(self, page: Any) -> ShopSelectResult:
-        current_url = str(getattr(page, "url", "") or "")
+        current_url = await wait_until_page_settles(page, timeout_ms=4000, poll_ms=200)
         current_region = self._current_region_from_url(current_url)
         target_region = self._target_region(current_region)
         if not target_region:
@@ -154,9 +138,13 @@ class TiktokShopSwitch:
 
         if current_region != target_region:
             target_url = self._rewrite_shop_region(current_url, target_region)
-            await page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(800)
+            await goto_when_ready(
+                page,
+                target_url,
+                goto_timeout=20000,
+                settle_timeout_ms=4000,
+                poll_ms=200,
+            )
 
         current_region, display_name = await self._confirm_target_region_after_refresh(page, target_region)
         if current_region != target_region:

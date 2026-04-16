@@ -268,7 +268,7 @@ else:
     # PostgreSQL连接池配置(第二阶段优化)
     # v4.12.0: 配置search_path以支持多schema访问
     connect_args = {
-        "options": "-c statement_timeout=30000 -c idle_in_transaction_session_timeout=120000 -c search_path=public,b_class,a_class,c_class,core,finance"
+        "options": "-c statement_timeout=120000 -c idle_in_transaction_session_timeout=120000 -c search_path=public,b_class,a_class,c_class,core,finance"
     }
     pool_config = {
         "pool_size": settings.DB_POOL_SIZE,
@@ -328,7 +328,7 @@ def set_search_path_on_connect(dbapi_connection, connection_record):
     """每次连接建立时设置 search_path 和事务超时保护"""
     cursor = dbapi_connection.cursor()
     cursor.execute("SET search_path TO public, b_class, a_class, c_class, core, finance")
-    cursor.execute("SET statement_timeout TO 30000")
+    cursor.execute("SET statement_timeout TO 120000")
     cursor.execute("SET idle_in_transaction_session_timeout TO 120000")
     cursor.close()
 

@@ -7,6 +7,16 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: xihong_erp_postgres
+    command:
+      - postgres
+      - -c
+      - statement_timeout=120s
+      - -c
+      - work_mem=32MB
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - max_parallel_workers_per_gather=4
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-erp_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_pass_2025}

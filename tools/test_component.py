@@ -316,6 +316,22 @@ class ComponentTester:
             ).strip().upper()
             base = "https://seller.tiktokshopglobalselling.com/compass/product-analysis"
             return f"{base}?shop_region={region}" if region else base
+        if self.platform == "tiktok" and data_domain == "analytics":
+            region = str(
+                self.runtime_config.get("shop_region")
+                or account.get("shop_region")
+                or ""
+            ).strip().upper()
+            base = "https://seller.tiktokshopglobalselling.com/compass/data-overview"
+            return f"{base}?shop_region={region}" if region else base
+        if self.platform == "tiktok" and data_domain == "services":
+            region = str(
+                self.runtime_config.get("shop_region")
+                or account.get("shop_region")
+                or ""
+            ).strip().upper()
+            base = "https://seller.tiktokshopglobalselling.com/compass/service-analytics"
+            return f"{base}?shop_region={region}" if region else base
 
         return None
 
@@ -337,7 +353,12 @@ class ComponentTester:
             pass
 
         if self.platform == "tiktok":
-            return f"{login_url}/homepage"
+            region = str(
+                self.runtime_config.get("shop_region")
+                or account.get("shop_region")
+                or ""
+            ).strip().upper()
+            return f"{login_url}/homepage?shop_region={region}" if region else f"{login_url}/homepage"
         if self.platform == "miaoshou":
             return f"{login_url}/welcome"
         if self.platform == "shopee":
@@ -359,6 +380,9 @@ class ComponentTester:
         component_name: Optional[str],
         account_info: Optional[Dict[str, Any]],
     ) -> List[str]:
+        if self.platform == "tiktok":
+            return []
+
         candidates = [
             self._business_probe_url(component_type, component_name, account_info),
             self._homepage_probe_url(account_info),

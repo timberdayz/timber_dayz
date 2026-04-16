@@ -262,6 +262,61 @@ class _DelayedReadinessPage(_FakePage):
         return super().locator(selector)
 
 
+class _DelayedTabAreaPage(_FakePage):
+    def __init__(self, url: str, *, tab_visible_after_waits: int = 3) -> None:
+        super().__init__(url)
+        self.loading_visible = True
+        self.tab_visible_after_waits = tab_visible_after_waits
+        self.wait_count = 0
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        self.wait_calls.append(ms)
+        self.wait_count += 1
+        if self.wait_count >= self.tab_visible_after_waits:
+            self.loading_visible = False
+
+    def locator(self, selector: str):
+        if selector in ('[data-tid="m4b_loading"]', ".theme-arco-spin", ".theme-m4b-loading"):
+            return _FakeLocator(visible=self.loading_visible)
+        if '[role="tab"]' in selector:
+            return _FakeLocator(visible=not self.loading_visible)
+        return super().locator(selector)
+
+
+class _DelayedServicesNavigationPage(_FakePage):
+    def __init__(self, url: str, *, settle_after_waits: int = 2) -> None:
+        super().__init__(url)
+        self._pending_url: str | None = None
+        self._settle_after_waits = settle_after_waits
+
+    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+        self.goto_calls.append(url)
+        self._pending_url = url
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        self.wait_calls.append(ms)
+        if self._pending_url is not None and len(self.wait_calls) >= self._settle_after_waits:
+            self.url = self._pending_url
+            self._pending_url = None
+
+
+class _InternalErrorThenReadyServicesPage(_FakePage):
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+        self.goto_count = 0
+
+    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+        self.goto_calls.append(url)
+        self.goto_count += 1
+        self.url = url
+        if self.goto_count == 1:
+            self.body_text = "出错了\n请重新加载页面\nSeller Condition is undefined\n"
+            self.visible_texts.update({"出错了", "请重新加载页面", "Seller Condition is undefined"})
+        else:
+            self.body_text = "客服表现详情\n导出数据\n"
+            self.visible_texts.clear()
+
+
 def test_tiktok_services_agent_export_detects_service_page_url() -> None:
     component = TiktokServicesAgentExport(_ctx())
 
@@ -312,16 +367,44 @@ async def test_tiktok_services_agent_export_navigates_to_services_page_and_runs_
 
 
 @pytest.mark.asyncio
-async def test_tiktok_services_agent_export_switches_shop_context_before_opening_service_analytics(
+async def test_tiktok_services_agent_export_deep_links_directly_from_unknown_logged_in_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/orders/list?shop_region=MY")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    detail_mock = AsyncMock(return_value=True)
+    date_state_mock = AsyncMock(return_value=True)
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/services-agent.xlsx")
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_wait_export_readiness_state", AsyncMock(return_value="ready"))
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+
+    result = await component.run(page)
+
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY"
+    ]
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_switches_shop_context_on_services_page_after_direct_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
     component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
 
-    async def _switch_on_homepage(current_page):
-        assert "/homepage" in str(current_page.url)
-        assert "/compass/service-analytics" not in str(current_page.url)
-        current_page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"
+    async def _switch_on_services_page(current_page):
+        assert "/compass/service-analytics" in str(current_page.url)
+        assert "/homepage" not in str(current_page.url)
+        current_page.url = "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY"
         return type("R", (), {"success": True, "message": "ok"})()
 
     detail_mock = AsyncMock(return_value=True)
@@ -329,7 +412,7 @@ async def test_tiktok_services_agent_export_switches_shop_context_before_opening
     trigger_mock = AsyncMock(return_value=True)
     collect_mock = AsyncMock(return_value="temp/services-agent-my.xlsx")
 
-    monkeypatch.setattr(component, "_run_shop_switch", _switch_on_homepage)
+    monkeypatch.setattr(component, "_run_shop_switch", _switch_on_services_page)
     monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
     monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
     monkeypatch.setattr(component, "_wait_export_readiness_state", AsyncMock(return_value="ready"))
@@ -346,6 +429,69 @@ async def test_tiktok_services_agent_export_switches_shop_context_before_opening
     collect_mock.assert_awaited_once_with(page)
     assert result.success is True
     assert result.file_path == "temp/services-agent-my.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_normalizes_region_on_services_page_without_bouncing_homepage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=SG")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+
+    async def _switch_on_services_page(current_page):
+        assert "/compass/service-analytics" in str(current_page.url)
+        assert "/homepage" not in str(current_page.url)
+        current_page.url = "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY"
+        return type("R", (), {"success": True, "message": "ok"})()
+
+    detail_mock = AsyncMock(return_value=True)
+    date_state_mock = AsyncMock(return_value=True)
+    trigger_mock = AsyncMock(return_value=True)
+    collect_mock = AsyncMock(return_value="temp/services-agent-my.xlsx")
+
+    monkeypatch.setattr(component, "_run_shop_switch", _switch_on_services_page)
+    monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_wait_export_readiness_state", AsyncMock(return_value="ready"))
+    monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
+    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert all("/homepage" not in url for url in page.goto_calls)
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_waits_until_service_analytics_navigation_settles() -> None:
+    page = _DelayedServicesNavigationPage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY",
+        settle_after_waits=2,
+    )
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+
+    current_url = await component.ensure_services_ready(page)
+
+    assert current_url == "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY"
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_retries_once_when_first_services_page_load_hits_internal_error() -> None:
+    page = _InternalErrorThenReadyServicesPage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"
+    )
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+
+    current_url = await component.ensure_services_ready(page)
+
+    assert current_url == "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY"
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY",
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY",
+    ]
 
 
 @pytest.mark.asyncio
@@ -449,6 +595,33 @@ async def test_tiktok_services_agent_export_waits_for_tab_area_ready_before_clic
 
     assert ready is True
     assert page.clicked_selectors == []
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_waits_for_delayed_tab_area_while_loading() -> None:
+    page = _DelayedTabAreaPage(
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY",
+        tab_visible_after_waits=3,
+    )
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY"}))
+
+    ready = await component._wait_tab_area_ready(page, timeout_ms=1000, poll_ms=200)
+
+    assert ready is True
+    assert len(page.wait_calls) >= 2
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_waits_long_enough_for_skeleton_page_tab_area() -> None:
+    page = _DelayedTabAreaPage(
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY",
+        tab_visible_after_waits=25,
+    )
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY"}))
+
+    ready = await component._wait_tab_area_ready(page)
+
+    assert ready is True
 
 
 @pytest.mark.asyncio

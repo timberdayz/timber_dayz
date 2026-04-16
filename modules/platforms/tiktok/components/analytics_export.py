@@ -8,6 +8,7 @@ from modules.components.base import ExecutionContext
 from modules.components.export.base import build_standard_output_root
 from modules.components.date_picker.base import DateOption
 from modules.components.export.base import ExportComponent, ExportMode, ExportResult
+from modules.platforms.tiktok.components._navigation import goto_when_ready, wait_until_page_settles
 from modules.platforms.tiktok.components.date_picker import TiktokDatePicker
 from modules.platforms.tiktok.components._download_helpers import (
     cleanup_download_capture,
@@ -127,37 +128,37 @@ class TiktokAnalyticsExport(ExportComponent):
     async def _run_export(self, page: Any):
         return await TiktokExport(self.ctx).run(page, mode=ExportMode.STANDARD)
 
-    async def ensure_page_ready(self, page: Any) -> str:
-        entry_state = await self._wait_for_entry_state(page)
-        current_url = str(getattr(page, "url", "") or "")
-
-        if entry_state == "login":
-            raise RuntimeError("login required before analytics export")
-
-        region = self._target_region() or self._target_region_from_page_url(current_url)
-        if entry_state == "unknown":
-            target_url = self._homepage_url(region) if region else self._generic_homepage_url()
-            await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(800)
+    async def _wait_analytics_page_settled(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 5000,
+        poll_ms: int = 200,
+    ) -> str:
+        waited = 0
+        while waited <= timeout_ms:
             current_url = str(getattr(page, "url", "") or "")
+            if self._analytics_page_looks_ready(current_url):
+                return current_url
+            if self._is_login_page(current_url):
+                return current_url
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return str(getattr(page, "url", "") or "")
 
+    async def ensure_page_ready(self, page: Any) -> str:
+        current_url = await wait_until_page_settles(page)
+        if self._is_login_page(current_url) and await self._login_surface_looks_ready(page):
+            raise RuntimeError("login required before analytics export")
         if self._is_login_page(current_url):
             raise RuntimeError("login required before analytics export")
-
         return current_url
 
     async def ensure_shop_ready(self, page: Any, current_url: str) -> str | None:
         region = self._target_region() or self._target_region_from_page_url(current_url)
         if not region:
             return None
-
-        current_page_url = str(getattr(page, "url", "") or "")
-        if not self._is_homepage(current_page_url):
-            homepage_url = self._homepage_url(region)
-            await page.goto(homepage_url, wait_until="domcontentloaded", timeout=60000)
-            if hasattr(page, "wait_for_timeout"):
-                await page.wait_for_timeout(800)
 
         if self.ctx.config is None:
             self.ctx.config = {}
@@ -168,17 +169,13 @@ class TiktokAnalyticsExport(ExportComponent):
         return region
 
     async def ensure_analytics_ready(self, page: Any) -> str:
-        current_url = str(getattr(page, "url", "") or "")
+        current_url = await wait_until_page_settles(page)
         if self._analytics_page_looks_ready(current_url):
             return current_url
 
         region = self._target_region() or self._target_region_from_page_url(current_url)
         target_url = self._analytics_page_url(region) if region else self._generic_analytics_page_url()
-        await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-        if hasattr(page, "wait_for_timeout"):
-            await page.wait_for_timeout(800)
-
-        current_url = str(getattr(page, "url", "") or "")
+        current_url = await goto_when_ready(page, target_url, goto_timeout=60000, settle_timeout_ms=6000, poll_ms=200)
         if self._is_login_page(current_url):
             raise RuntimeError("login required before analytics export")
         return current_url
@@ -265,8 +262,8 @@ class TiktokAnalyticsExport(ExportComponent):
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
             current_url = await self.ensure_page_ready(page)
+            current_url = await self.ensure_analytics_ready(page)
             await self.ensure_shop_ready(page, current_url)
-            await self.ensure_analytics_ready(page)
             await self.ensure_date_ready(page)
         except RuntimeError as exc:
             return ExportResult(success=False, message=str(exc), file_path=None)

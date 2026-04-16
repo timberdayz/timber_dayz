@@ -19,6 +19,7 @@ from loguru import logger
 
 
 class DeviceFingerprintManager:
+    TIKTOK_FINGERPRINT_VERSION = "3.0"
     """设备指纹管理器"""
     
     # 扩展的用户代理列表(20+ 不同 UA - v4.7.0 扩展)
@@ -55,6 +56,13 @@ class DeviceFingerprintManager:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 OPR/120.0.0.0",
         # Brave
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Brave/136",
+    ]
+
+    TIKTOK_CHROMIUM_USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
     ]
     
     # 扩展的视口尺寸列表(10+ 常用分辨率 - v4.7.0 扩展)
@@ -246,9 +254,12 @@ class DeviceFingerprintManager:
                 with open(fingerprint_file, 'r', encoding='utf-8') as f:
                     fingerprint = json.load(f)
                 
-                logger.debug(f"加载现有设备指纹: {platform}/{account_id}")
-                return fingerprint
-                
+                if not self._fingerprint_needs_refresh(platform, fingerprint):
+                    logger.debug(f"????????: {platform}/{account_id}")
+                    return fingerprint
+
+                logger.info(f"????????????,?????: {platform}/{account_id}")
+
             except Exception as e:
                 logger.warning(f"加载设备指纹失败,将重新生成: {e}")
         
@@ -273,6 +284,30 @@ class DeviceFingerprintManager:
         if raw.get("Accept-Language"):
             allowed["Accept-Language"] = str(raw["Accept-Language"])
         return allowed
+
+    def _user_agents_for_platform(self, platform: str) -> List[str]:
+        normalized = str(platform or "").strip().lower()
+        if normalized == "tiktok":
+            return list(self.TIKTOK_CHROMIUM_USER_AGENTS)
+        return list(self.STABLE_USER_AGENTS)
+
+    def _fingerprint_needs_refresh(self, platform: str, fingerprint: Dict[str, Any]) -> bool:
+        normalized = str(platform or "").strip().lower()
+        if normalized != "tiktok":
+            return False
+
+        if str(fingerprint.get("version") or "").strip() != self.TIKTOK_FINGERPRINT_VERSION:
+            return True
+
+        user_agent = str(fingerprint.get("user_agent") or "").strip()
+        if user_agent not in self.TIKTOK_CHROMIUM_USER_AGENTS:
+            return True
+
+        headers = dict(fingerprint.get("extra_http_headers") or {})
+        if set(headers.keys()) != {"Accept-Language"}:
+            return True
+
+        return False
     
     def _generate_fingerprint(
         self, 
@@ -296,10 +331,13 @@ class DeviceFingerprintManager:
         seed_int = int(seed[:8], 16)
         
         # 基于种子选择稳定的配置
-        ua_index = seed_int % len(self.STABLE_USER_AGENTS)
+        user_agents = self._user_agents_for_platform(platform)
+
+        # ???????????
+        ua_index = seed_int % len(user_agents)
         viewport_index = seed_int % len(self.COMMON_VIEWPORTS)
-        
-        user_agent = self.STABLE_USER_AGENTS[ua_index]
+
+        user_agent = user_agents[ua_index]
         viewport = self.COMMON_VIEWPORTS[viewport_index].copy()
         
         # 从账号配置中获取地区信息,使用地区模板(v4.7.0 扩展)
@@ -311,16 +349,19 @@ class DeviceFingerprintManager:
                 or "CN"
             ).upper()
         
-        # 获取地区模板配置
-        region_template = self.REGION_TEMPLATES.get(region, self.REGION_TEMPLATES["CN"])
+        # TikTok 运行环境固定为中国卖家环境；shop_region 只用于业务上下文，不驱动浏览器地区人格
+        if str(platform or "").strip().lower() == "tiktok":
+            region_template = self.REGION_TEMPLATES["CN"]
+        else:
+            region_template = self.REGION_TEMPLATES.get(region, self.REGION_TEMPLATES["CN"])
         
         locale = region_template["locale"]
         timezone = region_template["timezone"]
         accept_language = region_template["accept_language"]
         currency = region_template.get("currency", "CNY")
         
-        # 允许账号配置覆盖默认值
-        if account_config:
+        # TikTok ??????????????????? locale/timezone?
+        if account_config and str(platform or "").strip().lower() != "tiktok":
             timezone = account_config.get("timezone", timezone)
             locale = account_config.get("locale", locale)
         
@@ -350,7 +391,7 @@ class DeviceFingerprintManager:
                 "microphone": "denied",
             },
             "created_at": __import__("time").time(),
-            "version": "2.0"  # v4.7.0 升级版本号
+            "version": self.TIKTOK_FINGERPRINT_VERSION if str(platform or "").strip().lower() == "tiktok" else "2.0"  # v4.7.0 ?????
         }
         
         return fingerprint

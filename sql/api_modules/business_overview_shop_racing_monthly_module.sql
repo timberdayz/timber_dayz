@@ -1,6 +1,5 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
-DROP VIEW IF EXISTS api.business_overview_shop_racing_monthly_module;
 DROP MATERIALIZED VIEW IF EXISTS api.business_overview_shop_racing_monthly_module;
 
 CREATE MATERIALIZED VIEW api.business_overview_shop_racing_monthly_module AS
