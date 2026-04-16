@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from backend.services.profit_basis_service import ProfitBasisService
+from modules.core.db import DimFiscalCalendar
 
 
 class _MockMappingsResult:
@@ -191,10 +192,12 @@ async def test_upsert_profit_basis_snapshot_creates_new_snapshot():
     result = await service.upsert_profit_basis_snapshot(payload)
 
     assert result == payload
-    assert len(added) == 1
-    assert getattr(added[0], "period_month") == "2026-03"
-    assert getattr(added[0], "shop_id") == "shop-1"
-    db.commit.assert_awaited_once()
+    assert len(added) == 2
+    assert isinstance(added[0], DimFiscalCalendar)
+    assert added[0].period_code == "2026-03"
+    assert getattr(added[1], "period_month") == "2026-03"
+    assert getattr(added[1], "shop_id") == "shop-1"
+    assert db.commit.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -233,3 +236,63 @@ async def test_upsert_profit_basis_snapshot_updates_existing_snapshot():
     assert existing.a_class_cost_amount == pytest.approx(1500.0)
     assert existing.profit_basis_amount == pytest.approx(2500.0)
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_fiscal_period_exists_creates_missing_period():
+    db = AsyncMock()
+    added = []
+    db.add = lambda row: added.append(row)
+    service = ProfitBasisService(db)
+
+    db.execute = AsyncMock(return_value=_MockMappingsResult([]))
+
+    await service.ensure_fiscal_period_exists("2026-04")
+
+    assert len(added) == 1
+    assert isinstance(added[0], DimFiscalCalendar)
+    assert added[0].period_code == "2026-04"
+    assert added[0].period_year == 2026
+    assert added[0].period_month == 4
+    assert added[0].start_date.isoformat() == "2026-04-01"
+    assert added[0].end_date.isoformat() == "2026-04-30"
+    assert added[0].status == "open"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_upsert_profit_basis_snapshot_ensures_period_before_insert():
+    db = AsyncMock()
+    added = []
+    db.add = lambda row: added.append(row)
+    service = ProfitBasisService(db)
+
+    def _execute_side_effect(stmt, *args, **kwargs):
+        sql = str(stmt)
+        if "FROM core.dim_fiscal_calendar" in sql:
+            return _MockMappingsResult([])
+        if "FROM finance.shop_profit_basis" in sql:
+            return _MockMappingsResult([])
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+    db.execute = AsyncMock(side_effect=_execute_side_effect)
+
+    payload = {
+        "period_month": "2026-04",
+        "platform_code": "shopee",
+        "shop_id": "shop-1",
+        "orders_profit_amount": 0.0,
+        "a_class_cost_amount": 0.0,
+        "b_class_cost_amount": 0.0,
+        "profit_basis_amount": 0.0,
+        "basis_version": "A_ONLY_V1",
+    }
+
+    await service.upsert_profit_basis_snapshot(payload)
+
+    assert len(added) == 2
+    assert isinstance(added[0], DimFiscalCalendar)
+    assert added[0].period_code == "2026-04"
+    assert getattr(added[1], "period_month") == "2026-04"
+    assert getattr(added[1], "shop_id") == "shop-1"
+    assert db.commit.await_count == 2

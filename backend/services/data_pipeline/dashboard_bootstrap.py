@@ -69,6 +69,9 @@ async def inspect_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
 
 
 async def bootstrap_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
+    # Bootstrap may rebuild large semantic/materialized assets and can exceed
+    # the normal 120s query timeout configured for interactive runtime traffic.
+    await session.execute(text("SET LOCAL statement_timeout = 0"))
     await execute_sql_file(session, "sql/ops/create_pipeline_tables.sql")
     await execute_sql_file(session, "sql/ops/create_field_alias_rules.sql")
     run_id = await execute_refresh_plan(

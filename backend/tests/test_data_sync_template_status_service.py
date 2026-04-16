@@ -282,3 +282,80 @@ async def test_template_status_service_returns_missing_without_template(
 
     assert status["template_status"] == "missing"
     assert status["has_template"] is False
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_monthly_semantic_aliases_allow_auto_sync(
+    template_status_session_factory, tmp_path
+):
+    from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
+
+    file_path = tmp_path / "shopee_products_monthly.xlsx"
+    file_path.write_text("demo", encoding="utf-8")
+    now = datetime.now(timezone.utc)
+
+    async with template_status_session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="products",
+            granularity="monthly",
+            sub_domain=None,
+            template_name="shopee_products__monthly_v7",
+            version=7,
+            status="published",
+            header_row=0,
+            header_columns=[
+                "商品编号",
+                "销售额（已下订单） (MXN)",
+                "销售额（已付款订单） (MXN)",
+                "订单转化率（已付款订单）",
+                "已付款订单",
+                "件数（已付款订单）",
+                "买家数（已付款订单）",
+                "转化率（已付款订单）",
+                "每笔订单销售额（已付款订单） (MXN)",
+                "订单复购率（已付款订单）",
+                "订单复购的平均天数（已付款订单）",
+            ],
+            created_at=now,
+            updated_at=now,
+        )
+        catalog_file = CatalogFile(
+            file_path=str(file_path),
+            file_name=file_path.name,
+            source="data/raw",
+            platform_code="shopee",
+            source_platform="shopee",
+            data_domain="products",
+            granularity="monthly",
+            status="pending",
+            first_seen_at=now,
+        )
+        session.add_all([template, catalog_file])
+        await session.commit()
+        await session.refresh(template)
+        await session.refresh(catalog_file)
+
+        service = DataSyncTemplateStatusService(session)
+        status = await service.evaluate_catalog_file(
+            catalog_file,
+            template=template,
+            current_columns=[
+                "商品编号",
+                "销售额（已下订单） (PHP)",
+                "销售额（已确定订单） (PHP)",
+                "订单转化率（已确认订单）",
+                "已确定订单",
+                "件数（已确定订单）",
+                "买家数（已确定订单）",
+                "转化率（已确定订单）",
+                "每笔订单销售额（已确认订单） (PHP)",
+                "订单复购率（已确认订单）",
+                "订单复购的平均天数（已确认订单）",
+            ],
+        )
+
+    assert status["template_status"] in {"ready", "alias_only"}
+    assert status["template_update_required"] is False
+    assert status["should_auto_sync"] is True
+    assert status["semantic_match"] is True

@@ -33,6 +33,18 @@ class TiktokLogin(LoginComponent):
 
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
+        self._runtime_logger = getattr(ctx, "logger", None)
+
+    def _log_info(self, message: str, *args) -> None:
+        if self._runtime_logger is None:
+            return
+        try:
+            self._runtime_logger.info(message, *args)
+        except Exception:
+            pass
+
+    def _log_url_event(self, label: str, url: str) -> None:
+        self._log_info("tiktok_login %s url=%s", label, str(url or "").strip())
 
     def _login_looks_successful(self, url: str) -> bool:
         cur = str(url or "").strip().lower()
@@ -455,25 +467,37 @@ class TiktokLogin(LoginComponent):
         poll_ms: int = 1000,
     ) -> str:
         elapsed = 0
+        last_logged_url = str(getattr(page, "url", "") or "").strip()
+        self._log_url_event(f"{phase}_wait_start", last_logged_url)
         while elapsed <= timeout_ms:
+            current_url = str(getattr(page, "url", "") or "").strip()
+            if current_url != last_logged_url:
+                self._log_url_event(f"{phase}_url_change", current_url)
+                last_logged_url = current_url
+
             login_error = await self._find_visible_login_error(page)
             if login_error:
+                self._log_info("tiktok_login %s login_error=%s", phase, login_error)
                 return "login_error"
 
             otp_error = await self._find_visible_otp_error(page)
             if otp_error and phase == "post_otp_submit":
+                self._log_info("tiktok_login %s otp_error=%s", phase, otp_error)
                 return "otp_error"
 
             if await self._target_looks_ready(page):
+                self._log_url_event(f"{phase}_target_ready", last_logged_url)
                 return "success"
 
             if await self._is_otp_visible(page):
                 if phase == "post_credentials":
+                    self._log_url_event(f"{phase}_otp_visible", last_logged_url)
                     return "otp"
 
             await page.wait_for_timeout(poll_ms)
             elapsed += poll_ms
 
+        self._log_url_event(f"{phase}_timeout", last_logged_url)
         return "timeout"
 
     async def _raise_otp_verification_required(self, page: Any, config: dict[str, Any]) -> None:
@@ -531,6 +555,7 @@ class TiktokLogin(LoginComponent):
         manual_completed = bool(params.get("manual_completed"))
 
         if self._login_looks_successful(current_url):
+            self._log_url_event("already_logged_in", current_url)
             await self._cleanup_after_login(page)
             return LoginResult(success=True, message="already logged in")
 
@@ -561,6 +586,8 @@ class TiktokLogin(LoginComponent):
                 )
 
             login_url = str(acc.get("login_url") or get_platform_login_entry(self.platform)).strip()
+            self._log_url_event("run_start", current_url)
+            self._log_url_event("login_entry", login_url)
 
             password = str(acc.get("password") or "").strip()
             if not password:
@@ -568,22 +595,29 @@ class TiktokLogin(LoginComponent):
 
             current_url = str(getattr(page, "url", "") or "").strip()
             if "/account/login" in current_url.lower():
+                self._log_url_event("login_surface_reuse", current_url)
                 await self._wait_for_login_surface_ready(page)
             else:
+                self._log_url_event("goto_login_before", current_url)
                 await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+                self._log_url_event("goto_login_after", getattr(page, "url", ""))
                 await page.wait_for_timeout(800)
                 await self._wait_for_login_surface_ready(page)
 
             if self._login_looks_successful(str(getattr(page, "url", "") or "")):
+                self._log_url_event("login_short_circuit_success", getattr(page, "url", ""))
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
 
             target_mode = "phone" if str(acc.get("phone") or "").strip() else "email"
             await self._ensure_login_mode(page, target_mode)
             await self._fill_credentials(page, acc)
+            self._log_url_event("credentials_filled", getattr(page, "url", ""))
             await self._submit_credentials(page)
+            self._log_url_event("credentials_submitted", getattr(page, "url", ""))
             outcome = await self._wait_for_post_login_outcome(page, phase="post_credentials")
             if outcome == "success":
+                self._log_url_event("login_success", getattr(page, "url", ""))
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
             if outcome == "login_error":

@@ -7,7 +7,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
-from modules.core.db import ShopProfitBasis
+from modules.core.db import DimFiscalCalendar, ShopProfitBasis
 
 
 def _shop_key(platform_code: Any, shop_id: Any) -> str:
@@ -29,6 +29,27 @@ def _month_bounds(year_month: str) -> tuple[date, date]:
 class ProfitBasisService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def ensure_fiscal_period_exists(self, year_month: str) -> None:
+        existing_period = (
+            await self.db.execute(
+                select(DimFiscalCalendar).where(DimFiscalCalendar.period_code == year_month)
+            )
+        ).scalar_one_or_none()
+        if existing_period is not None:
+            return
+
+        period_start, next_month = _month_bounds(year_month)
+        period = DimFiscalCalendar(
+            period_year=period_start.year,
+            period_month=period_start.month,
+            period_code=year_month,
+            start_date=period_start,
+            end_date=next_month - timedelta(days=1),
+            status="open",
+        )
+        self.db.add(period)
+        await self.db.commit()
 
     async def _load_orders_profit_amount(
         self,
@@ -92,6 +113,8 @@ class ProfitBasisService:
         }
 
     async def upsert_profit_basis_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        await self.ensure_fiscal_period_exists(payload["period_month"])
+
         record = (
             await self.db.execute(
                 select(ShopProfitBasis).where(

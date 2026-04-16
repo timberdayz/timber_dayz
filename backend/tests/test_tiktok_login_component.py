@@ -9,9 +9,18 @@ from modules.components.base import ExecutionContext
 from modules.platforms.tiktok.components.login import TiktokLogin
 
 
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.infos: list[str] = []
+
+    def info(self, message: str, *args) -> None:
+        self.infos.append(message % args if args else message)
+
+
 def _ctx(
     account: dict | None = None,
     config: dict | None = None,
+    logger=None,
 ) -> ExecutionContext:
     return ExecutionContext(
         platform="tiktok",
@@ -22,7 +31,7 @@ def _ctx(
             "phone": "18876067809",
             "login_url": "https://seller.tiktokglobalshop.com/account/login",
         },
-        logger=None,
+        logger=logger,
         config=config or {},
     )
 
@@ -525,6 +534,46 @@ async def test_tiktok_login_post_otp_wait_supports_data_overview_target(
     )
 
     assert outcome == "success"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_login_logs_url_transitions_during_post_login_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = _FakeLogger()
+    component = TiktokLogin(
+        _ctx(
+            config={"shop_region": "SG"},
+            logger=logger,
+        )
+    )
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+
+    async def _advance_page(ms: int) -> None:
+        page.timeout_calls.append(ms)
+        if len(page.timeout_calls) == 1:
+            page.url = "https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&register_libra="
+        elif len(page.timeout_calls) >= 2:
+            page.url = "https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&shop_region=SG"
+            page.text_map["SG"] = _FakeLocator()
+            page.text_map["数据分析"] = _FakeLocator()
+
+    monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
+
+    outcome = await component._wait_for_post_login_outcome(
+        page,
+        phase="post_otp_submit",
+        timeout_ms=10,
+        poll_ms=1,
+    )
+
+    assert outcome == "success"
+    assert any("region_check=1&register_libra=" in message for message in logger.infos)
+    assert any("shop_region=SG" in message for message in logger.infos)
 
 
 @pytest.mark.asyncio

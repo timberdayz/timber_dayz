@@ -1,7 +1,6 @@
 CREATE SCHEMA IF NOT EXISTS semantic;
 
-DROP VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv;
-DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv;
+DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv CASCADE;
 
 CREATE MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv AS
 WITH raw_monthly_orders AS (

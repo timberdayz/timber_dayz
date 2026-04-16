@@ -90,6 +90,9 @@ def test_orders_monthly_atomic_mv_sql_asset():
             "ix_fact_orders_monthly_atomic_mv_period_platform_shop",
         ),
     )
+    sql_text = Path("sql/semantic/orders_monthly_atomic_mv.sql").read_text(encoding="utf-8")
+    assert "DROP VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv" not in sql_text
+    assert "DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv CASCADE" in sql_text
 
 
 def test_analytics_monthly_atomic_sql_asset():
