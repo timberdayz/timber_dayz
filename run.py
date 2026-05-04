@@ -507,7 +507,7 @@ def _report_migrate_failure(reason):
     return False
 
 
-def start_services_with_docker_compose(use_collection=False):
+def start_services_with_docker_compose(use_collection=False, runtime_mode="production"):
     """使用Docker Compose启动服务（v4.19.6新增，生产模式：确保所有服务在容器中运行）
     use_collection: 若为 True，加载 docker-compose.collection-dev.yml，使 backend 使用 Dockerfile.collection（带 Playwright）
     """
@@ -602,11 +602,14 @@ def start_services_with_docker_compose(use_collection=False):
         compose_files.extend(["-f", str(compose_collection_dev)])
         safe_print("  [INFO] 已加载采集开发配置（backend 使用 Dockerfile.collection，端口 8001）")
     
+    compose_env = os.environ.copy()
+    compose_env["APP_RUNTIME_MODE"] = runtime_mode
+
     try:
         # 启动Redis和PostgreSQL
         safe_print("  [启动] Redis和PostgreSQL...")
         cmd = compose_command + compose_files + ["--profile", "dev", "up", "-d", "redis", "postgres"]
-        result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='ignore')
+        result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='ignore', env=compose_env)
         if result.returncode != 0:
             error_msg = result.stderr or result.stdout or "未知错误"
             safe_print(f"  [WARNING] Docker Compose启动失败: {error_msg[:200]}")
@@ -649,7 +652,7 @@ def start_services_with_docker_compose(use_collection=False):
         try:
             cmd = compose_command + compose_files + ["--profile", profile_name, "up", "-d", "backend"]
             # [FIX] 增加超时到300秒（5分钟），首次构建需要更长时间
-            result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore')
+            result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore', env=compose_env)
             
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "未知错误"
@@ -968,6 +971,17 @@ def _resolve_npm_path():
     return None
 
 
+def _resolve_backend_runtime_mode(args):
+    """Resolve the backend runtime mode for local or docker startup paths."""
+    if getattr(args, "frontend_only", False):
+        return None
+    if getattr(args, "local", False):
+        return "development"
+    if getattr(args, "use_docker", False):
+        return "collector" if getattr(args, "collection", False) else "production"
+    return "development"
+
+
 def _frontend_has_cli_dependency(frontend_dir, package_name):
     """检查前端关键 CLI 依赖是否已正确安装，避免空 node_modules 误判为可启动。"""
     package_dir = frontend_dir / "node_modules" / package_name
@@ -979,7 +993,7 @@ def _frontend_has_cli_dependency(frontend_dir, package_name):
     return any((bin_dir / candidate).exists() for candidate in candidates)
 
 
-def start_backend():
+def start_backend(runtime_mode="development"):
     """启动本地后端服务。"""
     safe_print("\n[启动] 后端服务...")
     safe_print(f"  地址: http://localhost:{ACTIVE_BACKEND_PORT}")
@@ -993,9 +1007,9 @@ def start_backend():
         work_dir = str(project_root.resolve())
         work_dir_ps = work_dir.replace("'", "''")
         inner_cmd = (
-            "`$env:PYTHONPATH='{}'; python -m uvicorn backend.main:app "
+            "`$env:PYTHONPATH='{}'; `$env:APP_RUNTIME_MODE='{}'; python -m uvicorn backend.app.main:app "
             "--host 127.0.0.1 --port {} --loop asyncio"
-        ).format(work_dir_ps, ACTIVE_BACKEND_PORT)
+        ).format(work_dir_ps, runtime_mode, ACTIVE_BACKEND_PORT)
         cmd = (
             'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" '
             '-WorkingDirectory "{}"'
@@ -1010,12 +1024,14 @@ def start_backend():
         safe_print("  提示: 查看新打开的 PowerShell 窗口获取详细日志")
         return process
 
+    env = os.environ.copy()
+    env["APP_RUNTIME_MODE"] = runtime_mode
     process = subprocess.Popen(
         [
             sys.executable,
             "-m",
             "uvicorn",
-            "backend.main:app",
+            "backend.app.main:app",
             "--host",
             "0.0.0.0",
             "--port",
@@ -1023,6 +1039,7 @@ def start_backend():
             "--reload",
         ],
         cwd=project_root,
+        env=env,
     )
     safe_print("  [OK] 后端服务已启动")
     return process
@@ -1278,6 +1295,7 @@ def main():
         help="本地采集测试模式：Docker 启动 postgres、redis、celery-worker、celery-beat，本机启动后端与前端",
     )
     args = parser.parse_args()
+    backend_runtime_mode = _resolve_backend_runtime_mode(args)
 
     print_banner()
     project_root = Path(__file__).resolve().parent
@@ -1296,6 +1314,7 @@ def main():
         if not args.frontend_only:
             docker_success = start_services_with_docker_compose(
                 use_collection=args.collection,
+                runtime_mode=backend_runtime_mode or "production",
             )
             if not docker_success:
                 safe_print("\n[ERROR] Docker Compose 启动失败")
@@ -1352,7 +1371,7 @@ def main():
                 safe_print("\n[ERROR] PostgreSQL Dashboard 资产检查失败")
                 raise SystemExit(1)
 
-            backend_process = start_backend()
+            backend_process = start_backend(runtime_mode=backend_runtime_mode or "development")
             if backend_process is None:
                 safe_print("\n[ERROR] 后端服务未启动")
                 raise SystemExit(1)
