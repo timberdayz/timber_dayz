@@ -1,4 +1,4 @@
-"""
+﻿"""
 角色管理API路由
 """
 
@@ -334,7 +334,3 @@ async def get_available_permissions(
     ]
     
     return permissions
-from backend.domains.platform.routers.roles import *  # noqa: F403
-
-# Compatibility shim: preserve legacy import path (`backend.routers.roles`) while
-# the router is physically relocated under the platform domain.
