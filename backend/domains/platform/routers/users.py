@@ -1,4 +1,4 @@
-"""
+﻿"""
 用户管理API路由 - 聚合入口
 
 将 users_admin 和 users_me 的子路由合并为单一 router，
@@ -16,7 +16,3 @@ from backend.dependencies.auth import require_admin  # noqa: F401
 router = APIRouter()
 router.include_router(_admin_router)
 router.include_router(_me_router)
-from backend.domains.platform.routers.users import *  # noqa: F403
-
-# Compatibility shim: preserve legacy import path (`backend.routers.users`) while
-# the router is physically relocated under the platform domain.

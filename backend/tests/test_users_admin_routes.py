@@ -140,9 +140,9 @@ async def test_notification_quick_approve_promotes_pending_user():
             sql = str(statement)
             if "FROM notifications" in sql:
                 return _ScalarResult(notification)
-            if "FROM dim_users" in sql:
+            if "FROM dim_users" in sql or "FROM core.dim_users" in sql:
                 return _ScalarResult(target_user)
-            if "FROM dim_roles" in sql:
+            if "FROM dim_roles" in sql or "FROM core.dim_roles" in sql:
                 return _ScalarResult(operator_role)
             return _ScalarResult([])
 
