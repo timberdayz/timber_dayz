@@ -871,6 +871,10 @@ def create_app(runtime_mode: str | None = None) -> FastAPI:
 
 
 _LEGACY_ROUTE_REGISTRATION_NOTES = """
+NOTE: 此段历史 `app.include_router(...)` 注册片段已归档到
+`docs/DEVELOPMENT_RULES/legacy/MAIN_PY_ROUTE_REGISTRATION.md`。
+当前运行态路由注册以 `backend.app.runtime.bootstrap_app` 为准。
+
 logger.info("Dashboard router source: PostgreSQL")
 app.include_router(dashboard_api_postgresql.router, tags=["Dashboard"])
 
