@@ -70,6 +70,26 @@ For high-frequency homepage reads:
 
 Production homepage reads should stop at `api` whenever possible.
 
+### Principle 1.1: Online Query Policy (B)
+
+This track adopts a "medium constraint" policy for the business overview read path.
+
+Allowed in production online dashboard reads (FastAPI request path):
+
+- Read from `api.*` read models and lightweight service composition around them.
+- Read from `mart.*` aggregates when a module does not yet have a dedicated `api.*` read model.
+- Join stable dimension tables for display (for example `core.dim_shops`, `core.shop_accounts`, `core.main_accounts`).
+
+Forbidden in production online dashboard reads:
+
+- Request-time parsing/cleaning/deduplication of `b_class` JSON (`raw_data->>`), including `REGEXP_REPLACE`, ad hoc type casting fixes, and window deduplication intended to repair ingestion artifacts.
+- Direct reads from `b_class.*` persistence tables.
+
+Rationale:
+
+- `b_class` is persistence, not a query API.
+- heavy mapping/cleaning belongs in `semantic` (normalization) and `mart` (reusable aggregates), or pre-shaped into `api` read models for page consumption.
+
 ### Principle 2: First-screen data is not the same as secondary analytics
 
 The page should distinguish between:
@@ -137,6 +157,15 @@ Target:
 
 - move monthly KPI reads to a stable `mart/api` read model
 - eliminate homepage dependence on request-time raw JSON parsing and deduplication
+
+### Current Deviations To Remove (as of 2026-05-05)
+
+These are known violations of the Query Policy (B) and must be removed as part of this track:
+
+1. Business overview KPI monthly runtime path reads `b_class` and parses `raw_data` at request time.
+   - Fix direction: read from `api.business_overview_kpi_module` (backed by `mart.platform_month_kpi`) or an equivalent `mart` aggregate path.
+2. Business overview traffic ranking service method bypasses `api.business_overview_traffic_ranking_module` and reads from the `mart` source table directly.
+   - Fix direction: either (a) standardize on `api.business_overview_traffic_ranking_module` for reads, or (b) explicitly retire the unused module and document the sanctioned `mart` read path. The system must not keep both "intended" and "actual" read paths silently diverging.
 
 ### Clearance and Inventory Modules
 
@@ -239,3 +268,15 @@ This design is successful when:
 - the dashboard read path is more uniform and easier to reason about
 - business overview performance work aligns with the repository simplification strategy rather than living as a separate special case
 
+## Enforcement (Gates)
+
+This track is considered incomplete until it becomes difficult to regress.
+
+Required gates:
+
+1. SQL source policy tests
+   - Add/extend tests that capture SQL executed by `backend/services/postgresql_dashboard_service.py` business overview methods and assert:
+     - it does not include `raw_data->>` or `REGEXP_REPLACE`
+     - it does not read `b_class.`
+2. Read-model preference tests
+   - Add/extend tests that assert critical-tier modules read `api.*` read models (or approved `mart.*` fallbacks) rather than ad hoc request-time aggregation.
