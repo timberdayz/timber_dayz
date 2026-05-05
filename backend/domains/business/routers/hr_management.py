@@ -13,11 +13,11 @@ v4.21.0: 拆分为五个子模块以保持每文件 <= 15 个端点:
 
 from fastapi import APIRouter
 
-from backend.routers.hr_department import router as hr_department_router
-from backend.routers.hr_employee import router as hr_employee_router
-from backend.routers.hr_attendance import router as hr_attendance_router
-from backend.routers.hr_salary import router as hr_salary_router
-from backend.routers.hr_commission import router as hr_commission_router
+from backend.domains.business.routers.hr_department import router as hr_department_router
+from backend.domains.business.routers.hr_employee import router as hr_employee_router
+from backend.domains.business.routers.hr_attendance import router as hr_attendance_router
+from backend.domains.business.routers.hr_salary import router as hr_salary_router
+from backend.domains.business.routers.hr_commission import router as hr_commission_router
 
 router = APIRouter()
 router.include_router(hr_department_router)
