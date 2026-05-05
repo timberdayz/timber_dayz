@@ -27,6 +27,13 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import os  # [*] v6.0.0新增:用于检查 CSRF_ENABLED 环境变量
 
+from backend.domains.platform.compat.notifications import (
+    notify_account_locked,
+    notify_account_unlocked,
+    notify_user_registered,
+    revoke_all_user_sessions,
+)
+
 logger = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["认证管理"])
 security = HTTPBearer(auto_error=False)  # [*] v6.0.0修改:auto_error=False 允许可选认证(支持 Cookie)
@@ -115,7 +122,6 @@ async def register(
             logger.warning(f"[approval-center] failed to submit re-registration approval: {exc}")
         
         # v4.19.0: 通知管理员有新用户注册
-        from backend.routers.notifications import notify_user_registered
         await notify_user_registered(
             db=db,
             user_id=existing_user_by_username.user_id,
@@ -198,7 +204,6 @@ async def register(
         logger.warning(f"[approval-center] failed to submit user registration approval: {exc}")
     
     # v4.19.0: 通知管理员有新用户注册
-    from backend.routers.notifications import notify_user_registered
     await notify_user_registered(
         db=db,
         user_id=user.user_id,
@@ -316,7 +321,6 @@ async def login(
         await db.commit()
         
         # v4.19.0 P1:发送自动解锁通知
-        from backend.routers.notifications import notify_account_unlocked
         await notify_account_unlocked(
             db=db,
             user_id=user.user_id,
@@ -352,7 +356,6 @@ async def login(
             user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=lockout_duration_minutes)
             
             # v4.19.0 P0安全要求:账户锁定后强制撤销所有活跃会话
-            from backend.routers.notifications import revoke_all_user_sessions, notify_account_locked
             revoked_count = await revoke_all_user_sessions(
                 db=db,
                 user_id=user.user_id,

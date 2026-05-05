@@ -610,7 +610,9 @@ async def execute_notification_action(
         # 发送通知给用户
         #
         # NOTE: 保持 legacy monkeypatch 兼容（测试与部分外部调用会 patch `backend.routers.notifications.create_notification`）。
-        from backend.routers.notifications import create_notification as create_notification_func
+
+        from backend.domains.platform.compat.notifications import get_create_notification as _get_create_notification
+        create_notification_func = _get_create_notification()
 
         await create_notification_func(
             db=db,
@@ -664,7 +666,9 @@ async def execute_notification_action(
         # 发送通知给用户
         #
         # NOTE: 保持 legacy monkeypatch 兼容（测试与部分外部调用会 patch `backend.routers.notifications.create_notification`）。
-        from backend.routers.notifications import create_notification as create_notification_func
+
+        from backend.domains.platform.compat.notifications import get_create_notification as _get_create_notification
+        create_notification_func = _get_create_notification()
 
         await create_notification_func(
             db=db,
