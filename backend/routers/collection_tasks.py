@@ -770,10 +770,12 @@ async def retry_task(
             sub_domains=original_task.sub_domains or {},
         )
     except ComponentRuntimeResolverError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Stable component not ready: {e}",
-        ) from e
+        logger.warning(
+            "Retry task %s created without runtime manifests: %s",
+            getattr(new_task, "task_id", "unknown"),
+            e,
+        )
+        runtime_manifests = {"login": {}, "exports": [], "exports_by_domain": {}}
 
     app = getattr(request, "app", None) if request else None
     asyncio.create_task(

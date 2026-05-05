@@ -433,7 +433,7 @@ class FactProductMetric(Base):
         # 外键约束:platform_code + shop_id + platform_sku -> dim_products
         ForeignKeyConstraint(
             ["platform_code", "shop_id", "platform_sku"],
-            ["dim_products.platform_code", "dim_products.shop_id", "dim_products.platform_sku"]
+            ["core.dim_products.platform_code", "core.dim_products.shop_id", "core.dim_products.platform_sku"]
         ),
         # 索引:支持父SKU聚合查询
         Index("ix_product_parent_date", "platform_code", "shop_id", "parent_platform_sku", "metric_date"),
@@ -4378,7 +4378,7 @@ class StagingRawData(Base):
     __tablename__ = "staging_raw_data"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    file_id = Column(Integer, ForeignKey("public.catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
     row_number = Column(Integer, nullable=False)
     platform_code = Column(String(32), nullable=True, index=True)
     shop_id = Column(String(256), nullable=True, index=True)

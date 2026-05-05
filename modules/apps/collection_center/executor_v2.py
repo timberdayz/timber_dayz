@@ -9,6 +9,8 @@
 - 验证码暂停处理
 """
 
+from __future__ import annotations
+
 import os
 import asyncio
 import time
