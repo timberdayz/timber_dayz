@@ -258,7 +258,7 @@ git commit -m "refactor(frontend): repoint routes to domain-owned views"
   - `modules/core/db/schema_parts/business.py`
 - Modify: `backend/tests/test_schema_ssot_import_contract.py`
 
-- [ ] **Step 1: Add a failing identity/import test for the next schema slice**
+- [x] **Step 1: Add a failing identity/import test for the next schema slice**
 
 Extend `backend/tests/test_schema_ssot_import_contract.py` to assert public symbol identity for the first next slice, starting with collection/task-center/approval/training models:
 - `CollectionConfig`
@@ -268,7 +268,7 @@ Extend `backend/tests/test_schema_ssot_import_contract.py` to assert public symb
 - `ApprovalInstance`
 - `TrainingProgram`
 
-- [ ] **Step 2: Run the schema contract test and verify the new assertions fail**
+- [x] **Step 2: Run the schema contract test and verify the new assertions fail**
 
 Run:
 ```powershell
@@ -276,7 +276,7 @@ python -m pytest backend/tests/test_schema_ssot_import_contract.py -q
 ```
 Expected: FAIL until the slice is re-exported from `schema_parts`.
 
-- [ ] **Step 3: Move collection/task-center/approval/training models into `schema_parts/collection.py`**
+- [x] **Step 3: Move collection/task-center/approval/training models into `schema_parts/collection.py`**
 
 Requirements:
 - no table or column changes
@@ -284,7 +284,7 @@ Requirements:
 - preserve relationship semantics
 - keep `modules.core.db.schema` public symbols unchanged
 
-- [ ] **Step 4: Re-run compile and schema contract tests**
+- [x] **Step 4: Re-run compile and schema contract tests**
 
 Run:
 ```powershell
@@ -293,7 +293,7 @@ python -m pytest backend/tests/test_schema_ssot_import_contract.py -q
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Repeat by slice for `platform`, `data_platform`, and `business`**
+- [x] **Step 5: Repeat by slice for `platform`, `data_platform`, and `business`**
 
 Suggested order:
 1. `platform.py`
@@ -306,6 +306,10 @@ After each slice:
 - run schema contract tests
 
 - [ ] **Step 6: Commit**
+
+Task 4 status note:
+- Completed the required `collection`, `platform`, `data_platform`, and `business` slices.
+- `backend/tests/test_schema_ssot_import_contract.py` now covers representative public symbol identity for all four new slice modules.
 
 ```powershell
 git add modules/core/db/schema.py modules/core/db/schema_parts backend/tests/test_schema_ssot_import_contract.py

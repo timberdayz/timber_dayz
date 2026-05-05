@@ -54,13 +54,13 @@ Wrapper cleanup status after Task 3:
 - Remaining route wrapper files: 0.
 - `frontend/src/views/**` now only keeps non-wrapper legacy view files that are outside the Phase 6 Task 3 route-bridge scope.
 
-## Schema next split order
+## Schema residual summary
 
-Recommended next decomposition order for `modules/core/db/schema.py` remains:
+Task 4 schema decomposition is now landed in the Phase 6 worktree:
 
-1. `collection`
-2. `platform`
-3. `data_platform`
-4. `business`
-
-Reasoning: move the smaller, already-bounded operational slices first and leave the broadest business aggregate surface for last.
+- Added `modules/core/db/schema_parts/collection.py`
+- Added `modules/core/db/schema_parts/platform.py`
+- Added `modules/core/db/schema_parts/data_platform.py`
+- Added `modules/core/db/schema_parts/business.py`
+- `modules/core/db/schema.py` is now a re-export/import-contract surface and no longer owns in-file ORM class definitions.
+- Public import compatibility preserved for representative symbols across `dimensions`, `facts`, `collection`, `platform`, `data_platform`, and `business`, including package-level re-export usage through `modules.core.db`.
