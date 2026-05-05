@@ -7,9 +7,9 @@ main.py 仍然通过 field_mapping.router 注册,无需修改。
 
 from fastapi import APIRouter
 
-from backend.routers.field_mapping_files import router as files_router
-from backend.routers.field_mapping_ingest import router as ingest_router
-from backend.routers.field_mapping_status import router as status_router
+from backend.domains.data_platform.routers.field_mapping_files import router as files_router
+from backend.domains.data_platform.routers.field_mapping_ingest import router as ingest_router
+from backend.domains.data_platform.routers.field_mapping_status import router as status_router
 
 router = APIRouter()
 
