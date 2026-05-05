@@ -119,7 +119,9 @@ class CollectionQueueRunner:
         *,
         runtime_manifests: object | None = None,
     ) -> None:
-        from backend.routers.collection_tasks import _execute_collection_task_background
+        from backend.domains.collection.routers.collection_tasks import (
+            _execute_collection_task_background,
+        )
 
         await _execute_collection_task_background(
             task_id=task.task_id,
