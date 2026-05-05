@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+import inspect
+
+from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.dependencies.auth import require_admin
+from backend.models.database import get_async_db
+from backend.services.cloud_sync_admin_command_service import CloudSyncAdminCommandService
+from backend.services.cloud_sync_admin_query_service import CloudSyncAdminQueryService
+from modules.core.logger import get_logger
+
+router = APIRouter()
+logger = get_logger(__name__)
+
+
+class ManualTriggerRequest(BaseModel):
+    source_table_name: str = Field(pattern=r"^fact_[a-z0-9_]+$")
+
+
+class CloudSyncSettingsRequest(BaseModel):
+    auto_sync_enabled: bool
+
+
+def build_query_service(db: AsyncSession) -> CloudSyncAdminQueryService:
+    return CloudSyncAdminQueryService(db)
+
+
+def build_command_service(db: AsyncSession) -> CloudSyncAdminCommandService:
+    return CloudSyncAdminCommandService(db)
+
+
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _actor_repr(current_user) -> str:
+    return str(
+        getattr(current_user, "user_id", None)
+        or getattr(current_user, "id", None)
+        or current_user.get("user_id")
+        if isinstance(current_user, dict)
+        else "unknown"
+    )
+
+
+@router.get("/api/cloud-sync/health")
+async def cloud_sync_health(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    runtime = getattr(request.app.state, "cloud_sync_runtime", None)
+    runtime_health = runtime.get_health() if runtime is not None else None
+    service = build_query_service(db)
+    return await _maybe_await(service.get_health_summary(runtime_health=runtime_health))
+
+
+@router.get("/api/cloud-sync/overview")
+async def cloud_sync_overview(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    runtime = getattr(request.app.state, "cloud_sync_runtime", None)
+    runtime_health = runtime.get_health() if runtime is not None else None
+    service = build_query_service(db)
+    return await _maybe_await(service.get_overview_summary(runtime_health=runtime_health))
+
+
+@router.get("/api/cloud-sync/runtime")
+async def cloud_sync_runtime_summary(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    runtime = getattr(request.app.state, "cloud_sync_runtime", None)
+    runtime_health = runtime.get_health() if runtime is not None else None
+    service = build_query_service(db)
+    return await _maybe_await(service.get_runtime_summary(runtime_health=runtime_health))
+
+
+@router.get("/api/cloud-sync/history")
+async def cloud_sync_history(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    return await _maybe_await(service.list_history())
+
+
+@router.get("/api/cloud-sync/settings")
+async def cloud_sync_settings(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    return await _maybe_await(service.get_settings())
+
+
+@router.get("/api/cloud-sync/tables")
+async def list_cloud_sync_tables(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    return await _maybe_await(service.list_table_states())
+
+
+@router.get("/api/cloud-sync/events")
+async def list_cloud_sync_events(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    return await _maybe_await(service.list_events())
+
+
+@router.post("/api/cloud-sync/tasks/trigger")
+async def trigger_cloud_sync_task(
+    payload: ManualTriggerRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=trigger_sync table=%s", _actor_repr(current_user), payload.source_table_name)
+    return await _maybe_await(service.trigger_sync(payload.source_table_name))
+
+
+@router.post("/api/cloud-sync/sync-now")
+async def trigger_cloud_sync_now(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=sync_now", _actor_repr(current_user))
+    return await _maybe_await(service.sync_now())
+
+
+@router.post("/api/cloud-sync/retry-failed")
+async def retry_failed_cloud_sync_tasks(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=retry_failed", _actor_repr(current_user))
+    return await _maybe_await(service.retry_failed())
+
+
+@router.put("/api/cloud-sync/settings")
+async def update_cloud_sync_settings(
+    payload: CloudSyncSettingsRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info(
+        "[CloudSyncAdmin] user=%s action=update_settings auto_sync_enabled=%s",
+        _actor_repr(current_user),
+        payload.auto_sync_enabled,
+    )
+    return await _maybe_await(service.update_settings(enabled=payload.auto_sync_enabled))
+
+
+@router.get("/api/cloud-sync/tasks")
+async def list_cloud_sync_tasks(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    return await _maybe_await(service.list_tasks())
+
+
+@router.get("/api/cloud-sync/tasks/{job_id}")
+async def get_cloud_sync_task(
+    job_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    task = await _maybe_await(service.get_task(job_id))
+    if task is None:
+        return {"job_id": job_id, "status": "not_found"}
+    return task
+
+
+@router.post("/api/cloud-sync/tasks/{job_id}/retry")
+async def retry_cloud_sync_task(
+    job_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=retry_task job_id=%s", _actor_repr(current_user), job_id)
+    return await _maybe_await(service.retry_task(job_id))
+
+
+@router.post("/api/cloud-sync/tasks/{job_id}/cancel")
+async def cancel_cloud_sync_task(
+    job_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=cancel_task job_id=%s", _actor_repr(current_user), job_id)
+    return await _maybe_await(service.cancel_task(job_id))
+
+
+@router.post("/api/cloud-sync/tables/{table_name}/dry-run")
+async def dry_run_cloud_sync_table(
+    table_name: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=dry_run table=%s", _actor_repr(current_user), table_name)
+    return await _maybe_await(service.dry_run_table(table_name))
+
+
+@router.post("/api/cloud-sync/tables/{table_name}/repair-checkpoint")
+async def repair_cloud_sync_checkpoint(
+    table_name: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=repair_checkpoint table=%s", _actor_repr(current_user), table_name)
+    return await _maybe_await(service.repair_checkpoint(table_name))
+
+
+@router.post("/api/cloud-sync/tables/{table_name}/refresh-projection")
+async def refresh_cloud_sync_projection(
+    table_name: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=refresh_projection table=%s", _actor_repr(current_user), table_name)
+    return await _maybe_await(service.refresh_projection(table_name))
