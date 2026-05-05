@@ -140,6 +140,69 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS api"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS core.dim_shops (
+                        platform_code varchar(32),
+                        shop_id varchar(256),
+                        shop_name varchar(256)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS core.shop_accounts (
+                        id serial primary key,
+                        platform varchar(32),
+                        platform_shop_id varchar(256),
+                        shop_account_id varchar(256),
+                        main_account_id varchar(128),
+                        store_name varchar(256)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS core.main_accounts (
+                        main_account_id varchar(128) primary key,
+                        main_account_name varchar(256)
+                    )
+                    """
+                )
+            )
+            await session.execute(text("DELETE FROM core.dim_shops"))
+            await session.execute(text("DELETE FROM core.shop_accounts"))
+            await session.execute(text("DELETE FROM core.main_accounts"))
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.dim_shops (platform_code, shop_id, shop_name)
+                    VALUES ('shopee', 'shop-a', 'Shop A')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.main_accounts (main_account_id, main_account_name)
+                    VALUES ('main-a', 'Main Account A')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_accounts (platform, platform_shop_id, shop_account_id, main_account_id, store_name)
+                    VALUES ('shopee', 'shop-a', 'shop-a', 'main-a', 'Shop A')
+                    """
+                )
+            )
             await session.execute(
                 text(
                     """
@@ -170,7 +233,7 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             await session.execute(
                 text(
                     """
-                    CREATE OR REPLACE VIEW api.business_overview_shop_racing_module AS
+                    CREATE OR REPLACE VIEW api.business_overview_shop_racing_monthly_module AS
                     SELECT
                         'monthly'::varchar AS granularity,
                         DATE '2026-03-01' AS period_key,
@@ -214,6 +277,8 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         'shopee'::varchar AS platform_code,
                         321::numeric AS sales_amount,
                         10::numeric AS sales_quantity,
+                        10::numeric AS order_count,
+                        15::numeric AS total_items,
                         200::numeric AS traffic,
                         5::numeric AS conversion_rate,
                         32.1::numeric AS avg_order_value,
@@ -221,7 +286,7 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         120::numeric AS profit
                     UNION ALL
                     SELECT
-                        'monthly', DATE '2026-02-01', 'shopee', 300, 9, 180, 5, 33.3, 1.4, 100
+                        'monthly', DATE '2026-02-01', 'shopee', 300, 9, 9, 13, 180, 5, 33.3, 1.4, 100
                     """
                 )
             )
