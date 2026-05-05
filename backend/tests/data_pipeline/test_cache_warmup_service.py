@@ -15,8 +15,8 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
             stored.append((cache_type, response, cache_params))
 
     class _PostgresqlServiceStub:
-        async def get_business_overview_kpi(self, month, platform):
-            called.append(("kpi", month, platform))
+        async def get_business_overview_kpi(self, month, platform, granularity="monthly", target_date=None):
+            called.append(("kpi", month, platform, granularity, target_date))
             return {"gmv": 100}
 
         async def get_business_overview_comparison(self, granularity, target_date, platform):
@@ -55,9 +55,10 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
 
     result = await cache_warmup_service.run_dashboard_cache_warmup()
 
-    assert result["ok"] == 7
+    assert result["ok"] == 8
     assert result["failed"] == 0
-    assert len(stored) == 7
+    assert len(stored) == 8
+    assert any(item[0] == "dashboard_business_overview_bootstrap" for item in stored)
     assert any(item[0] == "dashboard_kpi" for item in stored)
     assert any(call[0] == "kpi" for call in called)
     assert ("inventory_backlog", 30, 20) in called

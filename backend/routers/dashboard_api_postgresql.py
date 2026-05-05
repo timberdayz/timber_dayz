@@ -197,6 +197,82 @@ async def get_business_overview_comparison_postgresql(
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
 
 
+@router.get("/business-overview/bootstrap")
+async def get_business_overview_bootstrap_postgresql(
+    request: Request,
+    granularity: Optional[str] = Query(None, description="daily/weekly/monthly"),
+    date: Optional[str] = Query(None, description="date in YYYY-MM-DD or YYYY-MM"),
+    month: Optional[str] = Query(None, description="month in YYYY-MM-DD (first day of month)"),
+    platform: Optional[str] = Query(None, description="single platform code"),
+):
+    from datetime import datetime
+
+    try:
+        granularity_value = granularity if isinstance(granularity, str) else None
+        date_value = date if isinstance(date, str) else None
+        month_value = month if isinstance(month, str) else None
+
+        effective_granularity = (granularity_value or "monthly").strip().lower()
+        effective_date = date_value
+        if not effective_date:
+            today = datetime.now()
+            effective_date = f"{today.year}-{today.month:02d}-01"
+            effective_granularity = "monthly"
+
+        effective_operational_month = month_value
+        if not effective_operational_month:
+            period = _normalize_period_start(effective_date)
+            effective_operational_month = date_cls(period.year, period.month, 1).isoformat()
+
+        params = {
+            "granularity": effective_granularity,
+            "date": effective_date,
+            "month": effective_operational_month,
+            "platform": platform,
+        }
+        cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            kpi_result = await service.get_business_overview_kpi(
+                month=effective_date,
+                platform=platform,
+                granularity=effective_granularity,
+                target_date=effective_date,
+            )
+            comparison_result = await service.get_business_overview_comparison(
+                granularity=effective_granularity,
+                target_date=effective_date,
+                platform=platform,
+            )
+            operational_result = await service.get_business_overview_operational_metrics(
+                month=effective_operational_month,
+                platform=platform,
+            )
+            return json.loads(
+                success_response(
+                    data={
+                        "kpi": kpi_result,
+                        "comparison": comparison_result,
+                        "operational_metrics": operational_result,
+                    }
+                ).body.decode()
+            )
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "dashboard_business_overview_bootstrap",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"PostgreSQL business overview bootstrap query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+
+
 @router.get("/annual-summary/kpi")
 async def get_annual_summary_kpi_postgresql(
     request: Request,

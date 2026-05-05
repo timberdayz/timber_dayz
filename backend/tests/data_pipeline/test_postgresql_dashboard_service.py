@@ -109,13 +109,12 @@ async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(mo
     assert result["gmv"] == 100
     assert len(captured) == 1
     query, params = captured[0]
-    assert "FROM mart.platform_month_kpi" in query
-    assert "api.business_overview_kpi_module" not in query
+    assert "FROM api.business_overview_kpi_module" in query
     assert str(params["period_key"]) == "2026-04-01"
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_monthly_kpi_uses_raw_monthly_fast_path(monkeypatch):
+async def test_postgresql_dashboard_service_monthly_kpi_supports_platform_filter(monkeypatch):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -147,9 +146,8 @@ async def test_postgresql_dashboard_service_monthly_kpi_uses_raw_monthly_fast_pa
     assert result["gmv"] == 100
     assert len(captured) == 1
     query, params = captured[0]
-    assert "fact_shopee_orders_monthly" in query
-    assert "fact_shopee_analytics_monthly" in query
-    assert "mart.platform_month_kpi" not in query
+    assert "FROM api.business_overview_kpi_module" in query
+    assert "platform_code = :platform_code" in query
     assert str(params["period_key"]) == "2026-04-01"
     assert params["platform_code"] == "shopee"
 
@@ -882,6 +880,7 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS api"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS semantic"))
             await session.execute(
                 text(
                     """
@@ -974,6 +973,21 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
             await session.execute(
                 text(
                     """
+                    CREATE TABLE semantic.fact_orders_monthly_atomic (
+                        metric_date DATE,
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        order_id VARCHAR(128),
+                        paid_amount NUMERIC,
+                        product_quantity NUMERIC,
+                        profit NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
                     CREATE TABLE a_class.sales_targets (
                         id INTEGER PRIMARY KEY,
                         target_name VARCHAR(255),
@@ -1018,6 +1032,17 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
                     ) VALUES (
                         DATE '2025-09-01', 'shopee', 'shop-3c', 100, 10,
                         0, 0, 0, 10, 1.2, 12, 30
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO semantic.fact_orders_monthly_atomic (
+                        metric_date, platform_code, shop_id, order_id, paid_amount, product_quantity, profit
+                    ) VALUES (
+                        DATE '2025-09-01', 'shopee', 'shop-3c', 'o-1', 100, 12, 30
                     )
                     """
                 )
@@ -1219,13 +1244,20 @@ async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_mod
 
     async def fake_fetch_rows(query, params):
         captured.append((query, params))
-        if "FROM mart.inventory_snapshot_latest" in query:
+        if "FROM api.clearance_ranking_module" in query:
             return [
                 {
+                    "snapshot_date": "2026-04-14",
                     "platform_code": "shopee",
+                    "shop_id": "shop-a",
+                    "product_id": "P2",
+                    "product_name": "Beta",
                     "platform_sku": "SKU-2",
+                    "product_sku": "PSKU-2",
+                    "available_stock": 10,
                     "inventory_value": 100,
                     "estimated_turnover_days": 100,
+                    "daily_avg_sales": 0,
                     "estimated_stagnant_days": 14,
                     "stagnant_snapshot_count": 3,
                     "risk_level": "high",
@@ -1240,10 +1272,11 @@ async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_mod
 
     assert len(result) == 1
     query, params = captured[0]
-    assert "FROM mart.inventory_snapshot_latest" in query
-    assert "fact_shopee_orders_daily" in query
-    assert "fact_tiktok_orders_daily" in query
-    assert "fact_miaoshou_orders_daily" in query
+    assert "FROM api.clearance_ranking_module" in query
+    assert "FROM mart.inventory_snapshot_latest" not in query
+    assert "raw_data->>" not in query
+    assert "REGEXP_REPLACE" not in query
+    assert "FROM b_class." not in query
     assert "ORDER BY clearance_priority_score DESC" in query
     assert "LIMIT :limit" in query
     assert params == {"min_days": 45, "limit": 10, "period_start": None, "period_end": None}
@@ -1636,8 +1669,7 @@ async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_p
     assert result[0]["page_views"] == 180
     assert result[1]["name"] == "shop-a"
     assert len(captured) == 1
-    assert "FROM mart.shop_month_kpi" in captured[0][0]
-    assert "api.business_overview_traffic_ranking_module" not in captured[0][0]
+    assert "FROM api.business_overview_traffic_ranking_module" in captured[0][0]
 
 
 @pytest.mark.asyncio
@@ -1948,6 +1980,8 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                 for target in (
                     "mart.shop_day_kpi",
                     "mart.shop_week_kpi",
+                    "semantic.shop_identity_resolution_candidates",
+                    "semantic.fact_orders_monthly_atomic_mv",
                     "semantic.fact_orders_monthly_atomic",
                     "semantic.fact_analytics_monthly_atomic",
                     "mart.shop_month_kpi",
@@ -2108,9 +2142,12 @@ async def test_postgresql_dashboard_service_monthly_kpi_uses_page_views_as_unifi
 
         async with session_factory() as session:
             for target in (
+                "semantic.shop_identity_resolution_candidates",
+                "semantic.fact_orders_monthly_atomic_mv",
                 "semantic.fact_orders_monthly_atomic",
                 "semantic.fact_analytics_monthly_atomic",
                 "mart.platform_month_kpi",
+                "api.business_overview_kpi_module",
             ):
                 await execute_sql_target(session, target)
             await session.commit()
@@ -2248,6 +2285,8 @@ async def test_business_overview_kpi_module_uses_page_views_for_conversion_rate(
 
         async with session_factory() as session:
             for target in (
+                "semantic.shop_identity_resolution_candidates",
+                "semantic.fact_orders_monthly_atomic_mv",
                 "semantic.fact_orders_monthly_atomic",
                 "semantic.fact_analytics_monthly_atomic",
                 "mart.platform_month_kpi",

@@ -84,6 +84,7 @@ Forbidden in production online dashboard reads:
 
 - Request-time parsing/cleaning/deduplication of `b_class` JSON (`raw_data->>`), including `REGEXP_REPLACE`, ad hoc type casting fixes, and window deduplication intended to repair ingestion artifacts.
 - Direct reads from `b_class.*` persistence tables.
+- Request-time aggregation from `semantic.fact_*_atomic` on governed business overview / clearance endpoints when an `api.*` or sanctioned `mart.*` read model exists.
 
 Rationale:
 
@@ -148,6 +149,7 @@ The following rules should apply:
 - `api.*` assets may reshape data for page use
 - `api.*` assets should not become a place for heavyweight runtime-only business recomputation
 - service methods should prefer reading `api.*` assets over stitching raw `b_class` JSON in request time
+- governed online endpoints should not fall back to `semantic.fact_*_atomic` once a page read contract has been established
 
 ### KPI Path
 

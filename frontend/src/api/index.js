@@ -2138,6 +2138,19 @@ export default {
   },
 
   // 获取业务概览数据对比（日/周/月度）
+  // 业务概览首屏 bootstrap：一次返回关键模块（kpi/comparison/operational_metrics）
+  async getBusinessOverviewBootstrap(params = {}) {
+    const queryParams = new URLSearchParams()
+    if (params.granularity) queryParams.append('granularity', params.granularity)
+    if (params.date) queryParams.append('date', params.date)
+    if (params.month) queryParams.append('month', params.month)
+    if (params.platform) queryParams.append('platform', params.platform)
+    const queryString = queryParams.toString()
+    return await this._get(
+      `/dashboard/business-overview/bootstrap${queryString ? '?' + queryString : ''}`
+    )
+  },
+
   async getBusinessOverviewComparison(params) {
     const queryParams = new URLSearchParams()
     queryParams.append('granularity', params.granularity)
