@@ -26,8 +26,13 @@ Guard detail now preserved in the test baseline:
 Notable exceptions still intentionally retained:
 
 - `backend/domains/platform/compat/notifications.py` keeps legacy notification hooks for compat callers and monkeypatch-based tests.
-- `backend/domains/platform/routers/users.py` still bridges `users_admin` and `users_me`.
-- `backend/domains/collection/routers/collection_tasks.py` retains both star re-export and `_execute_collection_task_background` exposure.
+- `backend/domains/platform/routers/users.py` still bridges `users_admin` and `users_me`, but now labels them as explicit legacy subrouters instead of treating them as implicit wildcard surface.
+- `backend/domains/collection/routers/collection_tasks.py` retains `router` plus `_execute_collection_task_background` as the only explicit legacy re-export.
+
+Task 2 backend residual refinement:
+
+- All allowlisted business / collection / data-platform wrapper files now use explicit `router` shims instead of `from backend.routers... import *`.
+- No allowlisted backend residual file outside `backend/domains/platform/compat/notifications.py` keeps notification monkeypatch compatibility logic.
 
 ## Frontend wrapper summary
 

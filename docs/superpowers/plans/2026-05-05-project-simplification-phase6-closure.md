@@ -138,24 +138,24 @@ git commit -m "test: add phase6 closure guard inventories"
 - Test: `backend/tests/test_domain_route_registration.py`
 - Test: `backend/tests/test_runtime_mode_route_registration.py`
 
-- [ ] **Step 1: Convert trivial `from backend.routers... import *` wrappers into explicit domain-owned shims**
+- [x] **Step 1: Convert trivial `from backend.routers... import *` wrappers into explicit domain-owned shims**
 
 For each thin wrapper file:
 - replace star import with explicit router/helper imports
 - keep backward-compatible exports only where truly needed
 - document any file that must remain a pure compat shim
 
-- [ ] **Step 2: Normalize platform users and notifications onto compat helper boundaries**
+- [x] **Step 2: Normalize platform users and notifications onto compat helper boundaries**
 
 Goal:
 - `backend/domains/platform/routers/users.py` should prefer domain-local or compat-local imports
 - all notification-related legacy monkeypatch support stays behind `backend/domains/platform/compat/notifications.py`
 
-- [ ] **Step 3: Update the backend guard test allowlist to the new expected residual set**
+- [x] **Step 3: Update the backend guard test allowlist to the new expected residual set**
 
 The test should now pass only for intentionally retained compat hooks.
 
-- [ ] **Step 4: Run targeted route/runtime tests**
+- [x] **Step 4: Run targeted route/runtime tests**
 
 Run:
 ```powershell
@@ -163,7 +163,7 @@ python -m pytest backend/tests/test_domain_legacy_router_boundary.py backend/tes
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Run the expanded backend regression subset**
+- [x] **Step 5: Run the expanded backend regression subset**
 
 Run:
 ```powershell

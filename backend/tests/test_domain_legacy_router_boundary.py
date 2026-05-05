@@ -1,67 +1,67 @@
 ﻿from __future__ import annotations
 
 import ast
+import importlib
 from pathlib import Path
 
 
 ALLOWED_LEGACY_ROUTER_IMPORTS: dict[str, list[str]] = {
     'backend/domains/business/routers/dashboard_api_postgresql.py': [
-        'from backend.routers.dashboard_api_postgresql import *',
+        'import backend.routers.dashboard_api_postgresql as legacy_module',
     ],
     'backend/domains/business/routers/follow_investment.py': [
-        'from backend.routers.follow_investment import *',
+        'import backend.routers.follow_investment as legacy_module',
     ],
     'backend/domains/business/routers/hr_attendance.py': [
-        'from backend.routers.hr_attendance import *',
+        'import backend.routers.hr_attendance as legacy_module',
     ],
     'backend/domains/business/routers/hr_commission.py': [
-        'from backend.routers.hr_commission import *',
+        'import backend.routers.hr_commission as legacy_module',
     ],
     'backend/domains/business/routers/hr_department.py': [
-        'from backend.routers.hr_department import *',
+        'import backend.routers.hr_department as legacy_module',
     ],
     'backend/domains/business/routers/hr_employee.py': [
-        'from backend.routers.hr_employee import *',
+        'import backend.routers.hr_employee as legacy_module',
     ],
     'backend/domains/business/routers/hr_salary.py': [
-        'from backend.routers.hr_salary import *',
+        'import backend.routers.hr_salary as legacy_module',
     ],
     'backend/domains/business/routers/monthly_profit_settlement.py': [
-        'from backend.routers.monthly_profit_settlement import *',
+        'import backend.routers.monthly_profit_settlement as legacy_module',
     ],
     'backend/domains/business/routers/mv.py': [
-        'from backend.routers.mv import *',
+        'import backend.routers.mv as legacy_module',
     ],
     'backend/domains/business/routers/performance_management.py': [
-        'from backend.routers.performance_management import *',
+        'import backend.routers.performance_management as legacy_module',
     ],
     'backend/domains/business/routers/profit_basis.py': [
-        'from backend.routers.profit_basis import *',
+        'import backend.routers.profit_basis as legacy_module',
     ],
     'backend/domains/collection/routers/collection_tasks.py': [
-        'from backend.routers.collection_tasks import *',
-        'from backend.routers.collection_tasks import _execute_collection_task_background',
+        'import backend.routers.collection_tasks as legacy_module',
     ],
     'backend/domains/collection/routers/component_recorder.py': [
-        'from backend.routers.component_recorder import *',
+        'import backend.routers.component_recorder as legacy_module',
     ],
     'backend/domains/collection/routers/component_versions.py': [
-        'from backend.routers.component_versions import *',
+        'import backend.routers.component_versions as legacy_module',
     ],
     'backend/domains/collection/routers/main_accounts.py': [
-        'from backend.routers.main_accounts import *',
+        'import backend.routers.main_accounts as legacy_module',
     ],
     'backend/domains/collection/routers/shop_account_aliases.py': [
-        'from backend.routers.shop_account_aliases import *',
+        'import backend.routers.shop_account_aliases as legacy_module',
     ],
     'backend/domains/data_platform/routers/field_mapping_files.py': [
-        'from backend.routers.field_mapping_files import *',
+        'import backend.routers.field_mapping_files as legacy_module',
     ],
     'backend/domains/data_platform/routers/field_mapping_ingest.py': [
-        'from backend.routers.field_mapping_ingest import *',
+        'import backend.routers.field_mapping_ingest as legacy_module',
     ],
     'backend/domains/data_platform/routers/field_mapping_status.py': [
-        'from backend.routers.field_mapping_status import *',
+        'import backend.routers.field_mapping_status as legacy_module',
     ],
     'backend/domains/platform/compat/notifications.py': [
         'from backend.routers.notifications import create_notification as create_notification_func',
@@ -71,8 +71,8 @@ ALLOWED_LEGACY_ROUTER_IMPORTS: dict[str, list[str]] = {
         'from backend.routers.notifications import revoke_all_user_sessions as revoke_all_user_sessions_func',
     ],
     'backend/domains/platform/routers/users.py': [
-        'from backend.routers.users_admin import router as _admin_router',
-        'from backend.routers.users_me import router as _me_router',
+        'import backend.routers.users_admin as legacy_admin_module',
+        'import backend.routers.users_me as legacy_me_module',
     ],
 }
 
@@ -145,4 +145,66 @@ def test_domain_and_service_runtime_imports_do_not_expand_legacy_router_surface(
         'Found unexpected or changed backend.routers runtime imports. '
         'If the residual surface was intentionally changed, update the allowlist in this test '
         f'and refresh the Task 1 inventory summary. actual={actual}'
+    )
+
+
+def _exported_names(module: object) -> set[str]:
+    module_all = getattr(module, '__all__', None)
+    if module_all is not None:
+        return set(module_all)
+    return {name for name in vars(module) if not name.startswith('_')}
+
+
+def test_representative_domain_shims_preserve_legacy_public_exports() -> None:
+    representative_pairs = [
+        (
+            'backend.domains.business.routers.hr_employee',
+            'backend.routers.hr_employee',
+        ),
+        (
+            'backend.domains.collection.routers.component_versions',
+            'backend.routers.component_versions',
+        ),
+        (
+            'backend.domains.data_platform.routers.field_mapping_ingest',
+            'backend.routers.field_mapping_ingest',
+        ),
+    ]
+
+    for shim_module_name, legacy_module_name in representative_pairs:
+        shim_module = importlib.import_module(shim_module_name)
+        legacy_module = importlib.import_module(legacy_module_name)
+
+        missing_public_exports = _exported_names(legacy_module) - _exported_names(shim_module)
+        assert not missing_public_exports, (
+            f'{shim_module_name} narrowed the public export surface from {legacy_module_name}: '
+            f'missing={sorted(missing_public_exports)}'
+        )
+
+
+def test_collection_tasks_shim_preserves_extra_helper_export() -> None:
+    shim_module = importlib.import_module('backend.domains.collection.routers.collection_tasks')
+    legacy_module = importlib.import_module('backend.routers.collection_tasks')
+
+    assert (
+        shim_module._execute_collection_task_background
+        is legacy_module._execute_collection_task_background
+    )
+
+
+def test_users_domain_shim_preserves_legacy_public_exports() -> None:
+    shim_module = importlib.import_module('backend.domains.platform.routers.users')
+    admin_module = importlib.import_module('backend.routers.users_admin')
+    me_module = importlib.import_module('backend.routers.users_me')
+
+    expected_exports = (
+        _exported_names(admin_module)
+        | _exported_names(me_module)
+        | {'require_admin', 'router'}
+    )
+
+    missing_public_exports = expected_exports - _exported_names(shim_module)
+    assert not missing_public_exports, (
+        'backend.domains.platform.routers.users narrowed the aggregated users export surface: '
+        f'missing={sorted(missing_public_exports)}'
     )
