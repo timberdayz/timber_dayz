@@ -324,7 +324,7 @@ git commit -m "refactor(schema): continue phase6 schema slice decomposition"
 - Modify: `progress.md`
 - Modify: `findings.md`
 
-- [ ] **Step 1: Run the backend verification set**
+- [x] **Step 1: Run the backend verification set**
 
 Run:
 ```powershell
@@ -333,7 +333,7 @@ python -m pytest backend/tests/data_pipeline/test_dashboard_router_switch.py bac
 ```
 Expected: PASS.
 
-- [ ] **Step 2: Run the frontend verification set**
+- [x] **Step 2: Run the frontend verification set**
 
 Run:
 ```powershell
@@ -345,14 +345,14 @@ npm run test:smoke-shared
 ```
 Expected: PASS.
 
-- [ ] **Step 3: Update closure notes**
+- [x] **Step 3: Update closure notes**
 
 Document:
 - remaining intentional compat hooks
 - remaining wrapper count, if any
 - remaining model classes still in `schema.py`, if any
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git add docs/superpowers/findings/2026-05-05-phase6-closure-inventory.md task_plan.md progress.md findings.md
