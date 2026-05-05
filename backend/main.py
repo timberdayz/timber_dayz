@@ -424,7 +424,9 @@ async def lifespan(app: FastAPI):
 
         # v4.19.0新增:启动通知WebSocket清理任务
         try:
-            from backend.routers.notification_websocket import start_cleanup_task
+            from backend.domains.platform.routers.notification_websocket import (
+                start_cleanup_task,
+            )
 
             cleanup_task = await start_cleanup_task()
             if cleanup_task:
