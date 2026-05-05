@@ -85,12 +85,10 @@ async def list_follow_investments(
     _current_user=Depends(_require_finance_role),
 ):
     service = FollowInvestmentService(db)
-    payload = await service.list_investments(
-        platform_code=platform_code,
-        shop_id=shop_id,
-        status=status,
-        period_month=period_month,
-    )
+    params = {"platform_code": platform_code, "shop_id": shop_id, "status": status}
+    if period_month:
+        params["period_month"] = period_month
+    payload = await service.list_investments(**params)
     return success_response(data=payload)
 
 
