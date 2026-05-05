@@ -1284,7 +1284,10 @@ class PostgresqlDashboardService:
             query += " AND src.platform_code = :platform_code"
             params["platform_code"] = platform
 
-        rows = await self._fetch_rows_with_statement_timeout(query, params, timeout_ms=120000)
+        try:
+            rows = await self._fetch_rows(query, params)
+        except Exception:
+            rows = await self._fetch_rows_with_statement_timeout(query, params, timeout_ms=120000)
 
         if group_by == "platform":
             grouped: dict[str, dict[str, Any]] = {}
