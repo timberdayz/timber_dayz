@@ -51,12 +51,10 @@ from sqlalchemy import (
     Numeric,  # v4.12.0新增:运营数据表
 )
 from sqlalchemy.dialects.postgresql import JSONB  # v4.12.0新增:运营数据表
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func  # v4.12.0新增:用户权限表
 
-Base = declarative_base()
-
-JSON_COMPAT = JSON().with_variant(JSONB, "postgresql")
+from .schema_parts.base import Base, JSON_COMPAT
 
 # -------------------- Dimension Tables --------------------
 
