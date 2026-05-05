@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const apiPath = path.resolve(__dirname, '../src/api/collection.js')
-const tasksViewPath = path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
+const tasksViewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionTasks.vue')
 
 const apiSource = fs.readFileSync(apiPath, 'utf8')
 const tasksSource = fs.readFileSync(tasksViewPath, 'utf8')
@@ -27,8 +27,8 @@ test('CollectionTasks auto-opens verification dialog when verification_required 
   )
 
   assert.equal(
-    tasksSource.includes("['verification_required', 'paused'].includes(task.status) && task.verification_type"),
+    tasksSource.includes("['verification_required', 'paused', 'manual_intervention_required'].includes(task.status) && task.verification_type"),
     true,
-    'task page should detect verification-required tasks from polled task data while remaining compatible with paused legacy tasks'
+    'task page should detect verification-required tasks from polled task data while remaining compatible with paused and intervention-required legacy states'
   )
 })

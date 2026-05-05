@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const componentPath = path.resolve(__dirname, '../src/views/ComponentRecorder.vue')
+const componentPath = path.resolve(__dirname, '../src/domains/collection/views/ComponentRecorder.vue')
 const source = fs.readFileSync(componentPath, 'utf8')
 
 test('ComponentRecorder normalizes axios interceptor responses instead of assuming { success, data } shape', () => {

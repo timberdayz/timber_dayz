@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const projectRoot = resolve(process.cwd())
-const viewPath = resolve(projectRoot, 'frontend/src/views/DataSyncTemplates.vue')
-const apiPath = resolve(projectRoot, 'frontend/src/api/index.js')
+const viewPath = resolve(projectRoot, 'src/domains/data_platform/views/DataSyncTemplates.vue')
+const apiPath = resolve(projectRoot, 'src/api/index.js')
 
 const viewText = readFileSync(viewPath, 'utf8')
 const apiText = readFileSync(apiPath, 'utf8')

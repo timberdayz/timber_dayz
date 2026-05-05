@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const projectRoot = resolve(process.cwd())
-const viewText = readFileSync(resolve(projectRoot, 'frontend/src/views/collection/CollectionConfig.vue'), 'utf8')
-const apiText = readFileSync(resolve(projectRoot, 'frontend/src/api/collection.js'), 'utf8')
-const constantsText = readFileSync(resolve(projectRoot, 'frontend/src/constants/collection.js'), 'utf8')
+const viewText = readFileSync(resolve(projectRoot, 'src/domains/collection/views/collection/CollectionConfig.vue'), 'utf8')
+const apiText = readFileSync(resolve(projectRoot, 'src/api/collection.js'), 'utf8')
+const constantsText = readFileSync(resolve(projectRoot, 'src/constants/collection.js'), 'utf8')
 
 assert.match(viewText, /activeGranularity/, 'CollectionConfig.vue should track the active granularity view')
 assert.match(viewText, /daily|weekly|monthly/, 'CollectionConfig.vue should expose daily weekly monthly views')

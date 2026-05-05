@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const projectRoot = resolve(process.cwd())
-const viewText = readFileSync(resolve(projectRoot, 'frontend/src/views/collection/CollectionConfig.vue'), 'utf8')
+const viewText = readFileSync(resolve(projectRoot, 'src/domains/collection/views/collection/CollectionConfig.vue'), 'utf8')
 
 assert.match(viewText, /filters\.main_account_id/, 'CollectionConfig.vue should expose a main-account list filter')
 assert.match(viewText, /filters\.date_range_type/, 'CollectionConfig.vue should expose a date-range list filter')

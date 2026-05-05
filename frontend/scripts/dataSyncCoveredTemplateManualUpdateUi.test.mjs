@@ -4,24 +4,24 @@ import { resolve } from 'node:path'
 
 const projectRoot = resolve(process.cwd())
 
-const viewPath = resolve(projectRoot, 'frontend/src/views/DataSyncTemplates.vue')
+const viewPath = resolve(projectRoot, 'src/domains/data_platform/views/DataSyncTemplates.vue')
 const governancePanelPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateGovernancePanel.vue'
+  'src/components/dataSync/TemplateGovernancePanel.vue'
 )
 const needsUpdateTablePath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateNeedsUpdateTable.vue'
+  'src/components/dataSync/TemplateNeedsUpdateTable.vue'
 )
 const modeDialogPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateManualUpdateModeDialog.vue'
+  'src/components/dataSync/TemplateManualUpdateModeDialog.vue'
 )
 const workbenchDrawerPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
+  'src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
 )
-const apiPath = resolve(projectRoot, 'frontend/src/api/index.js')
+const apiPath = resolve(projectRoot, 'src/api/index.js')
 
 assert.equal(existsSync(viewPath), true, 'DataSyncTemplates.vue should exist')
 assert.equal(existsSync(governancePanelPath), true, 'TemplateGovernancePanel.vue should exist')

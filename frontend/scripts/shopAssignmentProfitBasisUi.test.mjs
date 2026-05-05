@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const source = fs.readFileSync(
-  path.resolve(__dirname, '../src/views/hr/ShopAssignment.vue'),
+  path.resolve(__dirname, '../src/domains/business/views/hr/ShopAssignment.vue'),
   'utf8'
 )
 

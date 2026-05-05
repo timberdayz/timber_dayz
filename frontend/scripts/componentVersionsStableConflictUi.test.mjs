@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const viewPath = path.resolve(__dirname, '../src/views/ComponentVersions.vue')
+const viewPath = path.resolve(__dirname, '../src/domains/collection/views/ComponentVersions.vue')
 const source = fs.readFileSync(viewPath, 'utf8')
 
 test('ComponentVersions computes multi-stable conflicts using exact component names', () => {

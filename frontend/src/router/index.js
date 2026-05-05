@@ -18,7 +18,7 @@ const routes = [
   {
     path: '/login',
     name: 'Login',
-    component: () => import('../views/Login.vue'),
+    component: () => import('@/domains/platform/views/Login.vue'),
     meta: {
       title: '登录',
       public: true
@@ -27,7 +27,7 @@ const routes = [
   {
     path: '/register',
     name: 'Register',
-    component: () => import('../views/Register.vue'),
+    component: () => import('@/domains/platform/views/Register.vue'),
     meta: {
       title: '注册',
       public: true
@@ -36,7 +36,7 @@ const routes = [
   {
     path: '/admin/users/pending',
     name: 'UserApproval',
-    component: () => import('../views/admin/UserApproval.vue'),
+    component: () => import('@/domains/platform/views/admin/UserApproval.vue'),
     meta: {
       title: '用户审批',
       icon: 'User',
@@ -47,7 +47,7 @@ const routes = [
   {
     path: '/my-tasks/:taskId',
     name: 'TaskDetail',
-    component: () => import('../views/approval/TaskDetail.vue'),
+    component: () => import('@/domains/platform/views/approval/TaskDetail.vue'),
     meta: {
       title: '任务详情',
       icon: 'List',
@@ -58,7 +58,7 @@ const routes = [
   {
     path: '/ultra-simple',
     name: 'UltraSimple',
-    component: () => import('../views/UltraSimplePage.vue'),
+    component: () => import('@/domains/platform/views/UltraSimplePage.vue'),
     meta: {
       title: '超简化页面',
       icon: 'Setting',
@@ -69,7 +69,7 @@ const routes = [
   {
     path: '/test-legacy',
     name: 'TestLegacy',
-    component: () => import('../views/TestPage.vue'),
+    component: () => import('@/domains/platform/views/TestPage.vue'),
     meta: {
       title: '测试页面',
       icon: 'Setting',
@@ -80,7 +80,7 @@ const routes = [
   {
     path: '/business-overview',
     name: 'BusinessOverview',
-    component: () => import('../views/BusinessOverview.vue'),  // v4.11.0: 使用重构后的业务概览页面
+    component: () => import('@/domains/business/views/BusinessOverview.vue'),  // v4.11.0: 使用重构后的业务概览页面
     meta: {
       title: '业务概览',
       icon: 'DataBoard',
@@ -91,7 +91,7 @@ const routes = [
   {
     path: '/annual-summary',
     name: 'AnnualSummary',
-    component: () => import('../views/AnnualSummary.vue'),
+    component: () => import('@/domains/business/views/AnnualSummary.vue'),
     meta: {
       title: '年度数据总结',
       icon: 'DataBoard',
@@ -102,7 +102,7 @@ const routes = [
   {
     path: '/sales-analysis',
     name: 'SalesAnalysis',
-    component: () => import('../views/SalesAnalysis.vue'),
+    component: () => import('@/domains/business/views/SalesAnalysis.vue'),
     meta: {
       title: '销售分析',
       icon: 'TrendCharts',
@@ -113,7 +113,7 @@ const routes = [
   {
     path: '/sales-dashboard',
     name: 'SalesDashboard',
-    component: () => import('../views/SalesDashboard.vue'),
+    component: () => import('@/domains/business/views/SalesDashboard.vue'),
     meta: {
       title: '销售看板',
       icon: 'DataAnalysis',
@@ -124,7 +124,7 @@ const routes = [
   {
     path: '/sales/order-management',
     name: 'OrderManagement',
-    component: () => import('../views/sales/OrderManagement.vue'),
+    component: () => import('@/domains/business/views/sales/OrderManagement.vue'),
     meta: {
       title: '订单管理',
       icon: 'Document',
@@ -135,7 +135,7 @@ const routes = [
   {
     path: '/sales/sales-detail-by-product',
     name: 'SalesDetailByProduct',
-    component: () => import('../views/sales/SalesDetailByProduct.vue'),
+    component: () => import('@/domains/business/views/sales/SalesDetailByProduct.vue'),
     meta: {
       title: '销售明细（产品ID级别）',
       icon: 'List',
@@ -146,7 +146,7 @@ const routes = [
   {
     path: '/inventory-management',
     name: 'InventoryManagement',
-    component: () => import('../views/inventory/InventoryBalances.vue'),
+    component: () => import('@/domains/business/views/inventory/InventoryBalances.vue'),
     meta: {
       title: '库存管理',
       icon: 'Box',
@@ -157,7 +157,7 @@ const routes = [
   {
     path: '/inventory-overview',
     name: 'InventoryOverview',
-    component: () => import('../views/InventoryOverview.vue'),
+    component: () => import('@/domains/business/views/InventoryOverview.vue'),
     meta: {
       title: '库存总览',
       icon: 'DataBoard',
@@ -168,7 +168,7 @@ const routes = [
   {
     path: '/inventory/ledger',
     name: 'InventoryLedger',
-    component: () => import('../views/inventory/InventoryLedger.vue'),
+    component: () => import('@/domains/business/views/inventory/InventoryLedger.vue'),
     meta: {
       title: '库存流水',
       icon: 'List',
@@ -179,7 +179,7 @@ const routes = [
   {
     path: '/inventory/adjustments',
     name: 'InventoryAdjustments',
-    component: () => import('../views/inventory/InventoryAdjustments.vue'),
+    component: () => import('@/domains/business/views/inventory/InventoryAdjustments.vue'),
     meta: {
       title: '库存调整',
       icon: 'Edit',
@@ -190,7 +190,7 @@ const routes = [
   {
     path: '/inventory/grns',
     name: 'InventoryGrns',
-    component: () => import('../views/inventory/InventoryGrns.vue'),
+    component: () => import('@/domains/business/views/inventory/InventoryGrns.vue'),
     meta: {
       title: '入库单管理',
       icon: 'Tickets',
@@ -201,7 +201,7 @@ const routes = [
   {
     path: '/inventory/alerts',
     name: 'InventoryAlerts',
-    component: () => import('../views/inventory/InventoryAlerts.vue'),
+    component: () => import('@/domains/business/views/inventory/InventoryAlerts.vue'),
     meta: {
       title: '库存预警',
       icon: 'Warning',
@@ -212,7 +212,7 @@ const routes = [
   {
     path: '/inventory/reconciliation',
     name: 'InventoryReconciliation',
-    component: () => import('../views/inventory/InventoryReconciliation.vue'),
+    component: () => import('@/domains/business/views/inventory/InventoryReconciliation.vue'),
     meta: {
       title: '库存对账',
       icon: 'Switch',
@@ -223,7 +223,7 @@ const routes = [
   {
     path: '/inventory/aging',
     name: 'InventoryAging',
-    component: () => import('../views/inventory/InventoryAging.vue'),
+    component: () => import('@/domains/business/views/inventory/InventoryAging.vue'),
     meta: {
       title: '搴撳瓨搴撻緞',
       icon: 'Clock',
@@ -234,7 +234,7 @@ const routes = [
   {
     path: '/inventory/opening-balances',
     name: 'InventoryOpeningBalances',
-    component: () => import('../views/inventory/InventoryOpeningBalances.vue'),
+    component: () => import('@/domains/business/views/inventory/InventoryOpeningBalances.vue'),
     meta: {
       title: '期初余额',
       icon: 'Document',
@@ -245,7 +245,7 @@ const routes = [
   {
     path: '/human-resources',
     name: 'HumanResources',
-    component: () => import('../views/HumanResources.vue'),
+    component: () => import('@/domains/business/views/HumanResources.vue'),
     meta: {
       title: '人力管理',
       icon: 'User',
@@ -256,7 +256,7 @@ const routes = [
   {
     path: '/financial-management',
     name: 'FinancialManagement',
-    component: () => import('../views/FinancialManagement.vue'),
+    component: () => import('@/domains/business/views/FinancialManagement.vue'),
     meta: {
       title: '财务管理',
       icon: 'Money',
@@ -267,7 +267,7 @@ const routes = [
   {
     path: '/store-management',
     name: 'StoreManagement',
-    component: () => import('../views/StoreManagement.vue'),
+    component: () => import('@/domains/business/views/StoreManagement.vue'),
     meta: {
       title: '店铺管理',
       icon: 'Shop',
@@ -278,7 +278,7 @@ const routes = [
   {
     path: '/system-config',
     name: 'SystemConfig',
-    component: () => import('../views/system/SystemConfig.vue'),
+    component: () => import('@/domains/platform/views/system/SystemConfig.vue'),
     meta: {
       title: '系统配置',
       icon: 'Setting',
@@ -289,7 +289,7 @@ const routes = [
   {
     path: '/database-config',
     name: 'DatabaseConfig',
-    component: () => import('../views/system/DatabaseConfig.vue'),
+    component: () => import('@/domains/platform/views/system/DatabaseConfig.vue'),
     meta: {
       title: '数据库配置',
       icon: 'Connection',
@@ -300,7 +300,7 @@ const routes = [
   {
     path: '/security-settings',
     name: 'SecuritySettings',
-    component: () => import('../views/system/SecuritySettings.vue'),
+    component: () => import('@/domains/platform/views/system/SecuritySettings.vue'),
     meta: {
       title: '安全设置',
       icon: 'Lock',
@@ -311,7 +311,7 @@ const routes = [
   {
     path: '/account-management',
     name: 'AccountManagement',
-    component: () => import('../views/AccountManagement.vue'),
+    component: () => import('@/domains/platform/views/AccountManagement.vue'),
     meta: {
       title: '账号管理',
       icon: 'UserFilled',
@@ -322,7 +322,7 @@ const routes = [
   {
     path: '/personal-settings',
     name: 'PersonalSettings',
-    component: () => import('../views/PersonalSettings.vue'),
+    component: () => import('@/domains/platform/views/PersonalSettings.vue'),
     meta: {
       title: '个人设置',
       icon: 'Setting',
@@ -333,7 +333,7 @@ const routes = [
   {
     path: '/settings/notifications',
     name: 'NotificationPreferences',
-    component: () => import('../views/settings/NotificationPreferences.vue'),
+    component: () => import('@/domains/platform/views/settings/NotificationPreferences.vue'),
     meta: {
       title: '通知偏好设置',
       icon: 'Bell',
@@ -344,7 +344,7 @@ const routes = [
   {
     path: '/settings/sessions',
     name: 'Sessions',
-    component: () => import('../views/settings/Sessions.vue'),
+    component: () => import('@/domains/platform/views/settings/Sessions.vue'),
     meta: {
       title: '会话管理',
       icon: 'Monitor',
@@ -357,7 +357,7 @@ const routes = [
   {
     path: '/data-sync/files',
     name: 'DataSyncFiles',
-    component: () => import('../views/DataSyncFiles.vue'),
+    component: () => import('@/domains/data_platform/views/DataSyncFiles.vue'),
     meta: {
       title: '文件列表',
       icon: 'Document',
@@ -368,7 +368,7 @@ const routes = [
   {
     path: '/data-sync/file-detail/:fileId',
     name: 'DataSyncFileDetail',
-    component: () => import('../views/DataSyncFileDetail.vue'),
+    component: () => import('@/domains/data_platform/views/DataSyncFileDetail.vue'),
     meta: {
       title: '文件详情',
       icon: 'Document',
@@ -379,7 +379,7 @@ const routes = [
   {
     path: '/data-sync/tasks',
     name: 'DataSyncTasks',
-    component: () => import('../views/DataSyncTasks.vue'),
+    component: () => import('@/domains/data_platform/views/DataSyncTasks.vue'),
     meta: {
       title: '同步任务',
       icon: 'Loading',
@@ -390,7 +390,7 @@ const routes = [
   {
     path: '/data-sync/history',
     name: 'DataSyncHistory',
-    component: () => import('../views/DataSyncHistory.vue'),
+    component: () => import('@/domains/data_platform/views/DataSyncHistory.vue'),
     meta: {
       title: '同步历史',
       icon: 'Clock',
@@ -401,7 +401,7 @@ const routes = [
   {
     path: '/data-sync/templates',
     name: 'DataSyncTemplates',
-    component: () => import('../views/DataSyncTemplates.vue'),
+    component: () => import('@/domains/data_platform/views/DataSyncTemplates.vue'),
     meta: {
       title: '模板管理',
       icon: 'Files',
@@ -412,7 +412,7 @@ const routes = [
   {
     path: '/data-sync/refresh-queue',
     name: 'DataSyncRefreshQueue',
-    component: () => import('../views/DataSyncRefreshQueue.vue'),
+    component: () => import('@/domains/data_platform/views/DataSyncRefreshQueue.vue'),
     meta: {
       title: '刷新队列',
       icon: 'Refresh',
@@ -423,7 +423,7 @@ const routes = [
   {
     path: '/cloud-sync',
     name: 'CloudSyncManagement',
-    component: () => import('../views/CloudSyncManagement.vue'),
+    component: () => import('@/domains/data_platform/views/CloudSyncManagement.vue'),
     meta: {
       title: 'B类云端追平',
       icon: 'Connection',
@@ -446,7 +446,7 @@ const routes = [
   {
     path: '/data-consistency',
     name: 'DataConsistency',
-    component: () => import('../views/DataConsistency.vue'),  // v4.11.5: 数据一致性验证
+    component: () => import('@/domains/data_platform/views/DataConsistency.vue'),  // v4.11.5: 数据一致性验证
     meta: {
       title: '数据一致性验证',
       icon: 'DocumentChecked',
@@ -457,7 +457,7 @@ const routes = [
   {
     path: '/top-products',
     name: 'TopProducts',
-    component: () => import('../views/TopProducts.vue'),  // 已废弃，不在菜单显示
+    component: () => import('@/domains/business/views/TopProducts.vue'),  // 已废弃，不在菜单显示
     meta: {
       title: 'TopN产品排行',
       icon: 'TrendCharts',
@@ -468,7 +468,7 @@ const routes = [
   {
     path: '/inventory-health',
     name: 'InventoryHealth',
-    component: () => import('../views/InventoryHealthDashboard.vue'),  // v4.9.0: 库存健康
+    component: () => import('@/domains/business/views/InventoryHealthDashboard.vue'),  // v4.9.0: 库存健康
     meta: {
       title: '库存健康仪表盘',
       icon: 'Box',
@@ -479,7 +479,7 @@ const routes = [
   {
     path: '/product-quality',
     name: 'ProductQuality',
-    component: () => import('../views/ProductQualityDashboard.vue'),  // v4.9.0: 产品质量
+    component: () => import('@/domains/business/views/ProductQualityDashboard.vue'),  // v4.9.0: 产品质量
     meta: {
       title: '产品质量仪表盘',
       icon: 'Medal',
@@ -490,7 +490,7 @@ const routes = [
   {
     path: '/sales-trend',
     name: 'SalesTrend',
-    component: () => import('../views/SalesTrendChart.vue'),  // 已废弃，不在菜单显示
+    component: () => import('@/domains/business/views/SalesTrendChart.vue'),  // 已废弃，不在菜单显示
     meta: {
       title: '销售趋势分析',
       icon: 'TrendCharts',
@@ -512,7 +512,7 @@ const routes = [
   {
     path: '/data-quarantine',
     name: 'DataQuarantine',
-    component: () => import('../views/DataQuarantine.vue'),
+    component: () => import('@/domains/data_platform/views/DataQuarantine.vue'),
     meta: {
       title: '数据隔离区',
       icon: 'Warning',
@@ -523,7 +523,7 @@ const routes = [
   {
     path: '/account-alignment',
     name: 'AccountAlignment',
-    component: () => import('../views/AccountAlignment.vue'),
+    component: () => import('@/domains/business/views/AccountAlignment.vue'),
     meta: {
       title: '账号对齐',
       icon: 'Shop',
@@ -534,7 +534,7 @@ const routes = [
   {
     path: '/sales-dashboard-v3',
     name: 'SalesDashboardV3',
-    component: () => import('../views/SalesDashboard.vue'),
+    component: () => import('@/domains/business/views/SalesDashboard.vue'),
     meta: {
       title: '销售看板v3',
       icon: 'TrendCharts',
@@ -545,7 +545,7 @@ const routes = [
   {
     path: '/inventory-dashboard-v3',
     name: 'InventoryDashboardV3',
-    component: () => import('../views/InventoryDashboardSimple.vue'),  // 临时使用简化版
+    component: () => import('@/domains/business/views/InventoryDashboardSimple.vue'),  // 临时使用简化版
     meta: {
       title: '库存看板v3',
       icon: 'DataLine',
@@ -556,7 +556,7 @@ const routes = [
   {
     path: '/user-management',
     name: 'UserManagement',
-    component: () => import('../views/UserManagement.vue'),
+    component: () => import('@/domains/platform/views/UserManagement.vue'),
     meta: {
       title: '用户管理',
       icon: 'UserFilled',
@@ -567,7 +567,7 @@ const routes = [
   {
     path: '/role-management',
     name: 'RoleManagement',
-    component: () => import('../views/RoleManagement.vue'),
+    component: () => import('@/domains/platform/views/RoleManagement.vue'),
     meta: {
       title: '角色管理',
       icon: 'Key',
@@ -578,7 +578,7 @@ const routes = [
   {
     path: '/permission-management',
     name: 'PermissionManagement',
-    component: () => import('../views/PermissionManagement.vue'),
+    component: () => import('@/domains/platform/views/PermissionManagement.vue'),
     meta: {
       title: '权限管理',
       icon: 'Lock',
@@ -589,7 +589,7 @@ const routes = [
   {
     path: '/target-management',
     name: 'TargetManagement',
-    component: () => import('../views/target/TargetManagement.vue'),
+    component: () => import('@/domains/business/views/target/TargetManagement.vue'),
     meta: {
       title: '目标管理',
       icon: 'Aim',
@@ -603,7 +603,7 @@ const routes = [
   {
     path: '/config/sales-targets',
     name: 'SalesTargetManagement',
-    component: () => import('../views/config/SalesTargetManagement.vue'),
+    component: () => import('@/domains/business/views/config/SalesTargetManagement.vue'),
     meta: {
       title: '销售目标配置',
       icon: 'Histogram',
@@ -614,7 +614,7 @@ const routes = [
   {
     path: '/debug',
     name: 'Debug',
-    component: () => import('../views/Debug.vue'),
+    component: () => import('@/domains/platform/views/Debug.vue'),
     meta: {
       title: '调试信息',
       icon: 'Setting',
@@ -625,7 +625,7 @@ const routes = [
   {
     path: '/test',
     name: 'Test',
-    component: () => import('../views/Test.vue'),
+    component: () => import('@/domains/business/views/Test.vue'),
     meta: {
       title: '测试页面',
       icon: 'Setting',
@@ -638,7 +638,7 @@ const routes = [
   {
     path: '/collection-config',
     name: 'CollectionConfig',
-    component: () => import('../views/collection/CollectionConfig.vue'),
+    component: () => import('@/domains/collection/views/collection/CollectionConfig.vue'),
     meta: {
       title: '采集配置',
       icon: 'Setting',
@@ -649,7 +649,7 @@ const routes = [
   {
     path: '/collection-coverage-audit',
     name: 'CollectionCoverageAudit',
-    component: () => import('../views/collection/CollectionCoverageAudit.vue'),
+    component: () => import('@/domains/collection/views/collection/CollectionCoverageAudit.vue'),
     meta: {
       title: '采集覆盖率巡检',
       icon: 'DataLine',
@@ -660,7 +660,7 @@ const routes = [
   {
     path: '/collection-tasks',
     name: 'CollectionTasks',
-    component: () => import('../views/collection/CollectionTasks.vue'),
+    component: () => import('@/domains/collection/views/collection/CollectionTasks.vue'),
     meta: {
       title: '采集任务',
       icon: 'List',
@@ -671,7 +671,7 @@ const routes = [
   {
     path: '/collection-history',
     name: 'CollectionHistory',
-    component: () => import('../views/collection/CollectionHistory.vue'),
+    component: () => import('@/domains/collection/views/collection/CollectionHistory.vue'),
     meta: {
       title: '采集历史',
       icon: 'Clock',
@@ -682,7 +682,7 @@ const routes = [
   {
     path: '/component-recorder',
     name: 'ComponentRecorder',
-    component: () => import('../views/ComponentRecorder.vue'),
+    component: () => import('@/domains/collection/views/ComponentRecorder.vue'),
     meta: {
       title: '组件录制工具',
       icon: 'VideoPlay',
@@ -693,7 +693,7 @@ const routes = [
   {
     path: '/component-versions',
     name: 'ComponentVersions',
-    component: () => import('../views/ComponentVersions.vue'),
+    component: () => import('@/domains/collection/views/ComponentVersions.vue'),
     meta: {
       title: '组件版本管理',
       icon: 'Files',
@@ -706,7 +706,7 @@ const routes = [
   {
     path: '/purchase-orders',
     name: 'PurchaseOrders',
-    component: () => import('../views/procurement/PurchaseOrders.vue'),
+    component: () => import('@/domains/business/views/procurement/PurchaseOrders.vue'),
     meta: {
       title: '采购订单',
       icon: 'Document',
@@ -717,7 +717,7 @@ const routes = [
   {
     path: '/grn-management',
     name: 'GRNManagement',
-    component: () => import('../views/procurement/GRNManagement.vue'),
+    component: () => import('@/domains/business/views/procurement/GRNManagement.vue'),
     meta: {
       title: '入库单',
       icon: 'Box',
@@ -728,7 +728,7 @@ const routes = [
   {
     path: '/vendor-management',
     name: 'VendorManagement',
-    component: () => import('../views/procurement/VendorManagement.vue'),
+    component: () => import('@/domains/business/views/procurement/VendorManagement.vue'),
     meta: {
       title: '供应商管理',
       icon: 'OfficeBuilding',
@@ -739,7 +739,7 @@ const routes = [
   {
     path: '/invoice-management',
     name: 'InvoiceManagement',
-    component: () => import('../views/procurement/InvoiceManagement.vue'),
+    component: () => import('@/domains/business/views/procurement/InvoiceManagement.vue'),
     meta: {
       title: '发票管理',
       icon: 'Document',
@@ -752,7 +752,7 @@ const routes = [
   {
     path: '/customer-management',
     name: 'CustomerManagement',
-    component: () => import('../views/sales/CustomerManagement.vue'),
+    component: () => import('@/domains/business/views/sales/CustomerManagement.vue'),
     meta: {
       title: '客户管理',
       icon: 'UserFilled',
@@ -763,7 +763,7 @@ const routes = [
   {
     path: '/order-management',
     name: 'OrderManagement',
-    component: () => import('../views/sales/OrderManagement.vue'),
+    component: () => import('@/domains/business/views/sales/OrderManagement.vue'),
     meta: {
       title: '订单管理',
       icon: 'Document',
@@ -774,7 +774,7 @@ const routes = [
   {
     path: '/sales-campaign-management',
     name: 'SalesCampaignManagement',
-    component: () => import('../views/sales/CampaignManagement.vue'),
+    component: () => import('@/domains/business/views/sales/CampaignManagement.vue'),
     meta: {
       title: '销售战役管理',
       icon: 'Trophy',
@@ -787,7 +787,7 @@ const routes = [
   {
     path: '/expense-management',
     name: 'ExpenseManagement',
-    component: () => import('../views/finance/ExpenseManagement.vue'),
+    component: () => import('@/domains/business/views/finance/ExpenseManagement.vue'),
     meta: {
       title: '费用管理',
       icon: 'Wallet',
@@ -798,7 +798,7 @@ const routes = [
   {
     path: '/b-cost-analysis',
     name: 'BCostAnalysis',
-    component: () => import('../views/finance/BCostAnalysis.vue'),
+    component: () => import('@/domains/business/views/finance/BCostAnalysis.vue'),
     meta: {
       title: 'B类成本分析',
       icon: 'DataAnalysis',
@@ -809,7 +809,7 @@ const routes = [
   {
     path: '/finance-reports',
     name: 'FinanceReports',
-    component: () => import('../views/finance/FinanceReports.vue'),
+    component: () => import('@/domains/business/views/finance/FinanceReports.vue'),
     meta: {
       title: '财务报表',
       icon: 'Document',
@@ -820,7 +820,7 @@ const routes = [
   {
     path: '/fx-management',
     name: 'FXManagement',
-    component: () => import('../views/finance/FXManagement.vue'),
+    component: () => import('@/domains/business/views/finance/FXManagement.vue'),
     meta: {
       title: '汇率管理',
       icon: 'Money',
@@ -831,7 +831,7 @@ const routes = [
   {
     path: '/fiscal-periods',
     name: 'FiscalPeriods',
-    component: () => import('../views/finance/FiscalPeriods.vue'),
+    component: () => import('@/domains/business/views/finance/FiscalPeriods.vue'),
     meta: {
       title: '会计期间',
       icon: 'Calendar',
@@ -844,7 +844,7 @@ const routes = [
   {
     path: '/store-analytics',
     name: 'StoreAnalytics',
-    component: () => import('../views/store/StoreAnalytics.vue'),
+    component: () => import('@/domains/business/views/store/StoreAnalytics.vue'),
     meta: {
       title: '店铺分析',
       icon: 'DataAnalysis',
@@ -857,7 +857,7 @@ const routes = [
   {
     path: '/sales-reports',
     name: 'SalesReports',
-    component: () => import('../views/reports/SalesReports.vue'),
+    component: () => import('@/domains/business/views/reports/SalesReports.vue'),
     meta: {
       title: '销售报表',
       icon: 'Document',
@@ -868,7 +868,7 @@ const routes = [
   {
     path: '/inventory-reports',
     name: 'InventoryReports',
-    component: () => import('../views/reports/InventoryReports.vue'),
+    component: () => import('@/domains/business/views/reports/InventoryReports.vue'),
     meta: {
       title: '库存报表',
       icon: 'Document',
@@ -879,7 +879,7 @@ const routes = [
   {
     path: '/finance-reports-detail',
     name: 'FinanceReportsDetail',
-    component: () => import('../views/reports/FinanceReportsDetail.vue'),
+    component: () => import('@/domains/business/views/reports/FinanceReportsDetail.vue'),
     meta: {
       title: '财务报表详情',
       icon: 'Document',
@@ -890,7 +890,7 @@ const routes = [
   {
     path: '/vendor-reports',
     name: 'VendorReports',
-    component: () => import('../views/reports/VendorReports.vue'),
+    component: () => import('@/domains/business/views/reports/VendorReports.vue'),
     meta: {
       title: '供应商报表',
       icon: 'Document',
@@ -901,7 +901,7 @@ const routes = [
   {
     path: '/custom-reports',
     name: 'CustomReports',
-    component: () => import('../views/reports/CustomReports.vue'),
+    component: () => import('@/domains/business/views/reports/CustomReports.vue'),
     meta: {
       title: '自定义报表',
       icon: 'Document',
@@ -914,7 +914,7 @@ const routes = [
   {
     path: '/employee-management',
     name: 'EmployeeManagement',
-    component: () => import('../views/hr/EmployeeManagement.vue'),
+    component: () => import('@/domains/business/views/hr/EmployeeManagement.vue'),
     meta: {
       title: '我的档案',
       icon: 'UserFilled',
@@ -929,7 +929,7 @@ const routes = [
   {
     path: '/my-income',
     name: 'MyIncome',
-    component: () => import('../views/hr/MyIncome.vue'),
+    component: () => import('@/domains/business/views/hr/MyIncome.vue'),
     meta: {
       title: '我的收入',
       icon: 'Money',
@@ -940,7 +940,7 @@ const routes = [
   {
     path: '/my-follow-investment-income',
     name: 'MyFollowInvestmentIncome',
-    component: () => import('../views/hr/MyFollowInvestmentIncome.vue'),
+    component: () => import('@/domains/business/views/hr/MyFollowInvestmentIncome.vue'),
     meta: {
       title: '我的跟投收益',
       icon: 'Money',
@@ -951,7 +951,7 @@ const routes = [
   {
     path: '/employee-salary',
     name: 'EmployeeSalary',
-    component: () => import('../views/hr/EmployeeSalary.vue'),
+    component: () => import('@/domains/business/views/hr/EmployeeSalary.vue'),
     meta: {
       title: '员工薪资',
       icon: 'Money',
@@ -962,7 +962,7 @@ const routes = [
   {
     path: '/hr-performance-management',
     name: 'HRPerformanceManagement',
-    component: () => import('../views/hr/PerformanceManagement.vue'),
+    component: () => import('@/domains/business/views/hr/PerformanceManagement.vue'),
     meta: {
       title: '绩效管理',
       icon: 'Medal',
@@ -973,7 +973,7 @@ const routes = [
   {
     path: '/hr-performance-display',
     name: 'HRPerformanceDisplay',
-    component: () => import('../views/hr/PerformanceDisplay.vue'),
+    component: () => import('@/domains/business/views/hr/PerformanceDisplay.vue'),
     meta: {
       title: '绩效公示',
       icon: 'View',
@@ -984,7 +984,7 @@ const routes = [
   {
     path: '/hr-shop-assignment',
     name: 'ShopAssignment',
-    component: () => import('../views/hr/ShopAssignment.vue'),
+    component: () => import('@/domains/business/views/hr/ShopAssignment.vue'),
     meta: {
       title: '人员店铺归属和提成比',
       icon: 'Connection',
@@ -997,7 +997,7 @@ const routes = [
   {
     path: '/my-tasks',
     name: 'MyTasks',
-    component: () => import('../views/approval/MyTasks.vue'),
+    component: () => import('@/domains/platform/views/approval/MyTasks.vue'),
     meta: {
       title: '我的待办',
       icon: 'List',
@@ -1008,7 +1008,7 @@ const routes = [
   {
     path: '/training/overview',
     name: 'TrainingOverview',
-    component: () => import('../views/training/TrainingOverview.vue'),
+    component: () => import('@/domains/platform/views/training/TrainingOverview.vue'),
     meta: {
       title: '培训总览',
       icon: 'Reading',
@@ -1019,7 +1019,7 @@ const routes = [
   {
     path: '/training/programs',
     name: 'TrainingPrograms',
-    component: () => import('../views/training/TrainingPrograms.vue'),
+    component: () => import('@/domains/platform/views/training/TrainingPrograms.vue'),
     meta: {
       title: '培训项目',
       icon: 'Files',
@@ -1030,7 +1030,7 @@ const routes = [
   {
     path: '/training/assignments',
     name: 'TrainingAssignments',
-    component: () => import('../views/training/TrainingAssignments.vue'),
+    component: () => import('@/domains/platform/views/training/TrainingAssignments.vue'),
     meta: {
       title: '培训分配',
       icon: 'UserFilled',
@@ -1041,7 +1041,7 @@ const routes = [
   {
     path: '/training/assignments/:assignmentId',
     name: 'TrainingAssignmentDetail',
-    component: () => import('../views/training/TrainingAssignmentDetail.vue'),
+    component: () => import('@/domains/platform/views/training/TrainingAssignmentDetail.vue'),
     meta: {
       title: '培训详情',
       icon: 'Document',
@@ -1052,7 +1052,7 @@ const routes = [
   {
     path: '/training/results',
     name: 'TrainingResults',
-    component: () => import('../views/training/TrainingResults.vue'),
+    component: () => import('@/domains/platform/views/training/TrainingResults.vue'),
     meta: {
       title: '培训结果',
       icon: 'Histogram',
@@ -1063,7 +1063,7 @@ const routes = [
   {
     path: '/training/integration',
     name: 'TrainingIntegration',
-    component: () => import('../views/training/TrainingIntegration.vue'),
+    component: () => import('@/domains/platform/views/training/TrainingIntegration.vue'),
     meta: {
       title: '飞书接入',
       icon: 'Connection',
@@ -1074,7 +1074,7 @@ const routes = [
   {
     path: '/my-training',
     name: 'MyTraining',
-    component: () => import('../views/training/MyTraining.vue'),
+    component: () => import('@/domains/platform/views/training/MyTraining.vue'),
     meta: {
       title: '我的培训',
       icon: 'Notebook',
@@ -1085,7 +1085,7 @@ const routes = [
   {
     path: '/my-requests',
     name: 'MyRequests',
-    component: () => import('../views/approval/MyRequests.vue'),
+    component: () => import('@/domains/platform/views/approval/MyRequests.vue'),
     meta: {
       title: '我的申请',
       icon: 'Document',
@@ -1096,7 +1096,7 @@ const routes = [
   {
     path: '/approval-history',
     name: 'ApprovalHistory',
-    component: () => import('../views/approval/ApprovalHistory.vue'),
+    component: () => import('@/domains/platform/views/approval/ApprovalHistory.vue'),
     meta: {
       title: '审批历史',
       icon: 'Clock',
@@ -1107,7 +1107,7 @@ const routes = [
   {
     path: '/workflow-config',
     name: 'WorkflowConfig',
-    component: () => import('../views/approval/WorkflowConfig.vue'),
+    component: () => import('@/domains/platform/views/approval/WorkflowConfig.vue'),
     meta: {
       title: '流程配置',
       icon: 'Setting',
@@ -1120,7 +1120,7 @@ const routes = [
   {
     path: '/system-notifications',
     name: 'SystemNotifications',
-    component: () => import('../views/messages/SystemNotifications.vue'),
+    component: () => import('@/domains/platform/views/messages/SystemNotifications.vue'),
     meta: {
       title: '系统通知',
       icon: 'Bell',
@@ -1131,7 +1131,7 @@ const routes = [
   {
     path: '/alerts',
     name: 'Alerts',
-    component: () => import('../views/messages/Alerts.vue'),
+    component: () => import('@/domains/platform/views/messages/Alerts.vue'),
     meta: {
       title: '预警提醒',
       icon: 'Warning',
@@ -1142,7 +1142,7 @@ const routes = [
   {
     path: '/message-settings',
     name: 'MessageSettings',
-    component: () => import('../views/messages/MessageSettings.vue'),
+    component: () => import('@/domains/platform/views/messages/MessageSettings.vue'),
     meta: {
       title: '消息设置',
       icon: 'Setting',
@@ -1155,7 +1155,7 @@ const routes = [
   {
     path: '/system-logs',
     name: 'SystemLogs',
-    component: () => import('../views/system/SystemLogs.vue'),
+    component: () => import('@/domains/platform/views/system/SystemLogs.vue'),
     meta: {
       title: '系统日志',
       icon: 'Document',
@@ -1166,7 +1166,7 @@ const routes = [
   {
     path: '/data-backup',
     name: 'DataBackup',
-    component: () => import('../views/system/DataBackup.vue'),
+    component: () => import('@/domains/platform/views/system/DataBackup.vue'),
     meta: {
       title: '数据备份',
       icon: 'Folder',
@@ -1177,7 +1177,7 @@ const routes = [
   {
     path: '/system-maintenance',
     name: 'SystemMaintenance',
-    component: () => import('../views/system/SystemMaintenance.vue'),
+    component: () => import('@/domains/platform/views/system/SystemMaintenance.vue'),
     meta: {
       title: '系统维护',
       icon: 'Tools',
@@ -1188,7 +1188,7 @@ const routes = [
   {
     path: '/notification-config',
     name: 'NotificationConfig',
-    component: () => import('../views/system/NotificationConfig.vue'),
+    component: () => import('@/domains/platform/views/system/NotificationConfig.vue'),
     meta: {
       title: '通知配置',
       icon: 'Bell',
@@ -1201,7 +1201,7 @@ const routes = [
   {
     path: '/user-guide',
     name: 'UserGuide',
-    component: () => import('../views/help/UserGuide.vue'),
+    component: () => import('@/domains/platform/views/help/UserGuide.vue'),
     meta: {
       title: '操作指南',
       icon: 'Reading',
@@ -1212,7 +1212,7 @@ const routes = [
   {
     path: '/video-tutorials',
     name: 'VideoTutorials',
-    component: () => import('../views/help/VideoTutorials.vue'),
+    component: () => import('@/domains/platform/views/help/VideoTutorials.vue'),
     meta: {
       title: '视频教程',
       icon: 'VideoPlay',
@@ -1223,7 +1223,7 @@ const routes = [
   {
     path: '/faq',
     name: 'FAQ',
-    component: () => import('../views/help/FAQ.vue'),
+    component: () => import('@/domains/platform/views/help/FAQ.vue'),
     meta: {
       title: '常见问题',
       icon: 'QuestionFilled',
@@ -1236,7 +1236,7 @@ const routes = [
   {
     path: '/api-docs',
     name: 'APIDocs',
-    component: () => import('../views/dev/APIDocs.vue'),
+    component: () => import('@/domains/platform/views/dev/APIDocs.vue'),
     meta: {
       title: 'API文档',
       icon: 'Document',

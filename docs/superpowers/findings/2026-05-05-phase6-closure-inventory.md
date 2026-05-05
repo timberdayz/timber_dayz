@@ -38,14 +38,21 @@ Task 2 backend residual refinement:
 
 Current router-to-wrapper inventory baseline recorded in the frontend test:
 
-- Route-level wrapper references: 107
-- Unique wrapper files: 105
-- Duplicate-aware baseline also records each wrapper route occurrence in router order, including repeated specifiers.
+- Route-level wrapper references: 0
+- Direct route-to-domain imports: 107
+- Direct domain ownership counts:
+  - `platform`: 39
+  - `data_platform`: 9
+  - `collection`: 6
+  - `business`: 53
+- Wrapper baseline reduced from `107` route references / `105` unique files to `0` route references / `0` unique route wrappers.
 
-Notable repeated route specifiers still present in the router baseline:
+Wrapper cleanup status after Task 3:
 
-- `../views/SalesDashboard.vue` appears twice
-- `../views/sales/OrderManagement.vue` appears twice
+- Deleted 75 unreferenced domain wrappers under `frontend/src/views/**`.
+- Continued cleanup removed the last 30 test-only wrappers after migrating script tests to canonical domain paths.
+- Remaining route wrapper files: 0.
+- `frontend/src/views/**` now only keeps non-wrapper legacy view files that are outside the Phase 6 Task 3 route-bridge scope.
 
 ## Schema next split order
 

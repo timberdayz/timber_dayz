@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dashboardApiPath = path.resolve(__dirname, '../src/api/dashboard.js')
 const routerPath = path.resolve(__dirname, '../src/router/index.js')
-const viewPath = path.resolve(__dirname, '../src/views/finance/BCostAnalysis.vue')
+const viewPath = path.resolve(__dirname, '../src/domains/business/views/finance/BCostAnalysis.vue')
 const menuGroupsPath = path.resolve(__dirname, '../src/config/menuGroups.js')
 
 const dashboardSource = fs.readFileSync(dashboardApiPath, 'utf8')

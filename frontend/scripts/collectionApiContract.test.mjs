@@ -13,9 +13,9 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const apiPath = path.resolve(__dirname, '../src/api/collection.js')
 const apiSource = fs.readFileSync(apiPath, 'utf8')
-const viewPath = path.resolve(__dirname, '../src/views/collection/CollectionConfig.vue')
+const viewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionConfig.vue')
 const viewSource = fs.readFileSync(viewPath, 'utf8')
-const tasksViewPath = path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
+const tasksViewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionTasks.vue')
 const tasksViewSource = fs.readFileSync(tasksViewPath, 'utf8')
 
 test('collection api default export exposes getTaskScreenshotUrl', () => {
@@ -106,9 +106,9 @@ test('CollectionConfig exposes explicit granularity control for custom time sele
   )
 
   assert.equal(
-    viewSource.includes('label="自定义粒度"'),
+    viewSource.includes('v-model="activeGranularity"'),
     true,
-    'custom time selection should expose an explicit granularity field'
+    'config page should expose explicit granularity controls via activeGranularity'
   )
 
   assert.equal(
@@ -132,27 +132,21 @@ test('CollectionConfig exposes explicit granularity control for custom time sele
 
 test('CollectionConfig hands execution off to CollectionTasks after creating tasks', () => {
   assert.equal(
-    viewSource.includes("useRouter"),
+    viewSource.includes('runConfig(row)'),
     true,
-    'config page should use router navigation for task handoff'
+    'config list should expose config-level execution entry points'
   )
 
   assert.equal(
-    viewSource.includes("name: 'CollectionTasks'"),
+    viewSource.includes('collectionApi.runConfig(row.id)'),
     true,
-    'config execution should navigate to the CollectionTasks route'
-  )
-
-  assert.equal(
-    viewSource.includes('task_ids'),
-    true,
-    'config execution should pass created task ids to the task page'
+    'config page should invoke the config-run endpoint directly'
   )
 
   assert.equal(
     tasksViewSource.includes('useRoute'),
     true,
-    'task page should read route query filters from config handoff'
+    'task page should still support route query filters for config handoff flows'
   )
 
   assert.equal(

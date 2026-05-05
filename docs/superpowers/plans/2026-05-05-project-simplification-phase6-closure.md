@@ -191,13 +191,13 @@ git commit -m "refactor: narrow backend legacy router compat surfaces"
   - `frontend/src/domains/collection/views/**`
 - Test: `frontend/scripts/frontendSmokeShared.test.mjs`
 
-- [ ] **Step 1: Write or extend a failing test for direct route-to-domain ownership**
+- [x] **Step 1: Write or extend a failing test for direct route-to-domain ownership**
 
 Update `frontend/scripts/domainBridgeInventory.test.mjs` so it can assert a first-wave target:
 - route imports for one domain batch no longer point to wrapper files
 - wrapper baseline decreases after the migration
 
-- [ ] **Step 2: Migrate `platform` route imports in `frontend/src/router/index.js`**
+- [x] **Step 2: Migrate `platform` route imports in `frontend/src/router/index.js`**
 
 Change route `component: () => import('../views/...')` entries to direct `@/domains/platform/views/...` imports for:
 - login/register
@@ -207,7 +207,7 @@ Change route `component: () => import('../views/...')` entries to direct `@/doma
 
 Keep route names and paths unchanged.
 
-- [ ] **Step 3: Run type-check and build**
+- [x] **Step 3: Run type-check and build**
 
 Run:
 ```powershell
@@ -219,7 +219,7 @@ npm run test:smoke-shared
 ```
 Expected: PASS.
 
-- [ ] **Step 4: Repeat for `data_platform`, `collection`, and `business` in small batches**
+- [x] **Step 4: Repeat for `data_platform`, `collection`, and `business` in small batches**
 
 Suggested order:
 1. `data_platform`
@@ -230,7 +230,10 @@ After each batch:
 - reduce wrapper count
 - verify build and smoke
 
-- [ ] **Step 5: Remove wrappers that are no longer referenced by the router or other imports**
+- [x] **Step 5: Remove wrappers that are no longer referenced by the router or other imports**
+
+Task 3 closure note:
+- Frontend script tests that previously hardcoded `src/views/**` collection / training / business / platform wrapper paths were repointed to canonical `src/domains/**/views/**` files, allowing the final 30 route-bridge wrappers to be deleted.
 
 Delete only wrappers proven unused by:
 ```powershell

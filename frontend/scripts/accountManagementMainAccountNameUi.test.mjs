@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const viewPath = path.resolve(__dirname, '../src/views/AccountManagement.vue')
+const viewPath = path.resolve(__dirname, '../src/domains/platform/views/AccountManagement.vue')
 const source = fs.readFileSync(viewPath, 'utf8')
 
 test('account management distinguishes main account name, id, and login username', () => {

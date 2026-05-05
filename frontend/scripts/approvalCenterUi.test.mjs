@@ -5,9 +5,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const myRequestsSource = fs.readFileSync(path.resolve(__dirname, '../src/views/approval/MyRequests.vue'), 'utf8')
-const approvalHistorySource = fs.readFileSync(path.resolve(__dirname, '../src/views/approval/ApprovalHistory.vue'), 'utf8')
-const workflowConfigSource = fs.readFileSync(path.resolve(__dirname, '../src/views/approval/WorkflowConfig.vue'), 'utf8')
+const myRequestsSource = fs.readFileSync(path.resolve(__dirname, '../src/domains/platform/views/approval/MyRequests.vue'), 'utf8')
+const approvalHistorySource = fs.readFileSync(path.resolve(__dirname, '../src/domains/platform/views/approval/ApprovalHistory.vue'), 'utf8')
+const workflowConfigSource = fs.readFileSync(path.resolve(__dirname, '../src/domains/platform/views/approval/WorkflowConfig.vue'), 'utf8')
 const approvalApiSource = fs.readFileSync(path.resolve(__dirname, '../src/api/approvalCenter.js'), 'utf8')
 
 test('my requests page exposes approval request summary and withdrawal flow', () => {
