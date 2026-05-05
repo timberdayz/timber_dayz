@@ -8,6 +8,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from backend.models.database import AsyncSessionLocal
+from modules.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _to_float(value: Any) -> float:
@@ -1091,6 +1094,40 @@ class PostgresqlDashboardService:
         period_key = _normalize_period_start(effective_target_date)
 
         if effective_granularity == "monthly":
+            try:
+                platform_filter_sql = " AND platform_code = :platform_code" if platform else ""
+                view_rows = await self._fetch_rows(
+                    f"""
+                    SELECT
+                        period_month AS period_key,
+                        platform_code,
+                        gmv,
+                        order_count,
+                        visitor_count,
+                        conversion_rate,
+                        avg_order_value,
+                        attach_rate,
+                        total_items,
+                        profit
+                    FROM mart.platform_month_kpi
+                    WHERE period_month = :period_key
+                    {platform_filter_sql}
+                    """,
+                    {"period_key": period_key, "platform_code": platform},
+                )
+                if view_rows:
+                    reduced = reduce_business_overview_kpi_rows(view_rows)
+                    employee_count = await self._load_active_employee_count(period_key)
+                    gmv = reduced.get("gmv")
+                    if employee_count > 0 and gmv is not None:
+                        reduced["labor_efficiency"] = round(float(gmv) / employee_count, 2)
+                    else:
+                        reduced["labor_efficiency"] = 0
+                    return reduced
+            except Exception:
+                # Fall back to raw layer sources when mart view is unavailable.
+                pass
+
             platform_filter_sql = " AND platform_code = :platform_code" if platform else ""
             rows = await self._fetch_rows(
                 """
@@ -1463,15 +1500,35 @@ class PostgresqlDashboardService:
         if platform:
             combined_query += " AND platform_code = :platform_code"
 
-        combined_rows = await self._fetch_rows(
-            combined_query,
-            {
-                "granularity": granularity,
-                "range_start": min(previous_start, average_start),
-                "range_end": current_start,
-                "platform_code": platform,
-            },
-        )
+        params = {
+            "granularity": granularity,
+            "range_start": min(previous_start, average_start),
+            "range_end": current_start,
+            "platform_code": platform,
+        }
+        try:
+            combined_rows = await self._fetch_rows(combined_query, params)
+        except ProgrammingError:
+            fallback_query = """
+                SELECT
+                    period_key,
+                    sales_amount,
+                    sales_quantity,
+                    0::numeric AS order_count,
+                    0::numeric AS total_items,
+                    traffic,
+                    conversion_rate,
+                    avg_order_value,
+                    attach_rate,
+                    profit
+                FROM api.business_overview_comparison_platform_module
+                WHERE granularity = :granularity
+                  AND period_key >= :range_start
+                  AND period_key <= :range_end
+            """
+            if platform:
+                fallback_query += " AND platform_code = :platform_code"
+            combined_rows = await self._fetch_rows(fallback_query, params)
 
         current_rows = _filter_rows_by_period_key(combined_rows, current_start)
         previous_rows = _filter_rows_by_period_key(combined_rows, previous_start)
@@ -1740,10 +1797,11 @@ class PostgresqlDashboardService:
                     profit,
                     target_amount,
                     achievement_rate
-                FROM api.business_overview_shop_racing_monthly_module src
-                WHERE src.period_key = :period_key
+                FROM api.business_overview_shop_racing_module src
+                WHERE src.granularity = :granularity
+                  AND src.period_key = :period_key
             """
-            params = {"period_key": period_key}
+            params = {"granularity": "monthly", "period_key": period_key}
             if platform:
                 query += " AND src.platform_code = :platform_code"
                 params["platform_code"] = platform
@@ -1772,74 +1830,82 @@ class PostgresqlDashboardService:
             main_account_name_map: dict[str, str] = {}
 
             if shop_ids and platforms:
-                dim_shop_rows = await self._fetch_rows(
-                    """
-                    SELECT platform_code, shop_id, shop_name
-                    FROM core.dim_shops
-                    WHERE platform_code = ANY(:platforms)
-                      AND shop_id = ANY(:shop_ids)
-                    """,
-                    {"platforms": platforms, "shop_ids": shop_ids},
-                )
-                dim_shop_map = {
-                    (
-                        str(row.get("platform_code") or "").strip().lower(),
-                        str(row.get("shop_id") or "").strip(),
-                    ): str(row.get("shop_name") or "").strip()
-                    for row in dim_shop_rows
-                    if row.get("shop_name")
-                }
-
-                account_rows = await self._fetch_rows(
-                    """
-                    SELECT id, platform, shop_account_id, main_account_id, store_name, platform_shop_id
-                    FROM core.shop_accounts
-                    WHERE LOWER(COALESCE(platform, '')) = ANY(:platforms)
-                      AND (
-                          COALESCE(platform_shop_id, '') = ANY(:shop_ids)
-                          OR COALESCE(shop_account_id, '') = ANY(:shop_ids)
-                          OR id::text = ANY(:shop_ids)
-                      )
-                    """,
-                    {"platforms": platforms, "shop_ids": shop_ids},
-                )
-                for row in account_rows:
-                    platform_code = str(row.get("platform") or "").strip().lower()
-                    keys = {
-                        str(row.get("platform_shop_id") or "").strip(),
-                        str(row.get("shop_account_id") or "").strip(),
-                        str(row.get("id") or "").strip(),
-                    }
-                    payload = {
-                        "shop_account_id": row.get("shop_account_id"),
-                        "main_account_id": row.get("main_account_id"),
-                        "account_store_name": row.get("store_name"),
-                    }
-                    for key in keys:
-                        if key:
-                            account_map[(platform_code, key)] = payload
-
-                main_account_ids = sorted(
-                    {
-                        str(row.get("main_account_id") or "").strip()
-                        for row in account_rows
-                        if str(row.get("main_account_id") or "").strip()
-                    }
-                )
-                if main_account_ids:
-                    main_account_rows = await self._fetch_rows(
+                try:
+                    dim_shop_rows = await self._fetch_rows(
                         """
-                        SELECT main_account_id, main_account_name
-                        FROM core.main_accounts
-                        WHERE main_account_id = ANY(:main_account_ids)
+                        SELECT platform_code, shop_id, shop_name
+                        FROM core.dim_shops
+                        WHERE platform_code = ANY(:platforms)
+                          AND shop_id = ANY(:shop_ids)
                         """,
-                        {"main_account_ids": main_account_ids},
+                        {"platforms": platforms, "shop_ids": shop_ids},
                     )
-                    main_account_name_map = {
-                        str(row.get("main_account_id") or "").strip(): str(row.get("main_account_name") or "").strip()
-                        for row in main_account_rows
-                        if row.get("main_account_name")
+                    dim_shop_map = {
+                        (
+                            str(row.get("platform_code") or "").strip().lower(),
+                            str(row.get("shop_id") or "").strip(),
+                        ): str(row.get("shop_name") or "").strip()
+                        for row in dim_shop_rows
+                        if row.get("shop_name")
                     }
+
+                    account_rows = await self._fetch_rows(
+                        """
+                        SELECT id, platform, shop_account_id, main_account_id, store_name, platform_shop_id
+                        FROM core.shop_accounts
+                        WHERE LOWER(COALESCE(platform, '')) = ANY(:platforms)
+                          AND (
+                              COALESCE(platform_shop_id, '') = ANY(:shop_ids)
+                              OR COALESCE(shop_account_id, '') = ANY(:shop_ids)
+                              OR id::text = ANY(:shop_ids)
+                          )
+                        """,
+                        {"platforms": platforms, "shop_ids": shop_ids},
+                    )
+                    for row in account_rows:
+                        platform_code = str(row.get("platform") or "").strip().lower()
+                        keys = {
+                            str(row.get("platform_shop_id") or "").strip(),
+                            str(row.get("shop_account_id") or "").strip(),
+                            str(row.get("id") or "").strip(),
+                        }
+                        payload = {
+                            "shop_account_id": row.get("shop_account_id"),
+                            "main_account_id": row.get("main_account_id"),
+                            "account_store_name": row.get("store_name"),
+                        }
+                        for key in keys:
+                            if key:
+                                account_map[(platform_code, key)] = payload
+
+                    main_account_ids = sorted(
+                        {
+                            str(row.get("main_account_id") or "").strip()
+                            for row in account_rows
+                            if str(row.get("main_account_id") or "").strip()
+                        }
+                    )
+                    if main_account_ids:
+                        main_account_rows = await self._fetch_rows(
+                            """
+                            SELECT main_account_id, main_account_name
+                            FROM core.main_accounts
+                            WHERE main_account_id = ANY(:main_account_ids)
+                            """,
+                            {"main_account_ids": main_account_ids},
+                        )
+                        main_account_name_map = {
+                            str(row.get("main_account_id") or "").strip(): str(
+                                row.get("main_account_name") or ""
+                            ).strip()
+                            for row in main_account_rows
+                            if row.get("main_account_name")
+                        }
+                except Exception as e:
+                    logger.warning(
+                        "Shop racing enrichment skipped (missing core tables?): %s",
+                        e,
+                    )
 
             enriched_rows: list[dict[str, Any]] = []
             for row in rows:
