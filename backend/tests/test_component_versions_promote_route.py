@@ -41,7 +41,7 @@ async def test_promote_to_stable_route_works_with_async_session():
 
     async def _execute(stmt, *args, **kwargs):
         sql = str(stmt)
-        if "WHERE component_versions.id =" in sql:
+        if "WHERE component_versions.id =" in sql or "WHERE core.component_versions.id =" in sql:
             return _ScalarResult(target)
         return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [old_stable]))
 
@@ -106,7 +106,7 @@ async def test_promote_to_stable_invalidates_component_versions_cache():
 
     async def _execute(stmt, *args, **kwargs):
         sql = str(stmt)
-        if "WHERE component_versions.id =" in sql:
+        if "WHERE component_versions.id =" in sql or "WHERE core.component_versions.id =" in sql:
             return _ScalarResult(target)
         return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
 
