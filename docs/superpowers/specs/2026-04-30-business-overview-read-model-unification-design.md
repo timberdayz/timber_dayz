@@ -3,7 +3,7 @@
 ## Metadata
 - Date: 2026-04-30
 - Scope: Business overview page, PostgreSQL dashboard read path, frontend loading strategy
-- Status: Draft for implementation
+- Status: Implemented and merged to `main` on 2026-05-05
 
 ## Context
 

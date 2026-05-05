@@ -255,8 +255,6 @@ session_owner_id = main_account_id
 shop_account_id = None
 ```
 
-<<<<<<< HEAD
-=======
 - [ ] **Step 5.1: Enforce the session ownership rule in runtime code paths**
 
 ```python
@@ -268,8 +266,6 @@ session_owner_id = account["shop_account_id"]
 ```
 
 Search for and eliminate any code path that creates persistent session state keyed by `shop_account_id` when `main_account_id` is available.
-
->>>>>>> codex/shop-discovery-current-only
 - [ ] **Step 6: Keep shop-bound runtime only after discovery or explicit shop selection**
 
 ```python
@@ -424,10 +420,7 @@ Expected: Confirms the plan still matches the approved design.
 ```markdown
 - login is main-account scoped
 - shop discovery is the cold-start shop-binding entry
-<<<<<<< HEAD
-=======
 - all automation components reuse main-account persistent sessions
->>>>>>> codex/shop-discovery-current-only
 ```
 
 - [ ] **Step 3: Run backend verification**

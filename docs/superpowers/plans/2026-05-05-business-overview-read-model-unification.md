@@ -6,7 +6,7 @@
 - Track: Parallel follow-up for project simplification
 - Design SSOT: `docs/superpowers/specs/2026-04-30-business-overview-read-model-unification-design.md`
 - Policy baseline: Online Query Policy (B) for business overview
-- Status: Completed in worktree (pending merge / rollout)
+- Status: Implemented and merged to `main` on 2026-05-05
 
 ## Objective
 
