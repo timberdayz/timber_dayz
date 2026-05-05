@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.routers.notifications import create_notification
+from backend.domains.platform.routers.notifications import create_notification
 from backend.schemas.notification import NotificationType
 
 
