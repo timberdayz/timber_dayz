@@ -52,63 +52,8 @@ from typing import List, Optional
 
 # 导入路由(全部启用 - v4.1.0优化后)
 # Legacy cleanup notes for previously removed dashboard APIs.
-from backend.routers import (
-    permissions,  # v4.20.0: 权限树API
-    permission,  # v4.20.0: 权限列表API
-    collection,
-    management,
-    # accounts,  # v4.18.0: 已删除,使用account_management替代
-    field_mapping,
-    field_mapping_dictionary,  # v4.3.7: 字段映射辞典API
-    field_mapping_templates,
-    auto_ingest,  # v4.5.0: 自动入库API(v4.12.0标记为废弃,使用data_sync替代)
-    data_sync,  # v4.12.0: 数据同步API(新统一入口)
-    data_sync_mapping_quality,  # v4.13.0: 字段映射质量评分API
-    data_quarantine,  # v4.6.0: 数据隔离区API
-    data_quality,  # C类数据核心字段优化计划: 数据质量监控API
-    config_management,  # Phase 3: A类数据管理API(销售目标、战役目标、经营成本)
-    dashboard_api_postgresql,  # PostgreSQL-first dashboard API
-    data_pipeline,  # PostgreSQL dashboard pipeline observability API
-    hr_management,  # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)
-    test_api,
-    inventory_domain,
-    inventory_overview,
-    # finance,  # v4.17.0: 已删除(财务域表已删除,API路由已移除)
-    auth,
-    users,
-    roles,
-    notifications,  # v4.19.0: 系统通知API
-    training,
-    performance,
-    system,  # v4.3.5: 系统配置API
-    system_logs,  # v4.20.0: 系统日志API
-    security,  # v4.20.0: 安全设置API
-    backup,  # v4.20.0: 数据备份与恢复API
-    maintenance,  # v4.20.0: 系统维护API
-    notification_config,  # v4.20.0: 通知配置API
-    account_alignment,  # v4.3.6: 账号对齐API
-    # procurement,  # v4.17.0: 已删除(财务域表已删除,API路由已移除)
-    # [WARN] v4.12.0移除:旧数据浏览器API已移除
-    # data_browser,  # v4.7.0: 数据库浏览器API
-    sales_campaign,  # v4.11.0: 销售战役管理API
-    target_management,  # v4.11.0: 目标管理API
-    expense_management,  # v4.21.0: 费用管理API
-    performance_management,  # v4.11.0: 绩效管理API
-    raw_layer,  # v4.11.5: 原始数据层查看API
-    raw_layer_export,  # v4.13.1: 丢失数据导出API
-    data_flow,  # v4.11.5: 数据流转追踪API
-    data_consistency,  # v4.11.5: 数据一致性验证API
-    database_design_validator,  # [*] v4.12.0新增:数据库设计规范验证API
-    mv,  # [*] v4.12.0修复:物化视图管理API(修复刷新功能)
-    component_recorder,  # [*] Phase 8.1: UI化组件录制工具API
-    rate_limit,  # [*] v4.19.2: 限流管理API
-    data_migration,  # v5.0.0: 数据迁移API
-    task_center,  # task center unified read APIs
-    employee_tasks,
-    approval_center,
-)
-from backend.routers import rate_limit_config  # [*] v4.19.4: 限流配置管理API(Phase 3)
-from backend.routers import cloud_sync as cloud_sync_router
+# 路由注册已迁移到 `backend.app.runtime.bootstrap_app`（通过各 domain 的 routes.py 统一挂载）。
+# 入口模块不再做大规模 `backend.routers.*` 顶层导入，避免 import side-effect 与循环依赖风险。
 from backend.models.database import init_db, get_db
 from backend.utils.config import get_settings
 from modules.core.logger import get_logger
@@ -923,14 +868,6 @@ def create_app(runtime_mode: str | None = None) -> FastAPI:
     return bootstrap_app(app, logger, settings, runtime_mode)
 
 
-def _deferred_include_router(*args, **kwargs):
-    return None
-
-
-_original_include_router = app.include_router
-app.include_router = _deferred_include_router
-
-
 _LEGACY_ROUTE_REGISTRATION_NOTES = """
 logger.info("Dashboard router source: PostgreSQL")
 app.include_router(dashboard_api_postgresql.router, tags=["Dashboard"])
@@ -1187,8 +1124,6 @@ app.include_router(approval_center.router, prefix="/api", tags=["审批中心"])
 
 # 全局异常处理(v4.6.0统一响应格式)
 """
-app.include_router = _original_include_router
-
 # Bootstrap registration markers retained for source-contract tests:
 # app.include_router(field_mapping_templates.router, prefix="/api/field-mapping", tags=["字段映射模板"])
 # app.include_router(profit_basis.router, tags=["利润结算基准"])
