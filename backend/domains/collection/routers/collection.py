@@ -11,10 +11,12 @@ v4.21.0: 拆分为三个子模块以保持每文件 <= 15 个端点：
 
 from fastapi import APIRouter
 
-from backend.routers.collection_config import router as config_router
-from backend.routers.collection_tasks import router as tasks_router
-from backend.routers.collection_tasks import _execute_collection_task_background  # noqa: F401 backward compat
-from backend.routers.collection_schedule import router as schedule_router
+from backend.domains.collection.routers.collection_config import router as config_router
+from backend.domains.collection.routers.collection_tasks import router as tasks_router
+from backend.domains.collection.routers.collection_tasks import (
+    _execute_collection_task_background,  # noqa: F401 backward compat
+)
+from backend.domains.collection.routers.collection_schedule import router as schedule_router
 
 router = APIRouter(tags=["数据采集"])
 
