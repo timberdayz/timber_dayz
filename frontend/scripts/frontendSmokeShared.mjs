@@ -1,4 +1,4 @@
-import { buildPersistedAuthState } from '../src/utils/authSession.js'
+﻿import { buildPersistedAuthState } from '../src/utils/authSession.js'
 
 export const SMOKE_ROUTES = [
   { name: 'BusinessOverview', path: '/business-overview', expectedTitle: '业务概览' },
@@ -23,7 +23,7 @@ export const SMOKE_ROUTES = [
   { name: 'DataSyncHistory', path: '/data-sync/history', expectedTitle: '同步历史' },
   { name: 'ComponentVersions', path: '/component-versions', expectedTitle: '组件版本管理' },
   { name: 'StoreAnalytics', path: '/store-analytics', expectedTitle: '店铺分析' },
-  { name: 'FinancialManagement', path: '/financial-management', expectedTitle: '财务总览' },
+  { name: 'FinancialManagement', path: '/financial-overview', expectedTitle: '财务总览' },
   { name: 'ExpenseManagement', path: '/expense-management', expectedTitle: '费用管理' },
   { name: 'InventoryDashboardV3', path: '/inventory-dashboard-v3', expectedTitle: '库存看板v3' },
   { name: 'InventoryHealth', path: '/inventory-health', expectedTitle: '库存健康仪表盘' },
@@ -53,3 +53,4 @@ export function summarizeSmokeResults(results) {
     failedRoutes
   }
 }
+
