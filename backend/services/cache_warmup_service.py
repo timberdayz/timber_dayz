@@ -17,6 +17,7 @@ logger = get_logger(__name__)
 
 # P1 业务概览预热入口列表；可通过 ENV POSTGRESQL_DASHBOARD_WARMUP_TARGETS 覆盖
 _DEFAULT_P1_TARGETS = [
+    "business_overview_bootstrap",
     "business_overview_kpi",
     "business_overview_comparison",
     "business_overview_shop_racing",
@@ -28,6 +29,15 @@ _DEFAULT_P1_TARGETS = [
 
 # target_name -> (cache_type, 默认参数字典；值可为 callable() 表示运行时计算)
 _WARMUP_SPEC: Dict[str, Tuple[str, Dict[str, Any]]] = {
+    "business_overview_bootstrap": (
+        "dashboard_business_overview_bootstrap",
+        {
+            "granularity": "monthly",
+            "date": lambda: _current_month(),
+            "month": lambda: _current_month(),
+            "platform": None,
+        },
+    ),
     "business_overview_kpi": (
         "dashboard_kpi",
         {"month": lambda: _current_month(), "platform": None},
@@ -187,6 +197,30 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
 
 
 async def _query_postgresql_dashboard(service, target_name: str, params: Dict[str, Any]) -> Any:
+    if target_name == "business_overview_bootstrap":
+        date_value = params.get("date") or _current_month()
+        granularity = params.get("granularity") or "monthly"
+        platform = params.get("platform")
+        kpi_result = await service.get_business_overview_kpi(
+            month=date_value,
+            platform=platform,
+            granularity=granularity,
+            target_date=date_value,
+        )
+        comparison_result = await service.get_business_overview_comparison(
+            granularity=granularity,
+            target_date=date_value,
+            platform=platform,
+        )
+        operational_result = await service.get_business_overview_operational_metrics(
+            month=params.get("month") or _current_month(),
+            platform=platform,
+        )
+        return {
+            "kpi": kpi_result,
+            "comparison": comparison_result,
+            "operational_metrics": operational_result,
+        }
     if target_name == "business_overview_kpi":
         return await service.get_business_overview_kpi(
             month=params.get("month"),

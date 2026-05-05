@@ -14,6 +14,9 @@
 import api from './index.js'
 
 export default {
+  async queryBusinessOverviewBootstrap(params = {}) {
+    return await api._get('/dashboard/business-overview/bootstrap', { params })
+  },
   /**
    * 查询业务概览KPI数据
    * @param {Object} params - 查询参数

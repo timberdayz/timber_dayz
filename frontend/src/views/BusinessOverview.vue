@@ -1406,12 +1406,21 @@ function loadModulesAfterGlobalChange() {
   _globalDebounceTimer = setTimeout(() => {
     _globalDebounceTimer = null
     const tasks = []
-    if (useGlobalDate.value.comparison) tasks.push(loadComparisonData())
+    const criticalFollowed =
+      useGlobalDate.value.kpi &&
+      useGlobalDate.value.comparison &&
+      useGlobalDate.value.operational
+
+    if (criticalFollowed) {
+      tasks.push(loadCriticalTierBootstrap())
+    } else {
+      if (useGlobalDate.value.kpi) tasks.push(loadKPIData())
+      if (useGlobalDate.value.comparison) tasks.push(loadComparisonData())
+      if (useGlobalDate.value.operational) tasks.push(loadOperationalMetrics())
+    }
     if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData())
     if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking())
     if (useGlobalDate.value.inventory) tasks.push(loadInventoryBacklog())
-    if (useGlobalDate.value.operational) tasks.push(loadOperationalMetrics())
-    if (useGlobalDate.value.kpi) tasks.push(loadKPIData())
     if (useGlobalDate.value.clearance && (globalGranularity.value === 'monthly' || globalGranularity.value === 'weekly')) {
       tasks.push(loadClearanceRanking('monthly'))
       tasks.push(loadClearanceRanking('weekly'))
@@ -1424,9 +1433,18 @@ async function refreshFollowedModules() {
   applyGlobalToModules()
   await nextTick()
   const tasks = []
-  if (useGlobalDate.value.kpi) tasks.push(loadKPIData())
-  if (useGlobalDate.value.operational) tasks.push(loadOperationalMetrics())
-  if (useGlobalDate.value.comparison) tasks.push(loadComparisonData())
+  const criticalFollowed =
+    useGlobalDate.value.kpi &&
+    useGlobalDate.value.comparison &&
+    useGlobalDate.value.operational
+
+  if (criticalFollowed) {
+    tasks.push(loadCriticalTierBootstrap())
+  } else {
+    if (useGlobalDate.value.kpi) tasks.push(loadKPIData())
+    if (useGlobalDate.value.operational) tasks.push(loadOperationalMetrics())
+    if (useGlobalDate.value.comparison) tasks.push(loadComparisonData())
+  }
   if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData())
   if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking())
   if (useGlobalDate.value.inventory) tasks.push(loadInventoryBacklog())
@@ -2612,17 +2630,129 @@ const getWeekNumber = (date) => {
   return Math.ceil(((d - yearStart) / 86400000 + 1) / 7)
 }
 
+const loadCriticalTierBootstrap = async () => {
+  loadingKPI.value = true
+  loadingComparison.value = true
+  loadingOperational.value = true
+  try {
+    const dateStr = globalToDateStr()
+    const monthStr = globalToOperationalDateStr()
+    const payload = await api.getBusinessOverviewBootstrap({
+      granularity: globalGranularity.value,
+      date: dateStr || undefined,
+      month: monthStr || undefined,
+      platform: kpiPlatform.value || undefined
+    })
+
+    const applyKpiPayload = (data) => {
+      if (!data) return
+      const formatChange = (num) => {
+        if (num === null || num === undefined) return '--'
+        const n = Number(num)
+        if (Number.isNaN(n)) return '--'
+        return (n > 0 ? '+' : '') + n.toFixed(2) + '%'
+      }
+      const showValue = (v, formatter) =>
+        v != null && v !== '' ? formatter(Number(v)) : '--'
+
+      const conversionRate = data.conversion_rate
+      kpiData.value[0].value = showValue(conversionRate, (n) => `${n.toFixed(2)}%`)
+      kpiData.value[0].change = formatChange(data.conversion_rate_change)
+      kpiData.value[0].changeType = getChangeType(data.conversion_rate_change)
+      kpiData.value[0].changeIcon = getChangeIcon(data.conversion_rate_change)
+
+      const visitorCount = data.visitor_count ?? data.traffic?.current
+      kpiData.value[1].value = showValue(visitorCount, (n) => formatInteger(n))
+      kpiData.value[1].change = formatChange(data.visitor_count_change)
+      kpiData.value[1].changeType = getChangeType(data.visitor_count_change)
+      kpiData.value[1].changeIcon = getChangeIcon(data.visitor_count_change)
+
+      const avgOrderValue = data.avg_order_value ?? data.average_order_value?.current
+      kpiData.value[2].value = showValue(avgOrderValue, (n) => formatCurrency(n))
+      kpiData.value[2].change = formatChange(data.avg_order_value_change)
+      kpiData.value[2].changeType = getChangeType(data.avg_order_value_change)
+      kpiData.value[2].changeIcon = getChangeIcon(data.avg_order_value_change)
+
+      const gmv = data.gmv
+      kpiData.value[3].value = showValue(gmv, (n) => formatCurrency(n))
+      kpiData.value[3].change = formatChange(data.gmv_change)
+      kpiData.value[3].changeType = getChangeType(data.gmv_change)
+      kpiData.value[3].changeIcon = getChangeIcon(data.gmv_change)
+
+      const orderCount = data.order_count
+      kpiData.value[4].value = showValue(orderCount, (n) => formatInteger(n))
+      kpiData.value[4].change = formatChange(data.order_count_change)
+      kpiData.value[4].changeType = getChangeType(data.order_count_change)
+      kpiData.value[4].changeIcon = getChangeIcon(data.order_count_change)
+
+      const attachRate = data.attach_rate ?? data.attach_rate_obj?.current
+      kpiData.value[5].value = showValue(attachRate, (n) => n.toFixed(2))
+      kpiData.value[5].change = formatChange(data.attach_rate_change ?? data.attach_rate_obj?.change)
+      kpiData.value[5].changeType = getChangeType(data.attach_rate_change ?? data.attach_rate_obj?.change)
+      kpiData.value[5].changeIcon = getChangeIcon(data.attach_rate_change ?? data.attach_rate_obj?.change)
+
+      const laborEfficiency = data.labor_efficiency ?? data.labor_efficiency_obj?.current
+      kpiData.value[6].value = showValue(laborEfficiency, (n) => formatCurrency(n))
+      kpiData.value[6].change = formatChange(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
+      kpiData.value[6].changeType = getChangeType(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
+      kpiData.value[6].changeIcon = getChangeIcon(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
+    }
+
+    const applyComparisonPayload = (data) => {
+      if (!data) return
+      const normalizedResponse = data || { metrics: {}, target: {} }
+      comparisonData.value = normalizedResponse
+      targetValue.value = Number(normalizedResponse.target?.sales_amount ?? 0)
+      achievedValue.value = Number(normalizedResponse.metrics?.sales_amount?.today ?? 0)
+      targetAchievementRate.value = Number(normalizedResponse.target?.achievement_rate ?? 0)
+      targetUnit.value = ''
+      updateComparisonTable()
+    }
+
+    const applyOperationalPayload = (data) => {
+      if (!data) return
+      operationalMetrics.value = {
+        monthly_target: data.monthly_target ?? null,
+        monthly_total_achieved: data.monthly_total_achieved ?? null,
+        today_sales: data.today_sales ?? data.monthly_total_achieved ?? null,
+        monthly_achievement_rate: data.monthly_achievement_rate ?? null,
+        time_gap: data.time_gap ?? null,
+        estimated_gross_profit: data.estimated_gross_profit ?? null,
+        estimated_expenses: data.estimated_expenses ?? null,
+        operating_result: data.operating_result ?? null,
+        operating_result_text: data.operating_result_text ?? '--',
+        monthly_order_count: data.monthly_order_count ?? null,
+        today_order_count: data.today_order_count ?? data.monthly_order_count ?? null
+      }
+    }
+
+    applyKpiPayload(payload?.kpi)
+    applyComparisonPayload(payload?.comparison)
+    applyOperationalPayload(payload?.operational_metrics)
+  } catch (error) {
+    console.error('[BusinessOverview] bootstrap 加载失败:', error)
+    handleApiError(error, { showMessage: true, logError: true })
+    await Promise.allSettled([
+      loadKPIData(),
+      loadComparisonData(),
+      loadOperationalMetrics()
+    ])
+  } finally {
+    loadingKPI.value = false
+    loadingComparison.value = false
+    loadingOperational.value = false
+  }
+}
+
 const refreshData = async () => {
   loading.value = true
   try {
     applyGlobalToModules()
+    await loadCriticalTierBootstrap()
     const results = await Promise.allSettled([
-      loadKPIData(),
-      loadComparisonData(),
       loadShopRacingData(),
       loadTrafficRanking(),
       loadInventoryBacklog(),
-      loadOperationalMetrics(),
       loadClearanceRanking('monthly'),
       loadClearanceRanking('weekly')
     ])
