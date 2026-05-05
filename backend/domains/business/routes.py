@@ -1,4 +1,4 @@
-from backend.routers import (
+from backend.domains.business.routers import (
     approval_center,
     config_management,
     dashboard_api_postgresql,
@@ -20,7 +20,7 @@ from backend.routers import (
     task_center,
     training,
 )
-from backend.routers import employee_tasks, follow_investment
+from backend.domains.business.routers import employee_tasks, follow_investment
 
 
 def register_business_routes(app) -> None:

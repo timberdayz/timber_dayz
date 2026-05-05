@@ -1,4 +1,4 @@
-from backend.routers import (
+from backend.domains.data_platform.routers import (
     auto_ingest,
     cloud_sync as cloud_sync_router,
     data_migration,

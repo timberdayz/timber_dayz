@@ -1,4 +1,4 @@
-from backend.routers import account_alignment, collection, component_recorder
+from backend.domains.collection.routers import account_alignment, collection, component_recorder
 
 
 def register_collection_routes(app, logger) -> None:
@@ -8,8 +8,8 @@ def register_collection_routes(app, logger) -> None:
     )
 
     try:
-        from backend.routers import collection_websocket
-        from backend.routers import (
+        from backend.domains.collection.routers import collection_websocket
+        from backend.domains.collection.routers import (
             component_versions,
             main_accounts,
             platform_shop_discoveries,

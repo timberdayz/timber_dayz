@@ -1,4 +1,4 @@
-from backend.routers import (
+from backend.domains.platform.routers import (
     auth,
     backup,
     maintenance,
