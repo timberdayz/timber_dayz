@@ -491,7 +491,7 @@ def _apply_ranking_policy(
             eligible_rows.append(row)
         else:
             row["rank"] = None
-            row["performance_coefficient"] = 1.0
+            row["performance_coefficient"] = None
 
     eligible_rows.sort(
         key=lambda item: (
@@ -1574,7 +1574,11 @@ async def calculate_performance_scores(
                 existed.key_product_score = row["key_product_score"]
                 existed.operation_score = row["operation_score"]
                 existed.rank = row["rank"]
-                existed.performance_coefficient = row["performance_coefficient"]
+                existed.performance_coefficient = (
+                    row["performance_coefficient"]
+                    if row.get("performance_coefficient") is not None
+                    else 1.0
+                )
                 existed.score_details = details
                 existed.updated_at = datetime.now(timezone.utc)
             else:
@@ -1589,7 +1593,11 @@ async def calculate_performance_scores(
                         key_product_score=row["key_product_score"],
                         operation_score=row["operation_score"],
                         rank=row["rank"],
-                        performance_coefficient=row["performance_coefficient"],
+                        performance_coefficient=(
+                            row["performance_coefficient"]
+                            if row.get("performance_coefficient") is not None
+                            else 1.0
+                        ),
                         score_details=details,
                     )
                 )
