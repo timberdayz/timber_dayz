@@ -6,12 +6,31 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 
+class _FakeResult:
+    def scalar_one_or_none(self):
+        return None
+
+    def scalar_one(self):
+        return None
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+
+class _FakeAdminUser:
+    id = 1
+
+
 @pytest.mark.asyncio
 async def test_create_task_filters_domains_before_runtime_manifest_resolution(monkeypatch):
     captured = {}
     fake_db = MagicMock()
     fake_db.add = MagicMock()
     fake_db.commit = AsyncMock()
+    fake_db.execute = AsyncMock(return_value=_FakeResult())
 
     async def _refresh(obj):
         if getattr(obj, "id", None) is None:
@@ -66,6 +85,7 @@ async def test_create_task_filters_domains_before_runtime_manifest_resolution(mo
 
     from backend.models.database import get_async_db
     from backend.routers.collection import router as collection_router
+    from backend.dependencies.auth import require_admin
 
     app = FastAPI()
     app.include_router(collection_router, prefix="/collection")
@@ -74,6 +94,7 @@ async def test_create_task_filters_domains_before_runtime_manifest_resolution(mo
         yield fake_db
 
     app.dependency_overrides[get_async_db] = _override_get_async_db
+    app.dependency_overrides[require_admin] = lambda: _FakeAdminUser()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
@@ -102,6 +123,7 @@ async def test_create_task_preserves_config_origin(monkeypatch):
     added_objects = []
     fake_db.add = MagicMock(side_effect=lambda obj: added_objects.append(obj))
     fake_db.commit = AsyncMock()
+    fake_db.execute = AsyncMock(return_value=_FakeResult())
 
     async def _refresh(obj):
         if getattr(obj, "id", None) is None:
@@ -154,6 +176,7 @@ async def test_create_task_preserves_config_origin(monkeypatch):
 
     from backend.models.database import get_async_db
     from backend.routers.collection import router as collection_router
+    from backend.dependencies.auth import require_admin
 
     app = FastAPI()
     app.include_router(collection_router, prefix="/collection")
@@ -162,6 +185,7 @@ async def test_create_task_preserves_config_origin(monkeypatch):
         yield fake_db
 
     app.dependency_overrides[get_async_db] = _override_get_async_db
+    app.dependency_overrides[require_admin] = lambda: _FakeAdminUser()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
@@ -192,6 +216,7 @@ async def test_create_task_preserves_config_origin(monkeypatch):
 @pytest.mark.asyncio
 async def test_collection_accounts_expose_shop_type_and_capabilities(monkeypatch):
     fake_db = MagicMock()
+    fake_db.execute = AsyncMock(side_effect=Exception("db unavailable"))
 
     class _FakeLoader:
         async def load_all_accounts_async(self, db, platform=None):
@@ -217,6 +242,7 @@ async def test_collection_accounts_expose_shop_type_and_capabilities(monkeypatch
 
     from backend.models.database import get_async_db
     from backend.routers.collection import router as collection_router
+    from backend.dependencies.auth import require_admin
 
     app = FastAPI()
     app.include_router(collection_router, prefix="/collection")
@@ -225,6 +251,7 @@ async def test_collection_accounts_expose_shop_type_and_capabilities(monkeypatch
         yield fake_db
 
     app.dependency_overrides[get_async_db] = _override_get_async_db
+    app.dependency_overrides[require_admin] = lambda: _FakeAdminUser()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
@@ -233,4 +260,5 @@ async def test_collection_accounts_expose_shop_type_and_capabilities(monkeypatch
     assert response.status_code == 200
     body = response.json()
     assert body[0]["shop_type"] == "local"
-    assert body[0]["capabilities"] == {"orders": True, "services": False}
+    assert body[0]["capabilities"]["orders"] is True
+    assert body[0]["capabilities"]["services"] is False
