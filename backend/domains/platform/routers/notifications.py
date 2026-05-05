@@ -843,7 +843,10 @@ async def notify_user_registered(
     
     # v4.19.0: WebSocket 实时推送
     try:
-        from backend.routers.notification_websocket import connection_manager, NotificationMessage
+        from backend.domains.platform.routers.notification_websocket import (
+            NotificationMessage,
+            connection_manager,
+        )
         
         # 获取所有管理员ID
         admin_ids = set()
@@ -912,7 +915,10 @@ async def notify_user_approved(
     
     # v4.19.0: WebSocket 实时推送
     try:
-        from backend.routers.notification_websocket import connection_manager, NotificationMessage
+        from backend.domains.platform.routers.notification_websocket import (
+            NotificationMessage,
+            connection_manager,
+        )
         
         # v4.19.0 P0安全要求:推送前验证 recipient_id 与连接用户 ID 匹配
         notification_msg = NotificationMessage(
@@ -969,7 +975,10 @@ async def notify_user_rejected(
     
     # v4.19.0: WebSocket 实时推送
     try:
-        from backend.routers.notification_websocket import connection_manager, NotificationMessage
+        from backend.domains.platform.routers.notification_websocket import (
+            NotificationMessage,
+            connection_manager,
+        )
         
         # v4.19.0 P0安全要求:推送前验证 recipient_id 与连接用户 ID 匹配
         notification_msg = NotificationMessage(
@@ -1019,7 +1028,10 @@ async def notify_password_reset(
     
     # v4.19.0: WebSocket 实时推送
     try:
-        from backend.routers.notification_websocket import connection_manager, NotificationMessage
+        from backend.domains.platform.routers.notification_websocket import (
+            NotificationMessage,
+            connection_manager,
+        )
         
         notification_msg = NotificationMessage(
             notification_id=notification.notification_id,
@@ -1071,7 +1083,10 @@ async def notify_account_locked(
     
     # v4.19.0: WebSocket 实时推送
     try:
-        from backend.routers.notification_websocket import connection_manager, NotificationMessage
+        from backend.domains.platform.routers.notification_websocket import (
+            NotificationMessage,
+            connection_manager,
+        )
         
         notification_msg = NotificationMessage(
             notification_id=notification.notification_id,
@@ -1128,7 +1143,10 @@ async def notify_account_unlocked(
     
     # v4.19.0: WebSocket 实时推送
     try:
-        from backend.routers.notification_websocket import connection_manager, NotificationMessage
+        from backend.domains.platform.routers.notification_websocket import (
+            NotificationMessage,
+            connection_manager,
+        )
         
         notification_msg = NotificationMessage(
             notification_id=notification.notification_id,
@@ -1185,7 +1203,10 @@ async def notify_user_suspended(
     
     # v4.19.0: WebSocket 实时推送
     try:
-        from backend.routers.notification_websocket import connection_manager, NotificationMessage
+        from backend.domains.platform.routers.notification_websocket import (
+            NotificationMessage,
+            connection_manager,
+        )
         
         notification_msg = NotificationMessage(
             notification_id=notification.notification_id,
