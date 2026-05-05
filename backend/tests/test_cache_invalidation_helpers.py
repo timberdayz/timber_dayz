@@ -39,4 +39,6 @@ async def test_invalidate_performance_related_caches_clears_score_keys():
     assert cache_service.calls == [
         ("invalidate", "performance_scores"),
         ("invalidate", "performance_scores_shop"),
+        ("invalidate", "hr_shop_profit_statistics"),
+        ("invalidate", "hr_annual_profit_statistics"),
     ]
