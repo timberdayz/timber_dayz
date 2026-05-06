@@ -1,6 +1,9 @@
-﻿# Project Simplification Phase 6 Closure Implementation Plan
+# Project Simplification Phase 6 Closure Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+## Status
+- Status: complete (merged to `main`)
 
 **Goal:** Finish the post-Phase-5 simplification cleanup by shrinking the remaining legacy compatibility surface across backend domains, frontend view bridges, and the schema SSOT aggregator without changing runtime behavior.
 

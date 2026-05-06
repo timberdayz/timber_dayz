@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Status
+- Status: complete (merged to `main`)
+
 **Goal:** Finish the backend-facing Phase 3 of project simplification by reducing non-test runtime dependencies on `backend.routers.*`, introducing domain-owned aggregation surfaces where missing, and narrowing cross-domain service/shared boundaries without changing business behavior.
 
 **Architecture:** Phase 1 made runtime composition explicit, and Phase 2 moved route-registration ownership into domain modules. Phase 3 should now remove the remaining "legacy compatibility path as runtime dependency" cases from active backend code. The compatibility layer under `backend/routers/` stays in place for tests, external imports, and gradual migration, but production code should prefer domain-owned router/service entry points. This phase remains behavior-preserving and does not yet split frontend structure or decompose the ORM SSOT.

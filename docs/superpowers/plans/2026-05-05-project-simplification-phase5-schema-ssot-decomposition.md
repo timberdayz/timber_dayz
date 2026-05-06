@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Status
+- Status: complete (merged to `main`)
+
 **Goal:** Decompose `modules/core/db/schema.py` internally into smaller, domain-aligned modules while preserving the SSOT contract and all existing import paths/ORM behavior.
 
 **Architecture:** Keep `modules/core/db/schema.py` as the single public SSOT import surface, but move model definitions into submodules under `modules/core/db/schema_parts/**` (name flexible). `schema.py` becomes an aggregator that imports and re-exports the same symbols. Migrate incrementally in small batches with import/metadata verification after each batch.
@@ -235,4 +238,3 @@ Expected: PASS.
   - Control: explicitly keep Base creation in one place (`schema_parts/base.py`) and re-export; verify metadata behavior via tests
 - Risk: missing table registrations
   - Control: keep `schema.py` importing every slice module so models are imported at module import time (metadata population remains complete)
-

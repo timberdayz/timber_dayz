@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Status
+- Status: complete (merged to `main`)
+
 **Goal:** Reorganize the Vue 3 frontend to mirror the backend domain model (`collection`, `data_platform`, `business`, `platform`) while preserving runtime behavior and existing route contracts.
 
 **Architecture:** Introduce `frontend/src/domains/*` as the owning location for domain UI, API clients, stores, and domain-scoped utilities. Keep a compatibility layer via re-export “bridge” modules so existing imports continue to work during the cutover, then progressively repoint call sites to domain-owned paths.
@@ -238,4 +241,3 @@ git commit -m "docs: record phase 4 frontend domain cutover notes"
   - Control: enforce “domain owns; shared is last resort” and prefer small bridges
 - Risk: Over-scoping into UI redesign
   - Control: no component redesign; only file movement + import rewiring
-

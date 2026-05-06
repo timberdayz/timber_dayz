@@ -1,6 +1,9 @@
 # Git attributes for consistent line endings across platforms
 # This ensures shell scripts work correctly in both Windows and Linux environments
 
+# Always keep .gitattributes itself LF
+.gitattributes text eol=lf
+
 # Force LF line endings for shell scripts (required for Docker containers)
 *.sh text eol=lf
 docker/scripts/* text eol=lf
@@ -26,6 +29,10 @@ docker-compose*.yml text eol=lf
 
 # JSON files
 *.json text eol=lf
+
+# TypeScript declaration outputs (often generated)
+frontend/auto-imports.d.ts text eol=lf
+frontend/components.d.ts text eol=lf
 
 # Windows batch files should use CRLF
 *.bat text eol=crlf

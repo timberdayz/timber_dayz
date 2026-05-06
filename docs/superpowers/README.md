@@ -6,6 +6,7 @@ This directory exists to support the active `superpowers` workflow.
 
 - `specs/` for brainstorming design documents
 - `plans/` for writing-plans output
+- `plans/STATUS.md` for plan completion state
 
 Create those subdirectories on demand.
 

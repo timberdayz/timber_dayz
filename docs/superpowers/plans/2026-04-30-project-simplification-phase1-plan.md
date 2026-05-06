@@ -4,6 +4,7 @@
 - Date: 2026-04-30
 - Phase: 1
 - Focus: Runtime composition split and implementation guardrails
+- Status: complete (merged to `main`)
 
 ## Objective
 

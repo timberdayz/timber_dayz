@@ -4,6 +4,7 @@
 - Date: 2026-05-04
 - Phase: 2
 - Focus: Introduce backend domain registration ownership without changing runtime behavior
+- Status: complete (merged to `main`)
 
 ## Objective
 
