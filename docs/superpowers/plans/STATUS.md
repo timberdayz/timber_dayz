@@ -19,3 +19,6 @@ Closure inventory:
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
 - Parallel/specialized tracks should keep their own plan documents and be referenced from here when they are merged.
 
+## Audit
+
+- Plans closure audit (documentation-only): `docs/superpowers/findings/2026-05-06-plans-closure-audit.md`
