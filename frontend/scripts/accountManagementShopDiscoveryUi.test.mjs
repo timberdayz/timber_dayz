@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const viewPath = path.resolve(__dirname, '../src/views/AccountManagement.vue')
+const viewPath = path.resolve(__dirname, '../src/domains/platform/views/AccountManagement.vue')
 const storePath = path.resolve(__dirname, '../src/stores/accounts.js')
 const apiPath = path.resolve(__dirname, '../src/api/accounts.js')
 

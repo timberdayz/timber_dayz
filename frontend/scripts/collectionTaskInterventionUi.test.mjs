@@ -5,9 +5,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const configViewPath = path.resolve(__dirname, '../src/views/collection/CollectionConfig.vue')
-const tasksViewPath = path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
-const historyViewPath = path.resolve(__dirname, '../src/views/collection/CollectionHistory.vue')
+const configViewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionConfig.vue')
+const tasksViewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionTasks.vue')
+const historyViewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionHistory.vue')
 
 const configSource = fs.readFileSync(configViewPath, 'utf8')
 const tasksSource = fs.readFileSync(tasksViewPath, 'utf8')

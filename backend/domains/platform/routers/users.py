@@ -7,12 +7,48 @@
 
 from fastapi import APIRouter
 
-from backend.routers.users_admin import router as _admin_router
-from backend.routers.users_me import router as _me_router
+import backend.routers.users_admin as legacy_admin_module
+import backend.routers.users_me as legacy_me_module
 
 # SSOT: 权限依赖已迁移至 backend.dependencies.auth，此处 re-export 保持向后兼容
 from backend.dependencies.auth import require_admin  # noqa: F401
 
-router = APIRouter()
-router.include_router(_admin_router)
-router.include_router(_me_router)
+
+def _build_users_router() -> APIRouter:
+    router = APIRouter()
+    router.include_router(legacy_admin_module.router)
+    router.include_router(legacy_me_module.router)
+    return router
+
+
+router = _build_users_router()
+
+
+def _module_public_names(module: object) -> set[str]:
+    module_all = getattr(module, "__all__", None)
+    if module_all is not None:
+        return set(module_all)
+    return {name for name in vars(module) if not name.startswith("_")}
+
+
+def __getattr__(name: str):
+    if hasattr(legacy_admin_module, name):
+        return getattr(legacy_admin_module, name)
+    if hasattr(legacy_me_module, name):
+        return getattr(legacy_me_module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(
+        set(globals())
+        | set(dir(legacy_admin_module))
+        | set(dir(legacy_me_module))
+    )
+
+
+__all__ = sorted(
+    _module_public_names(legacy_admin_module)
+    | _module_public_names(legacy_me_module)
+    | {"require_admin", "router"}
+)

@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const projectRoot = resolve(process.cwd())
-const viewPath = resolve(projectRoot, 'frontend/src/views/collection/CollectionCoverageAudit.vue')
-const apiPath = resolve(projectRoot, 'frontend/src/api/collection.js')
-const routerPath = resolve(projectRoot, 'frontend/src/router/index.js')
-const menuGroupsPath = resolve(projectRoot, 'frontend/src/config/menuGroups.js')
-const rolePermissionsPath = resolve(projectRoot, 'frontend/src/config/rolePermissions.js')
+const viewPath = resolve(projectRoot, 'src/domains/collection/views/collection/CollectionCoverageAudit.vue')
+const apiPath = resolve(projectRoot, 'src/api/collection.js')
+const routerPath = resolve(projectRoot, 'src/router/index.js')
+const menuGroupsPath = resolve(projectRoot, 'src/config/menuGroups.js')
+const rolePermissionsPath = resolve(projectRoot, 'src/config/rolePermissions.js')
 
 assert.equal(existsSync(viewPath), true, 'CollectionCoverageAudit.vue should exist')
 

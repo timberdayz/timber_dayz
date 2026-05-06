@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const dashboardApiPath = path.resolve('frontend/src/api/dashboard.js')
-const storeAnalyticsPath = path.resolve('frontend/src/views/store/StoreAnalytics.vue')
+const dashboardApiPath = path.resolve('src/api/dashboard.js')
+const storeAnalyticsPath = path.resolve('src/domains/business/views/store/StoreAnalytics.vue')
 
 test('dashboard api exposes store analysis endpoints', () => {
   const text = fs.readFileSync(dashboardApiPath, 'utf8')

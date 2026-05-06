@@ -1,4 +1,4 @@
-# Project Simplification Phase 6 Closure Implementation Plan
+﻿# Project Simplification Phase 6 Closure Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -75,7 +75,7 @@ Still largely aggregated inside `modules/core/db/schema.py`:
 - Read: `frontend/src/router/index.js`
 - Read: `frontend/src/views/**`
 
-- [ ] **Step 1: Write a failing backend guard test for legacy runtime imports**
+- [x] **Step 1: Write a failing backend guard test for legacy runtime imports**
 
 Create `backend/tests/test_domain_legacy_router_boundary.py` to scan:
 - `backend/domains/**/*.py`
@@ -85,7 +85,7 @@ The test should:
 - fail if new `backend.routers.*` imports appear outside an explicit allowlist
 - encode the current intentional exceptions in one place
 
-- [ ] **Step 2: Run the backend guard test to verify it fails for the current residual set**
+- [x] **Step 2: Run the backend guard test to verify it fails for the current residual set**
 
 Run:
 ```powershell
@@ -93,7 +93,7 @@ python -m pytest backend/tests/test_domain_legacy_router_boundary.py -q
 ```
 Expected: FAIL, showing the current allowlist candidates.
 
-- [ ] **Step 3: Add a frontend bridge inventory test**
+- [x] **Step 3: Add a frontend bridge inventory test**
 
 Create `frontend/scripts/domainBridgeInventory.test.mjs` that:
 - parses `frontend/src/router/index.js`
@@ -102,7 +102,7 @@ Create `frontend/scripts/domainBridgeInventory.test.mjs` that:
 
 The test should print or assert against an expected baseline count stored in the test file.
 
-- [ ] **Step 4: Run the frontend inventory test**
+- [x] **Step 4: Run the frontend inventory test**
 
 Run:
 ```powershell
@@ -111,7 +111,7 @@ node --test scripts/domainBridgeInventory.test.mjs
 ```
 Expected: PASS with a baseline count for tracked wrappers.
 
-- [ ] **Step 5: Record the residual inventory**
+- [x] **Step 5: Record the residual inventory**
 
 Create `docs/superpowers/findings/2026-05-05-phase6-closure-inventory.md` documenting:
 - allowed backend compat hooks
@@ -138,24 +138,24 @@ git commit -m "test: add phase6 closure guard inventories"
 - Test: `backend/tests/test_domain_route_registration.py`
 - Test: `backend/tests/test_runtime_mode_route_registration.py`
 
-- [ ] **Step 1: Convert trivial `from backend.routers... import *` wrappers into explicit domain-owned shims**
+- [x] **Step 1: Convert trivial `from backend.routers... import *` wrappers into explicit domain-owned shims**
 
 For each thin wrapper file:
 - replace star import with explicit router/helper imports
 - keep backward-compatible exports only where truly needed
 - document any file that must remain a pure compat shim
 
-- [ ] **Step 2: Normalize platform users and notifications onto compat helper boundaries**
+- [x] **Step 2: Normalize platform users and notifications onto compat helper boundaries**
 
 Goal:
 - `backend/domains/platform/routers/users.py` should prefer domain-local or compat-local imports
 - all notification-related legacy monkeypatch support stays behind `backend/domains/platform/compat/notifications.py`
 
-- [ ] **Step 3: Update the backend guard test allowlist to the new expected residual set**
+- [x] **Step 3: Update the backend guard test allowlist to the new expected residual set**
 
 The test should now pass only for intentionally retained compat hooks.
 
-- [ ] **Step 4: Run targeted route/runtime tests**
+- [x] **Step 4: Run targeted route/runtime tests**
 
 Run:
 ```powershell
@@ -163,7 +163,7 @@ python -m pytest backend/tests/test_domain_legacy_router_boundary.py backend/tes
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Run the expanded backend regression subset**
+- [x] **Step 5: Run the expanded backend regression subset**
 
 Run:
 ```powershell
@@ -191,13 +191,13 @@ git commit -m "refactor: narrow backend legacy router compat surfaces"
   - `frontend/src/domains/collection/views/**`
 - Test: `frontend/scripts/frontendSmokeShared.test.mjs`
 
-- [ ] **Step 1: Write or extend a failing test for direct route-to-domain ownership**
+- [x] **Step 1: Write or extend a failing test for direct route-to-domain ownership**
 
 Update `frontend/scripts/domainBridgeInventory.test.mjs` so it can assert a first-wave target:
 - route imports for one domain batch no longer point to wrapper files
 - wrapper baseline decreases after the migration
 
-- [ ] **Step 2: Migrate `platform` route imports in `frontend/src/router/index.js`**
+- [x] **Step 2: Migrate `platform` route imports in `frontend/src/router/index.js`**
 
 Change route `component: () => import('../views/...')` entries to direct `@/domains/platform/views/...` imports for:
 - login/register
@@ -207,7 +207,7 @@ Change route `component: () => import('../views/...')` entries to direct `@/doma
 
 Keep route names and paths unchanged.
 
-- [ ] **Step 3: Run type-check and build**
+- [x] **Step 3: Run type-check and build**
 
 Run:
 ```powershell
@@ -219,7 +219,7 @@ npm run test:smoke-shared
 ```
 Expected: PASS.
 
-- [ ] **Step 4: Repeat for `data_platform`, `collection`, and `business` in small batches**
+- [x] **Step 4: Repeat for `data_platform`, `collection`, and `business` in small batches**
 
 Suggested order:
 1. `data_platform`
@@ -230,7 +230,10 @@ After each batch:
 - reduce wrapper count
 - verify build and smoke
 
-- [ ] **Step 5: Remove wrappers that are no longer referenced by the router or other imports**
+- [x] **Step 5: Remove wrappers that are no longer referenced by the router or other imports**
+
+Task 3 closure note:
+- Frontend script tests that previously hardcoded `src/views/**` collection / training / business / platform wrapper paths were repointed to canonical `src/domains/**/views/**` files, allowing the final 30 route-bridge wrappers to be deleted.
 
 Delete only wrappers proven unused by:
 ```powershell
@@ -255,7 +258,7 @@ git commit -m "refactor(frontend): repoint routes to domain-owned views"
   - `modules/core/db/schema_parts/business.py`
 - Modify: `backend/tests/test_schema_ssot_import_contract.py`
 
-- [ ] **Step 1: Add a failing identity/import test for the next schema slice**
+- [x] **Step 1: Add a failing identity/import test for the next schema slice**
 
 Extend `backend/tests/test_schema_ssot_import_contract.py` to assert public symbol identity for the first next slice, starting with collection/task-center/approval/training models:
 - `CollectionConfig`
@@ -265,7 +268,7 @@ Extend `backend/tests/test_schema_ssot_import_contract.py` to assert public symb
 - `ApprovalInstance`
 - `TrainingProgram`
 
-- [ ] **Step 2: Run the schema contract test and verify the new assertions fail**
+- [x] **Step 2: Run the schema contract test and verify the new assertions fail**
 
 Run:
 ```powershell
@@ -273,7 +276,7 @@ python -m pytest backend/tests/test_schema_ssot_import_contract.py -q
 ```
 Expected: FAIL until the slice is re-exported from `schema_parts`.
 
-- [ ] **Step 3: Move collection/task-center/approval/training models into `schema_parts/collection.py`**
+- [x] **Step 3: Move collection/task-center/approval/training models into `schema_parts/collection.py`**
 
 Requirements:
 - no table or column changes
@@ -281,7 +284,7 @@ Requirements:
 - preserve relationship semantics
 - keep `modules.core.db.schema` public symbols unchanged
 
-- [ ] **Step 4: Re-run compile and schema contract tests**
+- [x] **Step 4: Re-run compile and schema contract tests**
 
 Run:
 ```powershell
@@ -290,7 +293,7 @@ python -m pytest backend/tests/test_schema_ssot_import_contract.py -q
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Repeat by slice for `platform`, `data_platform`, and `business`**
+- [x] **Step 5: Repeat by slice for `platform`, `data_platform`, and `business`**
 
 Suggested order:
 1. `platform.py`
@@ -303,6 +306,10 @@ After each slice:
 - run schema contract tests
 
 - [ ] **Step 6: Commit**
+
+Task 4 status note:
+- Completed the required `collection`, `platform`, `data_platform`, and `business` slices.
+- `backend/tests/test_schema_ssot_import_contract.py` now covers representative public symbol identity for all four new slice modules.
 
 ```powershell
 git add modules/core/db/schema.py modules/core/db/schema_parts backend/tests/test_schema_ssot_import_contract.py
@@ -317,7 +324,7 @@ git commit -m "refactor(schema): continue phase6 schema slice decomposition"
 - Modify: `progress.md`
 - Modify: `findings.md`
 
-- [ ] **Step 1: Run the backend verification set**
+- [x] **Step 1: Run the backend verification set**
 
 Run:
 ```powershell
@@ -326,7 +333,7 @@ python -m pytest backend/tests/data_pipeline/test_dashboard_router_switch.py bac
 ```
 Expected: PASS.
 
-- [ ] **Step 2: Run the frontend verification set**
+- [x] **Step 2: Run the frontend verification set**
 
 Run:
 ```powershell
@@ -338,14 +345,14 @@ npm run test:smoke-shared
 ```
 Expected: PASS.
 
-- [ ] **Step 3: Update closure notes**
+- [x] **Step 3: Update closure notes**
 
 Document:
 - remaining intentional compat hooks
 - remaining wrapper count, if any
 - remaining model classes still in `schema.py`, if any
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git add docs/superpowers/findings/2026-05-05-phase6-closure-inventory.md task_plan.md progress.md findings.md
@@ -369,3 +376,4 @@ git commit -m "docs: record phase6 closure status"
 
 - If Task 3 or Task 4 expands beyond a single focused session, split them into dedicated sub-plans rather than broadening this document further.
 - The separate `business overview read model unification` track is already out of scope for this plan and should stay independent.
+

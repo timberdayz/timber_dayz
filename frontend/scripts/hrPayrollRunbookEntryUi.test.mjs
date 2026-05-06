@@ -6,15 +6,15 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const humanResourcesSource = fs.readFileSync(
-  path.resolve(__dirname, '../src/views/HumanResources.vue'),
+  path.resolve(__dirname, '../src/domains/business/views/HumanResources.vue'),
   'utf8'
 )
 const myIncomeSource = fs.readFileSync(
-  path.resolve(__dirname, '../src/views/hr/MyIncome.vue'),
+  path.resolve(__dirname, '../src/domains/business/views/hr/MyIncome.vue'),
   'utf8'
 )
 const userGuideSource = fs.readFileSync(
-  path.resolve(__dirname, '../src/views/help/UserGuide.vue'),
+  path.resolve(__dirname, '../src/domains/platform/views/help/UserGuide.vue'),
   'utf8'
 )
 

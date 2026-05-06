@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '..')
 const apiSource = readFileSync(resolve(repoRoot, 'src/api/index.js'), 'utf8')
-const viewSource = readFileSync(resolve(repoRoot, 'src/views/BusinessOverview.vue'), 'utf8')
+const viewSource = readFileSync(resolve(repoRoot, 'src/domains/business/views/BusinessOverview.vue'), 'utf8')
 
 test('business overview inventory backlog api helper serializes limit', () => {
   assert.equal(apiSource.includes("if (params.limit) queryParams.append('limit', params.limit)"), true)

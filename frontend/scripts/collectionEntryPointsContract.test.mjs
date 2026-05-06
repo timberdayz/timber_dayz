@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const constantsPath = path.resolve(__dirname, '../src/constants/collection.js')
-const configViewPath = path.resolve(__dirname, '../src/views/collection/CollectionConfig.vue')
-const tasksViewPath = path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
+const configViewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionConfig.vue')
+const tasksViewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionTasks.vue')
 const routerPath = path.resolve(__dirname, '../src/router/index.js')
 const rootConfigViewPath = path.resolve(__dirname, '../src/views/CollectionConfig.vue')
 const rootTasksViewPath = path.resolve(__dirname, '../src/views/CollectionTasks.vue')
@@ -58,9 +58,9 @@ test('CollectionTasks sends unified time_selection payload for quick tasks', () 
 
 test('CollectionConfig resolves effective account ids before creating tasks', () => {
   assert.equal(
-    configSource.includes('resolveAccountIdsForConfigRun(row, accounts.value)'),
+    configSource.includes('shop_scopes: normalizeShopScopesForPayload()'),
     true,
-    'config execution should resolve effective account ids instead of blindly looping row.account_ids'
+    'config execution should serialize canonical shop_scopes instead of relying on legacy account_ids loops'
   )
 
   assert.equal(
@@ -72,19 +72,19 @@ test('CollectionConfig resolves effective account ids before creating tasks', ()
 
 test('router uses collection subdirectory views as canonical collection entry points', () => {
   assert.equal(
-    routerSource.includes("../views/collection/CollectionTasks.vue"),
+    routerSource.includes("@/domains/collection/views/collection/CollectionTasks.vue"),
     true,
     'router should use collection/CollectionTasks.vue as the canonical task entry point'
   )
 
   assert.equal(
-    routerSource.includes("../views/collection/CollectionConfig.vue"),
+    routerSource.includes("@/domains/collection/views/collection/CollectionConfig.vue"),
     true,
     'router should use collection/CollectionConfig.vue as the canonical config entry point'
   )
 
   assert.equal(
-    routerSource.includes("../views/collection/CollectionHistory.vue"),
+    routerSource.includes("@/domains/collection/views/collection/CollectionHistory.vue"),
     true,
     'router should use collection/CollectionHistory.vue as the canonical history entry point'
   )

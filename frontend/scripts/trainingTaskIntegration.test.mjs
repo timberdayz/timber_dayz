@@ -5,9 +5,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const myTasksSource = fs.readFileSync(path.resolve(__dirname, '../src/views/approval/MyTasks.vue'), 'utf8')
-const notificationsSource = fs.readFileSync(path.resolve(__dirname, '../src/views/messages/SystemNotifications.vue'), 'utf8')
-const taskDetailPath = path.resolve(__dirname, '../src/views/training/TrainingAssignmentDetail.vue')
+const myTasksSource = fs.readFileSync(path.resolve(__dirname, '../src/domains/platform/views/approval/MyTasks.vue'), 'utf8')
+const notificationsSource = fs.readFileSync(path.resolve(__dirname, '../src/domains/platform/views/messages/SystemNotifications.vue'), 'utf8')
+const taskDetailPath = path.resolve(__dirname, '../src/domains/platform/views/training/TrainingAssignmentDetail.vue')
 
 test('my tasks routes training items to training assignment detail', () => {
   assert.equal(myTasksSource.includes("source_module === 'training'"), true)

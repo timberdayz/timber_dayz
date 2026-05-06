@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '..')
-const source = readFileSync(resolve(repoRoot, 'src/views/finance/ExpenseManagement.vue'), 'utf8')
+const source = readFileSync(resolve(repoRoot, 'src/domains/business/views/finance/ExpenseManagement.vue'), 'utf8')
 
 test('ExpenseManagement page replaces add-all-shops action with quick split flow', () => {
   assert.equal(source.includes('为所有店铺添加'), false)

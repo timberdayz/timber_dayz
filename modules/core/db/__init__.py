@@ -12,5 +12,6 @@ without maintaining a fragile hand-curated export list.
 """
 
 from .schema import *  # noqa: F401,F403
+from .schema import __all__ as _SCHEMA_ALL
 
-__all__ = [name for name in globals() if not name.startswith("_")]
+__all__ = _SCHEMA_ALL

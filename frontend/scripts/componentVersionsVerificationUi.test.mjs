@@ -5,9 +5,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const viewPath = path.resolve(__dirname, '../src/views/ComponentVersions.vue')
+const viewPath = path.resolve(__dirname, '../src/domains/collection/views/ComponentVersions.vue')
 const source = fs.readFileSync(viewPath, 'utf8')
-const recorderViewPath = path.resolve(__dirname, '../src/views/ComponentRecorder.vue')
+const recorderViewPath = path.resolve(__dirname, '../src/domains/collection/views/ComponentRecorder.vue')
 const recorderSource = fs.readFileSync(recorderViewPath, 'utf8')
 
 test('ComponentVersions uses shared verification dialog instead of inline captcha card', () => {

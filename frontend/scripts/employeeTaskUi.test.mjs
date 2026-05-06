@@ -5,8 +5,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const myTasksSource = fs.readFileSync(path.resolve(__dirname, '../src/views/approval/MyTasks.vue'), 'utf8')
-const taskDetailSource = fs.readFileSync(path.resolve(__dirname, '../src/views/approval/TaskDetail.vue'), 'utf8')
+const myTasksSource = fs.readFileSync(path.resolve(__dirname, '../src/domains/platform/views/approval/MyTasks.vue'), 'utf8')
+const taskDetailSource = fs.readFileSync(path.resolve(__dirname, '../src/domains/platform/views/approval/TaskDetail.vue'), 'utf8')
 
 test('my tasks page contains summary, tabs, and filters', () => {
   for (const label of ['我的任务', '我发起的', '抄送我的', '按状态筛选', '按优先级筛选']) {

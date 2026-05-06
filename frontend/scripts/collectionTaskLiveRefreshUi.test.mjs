@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const tasksViewPath = path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
+const tasksViewPath = path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionTasks.vue')
 
 const tasksSource = fs.readFileSync(tasksViewPath, 'utf8')
 

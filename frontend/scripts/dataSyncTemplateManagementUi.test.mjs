@@ -3,44 +3,44 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const projectRoot = resolve(process.cwd())
-const viewPath = resolve(projectRoot, 'frontend/src/views/DataSyncTemplates.vue')
-const apiPath = resolve(projectRoot, 'frontend/src/api/index.js')
+const viewPath = resolve(projectRoot, 'src/domains/data_platform/views/DataSyncTemplates.vue')
+const apiPath = resolve(projectRoot, 'src/api/index.js')
 
 const governancePanelPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateGovernancePanel.vue'
+  'src/components/dataSync/TemplateGovernancePanel.vue'
 )
 const needsUpdateTablePath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateNeedsUpdateTable.vue'
+  'src/components/dataSync/TemplateNeedsUpdateTable.vue'
 )
 const workbenchDrawerPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
+  'src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
 )
 const changeSummaryCardPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateChangeSummaryCard.vue'
+  'src/components/dataSync/TemplateChangeSummaryCard.vue'
 )
 const headerDiffViewerPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/HeaderDiffViewer.vue'
+  'src/components/dataSync/HeaderDiffViewer.vue'
 )
 const deduplicationReviewPanelPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateDeduplicationReviewPanel.vue'
+  'src/components/dataSync/TemplateDeduplicationReviewPanel.vue'
 )
 const rawPreviewPanelPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateRawPreviewPanel.vue'
+  'src/components/dataSync/TemplateRawPreviewPanel.vue'
 )
 const builderWorkspacePath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateBuilderWorkspace.vue'
+  'src/components/dataSync/TemplateBuilderWorkspace.vue'
 )
 const createWorkbenchDrawerPath = resolve(
   projectRoot,
-  'frontend/src/components/dataSync/TemplateCreateWorkbenchDrawer.vue'
+  'src/components/dataSync/TemplateCreateWorkbenchDrawer.vue'
 )
 
 assert.equal(existsSync(viewPath), true, 'DataSyncTemplates.vue should exist')

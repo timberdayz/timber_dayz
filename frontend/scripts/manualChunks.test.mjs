@@ -28,7 +28,7 @@ test('resolveManualChunk keeps non-vue libraries out of vendor-vue-core', () => 
     'vendor-misc'
   )
   assert.equal(
-    resolveManualChunk('/repo/frontend/src/views/BusinessOverview.vue'),
+    resolveManualChunk('/repo/frontend/src/domains/business/views/BusinessOverview.vue'),
     undefined
   )
 })

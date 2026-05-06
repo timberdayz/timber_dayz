@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const storePath = path.resolve(__dirname, '../src/stores/accounts.js')
-const viewPath = path.resolve(__dirname, '../src/views/AccountManagement.vue')
+const viewPath = path.resolve(__dirname, '../src/domains/platform/views/AccountManagement.vue')
 const storeSource = fs.readFileSync(storePath, 'utf8')
 const viewSource = fs.readFileSync(viewPath, 'utf8')
 

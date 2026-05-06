@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const repoRoot = resolve(process.cwd(), 'frontend')
-const viewSource = readFileSync(resolve(repoRoot, 'src/views/BusinessOverview.vue'), 'utf8')
+const repoRoot = resolve(process.cwd())
+const viewSource = readFileSync(resolve(repoRoot, 'src/domains/business/views/BusinessOverview.vue'), 'utf8')
 const apiSource = readFileSync(resolve(repoRoot, 'src/api/index.js'), 'utf8')
 
 test('BusinessOverview exposes KPI granularity controls and forwards granularity/date', () => {

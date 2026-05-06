@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const files = [
-  path.resolve(__dirname, '../src/views/ComponentRecorder.vue'),
-  path.resolve(__dirname, '../src/views/ComponentVersions.vue'),
-  path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
+  path.resolve(__dirname, '../src/domains/collection/views/ComponentRecorder.vue'),
+  path.resolve(__dirname, '../src/domains/collection/views/ComponentVersions.vue'),
+  path.resolve(__dirname, '../src/domains/collection/views/collection/CollectionTasks.vue')
 ]
 
 test('shared verification dialog receives message, expires-at, and error-message props across all owner pages', () => {
