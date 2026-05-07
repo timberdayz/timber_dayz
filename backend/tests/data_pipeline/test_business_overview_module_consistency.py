@@ -84,12 +84,11 @@ def test_business_overview_kpi_contract_shape(monkeypatch):
     )
 
     body = json.loads(response.body.decode("utf-8"))
-    envelope = body["data"]
-    assert {"meta", "data"}.issubset(envelope.keys())
-    assert envelope["meta"]["period_key"] == "2026-03-01"
-    assert envelope["meta"]["granularity"] == "monthly"
-    assert envelope["meta"].get("platform_code") in (None, "")
-    data = envelope["data"]
+    assert "meta" in body
+    assert body["meta"]["period_key"] == "2026-03-01"
+    assert body["meta"]["granularity"] == "monthly"
+    assert body["meta"].get("platform_code") in (None, "")
+    data = body["data"]
     assert body["success"] is True
     assert {
         "gmv",
@@ -134,11 +133,10 @@ def test_business_overview_comparison_contract_shape(monkeypatch):
     )
 
     body = json.loads(response.body.decode("utf-8"))
-    envelope = body["data"]
-    assert {"meta", "data"}.issubset(envelope.keys())
-    assert envelope["meta"]["period_key"] == "2026-03-01"
-    assert envelope["meta"]["granularity"] == "monthly"
-    data = envelope["data"]
+    assert "meta" in body
+    assert body["meta"]["period_key"] == "2026-03-01"
+    assert body["meta"]["granularity"] == "monthly"
+    data = body["data"]
     assert body["success"] is True
     assert "metrics" in data
     assert "target" in data
@@ -167,11 +165,10 @@ def test_business_overview_bootstrap_contract_shape(monkeypatch):
     )
 
     body = json.loads(response.body.decode("utf-8"))
-    envelope = body["data"]
-    assert {"meta", "data"}.issubset(envelope.keys())
-    assert envelope["meta"]["granularity"] == "monthly"
-    assert envelope["meta"]["period_key"] == "2026-03-01"
-    data = envelope["data"]
+    assert "meta" in body
+    assert body["meta"]["granularity"] == "monthly"
+    assert body["meta"]["period_key"] == "2026-03-01"
+    data = body["data"]
     assert body["success"] is True
     assert {
         "kpi",

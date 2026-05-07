@@ -85,6 +85,28 @@ def _wrap_business_overview_envelope(
     return {"meta": meta, "data": module_payload}
 
 
+def _build_business_overview_meta(
+    *,
+    granularity: str,
+    period_key: str,
+    platform_code: Optional[str],
+    shop_id: Optional[str] = None,
+    cache_status: Optional[str] = None,
+) -> dict[str, Any]:
+    return {
+        "granularity": granularity,
+        "period_key": period_key,
+        "platform_code": platform_code,
+        "shop_id": shop_id,
+        "generated_at": _isoformat_utc_now_seconds(),
+        "cache": {
+            "status": cache_status,
+            "hit": True if cache_status == "HIT" else False if cache_status in {"MISS", "BYPASS"} else None,
+        },
+        "warnings": [],
+    }
+
+
 def _normalize_period_month_for_cache(period_month: Optional[str]) -> Optional[str]:
     if period_month is None:
         return None
@@ -205,8 +227,7 @@ async def get_business_overview_kpi_postgresql(
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
             period_key = _normalize_business_overview_period_key(effective_granularity, effective_date)
-            payload["data"] = _wrap_business_overview_envelope(
-                module_payload=payload["data"],
+            payload["meta"] = _build_business_overview_meta(
                 granularity=effective_granularity,
                 period_key=period_key,
                 platform_code=platform,
@@ -248,8 +269,7 @@ async def get_business_overview_comparison_postgresql(
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
             period_key = _normalize_business_overview_period_key(granularity, date)
-            payload["data"] = _wrap_business_overview_envelope(
-                module_payload=payload["data"],
+            payload["meta"] = _build_business_overview_meta(
                 granularity=granularity,
                 period_key=period_key,
                 platform_code=platform,
@@ -375,8 +395,7 @@ async def get_business_overview_bootstrap_postgresql(
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
             period_key = _normalize_business_overview_period_key(effective_granularity, effective_date)
-            payload["data"] = _wrap_business_overview_envelope(
-                module_payload=payload["data"],
+            payload["meta"] = _build_business_overview_meta(
                 granularity=effective_granularity,
                 period_key=period_key,
                 platform_code=platform,
@@ -456,8 +475,7 @@ async def get_business_overview_shop_racing_postgresql(
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
             period_key = _normalize_business_overview_period_key(granularity, date)
-            payload["data"] = _wrap_business_overview_envelope(
-                module_payload=payload["data"],
+            payload["meta"] = _build_business_overview_meta(
                 granularity=granularity,
                 period_key=period_key,
                 platform_code=effective_platform,
@@ -513,8 +531,7 @@ async def get_business_overview_traffic_ranking_postgresql(
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
             period_key = _normalize_business_overview_period_key(granularity, target_date)
-            payload["data"] = _wrap_business_overview_envelope(
-                module_payload=payload["data"],
+            payload["meta"] = _build_business_overview_meta(
                 granularity=granularity,
                 period_key=period_key,
                 platform_code=effective_platform,
@@ -595,8 +612,7 @@ async def get_business_overview_operational_metrics_postgresql(
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
             period_key = _normalize_business_overview_period_key("monthly", month)
-            payload["data"] = _wrap_business_overview_envelope(
-                module_payload=payload["data"],
+            payload["meta"] = _build_business_overview_meta(
                 granularity="monthly",
                 period_key=period_key,
                 platform_code=platform,
