@@ -454,6 +454,15 @@ async def get_business_overview_shop_racing_postgresql(
             cache_params,
             _produce_payload,
         )
+        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
+            period_key = _normalize_business_overview_period_key(granularity, date)
+            payload["data"] = _wrap_business_overview_envelope(
+                module_payload=payload["data"],
+                granularity=granularity,
+                period_key=period_key,
+                platform_code=effective_platform,
+                cache_status=cache_status,
+            )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
@@ -502,6 +511,15 @@ async def get_business_overview_traffic_ranking_postgresql(
             cache_params,
             _produce_payload,
         )
+        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
+            period_key = _normalize_business_overview_period_key(granularity, target_date)
+            payload["data"] = _wrap_business_overview_envelope(
+                module_payload=payload["data"],
+                granularity=granularity,
+                period_key=period_key,
+                platform_code=effective_platform,
+                cache_status=cache_status,
+            )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
@@ -575,6 +593,15 @@ async def get_business_overview_operational_metrics_postgresql(
             cache_params,
             _produce_payload,
         )
+        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
+            period_key = _normalize_business_overview_period_key("monthly", month)
+            payload["data"] = _wrap_business_overview_envelope(
+                module_payload=payload["data"],
+                granularity="monthly",
+                period_key=period_key,
+                platform_code=platform,
+                cache_status=cache_status,
+            )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
