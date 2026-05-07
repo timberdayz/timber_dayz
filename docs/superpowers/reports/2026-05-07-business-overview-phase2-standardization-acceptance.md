@@ -75,3 +75,22 @@ Business Overview（排除滞销库存 inventory-backlog）模块：
 
 - 本阶段为“非破坏性契约增强”：新增 `meta` 不改变 `data`，如需回滚可直接回退相关 router 变更提交。
 
+## Follow-up Optimization (Inventory / Clearance)
+
+### What Changed
+
+- `mart.inventory_backlog_base` 从在线重算 VIEW 改为：
+  - `mart.inventory_backlog_base_mv`（物化视图，离线刷新）
+  - 同名 `mart.inventory_backlog_base` VIEW 透出（保持兼容）
+- 在 `mart.inventory_backlog_base_mv` 上补齐按 `snapshot_date` + 排序/过滤字段的索引，提升：
+  - `/api/dashboard/business-overview/inventory-backlog`
+  - `/api/dashboard/clearance-ranking`
+
+### Evidence (EXPLAIN)
+
+优化后对典型条件：
+
+- `snapshot_date BETWEEN '2026-03-01' AND '2026-03-31'`
+- `estimated_turnover_days >= 30`
+
+`EXPLAIN (ANALYZE, BUFFERS)` 显示查询从秒级下降到亚毫秒级（主要耗时变为 MV 扫描与 top-N 排序）。
