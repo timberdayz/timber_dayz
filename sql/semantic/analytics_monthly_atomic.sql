@@ -150,25 +150,42 @@ resolved_monthly_traffic AS (
             c.resolved_shop_account_id,
             c.resolution_method,
             c.resolution_priority
-        FROM semantic.shop_identity_resolution_candidates c
-        WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
-          AND c.identity_value_normalized IN (
-              LOWER(COALESCE(m.source_platform_shop_id, '')),
-              LOWER(COALESCE(m.source_shop_account_id, '')),
-              LOWER(COALESCE(m.source_shop_id, '')),
-              REGEXP_REPLACE(
-                  REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.source_shop_id, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'),
-                  '[[:space:]_()/-]+',
-                  '',
-                  'g'
-              ),
-              REGEXP_REPLACE(
-                  REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'),
-                  '[[:space:]_()/-]+',
-                  '',
-                  'g'
-              )
-          )
+        FROM (
+            VALUES
+                (LOWER(COALESCE(m.source_platform_shop_id, ''))),
+                (LOWER(COALESCE(m.source_shop_account_id, ''))),
+                (LOWER(COALESCE(m.source_shop_id, ''))),
+                (
+                    REGEXP_REPLACE(
+                        REGEXP_REPLACE(
+                            LOWER(TRIM(COALESCE(m.source_shop_id, ''))),
+                            '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                            '',
+                            'i'
+                        ),
+                        '[[:space:]_()/-]+',
+                        '',
+                        'g'
+                    )
+                ),
+                (
+                    REGEXP_REPLACE(
+                        REGEXP_REPLACE(
+                            LOWER(TRIM(COALESCE(m.store_label_raw, ''))),
+                            '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                            '',
+                            'i'
+                        ),
+                        '[[:space:]_()/-]+',
+                        '',
+                        'g'
+                    )
+                )
+        ) candidate(identity_value_normalized)
+        INNER JOIN semantic.shop_identity_resolution_candidates c
+          ON c.platform_code = LOWER(COALESCE(m.platform_code, ''))
+         AND c.identity_value_normalized = candidate.identity_value_normalized
+        WHERE NULLIF(candidate.identity_value_normalized, '') IS NOT NULL
         ORDER BY c.resolution_priority, c.resolved_shop_id
         LIMIT 1
     ) resolved ON TRUE

@@ -115,6 +115,14 @@ CREATE INDEX IF NOT EXISTS ix_shop_identity_candidates_mv_platform_identity_prio
 CREATE INDEX IF NOT EXISTS ix_shop_identity_candidates_mv_platform_identity
     ON semantic.shop_identity_resolution_candidates_mv (platform_code, identity_value_normalized);
 
+CREATE INDEX IF NOT EXISTS ix_shop_identity_candidates_mv_platform_identity_priority_shop
+    ON semantic.shop_identity_resolution_candidates_mv (
+        platform_code,
+        identity_value_normalized,
+        resolution_priority,
+        resolved_shop_id
+    );
+
 CREATE OR REPLACE VIEW semantic.shop_identity_resolution_candidates AS
 SELECT
     platform_code,
