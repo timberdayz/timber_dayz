@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import date as date_cls
+from datetime import datetime, timedelta, timezone
 import time
 from typing import Any, Dict, Optional
 
@@ -36,6 +37,52 @@ _STORE_ANALYSIS_ALLOWED_ROLES = {"admin", "manager", "operator"}
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
     return {k: "" if v is None else str(v) for k, v in params.items()}
+
+
+def _isoformat_utc_now_seconds() -> str:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    return f"{now.isoformat()}Z"
+
+
+def _normalize_business_overview_period_key(granularity: str, value: str) -> str:
+    period_start = _normalize_period_start(value)
+    normalized_granularity = (granularity or "monthly").strip().lower()
+    if normalized_granularity == "daily":
+        return period_start.isoformat()
+    if normalized_granularity == "weekly":
+        week_start = period_start - timedelta(days=period_start.weekday())
+        return week_start.isoformat()
+    if normalized_granularity == "monthly":
+        month_start = date_cls(period_start.year, period_start.month, 1)
+        return month_start.isoformat()
+    raise ValueError("granularity must be daily, weekly or monthly")
+
+
+def _wrap_business_overview_envelope(
+    *,
+    module_payload: Any,
+    granularity: str,
+    period_key: str,
+    platform_code: Optional[str],
+    shop_id: Optional[str] = None,
+    cache_status: Optional[str] = None,
+) -> dict[str, Any]:
+    if isinstance(module_payload, dict) and {"meta", "data"}.issubset(module_payload.keys()):
+        return module_payload
+
+    meta: dict[str, Any] = {
+        "granularity": granularity,
+        "period_key": period_key,
+        "platform_code": platform_code,
+        "shop_id": shop_id,
+        "generated_at": _isoformat_utc_now_seconds(),
+        "cache": {
+            "status": cache_status,
+            "hit": True if cache_status == "HIT" else False if cache_status in {"MISS", "BYPASS"} else None,
+        },
+        "warnings": [],
+    }
+    return {"meta": meta, "data": module_payload}
 
 
 def _normalize_period_month_for_cache(period_month: Optional[str]) -> Optional[str]:
@@ -156,6 +203,15 @@ async def get_business_overview_kpi_postgresql(
             cache_params,
             _produce_payload,
         )
+        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
+            period_key = _normalize_business_overview_period_key(effective_granularity, effective_date)
+            payload["data"] = _wrap_business_overview_envelope(
+                module_payload=payload["data"],
+                granularity=effective_granularity,
+                period_key=period_key,
+                platform_code=platform,
+                cache_status=cache_status,
+            )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
@@ -190,6 +246,15 @@ async def get_business_overview_comparison_postgresql(
             cache_params,
             _produce_payload,
         )
+        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
+            period_key = _normalize_business_overview_period_key(granularity, date)
+            payload["data"] = _wrap_business_overview_envelope(
+                module_payload=payload["data"],
+                granularity=granularity,
+                period_key=period_key,
+                platform_code=platform,
+                cache_status=cache_status,
+            )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
@@ -259,15 +324,34 @@ async def get_business_overview_bootstrap_postgresql(
                 platform=platform,
             )
             operational_ms = (time.perf_counter() - operational_started) * 1000.0
+
+            traffic_started = time.perf_counter()
+            traffic_ranking_result = await service.get_business_overview_traffic_ranking(
+                granularity=effective_granularity,
+                target_date=effective_date,
+                dimension="shop",
+                platform=platform,
+            )
+            traffic_ms = (time.perf_counter() - traffic_started) * 1000.0
+
+            shop_racing_started = time.perf_counter()
+            shop_racing_result = await service.get_business_overview_shop_racing(
+                granularity=effective_granularity,
+                target_date=effective_date,
+                group_by="shop",
+                platform=platform,
+            )
+            shop_racing_ms = (time.perf_counter() - shop_racing_started) * 1000.0
             total_ms = (time.perf_counter() - started) * 1000.0
 
             # Observability: break down slow bootstrap into its subcalls.
             # Keep threshold consistent with middleware's "slow request" concept.
-            if total_ms >= 1000 or max(kpi_ms, comparison_ms, operational_ms) >= 1000:
+            if total_ms >= 1000 or max(kpi_ms, comparison_ms, operational_ms, traffic_ms, shop_racing_ms) >= 1000:
                 logger.warning(
                     "[slow_breakdown] /api/dashboard/business-overview/bootstrap "
                     f"total={total_ms:.2f}ms kpi={kpi_ms:.2f}ms comparison={comparison_ms:.2f}ms "
-                    f"operational={operational_ms:.2f}ms "
+                    f"operational={operational_ms:.2f}ms traffic_ranking={traffic_ms:.2f}ms "
+                    f"shop_racing={shop_racing_ms:.2f}ms "
                     f"granularity={effective_granularity} date={effective_date} month={effective_operational_month} "
                     f"platform={platform or ''}"
                 )
@@ -277,6 +361,8 @@ async def get_business_overview_bootstrap_postgresql(
                         "kpi": kpi_result,
                         "comparison": comparison_result,
                         "operational_metrics": operational_result,
+                        "traffic_ranking": traffic_ranking_result,
+                        "shop_racing": shop_racing_result,
                     }
                 ).body.decode()
             )
@@ -287,6 +373,15 @@ async def get_business_overview_bootstrap_postgresql(
             cache_params,
             _produce_payload,
         )
+        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
+            period_key = _normalize_business_overview_period_key(effective_granularity, effective_date)
+            payload["data"] = _wrap_business_overview_envelope(
+                module_payload=payload["data"],
+                granularity=effective_granularity,
+                period_key=period_key,
+                platform_code=platform,
+                cache_status=cache_status,
+            )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
