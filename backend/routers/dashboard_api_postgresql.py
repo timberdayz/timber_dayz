@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import date as date_cls
+import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -234,21 +235,42 @@ async def get_business_overview_bootstrap_postgresql(
 
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
+            started = time.perf_counter()
+            kpi_started = time.perf_counter()
             kpi_result = await service.get_business_overview_kpi(
                 month=effective_date,
                 platform=platform,
                 granularity=effective_granularity,
                 target_date=effective_date,
             )
+            kpi_ms = (time.perf_counter() - kpi_started) * 1000.0
+
+            comparison_started = time.perf_counter()
             comparison_result = await service.get_business_overview_comparison(
                 granularity=effective_granularity,
                 target_date=effective_date,
                 platform=platform,
             )
+            comparison_ms = (time.perf_counter() - comparison_started) * 1000.0
+
+            operational_started = time.perf_counter()
             operational_result = await service.get_business_overview_operational_metrics(
                 month=effective_operational_month,
                 platform=platform,
             )
+            operational_ms = (time.perf_counter() - operational_started) * 1000.0
+            total_ms = (time.perf_counter() - started) * 1000.0
+
+            # Observability: break down slow bootstrap into its subcalls.
+            # Keep threshold consistent with middleware's "slow request" concept.
+            if total_ms >= 1000 or max(kpi_ms, comparison_ms, operational_ms) >= 1000:
+                logger.warning(
+                    "[slow_breakdown] /api/dashboard/business-overview/bootstrap "
+                    f"total={total_ms:.2f}ms kpi={kpi_ms:.2f}ms comparison={comparison_ms:.2f}ms "
+                    f"operational={operational_ms:.2f}ms "
+                    f"granularity={effective_granularity} date={effective_date} month={effective_operational_month} "
+                    f"platform={platform or ''}"
+                )
             return json.loads(
                 success_response(
                     data={

@@ -643,6 +643,40 @@ def _previous_store_analysis_anchor(granularity: str, target_date: str) -> str:
 
 
 class PostgresqlDashboardService:
+    def __init__(self) -> None:
+        import asyncio
+
+        self._column_cache: dict[tuple[str, str], set[str]] = {}
+        self._column_cache_lock = asyncio.Lock()
+
+    async def _get_table_columns(self, table_schema: str, table_name: str) -> set[str]:
+        cache_key = (table_schema, table_name)
+        cached = self._column_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        async with self._column_cache_lock:
+            cached = self._column_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = :table_schema
+                          AND table_name = :table_name
+                        """
+                    ),
+                    {"table_schema": table_schema, "table_name": table_name},
+                )
+                columns = {str(row[0]) for row in result.fetchall() if row and row[0] is not None}
+
+            self._column_cache[cache_key] = columns
+            return columns
+
     async def _fetch_rows(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         async with AsyncSessionLocal() as session:
             result = await session.execute(text(query), params)
@@ -821,18 +855,34 @@ class PostgresqlDashboardService:
                         )
                     except Exception:
                         await session.rollback()
-                        result = await session.execute(
-                            text(
-                                """
-                                SELECT
-                                    SUM(target_sales_amount) AS target_amount,
-                                    SUM(target_quantity) AS target_quantity
-                                FROM a_class.sales_targets_a
-                                WHERE year_month = :year_month
-                                """
-                            ),
-                            {"year_month": period_start.strftime("%Y-%m")},
-                        )
+                        columns = await self._get_table_columns("a_class", "sales_targets_a")
+                        year_month_value = period_start.strftime("%Y-%m")
+                        if {"year_month", "target_sales_amount"}.issubset(columns):
+                            result = await session.execute(
+                                text(
+                                    """
+                                    SELECT
+                                        SUM(target_sales_amount) AS target_amount,
+                                        SUM(target_quantity) AS target_quantity
+                                    FROM a_class.sales_targets_a
+                                    WHERE year_month = :year_month
+                                    """
+                                ),
+                                {"year_month": year_month_value},
+                            )
+                        else:
+                            result = await session.execute(
+                                text(
+                                    """
+                                    SELECT
+                                        COALESCE(SUM("目标销售额"), 0) AS target_amount,
+                                        COALESCE(SUM("目标订单数"), 0) AS target_quantity
+                                    FROM a_class.sales_targets_a
+                                    WHERE "年月" = :year_month
+                                    """
+                                ),
+                                {"year_month": year_month_value},
+                            )
                 else:
                     try:
                         result = await session.execute(
@@ -852,18 +902,34 @@ class PostgresqlDashboardService:
                     except Exception:
                         await session.rollback()
                         try:
-                            result = await session.execute(
-                                text(
-                                    """
-                                    SELECT
-                                        SUM(target_sales_amount) AS target_amount,
-                                        SUM(target_quantity) AS target_quantity
-                                    FROM a_class.sales_targets_a
-                                    WHERE year_month = :year_month
-                                    """
-                                ),
-                                {"year_month": period_start.strftime("%Y-%m")},
-                            )
+                            columns = await self._get_table_columns("a_class", "sales_targets_a")
+                            year_month_value = period_start.strftime("%Y-%m")
+                            if {"year_month", "target_sales_amount"}.issubset(columns):
+                                result = await session.execute(
+                                    text(
+                                        """
+                                        SELECT
+                                            SUM(target_sales_amount) AS target_amount,
+                                            SUM(target_quantity) AS target_quantity
+                                        FROM a_class.sales_targets_a
+                                        WHERE year_month = :year_month
+                                        """
+                                    ),
+                                    {"year_month": year_month_value},
+                                )
+                            else:
+                                result = await session.execute(
+                                    text(
+                                        """
+                                        SELECT
+                                            COALESCE(SUM("目标销售额"), 0) AS target_amount,
+                                            COALESCE(SUM("目标订单数"), 0) AS target_quantity
+                                        FROM a_class.sales_targets_a
+                                        WHERE "年月" = :year_month
+                                        """
+                                    ),
+                                    {"year_month": year_month_value},
+                                )
                         except Exception:
                             await session.rollback()
                             try:
@@ -927,7 +993,8 @@ class PostgresqlDashboardService:
     ) -> float | None:
         year_month = period_month.strftime("%Y-%m")
         async with AsyncSessionLocal() as session:
-            try:
+            columns = await self._get_table_columns("a_class", "operating_costs")
+            if {"year_month", "rent", "marketing_fee", "utilities", "other_costs"}.issubset(columns):
                 result = await session.execute(
                     text(
                         """
@@ -938,35 +1005,19 @@ class PostgresqlDashboardService:
                     ),
                     {"year_month": year_month},
                 )
-            except Exception:
-                await session.rollback()
-                try:
-                    result = await session.execute(
-                        text(
-                            """
-                            SELECT COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0)
-                            FROM a_class.operating_costs
-                            WHERE "年月" = :year_month
-                            """
-                        ),
-                        {"year_month": year_month},
-                    )
-                except Exception:
-                    await session.rollback()
-                    try:
-                        result = await session.execute(
-                            text(
-                                """
-                                SELECT COALESCE(SUM("???" + "???" + "????? + "??????"), 0)
-                                FROM a_class.operating_costs
-                                WHERE "???" = :year_month
-                                """
-                            ),
-                            {"year_month": year_month},
-                        )
-                    except Exception:
-                        await session.rollback()
-                        return None
+            elif {"年月", "租金", "营销费用", "水电费", "其他成本"}.issubset(columns):
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0)
+                        FROM a_class.operating_costs
+                        WHERE "年月" = :year_month
+                        """
+                    ),
+                    {"year_month": year_month},
+                )
+            else:
+                return None
             value = result.scalar_one_or_none()
             return _to_optional_float(value)
 

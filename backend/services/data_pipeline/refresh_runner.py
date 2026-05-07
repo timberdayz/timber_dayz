@@ -21,6 +21,7 @@ _OPS_REQUIRED_TABLES = {
     "data_freshness_log",
     "data_lineage_registry",
 }
+_OPS_TABLES_READY_SIGNATURE: tuple[str, str] | None = None
 
 
 def build_refresh_plan(targets: list[str]) -> list[str]:
@@ -34,7 +35,24 @@ def _target_type(target: str) -> str:
 
 
 async def _ensure_ops_tables(db: AsyncSession) -> None:
+    global _OPS_TABLES_READY_SIGNATURE
+    try:
+        bind = getattr(db, "get_bind", None)
+        if callable(bind):
+            engine = db.get_bind()
+            db_url = str(getattr(engine, "url", "")) if engine is not None else ""
+        else:
+            engine = getattr(db, "bind", None)
+            db_url = str(getattr(engine, "url", "")) if engine is not None else ""
+    except Exception:
+        db_url = ""
+
+    signature = (db_url, "ops_tables_ready_v1")
+    if _OPS_TABLES_READY_SIGNATURE == signature:
+        return
     async with _OPS_TABLES_LOCK:
+        if _OPS_TABLES_READY_SIGNATURE == signature:
+            return
         existing_tables_result = await db.execute(
             text(
                 """
@@ -52,9 +70,11 @@ async def _ensure_ops_tables(db: AsyncSession) -> None:
         )
         existing_tables_count = existing_tables_result.scalar() or 0
         if existing_tables_count >= len(_OPS_REQUIRED_TABLES):
+            _OPS_TABLES_READY_SIGNATURE = signature
             return
 
         await execute_sql_file(db, "sql/ops/create_pipeline_tables.sql")
+        _OPS_TABLES_READY_SIGNATURE = signature
 
 
 async def _insert_run_log(

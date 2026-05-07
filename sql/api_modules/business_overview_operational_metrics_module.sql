@@ -11,11 +11,14 @@ BEGIN
     ) THEN
         EXECUTE $view$
         CREATE OR REPLACE VIEW api.business_overview_operational_metrics_module AS
-        WITH day_anchors AS (
+        WITH base_month_kpi AS (
             SELECT
                 m.period_month,
                 m.platform_code,
                 m.shop_id,
+                m.gmv,
+                m.order_count,
+                m.profit,
                 CASE
                     WHEN CURRENT_DATE < m.period_month THEN m.period_month
                     WHEN CURRENT_DATE > (m.period_month + INTERVAL '1 month - 1 day')::date THEN (m.period_month + INTERVAL '1 month - 1 day')::date
@@ -47,15 +50,6 @@ BEGIN
                 SUM(rent + marketing_fee + utilities + other_costs) AS estimated_expenses
             FROM a_class.operating_costs
             GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
-        ),
-        daily_sales AS (
-            SELECT
-                d.period_date,
-                d.platform_code,
-                d.shop_id,
-                d.gmv AS today_sales,
-                d.order_count AS today_order_count
-            FROM mart.shop_day_kpi d
         )
         SELECT
             m.period_month,
@@ -63,7 +57,7 @@ BEGIN
             m.shop_id,
             t.monthly_target AS monthly_target,
             m.gmv AS monthly_total_achieved,
-            ds.today_sales AS today_sales,
+            ds.gmv AS today_sales,
             CASE
                 WHEN t.monthly_target IS NULL OR m.gmv IS NULL THEN NULL
                 WHEN t.monthly_target > 0
@@ -75,9 +69,9 @@ BEGIN
             CASE
                 WHEN t.monthly_target IS NULL OR m.gmv IS NULL THEN NULL
                 WHEN t.monthly_target > 0
-                THEN ROUND((m.gmv::numeric * 100.0 / t.monthly_target) - da.time_progress_pct, 2)
+                THEN ROUND((m.gmv::numeric * 100.0 / t.monthly_target) - m.time_progress_pct, 2)
                 WHEN t.monthly_target = 0 AND m.gmv = 0
-                THEN ROUND(0 - da.time_progress_pct, 2)
+                THEN ROUND(0 - m.time_progress_pct, 2)
                 ELSE NULL
             END AS time_gap,
             m.profit AS estimated_gross_profit,
@@ -92,31 +86,30 @@ BEGIN
                 ELSE '亏损'
             END AS operating_result_text,
             m.order_count AS monthly_order_count,
-            ds.today_order_count AS today_order_count
-        FROM mart.shop_month_kpi m
-        LEFT JOIN day_anchors da
-            ON m.period_month = da.period_month
-           AND m.platform_code = da.platform_code
-           AND COALESCE(m.shop_id, '') = COALESCE(da.shop_id, '')
+            ds.order_count AS today_order_count
+        FROM base_month_kpi m
         LEFT JOIN monthly_targets t
             ON m.period_month = t.period_month
            AND COALESCE(m.shop_id, '') = COALESCE(t.shop_id, '')
         LEFT JOIN monthly_costs c
             ON m.period_month = c.period_month
            AND COALESCE(m.shop_id, '') = COALESCE(c.shop_id, '')
-        LEFT JOIN daily_sales ds
-            ON ds.period_date = da.anchor_date
+        LEFT JOIN mart.shop_day_kpi ds
+            ON ds.period_date = m.anchor_date
            AND ds.platform_code = m.platform_code
            AND COALESCE(ds.shop_id, '') = COALESCE(m.shop_id, '')
         $view$;
     ELSE
         EXECUTE $view$
         CREATE OR REPLACE VIEW api.business_overview_operational_metrics_module AS
-        WITH day_anchors AS (
+        WITH base_month_kpi AS (
             SELECT
                 m.period_month,
                 m.platform_code,
                 m.shop_id,
+                m.gmv,
+                m.order_count,
+                m.profit,
                 CASE
                     WHEN CURRENT_DATE < m.period_month THEN m.period_month
                     WHEN CURRENT_DATE > (m.period_month + INTERVAL '1 month - 1 day')::date THEN (m.period_month + INTERVAL '1 month - 1 day')::date
@@ -148,15 +141,6 @@ BEGIN
                 SUM("租金" + "营销费用" + "水电费" + "其他成本") AS estimated_expenses
             FROM a_class.operating_costs
             GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
-        ),
-        daily_sales AS (
-            SELECT
-                d.period_date,
-                d.platform_code,
-                d.shop_id,
-                d.gmv AS today_sales,
-                d.order_count AS today_order_count
-            FROM mart.shop_day_kpi d
         )
         SELECT
             m.period_month,
@@ -164,7 +148,7 @@ BEGIN
             m.shop_id,
             t.monthly_target AS monthly_target,
             m.gmv AS monthly_total_achieved,
-            ds.today_sales AS today_sales,
+            ds.gmv AS today_sales,
             CASE
                 WHEN t.monthly_target IS NULL OR m.gmv IS NULL THEN NULL
                 WHEN t.monthly_target > 0
@@ -176,9 +160,9 @@ BEGIN
             CASE
                 WHEN t.monthly_target IS NULL OR m.gmv IS NULL THEN NULL
                 WHEN t.monthly_target > 0
-                THEN ROUND((m.gmv::numeric * 100.0 / t.monthly_target) - da.time_progress_pct, 2)
+                THEN ROUND((m.gmv::numeric * 100.0 / t.monthly_target) - m.time_progress_pct, 2)
                 WHEN t.monthly_target = 0 AND m.gmv = 0
-                THEN ROUND(0 - da.time_progress_pct, 2)
+                THEN ROUND(0 - m.time_progress_pct, 2)
                 ELSE NULL
             END AS time_gap,
             m.profit AS estimated_gross_profit,
@@ -193,20 +177,16 @@ BEGIN
                 ELSE '亏损'
             END AS operating_result_text,
             m.order_count AS monthly_order_count,
-            ds.today_order_count AS today_order_count
-        FROM mart.shop_month_kpi m
-        LEFT JOIN day_anchors da
-            ON m.period_month = da.period_month
-           AND m.platform_code = da.platform_code
-           AND COALESCE(m.shop_id, '') = COALESCE(da.shop_id, '')
+            ds.order_count AS today_order_count
+        FROM base_month_kpi m
         LEFT JOIN monthly_targets t
             ON m.period_month = t.period_month
            AND COALESCE(m.shop_id, '') = COALESCE(t.shop_id, '')
         LEFT JOIN monthly_costs c
             ON m.period_month = c.period_month
            AND COALESCE(m.shop_id, '') = COALESCE(c.shop_id, '')
-        LEFT JOIN daily_sales ds
-            ON ds.period_date = da.anchor_date
+        LEFT JOIN mart.shop_day_kpi ds
+            ON ds.period_date = m.anchor_date
            AND ds.platform_code = m.platform_code
            AND COALESCE(ds.shop_id, '') = COALESCE(m.shop_id, '')
         $view$;

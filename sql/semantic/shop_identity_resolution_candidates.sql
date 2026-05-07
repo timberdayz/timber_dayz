@@ -1,6 +1,24 @@
 CREATE SCHEMA IF NOT EXISTS semantic;
 
-CREATE OR REPLACE VIEW semantic.shop_identity_resolution_candidates AS
+-- Performance note:
+-- This object is used in LATERAL identity resolution joins inside semantic analytics/order facts.
+-- Keeping it as a dynamic VIEW forces Postgres to repeatedly execute REGEXP/UNION logic during
+-- online dashboard reads. We materialize it (with indexes) and expose the same stable VIEW name.
+--
+-- IMPORTANT: Do NOT DROP ... CASCADE here.
+-- The semantic/mart/api layer depends on this view - dropping with CASCADE will remove downstream
+-- views and break online queries. Use CREATE IF NOT EXISTS + REFRESH instead.
+
+DO $bootstrap$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_matviews
+        WHERE schemaname = 'semantic'
+          AND matviewname = 'shop_identity_resolution_candidates_mv'
+    ) THEN
+        EXECUTE $mv$
+        CREATE MATERIALIZED VIEW semantic.shop_identity_resolution_candidates_mv AS
 WITH active_shop_accounts AS (
     SELECT
         sa.id AS shop_account_pk,
@@ -84,3 +102,26 @@ SELECT
     resolution_priority
 FROM identity_rows
 WHERE NULLIF(TRIM(COALESCE(identity_value_normalized, '')), '') IS NOT NULL;
+$mv$;
+    ELSE
+        REFRESH MATERIALIZED VIEW semantic.shop_identity_resolution_candidates_mv;
+    END IF;
+END
+$bootstrap$;
+
+CREATE INDEX IF NOT EXISTS ix_shop_identity_candidates_mv_platform_identity_priority
+    ON semantic.shop_identity_resolution_candidates_mv (platform_code, identity_value_normalized, resolution_priority);
+
+CREATE INDEX IF NOT EXISTS ix_shop_identity_candidates_mv_platform_identity
+    ON semantic.shop_identity_resolution_candidates_mv (platform_code, identity_value_normalized);
+
+CREATE OR REPLACE VIEW semantic.shop_identity_resolution_candidates AS
+SELECT
+    platform_code,
+    identity_value_normalized,
+    identity_source_value,
+    resolved_shop_id,
+    resolved_shop_account_id,
+    resolution_method,
+    resolution_priority
+FROM semantic.shop_identity_resolution_candidates_mv;

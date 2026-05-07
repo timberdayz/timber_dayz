@@ -15,7 +15,7 @@ WITH raw_monthly_traffic AS (
 ),
 mapped_monthly_traffic AS (
     SELECT
-        date_trunc('month', metric_date)::date AS metric_date,
+        metric_date::date AS metric_date,
         platform_code,
         NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
         NULLIF(
