@@ -1,6 +1,8 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
-CREATE OR REPLACE VIEW mart.inventory_backlog_base AS
+DROP MATERIALIZED VIEW IF EXISTS mart.inventory_backlog_base_mv;
+
+CREATE MATERIALIZED VIEW mart.inventory_backlog_base_mv AS
 -- Current backlog calculation runs on company-level inventory scope.
 -- shop_id remains a reserved interface field and is not part of the current
 -- latest snapshot, sales join, or risk aggregation key.
@@ -155,3 +157,21 @@ SELECT
         + base.estimated_turnover_days * 2
     ) AS clearance_priority_score
 FROM turnover_enriched base;
+
+CREATE INDEX IF NOT EXISTS ix_inventory_backlog_base_mv_snapshot_platform
+ON mart.inventory_backlog_base_mv (snapshot_date, platform_code);
+
+CREATE INDEX IF NOT EXISTS ix_inventory_backlog_base_mv_snapshot_turnover
+ON mart.inventory_backlog_base_mv (snapshot_date, estimated_turnover_days);
+
+CREATE INDEX IF NOT EXISTS ix_inventory_backlog_base_mv_snapshot_clearance_order
+ON mart.inventory_backlog_base_mv (
+    snapshot_date,
+    clearance_priority_score DESC,
+    inventory_value DESC,
+    estimated_turnover_days DESC
+);
+
+CREATE OR REPLACE VIEW mart.inventory_backlog_base AS
+SELECT *
+FROM mart.inventory_backlog_base_mv;
