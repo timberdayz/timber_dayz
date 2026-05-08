@@ -1825,8 +1825,8 @@ const loadComparisonData = async () => {
 
     const response = await api.getBusinessOverviewComparison({
       granularity: comparisonGranularity.value,
-      date: dateStr,
-      platform: kpiPlatform.value || undefined
+      period_key: dateStr,
+      platform_code: kpiPlatform.value || undefined
     })
 
     const normalizedResponse = response || { metrics: {}, target: {} }
@@ -2155,9 +2155,8 @@ const loadKPIData = async () => {
 
     const response = await api.getBusinessOverviewKPI({
       granularity: kpiGranularity.value,
-      date: kpiDateStr,
-      month: kpiGranularity.value === 'monthly' ? kpiDateStr : undefined,
-      platform: kpiPlatform.value || undefined // ????????
+      period_key: kpiDateStr,
+      platform_code: kpiPlatform.value || undefined
     })
 
     if (response) {
@@ -2404,9 +2403,9 @@ const loadShopRacingData = async () => {
 
     const response = await api.getBusinessOverviewShopRacing({
       granularity: shopRacingGranularity.value,
-      date: dateStr,
+      period_key: dateStr,
       group_by: racingGroupBy.value,
-      platform: kpiPlatform.value || undefined
+      platform_code: kpiPlatform.value || undefined
     })
 
     // 后端已转为 { name, target, achieved, achievement_rate, rank } 数组
@@ -2469,8 +2468,9 @@ const loadOperationalMetrics = async () => {
   try {
     // operationalDate 已经是 YYYY-MM-DD 格式的字符串（由 value-format 保证）
     const response = await api.getBusinessOverviewOperationalMetrics({
-      month: operationalDate.value || undefined,
-      platform: kpiPlatform.value || undefined
+      granularity: 'monthly',
+      period_key: operationalDate.value || undefined,
+      platform_code: kpiPlatform.value || undefined
     })
 
     // 响应拦截器已处理success字段，直接使用data
@@ -2527,11 +2527,9 @@ const loadTrafficRanking = async () => {
     const params = {
       granularity: gr,
       dimension: trafficRankingDimension.value,
-      date: dateStr
+      period_key: dateStr
     }
-    if (kpiPlatform.value) {
-      params.platform = kpiPlatform.value
-    }
+    if (kpiPlatform.value) params.platform_code = kpiPlatform.value
 
     const response = await api.getBusinessOverviewTrafficRanking(params)
 
@@ -2637,11 +2635,11 @@ const loadCriticalTierBootstrap = async () => {
   try {
     const dateStr = globalToDateStr()
     const monthStr = globalToOperationalDateStr()
+    const periodKey = dateStr || monthStr
     const payload = await api.getBusinessOverviewBootstrap({
       granularity: globalGranularity.value,
-      date: dateStr || undefined,
-      month: monthStr || undefined,
-      platform: kpiPlatform.value || undefined
+      period_key: periodKey || undefined,
+      platform_code: kpiPlatform.value || undefined
     })
 
     const applyKpiPayload = (data) => {

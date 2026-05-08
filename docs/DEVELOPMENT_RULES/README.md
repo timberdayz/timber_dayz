@@ -5,6 +5,7 @@ This directory is a detailed reference for repository-specific implementation st
 ## Current Rule Model
 
 - Active workflow: `superpowers` + `planning-with-files`
+- Supplemental helper skills such as `gstack` are allowed only as explicit add-ons, not as the repository default workflow
 - Repository constraints: [`.cursorrules`](F:/Vscode/python_programme/AI_code/xihong_erp/.cursorrules)
 - Entry docs: [`AGENTS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/AGENTS.md) and [`CLAUDE.md`](F:/Vscode/python_programme/AI_code/xihong_erp/CLAUDE.md)
 - Historical archive: [`openspec/`](F:/Vscode/python_programme/AI_code/xihong_erp/openspec)
@@ -40,5 +41,6 @@ Use this directory for deep-dive references and templates. Do not treat it as th
 ## Notes
 
 - When detailed docs conflict with active skills, prefer skills unless the difference is a repository-specific constraint recorded in `.cursorrules`.
+- When `superpowers` and `gstack` overlap, treat `superpowers` as the default and use `gstack-*` only when explicitly requested or clearly acting as a bounded helper.
 - When detailed docs conflict with `.cursorrules`, update the docs so the repository constraint and the reference stay aligned.
 - GitHub release operations in this repository are tag-driven; `origin/main` is not the deployment source of truth.

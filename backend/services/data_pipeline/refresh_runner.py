@@ -290,6 +290,7 @@ async def execute_sql_target(
     run_id: str | None = None,
     max_attempts: int = 1,
     retry_backoff_seconds: float = 0.0,
+    resolve_dependencies: bool = False,
 ) -> str:
     active_run_id = run_id or f"run_{uuid.uuid4().hex}"
     await _ensure_ops_tables(db)
@@ -309,90 +310,103 @@ async def execute_sql_target(
         status="running",
         details={"target_type": _target_type(target)},
     )
-    if target == "ops.pipeline_run_log":
-        sql_path = "sql/ops/create_pipeline_tables.sql"
+    if resolve_dependencies:
+        ordered_targets = build_refresh_plan([target])
     else:
-        sql_path = SQL_TARGET_PATHS[target]
+        ordered_targets = [target]
     last_error: Exception | None = None
-    attempts = max(1, max_attempts)
-    for attempt in range(1, attempts + 1):
-        try:
-            async with db.begin_nested():
-                await execute_sql_file(db, sql_path)
-            await _sync_lineage_registry(db, target)
-            await _upsert_freshness_log(db, target, "success")
-            await _update_step_log(
-                db,
-                active_run_id,
-                target,
-                "success",
-            )
-            await db.execute(
-                text(
-                    """
-                    UPDATE ops.pipeline_step_log
-                    SET details = CAST(:details AS jsonb)
-                    WHERE id = (
-                        SELECT id
-                        FROM ops.pipeline_step_log
-                        WHERE run_id = :run_id
-                          AND target_name = :target_name
-                        ORDER BY id DESC
-                        LIMIT 1
-                    )
-                    """
-                ),
-                {
-                    "run_id": active_run_id,
-                    "target_name": target,
-                    "details": __import__("json").dumps(
-                        {
-                            "target_type": _target_type(target),
-                            "attempts": attempt,
-                        }
-                    ),
-                },
-            )
-            if run_id is None:
-                await _update_run_log(db, active_run_id, "success")
-            return active_run_id
-        except Exception as exc:
-            last_error = exc
-            if attempt < attempts and retry_backoff_seconds > 0:
-                await asyncio.sleep(retry_backoff_seconds * attempt)
+    try:
+        for planned_target in ordered_targets:
+            if planned_target == "ops.pipeline_run_log":
+                sql_path = "sql/ops/create_pipeline_tables.sql"
+            else:
+                sql_path = SQL_TARGET_PATHS[planned_target]
+            attempts = max(1, max_attempts)
+            for attempt in range(1, attempts + 1):
+                try:
+                    async with db.begin_nested():
+                        await execute_sql_file(db, sql_path)
+                    await _sync_lineage_registry(db, planned_target)
+                    await _upsert_freshness_log(db, planned_target, "success")
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < attempts and retry_backoff_seconds > 0:
+                        await asyncio.sleep(retry_backoff_seconds * attempt)
+            else:
+                assert last_error is not None
+                raise last_error
 
-    assert last_error is not None
-    await _upsert_freshness_log(db, target, "failed")
-    await _update_step_log(db, active_run_id, target, "failed", error_message=str(last_error))
-    await db.execute(
-        text(
-            """
-            UPDATE ops.pipeline_step_log
-            SET details = CAST(:details AS jsonb)
-            WHERE id = (
-                SELECT id
-                FROM ops.pipeline_step_log
-                WHERE run_id = :run_id
-                  AND target_name = :target_name
-                ORDER BY id DESC
-                LIMIT 1
-            )
-            """
-        ),
-        {
-            "run_id": active_run_id,
-            "target_name": target,
-            "details": __import__("json").dumps(
-                {
-                    "target_type": _target_type(target),
-                    "attempts": attempts,
-                }
+        await _update_step_log(
+            db,
+            active_run_id,
+            target,
+            "success",
+        )
+        await db.execute(
+            text(
+                """
+                UPDATE ops.pipeline_step_log
+                SET details = CAST(:details AS jsonb)
+                WHERE id = (
+                    SELECT id
+                    FROM ops.pipeline_step_log
+                    WHERE run_id = :run_id
+                      AND target_name = :target_name
+                    ORDER BY id DESC
+                    LIMIT 1
+                )
+                """
             ),
-        },
-    )
-    if run_id is None:
-        await _update_run_log(db, active_run_id, "failed", error_message=str(last_error))
-    raise last_error
+            {
+                "run_id": active_run_id,
+                "target_name": target,
+                "details": __import__("json").dumps(
+                    {
+                        "target_type": _target_type(target),
+                        "attempts": max(1, max_attempts),
+                        "ordered_targets": ordered_targets,
+                    }
+                ),
+            },
+        )
+        if run_id is None:
+            await _update_run_log(db, active_run_id, "success")
+        return active_run_id
+    except Exception as exc:
+        last_error = exc
+        await _upsert_freshness_log(db, target, "failed")
+        await _update_step_log(db, active_run_id, target, "failed", error_message=str(last_error))
+        await db.execute(
+            text(
+                """
+                UPDATE ops.pipeline_step_log
+                SET details = CAST(:details AS jsonb)
+                WHERE id = (
+                    SELECT id
+                    FROM ops.pipeline_step_log
+                    WHERE run_id = :run_id
+                      AND target_name = :target_name
+                    ORDER BY id DESC
+                    LIMIT 1
+                )
+                """
+            ),
+            {
+                "run_id": active_run_id,
+                "target_name": target,
+                "details": __import__("json").dumps(
+                    {
+                        "target_type": _target_type(target),
+                        "attempts": max(1, max_attempts),
+                        "ordered_targets": ordered_targets,
+                    }
+                ),
+            },
+        )
+        if run_id is None:
+            await _update_run_log(db, active_run_id, "failed", error_message=str(last_error))
+        raise
 
 
 async def execute_refresh_plan(

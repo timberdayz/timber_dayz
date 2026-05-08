@@ -118,22 +118,34 @@ def check_low_stock_alert():
     try:
         logger.info("[ALERT] Checking low stock products...")
         
-        # 查询低库存商品
-        result = db.execute(text("""
-            SELECT
-                i.platform_code,
-                i.shop_id,
-                p.platform_sku,
-                p.title,
-                i.quantity_available,
-                i.safety_stock,
-                i.reorder_point
-            FROM fact_inventory i
-            JOIN dim_product p ON i.product_id = p.product_surrogate_id
-            WHERE i.quantity_available < i.safety_stock
-            ORDER BY (i.safety_stock - i.quantity_available) DESC
-            LIMIT 50
-        """))
+        # 查询低库存商品（使用当前运行时资产：mart.inventory_current）
+        # 旧表 fact_inventory / dim_product 已不再作为运行时依赖，避免缺表导致 Postgres ERROR 日志刷屏。
+        try:
+            result = db.execute(
+                text(
+                    """
+                    SELECT
+                        platform_code,
+                        shop_id,
+                        platform_sku,
+                        product_name,
+                        available_stock,
+                        safety_stock,
+                        reorder_point
+                    FROM mart.inventory_current
+                    WHERE available_stock < safety_stock
+                    ORDER BY (safety_stock - available_stock) DESC
+                    LIMIT 50
+                    """
+                )
+            )
+        except Exception as query_err:
+            # 如果 inventory 资产未部署（例如仅跑 Dashboard/BO），按“非关键任务”跳过，避免把错误当成系统故障。
+            msg = str(query_err)
+            if "does not exist" in msg or "UndefinedTable" in msg:
+                logger.warning(f"[ALERT] inventory asset not available, skipped: {query_err}")
+                return {"status": "skipped", "reason": "inventory_asset_missing"}
+            raise
         
         low_stock_products = []
         for row in result:

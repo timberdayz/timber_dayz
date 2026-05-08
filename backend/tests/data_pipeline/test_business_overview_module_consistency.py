@@ -20,6 +20,7 @@ def _make_request(path: str = "/api/dashboard/test"):
             "type": "http",
             "method": "GET",
             "path": path,
+            "query_string": b"",
             "headers": [],
             "client": ("127.0.0.1", 8001),
             "app": app,
@@ -78,8 +79,10 @@ def test_business_overview_kpi_contract_shape(monkeypatch):
     response = asyncio.run(
         get_business_overview_kpi_postgresql(
             request=request,
-            month="2026-03-01",
-            platform=None,
+            granularity="monthly",
+            period_key="2026-03-01",
+            platform_code=None,
+            shop_id=None,
         )
     )
 
@@ -127,8 +130,9 @@ def test_business_overview_comparison_contract_shape(monkeypatch):
         get_business_overview_comparison_postgresql(
             request=request,
             granularity="monthly",
-            date="2026-03",
-            platform=None,
+            period_key="2026-03-01",
+            platform_code=None,
+            shop_id=None,
         )
     )
 
@@ -158,9 +162,9 @@ def test_business_overview_bootstrap_contract_shape(monkeypatch):
         get_business_overview_bootstrap_postgresql(
             request=request,
             granularity="monthly",
-            date="2026-03-01",
-            month="2026-03-01",
-            platform=None,
+            period_key="2026-03-01",
+            platform_code=None,
+            shop_id=None,
         )
     )
 

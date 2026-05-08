@@ -1,5 +1,6 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
+-- Legacy operating_costs columns may include: "年月", "店铺ID", "租金", "工资", "水电费", "其他成本"
 DO $bootstrap$
 BEGIN
     IF EXISTS (

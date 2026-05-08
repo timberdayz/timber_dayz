@@ -8,7 +8,7 @@ This repository is skill-first. Skills define the default workflow. Project rule
 user instructions
 > repository-specific constraints (.cursorrules)
 > superpowers + planning-with-files
-> other skills
+> other skills (including gstack)
 > archived OpenSpec material
 ```
 
@@ -16,6 +16,9 @@ user instructions
 
 - Use `superpowers` as the default workflow engine.
 - Use `planning-with-files` for complex multi-step work.
+- Treat `gstack` as a supplemental skillset, not as a replacement for the repository default workflow.
+- Use explicit `gstack-*` names when invoking `gstack` so generic verbs such as review, plan, qa, or ship stay unambiguous.
+- If `gstack` and `superpowers` offer overlapping flows, default to `superpowers` unless the user explicitly asks for `gstack`.
 - Use `.cursorrules` only for stack-specific and safety-specific exceptions.
 - Treat `openspec/` as archive-only reference material.
 - For collection authoring conversations, prefer the already-loaded PowerShell `pwcli` helper commands when they exist in the active shell profile, instead of reintroducing manual setup or longer fallback wrappers.
@@ -93,6 +96,11 @@ user instructions
 
 "I need browser automation"
   -> webapp-testing
+
+"I explicitly want gstack help or a second opinion"
+  -> use the requested `gstack-*` skill
+  -> keep repository constraints from `.cursorrules`
+  -> return to the baseline `superpowers` workflow for implementation and verification
 ```
 
 ## OpenSpec Status

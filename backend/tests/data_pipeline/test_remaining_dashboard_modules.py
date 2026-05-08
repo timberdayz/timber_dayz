@@ -68,9 +68,10 @@ def test_business_overview_traffic_ranking_module_sql_asset():
 
 
 def test_business_overview_frontend_traffic_ranking_uses_date_query_param():
-    text = Path("frontend/src/views/BusinessOverview.vue").read_text(encoding="utf-8")
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(encoding="utf-8")
     assert "date_value:" not in text
-    assert "date: dateStr" in text
+    assert "date: dateStr" not in text
+    assert "period_key: dateStr" in text
 
 
 def test_business_overview_operational_metrics_module_sql_asset():

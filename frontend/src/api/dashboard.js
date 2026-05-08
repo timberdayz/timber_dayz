@@ -14,8 +14,15 @@
 import api from './index.js'
 
 export default {
+  /**
+   * Business Overview canonical params (no legacy compat):
+   * - granularity: daily|weekly|monthly
+   * - period_key: ISO date (monthly=month start, weekly=week start, daily=date)
+   * - platform_code?: platform code
+   * - shop_id?: shop id
+   */
   async queryBusinessOverviewBootstrap(params = {}) {
-    return await api._get('/dashboard/business-overview/bootstrap', { params })
+    return await api.getBusinessOverviewBootstrap(params)
   },
   /**
    * 查询业务概览KPI数据
@@ -26,7 +33,7 @@ export default {
    * @returns {Promise} KPI数据
    */
   async queryBusinessOverviewKpi(params = {}) {
-    return await api._get('/dashboard/business-overview/kpi', { params })
+    return await api.getBusinessOverviewKPI(params)
   },
 
   /**
@@ -38,7 +45,7 @@ export default {
    * @returns {Promise} 对比数据
    */
   async queryBusinessOverviewComparison(params = {}) {
-    return await api._get('/dashboard/business-overview/comparison', { params })
+    return await api.getBusinessOverviewComparison(params)
   },
 
   /**
@@ -51,7 +58,7 @@ export default {
    * @returns {Promise} 店铺赛马数据
    */
   async queryBusinessOverviewShopRacing(params = {}) {
-    return await api._get('/dashboard/business-overview/shop-racing', { params })
+    return await api.getBusinessOverviewShopRacing(params)
   },
 
   /**
@@ -64,7 +71,7 @@ export default {
    * @returns {Promise} 流量排名数据
    */
   async queryBusinessOverviewTrafficRanking(params = {}) {
-    return await api._get('/dashboard/business-overview/traffic-ranking', { params })
+    return await api.getBusinessOverviewTrafficRanking(params)
   },
 
   /**
@@ -87,7 +94,7 @@ export default {
    * @returns {Promise} 经营指标数据
    */
   async queryBusinessOverviewOperationalMetrics(params = {}) {
-    return await api._get('/dashboard/business-overview/operational-metrics', { params })
+    return await api.getBusinessOverviewOperationalMetrics(params)
   },
 
   /**

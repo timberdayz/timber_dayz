@@ -5,9 +5,10 @@ def test_active_frontend_dashboard_files_no_longer_reference_metabase_runtime():
     files = [
         "frontend/src/api/dashboard.js",
         "frontend/src/api/index.js",
-        "frontend/src/views/AnnualSummary.vue",
-        "frontend/src/views/hr/PerformanceDisplay.vue",
-        "frontend/src/views/hr/PerformanceManagement.vue",
+        "frontend/src/domains/business/views/AnnualSummary.vue",
+        "frontend/src/domains/business/views/BusinessOverview.vue",
+        "frontend/src/domains/business/views/hr/PerformanceDisplay.vue",
+        "frontend/src/domains/business/views/hr/PerformanceManagement.vue",
         "frontend/src/config/menuGroups.js",
         "frontend/src/router/index.js",
         "frontend/src/stores/dashboard.js",

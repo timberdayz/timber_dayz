@@ -15,7 +15,49 @@ WITH raw_monthly_orders AS (
 ),
 mapped_monthly_orders AS (
     SELECT
-        date_trunc('month', metric_date)::date AS metric_date,
+        COALESCE(
+            date_trunc(
+                'month',
+                CASE
+                    WHEN COALESCE(
+                        NULLIF(TRIM(raw_data->>'下单时间'), ''),
+                        NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
+                        NULLIF(TRIM(raw_data->>'create_time'), ''),
+                        NULLIF(TRIM(raw_data->>'order_create_time'), ''),
+                        NULLIF(TRIM(raw_data->>'order_time'), '')
+                    ) ~ '^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}'
+                    THEN to_timestamp(
+                        COALESCE(
+                            NULLIF(TRIM(raw_data->>'下单时间'), ''),
+                            NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
+                            NULLIF(TRIM(raw_data->>'create_time'), ''),
+                            NULLIF(TRIM(raw_data->>'order_create_time'), ''),
+                            NULLIF(TRIM(raw_data->>'order_time'), '')
+                        ),
+                        'YYYY-MM-DD HH24:MI:SS'
+                    )
+                    WHEN COALESCE(
+                        NULLIF(TRIM(raw_data->>'下单时间'), ''),
+                        NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
+                        NULLIF(TRIM(raw_data->>'create_time'), ''),
+                        NULLIF(TRIM(raw_data->>'order_create_time'), ''),
+                        NULLIF(TRIM(raw_data->>'order_time'), '')
+                    ) ~ '^\d{4}-\d{2}-\d{2}$'
+                    THEN to_date(
+                        COALESCE(
+                            NULLIF(TRIM(raw_data->>'下单时间'), ''),
+                            NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
+                            NULLIF(TRIM(raw_data->>'create_time'), ''),
+                            NULLIF(TRIM(raw_data->>'order_create_time'), ''),
+                            NULLIF(TRIM(raw_data->>'order_time'), '')
+                        ),
+                        'YYYY-MM-DD'
+                    )::timestamp
+                    ELSE metric_date::timestamp
+                END
+            )::date,
+            date_trunc('month', metric_date)::date
+        ) AS metric_date,
         platform_code,
         NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
         NULLIF(

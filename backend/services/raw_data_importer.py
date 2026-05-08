@@ -213,6 +213,18 @@ class RawDataImporter:
         
         # 标准化:将反斜杠替换为斜杠
         s = s.replace('\\', '/')
+
+        # Year-first ISO strings are unambiguous. Parse them explicitly first so we
+        # never misinterpret them via dayfirst fallbacks (e.g. 2026-01-05 -> 2026-05-01).
+        try:
+            if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", s):
+                for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+                    try:
+                        return datetime.strptime(s, fmt).date()
+                    except ValueError:
+                        continue
+        except Exception:
+            pass
         
         # 检测是否为日期范围(包含分隔符)
         range_separators = [' - ', '~', ' 至 ', ' to ', ' 到 ']
@@ -355,7 +367,8 @@ class RawDataImporter:
         # 最后尝试使用dateutil
         try:
             from dateutil.parser import parse as dateutil_parse
-            parsed = dateutil_parse(s, dayfirst=True)
+            year_first = re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", s) is not None
+            parsed = dateutil_parse(s, dayfirst=False if year_first else True)
             return parsed.date()
         except Exception:
             pass

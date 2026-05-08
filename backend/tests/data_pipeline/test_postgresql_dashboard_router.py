@@ -30,6 +30,7 @@ def _make_request(path: str):
             "type": "http",
             "method": "GET",
             "path": path,
+            "query_string": b"",
             "headers": [],
             "client": ("127.0.0.1", 8001),
             "app": app,
@@ -58,8 +59,9 @@ def test_postgresql_kpi_route_returns_service_payload(monkeypatch):
     response = asyncio.run(
         get_business_overview_kpi_postgresql(
             request=_make_request("/api/dashboard/business-overview/kpi"),
-            month="2026-03-01",
-            platform=None,
+            period_key="2026-03-01",
+            platform_code=None,
+            shop_id=None,
         )
     )
 
@@ -92,56 +94,47 @@ def test_postgresql_kpi_route_accepts_granularity_and_date(monkeypatch):
         get_business_overview_kpi_postgresql(
             request=_make_request("/api/dashboard/business-overview/kpi"),
             granularity="weekly",
-            date="2026-03-16",
-            month=None,
-            platform="shopee",
+            period_key="2026-03-16",
+            platform_code="shopee",
+            shop_id=None,
         )
     )
 
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert body["data"]["gmv"] == 456
-    assert captured["month"] is None
+    assert captured["month"] == "2026-03-16"
     assert captured["platform"] == "shopee"
     assert captured["granularity"] == "weekly"
     assert captured["target_date"] == "2026-03-16"
 
 
-def test_postgresql_kpi_route_normalizes_legacy_month_param(monkeypatch):
-    captured = {}
-
-    class _ServiceStub:
-        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
-            captured.update(
-                {
-                    "month": month,
-                    "platform": platform,
-                    "granularity": granularity,
-                    "target_date": target_date,
-                }
-            )
-            return {"gmv": 789}
+@pytest.mark.asyncio
+async def test_postgresql_kpi_route_rejects_legacy_month_param(monkeypatch):
+    def _service_should_not_be_called():
+        raise AssertionError("Service should not be called when legacy params are provided")
 
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
+        _service_should_not_be_called,
     )
 
-    response = asyncio.run(
-        get_business_overview_kpi_postgresql(
-            request=_make_request("/api/dashboard/business-overview/kpi"),
-            granularity=None,
-            date=None,
-            month="2026-03-01",
-            platform=None,
+    app = FastAPI()
+    app.include_router(router)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/business-overview/kpi",
+            params={"granularity": "monthly", "period_key": "2026-03-01", "month": "2026-03-01"},
         )
-    )
 
-    body = json.loads(response.body.decode("utf-8"))
-    assert body["success"] is True
-    assert body["data"]["gmv"] == 789
-    assert captured["granularity"] == "monthly"
-    assert captured["target_date"] == "2026-03-01"
+    body = json.loads(response.content.decode("utf-8"))
+    assert response.status_code == 422
+    assert body["detail"]["message"] == "Business Overview API no longer accepts legacy query params."
+    assert "month" in body["detail"]["legacy_params"]
 
 
 def test_postgresql_comparison_route_returns_service_payload(monkeypatch):
@@ -163,8 +156,9 @@ def test_postgresql_comparison_route_returns_service_payload(monkeypatch):
         get_business_overview_comparison_postgresql(
             request=_make_request("/api/dashboard/business-overview/comparison"),
             granularity="monthly",
-            date="2026-03-01",
-            platform=None,
+            period_key="2026-03-01",
+            platform_code=None,
+            shop_id=None,
         )
     )
 
@@ -295,10 +289,10 @@ def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
         get_business_overview_shop_racing_postgresql(
             request=_make_request("/api/dashboard/business-overview/shop-racing"),
             granularity="monthly",
-            date="2026-03-01",
+            period_key="2026-03-01",
             group_by="shop",
-            platform="shopee",
-            platforms=None,
+            platform_code="shopee",
+            shop_id=None,
         )
     )
 
@@ -322,10 +316,9 @@ def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
             request=_make_request("/api/dashboard/business-overview/traffic-ranking"),
             granularity="monthly",
             dimension="visitor",
-            date="2026-03-01",
-            platform="shopee",
-            platforms=None,
-            shops=None,
+            period_key="2026-03-01",
+            platform_code="shopee",
+            shop_id=None,
         )
     )
 
@@ -335,7 +328,7 @@ def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_postgresql_traffic_ranking_route_accepts_date_value_alias(monkeypatch):
+async def test_postgresql_traffic_ranking_route_rejects_legacy_date_value_alias(monkeypatch):
     captured = {}
 
     class _ServiceStub:
@@ -363,20 +356,15 @@ async def test_postgresql_traffic_ranking_route_accepts_date_value_alias(monkeyp
             params={
                 "granularity": "monthly",
                 "dimension": "shop",
+                "period_key": "2026-03-01",
                 "date_value": "2026-03-01",
-                "platform": "shopee",
             },
         )
 
     body = json.loads(response.content.decode("utf-8"))
-    assert response.status_code == 200
-    assert body["success"] is True
-    assert captured == {
-        "granularity": "monthly",
-        "target_date": "2026-03-01",
-        "dimension": "shop",
-        "platform": "shopee",
-    }
+    assert response.status_code == 422
+    assert body["detail"]["message"] == "Business Overview API no longer accepts legacy query params."
+    assert "date_value" in body["detail"]["legacy_params"]
 
 
 def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatch):
@@ -397,8 +385,10 @@ def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatc
     response = asyncio.run(
         get_business_overview_operational_metrics_postgresql(
             request=_make_request("/api/dashboard/business-overview/operational-metrics"),
-            month="2026-03-01",
-            platform=None,
+            granularity="monthly",
+            period_key="2026-03-01",
+            platform_code=None,
+            shop_id=None,
         )
     )
 

@@ -16,6 +16,10 @@ Use this file to adapt those skills to the actual codebase.
 ## Workflow Scope
 
 - Use skills as the default process for planning, implementation, debugging, review, and verification.
+- `superpowers` remains the default workflow engine for this repository even if other downloaded skill packs are installed.
+- `gstack` is allowed as a supplemental skillset for explicit helper flows such as `gstack-browse`, `gstack-review`, `gstack-qa`, or `gstack-codex`.
+- If `superpowers` and `gstack` suggest different default paths, keep `superpowers` as the baseline workflow unless the user explicitly asks for a `gstack-*` flow.
+- Prefer explicit `gstack-*` names over generic verbs such as review, plan, qa, or ship to avoid routing ambiguity across skill packs.
 - `openspec/` is archive-only. Do not treat it as the active workflow or source of current instructions unless the user explicitly asks about historical OpenSpec artifacts.
 - Root planning files are allowed:
   - `task_plan.md`

@@ -18,12 +18,13 @@ This repository is now skill-first:
 1. User instructions
 2. Repository-specific technical constraints in [`.cursorrules`](F:/Vscode/python_programme/AI_code/xihong_erp/.cursorrules)
 3. `superpowers` and `planning-with-files`
-4. Other downloaded skills
+4. Other downloaded skills such as `gstack`
 5. Historical material under [`openspec/`](F:/Vscode/python_programme/AI_code/xihong_erp/openspec)
 
 Interpretation:
 
 - Skills define the default workflow.
+- `superpowers` stays the default workflow engine; `gstack` is supplementary unless the user explicitly asks for a `gstack-*` flow.
 - Repository rules only add stack-specific, safety-specific, and architecture-specific constraints.
 - `openspec/` stays in the repo for historical reference only. It is not the active planning workflow.
 
@@ -36,6 +37,7 @@ Interpretation:
 | Complex refactor, migration, or research | `planning-with-files` |
 | Frontend design work | `ui-ux-pro-max` + `frontend-design`, implemented in Vue 3 + Element Plus |
 | Browser testing | `webapp-testing`; standalone scripts may use sync Playwright, runtime backend code stays async |
+| Explicit `gstack` helper request | Use the requested `gstack-*` flow as a bounded helper, then return to the repository baseline workflow |
 
 Root planning files are intentionally allowed:
 

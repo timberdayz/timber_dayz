@@ -20,27 +20,35 @@ BUSINESS_OVERVIEW_ENDPOINTS = [
     {
         "name": "kpi",
         "path": "/api/dashboard/business-overview/kpi",
-        "params": {"month": "2026-03-01"},
+        "params": {"granularity": "monthly", "period_key": "2026-03-01"},
     },
     {
         "name": "comparison",
         "path": "/api/dashboard/business-overview/comparison",
-        "params": {"granularity": "monthly", "date": "2026-03"},
+        "params": {"granularity": "monthly", "period_key": "2026-03-01"},
     },
     {
         "name": "shop_racing",
         "path": "/api/dashboard/business-overview/shop-racing",
-        "params": {"granularity": "monthly", "date": "2026-03-01", "group_by": "shop"},
+        "params": {
+            "granularity": "monthly",
+            "period_key": "2026-03-01",
+            "group_by": "shop",
+        },
     },
     {
         "name": "traffic_ranking",
         "path": "/api/dashboard/business-overview/traffic-ranking",
-        "params": {"granularity": "monthly", "dimension": "shop", "date_value": "2026-03-01"},
+        "params": {
+            "granularity": "monthly",
+            "dimension": "shop",
+            "period_key": "2026-03-01",
+        },
     },
     {
         "name": "operational_metrics",
         "path": "/api/dashboard/business-overview/operational-metrics",
-        "params": {"month": "2026-03-01"},
+        "params": {"granularity": "monthly", "period_key": "2026-03-01"},
     },
 ]
 

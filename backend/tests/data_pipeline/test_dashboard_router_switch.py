@@ -78,7 +78,7 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
     ) as client:
         response = await client.get(
             "/api/dashboard/business-overview/kpi",
-            params={"granularity": "weekly", "date": "2026-03-16"},
+            params={"granularity": "weekly", "period_key": "2026-03-16"},
         )
 
     body = json.loads(response.content.decode("utf-8"))
@@ -91,11 +91,11 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
     ) as client:
         shop_racing = await client.get(
             "/api/dashboard/business-overview/shop-racing",
-            params={"granularity": "monthly", "date": "2026-03-01", "group_by": "shop"},
+            params={"granularity": "monthly", "period_key": "2026-03-01", "group_by": "shop"},
         )
         operational = await client.get(
             "/api/dashboard/business-overview/operational-metrics",
-            params={"month": "2026-03-01"},
+            params={"granularity": "monthly", "period_key": "2026-03-01"},
         )
         target_completion = await client.get(
             "/api/dashboard/annual-summary/target-completion",
@@ -434,18 +434,21 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             transport=ASGITransport(app=reloaded.app),
             base_url="http://localhost",
         ) as client:
-            kpi_response = await client.get("/api/dashboard/business-overview/kpi", params={"month": "2026-03-01"})
+            kpi_response = await client.get(
+                "/api/dashboard/business-overview/kpi",
+                params={"granularity": "monthly", "period_key": "2026-03-01"},
+            )
             comparison_response = await client.get(
                 "/api/dashboard/business-overview/comparison",
-                params={"granularity": "monthly", "date": "2026-03-01"},
+                params={"granularity": "monthly", "period_key": "2026-03-01"},
             )
             shop_racing_response = await client.get(
                 "/api/dashboard/business-overview/shop-racing",
-                params={"granularity": "monthly", "date": "2026-03-01", "group_by": "shop"},
+                params={"granularity": "monthly", "period_key": "2026-03-01", "group_by": "shop"},
             )
             operational_response = await client.get(
                 "/api/dashboard/business-overview/operational-metrics",
-                params={"month": "2026-03-01"},
+                params={"granularity": "monthly", "period_key": "2026-03-01"},
             )
             target_response = await client.get(
                 "/api/dashboard/annual-summary/target-completion",

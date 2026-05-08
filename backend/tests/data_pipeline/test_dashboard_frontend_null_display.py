@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_business_overview_operational_metrics_no_longer_forces_nulls_to_zero():
-    text = Path("frontend/src/views/BusinessOverview.vue").read_text(
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
         encoding="utf-8",
         errors="replace",
     )
@@ -14,7 +14,7 @@ def test_business_overview_operational_metrics_no_longer_forces_nulls_to_zero():
 
 
 def test_annual_summary_view_uses_missing_display_instead_of_zero_fallback():
-    text = Path("frontend/src/views/AnnualSummary.vue").read_text(
+    text = Path("frontend/src/domains/business/views/AnnualSummary.vue").read_text(
         encoding="utf-8",
         errors="replace",
     )

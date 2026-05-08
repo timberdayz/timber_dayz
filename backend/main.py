@@ -514,14 +514,52 @@ async def lifespan(app: FastAPI):
                     if scheduler._scheduler:
                         from apscheduler.triggers.cron import CronTrigger
 
-                        scheduler._scheduler.add_job(
-                            cleanup_service.run_full_cleanup,
-                            trigger=CronTrigger(hour=3, minute=0),
-                            id="daily_cleanup",
-                            name="每日临时文件清理",
-                            replace_existing=True,
-                        )
-                        logger.info("[调度器] 已注册每日清理任务(3:00 AM)")
+                        lock_key = 921337401  # stable int key for "daily_cleanup"
+                        acquired = False
+                        try:
+                            # IMPORTANT: pg_try_advisory_lock is session-scoped.
+                            # Keep the DB session open while add_job executes to avoid races.
+                            _lock_db = SessionLocal()
+                            acquired = bool(
+                                _lock_db.execute(
+                                    text("SELECT pg_try_advisory_lock(:key)"),
+                                    {"key": lock_key},
+                                ).scalar()
+                            )
+                            if not acquired:
+                                logger.info("[调度器] daily_cleanup 任务注册跳过(未获取到锁)")
+                            else:
+                                job_exists = bool(
+                                    _lock_db.execute(
+                                        text(
+                                            "SELECT 1 FROM apscheduler_jobs WHERE id = :id LIMIT 1"
+                                        ),
+                                        {"id": "daily_cleanup"},
+                                    ).scalar()
+                                )
+                                if job_exists:
+                                    logger.info(
+                                        "[调度器] daily_cleanup 已存在于 jobstore，跳过注册"
+                                    )
+                                else:
+                                    scheduler._scheduler.add_job(
+                                        cleanup_service.run_full_cleanup,
+                                        trigger=CronTrigger(hour=3, minute=0),
+                                        id="daily_cleanup",
+                                        name="每日临时文件清理",
+                                        replace_existing=True,
+                                    )
+                                    logger.info("[调度器] 已注册每日清理任务(3:00 AM)")
+                        finally:
+                            try:
+                                if acquired:
+                                    _lock_db.execute(
+                                        text("SELECT pg_advisory_unlock(:key)"),
+                                        {"key": lock_key},
+                                    )
+                                _lock_db.close()
+                            except Exception:
+                                pass
                 except Exception as cleanup_err:
                     logger.warning(f"[调度器] 清理任务注册失败: {cleanup_err}")
 

@@ -31,6 +31,7 @@ REQUIRED_PHRASES = {
         "skill-first workflow",
         "`superpowers`",
         "`planning-with-files`",
+        "`gstack` is allowed as a supplemental skillset",
         "historical archive",
         "openspec/",
         "Chinese",
@@ -39,11 +40,13 @@ REQUIRED_PHRASES = {
         "This repository is now skill-first",
         "`brainstorming` -> `writing-plans`",
         "`planning-with-files`",
+        "`superpowers` stays the default workflow engine; `gstack` is supplementary",
         "Always answer users in Chinese",
         "Historical archive only",
     ],
     ".cursorrules": [
         "repository-specific constraints only",
+        "`gstack` is allowed as a supplemental skillset",
         "task_plan.md",
         "async_playwright",
         "Vue 3 + Element Plus + Pinia + Vite",
@@ -51,12 +54,14 @@ REQUIRED_PHRASES = {
     ],
     "skill-integration.mdc": [
         "Use `superpowers` as the default workflow engine.",
+        "Treat `gstack` as a supplemental skillset",
         "docs/superpowers/specs/",
         "`task_plan.md`, `findings.md`, and `progress.md` intentionally live in project root.",
         "OpenSpec Status",
     ],
     "docs/DEVELOPMENT_RULES/README.md": [
         "Active workflow: `superpowers` + `planning-with-files`",
+        "Supplemental helper skills such as `gstack` are allowed only as explicit add-ons",
         "Historical archive",
     ],
     "docs/superpowers/README.md": [

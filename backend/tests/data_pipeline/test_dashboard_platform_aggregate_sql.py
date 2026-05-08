@@ -42,4 +42,8 @@ def test_annual_summary_modules_do_not_use_strict_shop_null_gating():
     assert "COUNT(*) AS shop_row_count" not in kpi_sql
     assert "CASE WHEN COUNT(gmv) = COUNT(*) THEN SUM(gmv) END" not in trend_sql
     assert "CASE WHEN COUNT(gmv) = COUNT(*) THEN SUM(gmv) END" not in share_sql
-    assert "platform_month_kpi" in kpi_sql or "platform_month_cost" in kpi_sql
+    assert (
+        "mart.annual_summary_shop_month" in kpi_sql
+        or "platform_month_kpi" in kpi_sql
+        or "platform_month_cost" in kpi_sql
+    )

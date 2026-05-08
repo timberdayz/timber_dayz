@@ -228,7 +228,7 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                 )
             )
             await execute_sql_target(session, "semantic.fact_orders_monthly_atomic")
-            await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic")
+            await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic", resolve_dependencies=True)
             await execute_sql_target(session, "mart.shop_month_kpi")
             await session.commit()
 
