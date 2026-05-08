@@ -246,10 +246,11 @@ def restore_from_backup(
             if data:
                 columns = metadata["columns"]
                 placeholders = ", ".join([f":{col}" for col in columns])
+                column_list_sql = ", ".join([f"\"{col}\"" for col in columns])
                 insert_sql = text(
                     f'INSERT INTO "{target_schema}"."{table_name}" '
-                    f'({", ".join([f\'"{col}"\' for col in columns])}) '
-                    f'VALUES ({placeholders})'
+                    f"({column_list_sql}) "
+                    f"VALUES ({placeholders})"
                 )
                 
                 for row in data:

@@ -27,12 +27,12 @@ Notes:
 
 from __future__ import annotations
 
-from sqlalchemy import JSON
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON as _JSON
+from sqlalchemy.dialects.postgresql import JSONB as _JSONB
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
-JSON_COMPAT = JSON().with_variant(JSONB, "postgresql")
+JSON_COMPAT = _JSON().with_variant(_JSONB, "postgresql")
 
 from .schema_parts.dimensions import (
     DimPlatform,

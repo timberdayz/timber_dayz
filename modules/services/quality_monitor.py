@@ -44,6 +44,20 @@ def detect_gmv_conflicts(
         end_date = date.today()
     if not start_date:
         start_date = end_date - timedelta(days=30)
+
+    # fact_orders was deprecated/removed by newer migrations. Skip orders-vs-products comparison
+    # when the legacy table is absent to avoid spamming PostgreSQL logs.
+    try:
+        with engine.connect() as conn:
+            exists = conn.execute(
+                text("SELECT to_regclass('fact_orders')"),
+            ).scalar()
+        if exists is None:
+            logger.warning("[QualityMonitor] Table missing: fact_orders (GMV conflict check skipped)")
+            return []
+    except Exception:
+        # If we cannot check existence, keep previous behavior.
+        pass
     
     sql = """
     WITH orders_gmv AS (
@@ -174,4 +188,3 @@ def generate_quality_report(engine) -> Dict:
     
     logger.info(f"[QualityMonitor] 质量报告: {report['total_conflicts']}个冲突, 高风险{report['high_risk']}个")
     return report
-

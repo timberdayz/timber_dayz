@@ -48,11 +48,27 @@ def _check_excel_com_available() -> bool:
     
     # 检查pywin32
     try:
+        com_inited = False
+        try:
+            import pythoncom  # type: ignore
+
+            pythoncom.CoInitialize()
+            com_inited = True
+        except Exception:
+            com_inited = False
+
         import win32com.client
         # 尝试启动Excel(快速测试)
         excel = win32com.client.Dispatch("Excel.Application")
         excel.Visible = False
         excel.Quit()
+        if com_inited:
+            try:
+                import pythoncom  # type: ignore
+
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
         logger.info("Excel COM可用,自动修复已启用")
         _EXCEL_COM_AVAILABLE = True
         return True
@@ -145,6 +161,15 @@ def auto_repair_xls(xls_path: Path, max_size_mb: float = 50.0) -> Optional[Path]
         repaired_path.parent.mkdir(parents=True, exist_ok=True)
         
         # 调用COM修复
+        com_inited = False
+        try:
+            import pythoncom  # type: ignore
+
+            pythoncom.CoInitialize()
+            com_inited = True
+        except Exception:
+            com_inited = False
+
         import win32com.client
         
         excel = None
@@ -189,6 +214,13 @@ def auto_repair_xls(xls_path: Path, max_size_mb: float = 50.0) -> Optional[Path]
                     excel.Calculation = -4105  # xlCalculationAutomatic (恢复)
                     excel.Quit()
                 except:
+                    pass
+            if com_inited:
+                try:
+                    import pythoncom  # type: ignore
+
+                    pythoncom.CoUninitialize()
+                except Exception:
                     pass
     
     except Exception as e:
@@ -252,4 +284,3 @@ def batch_repair_all_xls(source_dir: Optional[Path] = None, file_pattern: str = 
 
 # 启动时检测Excel COM(全局初始化)
 _check_excel_com_available()
-

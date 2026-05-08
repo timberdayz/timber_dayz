@@ -1,196 +1,219 @@
 # ===================================================
-# 西虹ERP系统 - Makefile
-# ===================================================
-# 简化Docker命令，提供便捷的管理接口
-# 使用方式: make [command]
+# Xihong ERP - Makefile (ASCII-only output)
 # ===================================================
 
-.PHONY: help dev prod stop restart logs clean health build test
+.PHONY: help dev dev-full prod stop restart logs clean clean-all health build \
+	test test-full test-coverage test-smoke test-standard test-e2e test-backend-contract \
+	lint typecheck ps stats db-init db-backup db-shell db-restore shell-backend shell-frontend shell-postgres install
 
-# 默认目标
 .DEFAULT_GOAL := help
 
-# 颜色输出
 BLUE := \033[0;34m
 GREEN := \033[0;32m
 YELLOW := \033[1;33m
 NC := \033[0m
 
-# ===================================================
-# 帮助信息
-# ===================================================
-help:  ## 显示帮助信息
+help:
 	@echo "=========================================="
-	@echo "西虹ERP系统 - Makefile命令"
+	@echo "Xihong ERP - Makefile"
 	@echo "=========================================="
 	@echo ""
-	@echo "开发命令:"
-	@echo "  ${GREEN}make dev${NC}        - 启动开发环境（PostgreSQL + pgAdmin）"
-	@echo "  ${GREEN}make dev-full${NC}   - 启动完整开发环境（包括前后端）"
+	@echo "Dev:"
+	@echo "  make dev              - start dev db (postgres + pgadmin)"
+	@echo "  make dev-full         - start full dev stack"
 	@echo ""
-	@echo "生产命令:"
-	@echo "  ${GREEN}make prod${NC}       - 启动生产环境（构建并启动全部服务）"
-	@echo "  ${GREEN}make build${NC}      - 构建Docker镜像"
+	@echo "Prod:"
+	@echo "  make prod             - start prod stack"
+	@echo "  make build            - build docker images"
 	@echo ""
-	@echo "管理命令:"
-	@echo "  ${GREEN}make stop${NC}       - 停止所有服务"
-	@echo "  ${GREEN}make restart${NC}    - 重启所有服务"
-	@echo "  ${GREEN}make logs${NC}       - 查看所有服务日志"
-	@echo "  ${GREEN}make health${NC}     - 执行健康检查"
-	@echo "  ${GREEN}make ps${NC}         - 查看服务状态"
+	@echo "Ops:"
+	@echo "  make stop             - stop services"
+	@echo "  make restart          - restart services"
+	@echo "  make ps               - docker-compose ps"
+	@echo "  make logs             - follow logs"
 	@echo ""
-	@echo "清理命令:"
-	@echo "  ${GREEN}make clean${NC}      - 清理容器和网络"
-	@echo "  ${GREEN}make clean-all${NC}  - 清理所有（包括数据卷和镜像）"
+	@echo "DB:"
+	@echo "  make db-init          - init tables"
+	@echo "  make db-backup        - dump database"
+	@echo "  make db-restore       - restore from dump file"
 	@echo ""
-	@echo "数据库命令:"
-	@echo "  ${GREEN}make db-init${NC}    - 初始化数据库表"
-	@echo "  ${GREEN}make db-backup${NC}  - 备份数据库"
-	@echo "  ${GREEN}make db-shell${NC}   - 进入数据库shell"
+	@echo "Tests:"
+	@echo "  make test             - smoke tests (default)"
+	@echo "  make test-standard    - standard tests"
+	@echo "  make test-e2e         - e2e tests"
+	@echo "  make test-backend-contract - backend contract tests"
 	@echo ""
-	@echo "测试命令:"
-	@echo "  ${GREEN}make test${NC}       - 运行测试"
-	@echo ""
-	@echo "=========================================="
+	@echo "Quality:"
+	@echo "  make lint             - ruff gate"
+	@echo "  make typecheck        - mypy gate (subset)"
 
 # ===================================================
-# 开发环境
+# Dev / Prod
 # ===================================================
-dev:  ## 启动开发环境
-	@echo "${GREEN}启动开发环境...${NC}"
+dev:
+	@echo "${GREEN}Starting dev environment...${NC}"
 	@chmod +x docker/scripts/start-dev.sh
 	@./docker/scripts/start-dev.sh
 
-dev-full:  ## 启动完整开发环境
-	@echo "${GREEN}启动完整开发环境...${NC}"
+dev-full:
+	@echo "${GREEN}Starting dev-full environment...${NC}"
 	@docker-compose --profile dev-full up -d
-	@echo "${GREEN}✓ 完整开发环境已启动${NC}"
+	@echo "${GREEN}[OK] dev-full started${NC}"
 
-# ===================================================
-# 生产环境
-# ===================================================
-build:  ## 构建Docker镜像
-	@echo "${GREEN}构建Docker镜像...${NC}"
+build:
+	@echo "${GREEN}Building docker images...${NC}"
 	@docker build -f Dockerfile.backend -t xihong-erp-backend:latest .
 	@docker build -f Dockerfile.frontend -t xihong-erp-frontend:latest .
-	@echo "${GREEN}✓ 镜像构建完成${NC}"
+	@echo "${GREEN}[OK] images built${NC}"
 
-prod:  ## 启动生产环境
-	@echo "${GREEN}启动生产环境...${NC}"
+prod:
+	@echo "${GREEN}Starting production...${NC}"
 	@chmod +x docker/scripts/start-prod.sh
 	@./docker/scripts/start-prod.sh
 
 # ===================================================
-# 服务管理
+# Service ops
 # ===================================================
-stop:  ## 停止所有服务
-	@echo "${YELLOW}停止所有服务...${NC}"
+stop:
+	@echo "${YELLOW}Stopping services...${NC}"
 	@docker-compose down
-	@echo "${GREEN}✓ 服务已停止${NC}"
+	@echo "${GREEN}[OK] services stopped${NC}"
 
-restart:  ## 重启所有服务
-	@echo "${YELLOW}重启所有服务...${NC}"
+restart:
+	@echo "${YELLOW}Restarting services...${NC}"
 	@docker-compose restart
-	@echo "${GREEN}✓ 服务已重启${NC}"
+	@echo "${GREEN}[OK] services restarted${NC}"
 
-ps:  ## 查看服务状态
+ps:
 	@docker-compose ps
 
-logs:  ## 查看所有服务日志
+logs:
 	@docker-compose logs -f
 
-logs-backend:  ## 查看后端日志
+logs-backend:
 	@docker-compose logs -f backend
 
-logs-frontend:  ## 查看前端日志
+logs-frontend:
 	@docker-compose logs -f frontend
 
-logs-postgres:  ## 查看数据库日志
+logs-postgres:
 	@docker-compose logs -f postgres
 
-# ===================================================
-# 健康检查
-# ===================================================
-health:  ## 执行健康检查
-	@echo "${GREEN}执行健康检查...${NC}"
+health:
+	@echo "${GREEN}Running health-check...${NC}"
 	@chmod +x docker/scripts/health-check.sh
 	@./docker/scripts/health-check.sh
 
 # ===================================================
-# 清理
+# Clean
 # ===================================================
-clean:  ## 清理容器和网络
-	@echo "${YELLOW}清理容器和网络...${NC}"
+clean:
+	@echo "${YELLOW}Cleaning containers/network...${NC}"
 	@docker-compose down
-	@echo "${GREEN}✓ 清理完成${NC}"
+	@echo "${GREEN}[OK] cleaned${NC}"
 
-clean-all:  ## 清理所有（包括数据卷和镜像）
-	@echo "${YELLOW}⚠️  警告：这将删除所有数据！${NC}"
-	@read -p "确认继续? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+clean-all:
+	@echo "${YELLOW}[WARN] this will delete all data${NC}"
+	@read -p "confirm? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
 	@docker-compose down -v
 	@docker rmi xihong-erp-backend:latest xihong-erp-frontend:latest 2>/dev/null || true
-	@echo "${GREEN}✓ 全部清理完成${NC}"
+	@echo "${GREEN}[OK] clean-all completed${NC}"
 
 # ===================================================
-# 数据库操作
+# Database
 # ===================================================
-db-init:  ## 初始化数据库表
-	@echo "${GREEN}初始化数据库表...${NC}"
+db-init:
+	@echo "${GREEN}Init database tables...${NC}"
 	@python docker/postgres/init-tables.py
-	@echo "${GREEN}✓ 数据库初始化完成${NC}"
+	@echo "${GREEN}[OK] db init completed${NC}"
 
-db-backup:  ## 备份数据库
-	@echo "${GREEN}备份数据库...${NC}"
+db-backup:
+	@echo "${GREEN}Backup database...${NC}"
 	@mkdir -p backups
 	@docker-compose exec -T postgres pg_dump -U erp_user xihong_erp > backups/postgres_$(shell date +%Y%m%d_%H%M%S).sql
-	@echo "${GREEN}✓ 数据库备份完成${NC}"
+	@echo "${GREEN}[OK] db backup completed${NC}"
 
-db-shell:  ## 进入数据库shell
+db-shell:
 	@docker-compose exec postgres psql -U erp_user -d xihong_erp
 
-db-restore:  ## 恢复数据库
-	@echo "${YELLOW}恢复数据库...${NC}"
-	@read -p "备份文件路径: " backup_file && \
+db-restore:
+	@echo "${YELLOW}Restore database...${NC}"
+	@read -p "dump file path: " backup_file && \
 	 docker-compose exec -T postgres psql -U erp_user -d xihong_erp < $$backup_file
-	@echo "${GREEN}✓ 数据库恢复完成${NC}"
+	@echo "${GREEN}[OK] db restore completed${NC}"
 
 # ===================================================
-# 容器管理
+# Shell
 # ===================================================
-shell-backend:  ## 进入后端容器
+shell-backend:
 	@docker-compose exec backend /bin/bash
 
-shell-frontend:  ## 进入前端容器
+shell-frontend:
 	@docker-compose exec frontend /bin/sh
 
-shell-postgres:  ## 进入数据库容器
+shell-postgres:
 	@docker-compose exec postgres /bin/bash
 
 # ===================================================
-# 测试
+# Tests
 # ===================================================
-test:  ## 运行测试
-	@echo "${GREEN}运行测试...${NC}"
-	@docker-compose exec backend pytest tests/
-	@echo "${GREEN}✓ 测试完成${NC}"
+test:
+	@echo "${GREEN}Running smoke tests...${NC}"
+	@python scripts/run_smoke_tests.py
+	@echo "${GREEN}[OK] smoke tests passed${NC}"
 
-test-coverage:  ## 运行测试并生成覆盖率报告
-	@echo "${GREEN}运行测试（带覆盖率）...${NC}"
+test-full:
+	@echo "${GREEN}Running full tests in container...${NC}"
+	@docker-compose exec backend pytest
+	@echo "${GREEN}[OK] full tests completed${NC}"
+
+test-coverage:
+	@echo "${GREEN}Running coverage in container...${NC}"
 	@docker-compose exec backend pytest --cov=backend --cov-report=html tests/
-	@echo "${GREEN}✓ 测试完成，覆盖率报告：htmlcov/index.html${NC}"
+	@echo "${GREEN}[OK] coverage report: htmlcov/index.html${NC}"
+
+test-smoke:
+	@echo "${GREEN}Running smoke tests...${NC}"
+	@python scripts/run_smoke_tests.py
+	@echo "${GREEN}[OK] smoke tests passed${NC}"
+
+test-standard:
+	@echo "${GREEN}Running standard tests...${NC}"
+	@python scripts/run_standard_tests.py
+	@echo "${GREEN}[OK] standard tests passed${NC}"
+
+test-e2e:
+	@echo "${GREEN}Running e2e tests...${NC}"
+	@python scripts/run_e2e_tests.py
+	@echo "${GREEN}[OK] e2e tests passed${NC}"
+
+test-backend-contract:
+	@echo "${GREEN}Running backend contract tests...${NC}"
+	@python -m pytest -q backend/tests -m "not slow and not requires_browser" --ignore=backend/tests/data_pipeline --ignore=backend/tests/archive
+	@echo "${GREEN}[OK] backend contract tests passed${NC}"
 
 # ===================================================
-# 监控
+# Quality
 # ===================================================
-stats:  ## 查看容器资源使用
+lint:
+	@echo "${GREEN}Running lint gate...${NC}"
+	@python scripts/run_lint.py
+	@echo "${GREEN}[OK] lint completed${NC}"
+
+typecheck:
+	@echo "${GREEN}Running typecheck gate...${NC}"
+	@python scripts/run_typecheck.py
+
+# ===================================================
+# Misc
+# ===================================================
+stats:
 	@docker stats --no-stream xihong_erp_postgres xihong_erp_backend xihong_erp_frontend
 
-# ===================================================
-# 安装
-# ===================================================
-install:  ## 安装依赖
-	@echo "${GREEN}安装后端依赖...${NC}"
+install:
+	@echo "${GREEN}Installing backend deps...${NC}"
 	@pip install -r requirements.txt
-	@echo "${GREEN}安装前端依赖...${NC}"
+	@echo "${GREEN}Installing frontend deps...${NC}"
 	@cd frontend && npm install
-	@echo "${GREEN}✓ 依赖安装完成${NC}"
+	@echo "${GREEN}[OK] dependencies installed${NC}"
+

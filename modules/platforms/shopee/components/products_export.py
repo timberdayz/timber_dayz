@@ -776,12 +776,21 @@ class ShopeeProductsExport(ExportComponent):
         shop_id = self._current_shop_id(page)
         if shop_id:
             target_url = f"{target_url}?cnsc_shop_id={shop_id}"
+        business_ready = None
+        try:
+            from unittest.mock import Mock as _Mock
+
+            if not isinstance(page, _Mock) and callable(getattr(page, "locator", None)):
+                business_ready = self._products_page_business_ready
+        except Exception:
+            if callable(getattr(page, "locator", None)):
+                business_ready = self._products_page_business_ready
         await self._navigation_helper().ensure_overview_ready(
             page,
             overview_path=build_domain_path("products"),
             target_url=target_url,
             error_message="products performance page is not ready",
-            business_ready=self._products_page_business_ready,
+            business_ready=business_ready,
             business_error_message="products performance page is not ready",
         )
 

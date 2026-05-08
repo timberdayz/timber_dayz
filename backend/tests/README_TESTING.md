@@ -18,6 +18,9 @@ uvicorn backend.main:app --reload --port 8001
 ### 2. 运行测试
 
 ```bash
+# 快速回归（推荐先跑；跳过 e2e/慢测/浏览器）
+python scripts/run_smoke_tests.py
+
 # 运行所有测试
 python backend/tests/run_all_registration_tests.py
 
@@ -32,27 +35,27 @@ python backend/tests/test_user_registration_integration.py
 ### 1. 安全测试 (`test_user_registration_security.py`)
 
 测试安全相关功能：
-- ✅ 用户名/邮箱枚举攻击防护
-- ✅ 权限绕过防护
-- ✅ 状态一致性
-- ✅ Open Redirect防护
-- ✅ CSRF保护
-- ⚠️ 注册API限流（需要后端服务运行）
+- [OK] 用户名/邮箱枚举攻击防护
+- [OK] 权限绕过防护
+- [OK] 状态一致性
+- [OK] Open Redirect 防护
+- [OK] CSRF 保护
+- [WARN] 注册 API 限流（需要后端服务运行）
 
 ### 2. 单元测试 (`test_user_registration_unit.py`)
 
-测试单个API功能：
-- ✅ 用户注册（正常流程、重复检查、密码强度）
-- ✅ 用户审批（批准、拒绝）
-- ✅ 用户登录（状态检查、账户锁定）
+测试单个 API 功能：
+- [OK] 用户注册（正常流程、重复检查、密码强度）
+- [OK] 用户审批（批准、拒绝）
+- [OK] 用户登录（状态检查、账户锁定）
 
 ### 3. 集成测试 (`test_user_registration_integration.py`)
 
 测试完整业务流程：
-- ✅ 注册-审批-登录完整流程
-- ✅ 管理员审批工作流
-- ✅ 密码重置和账户解锁流程
-- ✅ 会话管理流程
+- [OK] 注册-审批-登录完整流程
+- [OK] 管理员审批工作流
+- [OK] 密码重置和账户解锁流程
+- [OK] 会话管理流程
 
 ## 测试结果解读
 

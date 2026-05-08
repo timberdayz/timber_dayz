@@ -464,7 +464,7 @@ async def lifespan(app: FastAPI):
                 APSCHEDULER_AVAILABLE,
             )
             from backend.models.database import SessionLocal
-            import asyncio
+
 
             # [*] v4.18.2修复:使用run_in_executor包装同步数据库操作
             def _sync_mark_interrupted_tasks():

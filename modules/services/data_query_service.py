@@ -75,6 +75,30 @@ class DataQueryService:
                 url = f"sqlite:///{db_path}"
             self._engine = create_engine(url, pool_pre_ping=True, future=True)
         return self._engine
+
+    def _table_exists(self, table_name: str) -> bool:
+        """
+        Best-effort table existence check across SQLite/PostgreSQL.
+        Prevent noisy runtime errors when legacy tables were removed by migrations.
+        """
+        try:
+            with self._get_engine().connect() as conn:
+                try:
+                    val = conn.execute(
+                        text("SELECT to_regclass(:name)"),
+                        {"name": table_name},
+                    ).scalar()
+                    return val is not None
+                except Exception:
+                    val = conn.execute(
+                        text(
+                            "SELECT name FROM sqlite_master WHERE type='table' AND name=:name"
+                        ),
+                        {"name": table_name},
+                    ).scalar()
+                    return val is not None
+        except Exception:
+            return False
     
     # ========================================
     # 订单数据查询
@@ -107,6 +131,24 @@ class DataQueryService:
                 total_amount, currency, order_status, payment_status
         """
         # 构建查询
+        if not self._table_exists("fact_orders"):
+            logger.warning("[DataQuery] Table missing: fact_orders (orders query skipped)")
+            return pd.DataFrame(
+                columns=[
+                    "order_id",
+                    "platform_code",
+                    "shop_id",
+                    "order_date_local",
+                    "total_amount",
+                    "total_amount_rmb",
+                    "currency",
+                    "order_status",
+                    "payment_status",
+                    "is_cancelled",
+                    "is_refunded",
+                ]
+            )
+
         sql = """
             SELECT 
                 order_id,
@@ -158,7 +200,7 @@ class DataQueryService:
             with self._get_engine().connect() as conn:
                 df = pd.read_sql_query(text(sql), conn, params=params)
             return df
-        except Exception as e:
+        except Exception:
             # 返回空DataFrame(带正确的列)
             return pd.DataFrame(columns=[
                 'order_id', 'platform_code', 'shop_id', 'order_date_local',
@@ -187,6 +229,24 @@ class DataQueryService:
             汇总数据,包含:订单数、总金额、平均订单金额等
         """
         # 构建分组字段
+        if not self._table_exists("fact_orders"):
+            logger.warning("[DataQuery] Table missing: fact_orders (order summary skipped)")
+            return pd.DataFrame(
+                columns=[
+                    "platform_code",
+                    "shop_id",
+                    "date",
+                    "week",
+                    "month",
+                    "order_count",
+                    "total_amount",
+                    "total_amount_rmb",
+                    "avg_amount",
+                    "cancelled_count",
+                    "refunded_count",
+                ]
+            )
+
         group_fields = []
         select_fields = []
         
