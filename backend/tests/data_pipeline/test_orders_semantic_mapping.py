@@ -130,21 +130,6 @@ async def _create_orders_b_class_tables(session) -> None:
         )
     )
 
-    await session.execute(
-        text(
-            """
-            CREATE TABLE semantic.shop_identity_resolution_candidates (
-                platform_code TEXT NOT NULL,
-                identity_value_normalized TEXT NOT NULL,
-                resolved_shop_id TEXT,
-                resolved_shop_account_id TEXT,
-                resolution_method TEXT,
-                resolution_priority INTEGER DEFAULT 0
-            )
-            """
-        )
-    )
-
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
@@ -180,6 +165,7 @@ async def test_orders_monthly_atomic_metric_date_prefers_order_time_over_metric_
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_monthly_atomic_mv")
             await session.commit()
             row = (
