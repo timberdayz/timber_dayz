@@ -1235,7 +1235,7 @@ class SalesTarget(Base):
     status = Column(String(32), nullable=False, default="active", comment="状态:active/completed/cancelled")
     description = Column(Text, nullable=True, comment="目标描述")
     
-    # 日度分解：周一到周日拆分比例（1=周一…7=周日，和为1），用于一键生成日度时按比例分配
+    # 日度分解：周一到周日拆分比例（1=周一...7=周日，和为1），用于一键生成日度时按比例分配
     weekday_ratios = Column(JSON, nullable=True, comment="周一到周日拆分比例 {\"1\":0.14,...,\"7\":0.14} 和为1")
     
     # 审计字段

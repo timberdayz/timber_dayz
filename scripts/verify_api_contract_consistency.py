@@ -31,18 +31,111 @@ class BackendAPIExtractor:
     
     def __init__(self):
         self.endpoints: Dict[str, List[Dict]] = {}
+        self._domain_mount_prefixes: Dict[str, Set[str]] = {}
+        self._legacy_router_domains: Dict[str, Set[str]] = {}
+
+    def _scan_domain_mount_prefixes(self) -> None:
+        """扫描 domain routes.py 中 include_router 的 prefix，用于补齐真实挂载路径。"""
+
+        domains_dir = project_root / "backend" / "domains"
+        if not domains_dir.exists():
+            return
+
+        route_files = list(domains_dir.glob("*/routes.py"))
+        route_files.append(project_root / "backend" / "app" / "bootstrap" / "common.py")
+        route_files = [p for p in route_files if p.exists()]
+
+        pattern = re.compile(
+            r"include_router\(\s*([a-zA-Z0-9_\.]+)\.router\s*,[^\)]*prefix\s*=\s*[\"']([^\"']+)[\"']",
+            re.MULTILINE,
+        )
+
+        for file_path in route_files:
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+
+            domain = "global"
+            if "domains" in file_path.parts:
+                try:
+                    domain = file_path.parts[file_path.parts.index("domains") + 1]
+                except Exception:
+                    domain = "global"
+
+            for match in pattern.finditer(content):
+                prefix = (match.group(2) or "").strip()
+                prefix = re.sub(r"/+", "/", prefix)
+                if not prefix:
+                    continue
+                if not prefix.startswith("/"):
+                    prefix = "/" + prefix
+                self._domain_mount_prefixes.setdefault(domain, set()).add(prefix.rstrip("/"))
+
+    def _scan_legacy_router_shims(self) -> None:
+        """扫描 domain routers 中的 compat shim，把 backend.routers.* 映射到 domain。"""
+
+        domains_dir = project_root / "backend" / "domains"
+        if not domains_dir.exists():
+            return
+
+        pattern = re.compile(
+            r"^\s*import\s+(backend\.routers\.[a-zA-Z0-9_]+)\s+as\s+legacy_module\s*$",
+            re.MULTILINE,
+        )
+
+        for shim_file in domains_dir.glob("*/routers/*.py"):
+            if shim_file.name == "__init__.py":
+                continue
+            try:
+                content = shim_file.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            m = pattern.search(content)
+            if not m:
+                continue
+
+            legacy_module = m.group(1)
+            domain = "global"
+            if "domains" in shim_file.parts:
+                try:
+                    domain = shim_file.parts[shim_file.parts.index("domains") + 1]
+                except Exception:
+                    domain = "global"
+
+            self._legacy_router_domains.setdefault(legacy_module, set()).add(domain)
     
     def scan_routers(self):
         """扫描所有router文件"""
-        routers_dir = project_root / 'backend' / 'routers'
-        if not routers_dir.exists():
-            return
-        
-        for py_file in routers_dir.glob('*.py'):
-            if py_file.name != '__init__.py':
-                self._scan_router(py_file)
+        self._scan_domain_mount_prefixes()
+        self._scan_legacy_router_shims()
+
+        routers_dir = project_root / "backend" / "routers"
+        if routers_dir.exists():
+            for py_file in routers_dir.glob("*.py"):
+                if py_file.name != "__init__.py":
+                    # always scan as global
+                    self._scan_router(py_file, domain="global")
+
+                    # if any domain shims re-export this legacy router, also scan with that domain mount prefix
+                    module_name = f"backend.routers.{py_file.stem}"
+                    for domain in sorted(self._legacy_router_domains.get(module_name, set())):
+                        self._scan_router(py_file, domain=domain)
+
+        domains_dir = project_root / "backend" / "domains"
+        if domains_dir.exists():
+            for py_file in domains_dir.glob("*/routers/**/*.py"):
+                if py_file.name == "__init__.py":
+                    continue
+                domain = "global"
+                if "domains" in py_file.parts:
+                    try:
+                        domain = py_file.parts[py_file.parts.index("domains") + 1]
+                    except Exception:
+                        domain = "global"
+                self._scan_router(py_file, domain=domain)
     
-    def _scan_router(self, file_path: Path):
+    def _scan_router(self, file_path: Path, domain: str):
         """扫描单个router文件"""
         try:
             content = file_path.read_text(encoding='utf-8')
@@ -52,29 +145,46 @@ class BackendAPIExtractor:
             prefix = prefix_match.group(1) if prefix_match else ''
             
             # 查找所有API定义
-            pattern = r'@router\.(get|post|put|delete|patch)\(["\']([^"\']+)["\']'
-            matches = re.finditer(pattern, content)
+            pattern = r'@router\.(get|post|put|delete|patch)\(\s*["\']([^"\']*)["\']'
+            matches = re.finditer(pattern, content, re.DOTALL)
             
             for match in matches:
                 method = match.group(1).upper()
                 path = match.group(2)
-                full_path = prefix + path if not path.startswith('/') else path
+                if prefix:
+                    if path.startswith("/"):
+                        full_path = f"{prefix}{path}"
+                    else:
+                        full_path = f"{prefix}/{path}"
+                else:
+                    full_path = path if path.startswith("/") else f"/{path}"
                 
                 # 标准化路径（移除重复的/）
                 full_path = re.sub(r'/+', '/', full_path)
+                full_path = full_path.rstrip("/") if full_path != "/" else full_path
                 
-                key = f"{method} {full_path}"
-                if key not in self.endpoints:
-                    self.endpoints[key] = []
-                
-                self.endpoints[key].append({
-                    'file': file_path.relative_to(project_root),
-                    'method': method,
-                    'path': full_path
-                })
+                self._add_endpoint(method=method, path=full_path, file_path=file_path)
+
+                for mount_prefix in sorted(self._domain_mount_prefixes.get(domain, set())):
+                    mounted_path = re.sub(r"/+", "/", f"{mount_prefix}{full_path}")
+                    mounted_path = mounted_path.rstrip("/") if mounted_path != "/" else mounted_path
+                    self._add_endpoint(method=method, path=mounted_path, file_path=file_path)
                 
         except Exception as e:
             pass
+
+    def _add_endpoint(self, *, method: str, path: str, file_path: Path) -> None:
+        key = f"{method} {path}"
+        if key not in self.endpoints:
+            self.endpoints[key] = []
+
+        self.endpoints[key].append(
+            {
+                "file": file_path.relative_to(project_root),
+                "method": method,
+                "path": path,
+            }
+        )
 
 
 class FrontendAPIExtractor:
@@ -82,9 +192,35 @@ class FrontendAPIExtractor:
     
     def __init__(self):
         self.api_calls: List[Dict] = []
+        self.base_path_prefix: str = "/api"
+
+    def _load_base_path_prefix(self) -> None:
+        """解析 frontend/src/api/index.js 中的 apiBaseURL 默认值，用于补齐实际请求路径。"""
+        index_js = project_root / "frontend" / "src" / "api" / "index.js"
+        if not index_js.exists():
+            return
+
+        try:
+            content = index_js.read_text(encoding="utf-8")
+        except Exception:
+            return
+
+        # 形如：const apiBaseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+        m = re.search(
+            r"const\\s+apiBaseURL\\s*=\\s*[^\\n]*\\|\\|\\s*['\\\"]([^'\\\"]+)['\\\"]",
+            content,
+        )
+        if not m:
+            return
+
+        val = (m.group(1) or "").strip()
+        if val.startswith("/"):
+            self.base_path_prefix = re.sub(r"/+", "/", val).rstrip("/") or "/"
     
     def scan_api_files(self):
         """扫描所有前端API文件"""
+        self._load_base_path_prefix()
+
         api_dir = project_root / 'frontend' / 'src' / 'api'
         if not api_dir.exists():
             return
@@ -109,7 +245,13 @@ class FrontendAPIExtractor:
                 line_no = content[:match.start()].count('\n') + 1
                 
                 # 标准化路径
-                path = re.sub(r'/+', '/', path)
+                path = re.sub(r"/+", "/", path)
+
+                # 补齐 axios baseURL（默认 /api）
+                if path.startswith("/") and self.base_path_prefix.startswith("/"):
+                    if not path.startswith(self.base_path_prefix + "/") and path != self.base_path_prefix:
+                        path = re.sub(r"/+", "/", f"{self.base_path_prefix}{path}")
+                path = path.rstrip("/") if path != "/" else path
                 
                 self.api_calls.append({
                     'file': file_path.relative_to(project_root),

@@ -148,17 +148,6 @@ export default {
   },
 
   /**
-   * 导出财务数据
-   * @param {Object} params - 导出参数
-   */
-  async exportFinancialData(params) {
-    return await api.get('/export', {
-      params,
-      responseType: 'blob'
-    })
-  },
-
-  /**
    * 获取利润率分析
    * @param {Object} params - 查询参数
    * @param {string} params.startDate - 开始日期

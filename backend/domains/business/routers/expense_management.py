@@ -125,7 +125,7 @@ async def list_expense_shops(
 
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
-    """规范化缓存 key 参数（None→空字符串）"""
+    """规范化缓存 key 参数（None->空字符串）"""
     return {k: "" if v is None else str(v) for k, v in params.items()}
 
 

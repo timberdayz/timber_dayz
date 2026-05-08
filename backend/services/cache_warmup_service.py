@@ -32,60 +32,75 @@ _WARMUP_SPEC: Dict[str, Tuple[str, Dict[str, Any]]] = {
     "business_overview_bootstrap": (
         "dashboard_business_overview_bootstrap",
         {
+            # Keep cache key aligned with backend/routers/dashboard_api_postgresql.py
             "granularity": "monthly",
-            "date": lambda: _current_month(),
-            "month": lambda: _current_month(),
-            "platform": None,
+            "period_key": lambda: _current_month(),
+            "platform_code": None,
+            "shop_id": None,
         },
     ),
     "business_overview_kpi": (
         "dashboard_kpi",
-        {"month": lambda: _current_month(), "platform": None},
+        {
+            "granularity": "monthly",
+            "period_key": lambda: _current_month(),
+            "platform_code": None,
+            "shop_id": None,
+        },
     ),
     "business_overview_comparison": (
         "dashboard_comparison",
         {
             "granularity": "monthly",
-            "date": lambda: _current_month(),
-            "platforms": None,
-            "shops": None,
+            "period_key": lambda: _current_month(),
+            "platform_code": None,
+            "shop_id": None,
         },
     ),
     "business_overview_shop_racing": (
         "dashboard_shop_racing",
         {
             "granularity": "monthly",
-            "date": lambda: _current_month(),
+            "period_key": lambda: _current_month(),
             "group_by": "shop",
-            "platforms": None,
+            "platform_code": None,
+            "shop_id": None,
         },
     ),
     "business_overview_traffic_ranking": (
         "dashboard_traffic_ranking",
         {
             "granularity": "monthly",
+            "period_key": lambda: _current_month(),
             "dimension": "visitor",
-            "date_value": lambda: _current_month(),
-            "platforms": None,
-            "shops": None,
+            "platform_code": None,
+            "shop_id": None,
         },
     ),
     "business_overview_inventory_backlog": (
         "dashboard_inventory_backlog",
-        {"days": None, "platforms": None, "shops": None},
+        {
+            # Keep cache key aligned with backend/routers/dashboard_api_postgresql.py
+            "days": 30,
+            "limit": 20,
+            "granularity": "monthly",
+            "date": lambda: _current_month(),
+        },
     ),
     "business_overview_operational_metrics": (
         "dashboard_operational_metrics",
-        {"month": lambda: _current_month(), "platform": None},
+        {
+            "period_key": lambda: _current_month(),
+            "platform_code": None,
+            "shop_id": None,
+        },
     ),
     "clearance_ranking": (
         "dashboard_clearance_ranking",
         {
-            "start_date": lambda: _current_month(),
-            "end_date": lambda: _month_end(),
-            "platforms": None,
-            "shops": None,
             "limit": 10,
+            "granularity": "monthly",
+            "date": lambda: _current_month(),
         },
     ),
 }
@@ -198,23 +213,23 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
 
 async def _query_postgresql_dashboard(service, target_name: str, params: Dict[str, Any]) -> Any:
     if target_name == "business_overview_bootstrap":
-        date_value = params.get("date") or _current_month()
+        period_key = params.get("period_key") or _current_month()
         granularity = params.get("granularity") or "monthly"
-        platform = params.get("platform")
+        platform_code = params.get("platform_code")
         kpi_result = await service.get_business_overview_kpi(
-            month=date_value,
-            platform=platform,
+            month=period_key,
+            platform=platform_code,
             granularity=granularity,
-            target_date=date_value,
+            target_date=period_key,
         )
         comparison_result = await service.get_business_overview_comparison(
             granularity=granularity,
-            target_date=date_value,
-            platform=platform,
+            target_date=period_key,
+            platform=platform_code,
         )
         operational_result = await service.get_business_overview_operational_metrics(
-            month=params.get("month") or _current_month(),
-            platform=platform,
+            month=period_key,
+            platform=platform_code,
         )
         return {
             "kpi": kpi_result,
@@ -223,41 +238,47 @@ async def _query_postgresql_dashboard(service, target_name: str, params: Dict[st
         }
     if target_name == "business_overview_kpi":
         return await service.get_business_overview_kpi(
-            month=params.get("month"),
-            platform=params.get("platform"),
+            month=params.get("period_key"),
+            platform=params.get("platform_code"),
         )
     if target_name == "business_overview_comparison":
         return await service.get_business_overview_comparison(
             granularity=params.get("granularity"),
-            target_date=params.get("date"),
-            platform=_first_csv_value(params.get("platforms")),
+            target_date=params.get("period_key"),
+            platform=params.get("platform_code"),
         )
     if target_name == "business_overview_shop_racing":
         return await service.get_business_overview_shop_racing(
             granularity=params.get("granularity"),
-            target_date=params.get("date"),
+            target_date=params.get("period_key"),
             group_by=params.get("group_by", "shop"),
         )
     if target_name == "business_overview_traffic_ranking":
         return await service.get_business_overview_traffic_ranking(
             granularity=params.get("granularity"),
-            target_date=params.get("date_value") or params.get("date"),
+            target_date=params.get("period_key"),
             dimension=params.get("dimension", "visitor"),
         )
     if target_name == "business_overview_inventory_backlog":
         days = params.get("days")
         return await service.get_business_overview_inventory_backlog(
             min_days=int(days) if days else 30,
-            limit=20,
+            limit=int(params.get("limit")) if params.get("limit") else 20,
+            granularity=params.get("granularity"),
+            target_date=params.get("date"),
         )
     if target_name == "business_overview_operational_metrics":
         return await service.get_business_overview_operational_metrics(
-            month=params.get("month"),
-            platform=params.get("platform"),
+            month=params.get("period_key"),
+            platform=params.get("platform_code"),
         )
     if target_name == "clearance_ranking":
         limit = params.get("limit")
-        return await service.get_clearance_ranking(limit=int(limit) if limit else 10)
+        return await service.get_clearance_ranking(
+            limit=int(limit) if limit else 10,
+            granularity=params.get("granularity") or "monthly",
+            target_date=params.get("date") or _current_month(),
+        )
     raise ValueError(f"unsupported_postgresql_warmup_target:{target_name}")
 
 

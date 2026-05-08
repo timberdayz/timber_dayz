@@ -8,9 +8,9 @@
 - 确保经营指标SQL和前端目标管理使用的是同一份数据
 
 数据流：
-- 前端目标管理 → sales_targets + target_breakdown (public schema)
-- 同步服务 → a_class.sales_targets_a
-- 经营指标SQL → 读取 a_class.sales_targets_a
+- 前端目标管理 -> sales_targets + target_breakdown (public schema)
+- 同步服务 -> a_class.sales_targets_a
+- 经营指标SQL -> 读取 a_class.sales_targets_a
 
 v4.21.0新增
 """

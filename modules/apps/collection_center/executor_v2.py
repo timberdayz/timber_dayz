@@ -2347,7 +2347,7 @@ class CollectionExecutorV2:
                 config=params,
             )
 
-        # 1. 执行登录组件( params 中已含 reused_session 标记)；支持验证码暂停→回传→同一 page 继续
+        # 1. 执行登录组件( params 中已含 reused_session 标记)；支持验证码暂停->回传->同一 page 继续
         if context.current_component_index == 0 and not params.get("_main_account_shared_state_prepared"):
             await self._update_status(task_id, 5, "正在登录...")
             await self._check_cancelled(task_id)

@@ -608,7 +608,7 @@ class CollectionCenterApp(BaseApplication):
                         },
                         logger=get_logger(__name__),
                     )
-                    adapter = get_adapter("tiktok", exec_ctx)
+                    adapter = get_adapter("tiktok", exec_ctx, allow_legacy_surface=True)
 
                     print("[LOC] 步骤3: 确保已登录...")
                     try:
@@ -795,7 +795,7 @@ class CollectionCenterApp(BaseApplication):
                         },
                         logger=get_logger(__name__),
                     )
-                    adapter = get_adapter("tiktok", exec_ctx)
+                    adapter = get_adapter("tiktok", exec_ctx, allow_legacy_surface=True)
 
                     print("[LOC] 步骤3: 确保已登录...")
                     try:
@@ -984,7 +984,7 @@ class CollectionCenterApp(BaseApplication):
                             },
                             logger=_get_logger(__name__),
                         )
-                        adapter = get_adapter("tiktok", exec_ctx)
+                        adapter = get_adapter("tiktok", exec_ctx, allow_legacy_surface=True)
 
                         print("[LOC] 步骤3: 确保已登录...")
                         try:
@@ -1123,7 +1123,7 @@ class CollectionCenterApp(BaseApplication):
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "products"}, logger=get_logger(__name__))
-                adapter = get_adapter("miaoshou", exec_ctx)
+                adapter = get_adapter("miaoshou", exec_ctx, allow_legacy_surface=True)
                 try:
                     adapter.login().run(page)
                 except Exception:
@@ -1180,7 +1180,7 @@ class CollectionCenterApp(BaseApplication):
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "traffic"}, logger=get_logger(__name__))
-                adapter = get_adapter("miaoshou", exec_ctx)
+                adapter = get_adapter("miaoshou", exec_ctx, allow_legacy_surface=True)
                 try: adapter.login().run(page)
                 except Exception: pass
                 nav = adapter.navigation().run(page, TargetPage.TRAFFIC_OVERVIEW)
@@ -1218,7 +1218,7 @@ class CollectionCenterApp(BaseApplication):
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "services"}, logger=get_logger(__name__))
-                adapter = get_adapter("miaoshou", exec_ctx)
+                adapter = get_adapter("miaoshou", exec_ctx, allow_legacy_surface=True)
                 try: adapter.login().run(page)
                 except Exception: pass
                 nav = adapter.navigation().run(page, TargetPage.SERVICE_ANALYTICS)
@@ -1267,7 +1267,7 @@ class CollectionCenterApp(BaseApplication):
                 # 先登录一次(若已登录会自动跳过),避免在每个子类型循环中重复尝试登录导致卡顿/识别异常
                 try:
                     _exec0 = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity}, logger=get_logger(__name__))
-                    _adapter0 = get_adapter("miaoshou", _exec0)
+                    _adapter0 = get_adapter("miaoshou", _exec0, allow_legacy_surface=True)
                     _adapter0.login().run(page)
                 except Exception:
                     pass
@@ -1285,7 +1285,7 @@ class CollectionCenterApp(BaseApplication):
                         },
                         logger=get_logger(__name__),
                     )
-                    adapter = get_adapter("miaoshou", exec_ctx)
+                    adapter = get_adapter("miaoshou", exec_ctx, allow_legacy_surface=True)
                     nav = adapter.navigation().run(page, TargetPage.ORDERS)
                     if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')},尝试继续")
                     try:
@@ -1340,7 +1340,7 @@ class CollectionCenterApp(BaseApplication):
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "finance"}, logger=get_logger(__name__))
-                adapter = get_adapter("miaoshou", exec_ctx)
+                adapter = get_adapter("miaoshou", exec_ctx, allow_legacy_surface=True)
                 try: adapter.login().run(page)
                 except Exception: pass
                 nav = adapter.navigation().run(page, TargetPage.FINANCE)
@@ -1551,7 +1551,7 @@ class CollectionCenterApp(BaseApplication):
                     page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                     # 构造上下文
                     exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity}, logger=get_logger(__name__))
-                    adapter = get_adapter("miaoshou", exec_ctx)
+                    adapter = get_adapter("miaoshou", exec_ctx, allow_legacy_surface=True)
                     try:
                         adapter.login().run(page)
                     except Exception:
@@ -1831,7 +1831,7 @@ class CollectionCenterApp(BaseApplication):
                             "one_click": _one_click,
                             "export_timeout_ms": _export_timeout_ms,
                         })
-                        adapter = get_adapter("tiktok", exec_ctx)
+                        adapter = get_adapter("tiktok", exec_ctx, allow_legacy_surface=True)
 
                         # 登录
                         try:
@@ -2819,7 +2819,7 @@ class CollectionCenterApp(BaseApplication):
                         },
                     )
 
-                    adapter = get_adapter(platform, exec_ctx)
+                    adapter = get_adapter(platform, exec_ctx, allow_legacy_surface=True)
 
                     # 动态获取导出组件类并执行
                     ExportCls = ConfigRegistry.get_export_component_class(domain)
@@ -3443,7 +3443,7 @@ class CollectionCenterApp(BaseApplication):
                                         "services_subtype": services_subtype,
                                     },
                                 )
-                                adapter = get_adapter(platform, exec_ctx)
+                                adapter = get_adapter(platform, exec_ctx, allow_legacy_surface=True)
                                 ExportCls = ConfigRegistry.get_export_component_class(DataDomain.SERVICES)
                                 exporter = ExportCls(exec_ctx)
                                 print("    [START] 导出:Shopee 服务表现(AI助手/人工聊天)")
@@ -3653,7 +3653,9 @@ class CollectionCenterApp(BaseApplication):
                         account_ctx = dict(account)
                         account_ctx['shop_id'] = shop.id
                         ctx = ExecutionContext(platform='shopee', account=account_ctx, logger=_get_logger(__name__))
-                        adapter = get_adapter('shopee', ctx)
+                        # Legacy CLI path: explicitly opt into the legacy adapter surface.
+                        # Production collection APIs should use V2 canonical components via executor_v2.
+                        adapter = get_adapter('shopee', ctx, allow_legacy_surface=True)
 
                         print("[LOC] 步骤3: 执行导航组件...")
                         # 组件化执行:navigate -> date(已通过 _open_account_page 完成入口,不再重复 login)

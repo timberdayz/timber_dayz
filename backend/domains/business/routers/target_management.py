@@ -44,7 +44,7 @@ from modules.core.db import (
     DimProduct,
     DimProductMaster,
     BridgeProductKeys,
-    DimUser,  # ✅ 2026-01-08: 添加用户模型用于权限检查
+    DimUser,  # [OK] 2026-01-08: 添加用户模型用于权限检查
     ShopAccount,
 )
 from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
@@ -57,7 +57,7 @@ from backend.schemas.target import (
     TargetResponse,
     BreakdownResponse,
 )
-from backend.dependencies.auth import get_current_user  # ✅ 2026-01-08: 添加用户认证
+from backend.dependencies.auth import get_current_user  # [OK] 2026-01-08: 添加用户认证
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/targets", tags=["目标管理"])
@@ -115,7 +115,7 @@ def _validate_operation_target_payload(
 
     return None
 
-# ✅ 2026-01-08: 添加管理员权限检查
+# [OK] 2026-01-08: 添加管理员权限检查
 async def require_admin(current_user: DimUser = Depends(get_current_user)):
     """要求管理员权限"""
     # 优先检查 is_superuser 标志
@@ -365,7 +365,7 @@ async def list_target_products(
 
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
-    """规范化缓存 key 参数（None→空字符串）"""
+    """规范化缓存 key 参数（None->空字符串）"""
     return {k: "" if v is None else str(v) for k, v in params.items()}
 
 
@@ -607,8 +607,8 @@ async def get_target(
 async def create_target(
     request: TargetCreateRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin),  # ✅ 2026-01-08: 仅管理员可访问
-    created_by: str = None  # ✅ 2026-01-08: 从current_user获取
+    current_user: DimUser = Depends(require_admin),  # [OK] 2026-01-08: 仅管理员可访问
+    created_by: str = None  # [OK] 2026-01-08: 从current_user获取
 ):
     """
     创建目标
@@ -662,7 +662,7 @@ async def create_target(
             manual_score_enabled=request.manual_score_enabled,
             manual_score_value=request.manual_score_value,
             description=request.description,
-            created_by=current_user.username if current_user else "admin",  # ✅ 2026-01-08: 从current_user获取
+            created_by=current_user.username if current_user else "admin",  # [OK] 2026-01-08: 从current_user获取
             status="active"
         )
         
@@ -724,7 +724,7 @@ async def update_target(
     target_id: int,
     request: TargetUpdateRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
+    current_user: DimUser = Depends(require_admin)  # [OK] 2026-01-08: 仅管理员可访问
 ):
     """
     更新目标
@@ -848,7 +848,7 @@ async def update_target(
 async def delete_target(
     target_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
+    current_user: DimUser = Depends(require_admin)  # [OK] 2026-01-08: 仅管理员可访问
 ):
     """
     删除目标
@@ -935,7 +935,7 @@ async def create_breakdown(
     target_id: int,
     request: BreakdownCreateRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
+    current_user: DimUser = Depends(require_admin)  # [OK] 2026-01-08: 仅管理员可访问
 ):
     """
     创建目标分解
@@ -960,7 +960,7 @@ async def create_breakdown(
                 status_code=404
             )
         
-        # ✅ 统一 platform_code 为小写(与 dim_shops 标准格式一致)
+        # [OK] 统一 platform_code 为小写(与 dim_shops 标准格式一致)
         normalized_platform_code = request.platform_code.lower() if request.platform_code else None
         
         # 验证分解类型
@@ -982,7 +982,7 @@ async def create_breakdown(
                 )
             )).scalar_one_or_none()
             if not shop:
-                # ✅ 查询 platform_accounts 时也使用小写比较(platform 字段可能大小写不一致)
+                # [OK] 查询 platform_accounts 时也使用小写比较(platform 字段可能大小写不一致)
                 shop_account = (await db.execute(
                     select(ShopAccount).where(
                         func.lower(ShopAccount.platform) == normalized_platform_code,
@@ -1002,7 +1002,7 @@ async def create_breakdown(
                         status_code=404
                     )
                 
-                # ✅ 自动同步店铺到 dim_shops
+                # [OK] 自动同步店铺到 dim_shops
                 try:
                     shop = await sync_platform_account_to_dim_shop(
                         db,
@@ -1271,7 +1271,7 @@ async def create_breakdown(
         
         breakdown_data = BreakdownResponse.model_validate(breakdown).model_dump()
         if request.breakdown_type == "shop":
-            # ✅ 使用标准化后的 platform_code 查询店铺名称
+            # [OK] 使用标准化后的 platform_code 查询店铺名称
             shop = (await db.execute(
                 select(DimShop).where(
                     DimShop.platform_code == normalized_platform_code,
@@ -1604,7 +1604,7 @@ async def generate_daily_breakdown(
 async def calculate_target_achievement(
     target_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
+    current_user: DimUser = Depends(require_admin)  # [OK] 2026-01-08: 仅管理员可访问
 ):
     """
     计算目标达成情况(C类数据:系统自动计算)
