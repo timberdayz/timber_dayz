@@ -272,6 +272,48 @@ def _require_local_port_available(port, service_name):
     return True
 
 
+def _can_listen_on_port(port: int, host: str = "0.0.0.0") -> bool:
+    """检查当前用户是否具备在指定 host:port 上监听的权限（捕获 Windows excluded port / ACL 等情况）。"""
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def _pick_frontend_port(preferred_port: int) -> int | None:
+    """为 Vite 选择一个可监听端口（避免 Windows excluded port 导致 EACCES）。"""
+    # First try preferred.
+    if _require_local_port_available(preferred_port, "前端服务") and _can_listen_on_port(preferred_port, host="0.0.0.0"):
+        return preferred_port
+
+    # Fallback scan: avoid common excluded ranges by scanning a higher range.
+    candidates = (
+        list(range(preferred_port, preferred_port + 50))
+        + list(range(51730, 51831))
+        + list(range(15173, 15223))
+        + list(range(25173, 25223))
+    )
+    for port in candidates:
+        if port == preferred_port:
+            continue
+        if not _require_local_port_available(port, "前端服务"):
+            continue
+        if not _can_listen_on_port(port, host="0.0.0.0"):
+            continue
+        return port
+    return None
+
+
 def _docker_container_health(container_name):
     """返回 Docker 容器健康状态（healthy/running/unhealthy/...）。"""
     try:
@@ -1048,7 +1090,14 @@ def start_backend(runtime_mode="development"):
 def start_frontend():
     """启动本地前端服务。"""
     safe_print("\n[启动] 前端服务...")
-    safe_print(f"  地址: http://localhost:{FRONTEND_PORT}")
+    picked_port = _pick_frontend_port(FRONTEND_PORT)
+    if picked_port is None:
+        safe_print(f"  [ERROR] 无法在本机找到可用的前端端口（首选 {FRONTEND_PORT}）")
+        safe_print("  提示: 可能是 Windows 端口排除/ACL 导致 EACCES。可尝试重启电脑或调整 excluded port range。")
+        return None
+    if picked_port != FRONTEND_PORT:
+        safe_print(f"  [WARNING] 默认端口 {FRONTEND_PORT} 无法监听（可能被 Windows 排除/ACL 限制），已切换到 {picked_port}")
+    safe_print(f"  地址: http://localhost:{picked_port}")
 
     frontend_dir = Path(__file__).parent / "frontend"
     if not (frontend_dir / "package.json").exists():
@@ -1061,9 +1110,7 @@ def start_frontend():
         safe_print("  [ERROR] frontend/node_modules 不完整，缺少 vite 依赖")
         safe_print("  提示: 请在 frontend 目录重新执行: npm install")
         return None
-    if not _require_local_port_available(FRONTEND_PORT, "前端服务"):
-        safe_print("  提示: 当前前端使用 strictPort=true，不会自动切换到 5174/5175")
-        return None
+    # Port already validated by _pick_frontend_port above.
 
     npm_exe = _resolve_npm_path()
     if not npm_exe:
@@ -1081,21 +1128,21 @@ def start_frontend():
         env["VITE_DEV_PROXY_TARGET"] = f"http://127.0.0.1:{ACTIVE_BACKEND_PORT}"
         create_new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
         process = subprocess.Popen(
-            [npm_exe, "run", "dev"],
+            [npm_exe, "run", "dev", "--", "--port", str(picked_port), "--strictPort"],
             cwd=frontend_path,
             env=env,
             shell=False,
             creationflags=create_new_console,
         )
         safe_print("  [OK] 前端服务已在新窗口启动")
-        safe_print("  [INFO] Vite 使用 strictPort=true，固定监听 5173")
-        return process
+        safe_print(f"  [INFO] Vite 使用 strictPort=true，固定监听 {picked_port}")
+        return process, picked_port
 
     env = os.environ.copy()
     env["VITE_DEV_PROXY_TARGET"] = f"http://127.0.0.1:{ACTIVE_BACKEND_PORT}"
-    process = subprocess.Popen([npm_exe, "run", "dev"], cwd=frontend_dir, env=env)
+    process = subprocess.Popen([npm_exe, "run", "dev", "--", "--port", str(picked_port), "--strictPort"], cwd=frontend_dir, env=env)
     safe_print("  [OK] 前端服务已启动")
-    return process
+    return process, picked_port
 
 
 def ensure_postgres_redis_docker(project_root, with_celery=True):
@@ -1402,12 +1449,13 @@ def main():
 
         frontend_port = None
         if not args.backend_only:
-            frontend_process = start_frontend()
-            if frontend_process is None:
+            frontend_started = start_frontend()
+            if frontend_started is None:
                 safe_print("  [ERROR] 前端服务未启动")
                 raise SystemExit(1)
+            frontend_process, frontend_port = frontend_started
             processes.append(("frontend", frontend_process))
-            frontend_port = wait_for_frontend_port()
+            frontend_port = wait_for_frontend_port(port=frontend_port)
             if frontend_port is None:
                 safe_print("  [ERROR] 前端服务启动失败，请查看前端窗口日志")
                 raise SystemExit(1)
