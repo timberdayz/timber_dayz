@@ -38,10 +38,32 @@ def _sort_numeric(value: Any) -> float:
     return maybe_value if maybe_value is not None else float("-inf")
 
 
+def _is_empty_period_rows(rows: list[dict[str, Any]], *, core_keys: tuple[str, ...]) -> bool:
+    if not rows:
+        return True
+    for row in rows:
+        for key in core_keys:
+            if row.get(key) is not None:
+                return False
+    return True
+
+
 def reduce_business_overview_kpi_rows(
     rows: list[dict[str, Any]],
     labor_efficiency: float | None = 0,
 ) -> dict[str, Any]:
+    if _is_empty_period_rows(rows, core_keys=("gmv", "order_count", "visitor_count", "profit")):
+        return {
+            "gmv": 0,
+            "order_count": 0,
+            "visitor_count": 0,
+            "conversion_rate": None,
+            "avg_order_value": None,
+            "attach_rate": None,
+            "labor_efficiency": 0,
+            "profit": 0,
+        }
+
     total_gmv = _sum_present_values(rows, "gmv")
     total_orders_raw = _sum_present_values(rows, "order_count")
     total_visitors_raw = _sum_present_values(rows, "visitor_count")
@@ -55,8 +77,6 @@ def reduce_business_overview_kpi_rows(
         conversion_rate = None
     elif total_visitors > 0:
         conversion_rate = round((total_orders * 100.0 / total_visitors), 2)
-    elif total_visitors == 0 and total_orders == 0:
-        conversion_rate = 0
     else:
         conversion_rate = None
 
@@ -64,8 +84,6 @@ def reduce_business_overview_kpi_rows(
         avg_order_value = None
     elif total_orders > 0:
         avg_order_value = round((total_gmv / total_orders), 2)
-    elif total_orders == 0 and total_gmv == 0:
-        avg_order_value = 0
     else:
         avg_order_value = None
 
@@ -73,20 +91,18 @@ def reduce_business_overview_kpi_rows(
         attach_rate = None
     elif total_orders > 0:
         attach_rate = round((total_items / total_orders), 2)
-    elif total_orders == 0 and total_items == 0:
-        attach_rate = 0
     else:
         attach_rate = None
 
     return {
-        "gmv": _round_or_none(total_gmv, 2),
-        "order_count": total_orders,
-        "visitor_count": total_visitors,
+        "gmv": _round_or_none(total_gmv, 2) or 0,
+        "order_count": total_orders or 0,
+        "visitor_count": total_visitors or 0,
         "conversion_rate": conversion_rate,
         "avg_order_value": avg_order_value,
         "attach_rate": attach_rate,
         "labor_efficiency": _round_or_none(labor_efficiency, 2),
-        "profit": _round_or_none(total_profit, 2),
+        "profit": _round_or_none(total_profit, 2) or 0,
     }
 
 
@@ -202,8 +218,6 @@ def reduce_business_overview_comparison_rows(
         achievement_rate = None
     elif target_sales_amount > 0:
         achievement_rate = round(metrics["sales_amount"]["today"] * 100.0 / target_sales_amount, 2)
-    elif target_sales_amount == 0 and metrics["sales_amount"]["today"] == 0:
-        achievement_rate = 0
     else:
         achievement_rate = None
 
@@ -218,6 +232,21 @@ def reduce_business_overview_comparison_rows(
 
 
 def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "sales_amount": 0,
+            "sales_quantity": 0,
+            "order_count": 0,
+            "total_items": 0,
+            "traffic": 0,
+            "conversion_rate": None,
+            "avg_order_value": None,
+            "attach_rate": None,
+            "profit": 0,
+            "target_sales_amount": None,
+            "target_sales_quantity": None,
+        }
+
     def _sum(name: str) -> float | None:
         value = _sum_present_values(rows, name)
         return _round_or_none(value, 2)
@@ -238,8 +267,6 @@ def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, An
         conversion_rate = None
     elif traffic > 0:
         conversion_rate = round((effective_order_count * 100.0 / traffic), 2)
-    elif traffic == 0 and effective_order_count == 0:
-        conversion_rate = 0
     else:
         conversion_rate = None
 
@@ -247,8 +274,6 @@ def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, An
         avg_order_value = None
     elif effective_order_count > 0:
         avg_order_value = round((sales_amount / effective_order_count), 2)
-    elif effective_order_count == 0 and sales_amount == 0:
-        avg_order_value = 0
     else:
         avg_order_value = None
 
@@ -256,8 +281,6 @@ def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, An
         attach_rate = None
     elif effective_order_count > 0:
         attach_rate = round((effective_total_items / effective_order_count), 2)
-    elif effective_order_count == 0 and effective_total_items == 0:
-        attach_rate = 0
     else:
         attach_rate = None
 
@@ -1185,7 +1208,7 @@ class PostgresqlDashboardService:
         reduced["target"]["achievement_rate"] = (
             round(reduced["metrics"]["sales_amount"]["today"] * 100.0 / target_summary["target_amount"], 2)
             if target_summary["target_amount"] and reduced["metrics"]["sales_amount"]["today"] is not None
-            else 0
+            else None
         )
         return reduced
 
@@ -2183,16 +2206,19 @@ class PostgresqlDashboardService:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity must be monthly or yearly")
 
+        columns = await self._get_table_columns("a_class", "sales_targets_a")
+
         if len(period) == 4:
-            year_month_filter = "year_month LIKE :period_prefix"
             db_params: dict[str, Any] = {"period_prefix": f"{period}-%"}
+            year_month_filter = "year_month LIKE :period_prefix"
             year_month_filter_cn = '"年月" LIKE :period_prefix'
         else:
-            year_month_filter = "year_month = :period"
             db_params = {"period": period}
+            year_month_filter = "year_month = :period"
             year_month_filter_cn = '"年月" = :period'
 
-        try:
+        # Avoid emitting Postgres ERROR logs by selecting the correct column set up front.
+        if {"year_month", "target_sales_amount", "target_quantity"}.issubset(columns):
             result = await db.execute(
                 text(
                     f"""
@@ -2204,8 +2230,32 @@ class PostgresqlDashboardService:
                 ),
                 db_params,
             )
-        except Exception:
-            await db.rollback()
+        elif {"年月", "目标销售额", "目标订单数"}.issubset(columns):
+            result = await db.execute(
+                text(
+                    f"""
+                    SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
+                           COALESCE(SUM("目标订单数"), 0) AS target_orders
+                    FROM a_class.sales_targets_a
+                    WHERE {year_month_filter_cn}
+                    """
+                ),
+                db_params,
+            )
+        elif {"年月", "目标销售额", "目标单量"}.issubset(columns):
+            result = await db.execute(
+                text(
+                    f"""
+                    SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
+                           COALESCE(SUM("目标单量"), 0) AS target_orders
+                    FROM a_class.sales_targets_a
+                    WHERE {year_month_filter_cn}
+                    """
+                ),
+                db_params,
+            )
+        else:
+            # Unknown schema variant: keep a defensive fallback without hard-failing.
             try:
                 result = await db.execute(
                     text(

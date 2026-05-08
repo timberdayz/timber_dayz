@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from datetime import date as date_cls
 from datetime import datetime, timedelta, timezone
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -33,11 +34,41 @@ _B_COST_ALLOWED_ROLES = {"admin", "manager", "finance"}
 _DASHBOARD_SINGLEFLIGHT_LOCK_TTL = 60
 _DASHBOARD_SINGLEFLIGHT_WAIT_TIMEOUT = 35.0
 _STORE_ANALYSIS_ALLOWED_ROLES = {"admin", "manager", "operator"}
+_BUSINESS_OVERVIEW_CANONICAL_ONLY = os.getenv(
+    "BUSINESS_OVERVIEW_CANONICAL_ONLY",
+    "true",
+).lower() in {"1", "true", "yes", "on"}
+_BUSINESS_OVERVIEW_LEGACY_QUERY_KEYS = {
+    "month",
+    "date",
+    "date_value",
+    "platform",
+    "platforms",
+    "shops",
+    "start_date",
+    "end_date",
+}
 
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
     return {k: "" if v is None else str(v) for k, v in params.items()}
 
+
+def _reject_business_overview_legacy_params(request: Request) -> None:
+    if not _BUSINESS_OVERVIEW_CANONICAL_ONLY:
+        return
+    legacy = [key for key in _BUSINESS_OVERVIEW_LEGACY_QUERY_KEYS if key in request.query_params]
+    if not legacy:
+        return
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "message": "Business Overview API no longer accepts legacy query params.",
+            "legacy_params": legacy,
+            "required_params": ["granularity", "period_key"],
+            "optional_params": ["platform_code", "shop_id"],
+        },
+    )
 
 def _isoformat_utc_now_seconds() -> str:
     now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -58,6 +89,51 @@ def _normalize_business_overview_period_key(granularity: str, value: str) -> str
     raise ValueError("granularity must be daily, weekly or monthly")
 
 
+def _detect_business_overview_empty_period(data: Any) -> bool:
+    if data == []:
+        return True
+    if not isinstance(data, dict):
+        return False
+    if {"gmv", "order_count", "visitor_count", "profit"}.issubset(data.keys()):
+        return (
+            (data.get("gmv") in {0, 0.0})
+            and (data.get("order_count") in {0})
+            and (data.get("visitor_count") in {0})
+            and (data.get("profit") in {0, 0.0})
+            and (data.get("conversion_rate") is None)
+            and (data.get("avg_order_value") is None)
+            and (data.get("attach_rate") is None)
+        )
+    metrics = data.get("metrics")
+    if isinstance(metrics, dict) and metrics:
+        for metric in metrics.values():
+            if not isinstance(metric, dict):
+                return False
+            if metric.get("change") is not None:
+                return False
+            for key in ("today", "yesterday", "average"):
+                if metric.get(key) not in {0, 0.0, None}:
+                    return False
+        return True
+    return False
+
+
+def _apply_business_overview_empty_period_meta(meta: dict[str, Any], data: Any) -> dict[str, Any]:
+    warnings = meta.get("warnings")
+    if not isinstance(warnings, list):
+        meta["warnings"] = []
+    meta.setdefault("data_status", "ok")
+    meta.setdefault("is_empty_period", False)
+
+    if _detect_business_overview_empty_period(data):
+        meta["data_status"] = "empty_period"
+        meta["is_empty_period"] = True
+        warning = "empty_period: no rows matched for the requested period"
+        if warning not in meta["warnings"]:
+            meta["warnings"].append(warning)
+    return meta
+
+
 def _wrap_business_overview_envelope(
     *,
     module_payload: Any,
@@ -68,6 +144,9 @@ def _wrap_business_overview_envelope(
     cache_status: Optional[str] = None,
 ) -> dict[str, Any]:
     if isinstance(module_payload, dict) and {"meta", "data"}.issubset(module_payload.keys()):
+        meta = module_payload.get("meta") if isinstance(module_payload.get("meta"), dict) else {}
+        data = module_payload.get("data")
+        module_payload["meta"] = _apply_business_overview_empty_period_meta(meta, data)
         return module_payload
 
     meta: dict[str, Any] = {
@@ -81,7 +160,10 @@ def _wrap_business_overview_envelope(
             "hit": True if cache_status == "HIT" else False if cache_status in {"MISS", "BYPASS"} else None,
         },
         "warnings": [],
+        "data_status": "ok",
+        "is_empty_period": False,
     }
+    _apply_business_overview_empty_period_meta(meta, module_payload)
     return {"meta": meta, "data": module_payload}
 
 
@@ -104,6 +186,8 @@ def _build_business_overview_meta(
             "hit": True if cache_status == "HIT" else False if cache_status in {"MISS", "BYPASS"} else None,
         },
         "warnings": [],
+        "data_status": "ok",
+        "is_empty_period": False,
     }
 
 
@@ -184,36 +268,29 @@ async def _get_store_analysis_authorized_user(current_user: Any = Depends(get_cu
 async def get_business_overview_kpi_postgresql(
     request: Request,
     granularity: Optional[str] = Query(None, description="daily/weekly/monthly"),
-    date: Optional[str] = Query(None, description="date in YYYY-MM-DD or YYYY-MM"),
-    month: Optional[str] = Query(None, description="month in YYYY-MM-DD (first day of month)"),
-    platform: Optional[str] = Query(None, description="single platform code"),
+    period_key: str = Query(..., description="canonical period key (ISO date)"),
+    platform_code: Optional[str] = Query(None, description="canonical platform code"),
+    shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
-    from datetime import datetime
-
     try:
+        _reject_business_overview_legacy_params(request)
         granularity_value = granularity if isinstance(granularity, str) else None
-        date_value = date if isinstance(date, str) else None
-        month_value = month if isinstance(month, str) else None
-
         effective_granularity = (granularity_value or "monthly").strip().lower()
-        effective_date = date_value or month_value
-        if not effective_date:
-            today = datetime.now()
-            effective_date = f"{today.year}-{today.month:02d}-01"
-            effective_granularity = "monthly"
+        effective_platform_code = platform_code
+        effective_date = period_key
         params = {
             "granularity": effective_granularity,
-            "date": effective_date,
-            "month": month_value,
-            "platform": platform,
+            "period_key": effective_date,
+            "platform_code": effective_platform_code,
+            "shop_id": shop_id,
         }
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
             result = await service.get_business_overview_kpi(
-                month=month_value,
-                platform=platform,
+                month=effective_date,
+                platform=effective_platform_code,
                 granularity=effective_granularity,
                 target_date=effective_date,
             )
@@ -230,10 +307,15 @@ async def get_business_overview_kpi_postgresql(
             payload["meta"] = _build_business_overview_meta(
                 granularity=effective_granularity,
                 period_key=period_key,
-                platform_code=platform,
+                platform_code=effective_platform_code,
+                shop_id=shop_id,
                 cache_status=cache_status,
             )
+            if isinstance(payload.get("meta"), dict):
+                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -245,19 +327,28 @@ async def get_business_overview_kpi_postgresql(
 async def get_business_overview_comparison_postgresql(
     request: Request,
     granularity: str = Query(..., description="daily/weekly/monthly"),
-    date: str = Query(..., description="date in YYYY-MM-DD or YYYY-MM"),
-    platform: Optional[str] = Query(None, description="single platform code"),
+    period_key: str = Query(..., description="canonical period key (ISO date)"),
+    platform_code: Optional[str] = Query(None, description="canonical platform code"),
+    shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
-        params = {"granularity": granularity, "date": date, "platform": platform}
+        _reject_business_overview_legacy_params(request)
+        effective_platform_code = platform_code
+        effective_period_key = period_key
+        params = {
+            "granularity": granularity,
+            "period_key": effective_period_key,
+            "platform_code": effective_platform_code,
+            "shop_id": shop_id,
+        }
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
             result = await service.get_business_overview_comparison(
                 granularity=granularity,
-                target_date=date,
-                platform=platform,
+                target_date=effective_period_key,
+                platform=effective_platform_code,
             )
             return json.loads(success_response(data=result).body.decode())
 
@@ -268,14 +359,19 @@ async def get_business_overview_comparison_postgresql(
             _produce_payload,
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            period_key = _normalize_business_overview_period_key(granularity, date)
+            normalized_period_key = _normalize_business_overview_period_key(granularity, effective_period_key)
             payload["meta"] = _build_business_overview_meta(
                 granularity=granularity,
-                period_key=period_key,
-                platform_code=platform,
+                period_key=normalized_period_key,
+                platform_code=effective_platform_code,
+                shop_id=shop_id,
                 cache_status=cache_status,
             )
+            if isinstance(payload.get("meta"), dict):
+                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -287,34 +383,25 @@ async def get_business_overview_comparison_postgresql(
 async def get_business_overview_bootstrap_postgresql(
     request: Request,
     granularity: Optional[str] = Query(None, description="daily/weekly/monthly"),
-    date: Optional[str] = Query(None, description="date in YYYY-MM-DD or YYYY-MM"),
-    month: Optional[str] = Query(None, description="month in YYYY-MM-DD (first day of month)"),
-    platform: Optional[str] = Query(None, description="single platform code"),
+    period_key: str = Query(..., description="canonical period key (ISO date)"),
+    platform_code: Optional[str] = Query(None, description="canonical platform code"),
+    shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
-    from datetime import datetime
-
     try:
+        _reject_business_overview_legacy_params(request)
         granularity_value = granularity if isinstance(granularity, str) else None
-        date_value = date if isinstance(date, str) else None
-        month_value = month if isinstance(month, str) else None
-
         effective_granularity = (granularity_value or "monthly").strip().lower()
-        effective_date = date_value
-        if not effective_date:
-            today = datetime.now()
-            effective_date = f"{today.year}-{today.month:02d}-01"
-            effective_granularity = "monthly"
+        effective_platform_code = platform_code
+        effective_date = period_key
 
-        effective_operational_month = month_value
-        if not effective_operational_month:
-            period = _normalize_period_start(effective_date)
-            effective_operational_month = date_cls(period.year, period.month, 1).isoformat()
+        period = _normalize_period_start(effective_date)
+        effective_operational_month = date_cls(period.year, period.month, 1).isoformat()
 
         params = {
             "granularity": effective_granularity,
-            "date": effective_date,
-            "month": effective_operational_month,
-            "platform": platform,
+            "period_key": effective_date,
+            "platform_code": effective_platform_code,
+            "shop_id": shop_id,
         }
         cache_params = _normalize_cache_params(params)
 
@@ -324,7 +411,7 @@ async def get_business_overview_bootstrap_postgresql(
             kpi_started = time.perf_counter()
             kpi_result = await service.get_business_overview_kpi(
                 month=effective_date,
-                platform=platform,
+                platform=effective_platform_code,
                 granularity=effective_granularity,
                 target_date=effective_date,
             )
@@ -334,14 +421,14 @@ async def get_business_overview_bootstrap_postgresql(
             comparison_result = await service.get_business_overview_comparison(
                 granularity=effective_granularity,
                 target_date=effective_date,
-                platform=platform,
+                platform=effective_platform_code,
             )
             comparison_ms = (time.perf_counter() - comparison_started) * 1000.0
 
             operational_started = time.perf_counter()
             operational_result = await service.get_business_overview_operational_metrics(
                 month=effective_operational_month,
-                platform=platform,
+                platform=effective_platform_code,
             )
             operational_ms = (time.perf_counter() - operational_started) * 1000.0
 
@@ -350,7 +437,7 @@ async def get_business_overview_bootstrap_postgresql(
                 granularity=effective_granularity,
                 target_date=effective_date,
                 dimension="shop",
-                platform=platform,
+                platform=effective_platform_code,
             )
             traffic_ms = (time.perf_counter() - traffic_started) * 1000.0
 
@@ -359,7 +446,7 @@ async def get_business_overview_bootstrap_postgresql(
                 granularity=effective_granularity,
                 target_date=effective_date,
                 group_by="shop",
-                platform=platform,
+                platform=effective_platform_code,
             )
             shop_racing_ms = (time.perf_counter() - shop_racing_started) * 1000.0
             total_ms = (time.perf_counter() - started) * 1000.0
@@ -372,8 +459,8 @@ async def get_business_overview_bootstrap_postgresql(
                     f"total={total_ms:.2f}ms kpi={kpi_ms:.2f}ms comparison={comparison_ms:.2f}ms "
                     f"operational={operational_ms:.2f}ms traffic_ranking={traffic_ms:.2f}ms "
                     f"shop_racing={shop_racing_ms:.2f}ms "
-                    f"granularity={effective_granularity} date={effective_date} month={effective_operational_month} "
-                    f"platform={platform or ''}"
+                    f"granularity={effective_granularity} period_key={effective_date} month={effective_operational_month} "
+                    f"platform={effective_platform_code or ''}"
                 )
             return json.loads(
                 success_response(
@@ -398,10 +485,15 @@ async def get_business_overview_bootstrap_postgresql(
             payload["meta"] = _build_business_overview_meta(
                 granularity=effective_granularity,
                 period_key=period_key,
-                platform_code=platform,
+                platform_code=effective_platform_code,
+                shop_id=shop_id,
                 cache_status=cache_status,
             )
+            if isinstance(payload.get("meta"), dict):
+                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -431,6 +523,8 @@ async def get_annual_summary_kpi_postgresql(
             _produce_payload,
         )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -442,18 +536,21 @@ async def get_annual_summary_kpi_postgresql(
 async def get_business_overview_shop_racing_postgresql(
     request: Request,
     granularity: str = Query(..., description="granularity"),
-    date: str = Query(..., description="date"),
+    period_key: str = Query(..., description="canonical period key (ISO date)"),
     group_by: str = Query("shop", description="grouping dimension"),
-    platform: Optional[str] = Query(None, description="single platform code"),
-    platforms: Optional[str] = Query(None, description="legacy comma-separated platform list"),
+    platform_code: Optional[str] = Query(None, description="canonical platform code"),
+    shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
-        effective_platform = platform or (platforms.split(",")[0].strip() if platforms else None)
+        _reject_business_overview_legacy_params(request)
+        effective_platform = platform_code
+        effective_period_key = period_key
         params = {
             "granularity": granularity,
-            "date": date,
+            "period_key": effective_period_key,
             "group_by": group_by,
-            "platform": effective_platform,
+            "platform_code": effective_platform,
+            "shop_id": shop_id,
         }
         cache_params = _normalize_cache_params(params)
 
@@ -461,7 +558,7 @@ async def get_business_overview_shop_racing_postgresql(
             service = get_postgresql_dashboard_service()
             result = await service.get_business_overview_shop_racing(
                 granularity=granularity,
-                target_date=date,
+                target_date=effective_period_key,
                 group_by=group_by,
                 platform=effective_platform,
             )
@@ -474,14 +571,19 @@ async def get_business_overview_shop_racing_postgresql(
             _produce_payload,
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            period_key = _normalize_business_overview_period_key(granularity, date)
+            normalized_period_key = _normalize_business_overview_period_key(granularity, effective_period_key)
             payload["meta"] = _build_business_overview_meta(
                 granularity=granularity,
-                period_key=period_key,
+                period_key=normalized_period_key,
                 platform_code=effective_platform,
+                shop_id=shop_id,
                 cache_status=cache_status,
             )
+            if isinstance(payload.get("meta"), dict):
+                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -494,22 +596,20 @@ async def get_business_overview_traffic_ranking_postgresql(
     request: Request,
     granularity: str = Query(..., description="granularity"),
     dimension: str = Query("visitor", description="ranking dimension"),
-    date: Optional[str] = Query(None, description="date"),
-    date_value: Optional[str] = Query(None, description="legacy date alias"),
-    platform: Optional[str] = Query(None, description="single platform code"),
-    platforms: Optional[str] = Query(None, description="legacy comma-separated platform list"),
-    shops: Optional[str] = Query(None, description="legacy shop filter (currently unused)"),
+    period_key: str = Query(..., description="canonical period key (ISO date)"),
+    platform_code: Optional[str] = Query(None, description="canonical platform code"),
+    shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
-        target_date = date or date_value
-        if not target_date:
-            raise ValueError("date is required")
-        effective_platform = platform or (platforms.split(",")[0].strip() if platforms else None)
+        _reject_business_overview_legacy_params(request)
+        target_date = period_key
+        effective_platform = platform_code
         params = {
             "granularity": granularity,
             "dimension": dimension,
-            "date": target_date,
-            "platform": effective_platform,
+            "period_key": target_date,
+            "platform_code": effective_platform,
+            "shop_id": shop_id,
         }
         cache_params = _normalize_cache_params(params)
 
@@ -535,9 +635,14 @@ async def get_business_overview_traffic_ranking_postgresql(
                 granularity=granularity,
                 period_key=period_key,
                 platform_code=effective_platform,
+                shop_id=shop_id,
                 cache_status=cache_status,
             )
+            if isinstance(payload.get("meta"), dict):
+                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -584,23 +689,30 @@ async def get_business_overview_inventory_backlog_postgresql(
 @router.get("/business-overview/operational-metrics")
 async def get_business_overview_operational_metrics_postgresql(
     request: Request,
-    month: Optional[str] = Query(None, description="month in YYYY-MM-DD"),
-    platform: Optional[str] = Query(None, description="single platform code"),
+    granularity: Optional[str] = Query(None, description="canonical granularity (only monthly supported)"),
+    period_key: str = Query(..., description="canonical period key (ISO date)"),
+    platform_code: Optional[str] = Query(None, description="canonical platform code"),
+    shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
-    from datetime import datetime
-
     try:
-        if not month:
-            today = datetime.now()
-            month = f"{today.year}-{today.month:02d}-01"
-        params = {"month": month, "platform": platform}
+        _reject_business_overview_legacy_params(request)
+        if granularity and str(granularity).strip().lower() != "monthly":
+            raise ValueError("granularity must be monthly")
+        effective_platform_code = platform_code
+        effective_month = _normalize_business_overview_period_key("monthly", period_key)
+        params = {
+            "granularity": "monthly",
+            "period_key": effective_month,
+            "platform_code": effective_platform_code,
+            "shop_id": shop_id,
+        }
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
             result = await service.get_business_overview_operational_metrics(
-                month=month,
-                platform=platform,
+                month=effective_month,
+                platform=effective_platform_code,
             )
             return json.loads(success_response(data=result).body.decode())
 
@@ -611,13 +723,16 @@ async def get_business_overview_operational_metrics_postgresql(
             _produce_payload,
         )
         if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            period_key = _normalize_business_overview_period_key("monthly", month)
+            period_key = _normalize_business_overview_period_key("monthly", effective_month)
             payload["meta"] = _build_business_overview_meta(
                 granularity="monthly",
                 period_key=period_key,
-                platform_code=platform,
+                platform_code=effective_platform_code,
+                shop_id=shop_id,
                 cache_status=cache_status,
             )
+            if isinstance(payload.get("meta"), dict):
+                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
