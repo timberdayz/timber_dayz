@@ -155,6 +155,71 @@ class TiktokProductsExport(ExportComponent):
             waited += poll_ms
         return str(getattr(page, "url", "") or "")
 
+    async def _is_internal_error_page(self, page: Any) -> bool:
+        markers = (
+            "Seller Condition is undefined",
+            "Error Code:",
+        )
+        try:
+            body = page.locator("body").first
+            text = await body.inner_text()
+        except Exception:
+            text = ""
+        return any(marker in str(text or "") for marker in markers)
+
+    async def _products_page_business_ready(self, page: Any) -> bool:
+        current_url = str(getattr(page, "url", "") or "")
+        if not self._products_page_looks_ready(current_url):
+            return False
+        if await self._is_internal_error_page(page):
+            return False
+
+        for selector in (
+            'button:has-text("Export")',
+            'button:has-text("导出")',
+            '[data-testid*="export"]',
+            '[class*="export"]',
+            '[class*="date"]',
+            '[class*="picker"]',
+        ):
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() > 0 and await locator.is_visible(timeout=300):
+                    return True
+            except Exception:
+                continue
+
+        for text in (
+            "Product analysis",
+            "Product Analytics",
+            "商品分析",
+            "商品表现",
+            "Export",
+            "导出",
+        ):
+            try:
+                if await page.get_by_text(text, exact=False).first.is_visible(timeout=300):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    async def _wait_products_business_ready(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 15000,
+        poll_ms: int = 500,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            if await self._products_page_business_ready(page):
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
+
     async def ensure_page_ready(self, page: Any) -> str:
         current_url = await wait_until_page_settles(page)
         if self._is_login_page(current_url) and await self._login_surface_looks_ready(page):
@@ -178,14 +243,20 @@ class TiktokProductsExport(ExportComponent):
 
     async def ensure_products_ready(self, page: Any) -> str:
         current_url = await wait_until_page_settles(page)
-        if self._products_page_looks_ready(current_url):
+        if self._products_page_looks_ready(current_url) and await self._wait_products_business_ready(page):
             return current_url
+        if self._products_page_looks_ready(current_url):
+            raise RuntimeError("products page is not ready")
 
         region = self._target_region() or self._target_region_from_page_url(current_url)
         target_url = self._products_page_url(region) if region else self._generic_products_page_url()
         current_url = await goto_when_ready(page, target_url, goto_timeout=60000, settle_timeout_ms=6000, poll_ms=200)
         if self._is_login_page(current_url):
             raise RuntimeError("login required before products export")
+        if await self._is_internal_error_page(page):
+            raise RuntimeError("products page internal error")
+        if not await self._wait_products_business_ready(page):
+            raise RuntimeError("products page is not ready")
         return current_url
 
     async def ensure_date_ready(self, page: Any) -> None:

@@ -733,6 +733,16 @@ async def get_business_overview_operational_metrics_postgresql(
             )
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                if effective_platform_code and isinstance(payload.get("data"), dict):
+                    data_meta = payload["data"].get("meta") if isinstance(payload["data"], dict) else None
+                    warnings = payload["meta"].get("warnings")
+                    if not isinstance(warnings, list):
+                        payload["meta"]["warnings"] = []
+                        warnings = payload["meta"]["warnings"]
+                    if isinstance(data_meta, dict) and isinstance(data_meta.get("warnings"), list):
+                        for warning in data_meta["warnings"]:
+                            if warning not in warnings:
+                                warnings.append(warning)
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)

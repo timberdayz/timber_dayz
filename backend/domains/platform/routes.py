@@ -13,6 +13,7 @@ from backend.domains.platform.routers import (
     system,
     system_logs,
     system_monitoring,
+    tiktokshop_oauth,
     users,
 )
 
@@ -33,3 +34,6 @@ def register_platform_routes(app) -> None:
     app.include_router(notification_config.router, tags=["通知配置"])
     app.include_router(rate_limit.router, prefix="/api", tags=["限流管理"])
     app.include_router(rate_limit_config.router, tags=["限流配置管理"])
+
+    # Public OAuth callback endpoints (no /api prefix by design)
+    app.include_router(tiktokshop_oauth.router, tags=["TikTok Shop OAuth"])

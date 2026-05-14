@@ -65,6 +65,10 @@ class _FakeLocator:
         return 1 if self._visible else 0
 
 
+def _mark_products_ready(page: _FakePage) -> None:
+    page.visible_texts.add("Product analysis")
+
+
 class _DelayedProductsNavigationPage(_FakePage):
     def __init__(self, url: str, *, settle_after_waits: int = 2) -> None:
         super().__init__(url)
@@ -132,6 +136,7 @@ async def test_tiktok_products_export_navigates_to_products_page_and_runs_helper
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
 
     switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
@@ -166,6 +171,7 @@ async def test_tiktok_products_export_deep_links_directly_from_unknown_logged_in
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/orders/list?shop_region=SG")
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
 
     switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
@@ -194,6 +200,7 @@ async def test_tiktok_products_export_waits_for_page_to_settle_before_direct_nav
         "https://seller.tiktokshopglobalselling.com/orders/list?shop_region=SG",
         loading_waits=2,
     )
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
 
     switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
@@ -220,6 +227,7 @@ async def test_tiktok_products_export_switches_shop_context_on_products_page_aft
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
 
     async def _switch_on_products_page(current_page):
@@ -253,6 +261,7 @@ async def test_tiktok_products_export_normalizes_region_on_products_page_without
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
 
     async def _switch_on_products_page(current_page):
@@ -282,6 +291,7 @@ async def test_tiktok_products_export_waits_until_product_analysis_navigation_se
         "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY",
         settle_after_waits=2,
     )
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
 
     current_url = await component.ensure_products_ready(page)
@@ -290,6 +300,15 @@ async def test_tiktok_products_export_waits_until_product_analysis_navigation_se
     assert page.goto_calls == [
         "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=MY"
     ]
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_rejects_product_url_without_business_markers() -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+
+    with pytest.raises(RuntimeError, match="products page is not ready"):
+        await component.ensure_products_ready(page)
 
 
 @pytest.mark.asyncio
@@ -322,6 +341,7 @@ async def test_tiktok_products_export_skips_date_picker_when_current_range_alrea
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "weekly"}))
 
     switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
@@ -350,6 +370,7 @@ async def test_tiktok_products_export_stops_when_date_confirmation_does_not_sett
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
 
     switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
@@ -377,6 +398,7 @@ async def test_tiktok_products_export_forwards_explicit_custom_range_to_date_pic
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    _mark_products_ready(page)
     component = TiktokProductsExport(
         _ctx(
             {
@@ -418,6 +440,7 @@ async def test_tiktok_products_export_uses_explicit_trigger_and_collect_stages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    _mark_products_ready(page)
     component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
 
     switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())

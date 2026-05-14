@@ -603,3 +603,42 @@ class TestAllPlatformsConfig:
         assert len(config["login_form_selectors"]) > 0
         assert len(config["logged_in_selectors"]) > 0
 
+
+class _AlwaysMissingLocator:
+    def __init__(self) -> None:
+        self.first = self
+
+    async def count(self) -> int:
+        return 0
+
+    async def is_visible(self, timeout: int | None = None) -> bool:  # noqa: ARG002
+        return False
+
+
+class TestTikTokCookieOnlyOnBlankPage:
+    @pytest.mark.anyio
+    async def test_cookie_only_does_not_confirm_login_when_page_is_about_blank(self):
+        detector = LoginStatusDetector("tiktok", debug=False)
+
+        page = MagicMock()
+        page.url = "about:blank"
+        page.wait_for_timeout = AsyncMock()
+        page.context = MagicMock()
+        page.context.cookies = AsyncMock(
+            return_value=[
+                {"name": "sessionid", "value": "ok"},
+                {"name": "passport_csrf_token", "value": "ok"},
+                {"name": "ttwid", "value": "ok"},
+            ]
+        )
+
+        missing = _AlwaysMissingLocator()
+        page.locator.return_value = missing
+        page.get_by_text.return_value = missing
+        page.get_by_role.return_value = missing
+        page.get_by_placeholder.return_value = missing
+        page.get_by_label.return_value = missing
+
+        result = await detector.detect(page, wait_for_redirect=False)
+
+        assert result.status is not LoginStatus.LOGGED_IN

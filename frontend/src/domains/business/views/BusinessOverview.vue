@@ -233,13 +233,27 @@
               </div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">预估毛利</div>
+              <div class="metric-label">
+                <el-tooltip
+                  content="来源：订单导出字段（利润/毛利/profit）聚合；口径可能因平台报表不同而不一致，需业务确认。"
+                  placement="top"
+                >
+                  <span>预估利润</span>
+                </el-tooltip>
+              </div>
               <div class="metric-value">
                 {{ formatNumber(operationalMetrics.estimated_gross_profit) }}
               </div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">预估费用</div>
+              <div class="metric-label">
+                <el-tooltip
+                  content="来源：经营成本表（租金+营销/薪资+水电+其他）按月汇总。注意：当按平台筛选时，费用可能缺失（不会再用全公司费用兜底）。"
+                  placement="top"
+                >
+                  <span>预估费用</span>
+                </el-tooltip>
+              </div>
               <div class="metric-value">
                 {{ formatNumber(operationalMetrics.estimated_expenses) }}
               </div>

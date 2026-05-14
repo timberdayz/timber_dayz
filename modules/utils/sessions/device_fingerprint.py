@@ -432,7 +432,11 @@ class DeviceFingerprintManager:
             "extra_http_headers": self._sanitize_context_headers(
                 fingerprint.get("extra_http_headers")
             ),
-            "permissions": list(fingerprint["permissions"].keys()),
+            "permissions": [
+                name
+                for name in list(fingerprint["permissions"].keys())
+                if name != "notifications"
+            ],
             "ignore_https_errors": True,  # 忽略HTTPS错误
             "java_script_enabled": True,
         }

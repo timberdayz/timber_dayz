@@ -807,13 +807,23 @@ class LoginStatusDetector:
         
         # 3. 如果Cookie存在,倾向于认为已登录
         if cookie_result.status == LoginStatus.LOGGED_IN and cookie_result.confidence >= 0.6:
+            normalized_url = str(current_url or "").strip().lower()
+            if self.platform == "tiktok" and (not normalized_url or normalized_url == "about:blank"):
+                return LoginDetectionResult(
+                    status=LoginStatus.UNKNOWN,
+                    confidence=min(0.59, cookie_result.confidence),
+                    reason="Auth cookies present but page not initialized; deferring login confirmation until navigation completes",
+                    detected_by="combined",
+                    current_url=current_url,
+                    matched_pattern=cookie_result.matched_pattern,
+                )
             return LoginDetectionResult(
                 status=LoginStatus.LOGGED_IN,
                 confidence=cookie_result.confidence,
                 reason=f"Cookie indicates logged in: {cookie_result.reason}",
                 detected_by="combined",
                 current_url=current_url,
-                matched_pattern=cookie_result.matched_pattern
+                matched_pattern=cookie_result.matched_pattern,
             )
         
         # 4. 如果元素检测明确

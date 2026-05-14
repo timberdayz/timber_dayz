@@ -1,0 +1,21 @@
+{
+  "platform": "tiktok",
+  "timestamp": "20260512_115313",
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "component": "login",
+      "status": "passed",
+      "duration_ms": 500.14000000000004,
+      "steps_total": 1,
+      "steps_passed": 0,
+      "steps_failed": 0,
+      "error": null
+    }
+  ]
+}

@@ -41,6 +41,7 @@ class _FakePage:
         self.url = url
         self.goto_calls: list[str] = []
         self.timeout_calls: list[int] = []
+        self.reload_calls = 0
         self.screenshot_paths: list[str] = []
         self.selector_map: dict[str, _FakeLocator] = {}
         self.text_map: dict[str, _FakeLocator] = {}
@@ -56,6 +57,9 @@ class _FakePage:
 
     async def wait_for_timeout(self, ms: int) -> None:
         self.timeout_calls.append(ms)
+
+    async def reload(self, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+        self.reload_calls += 1
 
     async def screenshot(self, path: str, timeout: int = 5000) -> None:
         self.screenshot_paths.append(path)
@@ -640,6 +644,34 @@ async def test_tiktok_login_post_otp_wait_accepts_homepage_url_plus_left_nav_sig
     )
 
     assert outcome == "success"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_login_post_credentials_wait_observes_homepage_without_reload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+
+    async def _advance_page(ms: int) -> None:
+        page.timeout_calls.append(ms)
+        page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+
+    monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
+
+    outcome = await component._wait_for_post_login_outcome(
+        page,
+        phase="post_credentials",
+        timeout_ms=3,
+        poll_ms=1,
+    )
+
+    assert outcome == "timeout"
+    assert page.reload_calls == 0
 
 
 @pytest.mark.asyncio

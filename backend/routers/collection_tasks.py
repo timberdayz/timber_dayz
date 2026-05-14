@@ -50,14 +50,11 @@ from backend.services.verification_protocol import (
     verification_input_mode,
 )
 from backend.services.websocket_manager import connection_manager
+from backend.services.collection_task_status import STATUS as TASK_STATUS, TERMINAL_STATUSES, ACTIVE_STATUSES
 
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["数据采集-任务"])
-
-TERMINAL_TASK_STATUSES = frozenset(
-    {"completed", "failed", "cancelled", "partial_success"}
-)
 
 CAPTCHA_REDIS_KEY_PREFIX = "collection:captcha:"
 
@@ -132,8 +129,8 @@ def _collection_status_to_task_center(status: Optional[str]) -> Optional[str]:
     if status is None:
         return None
     return {
-        "verification_required": "paused",
-        "verification_submitted": "running",
+        TASK_STATUS.VERIFICATION_REQUIRED: TASK_STATUS.PAUSED,
+        TASK_STATUS.VERIFICATION_SUBMITTED: TASK_STATUS.RUNNING,
     }.get(status, status)
 
 
@@ -329,9 +326,9 @@ async def _load_task_runtime_metadata(
 
 def _build_task_verification_item(task: CollectionTask) -> Optional[dict]:
     if getattr(task, "status", None) not in (
-        "verification_required",
-        "paused",
-        "manual_intervention_required",
+        TASK_STATUS.VERIFICATION_REQUIRED,
+        TASK_STATUS.PAUSED,  # legacy
+        TASK_STATUS.MANUAL_INTERVENTION_REQUIRED,
     ) or not getattr(task, "verification_type", None):
         return None
 
@@ -581,7 +578,7 @@ async def list_verification_items(
     platform: Optional[str] = Query(None, description="按平台筛选"),
     verification_type: Optional[str] = Query(None, description="按验证码类型筛选"),
     account_id: Optional[str] = Query(None, description="按账号筛选"),
-    status: Optional[str] = Query("verification_required", description="按状态筛选"),
+    status: Optional[str] = Query(TASK_STATUS.VERIFICATION_REQUIRED, description="按状态筛选"),
     db: AsyncSession = Depends(get_async_db),
 ):
     stmt = select(CollectionTask)
@@ -590,10 +587,14 @@ async def list_verification_items(
         stmt = stmt.where(CollectionTask.platform == platform)
     if account_id:
         stmt = stmt.where(CollectionTask.account == account_id)
-    if status == "verification_required":
+    if status == TASK_STATUS.VERIFICATION_REQUIRED:
         stmt = stmt.where(
             CollectionTask.status.in_(
-                ["verification_required", "paused", "manual_intervention_required"]
+                [
+                    TASK_STATUS.VERIFICATION_REQUIRED,
+                    TASK_STATUS.PAUSED,  # legacy
+                    TASK_STATUS.MANUAL_INTERVENTION_REQUIRED,
+                ]
             )
         )
     elif status:
@@ -653,7 +654,7 @@ async def cancel_or_delete_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    if task.status in TERMINAL_TASK_STATUSES:
+    if task.status in TERMINAL_STATUSES:
         await _mirror_collection_task(db, task)
         await db.delete(task)
         await db.commit()
@@ -661,19 +662,12 @@ async def cancel_or_delete_task(
         logger.info("Deleted terminal task: %s (status=%s)", task_id, task.status)
         return SuccessResponse(success=True, message="任务已删除", data=None)
     else:
-        if task.status not in [
-            "pending",
-            "queued",
-            "running",
-            "paused",
-            "verification_required",
-            "manual_intervention_required",
-        ]:
+        if task.status not in ACTIVE_STATUSES:
             raise HTTPException(
                 status_code=400, detail=f"无法取消{task.status}状态的任务"
             )
         prev_status = task.status
-        task.status = "cancelled"
+        task.status = TASK_STATUS.CANCELLED
         task.error_message = "用户取消"
         log = CollectionTaskLog(
             task_id=task.id,
@@ -715,7 +709,7 @@ async def retry_task(
     if not original_task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    if original_task.status not in ["failed", "cancelled"]:
+    if original_task.status not in [TASK_STATUS.FAILED, TASK_STATUS.CANCELLED]:
         raise HTTPException(
             status_code=400, detail=f"无法重试{original_task.status}状态的任务"
         )
@@ -823,9 +817,9 @@ async def resume_task(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     if task.status not in (
-        "verification_required",
-        "paused",
-        "manual_intervention_required",
+        TASK_STATUS.VERIFICATION_REQUIRED,
+        TASK_STATUS.PAUSED,  # legacy
+        TASK_STATUS.MANUAL_INTERVENTION_REQUIRED,
     ):
         raise HTTPException(
             status_code=400,
@@ -865,7 +859,7 @@ async def resume_task(
         message="用户已提交验证码，等待执行器继续",
         details={"previous_status": task.status},
     )
-    task.status = "verification_submitted"
+    task.status = TASK_STATUS.VERIFICATION_SUBMITTED
     db.add(log)
     await db.commit()
     refresh_result = getattr(db, "refresh", None)
@@ -1062,8 +1056,8 @@ async def get_history_stats(
         day_tasks = day_result.scalars().all()
 
         day_total = len(day_tasks)
-        day_completed = sum(1 for t in day_tasks if t.status == "completed")
-        day_failed = sum(1 for t in day_tasks if t.status == "failed")
+        day_completed = sum(1 for t in day_tasks if t.status == TASK_STATUS.COMPLETED)
+        day_failed = sum(1 for t in day_tasks if t.status == TASK_STATUS.FAILED)
         day_rate = round(day_completed / day_total * 100, 2) if day_total > 0 else 0
 
         daily_stats.append(
@@ -1139,7 +1133,7 @@ async def _collection_step_status_callback(
                 task_id,
                 progress,
                 message,
-                status=getattr(task, "status", None) or "running",
+                status=getattr(task, "status", None) or TASK_STATUS.RUNNING,
             )
     except Exception as e:
         logger.error(f"Step status callback failed for task {task_id}: {e}")
@@ -1155,7 +1149,7 @@ async def _is_collection_task_cancelled(task_id: str) -> bool:
                 select(CollectionTask).where(CollectionTask.task_id == task_id)
             )
             task = result.scalar_one_or_none()
-            return task is not None and task.status == "cancelled"
+            return task is not None and task.status == TASK_STATUS.CANCELLED
     except Exception as e:
         logger.error(f"Cancel check failed for task {task_id}: {e}")
         return False
@@ -1179,13 +1173,13 @@ async def _on_verification_required(
     from backend.models.database import AsyncSessionLocal
 
     next_status = (
-        "manual_intervention_required"
+        TASK_STATUS.MANUAL_INTERVENTION_REQUIRED
         if verification_input_mode(verification_type) == "manual_continue"
-        else "verification_required"
+        else TASK_STATUS.VERIFICATION_REQUIRED
     )
     waiting_message = (
         "等待人工处理"
-        if next_status == "manual_intervention_required"
+        if next_status == TASK_STATUS.MANUAL_INTERVENTION_REQUIRED
         else "等待验证码回填"
     )
     try:
@@ -1260,8 +1254,8 @@ async def _on_verification_required(
                             )
                         )
                         task = result.scalar_one_or_none()
-                        if task and task.status != "cancelled":
-                            task.status = "running"
+                        if task and task.status != TASK_STATUS.CANCELLED:
+                            task.status = TASK_STATUS.RUNNING
                             await session.commit()
                             await _mirror_collection_task(session, task)
                 except Exception as e:
@@ -1357,7 +1351,7 @@ async def _mark_collection_task_running(task_id: str) -> CollectionTask | None:
     now = datetime.now(timezone.utc)
 
     def _mutate(task: CollectionTask) -> None:
-        task.status = "running"
+        task.status = TASK_STATUS.RUNNING
         task.started_at = now
 
     return await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=0)
@@ -1371,7 +1365,7 @@ async def _mark_collection_task_failed(
     now = datetime.now(timezone.utc)
 
     def _mutate(task: CollectionTask) -> None:
-        task.status = "failed"
+        task.status = TASK_STATUS.FAILED
         task.error_message = error_message
         task.completed_at = now
 
@@ -1384,20 +1378,20 @@ async def _persist_collection_task_result(
 ) -> CollectionTask | None:
     completed_at = (
         None
-        if result.status in ["paused", "manual_intervention_required"]
+        if result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]
         else datetime.now(timezone.utc)
     )
     duration_seconds = (
         None
-        if result.status in ["paused", "manual_intervention_required"]
+        if result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]
         else result.duration_seconds
     )
 
     def _mutate(task: CollectionTask) -> None:
         task.status = result.status
-        if result.status in ["completed", "partial_success"]:
+        if result.status in [TASK_STATUS.COMPLETED, TASK_STATUS.PARTIAL_SUCCESS]:
             task.progress = 100
-        elif result.status in ["paused", "manual_intervention_required"]:
+        elif result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]:
             task.progress = max(getattr(task, "progress", 0) or 0, 1)
         else:
             task.progress = 0
@@ -1449,7 +1443,7 @@ async def _execute_collection_task_background_v2(
             )
             await connection_manager.send_complete(
                 task_id,
-                "failed",
+                TASK_STATUS.FAILED,
                 files_collected=getattr(failed_task, "files_collected", 0) or 0,
                 error_message=getattr(failed_task, "error_message", str(e)),
             )
@@ -1535,7 +1529,7 @@ async def _execute_collection_task_background_v2(
             )
             await connection_manager.send_complete(
                 task_id,
-                "failed",
+                TASK_STATUS.FAILED,
                 files_collected=getattr(failed_task, "files_collected", 0) or 0,
                 error_message=str(e),
             )
@@ -1637,14 +1631,14 @@ async def _execute_collection_task_background(
 
             except Exception as e:
                 logger.error(f"Failed to load account {account_id}: {e}")
-                task.status = "failed"
+                task.status = TASK_STATUS.FAILED
                 task.error_message = f"账号加载失败: {str(e)}"
                 task.completed_at = datetime.now(timezone.utc)
                 await db.commit()
                 await _mirror_collection_task(db, task)
                 await connection_manager.send_complete(
                     task_id,
-                    "failed",
+                    TASK_STATUS.FAILED,
                     files_collected=getattr(task, "files_collected", 0) or 0,
                     error_message=task.error_message,
                 )
@@ -1707,15 +1701,15 @@ async def _execute_collection_task_background(
                         )
 
                     task.status = result.status
-                    if result.status in ["completed", "partial_success"]:
+                    if result.status in [TASK_STATUS.COMPLETED, TASK_STATUS.PARTIAL_SUCCESS]:
                         task.progress = 100
-                    elif result.status in ["paused", "manual_intervention_required"]:
+                    elif result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]:
                         task.progress = max(getattr(task, "progress", 0) or 0, 1)
                     else:
                         task.progress = 0
                     task.files_collected = result.files_collected
                     task.error_message = result.error_message
-                    if result.status in ["paused", "manual_intervention_required"]:
+                    if result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]:
                         task.completed_at = None
                         task.duration_seconds = None
                     else:
@@ -1747,14 +1741,14 @@ async def _execute_collection_task_background(
                 )
                 task = result.scalar_one_or_none()
                 if task:
-                    task.status = "failed"
+                    task.status = TASK_STATUS.FAILED
                     task.error_message = str(e)
                     task.completed_at = datetime.now(timezone.utc)
                     await db.commit()
                     await _mirror_collection_task(db, task)
                     await connection_manager.send_complete(
                         task_id,
-                        "failed",
+                        TASK_STATUS.FAILED,
                         files_collected=getattr(task, "files_collected", 0) or 0,
                         error_message=str(e),
                     )

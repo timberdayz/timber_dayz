@@ -328,6 +328,8 @@ class TiktokLogin(LoginComponent):
             return False
 
         resolved_region = str(query.get("shop_region") or "").strip().upper()
+        if not resolved_region:
+            return False
         return resolved_region == expected_region
 
     async def _homepage_dom_looks_ready(self, page: Any) -> bool:

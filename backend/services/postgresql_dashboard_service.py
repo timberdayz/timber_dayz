@@ -1969,6 +1969,11 @@ class PostgresqlDashboardService:
             "monthly_order_count": None,
             "today_order_count": None,
         }
+        meta: dict[str, Any] = {
+            "profit_source": "orders_raw_profit_field",
+            "expenses_source": "shop_month_rows_sum",
+            "warnings": [],
+        }
         for row in rows:
             for key in total.keys():
                 value = _to_optional_float(row.get(key))
@@ -1985,9 +1990,18 @@ class PostgresqlDashboardService:
         )
         if target_summary["target_amount"] is not None:
             total["monthly_target"] = round(target_summary["target_amount"], 2)
-        loaded_expenses = await self._load_operating_expenses_summary(period_month)
-        if loaded_expenses is not None and total["estimated_expenses"] in (None, 0, 0.0):
-            total["estimated_expenses"] = round(loaded_expenses, 2)
+        loaded_expenses: float | None = None
+        if platform is None:
+            loaded_expenses = await self._load_operating_expenses_summary(period_month)
+            if loaded_expenses is not None and total["estimated_expenses"] in (None, 0, 0.0):
+                total["estimated_expenses"] = round(loaded_expenses, 2)
+                meta["expenses_source"] = "company_month_fallback_sum"
+        elif total["estimated_expenses"] in (None, 0, 0.0):
+            total["estimated_expenses"] = None
+            meta["expenses_source"] = None
+            meta["warnings"].append(
+                "estimated_expenses_missing_for_platform: expenses fallback is disabled when platform_code is provided"
+            )
         if total["estimated_gross_profit"] is not None and total["estimated_expenses"] is not None:
             total["operating_result"] = round(total["estimated_gross_profit"] - total["estimated_expenses"], 2)
 
@@ -2012,6 +2026,7 @@ class PostgresqlDashboardService:
         if operating_result_missing:
             total["operating_result"] = None
             total["operating_result_text"] = None
+        total["meta"] = meta
         return total
 
     async def get_b_cost_analysis_overview(

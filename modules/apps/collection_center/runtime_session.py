@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import inspect
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -25,6 +26,94 @@ logger = get_logger(__name__)
 STANDARD_HEADLESS_VIEWPORT = {"width": 1920, "height": 1080}
 
 _executor_pool: Optional[ThreadPoolExecutor] = None
+
+
+async def apply_stealth_init_scripts(context: Any) -> None:
+    """
+    Compatibility shim for legacy executor paths.
+
+    Historically some flows injected Playwright init scripts for "stealth".
+    The current collection runtime policy intentionally avoids injecting any
+    browser scripts in formal runtime sessions (see backend tests).
+
+    Keep this as a no-op to prevent AttributeError crashes while preserving
+    the "no injection" constraint.
+    """
+
+    _ = context
+    return None
+
+
+def apply_stealth_init_scripts_sync(context: Any) -> None:
+    """
+    Sync variant of `apply_stealth_init_scripts`, also a no-op by policy.
+    """
+
+    _ = context
+    return None
+
+
+def _storage_state_supports_indexed_db(*, platform: str) -> bool:
+    normalized = str(platform or "").strip().lower()
+    return normalized == "tiktok"
+
+
+def _require_indexed_db_for_platform(*, platform: str) -> bool:
+    """
+    Debug/verification flag:
+    - When enabled, fail fast if the installed Playwright does not support
+      `storage_state(indexed_db=True)` so we can validate the root-cause hypothesis.
+    """
+    normalized = str(platform or "").strip().lower()
+    if normalized != "tiktok":
+        return False
+    return os.getenv("TIKTOK_STORAGE_STATE_REQUIRE_INDEXED_DB", "false").lower() == "true"
+
+
+async def read_context_storage_state(
+    *,
+    platform: str,
+    context: Any,
+) -> Dict[str, Any]:
+    """
+    Read a storage_state snapshot for runtime session reuse.
+
+    TikTok seller flows may rely on IndexedDB-backed session artifacts; attempt to
+    include IndexedDB when supported by the installed Playwright version.
+    """
+    kwargs: Dict[str, Any] = {}
+    if _storage_state_supports_indexed_db(platform=platform):
+        kwargs["indexed_db"] = True
+    try:
+        return await context.storage_state(**kwargs)
+    except TypeError:
+        if _require_indexed_db_for_platform(platform=platform):
+            raise
+        logger.info(
+            "storage_state(indexed_db=...) unsupported; falling back to cookies/localStorage only (%s)",
+            platform,
+        )
+        return await context.storage_state()
+
+
+def read_context_storage_state_sync(
+    *,
+    platform: str,
+    context: Any,
+) -> Dict[str, Any]:
+    kwargs: Dict[str, Any] = {}
+    if _storage_state_supports_indexed_db(platform=platform):
+        kwargs["indexed_db"] = True
+    try:
+        return context.storage_state(**kwargs)
+    except TypeError:
+        if _require_indexed_db_for_platform(platform=platform):
+            raise
+        logger.info(
+            "storage_state(indexed_db=...) unsupported; falling back to cookies/localStorage only (%s)",
+            platform,
+        )
+        return context.storage_state()
 
 
 def _get_executor_pool() -> ThreadPoolExecutor:
@@ -77,7 +166,10 @@ def _bootstrap_session_from_profile_sync(
                 **launch_options,
             )
             try:
-                storage_state = context.storage_state()
+                storage_state = read_context_storage_state_sync(
+                    platform=platform,
+                    context=context,
+                )
             finally:
                 context.close()
     except Exception as exc:
@@ -260,6 +352,10 @@ def choose_runtime_strategy(
     component_type: str | None,
     parallel_mode: bool,
 ) -> RuntimeStrategyDecision:
+    prefer_persistent_profile = (
+        str(platform or "").strip().lower() == "tiktok"
+        and os.getenv("TIKTOK_RUNTIME_PREFER_PERSISTENT_PROFILE", "false").lower() == "true"
+    )
     if force_persistent_profile:
         return RuntimeStrategyDecision(
             mode="persistent_profile",
@@ -276,6 +372,15 @@ def choose_runtime_strategy(
             used_storage_state=False,
             used_persistent_profile=True,
             fallback_allowed=True,
+        )
+
+    if prefer_persistent_profile and has_persistent_profile:
+        return RuntimeStrategyDecision(
+            mode="persistent_profile",
+            reason="tiktok_prefer_persistent_profile",
+            used_storage_state=False,
+            used_persistent_profile=True,
+            fallback_allowed=False,
         )
 
     if has_storage_state:
@@ -379,6 +484,8 @@ async def build_runtime_context_options(
     context_options["accept_downloads"] = accept_downloads
     if storage_state:
         context_options["storage_state"] = storage_state
+    if str(platform or "").strip().lower() == "tiktok":
+        context_options.pop("permissions", None)
     if "locale" not in context_options:
         context_options["locale"] = "zh-CN"
     # Runtime viewport is a shared baseline and should not inherit oversized
@@ -426,11 +533,12 @@ async def open_persistent_runtime_bundle(
     )
     if getattr(context, "pages", None):
         page = context.pages[0]
-        for extra_page in context.pages[1:]:
-            try:
-                await extra_page.close()
-            except Exception:
-                pass
+        if str(platform or "").strip().lower() != "tiktok":
+            for extra_page in context.pages[1:]:
+                try:
+                    await extra_page.close()
+                except Exception:
+                    pass
     else:
         page = await context.new_page()
     return RuntimeContextBundle(
@@ -485,7 +593,10 @@ async def snapshot_runtime_storage_state(
     persist: bool = True,
 ) -> Optional[Dict[str, Any]]:
     try:
-        storage_state = await context.storage_state()
+        storage_state = await read_context_storage_state(
+            platform=platform,
+            context=context,
+        )
     except Exception as exc:
         logger.warning(
             "Failed to read storage state for %s/%s: %s",
@@ -598,6 +709,45 @@ async def _wait_for_probe_page_ready(page: Any, *, settle_ms: int = 800) -> None
             await maybe_wait
 
 
+async def _wait_for_tiktok_entry_redirect(
+    page: Any,
+    *,
+    timeout_ms: int = 20000,
+    poll_ms: int = 250,
+) -> None:
+    """
+    TikTok seller entry pages may perform multiple client-side redirects while
+    warming caches. Avoid interrupting this stage with extra navigation.
+    """
+    elapsed = 0
+    last_url = None
+    stable_ticks = 0
+    while elapsed <= timeout_ms:
+        current_url = str(getattr(page, "url", "") or "").strip()
+        if current_url != last_url:
+            stable_ticks = 0
+            last_url = current_url
+        else:
+            stable_ticks += 1
+
+        normalized = current_url.lower()
+        if (
+            normalized
+            and normalized != "about:blank"
+            and (
+                "/homepage" in normalized
+                or "/account/login" in normalized
+                or "/login" in normalized
+            )
+            and stable_ticks >= 2
+        ):
+            return
+
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(poll_ms)
+        elapsed += poll_ms
+
+
 async def prime_runtime_page_for_login_gate(
     *,
     page: Any,
@@ -608,13 +758,20 @@ async def prime_runtime_page_for_login_gate(
     if current_url and current_url != "about:blank":
         return
 
-    login_url = str(
-        (account or {}).get("login_url") or get_platform_login_entry(platform) or ""
-    ).strip()
-    if not login_url:
-        return
-
-    await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+    normalized_platform = str(platform or "").strip().lower()
+    if normalized_platform == "tiktok":
+        base_url = _normalize_probe_base_url(platform, account)
+        if not base_url:
+            return
+        await page.goto(f"{base_url}/", wait_until="domcontentloaded", timeout=60000)
+        await _wait_for_tiktok_entry_redirect(page)
+    else:
+        login_url = str(
+            (account or {}).get("login_url") or get_platform_login_entry(platform) or ""
+        ).strip()
+        if not login_url:
+            return
+        await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
     await _wait_for_probe_page_ready(page, settle_ms=800)
 
 
@@ -643,6 +800,7 @@ async def check_login_gate_ready(
         current_url=str(getattr(page, "url", "") or ""),
         matched_signal=detection_result.matched_pattern or detection_result.detected_by,
         detected_by=getattr(detection_result, "detected_by", None),
+        platform=platform,
     )
     return gate_result.status is GateStatus.READY, gate_result
 
@@ -653,6 +811,12 @@ async def probe_runtime_login_gate(
     platform: str,
     account: Optional[Dict[str, Any]],
 ) -> tuple[bool, GateResult]:
+    if str(platform or "").strip().lower() == "tiktok":
+        await prime_runtime_page_for_login_gate(
+            page=page,
+            platform=platform,
+            account=account,
+        )
     await _wait_for_probe_page_ready(page, settle_ms=500)
     ready, gate_result = await check_login_gate_ready(page=page, platform=platform)
     if ready:

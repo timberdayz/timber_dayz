@@ -89,6 +89,44 @@ def test_login_gate_evidence_accepts_cookie_backed_shell_without_login_form():
     assert result.reason == "cookie-backed session confirmed"
 
 
+def test_tiktok_login_gate_rejects_cookie_only_root_entry():
+    result = evaluate_login_gate_evidence(
+        platform="tiktok",
+        evidence=LoginGateEvidence(
+            detector_status="logged_in",
+            detector_confidence=0.85,
+            auth_cookies_present=True,
+            login_form_visible=False,
+            logged_in_markers_present=False,
+            current_url="https://seller.tiktokshopglobalselling.com/",
+            matched_signal="sessionid",
+            detected_by="cookie",
+        ),
+    )
+
+    assert result.status is GateStatus.FAILED
+    assert result.reason == "tiktok page readiness not confirmed"
+
+
+def test_tiktok_login_gate_rejects_url_only_homepage_without_markers():
+    result = evaluate_login_gate_evidence(
+        platform="tiktok",
+        evidence=LoginGateEvidence(
+            detector_status="logged_in",
+            detector_confidence=0.90,
+            auth_cookies_present=False,
+            login_form_visible=False,
+            logged_in_markers_present=False,
+            current_url="https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG",
+            matched_signal="/homepage",
+            detected_by="url",
+        ),
+    )
+
+    assert result.status is GateStatus.FAILED
+    assert result.reason == "tiktok page readiness not confirmed"
+
+
 def test_export_complete_requires_existing_non_empty_file(tmp_path: Path):
     target = tmp_path / "out.xlsx"
     target.write_bytes(b"ok")

@@ -28,18 +28,12 @@ from modules.core.db import (
     ShopAccountCapability,
 )
 from modules.core.logger import get_logger
+from backend.services.collection_task_status import ACTIVE_STATUSES
 
 
 logger = get_logger(__name__)
 
-ACTIVE_COLLECTION_TASK_STATUSES = [
-    "running",
-    "queued",
-    "paused",
-    "verification_required",
-    "verification_submitted",
-    "manual_intervention_required",
-]
+ACTIVE_COLLECTION_TASK_STATUSES = list(ACTIVE_STATUSES)
 
 
 async def _resolve_runnable_scope_runtime(

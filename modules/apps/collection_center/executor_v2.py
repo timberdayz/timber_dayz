@@ -17,6 +17,7 @@ import time
 import uuid
 import shutil
 import inspect
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Tuple, Union
@@ -26,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 from modules.core.logger import get_logger
 from backend.services.verification_protocol import apply_verification_result_to_params, verification_input_mode
+from backend.services.collection_task_status import STATUS as TASK_STATUS
 from backend.services.main_account_session_coordinator import (
     MainAccountSessionCoordinator,
     get_main_account_session_coordinator,
@@ -189,7 +191,7 @@ async def _record_platform_shop_discovery_async(
 async def _load_session_async(platform: str, account_id: str, max_age_days: int = 30) -> Optional[Dict[str, Any]]:
     """在线程池中加载会话，避免阻塞事件循环。返回 session_data 或 None。"""
     from modules.utils.sessions.session_manager import SessionManager
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     def _load() -> Optional[Dict[str, Any]]:
         sm = SessionManager()
         return sm.load_session(platform, account_id, max_age_days=max_age_days)
@@ -227,7 +229,10 @@ def _bootstrap_session_from_profile_sync(
             )
             runtime_session.apply_stealth_init_scripts_sync(context)
             try:
-                storage_state = context.storage_state()
+                storage_state = runtime_session.read_context_storage_state_sync(
+                    platform=platform,
+                    context=context,
+                )
             finally:
                 context.close()
     except Exception as e:
@@ -275,7 +280,7 @@ async def _load_or_bootstrap_session_async(
     if session_data and isinstance(session_data.get("storage_state"), dict):
         return session_data
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
         _get_executor_pool(),
         lambda: _bootstrap_session_from_profile_sync(
@@ -289,7 +294,7 @@ async def _load_or_bootstrap_session_async(
 async def _save_session_async(platform: str, account_id: str, storage_state: Dict[str, Any]) -> bool:
     """在线程池中保存会话。"""
     from modules.utils.sessions.session_manager import SessionManager
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     def _save() -> bool:
         sm = SessionManager()
         return sm.save_session(platform, account_id, storage_state)
@@ -498,32 +503,84 @@ async def _prepare_runtime_page_bundle(
     }
 
 
-# Phase 9.4: 版本管理支持(懒加载,避免循环依赖)
-_version_service = None
+# Phase 9.4: Async-safe wrappers (run sync DB work in thread executor)
+def _select_component_version_sync(
+    *,
+    component_name: str,
+    force_version: str | None,
+    enable_ab_test: bool,
+) -> dict | None:
+    """Sync DB lookup for version selection. Run in thread executor."""
+    from backend.models.database import SessionLocal
+    from backend.services.component_version_service import ComponentVersionService
 
-def _get_version_service():
-    """懒加载版本管理服务(避免导入时的循环依赖)"""
-    global _version_service
-    if _version_service is None:
+    db = SessionLocal()
+    try:
+        service = ComponentVersionService(db)
+        selected = service.select_version_for_use(
+            component_name=component_name,
+            force_version=force_version,
+            enable_ab_test=enable_ab_test,
+        )
+        if not selected:
+            return None
+        return {
+            "id": getattr(selected, "id", None),
+            "version": getattr(selected, "version", None),
+            "file_path": getattr(selected, "file_path", None),
+        }
+    finally:
         try:
-            from backend.services.component_version_service import ComponentVersionService
-            from backend.models.database import SessionLocal
-            
-            db = SessionLocal()
-            _version_service = ComponentVersionService(db)
-            logger.info("ComponentVersionService initialized for executor")
-        except Exception as e:
-            logger.warning(f"Failed to initialize ComponentVersionService: {e}")
-            _version_service = False  # 标记为尝试过但失败
-    
-    return _version_service if _version_service is not False else None
+            db.close()
+        except Exception:
+            pass
 
+
+async def _select_component_version_async(
+    *,
+    component_name: str,
+    force_version: str | None,
+    enable_ab_test: bool,
+) -> dict | None:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _get_executor_pool(),
+        lambda: _select_component_version_sync(
+            component_name=component_name,
+            force_version=force_version,
+            enable_ab_test=enable_ab_test,
+        ),
+    )
+
+
+def _record_component_version_usage_sync(
+    *,
+    component_name: str,
+    version: str,
+    success: bool,
+) -> None:
+    """Sync DB writeback for usage statistics. Run in thread executor."""
+    from backend.models.database import SessionLocal
+    from backend.services.component_version_service import ComponentVersionService
+
+    db = SessionLocal()
+    try:
+        ComponentVersionService(db).record_usage(
+            component_name=component_name,
+            version=version,
+            success=success,
+        )
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
 
 @dataclass
 class CollectionResult:
     """采集结果(v4.7.0)"""
     task_id: str
-    status: str  # completed, partial_success, failed, cancelled, paused
+    status: str  # see backend.services.collection_task_status.STATUS
     files_collected: int = 0
     collected_files: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
@@ -690,7 +747,19 @@ class CollectionExecutorV2:
         effective_storage_state = storage_state
 
         if normalized_mode == "auto":
-            if effective_storage_state is None and session_owner_id:
+            has_persistent_profile = bool(
+                session_owner_id and runtime_session.runtime_profile_exists(platform, session_owner_id)
+            )
+            prefers_existing_persistent_profile = (
+                str(platform or "").strip().lower() == "tiktok"
+                and os.getenv("TIKTOK_RUNTIME_PREFER_PERSISTENT_PROFILE", "false").lower() == "true"
+                and has_persistent_profile
+            )
+            if (
+                effective_storage_state is None
+                and session_owner_id
+                and not prefers_existing_persistent_profile
+            ):
                 effective_storage_state = await runtime_session.load_or_bootstrap_runtime_storage_state(
                     platform=platform,
                     session_owner_id=session_owner_id,
@@ -700,9 +769,7 @@ class CollectionExecutorV2:
                 platform=platform,
                 session_owner_id=session_owner_id,
                 has_storage_state=bool(effective_storage_state),
-                has_persistent_profile=bool(
-                    session_owner_id and runtime_session.runtime_profile_exists(platform, session_owner_id)
-                ),
+                has_persistent_profile=has_persistent_profile,
                 force_persistent_profile=False,
                 execution_kind="formal_collection",
                 component_type="export",
@@ -999,7 +1066,10 @@ class CollectionExecutorV2:
         )
         if save_session_after_login and session_platform and session_account_id:
             try:
-                storage_state = await page.context.storage_state()
+                storage_state = await runtime_session.read_context_storage_state(
+                    platform=session_platform,
+                    context=page.context,
+                )
                 ok = await _save_session_async(session_platform, session_account_id, storage_state)
                 if ok:
                     logger.info(
@@ -1023,9 +1093,9 @@ class CollectionExecutorV2:
     @staticmethod
     def _verification_timeout_status(verification_type: str | None) -> str:
         return (
-            "manual_intervention_required"
+            TASK_STATUS.MANUAL_INTERVENTION_REQUIRED
             if verification_input_mode(verification_type) == "manual_continue"
-            else "paused"
+            else TASK_STATUS.PAUSED
         )
 
     @staticmethod
@@ -1111,7 +1181,7 @@ class CollectionExecutorV2:
             "collection_platform": collection_platform,
         }
     
-    def _load_component_with_version(
+    async def _load_component_with_version(
         self,
         component_name: str,
         params: Dict[str, Any],
@@ -1130,7 +1200,6 @@ class CollectionExecutorV2:
         Returns:
             加载的组件配置
         """
-        version_service = _get_version_service()
         
         # 解析 platform / 组件名（如 "shopee/login" -> shopee, login）
         parts = component_name.split("/", 1)
@@ -1138,30 +1207,23 @@ class CollectionExecutorV2:
         comp_name = parts[1] if len(parts) >= 2 else component_name
 
         # 如果版本服务不可用，优先 Python 组件
-        if version_service is None:
-            logger.debug(f"Version service not available, loading default component: {component_name}")
-            component = self.component_loader.build_component_dict_from_python(platform, comp_name, params)
-            if component:
-                return component
-            return self.component_loader.load(component_name, params)
-
         try:
             # 使用版本服务选择版本
-            selected_version = version_service.select_version_for_use(
+            selected_version = await _select_component_version_async(
                 component_name=component_name,
                 force_version=force_version,
                 enable_ab_test=enable_ab_test,
             )
 
-            if selected_version and getattr(selected_version, "file_path", "").strip().endswith(".py"):
+            if selected_version and str(selected_version.get("file_path") or "").strip().endswith(".py"):
                 # 按 file_path 加载，元数据优先类发现（兼容历史类名）
                 comp_type_derived = (
                     "export" if comp_name.endswith("_export") else comp_name
                 )
                 try:
                     Klass = self.component_loader.load_python_component_from_path(
-                        selected_version.file_path,
-                        version_id=selected_version.id,
+                        selected_version["file_path"],
+                        version_id=selected_version.get("id"),
                         platform=platform,
                         component_type=comp_type_derived,
                     )
@@ -1174,22 +1236,22 @@ class CollectionExecutorV2:
                         "data_domain": getattr(Klass, "data_domain", None),
                         "_params": params or {},
                         "_python_component_class": Klass,
-                        "_version_id": selected_version.id,
-                        "_version_number": selected_version.version,
+                        "_version_id": selected_version.get("id"),
+                        "_version_number": selected_version.get("version"),
                     }
                     return component
                 except Exception as e:
-                    logger.warning(f"Failed to load from file_path {getattr(selected_version, 'file_path')}: {e}, falling back")
+                    logger.warning(f"Failed to load from file_path {selected_version.get('file_path')}: {e}, falling back")
 
-            if selected_version and getattr(selected_version, "file_path", "").strip().endswith(".yaml"):
+            if selected_version and str(selected_version.get("file_path") or "").strip().endswith(".yaml"):
                 # 版本表仍存 .yaml 路径时，按组件名尝试 Python 组件（YAML 已迁离）
                 logger.debug(f"Version file_path is .yaml, loading Python component: {platform}/{comp_name}")
                 component = self.component_loader.build_component_dict_from_python(
                     platform, comp_name, params
                 )
                 if component:
-                    component["_version_id"] = selected_version.id
-                    component["_version_number"] = selected_version.version
+                    component["_version_id"] = selected_version.get("id")
+                    component["_version_number"] = selected_version.get("version")
                     return component
 
             # 无版本或默认：仅 Python 组件
@@ -1198,8 +1260,8 @@ class CollectionExecutorV2:
             )
             if component:
                 if selected_version:
-                    component["_version_id"] = selected_version.id
-                    component["_version_number"] = selected_version.version
+                    component["_version_id"] = selected_version.get("id")
+                    component["_version_number"] = selected_version.get("version")
                 return component
             raise FileNotFoundError(
                 f"Python component not found: {component_name} "
@@ -1401,6 +1463,15 @@ class CollectionExecutorV2:
 
         # 1.0 统一约定: 规范化 account_id, 决定是否使用按账号会话/指纹
         session_owner_id, shop_account_id, use_account_session_fingerprint = _resolve_session_scope(account_id, account)
+        if (
+            str(platform or "").strip().lower() == "tiktok"
+            and shop_account_id
+            and not session_owner_id
+        ):
+            # TikTok often does not provide a dedicated `main_account_id`.
+            # Persist session per shop account to avoid forced re-login.
+            session_owner_id = shop_account_id
+            use_account_session_fingerprint = True
         if not use_account_session_fingerprint or not session_owner_id:
             legacy_session_owner_id = str(
                 account_id
@@ -1633,7 +1704,7 @@ class CollectionExecutorV2:
         except TaskCancelledError:
             return CollectionResult(
                 task_id=task_id,
-                status="cancelled",
+                status=TASK_STATUS.CANCELLED,
                 files_collected=len(context.collected_files),
                 collected_files=context.collected_files,
                 error_message="任务已取消",
@@ -1678,7 +1749,7 @@ class CollectionExecutorV2:
                     task_id, 5, "登录开始",
                     details={"step_id": "login", "component": "login", "data_domain": None}
                 )
-                login_component = self._load_component_with_version(
+                login_component = await self._load_component_with_version(
                     f"{platform}/login",
                     params,
                     enable_ab_test=True  # 启用A/B测试
@@ -1761,13 +1832,13 @@ class CollectionExecutorV2:
                             # 尝试子域特定组件,如 shopee/services_agent_export([*] Phase 9.4: 版本选择)
                             component_name = f"{platform}/{domain}_{sub_domain}_export"
                             try:
-                                export_component = self._load_component_with_version(component_name, params, enable_ab_test=True)
+                                export_component = await self._load_component_with_version(component_name, params, enable_ab_test=True)
                             except FileNotFoundError:
                                 # 回退到通用组件
                                 component_name = f"{platform}/{domain}_export"
-                                export_component = self._load_component_with_version(component_name, params, enable_ab_test=True)
+                                export_component = await self._load_component_with_version(component_name, params, enable_ab_test=True)
                         else:
-                            export_component = self._load_component_with_version(component_name, params, enable_ab_test=True)
+                            export_component = await self._load_component_with_version(component_name, params, enable_ab_test=True)
                         
                         file_path = await self._execute_export_component(
                             page, 
@@ -1819,7 +1890,7 @@ class CollectionExecutorV2:
                             context.failed_domains.append({"domain": full_domain, "error": "验证码等待超时"})
                             return CollectionResult(
                                 task_id=task_id,
-                                status="failed",
+                                status=TASK_STATUS.FAILED,
                                 files_collected=len(context.collected_files),
                                 collected_files=context.collected_files,
                                 error_message="验证码等待超时",
@@ -1886,15 +1957,15 @@ class CollectionExecutorV2:
             
             if completed_count == 0 and failed_count > 0:
                 # 全部失败
-                final_status = "failed"
+                final_status = TASK_STATUS.FAILED
                 final_message = f"采集失败,0/{total_domains_count} 个域成功"
             elif failed_count > 0:
                 # 部分成功
-                final_status = "partial_success"
+                final_status = TASK_STATUS.PARTIAL_SUCCESS
                 final_message = f"部分成功,{completed_count}/{total_domains_count} 个域成功,{failed_count} 个失败"
             else:
                 # 全部成功
-                final_status = "completed"
+                final_status = TASK_STATUS.COMPLETED
                 final_message = f"采集完成,共采集 {len(processed_files)} 个文件"
             
             await self._update_status(task_id, 100, final_message)
@@ -1924,7 +1995,7 @@ class CollectionExecutorV2:
             
             return CollectionResult(
                 task_id=task_id,
-                status="cancelled",
+                status=TASK_STATUS.CANCELLED,
                 files_collected=len(context.collected_files),
                 collected_files=context.collected_files,
                 error_message="任务已取消",
@@ -1950,7 +2021,7 @@ class CollectionExecutorV2:
             
             return CollectionResult(
                 task_id=task_id,
-                status="failed",
+                status=TASK_STATUS.FAILED,
                 files_collected=len(context.collected_files),
                 collected_files=context.collected_files,
                 error_message=str(e),
@@ -1973,7 +2044,7 @@ class CollectionExecutorV2:
             except Exception as _e:
                 logger.debug("Close created browser_instance: %s", _e)
 
-    def _record_version_usage(self, component: Dict[str, Any], success: bool) -> None:
+    async def _record_version_usage(self, component: Dict[str, Any], success: bool) -> None:
         """
         记录版本使用情况(Phase 9.4)
         
@@ -1990,23 +2061,25 @@ class CollectionExecutorV2:
             return
         
         try:
-            version_service = _get_version_service()
-            if version_service:
-                # 从组件名称中提取实际的组件路径(移除版本号)
-                # 例如:shopee_login_v1.0 -> shopee/login
-                base_name = component_name.rsplit('_v', 1)[0] if '_v' in component_name else component_name
-                base_name = base_name.replace('_', '/')
-                
-                version_service.record_usage(
+            # 从组件名称中提取实际的组件路径(移除版本号)
+            # 例如: shopee_login_v1.0 -> shopee/login
+            base_name = (
+                component_name.rsplit("_v", 1)[0] if "_v" in component_name else component_name
+            ).replace("_", "/")
+
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                _get_executor_pool(),
+                lambda: _record_component_version_usage_sync(
                     component_name=base_name,
-                    version=version_number,
-                    success=success
-                )
-                
-                logger.debug(
-                    f"Recorded version usage: {base_name} v{version_number}, "
-                    f"success={success}"
-                )
+                    version=str(version_number),
+                    success=bool(success),
+                ),
+            )
+
+            logger.debug(
+                f"Recorded version usage: {base_name} v{version_number}, success={success}"
+            )
         except Exception as e:
             logger.warning(f"Failed to record version usage: {e}")
     
@@ -2292,7 +2365,10 @@ class CollectionExecutorV2:
 
                     await self._ensure_login_gate_ready(headed_page, platform)
                     if session_platform and session_account_id:
-                        storage_state = await headed_context.storage_state()
+                        storage_state = await runtime_session.read_context_storage_state(
+                            platform=session_platform,
+                            context=headed_context,
+                        )
                         await _save_session_async(session_platform, session_account_id, storage_state)
                 finally:
                     await headed_context.close()
@@ -2434,7 +2510,10 @@ class CollectionExecutorV2:
                 )
             if save_session_after_login and session_platform and session_account_id:
                 try:
-                    storage_state = await page.context.storage_state()
+                    storage_state = await runtime_session.read_context_storage_state(
+                        platform=session_platform,
+                        context=page.context,
+                    )
                     ok = await _save_session_async(session_platform, session_account_id, storage_state)
                     if ok:
                         logger.info("Task %s: session saved for %s/%s", task_id, session_platform, session_account_id)
@@ -2556,7 +2635,7 @@ class CollectionExecutorV2:
                         context.failed_domains.append({"domain": full_domain, "error": "验证码等待超时"})
                         return CollectionResult(
                             task_id=task_id,
-                            status="failed",
+                            status=TASK_STATUS.FAILED,
                             files_collected=len(context.collected_files),
                             collected_files=context.collected_files,
                             error_message="验证码等待超时",
@@ -2625,13 +2704,13 @@ class CollectionExecutorV2:
         failed_count = len(context.failed_domains)
         
         if completed_count == 0 and failed_count > 0:
-            final_status = "failed"
+            final_status = TASK_STATUS.FAILED
             final_message = f"Collection failed, 0/{total_domains_count} domains succeeded"
         elif failed_count > 0:
-            final_status = "partial_success"
+            final_status = TASK_STATUS.PARTIAL_SUCCESS
             final_message = f"Partial success, {completed_count}/{total_domains_count} domains succeeded, {failed_count} failed"
         else:
-            final_status = "completed"
+            final_status = TASK_STATUS.COMPLETED
             final_message = f"Collection completed, {len(processed_files)} files collected"
         
         await self._update_status(task_id, 100, final_message)
@@ -2801,7 +2880,7 @@ class CollectionExecutorV2:
                 success_result = True
         
         # [*] Phase 9.4: 记录版本使用情况
-        self._record_version_usage(component, success_result)
+        await self._record_version_usage(component, success_result)
         
         return success_result
     
@@ -4189,7 +4268,7 @@ class CollectionExecutorV2:
         if not context:
             return CollectionResult(
                 task_id=task_id,
-                status="failed",
+                status=TASK_STATUS.FAILED,
                 error_message="Task context not found",
             )
         
@@ -4248,6 +4327,13 @@ class CollectionExecutorV2:
         """
         start_time = datetime.now()
         session_owner_id, shop_account_id, use_account_session_fingerprint = _resolve_session_scope(account_id, account)
+        if (
+            str(platform or "").strip().lower() == "tiktok"
+            and shop_account_id
+            and not session_owner_id
+        ):
+            session_owner_id = shop_account_id
+            use_account_session_fingerprint = True
         if not use_account_session_fingerprint or not session_owner_id:
             unresolved_shop_account_id = str(
                 shop_account_id
@@ -4416,12 +4502,20 @@ class CollectionExecutorV2:
         await self._update_status(task_id, 15, f"开始并行采集 {len(data_domains)} 个数据域...")
         
         # 将数据域分组,每组max_parallel个
-        domain_batches = []
-        for i in range(0, len(data_domains), max_parallel):
-            batch = data_domains[i:i+max_parallel]
-            domain_batches.append(batch)
-        
-        logger.info(f"Task {task_id}: Split into {len(domain_batches)} batches (max_parallel={max_parallel})")
+        if not data_domains:
+            return CollectionResult(
+                task_id=task_id,
+                status=TASK_STATUS.FAILED,
+                error_message="No data domains provided",
+            )
+
+        def _sanitize_domain_dirname(value: str) -> str:
+            raw = str(value or "").strip()
+            if not raw:
+                return "unknown"
+            cleaned = re.sub(r"[\\/:*?\"<>|\\s]+", "_", raw)
+            cleaned = cleaned.strip("._-") or "unknown"
+            return cleaned[:120]
         
         domain_context_options: Optional[Dict[str, Any]] = None
         if use_account_session_fingerprint and session_owner_id:
@@ -4436,47 +4530,56 @@ class CollectionExecutorV2:
         domain_context_options = dict(domain_context_options)
         domain_context_options.setdefault("accept_downloads", True)
 
-        for batch_index, batch in enumerate(domain_batches):
-            logger.info(f"Task {task_id}: Processing batch {batch_index+1}/{len(domain_batches)} with {len(batch)} domains")
-            tasks = []
-            for domain in batch:
-                task = self._execute_single_domain_parallel(
-                    task_id=task_id,
-                    platform=platform,
-                    account=account,
-                    data_domain=domain,
-                    date_range=date_range,
-                    granularity=granularity,
-                    browser=browser,
-                    storage_state=storage_state,
-                    task_download_dir=task_download_dir,
-                    domain_index=data_domains.index(domain),
-                    total_domains=len(data_domains),
-                    context_options=domain_context_options,
-                    runtime_manifests=runtime_manifests,
-                )
-                tasks.append(task)
-            
-            # 并行执行这一批
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # 处理结果
-            for i, result in enumerate(results):
-                domain = batch[i]
-                if isinstance(result, Exception):
-                    error_msg = f"{type(result).__name__}: {str(result)}"
-                    logger.error(f"Task {task_id}: Domain {domain} failed - {error_msg}")
-                    context.failed_domains.append({"domain": domain, "error": error_msg})
-                elif result:
-                    # 成功
-                    file_path, success = result
-                    if success:
-                        context.completed_domains.append(domain)
-                        if file_path:
-                            context.collected_files.append(file_path)
-                        logger.info(f"Task {task_id}: Domain {domain} completed")
-                    else:
-                        context.failed_domains.append({"domain": domain, "error": "Execution failed"})
+        semaphore = asyncio.Semaphore(max(1, int(max_parallel or 1)))
+        total_domains = len(data_domains)
+
+        async def _run_domain(domain: str, domain_index: int):
+            await self._check_cancelled(task_id)
+            async with semaphore:
+                try:
+                    domain_dir = task_download_dir / _sanitize_domain_dirname(domain)
+                    domain_dir.mkdir(parents=True, exist_ok=True)
+                    file_path, ok = await self._execute_single_domain_parallel(
+                        task_id=task_id,
+                        platform=platform,
+                        account=account,
+                        data_domain=domain,
+                        date_range=date_range,
+                        granularity=granularity,
+                        browser=browser,
+                        storage_state=storage_state,
+                        task_download_dir=domain_dir,
+                        domain_index=domain_index,
+                        total_domains=total_domains,
+                        context_options=domain_context_options,
+                        runtime_manifests=runtime_manifests,
+                    )
+                    return domain, file_path, ok, None
+                except Exception as e:
+                    return domain, None, False, f"{type(e).__name__}: {e}"
+
+        tasks = [
+            asyncio.create_task(_run_domain(domain, domain_index))
+            for domain_index, domain in enumerate(list(data_domains or []))
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, Exception):
+                error_msg = f"{type(result).__name__}: {str(result)}"
+                logger.error(f"Task {task_id}: Parallel domain execution failed - {error_msg}")
+                context.failed_domains.append({"domain": "unknown", "error": error_msg})
+                continue
+
+            domain, file_path, ok, error_msg = result
+            if ok:
+                context.completed_domains.append(domain)
+                if file_path:
+                    context.collected_files.append(file_path)
+                logger.info(f"Task {task_id}: Domain {domain} completed")
+            else:
+                context.failed_domains.append({"domain": domain, "error": error_msg or "Execution failed"})
         
         # 3. 处理采集到的文件 + 步骤可观测成对打点
         file_process_start = datetime.now()
