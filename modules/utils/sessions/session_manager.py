@@ -20,8 +20,70 @@ from modules.apps.collection_center.runtime_session import (
     tiktok_storage_state_meets_quality_gate,
     tiktok_storage_state_quality_score,
 )
+from modules.utils.login_status_detector import LOGIN_DETECTION_CONFIG
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _extract_state_payload(storage_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(storage_state, dict):
+        return {}
+    wrapped = storage_state.get("storage_state")
+    if isinstance(wrapped, dict):
+        return wrapped
+    return storage_state
+
+
+def _cookies_from_state(storage_state: Optional[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    payload = _extract_state_payload(storage_state)
+    cookies = payload.get("cookies")
+    return cookies if isinstance(cookies, list) else []
+
+
+def _origins_from_state(storage_state: Optional[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    payload = _extract_state_payload(storage_state)
+    origins = payload.get("origins")
+    return origins if isinstance(origins, list) else []
+
+
+def _auth_cookie_names_for_platform(platform: str) -> set[str]:
+    config = LOGIN_DETECTION_CONFIG.get(str(platform or "").strip().lower(), {})
+    values = config.get("auth_cookies") if isinstance(config, dict) else None
+    return {str(item).strip() for item in values or [] if str(item).strip()}
+
+
+def session_quality_score(platform: str, storage_state: Optional[Dict[str, Any]]) -> int:
+    normalized_platform = str(platform or "").strip().lower()
+    if normalized_platform == "tiktok":
+        return tiktok_storage_state_quality_score(storage_state)
+
+    cookies = _cookies_from_state(storage_state)
+    origins = _origins_from_state(storage_state)
+    cookie_names = {str(cookie.get("name") or "").strip() for cookie in cookies if isinstance(cookie, dict)}
+    auth_cookie_names = _auth_cookie_names_for_platform(normalized_platform)
+    auth_hits = len(cookie_names.intersection(auth_cookie_names))
+    score = 0
+    score += min(len(cookies), 20)
+    score += min(len(origins) * 3, 12)
+    score += auth_hits * 5
+    if len(cookies) >= 10:
+        score += 5
+    if len(cookies) >= 20:
+        score += 5
+    return score
+
+
+def session_meets_quality_gate(platform: str, storage_state: Optional[Dict[str, Any]]) -> bool:
+    normalized_platform = str(platform or "").strip().lower()
+    if normalized_platform == "tiktok":
+        return tiktok_storage_state_meets_quality_gate(storage_state)
+
+    cookies = _cookies_from_state(storage_state)
+    origins = _origins_from_state(storage_state)
+    cookie_names = {str(cookie.get("name") or "").strip() for cookie in cookies if isinstance(cookie, dict)}
+    auth_cookie_names = _auth_cookie_names_for_platform(normalized_platform)
+    auth_hits = len(cookie_names.intersection(auth_cookie_names))
+    return auth_hits >= 1 and len(cookies) >= 3 and (len(origins) >= 1 or len(cookies) >= 8)
 
 
 def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
@@ -83,6 +145,13 @@ class SessionManager:
             "persistent_profile_path": str(self.get_persistent_profile_path(platform, account_id)),
             "legacy_profile_path": str(self.get_profile_path(platform, account_id)),
         }
+
+    def get_session_metadata(self, platform: str, account_id: str) -> Dict[str, Any]:
+        session = self.load_session(platform, account_id, max_age_days=None)
+        if not isinstance(session, dict):
+            return {}
+        metadata = session.get("metadata")
+        return metadata if isinstance(metadata, dict) else {}
 
     def get_persistent_profile_path(self, platform: str, account_id: str) -> Path:
         """
@@ -282,11 +351,12 @@ class SessionManager:
 
                 return merged
 
+            old_state = None
+            if existing_session and isinstance(existing_session.get("storage_state"), dict):
+                old_state = existing_session.get("storage_state")
+
             merged_storage_state: Dict[str, Any] = storage_state or {}
             if normalized_platform == "tiktok":
-                old_state = None
-                if existing_session and isinstance(existing_session.get("storage_state"), dict):
-                    old_state = existing_session.get("storage_state")
                 merged_storage_state = _merge_tiktok_storage_state(old_state, storage_state or {})
                 old_score = tiktok_storage_state_quality_score(old_state)
                 new_score = tiktok_storage_state_quality_score(storage_state or {})
@@ -319,22 +389,63 @@ class SessionManager:
                 except Exception:
                     pass
 
+            old_metadata = existing_session.get("metadata") if isinstance(existing_session, dict) else {}
+            old_metadata = old_metadata if isinstance(old_metadata, dict) else {}
+            incoming_metadata = metadata if isinstance(metadata, dict) else {}
+
+            old_score = session_quality_score(normalized_platform, old_state)
+            new_score = session_quality_score(normalized_platform, storage_state or {})
+            merged_score = session_quality_score(normalized_platform, merged_storage_state)
+            old_gate = session_meets_quality_gate(normalized_platform, old_state)
+            merged_gate = session_meets_quality_gate(normalized_platform, merged_storage_state)
+            old_protected = bool(old_metadata.get("protected") or old_metadata.get("manual_seeded"))
+            incoming_manual = bool(incoming_metadata.get("manual_seeded"))
+
+            selected_state = merged_storage_state
+            selected_score = merged_score
+            selected_gate = merged_gate
+
+            if old_state is not None:
+                if old_protected and selected_score < old_score:
+                    selected_state = old_state
+                    selected_score = old_score
+                    selected_gate = old_gate
+                elif selected_score < old_score and old_gate:
+                    selected_state = old_state
+                    selected_score = old_score
+                    selected_gate = old_gate
+
             # created_at 不应该在每次 save 时重置，否则 max_age_days 将失效
             created_at = time.time()
             if existing_session and isinstance(existing_session.get("created_at"), (int, float)):
                 created_at = float(existing_session.get("created_at"))
 
             merged_metadata: Dict[str, Any] = {}
-            if existing_session and isinstance(existing_session.get("metadata"), dict):
-                merged_metadata.update(existing_session.get("metadata") or {})
-            if metadata:
-                merged_metadata.update(metadata)
+            merged_metadata.update(old_metadata)
+            merged_metadata.update(incoming_metadata)
+            merged_metadata["quality_score"] = selected_score
+            merged_metadata["quality_gate_passed"] = bool(selected_gate)
+            if incoming_manual:
+                merged_metadata["quality_source"] = "manual"
+                merged_metadata["manual_seeded"] = True
+                merged_metadata["protected"] = True
+            else:
+                if old_protected and selected_state is old_state:
+                    merged_metadata["quality_source"] = (
+                        str(old_metadata.get("quality_source") or "manual").strip().lower() or "manual"
+                    )
+                else:
+                    merged_metadata["quality_source"] = "automatic"
+                if old_protected:
+                    merged_metadata["protected"] = True
+                    if old_metadata.get("manual_seeded"):
+                        merged_metadata["manual_seeded"] = True
             
             # 准备保存的数据
             session_data = {
                 "platform": platform,
                 "account_id": account_id,
-                "storage_state": merged_storage_state,
+                "storage_state": selected_state,
                 "created_at": created_at,
                 "last_used_at": time.time(),
                 "metadata": merged_metadata,

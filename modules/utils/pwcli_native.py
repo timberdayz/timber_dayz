@@ -215,7 +215,7 @@ def _write_raw_storage_state(path: Path, storage_state: dict[str, Any]) -> None:
     path.write_text(json.dumps(storage_state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def save_default_storage_state_from_context(metadata: dict[str, Any], context) -> None:
+def save_default_storage_state_from_context(metadata: dict[str, Any], context, session_metadata: dict[str, Any] | None = None) -> None:
     state_path = str(metadata.get("default_state_path") or "").strip()
     state_mode = str(metadata.get("default_state_mode") or "").strip().lower()
     if not state_path or not state_mode:
@@ -228,7 +228,12 @@ def save_default_storage_state_from_context(metadata: dict[str, Any], context) -
         platform = str(metadata.get("platform") or "").strip().lower()
         account_id = str(metadata.get("account_id") or "").strip()
         if platform and account_id:
-            SessionManager(base_path=REPO_ROOT / "data" / "sessions").save_session(platform, account_id, storage_state)
+            SessionManager(base_path=REPO_ROOT / "data" / "sessions").save_session(
+                platform,
+                account_id,
+                storage_state,
+                metadata=session_metadata,
+            )
         return
 
     _write_raw_storage_state(Path(state_path), storage_state)
@@ -795,7 +800,15 @@ def command_state_save(session: str, filename: str | None) -> int:
             context.storage_state(path=str(target))
             print(target)
         elif state_mode == "session_manager" and default_state_path:
-            save_default_storage_state_from_context(metadata, context)
+            save_default_storage_state_from_context(
+                metadata,
+                context,
+                session_metadata={
+                    "quality_source": "manual",
+                    "manual_seeded": True,
+                    "protected": True,
+                },
+            )
             synced_default = True
             print(default_state_path)
         else:

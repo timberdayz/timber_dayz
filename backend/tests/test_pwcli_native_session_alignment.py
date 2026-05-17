@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 from modules.utils import pwcli_native
 
@@ -133,3 +134,43 @@ def test_page_summary_tolerates_console_buffer_navigation_errors() -> None:
 
     assert "Page URL: https://example.com" in summary
     assert "Page Title: Example" in summary
+
+
+def test_save_default_storage_state_from_context_marks_account_state_as_manual_seeded(monkeypatch) -> None:
+    class _FakeContext:
+        def storage_state(self):
+            return {"cookies": [{"name": "a"}], "origins": []}
+
+    saved = Mock()
+
+    class _FakeSessionManager:
+        def __init__(self, base_path=None):  # noqa: ANN001
+            self.base_path = base_path
+
+        def save_session(self, platform, account_id, storage_state, metadata=None):  # noqa: ANN001
+            saved(platform, account_id, storage_state, metadata)
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager",
+        _FakeSessionManager,
+    )
+
+    pwcli_native.save_default_storage_state_from_context(
+        {
+            "platform": "tiktok",
+            "account_id": "acc-1",
+            "default_state_mode": "session_manager",
+            "default_state_path": "ignored",
+        },
+        _FakeContext(),
+        session_metadata={
+            "quality_source": "manual",
+            "manual_seeded": True,
+            "protected": True,
+        },
+    )
+
+    saved.assert_called_once()
+    _, _, _, metadata = saved.call_args.args
+    assert metadata["manual_seeded"] is True
+    assert metadata["protected"] is True

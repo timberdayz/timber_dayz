@@ -233,6 +233,11 @@ def _extract_runtime_metadata_from_logs(logs: List[Any]) -> Optional[dict]:
             "runtime_timezone": details.get("runtime_timezone"),
             "runtime_accept_language": details.get("runtime_accept_language"),
             "probe_urls": details.get("probe_urls"),
+            "session_quality_score": details.get("session_quality_score"),
+            "session_quality_gate_passed": details.get("session_quality_gate_passed"),
+            "session_quality_source": details.get("session_quality_source"),
+            "session_manual_seeded": details.get("session_manual_seeded"),
+            "session_protected": details.get("session_protected"),
         }
     return None
 

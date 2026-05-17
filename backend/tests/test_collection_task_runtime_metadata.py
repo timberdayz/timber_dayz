@@ -58,6 +58,11 @@ def test_extract_runtime_metadata_from_logs_preserves_session_diagnostics() -> N
                 "runtime_locale": "en-SG",
                 "runtime_timezone": "Asia/Singapore",
                 "runtime_accept_language": "en-SG,en;q=0.9",
+                "session_quality_score": 33,
+                "session_quality_gate_passed": True,
+                "session_quality_source": "manual",
+                "session_manual_seeded": True,
+                "session_protected": True,
                 "probe_urls": [
                     "https://seller.tiktok.com/homepage",
                     "https://seller.tiktok.com/account/login",
@@ -78,6 +83,11 @@ def test_extract_runtime_metadata_from_logs_preserves_session_diagnostics() -> N
     assert metadata["runtime_locale"] == "en-SG"
     assert metadata["runtime_timezone"] == "Asia/Singapore"
     assert metadata["runtime_accept_language"] == "en-SG,en;q=0.9"
+    assert metadata["session_quality_score"] == 33
+    assert metadata["session_quality_gate_passed"] is True
+    assert metadata["session_quality_source"] == "manual"
+    assert metadata["session_manual_seeded"] is True
+    assert metadata["session_protected"] is True
     assert metadata["probe_urls"] == [
         "https://seller.tiktok.com/homepage",
         "https://seller.tiktok.com/account/login",

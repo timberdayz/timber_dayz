@@ -863,10 +863,19 @@ class CollectionExecutorV2:
         params: Dict[str, Any],
         runtime_bundle: Any,
     ) -> Dict[str, Any]:
+        session_owner_id = params.get("main_account_id")
+        session_metadata: Dict[str, Any] = {}
+        if session_owner_id:
+            try:
+                from modules.utils.sessions.session_manager import SessionManager
+
+                session_metadata = SessionManager().get_session_metadata(platform, session_owner_id)
+            except Exception:
+                session_metadata = {}
         context_options = getattr(runtime_bundle, "context_options", {}) or {}
         extra_headers = context_options.get("extra_http_headers", {}) or {}
         return {
-            "session_owner_id": params.get("main_account_id"),
+            "session_owner_id": session_owner_id,
             "shop_account_id": params.get("shop_account_id"),
             "persistent_profile_path": getattr(runtime_bundle, "profile_path", None),
             "profile_contains_state": bool(getattr(runtime_bundle, "reused_session", False)),
@@ -880,6 +889,11 @@ class CollectionExecutorV2:
                 platform=platform,
                 account=params.get("account") if isinstance(params.get("account"), dict) else None,
             ),
+            "session_quality_score": session_metadata.get("quality_score"),
+            "session_quality_gate_passed": session_metadata.get("quality_gate_passed"),
+            "session_quality_source": session_metadata.get("quality_source"),
+            "session_manual_seeded": session_metadata.get("manual_seeded"),
+            "session_protected": session_metadata.get("protected"),
         }
 
     async def _execute_shared_login_phase(

@@ -365,6 +365,21 @@
             <el-descriptions-item v-if="detailTask.session_source" label="会话来源">
               {{ getSessionSourceLabel(detailTask.session_source) }}
             </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.session_quality_source" label="??????">
+              {{ getSessionQualitySourceLabel(detailTask.session_quality_source) }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.session_quality_score !== null && detailTask.session_quality_score !== undefined" label="??????">
+              {{ detailTask.session_quality_score }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.session_quality_gate_passed !== null && detailTask.session_quality_gate_passed !== undefined" label="??????">
+              {{ detailTask.session_quality_gate_passed ? '???' : '???' }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.session_manual_seeded !== null && detailTask.session_manual_seeded !== undefined" label="??????">
+              {{ detailTask.session_manual_seeded ? '?' : '?' }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.session_protected !== null && detailTask.session_protected !== undefined" label="??????">
+              {{ detailTask.session_protected ? '???' : '???' }}
+            </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.runtime_strategy_reason" label="会话策略原因">
               {{ getRuntimeStrategyReasonLabel(detailTask.runtime_strategy_reason) }}
             </el-descriptions-item>
@@ -1003,6 +1018,14 @@ const getSessionSourceLabel = (source) => {
     storage_state: 'storage_state 快照',
     persistent_profile: '持久化浏览器档案',
     fresh_login: '本次重新登录'
+  }
+  return labels[source] || source || '-'
+}
+
+const getSessionQualitySourceLabel = (source) => {
+  const labels = {
+    manual: '????',
+    automatic: '????'
   }
   return labels[source] || source || '-'
 }
