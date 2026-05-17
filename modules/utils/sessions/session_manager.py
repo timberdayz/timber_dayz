@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import Dict, Optional, Any, Union, List
 from datetime import datetime, timedelta
 from loguru import logger
+from modules.apps.collection_center.runtime_session import (
+    tiktok_storage_state_meets_quality_gate,
+    tiktok_storage_state_quality_score,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -159,15 +163,181 @@ class SessionManager:
         """
         try:
             session_file = self.get_session_path(platform, account_id)
+
+            normalized_platform = str(platform or "").strip().lower()
+            existing_session: Optional[Dict[str, Any]] = None
+            if session_file.exists():
+                try:
+                    with open(session_file, "r", encoding="utf-8") as fh:
+                        existing_session = json.load(fh)
+                except Exception:
+                    existing_session = None
+
+            def _merge_tiktok_storage_state(
+                old_state: Optional[Dict[str, Any]],
+                new_state: Dict[str, Any],
+            ) -> Dict[str, Any]:
+                """
+                TikTok 特殊处理：
+                - storage_state 可能在页面尚未完成 bootstrap 时被读取，导致 origins/localStorage 为空
+                - 一旦把“空 origins”的快照写回磁盘，会覆盖掉历史上更完整的会话，从而降低后续复用质量
+
+                合并策略（尽量保守，避免降级）：
+                - cookies：按 (name, domain, path) 去重，优先使用 new_state 的值
+                - origins：按 origin 去重，localStorage 按 name 去重，优先使用 new_state 的值
+                - 当 new_state.origins 为空时，保留 old_state.origins（不降级）
+                """
+                if not isinstance(new_state, dict):
+                    return dict(old_state or {})
+                if not isinstance(old_state, dict):
+                    return dict(new_state)
+
+                merged: Dict[str, Any] = dict(old_state)
+
+                old_cookies = old_state.get("cookies") if isinstance(old_state.get("cookies"), list) else []
+                new_cookies = new_state.get("cookies") if isinstance(new_state.get("cookies"), list) else []
+                cookie_map: Dict[tuple[str, str, str], Dict[str, Any]] = {}
+                for cookie in old_cookies:
+                    if not isinstance(cookie, dict):
+                        continue
+                    key = (
+                        str(cookie.get("name") or ""),
+                        str(cookie.get("domain") or ""),
+                        str(cookie.get("path") or ""),
+                    )
+                    cookie_map[key] = cookie
+                for cookie in new_cookies:
+                    if not isinstance(cookie, dict):
+                        continue
+                    key = (
+                        str(cookie.get("name") or ""),
+                        str(cookie.get("domain") or ""),
+                        str(cookie.get("path") or ""),
+                    )
+                    cookie_map[key] = cookie
+                if cookie_map:
+                    merged["cookies"] = list(cookie_map.values())
+
+                old_origins = old_state.get("origins") if isinstance(old_state.get("origins"), list) else []
+                new_origins = new_state.get("origins") if isinstance(new_state.get("origins"), list) else []
+
+                def _norm_origin(value: Any) -> str:
+                    return str(value or "").strip()
+
+                def _merge_origin(old_origin: Dict[str, Any], new_origin: Dict[str, Any]) -> Dict[str, Any]:
+                    merged_origin: Dict[str, Any] = dict(old_origin or {})
+                    for key, value in (new_origin or {}).items():
+                        if key != "localStorage":
+                            merged_origin[key] = value
+
+                    old_ls = old_origin.get("localStorage") if isinstance(old_origin.get("localStorage"), list) else []
+                    new_ls = new_origin.get("localStorage") if isinstance(new_origin.get("localStorage"), list) else []
+                    ls_map: Dict[str, Dict[str, Any]] = {}
+                    for item in old_ls:
+                        if not isinstance(item, dict):
+                            continue
+                        name = str(item.get("name") or "").strip()
+                        if not name:
+                            continue
+                        ls_map[name] = item
+                    for item in new_ls:
+                        if not isinstance(item, dict):
+                            continue
+                        name = str(item.get("name") or "").strip()
+                        if not name:
+                            continue
+                        ls_map[name] = item
+                    if ls_map:
+                        merged_origin["localStorage"] = list(ls_map.values())
+                    return merged_origin
+
+                origin_map: Dict[str, Dict[str, Any]] = {}
+                for origin in old_origins:
+                    if not isinstance(origin, dict):
+                        continue
+                    key = _norm_origin(origin.get("origin"))
+                    if not key:
+                        continue
+                    origin_map[key] = origin
+
+                for origin in new_origins:
+                    if not isinstance(origin, dict):
+                        continue
+                    key = _norm_origin(origin.get("origin"))
+                    if not key:
+                        continue
+                    if key in origin_map and isinstance(origin_map[key], dict):
+                        origin_map[key] = _merge_origin(origin_map[key], origin)
+                    else:
+                        origin_map[key] = origin
+
+                if origin_map:
+                    merged["origins"] = list(origin_map.values())
+
+                # Copy any extra fields from new_state (but do not erase old fields when new is missing).
+                for key, value in new_state.items():
+                    if key in {"cookies", "origins"}:
+                        continue
+                    merged[key] = value
+
+                return merged
+
+            merged_storage_state: Dict[str, Any] = storage_state or {}
+            if normalized_platform == "tiktok":
+                old_state = None
+                if existing_session and isinstance(existing_session.get("storage_state"), dict):
+                    old_state = existing_session.get("storage_state")
+                merged_storage_state = _merge_tiktok_storage_state(old_state, storage_state or {})
+                old_score = tiktok_storage_state_quality_score(old_state)
+                new_score = tiktok_storage_state_quality_score(storage_state or {})
+                merged_score = tiktok_storage_state_quality_score(merged_storage_state)
+                try:
+                    old_origins = old_state.get("origins") if isinstance(old_state, dict) else None
+                    new_origins = (storage_state or {}).get("origins") if isinstance(storage_state, dict) else None
+                    merged_origins = merged_storage_state.get("origins") if isinstance(merged_storage_state, dict) else None
+                    old_count = len(old_origins) if isinstance(old_origins, list) else 0
+                    new_count = len(new_origins) if isinstance(new_origins, list) else 0
+                    merged_count = len(merged_origins) if isinstance(merged_origins, list) else 0
+                    logger.debug(
+                        "TikTok session merge: old_origins=%s new_origins=%s merged_origins=%s (%s/%s)",
+                        old_count,
+                        new_count,
+                        merged_count,
+                        platform,
+                        account_id,
+                    )
+                    logger.debug(
+                        "TikTok session quality: old=%s new=%s merged=%s gate(new)=%s gate(merged)=%s (%s/%s)",
+                        old_score,
+                        new_score,
+                        merged_score,
+                        tiktok_storage_state_meets_quality_gate(storage_state or {}),
+                        tiktok_storage_state_meets_quality_gate(merged_storage_state),
+                        platform,
+                        account_id,
+                    )
+                except Exception:
+                    pass
+
+            # created_at 不应该在每次 save 时重置，否则 max_age_days 将失效
+            created_at = time.time()
+            if existing_session and isinstance(existing_session.get("created_at"), (int, float)):
+                created_at = float(existing_session.get("created_at"))
+
+            merged_metadata: Dict[str, Any] = {}
+            if existing_session and isinstance(existing_session.get("metadata"), dict):
+                merged_metadata.update(existing_session.get("metadata") or {})
+            if metadata:
+                merged_metadata.update(metadata)
             
             # 准备保存的数据
             session_data = {
                 "platform": platform,
                 "account_id": account_id,
-                "storage_state": storage_state,
-                "created_at": time.time(),
+                "storage_state": merged_storage_state,
+                "created_at": created_at,
                 "last_used_at": time.time(),
-                "metadata": metadata or {}
+                "metadata": merged_metadata,
             }
             
             # 保存到文件

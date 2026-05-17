@@ -16,6 +16,10 @@ from modules.platforms.tiktok.components._download_helpers import (
     resolve_export_timeout_ms,
     save_download_to_target,
 )
+from modules.platforms.tiktok.components._runtime_diagnostics import (
+    attach_tiktok_runtime_diagnostics,
+    log_tiktok_runtime_diagnostics,
+)
 from modules.platforms.tiktok.components.export import TiktokExport
 from modules.platforms.tiktok.components.shop_switch import TiktokShopSwitch
 
@@ -29,7 +33,16 @@ class TiktokAnalyticsExport(ExportComponent):
 
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
+        self._runtime_logger = getattr(ctx, "logger", None)
         self._download_capture = None
+
+    def _log_info(self, message: str, *args: Any) -> None:
+        if self._runtime_logger is None:
+            return
+        try:
+            self._runtime_logger.info(message, *args)
+        except Exception:
+            pass
 
     def _target_region(self) -> str | None:
         config = self.ctx.config or {}
@@ -175,7 +188,14 @@ class TiktokAnalyticsExport(ExportComponent):
 
         region = self._target_region() or self._target_region_from_page_url(current_url)
         target_url = self._analytics_page_url(region) if region else self._generic_analytics_page_url()
+        self._log_info(
+            "tiktok_analytics_export navigating from url=%s to target=%s",
+            current_url or "UNKNOWN",
+            target_url,
+        )
+        await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="analytics_before_goto")
         current_url = await goto_when_ready(page, target_url, goto_timeout=60000, settle_timeout_ms=6000, poll_ms=200)
+        await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="analytics_after_goto")
         if self._is_login_page(current_url):
             raise RuntimeError("login required before analytics export")
         return current_url
@@ -260,12 +280,14 @@ class TiktokAnalyticsExport(ExportComponent):
         return "unknown"
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+        attach_tiktok_runtime_diagnostics(page)
         try:
             current_url = await self.ensure_page_ready(page)
             current_url = await self.ensure_analytics_ready(page)
             await self.ensure_shop_ready(page, current_url)
             await self.ensure_date_ready(page)
         except RuntimeError as exc:
+            await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="analytics_runtime_error")
             return ExportResult(success=False, message=str(exc), file_path=None)
 
         triggered = await self.trigger_export(page)

@@ -258,13 +258,57 @@ class UniversalPopupHandler:
             int: 关闭的弹窗数量
         """
         # 获取轮询策略
-        strategy = self.get_poll_strategy(platform)
+        effective_platform = str(platform or "").strip().lower() or None
+        current_url = ""
+        try:
+            current_url = str(getattr(page, "url", "") or "").strip()
+        except Exception:
+            current_url = ""
+
+        if effective_platform is None and current_url:
+            lowered = current_url.lower()
+            if "tiktokshopglobalselling.com" in lowered:
+                effective_platform = "tiktok"
+
+        if effective_platform == "tiktok":
+            lowered = (current_url or "").lower()
+            on_products_page = "/compass/product-analysis" in lowered
+            if not on_products_page:
+                logger.info(
+                    "Skip popup auto-close for TikTok before products ready (url=%s)",
+                    current_url or "UNKNOWN",
+                )
+                return 0
+
+            try:
+                challenge_markers = (
+                    "请完成下列验证后继续",
+                    "unable to verify",
+                    "please try again",
+                )
+                for marker in challenge_markers:
+                    loc = page.get_by_text(marker, exact=False).first
+                    if await loc.is_visible(timeout=150):
+                        logger.info(
+                            "Skip popup auto-close for TikTok because challenge is visible (marker=%s, url=%s)",
+                            marker,
+                            current_url or "UNKNOWN",
+                        )
+                        return 0
+            except Exception:
+                logger.info(
+                    "Skip popup auto-close for TikTok due to challenge detection uncertainty (url=%s)",
+                    current_url or "UNKNOWN",
+                )
+                return 0
+
+        strategy = self.get_poll_strategy(effective_platform or platform)
         max_rounds = max_rounds or strategy['max_rounds']
         interval_ms = interval_ms or strategy['interval_ms']
         watch_ms = watch_ms or strategy['watch_ms']
         
         # 获取选择器列表
-        close_selectors = self.get_close_selectors(platform)
+        close_selectors = self.get_close_selectors(effective_platform or platform)
         
         closed_count = 0
         start_time = asyncio.get_event_loop().time()

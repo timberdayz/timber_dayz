@@ -16,6 +16,10 @@ from modules.platforms.tiktok.components._download_helpers import (
     resolve_export_timeout_ms,
     save_download_to_target,
 )
+from modules.platforms.tiktok.components._runtime_diagnostics import (
+    attach_tiktok_runtime_diagnostics,
+    log_tiktok_runtime_diagnostics,
+)
 from modules.platforms.tiktok.components.export import TiktokExport
 from modules.platforms.tiktok.components.shop_switch import TiktokShopSwitch
 
@@ -224,10 +228,18 @@ class TiktokServicesAgentExport(ExportComponent):
         target_url = self._services_page_url(region) if region else self._generic_services_page_url()
 
         if not self._services_page_looks_ready(current_url):
+            self._log_info(
+                "tiktok_services_export navigating from url=%s to target=%s",
+                current_url or "UNKNOWN",
+                target_url,
+            )
+            await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="services_before_goto")
             current_url = await goto_when_ready(page, target_url, goto_timeout=60000, settle_timeout_ms=6000, poll_ms=200)
+            await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="services_after_goto")
 
         if await self._is_internal_error_page(page):
             self._log_info("services_agent_export detected internal error page on first load, retrying once")
+            await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="services_internal_error_retry")
             current_url = await goto_when_ready(page, target_url, goto_timeout=60000, settle_timeout_ms=6000, poll_ms=200)
 
         if self._is_login_page(current_url):
@@ -744,15 +756,18 @@ class TiktokServicesAgentExport(ExportComponent):
         return "unknown"
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+        attach_tiktok_runtime_diagnostics(page)
         try:
             current_url = await self.ensure_page_ready(page)
         except RuntimeError as exc:
+            await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="services_page_ready_error")
             return ExportResult(success=False, message=str(exc), file_path=None)
 
         try:
             current_url = await self.ensure_services_ready(page)
             await self.ensure_shop_ready(page, current_url)
         except RuntimeError as exc:
+            await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="services_runtime_error")
             return ExportResult(success=False, message=str(exc), file_path=None)
 
         if not await self._ensure_agent_detail_ready(page):
@@ -761,6 +776,7 @@ class TiktokServicesAgentExport(ExportComponent):
         try:
             await self.ensure_date_ready(page)
         except RuntimeError as exc:
+            await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="services_date_error")
             return ExportResult(success=False, message=str(exc), file_path=None)
 
         export_state = await self._wait_export_readiness_state(page)

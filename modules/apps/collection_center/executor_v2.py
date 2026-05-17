@@ -750,16 +750,7 @@ class CollectionExecutorV2:
             has_persistent_profile = bool(
                 session_owner_id and runtime_session.runtime_profile_exists(platform, session_owner_id)
             )
-            prefers_existing_persistent_profile = (
-                str(platform or "").strip().lower() == "tiktok"
-                and os.getenv("TIKTOK_RUNTIME_PREFER_PERSISTENT_PROFILE", "false").lower() == "true"
-                and has_persistent_profile
-            )
-            if (
-                effective_storage_state is None
-                and session_owner_id
-                and not prefers_existing_persistent_profile
-            ):
+            if effective_storage_state is None and session_owner_id:
                 effective_storage_state = await runtime_session.load_or_bootstrap_runtime_storage_state(
                     platform=platform,
                     session_owner_id=session_owner_id,
@@ -912,7 +903,8 @@ class CollectionExecutorV2:
     ) -> Tuple[Any, Any, Optional[CollectionResult]]:
         await self._update_status(task_id, 5, "正在登录...")
         await self._check_cancelled(task_id)
-        await self.popup_handler.close_popups(page, platform=platform)
+        if str(platform or "").strip().lower() != "tiktok":
+            await self.popup_handler.close_popups(page, platform=platform)
 
         runtime_mode = str(params.get("_runtime_session_mode") or "").strip().lower()
         if runtime_mode in {"persistent_profile", "storage_state_fanout"}:
@@ -1066,9 +1058,10 @@ class CollectionExecutorV2:
         )
         if save_session_after_login and session_platform and session_account_id:
             try:
-                storage_state = await runtime_session.read_context_storage_state(
-                    platform=session_platform,
-                    context=page.context,
+                storage_state = await self._wait_and_capture_high_quality_tiktok_session(
+                    page=page,
+                    session_platform=session_platform,
+                    session_account_id=session_account_id,
                 )
                 ok = await _save_session_async(session_platform, session_account_id, storage_state)
                 if ok:
@@ -1138,6 +1131,72 @@ class CollectionExecutorV2:
                 f"reason={gate_result.reason}, url={getattr(page, 'url', '')}"
             )
         return gate_result
+
+    async def _wait_and_capture_high_quality_tiktok_session(
+        self,
+        *,
+        page: Any,
+        session_platform: str,
+        session_account_id: str,
+        timeout_ms: int = 480000,
+        poll_ms: int = 15000,
+        stable_hits_required: int = 3,
+    ) -> Optional[dict]:
+        normalized_platform = str(session_platform or "").strip().lower()
+        if normalized_platform != "tiktok":
+            return await runtime_session.read_context_storage_state(
+                platform=session_platform,
+                context=page.context,
+            )
+
+        stable_hits = 0
+        best_state: Optional[dict] = None
+        best_score = -1
+        waited = 0
+
+        while waited <= timeout_ms:
+            gate_ok = False
+            try:
+                gate_ok, _gate = await runtime_session.check_login_gate_ready(
+                    page=page,
+                    platform=session_platform,
+                )
+            except Exception:
+                gate_ok = False
+
+            try:
+                candidate = await runtime_session.read_context_storage_state(
+                    platform=session_platform,
+                    context=page.context,
+                )
+            except Exception:
+                candidate = None
+
+            score = runtime_session.tiktok_storage_state_quality_score(candidate)
+            if candidate and score > best_score:
+                best_state = candidate
+                best_score = score
+
+            quality_ok = runtime_session.tiktok_storage_state_meets_quality_gate(candidate)
+            if gate_ok and quality_ok:
+                stable_hits += 1
+                if stable_hits >= stable_hits_required:
+                    return candidate
+            else:
+                stable_hits = 0
+
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            else:
+                await asyncio.sleep(poll_ms / 1000)
+            waited += poll_ms
+
+        if runtime_session.tiktok_storage_state_meets_quality_gate(best_state):
+            return best_state
+
+        raise StepExecutionError(
+            f"tiktok session quality never stabilized for save: account={session_account_id}, best_score={best_score}"
+        )
 
     def _ensure_export_complete(
         self,
@@ -2365,9 +2424,10 @@ class CollectionExecutorV2:
 
                     await self._ensure_login_gate_ready(headed_page, platform)
                     if session_platform and session_account_id:
-                        storage_state = await runtime_session.read_context_storage_state(
-                            platform=session_platform,
-                            context=headed_context,
+                        storage_state = await self._wait_and_capture_high_quality_tiktok_session(
+                            page=headed_page,
+                            session_platform=session_platform,
+                            session_account_id=session_account_id,
                         )
                         await _save_session_async(session_platform, session_account_id, storage_state)
                 finally:
@@ -2510,9 +2570,10 @@ class CollectionExecutorV2:
                 )
             if save_session_after_login and session_platform and session_account_id:
                 try:
-                    storage_state = await runtime_session.read_context_storage_state(
-                        platform=session_platform,
-                        context=page.context,
+                    storage_state = await self._wait_and_capture_high_quality_tiktok_session(
+                        page=page,
+                        session_platform=session_platform,
+                        session_account_id=session_account_id,
                     )
                     ok = await _save_session_async(session_platform, session_account_id, storage_state)
                     if ok:

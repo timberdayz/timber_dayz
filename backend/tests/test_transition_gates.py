@@ -89,7 +89,7 @@ def test_login_gate_evidence_accepts_cookie_backed_shell_without_login_form():
     assert result.reason == "cookie-backed session confirmed"
 
 
-def test_tiktok_login_gate_rejects_cookie_only_root_entry():
+def test_tiktok_login_gate_rejects_cookie_only_root_entry_when_detector_logged_in():
     result = evaluate_login_gate_evidence(
         platform="tiktok",
         evidence=LoginGateEvidence(
@@ -105,10 +105,10 @@ def test_tiktok_login_gate_rejects_cookie_only_root_entry():
     )
 
     assert result.status is GateStatus.FAILED
-    assert result.reason == "tiktok page readiness not confirmed"
+    assert result.reason == "tiktok cookie-only session missing seller target"
 
 
-def test_tiktok_login_gate_rejects_url_only_homepage_without_markers():
+def test_tiktok_login_gate_accepts_url_only_homepage_without_markers_when_detector_logged_in():
     result = evaluate_login_gate_evidence(
         platform="tiktok",
         evidence=LoginGateEvidence(
@@ -123,8 +123,7 @@ def test_tiktok_login_gate_rejects_url_only_homepage_without_markers():
         ),
     )
 
-    assert result.status is GateStatus.FAILED
-    assert result.reason == "tiktok page readiness not confirmed"
+    assert result.status is GateStatus.READY
 
 
 def test_export_complete_requires_existing_non_empty_file(tmp_path: Path):

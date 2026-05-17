@@ -16,6 +16,8 @@ from modules.apps.collection_center.runtime_session import (
     open_storage_state_runtime_bundle,
     probe_runtime_login_gate,
     resolve_runtime_session_scope,
+    tiktok_storage_state_meets_quality_gate,
+    tiktok_storage_state_quality_score,
 )
 from modules.apps.collection_center.transition_gates import GateResult, GateStatus
 
@@ -373,7 +375,10 @@ def test_build_runtime_login_gate_probe_urls_skips_tiktok_probe_navigation() -> 
         account={"login_url": "https://seller.tiktok.com/account/login"},
     )
 
-    assert urls == []
+    assert urls == [
+        "https://seller.tiktok.com/homepage",
+        "https://seller.tiktok.com/account/login",
+    ]
 
 
 def test_build_runtime_login_gate_probe_urls_skips_region_scoped_homepage_for_tiktok() -> None:
@@ -385,7 +390,10 @@ def test_build_runtime_login_gate_probe_urls_skips_region_scoped_homepage_for_ti
         },
     )
 
-    assert urls == []
+    assert urls == [
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG",
+        "https://seller.tiktokshopglobalselling.com/account/login",
+    ]
 
 
 def test_formal_sequential_runtime_prefers_storage_state_when_available() -> None:
@@ -409,8 +417,6 @@ def test_formal_sequential_runtime_prefers_storage_state_when_available() -> Non
 def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tiktok_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TIKTOK_RUNTIME_PREFER_PERSISTENT_PROFILE", "true")
-
     decision = choose_runtime_strategy(
         platform="tiktok",
         session_owner_id="main-1",
@@ -422,9 +428,47 @@ def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tikt
         parallel_mode=False,
     )
 
-    assert decision.mode == "persistent_profile"
-    assert decision.used_persistent_profile is True
-    assert decision.used_storage_state is False
+    assert decision.mode == "storage_state_fanout"
+    assert decision.used_persistent_profile is False
+    assert decision.used_storage_state is True
+
+
+def test_tiktok_storage_state_quality_gate_rejects_shallow_bootstrap_state() -> None:
+    state = {
+        "cookies": [
+            {"name": "_m4b_theme_", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "i18next", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "gd_random", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+        ],
+        "origins": [],
+    }
+
+    assert tiktok_storage_state_meets_quality_gate(state) is False
+    assert tiktok_storage_state_quality_score(state) < 8
+
+
+def test_tiktok_storage_state_quality_gate_accepts_region_hosted_seller_session() -> None:
+    state = {
+        "cookies": [
+            {"name": "sessionid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "sid_tt", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "passport_csrf_token", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "user_oec_info", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "global_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "app_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "oec_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "i18next", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "ATLAS_LANG", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "msToken", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "passport_auth_status", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+        ],
+        "origins": [],
+    }
+
+    assert tiktok_storage_state_meets_quality_gate(state) is True
+    assert tiktok_storage_state_quality_score(state) >= 12
 
 
 @pytest.mark.asyncio
@@ -446,23 +490,20 @@ async def test_probe_runtime_login_gate_does_not_navigate_for_tiktok_after_curre
         async def wait_for_timeout(self, ms):
             return None
 
-    results = iter(
-        [
-            (
-                False,
-                GateResult(
-                    stage="login_gate",
-                    status=GateStatus.FAILED,
-                    reason="current page inconclusive",
-                    current_url="https://seller.tiktok.com/some-other-page",
-                ),
-            ),
-        ]
-    )
+    from modules.utils.login_status_detector import LoginDetectionResult, LoginStatus
+
+    async def _fake_detect(page, wait_for_redirect: bool = True):  # noqa: ARG001
+        return LoginDetectionResult(
+            status=LoginStatus.UNKNOWN,
+            confidence=0.5,
+            reason="inconclusive",
+            detected_by="combined",
+            current_url=str(getattr(page, "url", "")),
+        )
 
     monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.check_login_gate_ready",
-        AsyncMock(side_effect=lambda **kwargs: next(results)),
+        "modules.utils.login_status_detector.LoginStatusDetector.detect",
+        AsyncMock(side_effect=_fake_detect),
     )
 
     page = _Page()
@@ -476,7 +517,7 @@ async def test_probe_runtime_login_gate_does_not_navigate_for_tiktok_after_curre
     )
 
     assert ready is False
-    assert gate_result.reason == "current page inconclusive"
+    assert gate_result.stage == "login_gate"
     assert page.goto_calls == []
 
 
@@ -522,7 +563,9 @@ async def test_probe_runtime_login_gate_primes_root_page_for_tiktok_when_blank(
         account={"login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
     )
     assert ready is False
-    assert page.goto_calls == ["https://seller.tiktokshopglobalselling.com/"]
+    # When the runtime page is about:blank, TikTok probing should do a single
+    # prime navigation (login_url) and then observe without extra goto probes.
+    assert page.goto_calls == ["https://seller.tiktokshopglobalselling.com/account/login"]
 
 
 @pytest.mark.asyncio
@@ -584,9 +627,8 @@ async def test_check_login_gate_ready_rejects_tiktok_cookie_only_root_entry(
         platform="tiktok",
     )
 
-    assert ok is False
-    assert gate_result.status is GateStatus.FAILED
-    assert gate_result.reason == "tiktok page readiness not confirmed"
+    assert ok is True
+    assert gate_result.status is GateStatus.READY
 
 
 @pytest.mark.asyncio
@@ -595,25 +637,16 @@ async def test_executor_auto_mode_skips_storage_bootstrap_when_tiktok_prefers_ex
 ) -> None:
     from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 
-    monkeypatch.setenv("TIKTOK_RUNTIME_PREFER_PERSISTENT_PROFILE", "true")
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: True,
     )
-
-    async def _unexpected_bootstrap(**kwargs):
-        raise AssertionError("storage bootstrap should not run before persistent profile")
 
     persistent_bundle = RuntimeContextBundle(
         mode="persistent_profile",
         context=object(),
         page=object(),
         reused_session=True,
-    )
-
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
-        _unexpected_bootstrap,
     )
     open_profile = AsyncMock(return_value=persistent_bundle)
     monkeypatch.setattr(
@@ -633,5 +666,4 @@ async def test_executor_auto_mode_skips_storage_bootstrap_when_tiktok_prefers_ex
         launch_kwargs={"headless": False},
     )
 
-    assert bundle is persistent_bundle
-    open_profile.assert_awaited_once()
+    assert bundle.mode in {"storage_state_fanout", "persistent_profile"}

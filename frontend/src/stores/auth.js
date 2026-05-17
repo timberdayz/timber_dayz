@@ -20,6 +20,20 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoggedIn = computed(() => !!token.value && !!user.value)
   const isLoading = ref(false)
 
+  const clearLocalSession = () => {
+    token.value = ''
+    refreshToken.value = ''
+    user.value = null
+    clearPersistedAuthState(localStorage)
+
+    try {
+      const userStore = useUserStore()
+      userStore.logout()
+    } catch (error) {
+      console.warn('[Auth] 清理 userStore 会话失败:', error)
+    }
+  }
+
   const login = async (credentials) => {
     try {
       isLoading.value = true
@@ -75,10 +89,7 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (_) {
       // ignore backend logout failure
     } finally {
-      token.value = ''
-      refreshToken.value = ''
-      user.value = null
-      clearPersistedAuthState(localStorage)
+      clearLocalSession()
     }
 
     ElMessage.success('已登出')
@@ -109,7 +120,7 @@ export const useAuthStore = defineStore('auth', () => {
       return true
     } catch (error) {
       console.error('[Auth] 刷新令牌失败:', error)
-      await logout()
+      clearLocalSession()
       return false
     }
   }
@@ -178,6 +189,7 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     isLoggedIn,
     isLoading,
+    clearLocalSession,
     login,
     logout,
     refreshAccessToken,

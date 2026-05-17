@@ -39,6 +39,32 @@ function redirectToLogin() {
 }
 
 // ⭐ v6.0.0新增：CSRF Token 名称（Phase 3: CSRF 保护）
+function clearAuthArtifacts() {
+  ;[
+    'token',
+    'access_token',
+    'refresh_token',
+    'user_info',
+    'userInfo',
+    'roles',
+    'permissions',
+    'activeRole'
+  ].forEach((key) => localStorage.removeItem(key))
+}
+
+function forceLocalLogout() {
+  try {
+    const store = getAuthStore()
+    if (typeof store.clearLocalSession === 'function') {
+      store.clearLocalSession()
+      return
+    }
+  } catch (error) {
+    console.error('[Auth] ????????:', error)
+  }
+  clearAuthArtifacts()
+}
+
 const CSRF_COOKIE_NAME = 'csrf_token'
 
 /**
@@ -437,24 +463,12 @@ api.interceptors.response.use(
         return Promise.reject(error)
       }
 
-      // 如果请求已经重试过（避免无限循环）
       if (originalRequest._retry) {
-        // 刷新失败，清除 token 并跳转登录页
-        try {
-          const store = getAuthStore()
-          await store.logout()
-        } catch (err) {
-          console.error('登出失败:', err)
-          // 清除 localStorage
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          localStorage.removeItem('user_info')
-        }
+        forceLocalLogout()
         redirectToLogin()
         return Promise.reject(error)
       }
 
-      // 如果正在刷新 token，将请求加入队列
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject })
@@ -468,16 +482,14 @@ api.interceptors.response.use(
           })
       }
 
-      // 标记为正在刷新
       originalRequest._retry = true
       isRefreshing = true
 
-      // ⭐ v6.0.0修复：通知其他标签页开始刷新
       if (refreshChannel) {
         try {
           refreshChannel.postMessage({ type: 'refresh_started' })
-        } catch (error) {
-          console.warn('[Auth] 无法通知其他标签页刷新状态:', error)
+        } catch (refreshNotifyError) {
+          console.warn('[Auth] ????????????????????', refreshNotifyError)
         }
       }
 
@@ -486,101 +498,73 @@ api.interceptors.response.use(
         const refreshed = await store.refreshAccessToken()
 
         if (refreshed) {
-          // 刷新成功，更新 token
           const newToken = store.token || localStorage.getItem('access_token')
 
-          // ⭐ v6.0.0修复：处理队列中的请求（成功时 resolve，失败时 reject）
           failedQueue.forEach(({ resolve }) => {
             resolve(newToken)
           })
           failedQueue = []
 
-          // ⭐ v6.0.0修复：通知其他标签页刷新完成（包含 refresh_token）
           if (refreshChannel) {
             try {
               const newRefreshToken =
-                store.refreshToken || localStorage.getItem('refresh_token') // ⭐ v6.0.0修复：获取 refresh_token
+                store.refreshToken || localStorage.getItem('refresh_token')
               refreshChannel.postMessage({
                 type: 'refresh_completed',
                 token: newToken,
-                refresh_token: newRefreshToken // ⭐ v6.0.0修复：同时发送 refresh_token
+                refresh_token: newRefreshToken
               })
-            } catch (error) {
-              console.warn('[Auth] 无法通知其他标签页刷新完成:', error)
+            } catch (refreshCompleteError) {
+              console.warn('[Auth] ????????????????????', refreshCompleteError)
             }
           }
 
-          // ⭐ v6.0.0修复：清除超时定时器（刷新成功）
           if (refreshTimeout) {
             clearTimeout(refreshTimeout)
             refreshTimeout = null
           }
 
-          // 更新原始请求的 token 并重试
           originalRequest.headers.Authorization = `Bearer ${newToken}`
           return api(originalRequest)
-        } else {
-          // ⭐ v6.0.0修复：刷新失败，拒绝队列中的所有请求
-          const refreshError = new Error('Token refresh failed')
-          failedQueue.forEach(({ reject }) => {
-            reject(refreshError)
-          })
-          failedQueue = []
-
-          // ⭐ v6.0.0修复：通知其他标签页刷新失败
-          if (refreshChannel) {
-            try {
-              refreshChannel.postMessage({ type: 'refresh_failed' })
-            } catch (error) {
-              console.warn('[Auth] 无法通知其他标签页刷新失败:', error)
-            }
-          }
-
-          // 清除 token 并跳转登录页
-          try {
-            const store = getAuthStore()
-            await store.logout()
-          } catch (err) {
-            console.error('登出失败:', err)
-            localStorage.removeItem('access_token')
-            localStorage.removeItem('refresh_token')
-            localStorage.removeItem('user_info')
-          }
-          redirectToLogin()
-          return Promise.reject(refreshError)
         }
-      } catch (refreshError) {
-        // ⭐ v6.0.0修复：刷新失败，拒绝队列中的所有请求
-        console.error('Token 刷新失败:', refreshError)
+
+        const refreshError = new Error('Token refresh failed')
         failedQueue.forEach(({ reject }) => {
           reject(refreshError)
         })
         failedQueue = []
 
-        // ⭐ v6.0.0修复：通知其他标签页刷新失败
         if (refreshChannel) {
           try {
             refreshChannel.postMessage({ type: 'refresh_failed' })
-          } catch (error) {
-            console.warn('[Auth] 无法通知其他标签页刷新失败:', error)
+          } catch (refreshFailedError) {
+            console.warn('[Auth] ????????????????????', refreshFailedError)
           }
         }
 
-        // 清除 token 并跳转登录页
-        try {
-          const store = getAuthStore()
-          await store.logout()
-        } catch (err) {
-          console.error('登出失败:', err)
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          localStorage.removeItem('user_info')
+        forceLocalLogout()
+        redirectToLogin()
+        return Promise.reject(refreshError)
+      } catch (refreshError) {
+        console.error('Token refresh failed:', refreshError)
+        failedQueue.forEach(({ reject }) => {
+          reject(refreshError)
+        })
+        failedQueue = []
+
+        if (refreshChannel) {
+          try {
+            refreshChannel.postMessage({ type: 'refresh_failed' })
+          } catch (refreshFailedError) {
+            console.warn('[Auth] ????????????????????', refreshFailedError)
+          }
         }
+
+        forceLocalLogout()
         redirectToLogin()
         return Promise.reject(refreshError)
       } finally {
         isRefreshing = false
-        // ⭐ v6.0.0修复：清除超时定时器（刷新完成或失败）
         if (refreshTimeout) {
           clearTimeout(refreshTimeout)
           refreshTimeout = null
@@ -588,7 +572,6 @@ api.interceptors.response.use(
       }
     }
 
-    // 网络错误或HTTP错误（404、500等）
     if (error.response) {
       // HTTP错误（404、500等）：检查响应格式
       const responseData = error.response.data

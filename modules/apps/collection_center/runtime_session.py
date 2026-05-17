@@ -7,7 +7,7 @@ import inspect
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse, urlsplit
 
 from backend.services.platform_login_entry_service import get_platform_login_entry
 from modules.apps.collection_center.browser_config_helper import (
@@ -26,6 +26,118 @@ logger = get_logger(__name__)
 STANDARD_HEADLESS_VIEWPORT = {"width": 1920, "height": 1080}
 
 _executor_pool: Optional[ThreadPoolExecutor] = None
+
+
+def _extract_storage_state_payload(storage_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(storage_state, dict):
+        return {}
+    wrapped = storage_state.get("storage_state")
+    if isinstance(wrapped, dict):
+        return wrapped
+    return storage_state
+
+
+def _storage_state_cookies(storage_state: Optional[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    payload = _extract_storage_state_payload(storage_state)
+    cookies = payload.get("cookies")
+    return cookies if isinstance(cookies, list) else []
+
+
+def _storage_state_origins(storage_state: Optional[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    payload = _extract_storage_state_payload(storage_state)
+    origins = payload.get("origins")
+    return origins if isinstance(origins, list) else []
+
+
+def _tiktok_quality_cookie_summary(storage_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    cookies = _storage_state_cookies(storage_state)
+    names = {str(cookie.get("name") or "").strip() for cookie in cookies if isinstance(cookie, dict)}
+    domains = {
+        str(cookie.get("domain") or "").strip().lower()
+        for cookie in cookies
+        if isinstance(cookie, dict)
+    }
+    seller_domains = {
+        domain
+        for domain in domains
+        if "tiktokshopglobalselling.com" in domain
+    }
+    return {
+        "cookies": cookies,
+        "cookie_count": len(cookies),
+        "cookie_names": names,
+        "domains": domains,
+        "seller_domains": seller_domains,
+    }
+
+
+def tiktok_storage_state_quality_score(storage_state: Optional[Dict[str, Any]]) -> int:
+    summary = _tiktok_quality_cookie_summary(storage_state)
+    names = summary["cookie_names"]
+    seller_domains = summary["seller_domains"]
+    score = 0
+    if "sessionid" in names:
+        score += 3
+    if "sid_tt" in names:
+        score += 3
+    if "passport_csrf_token" in names:
+        score += 2
+    if "user_oec_info" in names:
+        score += 3
+    if "global_seller_id_unified_seller_env" in names:
+        score += 2
+    if "app_id_unified_seller_env" in names:
+        score += 1
+    if "oec_seller_id_unified_seller_env" in names:
+        score += 1
+    if any(domain.startswith("seller.") for domain in seller_domains):
+        score += 2
+    if len(seller_domains) >= 2:
+        score += 1
+    if summary["cookie_count"] >= 20:
+        score += 2
+    if summary["cookie_count"] >= 30:
+        score += 2
+    return score
+
+
+def tiktok_storage_state_meets_quality_gate(storage_state: Optional[Dict[str, Any]]) -> bool:
+    summary = _tiktok_quality_cookie_summary(storage_state)
+    names = summary["cookie_names"]
+    seller_domains = summary["seller_domains"]
+    required_auth = {"sessionid", "sid_tt", "passport_csrf_token"}
+    auth_hits = len(required_auth.intersection(names))
+    seller_hits = len(
+        {
+            "user_oec_info",
+            "global_seller_id_unified_seller_env",
+            "app_id_unified_seller_env",
+            "oec_seller_id_unified_seller_env",
+        }.intersection(names)
+    )
+    return (
+        auth_hits >= 2
+        and seller_hits >= 1
+        and bool(seller_domains)
+        and summary["cookie_count"] >= 12
+    )
+
+
+def _tiktok_should_promote_storage_state(
+    old_state: Optional[Dict[str, Any]],
+    new_state: Optional[Dict[str, Any]],
+) -> bool:
+    old_quality = tiktok_storage_state_meets_quality_gate(old_state)
+    new_quality = tiktok_storage_state_meets_quality_gate(new_state)
+    if not new_quality:
+        return False
+    if not old_quality:
+        return True
+    return tiktok_storage_state_quality_score(new_state) >= tiktok_storage_state_quality_score(old_state)
+
+
+def _tiktok_session_cookie_gate_from_state(storage_state: Optional[Dict[str, Any]]) -> bool:
+    return tiktok_storage_state_meets_quality_gate(storage_state)
 
 
 async def apply_stealth_init_scripts(context: Any) -> None:
@@ -181,6 +293,16 @@ def _bootstrap_session_from_profile_sync(
         )
         return None
 
+    if str(platform or "").strip().lower() == "tiktok":
+        if not tiktok_storage_state_meets_quality_gate(storage_state):
+            logger.warning(
+                "Skip promoting bootstrapped TikTok storage_state without seller-quality session (score=%s) for %s/%s",
+                tiktok_storage_state_quality_score(storage_state),
+                platform,
+                account_id,
+            )
+            return {"storage_state": storage_state}
+
     manager.save_session(
         platform,
         account_id,
@@ -219,7 +341,19 @@ async def load_or_bootstrap_runtime_storage_state(
         max_age_days=max_age_days,
     )
     if session_data and isinstance(session_data.get("storage_state"), dict):
-        return session_data["storage_state"]
+        candidate = session_data["storage_state"]
+        if (
+            str(platform or "").strip().lower() == "tiktok"
+            and not tiktok_storage_state_meets_quality_gate(candidate)
+        ):
+            logger.warning(
+                "Ignore low-quality persisted TikTok storage_state during runtime bootstrap (score=%s) for %s/%s",
+                tiktok_storage_state_quality_score(candidate),
+                platform,
+                session_owner_id,
+            )
+        else:
+            return candidate
 
     loop = asyncio.get_event_loop()
     bootstrapped = await loop.run_in_executor(
@@ -352,10 +486,6 @@ def choose_runtime_strategy(
     component_type: str | None,
     parallel_mode: bool,
 ) -> RuntimeStrategyDecision:
-    prefer_persistent_profile = (
-        str(platform or "").strip().lower() == "tiktok"
-        and os.getenv("TIKTOK_RUNTIME_PREFER_PERSISTENT_PROFILE", "false").lower() == "true"
-    )
     if force_persistent_profile:
         return RuntimeStrategyDecision(
             mode="persistent_profile",
@@ -372,15 +502,6 @@ def choose_runtime_strategy(
             used_storage_state=False,
             used_persistent_profile=True,
             fallback_allowed=True,
-        )
-
-    if prefer_persistent_profile and has_persistent_profile:
-        return RuntimeStrategyDecision(
-            mode="persistent_profile",
-            reason="tiktok_prefer_persistent_profile",
-            used_storage_state=False,
-            used_persistent_profile=True,
-            fallback_allowed=False,
         )
 
     if has_storage_state:
@@ -592,6 +713,7 @@ async def snapshot_runtime_storage_state(
     context: Any,
     persist: bool = True,
 ) -> Optional[Dict[str, Any]]:
+    normalized_platform = str(platform or "").strip().lower()
     try:
         storage_state = await read_context_storage_state(
             platform=platform,
@@ -606,8 +728,96 @@ async def snapshot_runtime_storage_state(
         )
         return None
 
+    # TikTok: localStorage/indexedDB-backed session artifacts are often written during
+    # the homepage bootstrap/redirect window. If we snapshot too early, `origins` may be empty,
+    # and persisting that snapshot would downgrade future reuse quality.
+    if normalized_platform == "tiktok":
+        def _seller_local_storage_max(state: Dict[str, Any]) -> int:
+            try:
+                origins = state.get("origins") if isinstance(state, dict) else None
+                origins = origins if isinstance(origins, list) else []
+                best = 0
+                for origin_entry in origins:
+                    if not isinstance(origin_entry, dict):
+                        continue
+                    origin_url = str(origin_entry.get("origin") or "").strip().lower()
+                    if "seller.tiktokshopglobalselling.com" not in origin_url:
+                        continue
+                    local_storage = origin_entry.get("localStorage")
+                    if isinstance(local_storage, list):
+                        best = max(best, len(local_storage))
+                return int(best)
+            except Exception:
+                return 0
+
+        attempts = 0
+        while attempts < 20:
+            attempts += 1
+            try:
+                origins = storage_state.get("origins") if isinstance(storage_state, dict) else None
+                origins = origins if isinstance(origins, list) else []
+                if origins and _seller_local_storage_max(storage_state) > 0:
+                    break
+            except Exception:
+                origins = []
+
+            try:
+                await asyncio.sleep(1.0)
+            except Exception:
+                pass
+
+            try:
+                storage_state = await read_context_storage_state(
+                    platform=platform,
+                    context=context,
+                )
+            except Exception:
+                break
+
+        try:
+            origins = storage_state.get("origins") if isinstance(storage_state, dict) else None
+            origin_count = len(origins) if isinstance(origins, list) else 0
+            local_storage_items = 0
+            seller_origin_items = 0
+            if isinstance(origins, list):
+                for origin_entry in origins:
+                    if not isinstance(origin_entry, dict):
+                        continue
+                    local_storage = origin_entry.get("localStorage")
+                    if isinstance(local_storage, list):
+                        local_storage_items += len(local_storage)
+                        origin_url = str(origin_entry.get("origin") or "").strip().lower()
+                        if "seller.tiktokshopglobalselling.com" in origin_url:
+                            seller_origin_items = max(seller_origin_items, len(local_storage))
+            logger.info(
+                "TikTok storage_state snapshot attempts=%s origins=%s localStorage=%s sellerLocalStorage=%s (%s/%s)",
+                attempts,
+                origin_count,
+                local_storage_items,
+                seller_origin_items,
+                platform,
+                session_owner_id,
+            )
+        except Exception:
+            pass
+
     if persist and session_owner_id:
         try:
+            if normalized_platform == "tiktok":
+                origins = storage_state.get("origins") if isinstance(storage_state, dict) else None
+                origins = origins if isinstance(origins, list) else []
+                seller_local_storage = 0
+                if isinstance(storage_state, dict):
+                    seller_local_storage = _seller_local_storage_max(storage_state)
+                if not origins or seller_local_storage <= 0:
+                    logger.warning(
+                        "Skip persisting TikTok storage_state without seller localStorage (origins=%s sellerLocalStorage=%s) (%s/%s)",
+                        len(origins),
+                        seller_local_storage,
+                        platform,
+                        session_owner_id,
+                    )
+                    return storage_state
             await _save_session_async(platform, session_owner_id, storage_state)
         except Exception as exc:
             logger.warning(
@@ -682,9 +892,6 @@ def build_runtime_login_gate_probe_urls(
     platform: str,
     account: Optional[Dict[str, Any]],
 ) -> list[str]:
-    if str(platform or "").strip().lower() == "tiktok":
-        return []
-
     candidates = [
         _homepage_probe_url(platform, account),
         _login_gate_probe_url(platform, account),
@@ -709,45 +916,6 @@ async def _wait_for_probe_page_ready(page: Any, *, settle_ms: int = 800) -> None
             await maybe_wait
 
 
-async def _wait_for_tiktok_entry_redirect(
-    page: Any,
-    *,
-    timeout_ms: int = 20000,
-    poll_ms: int = 250,
-) -> None:
-    """
-    TikTok seller entry pages may perform multiple client-side redirects while
-    warming caches. Avoid interrupting this stage with extra navigation.
-    """
-    elapsed = 0
-    last_url = None
-    stable_ticks = 0
-    while elapsed <= timeout_ms:
-        current_url = str(getattr(page, "url", "") or "").strip()
-        if current_url != last_url:
-            stable_ticks = 0
-            last_url = current_url
-        else:
-            stable_ticks += 1
-
-        normalized = current_url.lower()
-        if (
-            normalized
-            and normalized != "about:blank"
-            and (
-                "/homepage" in normalized
-                or "/account/login" in normalized
-                or "/login" in normalized
-            )
-            and stable_ticks >= 2
-        ):
-            return
-
-        if hasattr(page, "wait_for_timeout"):
-            await page.wait_for_timeout(poll_ms)
-        elapsed += poll_ms
-
-
 async def prime_runtime_page_for_login_gate(
     *,
     page: Any,
@@ -758,20 +926,12 @@ async def prime_runtime_page_for_login_gate(
     if current_url and current_url != "about:blank":
         return
 
-    normalized_platform = str(platform or "").strip().lower()
-    if normalized_platform == "tiktok":
-        base_url = _normalize_probe_base_url(platform, account)
-        if not base_url:
-            return
-        await page.goto(f"{base_url}/", wait_until="domcontentloaded", timeout=60000)
-        await _wait_for_tiktok_entry_redirect(page)
-    else:
-        login_url = str(
-            (account or {}).get("login_url") or get_platform_login_entry(platform) or ""
-        ).strip()
-        if not login_url:
-            return
-        await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+    login_url = str(
+        (account or {}).get("login_url") or get_platform_login_entry(platform) or ""
+    ).strip()
+    if not login_url:
+        return
+    await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
     await _wait_for_probe_page_ready(page, settle_ms=800)
 
 
@@ -794,13 +954,38 @@ async def check_login_gate_ready(
 
     detector = LoginStatusDetector(platform, debug=False)
     detection_result = await detector.detect(page, wait_for_redirect=True)
+    if str(platform or "").strip().lower() == "tiktok":
+        current_url = str(getattr(page, "url", "") or "")
+        wrapped_state: Dict[str, Any] = {}
+        try:
+            raw_state = await read_context_storage_state(
+                platform=platform,
+                context=page.context,
+            )
+            wrapped_state = {"storage_state": raw_state} if isinstance(raw_state, dict) else {}
+        except Exception:
+            wrapped_state = {}
+        has_quality_session = _tiktok_session_cookie_gate_from_state(wrapped_state)
+        if (
+            str(getattr(detection_result, "status", "")).lower() == "logged_in"
+            and has_quality_session
+            and "tiktokshopglobalselling.com" in current_url.lower()
+            and "/account/login" not in current_url.lower()
+        ):
+            return True, GateResult(
+                stage="login_gate",
+                status=GateStatus.READY,
+                reason="tiktok seller-quality session confirmed",
+                confidence=max(float(getattr(detection_result, "confidence", 0.0) or 0.0), 0.9),
+                current_url=current_url,
+                matched_signal="seller_quality_session",
+            )
     gate_result = evaluate_login_ready(
         status=detection_result.status.value,
         confidence=detection_result.confidence,
         current_url=str(getattr(page, "url", "") or ""),
         matched_signal=detection_result.matched_pattern or detection_result.detected_by,
         detected_by=getattr(detection_result, "detected_by", None),
-        platform=platform,
     )
     return gate_result.status is GateStatus.READY, gate_result
 
@@ -811,15 +996,151 @@ async def probe_runtime_login_gate(
     platform: str,
     account: Optional[Dict[str, Any]],
 ) -> tuple[bool, GateResult]:
-    if str(platform or "").strip().lower() == "tiktok":
-        await prime_runtime_page_for_login_gate(
-            page=page,
-            platform=platform,
-            account=account,
-        )
     await _wait_for_probe_page_ready(page, settle_ms=500)
     ready, gate_result = await check_login_gate_ready(page=page, platform=platform)
     if ready:
+        return ready, gate_result
+
+    normalized_platform = str(platform or "").strip().lower()
+    # TikTok seller pages often perform their own redirect + cache initialization.
+    # During that phase, forcing extra goto probes can interrupt the flow and make
+    # verification/challenge loops impossible to complete. Prefer observing the
+    # current page state (no extra goto) and only do a single navigation when the
+    # page is still at about:blank.
+    if normalized_platform == "tiktok":
+        from modules.platforms.tiktok.components.login import TiktokLogin
+        from modules.platforms.tiktok.components._navigation import wait_until_bootstrap_finishes
+        from modules.components.base import ExecutionContext
+        from modules.utils.login_status_detector import LoginStatus, LoginStatusDetector
+
+        detector = LoginStatusDetector(platform, debug=False)
+        tiktok_login_helper = TiktokLogin(
+            ExecutionContext(
+                platform="tiktok",
+                account=account or {},
+                logger=logger,
+                config={"params": {"login_success_target": "homepage"}},
+            )
+        )
+
+        async def _tiktok_check_ready_bootstrap(*, allow_transient_login_form: bool) -> tuple[bool, GateResult]:
+            details: Dict[str, Any] = {}
+            result = await detector.detect(page, wait_for_redirect=True)
+            if details is not None:
+                # Preserve a compatible shape for callers that previously relied on
+                # the detector attaching details. `detect()` already returns a
+                # LoginDetectionResult with optional details; keep `details` here
+                # for future extensions without breaking the call site.
+                details.update(getattr(result, "details", {}) or {})
+            normalized_url = str(result.current_url or "").strip().lower()
+
+            # During TikTok auto-redirect bootstrap, a login form can briefly appear
+            # even when the session is valid and about to redirect to homepage.
+            if (
+                allow_transient_login_form
+                and result.status == LoginStatus.NOT_LOGGED_IN
+                and str(result.detected_by or "").strip().lower() == "element"
+                and any(
+                    marker in normalized_url
+                    for marker in ("/login", "/signin", "/account/login", "redirect=")
+                )
+            ):
+                return (
+                    False,
+                    GateResult(
+                        stage="login_gate",
+                        status=GateStatus.FAILED,
+                        reason="bootstrap: login surface may redirect; waiting",
+                        confidence=float(getattr(result, "confidence", 0.0) or 0.0),
+                        current_url=result.current_url,
+                        matched_signal=getattr(result, "matched_pattern", None),
+                    ),
+                )
+
+            if await tiktok_login_helper._target_looks_ready(page):
+                return (
+                    True,
+                    GateResult(
+                        stage="login_gate",
+                        status=GateStatus.READY,
+                        reason="homepage target ready",
+                        confidence=max(
+                            0.9,
+                            float(getattr(result, "confidence", 0.0) or 0.0),
+                        ),
+                        current_url=str(getattr(page, "url", "") or ""),
+                        matched_signal="homepage_ready",
+                    ),
+                )
+
+            if await tiktok_login_helper._session_shell_looks_ready(page):
+                return (
+                    False,
+                    GateResult(
+                        stage="login_gate",
+                        status=GateStatus.FAILED,
+                        reason="homepage shell ready; waiting target context",
+                        confidence=float(getattr(result, "confidence", 0.0) or 0.0),
+                        current_url=str(getattr(page, "url", "") or ""),
+                        matched_signal="shell_ready_waiting",
+                    ),
+                )
+
+            gate_result = evaluate_login_ready(
+                status=result.status.value if hasattr(result.status, "value") else str(result.status),
+                confidence=float(getattr(result, "confidence", 0.0) or 0.0),
+                current_url=result.current_url,
+                matched_signal=getattr(result, "matched_pattern", None),
+                detected_by=getattr(result, "detected_by", None),
+            )
+            gate_url = str(gate_result.current_url or "").strip().lower()
+            if "/account/login" in gate_url or "/login" in gate_url:
+                return (
+                    False,
+                    GateResult(
+                        stage="login_gate",
+                        status=GateStatus.FAILED,
+                        reason="login entry still bootstrapping",
+                        confidence=gate_result.confidence,
+                        current_url=gate_result.current_url,
+                        matched_signal=gate_result.matched_signal,
+                    ),
+                )
+            return (gate_result.status == GateStatus.READY), gate_result
+
+        current_url = str(getattr(page, "url", "") or "").strip()
+        if not current_url or current_url == "about:blank":
+            try:
+                # Prefer the already-resolved account login_url (consistent with other platforms),
+                # then fall back to platform login entry service.
+                login_url = str((account or {}).get("login_url") or "").strip()
+                if not login_url:
+                    entry = await get_platform_login_entry(platform=platform, account=account)
+                    login_url = str((entry or {}).get("login_url") or "").strip()
+                if login_url:
+                    await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+                    await wait_until_bootstrap_finishes(page, timeout_ms=30000, poll_ms=500, stable_cycles=4)
+                    ready, gate_result = await _tiktok_check_ready_bootstrap(
+                        allow_transient_login_form=True
+                    )
+                    if ready:
+                        return ready, gate_result
+            except Exception:
+                # Keep probing as "not ready" without forcing more navigation.
+                pass
+
+        # Observe-only stability wait: allow redirects/spinners to settle.
+        for _ in range(60):  # ~30s
+            try:
+                await wait_until_bootstrap_finishes(page, timeout_ms=4000, poll_ms=500, stable_cycles=2)
+                ready, gate_result = await _tiktok_check_ready_bootstrap(
+                    allow_transient_login_form=True
+                )
+                if ready:
+                    return ready, gate_result
+            except Exception:
+                # If the page is reloading, keep observing.
+                continue
         return ready, gate_result
 
     current_url = str(getattr(page, "url", "") or "").strip()

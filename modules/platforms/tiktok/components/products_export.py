@@ -16,8 +16,16 @@ from modules.platforms.tiktok.components._download_helpers import (
     resolve_export_timeout_ms,
     save_download_to_target,
 )
+from modules.platforms.tiktok.components._runtime_diagnostics import (
+    attach_tiktok_runtime_diagnostics,
+    log_tiktok_runtime_diagnostics,
+)
 from modules.platforms.tiktok.components.export import TiktokExport
 from modules.platforms.tiktok.components.shop_switch import TiktokShopSwitch
+from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+
+import os
+import tempfile
 
 
 class TiktokProductsExport(ExportComponent):
@@ -29,7 +37,16 @@ class TiktokProductsExport(ExportComponent):
 
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
+        self._runtime_logger = getattr(ctx, "logger", None)
         self._download_capture = None
+
+    def _log_info(self, message: str, *args: Any) -> None:
+        if self._runtime_logger is None:
+            return
+        try:
+            self._runtime_logger.info(message, *args)
+        except Exception:
+            pass
 
     def _target_region(self) -> str | None:
         config = self.ctx.config or {}
@@ -167,6 +184,33 @@ class TiktokProductsExport(ExportComponent):
             text = ""
         return any(marker in str(text or "") for marker in markers)
 
+    async def _challenge_is_visible(self, page: Any) -> bool:
+        markers = (
+            "请完成下列验证后继续",
+            "Unable to verify",
+            "Please try again",
+        )
+        try:
+            for marker in markers:
+                loc = page.get_by_text(marker, exact=False).first
+                if await loc.is_visible(timeout=200):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    async def _raise_manual_intervention_required(self, page: Any, *, suffix: str) -> None:
+        config = self.ctx.config or {}
+        screenshot_dir = (config or {}).get("task", {}).get("screenshot_dir")
+        if screenshot_dir:
+            os.makedirs(screenshot_dir, exist_ok=True)
+            screenshot_path = os.path.join(screenshot_dir, f"tiktok-products-{suffix}.png")
+        else:
+            fd, screenshot_path = tempfile.mkstemp(suffix=".png", prefix=f"tiktok_products_{suffix}_")
+            os.close(fd)
+        await page.screenshot(path=screenshot_path, timeout=5000)
+        raise VerificationRequiredError("manual_intervention", screenshot_path)
+
     async def _products_page_business_ready(self, page: Any) -> bool:
         current_url = str(getattr(page, "url", "") or "")
         if not self._products_page_looks_ready(current_url):
@@ -243,6 +287,8 @@ class TiktokProductsExport(ExportComponent):
 
     async def ensure_products_ready(self, page: Any) -> str:
         current_url = await wait_until_page_settles(page)
+        if await self._challenge_is_visible(page):
+            await self._raise_manual_intervention_required(page, suffix="challenge-visible")
         if self._products_page_looks_ready(current_url) and await self._wait_products_business_ready(page):
             return current_url
         if self._products_page_looks_ready(current_url):
@@ -250,11 +296,20 @@ class TiktokProductsExport(ExportComponent):
 
         region = self._target_region() or self._target_region_from_page_url(current_url)
         target_url = self._products_page_url(region) if region else self._generic_products_page_url()
+        self._log_info(
+            "tiktok_products_export navigating from url=%s to target=%s",
+            current_url or "UNKNOWN",
+            target_url,
+        )
+        await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="products_before_goto")
         current_url = await goto_when_ready(page, target_url, goto_timeout=60000, settle_timeout_ms=6000, poll_ms=200)
+        await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="products_after_goto")
         if self._is_login_page(current_url):
             raise RuntimeError("login required before products export")
+        if await self._challenge_is_visible(page):
+            await self._raise_manual_intervention_required(page, suffix="challenge-after-goto")
         if await self._is_internal_error_page(page):
-            raise RuntimeError("products page internal error")
+            await self._raise_manual_intervention_required(page, suffix="internal-error")
         if not await self._wait_products_business_ready(page):
             raise RuntimeError("products page is not ready")
         return current_url
@@ -339,12 +394,14 @@ class TiktokProductsExport(ExportComponent):
         return "unknown"
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+        attach_tiktok_runtime_diagnostics(page)
         try:
             current_url = await self.ensure_page_ready(page)
             current_url = await self.ensure_products_ready(page)
             await self.ensure_shop_ready(page, current_url)
             await self.ensure_date_ready(page)
         except RuntimeError as exc:
+            await log_tiktok_runtime_diagnostics(page, self._runtime_logger, label="products_runtime_error")
             return ExportResult(success=False, message=str(exc), file_path=None)
 
         triggered = await self.trigger_export(page)

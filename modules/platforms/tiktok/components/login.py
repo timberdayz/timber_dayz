@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import asyncio
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -11,6 +12,7 @@ from backend.services.platform_login_entry_service import get_platform_login_ent
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginComponent, LoginResult
 from modules.platforms.tiktok.archive.analytics_config import AnalyticsSelectors
+from modules.platforms.tiktok.components._navigation import page_looks_loading
 
 
 class TiktokLogin(LoginComponent):
@@ -60,6 +62,25 @@ class TiktokLogin(LoginComponent):
         if mode == "phone":
             return str(account.get("phone") or account.get("username") or "").strip()
         return str(account.get("email") or account.get("username") or account.get("phone") or "").strip()
+
+    async def _wait_for_reused_session_redirect(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 15000,
+        poll_ms: int = 300,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            current_url = str(getattr(page, "url", "") or "")
+            if self._login_looks_successful(current_url):
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            else:
+                await asyncio.sleep(poll_ms / 1000)
+            waited += poll_ms
+        return False
 
     def _known_login_error_texts(self) -> tuple[str, ...]:
         return (
@@ -176,6 +197,15 @@ class TiktokLogin(LoginComponent):
             "本机不再询问",
             "没有收到验证码",
             "发送验证码",
+        )
+
+    def _seller_context_error_texts(self) -> tuple[str, ...]:
+        # TikTok Seller Center occasionally lands on an internal error page after login/redirect.
+        # Treat it as a login failure signal so we fail fast instead of timing out into manual intervention.
+        return (
+            "Seller Condition is undefined",
+            "Error Code:",
+            "出错了",
         )
 
     async def _current_login_mode(self, page: Any) -> str:
@@ -332,12 +362,60 @@ class TiktokLogin(LoginComponent):
             return False
         return resolved_region == expected_region
 
+    async def _homepage_local_storage_looks_ready(self, page: Any) -> bool:
+        """
+        TikTok Seller Center frequently continues its bootstrap after URL already becomes `/homepage`.
+        A reliable "context initialized" signal is that key localStorage entries have been written.
+
+        We intentionally check only a small set of low-risk keys (presence only).
+        """
+        try:
+            flags = await page.evaluate(
+                """() => {
+                try {
+                  const keys = [
+                    'current_shop_region',
+                    'local_unique_id',
+                    'sw-last-update-time',
+                    'LOCAL_IS_EFFECTIVE',
+                  ];
+                  const present = {};
+                  for (const k of keys) {
+                    const v = window.localStorage ? window.localStorage.getItem(k) : null;
+                    present[k] = !!(v && String(v).length > 0);
+                  }
+                  // treat as ready when at least one key is present;
+                  // different seller accounts / regions may not populate all keys.
+                  const ok = Object.values(present).some(Boolean);
+                  return { ok, present };
+                } catch (e) {
+                  return { ok: false, present: {} };
+                }
+              }"""
+            )
+            return bool((flags or {}).get("ok"))
+        except Exception:
+            return False
+
     async def _homepage_dom_looks_ready(self, page: Any) -> bool:
         region = self._configured_shop_region()
         signal_count = 0
         current_url = str(getattr(page, "url", "") or "").strip().lower()
 
         if "/homepage" in current_url and not self._homepage_has_region_context(current_url):
+            return False
+
+        # TikTok homepage often lands first, then continues its own bootstrap (loading overlay + async init)
+        # before the seller/shop context is usable. During that window we must keep observing and avoid
+        # proceeding to downstream navigation/actions.
+        try:
+            if await page_looks_loading(page):
+                return False
+        except Exception:
+            pass
+
+        # localStorage markers indicate the seller/shop context has finished initializing.
+        if not await self._homepage_local_storage_looks_ready(page):
             return False
 
         if self._homepage_has_region_context(current_url):
@@ -408,6 +486,11 @@ class TiktokLogin(LoginComponent):
             return False
         if "/homepage" in current_url and not self._homepage_has_region_context(current_url):
             return False
+        try:
+            if await page_looks_loading(page):
+                return False
+        except Exception:
+            pass
         if await self._target_looks_ready(page):
             return False
         if await self._is_otp_visible(page):
@@ -487,6 +570,11 @@ class TiktokLogin(LoginComponent):
                 self._log_info("tiktok_login %s otp_error=%s", phase, otp_error)
                 return "otp_error"
 
+            seller_error = await self._find_visible_text(page, self._seller_context_error_texts())
+            if seller_error:
+                self._log_info("tiktok_login %s seller_context_error=%s", phase, seller_error)
+                return "login_error"
+
             if await self._target_looks_ready(page):
                 self._log_url_event(f"{phase}_target_ready", last_logged_url)
                 return "success"
@@ -555,6 +643,7 @@ class TiktokLogin(LoginComponent):
         current_url = str(getattr(page, "url", "") or "")
         otp_value = str(params.get("captcha_code") or params.get("otp") or "").strip()
         manual_completed = bool(params.get("manual_completed"))
+        reused_session = bool(params.get("reused_session"))
 
         if self._login_looks_successful(current_url):
             self._log_url_event("already_logged_in", current_url)
@@ -605,6 +694,19 @@ class TiktokLogin(LoginComponent):
                 self._log_url_event("goto_login_after", getattr(page, "url", ""))
                 await page.wait_for_timeout(800)
                 await self._wait_for_login_surface_ready(page)
+
+            if reused_session:
+                redirected = await self._wait_for_reused_session_redirect(page)
+                if redirected:
+                    outcome = await self._wait_for_post_login_outcome(
+                        page,
+                        phase="post_otp_submit",
+                        timeout_ms=20000,
+                        poll_ms=500,
+                    )
+                    if outcome == "success":
+                        await self._cleanup_after_login(page)
+                        return LoginResult(success=True, message="ok")
 
             if self._login_looks_successful(str(getattr(page, "url", "") or "")):
                 self._log_url_event("login_short_circuit_success", getattr(page, "url", ""))

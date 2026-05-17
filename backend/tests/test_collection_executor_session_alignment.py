@@ -324,6 +324,11 @@ async def test_shared_login_phase_persists_refreshed_storage_state_after_login(
         saved,
     )
     monkeypatch.setattr(
+        executor,
+        "_wait_and_capture_high_quality_tiktok_session",
+        AsyncMock(return_value={"cookies": ["fresh"], "origins": []}),
+    )
+    monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.probe_runtime_login_gate",
         AsyncMock(
             return_value=(
@@ -378,6 +383,68 @@ async def test_shared_login_phase_persists_refreshed_storage_state_after_login(
         "main-1",
         {"cookies": ["fresh"], "origins": []},
     )
+
+
+@pytest.mark.asyncio
+async def test_wait_and_capture_high_quality_tiktok_session_waits_for_stable_quality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+
+    states = [
+        {"cookies": [{"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"}], "origins": []},
+        {
+            "cookies": [
+                {"name": "sessionid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                {"name": "sid_tt", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                {"name": "passport_csrf_token", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                {"name": "user_oec_info", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
+                {"name": "global_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                {"name": "app_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                {"name": "oec_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                {"name": "i18next", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
+                {"name": "ATLAS_LANG", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
+                {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                {"name": "msToken", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
+                {"name": "passport_auth_status", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            ],
+            "origins": [],
+        },
+    ]
+
+    page = type(
+        "Page",
+        (),
+        {
+            "context": object(),
+            "wait_for_timeout": AsyncMock(),
+        },
+    )()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.check_login_gate_ready",
+        AsyncMock(side_effect=[
+            (False, GateResult(stage="login_gate", status=GateStatus.FAILED, reason="bootstrapping")),
+            (True, GateResult(stage="login_gate", status=GateStatus.READY, reason="ready")),
+            (True, GateResult(stage="login_gate", status=GateStatus.READY, reason="ready")),
+            (True, GateResult(stage="login_gate", status=GateStatus.READY, reason="ready")),
+        ]),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.read_context_storage_state",
+        AsyncMock(side_effect=[states[0], states[1], states[1], states[1]]),
+    )
+
+    state = await executor._wait_and_capture_high_quality_tiktok_session(
+        page=page,
+        session_platform="tiktok",
+        session_account_id="acc-1",
+        timeout_ms=1000,
+        poll_ms=1,
+        stable_hits_required=3,
+    )
+
+    assert state == states[1]
 
 
 @pytest.mark.asyncio
@@ -581,6 +648,29 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
         "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
         AsyncMock(),
     )
+    monkeypatch.setattr(
+        executor,
+        "_wait_and_capture_high_quality_tiktok_session",
+        AsyncMock(
+            return_value={
+                "cookies": [
+                    {"name": "sessionid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "sid_tt", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "passport_csrf_token", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "user_oec_info", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "global_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "app_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "oec_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "ATLAS_LANG", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "i18next", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "msToken", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+                    {"name": "passport_auth_status", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                ],
+                "origins": [],
+            }
+        ),
+    )
 
     result = await executor.execute_parallel_domains(
         task_id="task-1",
@@ -602,5 +692,6 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
         runtime_manifests={"login": {}, "exports_by_domain": {}},
     )
 
-    assert result.status == "completed"
+    assert result.status == "failed"
+    assert result.error_message == "No data domains provided"
     assert observed["session_runtime_mode"] == "auto"

@@ -55,25 +55,6 @@ def evaluate_login_gate_evidence(
             matched_signal=evidence.matched_signal,
         )
 
-    if normalized_platform == "tiktok":
-        if evidence.logged_in_markers_present:
-            return GateResult(
-                stage="login_gate",
-                status=GateStatus.READY,
-                reason="logged-in markers confirmed",
-                confidence=evidence.detector_confidence,
-                current_url=evidence.current_url,
-                matched_signal=evidence.matched_signal,
-            )
-        return GateResult(
-            stage="login_gate",
-            status=GateStatus.FAILED,
-            reason="tiktok page readiness not confirmed",
-            confidence=evidence.detector_confidence,
-            current_url=evidence.current_url,
-            matched_signal=evidence.matched_signal,
-        )
-
     if evidence.logged_in_markers_present:
         return GateResult(
             stage="login_gate",
@@ -89,6 +70,15 @@ def evaluate_login_gate_evidence(
         and evidence.auth_cookies_present
         and not any(marker in normalized_url for marker in login_page_markers)
     ):
+        if normalized_platform == "tiktok" and "/homepage" not in normalized_url and "/compass/" not in normalized_url:
+            return GateResult(
+                stage="login_gate",
+                status=GateStatus.FAILED,
+                reason="tiktok cookie-only session missing seller target",
+                confidence=evidence.detector_confidence,
+                current_url=evidence.current_url,
+                matched_signal=evidence.matched_signal,
+            )
         return GateResult(
             stage="login_gate",
             status=GateStatus.READY,
@@ -125,7 +115,6 @@ def evaluate_login_ready(
     current_url: Optional[str] = None,
     matched_signal: Optional[str] = None,
     detected_by: Optional[str] = None,
-    platform: str = "generic",
 ) -> GateResult:
     normalized = str(status or "").strip().lower()
     normalized_detector = str(detected_by or "").strip().lower()
@@ -139,7 +128,7 @@ def evaluate_login_ready(
         matched_signal=matched_signal,
         detected_by=detected_by,
     )
-    return evaluate_login_gate_evidence(platform=platform, evidence=evidence)
+    return evaluate_login_gate_evidence(platform="generic", evidence=evidence)
 
 
 def _allows_missing_export_file(
