@@ -4,6 +4,7 @@ from scripts.validate_migrations_fresh_db import (
     DEFAULT_DOCKER_RUN_TIMEOUT_SECONDS,
     build_temp_postgres_run_command,
     choose_temp_postgres_port,
+    is_docker_bind_error,
     start_temp_postgres_container,
 )
 
@@ -33,7 +34,7 @@ def test_start_temp_postgres_container_uses_extended_timeout():
 
 def test_choose_temp_postgres_port_falls_back_when_preferred_is_busy():
     busy_socket = socket.socket()
-    busy_socket.bind(("127.0.0.1", 0))
+    busy_socket.bind(("0.0.0.0", 0))
     busy_port = busy_socket.getsockname()[1]
     try:
         selected_port = choose_temp_postgres_port(busy_port)
@@ -41,3 +42,8 @@ def test_choose_temp_postgres_port_falls_back_when_preferred_is_busy():
         busy_socket.close()
 
     assert selected_port != busy_port
+
+
+def test_is_docker_bind_error_detects_port_allocation_failure():
+    assert is_docker_bind_error("Bind for 0.0.0.0:5433 failed: port is already allocated") is True
+    assert is_docker_bind_error("some other docker error") is False

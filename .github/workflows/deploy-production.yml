@@ -80,7 +80,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          python -m pip install pytest
 
       - name: Create temp directory
         run: mkdir -p temp
@@ -151,26 +155,7 @@ jobs:
           TEST_DB_PASSWORD: migration_test_pass
           TEST_DB_ADMIN_DB: postgres
         run: |
-          echo "[INFO] Waiting for PostgreSQL readiness..."
-          for i in $(seq 1 30); do
-            if PGPASSWORD="${TEST_DB_PASSWORD}" psql -h "${TEST_DB_HOST}" -p "${TEST_DB_PORT}" -U "${TEST_DB_USER}" -d migration_test_db -c "SELECT 1" >/dev/null 2>&1; then
-              echo "[OK] PostgreSQL is ready"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "[FAIL] PostgreSQL startup timeout"
-              exit 1
-            fi
-            sleep 1
-          done
-
-          echo "[INFO] Running targeted production migration contract tests..."
-          pytest -q \
-            tests/test_alembic_version_table_contract.py \
-            tests/test_collection_config_core_schema_migration_contract.py \
-            tests/test_follow_investment_finance_schema_contract.py
-
-          echo "[OK] Production migration contract checks passed"
+          python scripts/verify_production_migration_contracts.py
 
       # [NOTE] 鍙戝竷闂ㄧ锛歵ag 鍙戝竷蹇呴』閫氳繃杩欎簺妫€鏌ワ紱澶辫触浼氶樆鏂?build 鍜?deploy
       # [FIX] 鍙獙璇佹敼鍔ㄧ殑 router 鏂囦欢锛岄伩鍏嶅巻鍙查仐鐣欓棶棰橀樆鏂柊鍙戝竷
@@ -199,7 +184,7 @@ jobs:
 
       - name: Validate Inventory Age Pipeline (Release Gate)
         run: |
-          pytest -q \
+          python -m pytest -q \
             backend/tests/data_pipeline/test_inventory_snapshot_change_module.py \
             backend/tests/data_pipeline/test_inventory_snapshot_company_daily_module.py \
             backend/tests/data_pipeline/test_inventory_age_refresh_service.py \

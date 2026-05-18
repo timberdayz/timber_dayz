@@ -119,6 +119,11 @@ def start_temp_postgres_container(
     return container_id
 
 
+def is_docker_bind_error(message: str) -> bool:
+    normalized = str(message or "").lower()
+    return "bind for 0.0.0.0" in normalized and "port is already allocated" in normalized
+
+
 def choose_temp_postgres_port(preferred_port: int) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -145,9 +150,20 @@ def main() -> int:
     try:
         container_id = start_temp_postgres_container(port)
     except RuntimeError as exc:
-        safe_print("[FAIL] 启动临时 Postgres 失败")
-        safe_print(str(exc))
-        return 1
+        if is_docker_bind_error(str(exc)):
+            fallback_port = choose_temp_postgres_port(0)
+            safe_print(f"[WARN] 端口 {port} Docker 绑定失败，改用临时端口 {fallback_port}")
+            port = fallback_port
+            try:
+                container_id = start_temp_postgres_container(port)
+            except RuntimeError as retry_exc:
+                safe_print("[FAIL] 启动临时 Postgres 失败")
+                safe_print(str(retry_exc))
+                return 1
+        else:
+            safe_print("[FAIL] 启动临时 Postgres 失败")
+            safe_print(str(exc))
+            return 1
 
     try:
         safe_print("[INFO] 等待 Postgres 就绪...")
