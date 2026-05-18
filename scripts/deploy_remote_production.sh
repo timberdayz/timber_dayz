@@ -571,17 +571,17 @@ smart_database_migrate() {
     # 新数据库：使用 Schema 快照迁移
     echo "[INFO] 检测到全新数据库（alembic_version 表不存在），使用 Schema 快照迁移..."
     # [FIX] 验证快照迁移 revision ID 是否存在
-    REVISION_EXISTS=$("${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic history 2>&1 | grep -c "v5_0_0_schema_snapshot" || echo "0")
+    REVISION_EXISTS=$("${compose_cmd_base[@]}" run --rm --no-deps backend alembic history 2>&1 | grep -c "v5_0_0_schema_snapshot" || echo "0")
     if [ "$REVISION_EXISTS" -eq 0 ]; then
       echo "[WARN] 快照迁移 revision ID 'v5_0_0_schema_snapshot' 不存在"
       echo "[INFO] 尝试使用 alembic upgrade heads 作为降级方案..."
-      "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic upgrade heads || {
+      "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads || {
         echo "[ERROR] 无法执行迁移（快照迁移 revision 不存在且 heads 迁移失败）"
         echo "[INFO] 请检查迁移文件是否存在，或手动创建快照迁移"
         return 1
       }
     else
-      "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic upgrade v5_0_0_schema_snapshot || {
+      "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade v5_0_0_schema_snapshot || {
         echo "[ERROR] Schema 快照迁移失败"
         # [FIX] 检查表是否已部分创建
         TABLE_COUNT=$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
@@ -592,7 +592,7 @@ smart_database_migrate() {
           echo "[INFO] 选项1: 清理数据库后重试"
           echo "[INFO] 选项2: 使用 alembic upgrade heads 继续迁移"
           # 尝试继续迁移
-          "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic upgrade heads || {
+          "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads || {
             echo "[ERROR] 继续迁移也失败，请手动检查"
             return 1
           }
@@ -603,7 +603,7 @@ smart_database_migrate() {
     fi
     # 继续执行后续增量迁移（如果有）
     # [FIX] 使用 heads（复数）以支持多头迁移分支
-    "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic upgrade heads || {
+    "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads || {
       echo "[WARN] 后续增量迁移失败，可能是快照迁移 revision ID 不正确或链接问题"
       echo "[INFO] 检查快照迁移的 revision ID 和后续迁移的 down_revision"
       echo "[INFO] 如果表已创建，可以继续部署；否则需要手动修复"
@@ -614,13 +614,13 @@ smart_database_migrate() {
     echo "[INFO] 检测到已有数据库（alembic_version 表存在），尝试增量迁移..."
     MIGRATE_LOG=$(mktemp)
     # [FIX] 使用 heads（复数）以支持多头迁移分支；捕获完整输出便于排查（如云服务器为旧版本表结构）
-    "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic upgrade heads 2> "${MIGRATE_LOG}"
+    "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads 2> "${MIGRATE_LOG}"
     MIGRATE_EXIT=$?
     if [ ${MIGRATE_EXIT} -ne 0 ]; then
       echo "[WARN] 迁移命令返回非零 (exit ${MIGRATE_EXIT})，完整输出如下:"
       cat "${MIGRATE_LOG}"
       echo "[WARN] 迁移失败，检测缺失的表..."
-      MISSING_TABLES=$("${compose_cmd_base[@]}" run --rm --no-build --no-deps backend python3 -c "
+      MISSING_TABLES=$("${compose_cmd_base[@]}" run --rm --no-deps backend python3 -c "
 from backend.models.database import Base, engine
 from sqlalchemy import inspect
 import sys
@@ -650,7 +650,7 @@ except Exception as e:
         echo "[INFO] 发现缺失的表，尝试补充: $MISSING_TABLES"
         # [FIX] 使用 Base.metadata.create_all() 只创建缺失的表
         # [FIX] 使用 tables 参数指定要创建的表，SQLAlchemy 会自动处理依赖顺序
-        "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend python3 -c "
+        "${compose_cmd_base[@]}" run --rm --no-deps backend python3 -c "
 from backend.models.database import Base, engine
 from sqlalchemy import inspect, text
 import sys
@@ -699,7 +699,7 @@ else:
 
         # [FIX] 验证表结构完整性后再标记
         # [FIX] 直接检查表是否存在，不依赖 verify_schema_completeness()（可能因多头迁移失败）
-        VERIFY_RESULT=$("${compose_cmd_base[@]}" run --rm --no-build --no-deps backend python3 -c "
+        VERIFY_RESULT=$("${compose_cmd_base[@]}" run --rm --no-deps backend python3 -c "
 from backend.models.database import Base, engine
 from sqlalchemy import inspect
 import json
@@ -728,15 +728,15 @@ except Exception as e:
           # [FIX] 仅在验证通过后才标记为最新
           # [FIX] 检查 head 数量，根据情况选择 stamp 命令
           # [FIX] 使用更准确的检测方式：统计包含 "(head)" 的行数
-          HEAD_COUNT=$("${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic heads 2>&1 | grep -E "\(head\)" | wc -l | tr -d ' \n\r' || echo "0")
+          HEAD_COUNT=$("${compose_cmd_base[@]}" run --rm --no-deps backend alembic heads 2>&1 | grep -E "\(head\)" | wc -l | tr -d ' \n\r' || echo "0")
           if [ "$HEAD_COUNT" -eq 1 ]; then
             echo "[INFO] 检测到单个 head，使用 alembic stamp head"
-            "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic stamp head || {
+            "${compose_cmd_base[@]}" run --rm --no-deps backend alembic stamp head || {
               echo "[WARN] alembic stamp head 失败，但表已创建"
             }
           else
             echo "[INFO] 检测到多个 head ($HEAD_COUNT 个)，使用 alembic stamp heads"
-            "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic stamp heads || {
+            "${compose_cmd_base[@]}" run --rm --no-deps backend alembic stamp heads || {
               echo "[WARN] alembic stamp heads 失败，但表已创建"
             }
           fi
@@ -754,11 +754,11 @@ except Exception as e:
       else
         # [P0] 所有表都存在：尝试补列后重试迁移（云上旧 schema 缺列时一次补齐）
         echo "[INFO] 所有表都存在，尝试补列后重试迁移..."
-        if ! "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend python3 /app/scripts/sync_schema_columns.py 2>/dev/null; then
+        if ! "${compose_cmd_base[@]}" run --rm --no-deps backend python3 /app/scripts/sync_schema_columns.py 2>/dev/null; then
           echo "[WARN] sync_schema_columns.py 执行失败或未找到，继续重试迁移"
         fi
         echo "[INFO] 重试 alembic upgrade heads..."
-        "${compose_cmd_base[@]}" run --rm --no-build --no-deps backend alembic upgrade heads 2> "${MIGRATE_LOG}"
+        "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads 2> "${MIGRATE_LOG}"
         RETRY_EXIT=$?
         if [ ${RETRY_EXIT} -eq 0 ]; then
           echo "[OK] 补列后迁移成功"
@@ -791,7 +791,7 @@ echo "[OK] Smart database migration completed successfully"
 # [BOOTSTRAP] Phase 2.5: Bootstrap initialization (after migrations, before application layer)
 # Note: Schema verification is now integrated into smart_database_migrate() function above
 echo "[INFO] Phase 2.5: Running production bootstrap..."
-"${compose_cmd_base[@]}" run --rm --no-build --no-deps backend python3 /app/scripts/bootstrap_production.py
+"${compose_cmd_base[@]}" run --rm --no-deps backend python3 /app/scripts/bootstrap_production.py
 if [ $? -ne 0 ]; then
   echo "[FAIL] Bootstrap execution failed, deployment blocked"
   echo "[INFO] Bootstrap failure diagnostics (without sensitive information):"
