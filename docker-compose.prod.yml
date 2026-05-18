@@ -167,6 +167,8 @@ services:
     command: alembic upgrade heads
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       RUN_MIGRATIONS: "1"
       ENVIRONMENT: "production"
       APP_ENV: production
