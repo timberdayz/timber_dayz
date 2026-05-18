@@ -10,6 +10,20 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  release-tag-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Verify deploy workflow release tag rules
+        run: |
+          python scripts/verify_release_tag_generation.py --release-tags v5.3 v5.3.1
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -298,15 +312,16 @@ jobs:
 
   notify:
     runs-on: ubuntu-latest
-    needs: [test, security-scan, build-check]
+    needs: [release-tag-rules, test, security-scan, build-check]
     if: always()
     steps:
       - name: Notify results
         run: |
-          if [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.build-check.result }}" == "success" ]; then
+          if [ "${{ needs.release-tag-rules.result }}" == "success" ] && [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.build-check.result }}" == "success" ]; then
             echo "[OK] All CI checks passed!"
           else
             echo "[FAIL] Some CI checks failed"
+            echo "Release tag rules: ${{ needs.release-tag-rules.result }}"
             echo "Test: ${{ needs.test.result }}"
             echo "Security: ${{ needs.security-scan.result }}"
             echo "Build: ${{ needs.build-check.result }}"
