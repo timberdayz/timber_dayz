@@ -92,10 +92,25 @@ def _add_column_if_missing(table_name: str, column: sa.Column) -> None:
         op.add_column(table_name, column, schema="c_class")
 
 
+def _has_all_columns(connection, table_name: str, columns: list[str]) -> bool:
+    return all(
+        _column_exists(connection, "c_class", table_name, column_name)
+        for column_name in columns
+    )
+
+
 def upgrade() -> None:
     connection = op.get_bind()
 
     if _table_exists(connection, "c_class", "employee_performance"):
+        legacy_employee_performance_columns = [
+            "员工编号",
+            "年月",
+            "实际销售额",
+            "达成率",
+            "绩效得分",
+            "计算时间",
+        ]
         _add_column_if_missing(
             "employee_performance",
             sa.Column("employee_code", sa.String(length=64), nullable=True),
@@ -121,25 +136,26 @@ def upgrade() -> None:
             sa.Column("calculated_at", sa.DateTime(timezone=True), nullable=True),
         )
 
-        op.execute(
-            sa.text(
-                """
-                UPDATE c_class.employee_performance
-                SET employee_code = "员工编号",
-                    year_month = "年月",
-                    actual_sales = "实际销售额",
-                    achievement_rate = "达成率",
-                    performance_score = "绩效得分",
-                    calculated_at = "计算时间"
-                WHERE employee_code IS NULL
-                   OR year_month IS NULL
-                   OR actual_sales IS NULL
-                   OR achievement_rate IS NULL
-                   OR performance_score IS NULL
-                   OR calculated_at IS NULL
-                """
+        if _has_all_columns(connection, "employee_performance", legacy_employee_performance_columns):
+            op.execute(
+                sa.text(
+                    """
+                    UPDATE c_class.employee_performance
+                    SET employee_code = "员工编号",
+                        year_month = "年月",
+                        actual_sales = "实际销售额",
+                        achievement_rate = "达成率",
+                        performance_score = "绩效得分",
+                        calculated_at = "计算时间"
+                    WHERE employee_code IS NULL
+                       OR year_month IS NULL
+                       OR actual_sales IS NULL
+                       OR achievement_rate IS NULL
+                       OR performance_score IS NULL
+                       OR calculated_at IS NULL
+                    """
+                )
             )
-        )
 
         op.execute(sa.text("""ALTER TABLE c_class.employee_performance ALTER COLUMN employee_code SET NOT NULL"""))
         op.execute(sa.text("""ALTER TABLE c_class.employee_performance ALTER COLUMN year_month SET NOT NULL"""))
@@ -173,6 +189,14 @@ def upgrade() -> None:
             )
 
     if _table_exists(connection, "c_class", "employee_commissions"):
+        legacy_employee_commission_columns = [
+            "员工编号",
+            "年月",
+            "销售额",
+            "提成金额",
+            "提成比例",
+            "计算时间",
+        ]
         _add_column_if_missing(
             "employee_commissions",
             sa.Column("employee_code", sa.String(length=64), nullable=True),
@@ -198,25 +222,26 @@ def upgrade() -> None:
             sa.Column("calculated_at", sa.DateTime(timezone=True), nullable=True),
         )
 
-        op.execute(
-            sa.text(
-                """
-                UPDATE c_class.employee_commissions
-                SET employee_code = "员工编号",
-                    year_month = "年月",
-                    sales_amount = "销售额",
-                    commission_amount = "提成金额",
-                    commission_rate = "提成比例",
-                    calculated_at = "计算时间"
-                WHERE employee_code IS NULL
-                   OR year_month IS NULL
-                   OR sales_amount IS NULL
-                   OR commission_amount IS NULL
-                   OR commission_rate IS NULL
-                   OR calculated_at IS NULL
-                """
+        if _has_all_columns(connection, "employee_commissions", legacy_employee_commission_columns):
+            op.execute(
+                sa.text(
+                    """
+                    UPDATE c_class.employee_commissions
+                    SET employee_code = "员工编号",
+                        year_month = "年月",
+                        sales_amount = "销售额",
+                        commission_amount = "提成金额",
+                        commission_rate = "提成比例",
+                        calculated_at = "计算时间"
+                    WHERE employee_code IS NULL
+                       OR year_month IS NULL
+                       OR sales_amount IS NULL
+                       OR commission_amount IS NULL
+                       OR commission_rate IS NULL
+                       OR calculated_at IS NULL
+                    """
+                )
             )
-        )
 
         op.execute(sa.text("""ALTER TABLE c_class.employee_commissions ALTER COLUMN employee_code SET NOT NULL"""))
         op.execute(sa.text("""ALTER TABLE c_class.employee_commissions ALTER COLUMN year_month SET NOT NULL"""))

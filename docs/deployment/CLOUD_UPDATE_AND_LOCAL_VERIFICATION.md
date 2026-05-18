@@ -62,7 +62,7 @@ git checkout main
 git pull origin main
 
 # 2. 本地按「二、本地 Docker 验证」跑一遍，确认通过后再打 tag
-python scripts/verify_deploy_phase35_local.py
+python scripts/verify_release_local.py
 # 以及（可选）本地生产 compose 全栈验证
 
 # 3. 打 tag 并推送（触发 CI：验证 → 构建 → 部署）
@@ -94,7 +94,7 @@ git push origin v4.x.x
 python run.py --use-docker --with-metabase
 
 # 2. 等待后端与 Metabase 就绪后，执行 Phase 3.5 等效 + 集成检查
-python scripts/verify_deploy_phase35_local.py --metabase-url http://localhost:8080 --backend-url http://localhost:8001
+python scripts/verify_release_local.py
 ```
 
 - 会执行：Metabase 健康 → `init_metabase.py` → Backend 健康 → Metabase 代理健康 → Dashboard KPI（按名称查 Question）。
@@ -111,18 +111,18 @@ python scripts/verify_deploy_phase35_local.py --metabase-url http://localhost:80
 **一键执行**（推荐部署前执行，**不要**加 `--no-build`，否则旧镜像可能缺少 `init_metabase.py`）：
 
 ```bash
-python scripts/verify_deploy_full_local.py
+python scripts/verify_release_local.py
 ```
 
 **可选**：跳过构建以节省时间（仅当确认当前 backend 镜像已含 `init_metabase.py` 时）：
 
 ```bash
-python scripts/verify_deploy_full_local.py --no-build
+python scripts/verify_release_local.py --skip-build
 ```
 
-**发布前若需与 CI 完全对齐**：可先运行 `python scripts/validate_migrations_fresh_db.py`（临时库门禁，在全新临时 Postgres 上跑 `alembic upgrade heads`，不碰开发库），再运行 `verify_deploy_full_local.py`。本方案**不提供**会清空开发库的 `--fresh-db`，避免误伤本地数据。
+**发布前若需与 CI 完全对齐**：可先运行 `python scripts/validate_migrations_fresh_db.py`（临时库门禁，在全新临时 Postgres 上跑 `alembic upgrade heads`，不碰开发库），再运行 `python scripts/verify_release_local.py`。
 
-**脚本行为**：使用 `docker-compose.yml` + `docker-compose.prod.yml` + `docker-compose.metabase.yml` + `docker-compose.verify-local.yml`（覆盖 `DATABASE_URL=postgres:5432` 与宿主机端口 8001/8080），按顺序执行：
+**当前脚本行为**：`verify_release_local.py` 串联当前仓库里真实存在的验证步骤，并在本地生产 compose 校验时显式使用 `--env-file .env.production`，避免根目录 `.env` 中的 `localhost` 型 `DATABASE_URL` 混入容器内配置。
 
 1. Phase 0.5：清洗 `.env` → `.env.cleaned`  
 2. Phase 1：启动 PostgreSQL、Redis，等待健康  
@@ -143,7 +143,7 @@ python scripts/verify_deploy_full_local.py --no-build
 - [ ] **临时库迁移门禁**：执行 `python scripts/validate_migrations_fresh_db.py` 通过（在全新临时 Postgres 上跑 `alembic upgrade heads`，不碰开发库）。
 - [ ] **迁移**：本地临时库或本地 Docker 库执行 `alembic upgrade heads` 无报错，表数量/关键表存在符合预期。
 - [ ] **Metabase 配置**：`config/metabase_config.yaml` 与 `sql/metabase_models/*.sql`、`sql/metabase_questions/*.sql` 已提交且无语法/路径错误。
-- [ ] **Phase 3.5 等效**：`python scripts/verify_deploy_phase35_local.py` 通过（Metabase 健康 → init_metabase.py → Backend 健康 → Dashboard KPI 返回数据）。
+- [ ] **当前发布前入口**：`python scripts/verify_release_local.py` 通过。
 - [ ] **单元测试**：`pytest tests/test_metabase_question_service.py -v` 通过。
 - [ ] **（可选）本地生产流程**：按 2.2 在本地用生产 compose 跑通迁移 → Bootstrap → Metabase → Phase 3.5 → 应用 → 健康/接口检查。
 
@@ -221,7 +221,7 @@ A：`init_metabase.py` 会按名称创建缺失的 Question；若你希望云端
 A：在服务器上查看部署日志，搜索 `Phase 3.5` 和 `init_metabase.py`；或部署后调用 Dashboard KPI 等接口，能按名称拿到数据即说明 Phase 3.5 与后端按名称解析均生效。
 
 **Q：本地没有 bash，无法直接跑 deploy_remote_production.sh？**  
-A：生产部署在 GitHub Actions 的 Linux 环境中执行该脚本；本地用「方式 A」的 `verify_deploy_phase35_local.py` 即可覆盖 Phase 3.5 与集成验证。若需完整顺序，可用 WSL 或 Git Bash 按 2.2 执行等价步骤。
+A：生产部署在 GitHub Actions 的 Linux 环境中执行该脚本；本地请直接运行 `python scripts/verify_release_local.py`。若需手工展开 compose，请显式带 `--env-file .env.production`。
 
 **Q：部署后服务器镜像太多占空间，如何只保留最近几个？**  
 A：在服务器 `.env`（或部署所用环境变量）中设置 **`KEEP_IMAGES_COUNT=2`**（或其它数字）。`deploy_remote_production.sh` 在部署成功后会按该数量保留最新的 backend/frontend 镜像并清理更旧的；未设置时脚本默认保留 5 个。模板见 `env.production.example` 中的「部署与镜像清理」小节。
@@ -234,9 +234,9 @@ A：在服务器 `.env`（或部署所用环境变量）中设置 **`KEEP_IMAGES
 |------|-----------|
 | 部署脚本（服务器执行） | `scripts/deploy_remote_production.sh` |
 | Metabase 初始化（Phase 3.5） | `scripts/init_metabase.py` |
-| **方式 B：本地生产流程验证（推荐部署前执行）** | `python scripts/verify_deploy_full_local.py` |
+| 本地发布前验证（推荐部署前执行） | `python scripts/verify_release_local.py` |
 | 方式 B 使用的 Compose 覆盖 | `docker-compose.verify-local.yml`（端口 8001/8080 + DATABASE_URL 覆盖） |
-| 本地 Phase 3.5 + 集成验证（方式 A） | `python scripts/verify_deploy_phase35_local.py` |
+| 本地 compose 规则 | `docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.verify-local.yml --profile production config` |
 | **临时库迁移门禁**（与 CI Validate Database Migrations 等价） | `python scripts/validate_migrations_fresh_db.py`（可选 `--port 5433`） |
 | 云上旧 schema 补列（部署失败时自动调用） | `scripts/sync_schema_columns.py`（可选 `--dry-run` 预览） |
 | 仅集成测试（后端已起） | `python scripts/test_metabase_question_integration.py --base-url http://localhost:8001` |

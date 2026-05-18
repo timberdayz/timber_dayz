@@ -17,6 +17,8 @@ down_revision = "20260202_sccym"
 branch_labels = None
 depends_on = None
 
+CORE_SCHEMA = "core"
+
 
 def column_exists(conn, table_name: str, column_name: str, schema: str = "public") -> bool:
     r = conn.execute(text("""
@@ -30,18 +32,20 @@ def column_exists(conn, table_name: str, column_name: str, schema: str = "public
 
 def upgrade() -> None:
     conn = op.get_bind()
-    if column_exists(conn, "collection_tasks", "started_at", "public"):
+    if column_exists(conn, "collection_tasks", "started_at", CORE_SCHEMA):
         return  # idempotent
     op.add_column(
         "collection_tasks",
         sa.Column("started_at", sa.DateTime(), nullable=True),
+        schema=CORE_SCHEMA,
     )
     op.add_column(
         "collection_tasks",
         sa.Column("completed_at", sa.DateTime(), nullable=True),
+        schema=CORE_SCHEMA,
     )
 
 
 def downgrade() -> None:
-    op.drop_column("collection_tasks", "completed_at")
-    op.drop_column("collection_tasks", "started_at")
+    op.drop_column("collection_tasks", "completed_at", schema=CORE_SCHEMA)
+    op.drop_column("collection_tasks", "started_at", schema=CORE_SCHEMA)

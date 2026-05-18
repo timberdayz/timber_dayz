@@ -16,9 +16,9 @@ depends_on = None
 
 
 TARGETS = {
-    ("public", "employee_tasks"): ("created_at", "updated_at"),
-    ("public", "employee_task_logs"): ("created_at",),
-    ("public", "employee_task_participants"): ("created_at",),
+    ("core", "employee_tasks"): ("created_at", "updated_at"),
+    ("core", "employee_task_logs"): ("created_at",),
+    ("core", "employee_task_participants"): ("created_at",),
     ("core", "sync_progress_tasks"): ("updated_at",),
     ("public", "dim_rate_limit_config"): ("created_at", "updated_at"),
     ("public", "notification_templates"): ("created_at", "updated_at"),

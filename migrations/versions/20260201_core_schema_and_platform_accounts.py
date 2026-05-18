@@ -47,6 +47,23 @@ def upgrade():
     conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
     safe_print("[OK] core schema ensured")
 
+    core_alignment_tables = (
+        "dim_users",
+        "dim_roles",
+        "backup_records",
+        "dim_fiscal_calendar",
+        "dim_vendors",
+        "collection_configs",
+        "collection_tasks",
+        "collection_task_logs",
+    )
+    for table_name in core_alignment_tables:
+        if table_exists(conn, table_name, 'public') and not table_exists(conn, table_name, 'core'):
+            conn.execute(text(f'ALTER TABLE public.{table_name} SET SCHEMA core'))
+            safe_print(f"[OK] public.{table_name} moved to core.{table_name}")
+        elif table_exists(conn, table_name, 'core'):
+            safe_print(f"[SKIP] core.{table_name} already exists")
+
     # 2. public.platform_accounts -> core.platform_accounts
     if table_exists(conn, 'platform_accounts', 'public') and not table_exists(conn, 'platform_accounts', 'core'):
         conn.execute(text('ALTER TABLE public.platform_accounts SET SCHEMA core'))

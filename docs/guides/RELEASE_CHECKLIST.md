@@ -11,8 +11,10 @@
 1. Confirm the working tree is clean or only contains intended release changes
 2. Run the focused tests for the changed area
 3. Run `python scripts/verify_rules_completeness.py`
-4. If production compose or env handling changed, verify:
+4. Run `python scripts/verify_release_local.py`
+5. If production compose or env handling changed, verify:
    - `docker-compose.prod.yml` uses `${DATABASE_URL}`
+   - local production compose validation uses `--env-file .env.production`
    - no legacy password fallback remains
    - local `.env.production` matches the intended server `.env`
 

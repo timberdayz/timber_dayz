@@ -36,3 +36,17 @@ def test_migration_rehearsal_accepts_complete_data_sync_critical_columns():
     missing = find_missing_data_sync_critical_columns(_FakeInspector())
 
     assert missing == []
+
+
+def test_migration_rehearsal_skips_missing_tables():
+    from scripts.validate_migrations_fresh_db import find_missing_data_sync_critical_columns
+
+    class _FakeInspector:
+        def get_columns(self, table_name, schema=None):
+            if (schema, table_name) == ("core", "data_quarantine"):
+                raise RuntimeError("missing table")
+            return [{"name": "id"}, {"name": "file_id"}]
+
+    missing = find_missing_data_sync_critical_columns(_FakeInspector())
+
+    assert missing == []

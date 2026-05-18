@@ -301,14 +301,28 @@ def check_nginx_config():
     content = nginx_file.read_text(encoding='utf-8')
     
     # 检查API代理配置
-    if 'location /api/' in content and 'proxy_pass http://backend' in content:
+    api_proxy_ok = (
+        'location /api/' in content
+        and (
+            'proxy_pass http://backend' in content
+            or 'proxy_pass http://$backend_upstream' in content
+        )
+    )
+    if api_proxy_ok:
         safe_print("  [OK] /api/ 路径代理到 backend")
     else:
         safe_print("  [FAIL] /api/ 路径代理配置不正确")
         return False
     
     # 检查前端代理配置
-    if 'location /' in content and 'proxy_pass http://frontend' in content:
+    frontend_proxy_ok = (
+        'location /' in content
+        and (
+            'proxy_pass http://frontend' in content
+            or 'proxy_pass http://$frontend_upstream' in content
+        )
+    )
+    if frontend_proxy_ok:
         safe_print("  [OK] / 路径代理到 frontend")
     else:
         safe_print("  [WARN] / 路径代理配置可能不正确")

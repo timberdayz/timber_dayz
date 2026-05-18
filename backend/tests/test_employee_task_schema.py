@@ -59,6 +59,15 @@ def test_employee_task_migration_mentions_all_three_tables():
     assert "employee_task_participants" in source
 
 
+def test_employee_task_migration_targets_core_schema():
+    versions_dir = Path("migrations/versions")
+    migration_path = next(iter(versions_dir.glob("*employee*task*.py")))
+    source = migration_path.read_text(encoding="utf-8")
+
+    assert 'CORE_SCHEMA = "core"' in source
+    assert 'schema=CORE_SCHEMA' in source
+
+
 def test_employee_task_tables_bind_to_core_schema():
     assert Base.metadata.tables["core.employee_tasks"].schema == "core"
     assert Base.metadata.tables["core.employee_task_logs"].schema == "core"

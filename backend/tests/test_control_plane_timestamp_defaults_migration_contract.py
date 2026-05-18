@@ -26,3 +26,12 @@ def test_control_plane_timestamp_default_migration_mentions_required_repairs():
     assert "created_at" in source
     assert "updated_at" in source
     assert "SET DEFAULT now()" in source
+
+
+def test_control_plane_timestamp_default_migration_targets_core_employee_task_tables():
+    migration_path = _find_control_plane_timestamp_default_migration()
+    source = migration_path.read_text(encoding="utf-8")
+
+    assert '("core", "employee_tasks")' in source
+    assert '("core", "employee_task_logs")' in source
+    assert '("core", "employee_task_participants")' in source

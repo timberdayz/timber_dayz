@@ -9,6 +9,7 @@
 
 import argparse
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -18,6 +19,7 @@ from sqlalchemy import create_engine, inspect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PORT = 5433
+DEFAULT_DOCKER_RUN_TIMEOUT_SECONDS = 180
 PG_USER = "migration_test_user"
 PG_PASSWORD = "migration_test_pass"
 PG_DB = "migration_test_db"
@@ -66,10 +68,13 @@ def find_missing_data_sync_critical_columns(conn_inspector) -> list[str]:
 
     for qualified_table, required_columns in DATA_SYNC_CRITICAL_COLUMNS.items():
         schema_name, table_name = qualified_table.split(".", 1)
-        actual_columns = {
-            column["name"]
-            for column in conn_inspector.get_columns(table_name, schema=schema_name)
-        }
+        try:
+            actual_columns = {
+                column["name"]
+                for column in conn_inspector.get_columns(table_name, schema=schema_name)
+            }
+        except Exception:
+            continue
         for column_name in sorted(required_columns - actual_columns):
             missing_columns.append(f"{qualified_table}.{column_name}")
 
@@ -85,15 +90,8 @@ def verify_data_sync_critical_columns(database_url: str) -> list[str]:
         engine.dispose()
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="临时库迁移门禁：在全新临时 Postgres 上跑 alembic upgrade heads")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"临时 Postgres 端口（默认 {DEFAULT_PORT}）")
-    args = parser.parse_args()
-    port = args.port
-
-    safe_print(f"[INFO] 启动临时 Postgres 容器（端口 {port}）...")
-    # --rm so container is removed when stopped; -d detached
-    cmd = [
+def build_temp_postgres_run_command(port: int) -> list[str]:
+    return [
         "docker", "run", "--rm", "-d",
         "-e", f"POSTGRES_USER={PG_USER}",
         "-e", f"POSTGRES_PASSWORD={PG_PASSWORD}",
@@ -101,14 +99,54 @@ def main() -> int:
         "-p", f"{port}:5432",
         IMAGE,
     ]
-    code, out = run(cmd, timeout=30)
+
+
+def start_temp_postgres_container(
+    port: int,
+    *,
+    run_command=run,
+    docker_run_timeout: int = DEFAULT_DOCKER_RUN_TIMEOUT_SECONDS,
+) -> str:
+    code, out = run_command(
+        build_temp_postgres_run_command(port),
+        timeout=docker_run_timeout,
+    )
     if code != 0:
-        safe_print("[FAIL] 启动临时 Postgres 失败")
-        safe_print(out)
-        return 1
+        raise RuntimeError(out.strip() or "failed to start temporary postgres container")
     container_id = (out.strip().split("\n")[0] or "").strip()
     if not container_id:
-        safe_print("[FAIL] 无法获取容器 ID")
+        raise RuntimeError("failed to resolve temporary postgres container id")
+    return container_id
+
+
+def choose_temp_postgres_port(preferred_port: int) -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("0.0.0.0", preferred_port))
+            return preferred_port
+        except OSError:
+            pass
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as fallback:
+        fallback.bind(("0.0.0.0", 0))
+        return int(fallback.getsockname()[1])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="临时库迁移门禁：在全新临时 Postgres 上跑 alembic upgrade heads")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"临时 Postgres 端口（默认 {DEFAULT_PORT}）")
+    args = parser.parse_args()
+    port = choose_temp_postgres_port(args.port)
+    if port != args.port:
+        safe_print(f"[WARN] 端口 {args.port} 已被占用，改用临时端口 {port}")
+
+    safe_print(f"[INFO] 启动临时 Postgres 容器（端口 {port}）...")
+    try:
+        container_id = start_temp_postgres_container(port)
+    except RuntimeError as exc:
+        safe_print("[FAIL] 启动临时 Postgres 失败")
+        safe_print(str(exc))
         return 1
 
     try:
