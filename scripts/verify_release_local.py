@@ -55,6 +55,7 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
     env_file = PROJECT_ROOT / ".env.production"
 
     _run_command([sys.executable, "scripts/verify_release_tag_generation.py"])
+    _run_command([sys.executable, "scripts/verify_remote_deploy_contracts.py"])
     _run_command([sys.executable, "scripts/validate_production_env.py"])
     _run_command([sys.executable, "scripts/pre_deployment_check.py"])
     _run_command([sys.executable, "scripts/validate_migrations_fresh_db.py"])
