@@ -112,7 +112,8 @@ jobs:
           # 设置测试用的环境变量
           echo "TEST_MODE=true" >> .env
           echo "DATABASE_NAME=test_sales_analytics.db" >> .env
-          echo "ACCOUNT_ENCRYPTION_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> .env
+          # Fernet key must be 32 url-safe base64-encoded bytes.
+          echo "ACCOUNT_ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> .env
           echo "SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> .env
           echo "JWT_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> .env
 
