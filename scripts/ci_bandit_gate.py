@@ -51,9 +51,13 @@ def main() -> int:
 
     results = payload.get("results") or []
     fail_sev = {s.strip().upper() for s in (args.fail_on_severity or []) if s.strip()}
-    matched = [r for r in results if str(r.get("issue_severity", "")).upper() in fail_sev]
+    matched = [
+        r for r in results if str(r.get("issue_severity", "")).upper() in fail_sev
+    ]
 
-    print(f"[INFO] Bandit results: total={len(results)} fail_on={sorted(fail_sev)} matched={len(matched)}")
+    print(
+        f"[INFO] Bandit results: total={len(results)} fail_on={sorted(fail_sev)} matched={len(matched)}"
+    )
     if matched:
         print("[INFO] Matched findings (showing up to max-print):")
         for item in matched[: max(args.max_print, 0)]:
@@ -75,4 +79,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

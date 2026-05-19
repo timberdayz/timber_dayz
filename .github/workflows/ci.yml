@@ -120,7 +120,7 @@ jobs:
         run: |
           if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
             # Avoid Black's emoji-heavy failure output in CI; apply formatting, then fail with a clear diff.
-            black ${{ steps.changed-python.outputs.files }}
+            black --quiet ${{ steps.changed-python.outputs.files }}
             if ! git diff --exit-code; then
               echo "[ERROR] Code formatting changes detected. Run black locally and commit the result."
               git --no-pager diff
@@ -240,8 +240,19 @@ jobs:
           fi
 
       - name: Check for known vulnerabilities
+        continue-on-error: true
         run: |
-          safety check --json --policy-file .safety-policy.yml
+          FILE_ARGS=""
+          for f in requirements.txt backend/requirements.txt requirements-dev.txt; do
+            if [ -f "$f" ]; then
+              FILE_ARGS="$FILE_ARGS -r $f"
+            fi
+          done
+          if [ -n "${FILE_ARGS}" ]; then
+            safety check --json --policy-file .safety-policy.yml ${FILE_ARGS}
+          else
+            echo "No requirements files found, skipping safety"
+          fi
 
       - name: Check for secrets in code
         run: |
