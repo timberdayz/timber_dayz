@@ -1,0 +1,11 @@
+---
+# Safety (CLI) policy file for CI.
+#
+# Notes:
+# - Our CI currently runs `safety check`.
+# - Some Safety versions default `--policy-file` to `.safety-policy.yml`.
+# - Keeping this file in-repo prevents CI failures caused by missing policy files.
+#
+# Reference: Safety policy file (Safety 2 docs).
+security: {}
+
