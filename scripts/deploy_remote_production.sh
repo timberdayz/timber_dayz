@@ -390,6 +390,15 @@ echo "[OK] Resolved tags: Backend=${BACKEND_TAG}, Frontend=${FRONTEND_TAG}"
 echo "[INFO] Cleaning up old containers that might conflict with port 80..."
 docker stop xihong_erp_frontend 2>/dev/null || true
 docker rm xihong_erp_frontend 2>/dev/null || true
+
+# Stop application layer before migrations/bootstrap to avoid concurrent background jobs
+# touching ops tables and causing lock contention during deploy.
+echo "[INFO] Stopping existing application containers (backend/celery/nginx) to avoid DB lock contention..."
+docker stop xihong_erp_nginx 2>/dev/null || true
+docker stop xihong_erp_backend 2>/dev/null || true
+docker stop xihong_erp_celery_worker 2>/dev/null || true
+docker stop xihong_erp_celery_beat 2>/dev/null || true
+echo "[OK] Application containers stopped (best-effort)"
 PORT_80_CONTAINER="$(docker ps --format "{{.Names}}" --filter "publish=80" 2>/dev/null | head -1 || echo "")"
 if [ -n "${PORT_80_CONTAINER}" ] && [ "${PORT_80_CONTAINER}" != "xihong_erp_nginx" ]; then
   echo "[WARN] Found container ${PORT_80_CONTAINER} using port 80, stopping it..."
