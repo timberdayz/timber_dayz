@@ -277,6 +277,10 @@ jobs:
       - name: Safety diff gate (PR only, fail on new vulns)
         if: steps.base-sha.outputs.sha != ''
         run: |
+          POLICY_PATH="${RUNNER_TEMP}/safety-policy.yml"
+          # Base SHA may not include the policy file; keep a copy outside the repo tree.
+          cp .safety-policy.yml "${POLICY_PATH}"
+
           FILE_ARGS=""
           for f in requirements.txt backend/requirements.txt requirements-dev.txt; do
             if [ -f "$f" ]; then
@@ -290,7 +294,7 @@ jobs:
 
           # Generate base report in the same workspace by temporarily checking out the base SHA.
           git checkout --quiet ${{ steps.base-sha.outputs.sha }}
-          safety check --json --policy-file .safety-policy.yml --save-json safety-report-base.json ${FILE_ARGS} || true
+          safety check --json --policy-file "${POLICY_PATH}" --save-json safety-report-base.json ${FILE_ARGS} || true
 
           # Restore head for subsequent steps/artifacts.
           git checkout --quiet ${{ github.sha }}
