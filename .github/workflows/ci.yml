@@ -8,6 +8,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PYTHONUTF8: "1"
 
 jobs:
   release-tag-rules:
@@ -214,7 +215,8 @@ jobs:
 
       - name: Install security tools
         run: |
-          pip install bandit safety
+          python -m pip install --upgrade pip
+          pip install bandit==1.9.4 safety==3.7.0
 
       - name: Detect changed Python files
         id: changed-python
@@ -234,11 +236,18 @@ jobs:
           if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
             # Use --exit-zero so the step continues and prints findings; enforce the gate explicitly.
             bandit -s B608 ${{ steps.changed-python.outputs.files }} -f json -o bandit-report.json --exit-zero
-            bandit -s B608 ${{ steps.changed-python.outputs.files }} --exit-zero
             python scripts/ci_bandit_gate.py bandit-report.json --fail-on-severity HIGH
           else
             echo "No changed Python files for Bandit scan"
           fi
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          if-no-files-found: ignore
 
       - name: Check for known vulnerabilities
         continue-on-error: true
@@ -250,10 +259,19 @@ jobs:
             fi
           done
           if [ -n "${FILE_ARGS}" ]; then
-            safety check --json --policy-file .safety-policy.yml ${FILE_ARGS}
+            # `safety check` is deprecated upstream, but still used here for compatibility.
+            safety check --json --policy-file .safety-policy.yml --save-json safety-report.json ${FILE_ARGS}
           else
             echo "No requirements files found, skipping safety"
           fi
+
+      - name: Upload Safety report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safety-report
+          path: safety-report.json
+          if-no-files-found: ignore
 
       - name: Check for secrets in code
         run: |
