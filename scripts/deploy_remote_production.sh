@@ -803,9 +803,19 @@ fi
 echo "[OK] Bootstrap completed successfully"
 
 echo "[INFO] Phase 2.6: Bootstrapping PostgreSQL Dashboard assets (single-run)..."
-"${compose_cmd_base[@]}" run --rm --no-deps backend python3 /app/scripts/bootstrap_postgresql_dashboard.py
-if [ $? -ne 0 ]; then
+DEPLOY_LOG_DIR="${PRODUCTION_PATH}/deploy-logs"
+mkdir -p "${DEPLOY_LOG_DIR}" || true
+BOOTSTRAP_TS="$(date +%Y%m%d_%H%M%S)"
+BOOTSTRAP_LOG_FILE="${DEPLOY_LOG_DIR}/bootstrap_postgresql_dashboard_${BOOTSTRAP_TS}.log"
+
+set +e
+"${compose_cmd_base[@]}" run --rm --no-deps backend python3 /app/scripts/bootstrap_postgresql_dashboard.py 2>&1 | tee "${BOOTSTRAP_LOG_FILE}"
+BOOTSTRAP_RC=${PIPESTATUS[0]}
+set -e
+
+if [ ${BOOTSTRAP_RC} -ne 0 ]; then
   echo "[FAIL] PostgreSQL Dashboard assets bootstrap failed, deployment blocked"
+  echo "[INFO] Bootstrap log: ${BOOTSTRAP_LOG_FILE}"
   exit 1
 fi
 echo "[OK] PostgreSQL Dashboard assets are ready"
