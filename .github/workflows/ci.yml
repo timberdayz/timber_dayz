@@ -218,6 +218,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install bandit==1.9.4 safety==3.7.0
 
+      - name: Resolve base SHA (PR only)
+        id: base-sha
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "sha=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "sha=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Detect changed Python files
         id: changed-python
         env:
@@ -260,17 +269,42 @@ jobs:
           done
           if [ -n "${FILE_ARGS}" ]; then
             # `safety check` is deprecated upstream, but still used here for compatibility.
-            safety check --json --policy-file .safety-policy.yml --save-json safety-report.json ${FILE_ARGS}
+            safety check --json --policy-file .safety-policy.yml --save-json safety-report-head.json ${FILE_ARGS}
           else
             echo "No requirements files found, skipping safety"
           fi
+
+      - name: Safety diff gate (PR only, fail on new vulns)
+        if: steps.base-sha.outputs.sha != ''
+        run: |
+          FILE_ARGS=""
+          for f in requirements.txt backend/requirements.txt requirements-dev.txt; do
+            if [ -f "$f" ]; then
+              FILE_ARGS="$FILE_ARGS -r $f"
+            fi
+          done
+          if [ -z "${FILE_ARGS}" ]; then
+            echo "No requirements files found, skipping safety gate"
+            exit 0
+          fi
+
+          # Generate base report in the same workspace by temporarily checking out the base SHA.
+          git checkout --quiet ${{ steps.base-sha.outputs.sha }}
+          safety check --json --policy-file .safety-policy.yml --save-json safety-report-base.json ${FILE_ARGS} || true
+
+          # Restore head for subsequent steps/artifacts.
+          git checkout --quiet ${{ github.sha }}
+
+          python scripts/ci_safety_gate.py safety-report-head.json --base-report safety-report-base.json --fail-on-new
 
       - name: Upload Safety report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: safety-report
-          path: safety-report.json
+          path: |
+            safety-report-head.json
+            safety-report-base.json
           if-no-files-found: ignore
 
       - name: Check for secrets in code
