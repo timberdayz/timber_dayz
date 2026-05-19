@@ -2,7 +2,29 @@ CREATE SCHEMA IF NOT EXISTS api;
 
 -- Legacy operating_costs columns may include: "年月", "店铺ID", "租金", "工资", "水电费", "其他成本"
 DO $bootstrap$
+DECLARE
+    marketing_fee_expr text;
 BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'a_class'
+          AND table_name = 'operating_costs'
+          AND column_name = '营销费用'
+    ) THEN
+        marketing_fee_expr := 'COALESCE("营销费用", 0)';
+    ELSIF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'a_class'
+          AND table_name = 'operating_costs'
+          AND column_name = '工资'
+    ) THEN
+        marketing_fee_expr := 'COALESCE("工资", 0)';
+    ELSE
+        marketing_fee_expr := '0';
+    END IF;
+
     IF EXISTS (
         SELECT 1
         FROM information_schema.columns
@@ -101,7 +123,7 @@ BEGIN
            AND COALESCE(ds.shop_id, '') = COALESCE(m.shop_id, '')
         $view$;
     ELSE
-        EXECUTE $view$
+        EXECUTE format($view$
         CREATE OR REPLACE VIEW api.business_overview_operational_metrics_module AS
         WITH base_month_kpi AS (
             SELECT
@@ -139,7 +161,7 @@ BEGIN
             SELECT
                 to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
                 "店铺ID" AS shop_id,
-                SUM("租金" + "营销费用" + "水电费" + "其他成本") AS estimated_expenses
+                SUM("租金" + %s + "水电费" + "其他成本") AS estimated_expenses
             FROM a_class.operating_costs
             GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
         )
@@ -190,7 +212,7 @@ BEGIN
             ON ds.period_date = m.anchor_date
            AND ds.platform_code = m.platform_code
            AND COALESCE(ds.shop_id, '') = COALESCE(m.shop_id, '')
-        $view$;
+        $view$, marketing_fee_expr);
     END IF;
 END
 $bootstrap$;

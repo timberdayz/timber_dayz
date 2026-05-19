@@ -2,7 +2,29 @@ CREATE SCHEMA IF NOT EXISTS mart;
 
 -- Legacy operating_costs columns may include: "年月", "店铺ID", "租金", "工资", "水电费", "其他成本"
 DO $bootstrap$
+DECLARE
+    marketing_fee_expr text;
 BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'a_class'
+          AND table_name = 'operating_costs'
+          AND column_name = '营销费用'
+    ) THEN
+        marketing_fee_expr := 'COALESCE("营销费用", 0)';
+    ELSIF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'a_class'
+          AND table_name = 'operating_costs'
+          AND column_name = '工资'
+    ) THEN
+        marketing_fee_expr := 'COALESCE("工资", 0)';
+    ELSE
+        marketing_fee_expr := '0';
+    END IF;
+
     IF EXISTS (
         SELECT 1
         FROM information_schema.columns
@@ -56,13 +78,13 @@ BEGIN
            AND COALESCE(m.shop_id, '') = COALESCE(c.shop_id, '')
         $view$;
     ELSE
-        EXECUTE $view$
+        EXECUTE format($view$
         CREATE OR REPLACE VIEW mart.annual_summary_shop_month AS
         WITH monthly_costs AS (
             SELECT
                 to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
                 "店铺ID" AS shop_id,
-                SUM("租金" + "营销费用" + "水电费" + "其他成本") AS total_cost
+                SUM("租金" + %s + "水电费" + "其他成本") AS total_cost
             FROM a_class.operating_costs
             GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
         )
@@ -100,7 +122,7 @@ BEGIN
         LEFT JOIN monthly_costs c
             ON m.period_month = c.period_month
            AND COALESCE(m.shop_id, '') = COALESCE(c.shop_id, '')
-        $view$;
+        $view$, marketing_fee_expr);
     END IF;
 END
 $bootstrap$;

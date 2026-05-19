@@ -56,6 +56,7 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
 
     _run_command([sys.executable, "scripts/verify_release_tag_generation.py"])
     _run_command([sys.executable, "scripts/verify_remote_deploy_contracts.py"])
+    _run_command([sys.executable, "scripts/verify_sql_legacy_compat.py"])
     _run_command([sys.executable, "scripts/validate_production_env.py"])
     _run_command([sys.executable, "scripts/pre_deployment_check.py"])
     _run_command([sys.executable, "scripts/validate_migrations_fresh_db.py"])
@@ -120,6 +121,10 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
         ],
         env=verify_env,
     )
+
+    # Optional: run a full rehearsal against a locally-restored production snapshot DB.
+    # Set PROD_SNAPSHOT_DATABASE_URL to enable.
+    _run_command([sys.executable, "scripts/rehearsal_prod_snapshot.py"])
 
     return True
 
