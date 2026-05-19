@@ -43,6 +43,7 @@ COPY VERSION /app/VERSION
 RUN mkdir -p /app/scripts /app/sql
 COPY scripts/create_admin_user.py /app/scripts/create_admin_user.py
 COPY scripts/bootstrap_production.py /app/scripts/bootstrap_production.py
+COPY scripts/bootstrap_postgresql_dashboard.py /app/scripts/bootstrap_postgresql_dashboard.py
 COPY scripts/check_postgresql_dashboard_ops.py /app/scripts/check_postgresql_dashboard_ops.py
 COPY scripts/migrate_cloud_sync_tables.py /app/scripts/migrate_cloud_sync_tables.py
 COPY scripts/rebuild_inventory_age_from_snapshots.py /app/scripts/rebuild_inventory_age_from_snapshots.py
