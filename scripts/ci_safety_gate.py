@@ -70,7 +70,9 @@ def _print_item(prefix: str, item: dict) -> None:
     pkg = item.get("package_name", "")
     cve = item.get("CVE") or ""
     spec = item.get("vulnerable_spec") or item.get("all_vulnerable_specs") or []
-    spec_s = ",".join(str(x) for x in (spec if isinstance(spec, list) else [spec]))[:120]
+    spec_s = ",".join(str(x) for x in (spec if isinstance(spec, list) else [spec]))[
+        :120
+    ]
     analyzed = item.get("analyzed_version") or ""
     print(f"- {prefix} {pkg} {analyzed} vid={vid} {cve} spec={spec_s}".strip())
 
@@ -94,7 +96,10 @@ def main() -> int:
         base_payload = _load_json(base_path)
         base_findings = _extract_findings(base_payload)
 
-    new_keys = sorted(set(head_findings.keys()) - set(base_findings.keys()), key=lambda k: (k.package_name, k.vulnerability_id))
+    new_keys = sorted(
+        set(head_findings.keys()) - set(base_findings.keys()),
+        key=lambda k: (k.package_name, k.vulnerability_id),
+    )
 
     print(
         "[INFO] Safety findings:"
@@ -119,4 +124,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
