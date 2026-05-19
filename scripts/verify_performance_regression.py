@@ -134,7 +134,9 @@ def main() -> int:
     print(str(path))
     if not summary["all_passed"]:
         failed = [item for item in results if item["returncode"] != 0]
-        print(f"[ERROR] Performance regression failed steps: {len(failed)}/{len(results)}")
+        print(
+            f"[ERROR] Performance regression failed steps: {len(failed)}/{len(results)}"
+        )
         for item in failed:
             print(f"[ERROR] Step={item['name']} returncode={item['returncode']}")
             stderr = (item.get("stderr") or "").strip()
