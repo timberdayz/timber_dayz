@@ -273,12 +273,30 @@ async def lifespan(app: FastAPI):
             )
 
             async with AsyncSessionLocal() as session:
-                dashboard_bootstrap_report = await bootstrap_dashboard_assets_if_needed(
-                    session
-                )
-                await session.commit()
+                auto_bootstrap = os.getenv(
+                    "AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP",
+                    "false" if settings.ENVIRONMENT == "production" else "true",
+                ).lower() in ("true", "1")
+
+                if auto_bootstrap:
+                    dashboard_bootstrap_report = await bootstrap_dashboard_assets_if_needed(
+                        session,
+                        wait_for_lock=False,
+                    )
+                    await session.commit()
+                else:
+                    dashboard_bootstrap_report = {"bootstrapped": False, "skipped": True}
             startup_metrics["dashboard_bootstrap"] = time.time() - step_start
-            if dashboard_bootstrap_report.get("bootstrapped"):
+            if dashboard_bootstrap_report.get("skipped"):
+                logger.info(
+                    "[SKIP] PostgreSQL Dashboard 资产启动期自动初始化已禁用 "
+                    "(AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false)"
+                )
+            elif dashboard_bootstrap_report.get("bootstrap_in_progress"):
+                logger.info(
+                    "[SKIP] PostgreSQL Dashboard 资产正在被其他实例初始化，避免并发竞争"
+                )
+            elif dashboard_bootstrap_report.get("bootstrapped"):
                 logger.info(
                     "[OK] PostgreSQL Dashboard 资产已自动初始化 "
                     f"({startup_metrics['dashboard_bootstrap']:.2f}秒, run_id={dashboard_bootstrap_report.get('run_id')})"

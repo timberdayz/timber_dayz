@@ -22,6 +22,7 @@ from backend.services.data_pipeline.dashboard_bootstrap import (
     DASHBOARD_BOOTSTRAP_TARGETS,
     DASHBOARD_REQUIRED_OBJECTS,
     bootstrap_dashboard_assets,
+    bootstrap_dashboard_assets_if_needed,
     inspect_dashboard_assets,
 )
 
@@ -58,7 +59,9 @@ async def _async_main(args: argparse.Namespace) -> int:
             _print_report(report, args.json)
             return 0 if report["ready"] else 1
 
-        report = await bootstrap_dashboard_assets(session)
+        # Deploy-time runs should be concurrency-safe and avoid deadlocks if other
+        # instances happen to start simultaneously.
+        report = await bootstrap_dashboard_assets_if_needed(session, wait_for_lock=True)
         await session.commit()
         _print_report(report, args.json)
         return 0 if report["ready"] else 1

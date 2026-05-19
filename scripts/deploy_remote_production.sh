@@ -802,12 +802,21 @@ if [ $? -ne 0 ]; then
 fi
 echo "[OK] Bootstrap completed successfully"
 
+echo "[INFO] Phase 2.6: Bootstrapping PostgreSQL Dashboard assets (single-run)..."
+"${compose_cmd_base[@]}" run --rm --no-deps backend python3 /app/scripts/bootstrap_postgresql_dashboard.py
+if [ $? -ne 0 ]; then
+  echo "[FAIL] PostgreSQL Dashboard assets bootstrap failed, deployment blocked"
+  exit 1
+fi
+echo "[OK] PostgreSQL Dashboard assets are ready"
+
 echo "[INFO] Phase 3: starting application layer (backend, celery)..."
 "${compose_cmd_base[@]}" up -d --no-build backend celery-worker celery-beat
 
 echo "[INFO] Waiting for backend health..."
 for i in $(seq 1 60); do
-  if docker exec xihong_erp_backend curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+  # Avoid relying on curl inside the container; python is always available.
+  if docker exec xihong_erp_backend python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()" >/dev/null 2>&1; then
     echo "[OK] Backend is healthy"
     break
   fi

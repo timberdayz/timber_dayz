@@ -103,6 +103,8 @@ services:
       DEBUG: "false"
       LOG_LEVEL: INFO
       USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-true}
+      # Avoid concurrent startup bootstrap deadlocks; bootstrap runs as an explicit deploy step.
+      AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP: ${AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP:-false}
       # ⚠️ 重要：ALLOWED_HOSTS 必须包含 'backend'（Nginx 代理时设置的 Host 头）
       # 生产环境建议通过 .env 文件明确配置：ALLOWED_HOSTS=localhost,127.0.0.1,backend,your-domain.com
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},backend

@@ -24,6 +24,28 @@ EXTRA_TABLES = (
 )
 DASHBOARD_REQUIRED_OBJECTS = [*DASHBOARD_BOOTSTRAP_TARGETS, *OPS_TABLES, *EXTRA_TABLES]
 
+# Global bootstrap lock to avoid deadlocks during concurrent startup/deploy.
+# Chosen as a stable 32-bit integer key derived from a human label.
+_DASHBOARD_BOOTSTRAP_LOCK_KEY = 918_240_113  # "bootstrap_postgresql_dashboard"
+
+
+async def _try_advisory_lock(session: AsyncSession, key: int) -> bool:
+    result = await session.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})
+    return bool(result.scalar_one())
+
+
+async def _advisory_unlock(session: AsyncSession, key: int) -> None:
+    try:
+        await session.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+    except Exception:
+        # Best-effort: if the session is already closed/failed, unlock isn't possible.
+        pass
+
+
+async def _advisory_lock(session: AsyncSession, key: int) -> None:
+    # Block until lock acquired (used by deploy-time bootstrap).
+    await session.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
+
 
 def _compute_dashboard_assets_fingerprint() -> str:
     """Stable fingerprint for dashboard SQL assets, used for drift detection.
@@ -152,12 +174,32 @@ async def bootstrap_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
     return report
 
 
-async def bootstrap_dashboard_assets_if_needed(session: AsyncSession) -> dict[str, Any]:
+async def bootstrap_dashboard_assets_if_needed(
+    session: AsyncSession,
+    *,
+    wait_for_lock: bool = False,
+) -> dict[str, Any]:
     report = await inspect_dashboard_assets(session)
     if report["ready"]:
         report["bootstrapped"] = False
         return report
 
-    report = await bootstrap_dashboard_assets(session)
-    report["bootstrapped"] = True
-    return report
+    acquired = False
+    if wait_for_lock:
+        await _advisory_lock(session, _DASHBOARD_BOOTSTRAP_LOCK_KEY)
+        acquired = True
+    else:
+        acquired = await _try_advisory_lock(session, _DASHBOARD_BOOTSTRAP_LOCK_KEY)
+
+    if not acquired:
+        # Another instance is bootstrapping. Avoid deadlock by not racing it.
+        report["bootstrapped"] = False
+        report["bootstrap_in_progress"] = True
+        return report
+
+    try:
+        report = await bootstrap_dashboard_assets(session)
+        report["bootstrapped"] = True
+        return report
+    finally:
+        await _advisory_unlock(session, _DASHBOARD_BOOTSTRAP_LOCK_KEY)
