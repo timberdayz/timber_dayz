@@ -1,0 +1,14 @@
+---
+# Safety Security Configuration file (used by `safety check`).
+#
+# This is intentionally minimal but schema-valid so CI doesn't fail due to a
+# missing or invalid policy file.
+#
+# Reference template: pyupio/safety `safety-policy-template.yml`.
+
+security:
+  ignore-unpinned-requirements: true
+  ignore-cvss-severity-below: 0
+  ignore-cvss-unknown-severity: false
+  ignore-vulnerabilities: {}
+  continue-on-vulnerability-error: false

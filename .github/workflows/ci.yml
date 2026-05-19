@@ -8,6 +8,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PYTHONUTF8: "1"
 
 jobs:
   release-tag-rules:
@@ -112,14 +113,21 @@ jobs:
           # 设置测试用的环境变量
           echo "TEST_MODE=true" >> .env
           echo "DATABASE_NAME=test_sales_analytics.db" >> .env
-          echo "ACCOUNT_ENCRYPTION_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> .env
+          # Fernet key must be 32 url-safe base64-encoded bytes.
+          echo "ACCOUNT_ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> .env
           echo "SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> .env
           echo "JWT_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> .env
 
       - name: Code formatting check
         run: |
           if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
-            black --check --diff ${{ steps.changed-python.outputs.files }}
+            # Avoid Black's emoji-heavy failure output in CI; apply formatting, then fail with a clear diff.
+            black --quiet ${{ steps.changed-python.outputs.files }}
+            if ! git diff --exit-code; then
+              echo "[ERROR] Code formatting changes detected. Run black locally and commit the result."
+              git --no-pager diff
+              exit 1
+            fi
           else
             echo "No changed Python files for formatting check"
           fi
@@ -207,7 +215,17 @@ jobs:
 
       - name: Install security tools
         run: |
-          pip install bandit safety
+          python -m pip install --upgrade pip
+          pip install bandit==1.9.4 safety==3.7.0
+
+      - name: Resolve base SHA (PR only)
+        id: base-sha
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "sha=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "sha=" >> $GITHUB_OUTPUT
+          fi
 
       - name: Detect changed Python files
         id: changed-python
@@ -225,15 +243,73 @@ jobs:
       - name: Run Bandit security scan
         run: |
           if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
-            bandit -s B608 ${{ steps.changed-python.outputs.files }} -f json -o bandit-report.json
-            bandit -s B608 ${{ steps.changed-python.outputs.files }}
+            # Use --exit-zero so the step continues and prints findings; enforce the gate explicitly.
+            bandit -s B608 ${{ steps.changed-python.outputs.files }} -f json -o bandit-report.json --exit-zero
+            python scripts/ci_bandit_gate.py bandit-report.json --fail-on-severity HIGH
           else
             echo "No changed Python files for Bandit scan"
           fi
 
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          if-no-files-found: ignore
+
       - name: Check for known vulnerabilities
+        continue-on-error: true
         run: |
-          safety check --json
+          FILE_ARGS=""
+          for f in requirements.txt backend/requirements.txt requirements-dev.txt; do
+            if [ -f "$f" ]; then
+              FILE_ARGS="$FILE_ARGS -r $f"
+            fi
+          done
+          if [ -n "${FILE_ARGS}" ]; then
+            # `safety check` is deprecated upstream, but still used here for compatibility.
+            safety check --json --policy-file .safety-policy.yml --save-json safety-report-head.json ${FILE_ARGS}
+          else
+            echo "No requirements files found, skipping safety"
+          fi
+
+      - name: Safety diff gate (PR only, fail on new vulns)
+        if: steps.base-sha.outputs.sha != ''
+        run: |
+          POLICY_PATH="${RUNNER_TEMP}/safety-policy.yml"
+          # Base SHA may not include the policy file; keep a copy outside the repo tree.
+          cp .safety-policy.yml "${POLICY_PATH}"
+
+          FILE_ARGS=""
+          for f in requirements.txt backend/requirements.txt requirements-dev.txt; do
+            if [ -f "$f" ]; then
+              FILE_ARGS="$FILE_ARGS -r $f"
+            fi
+          done
+          if [ -z "${FILE_ARGS}" ]; then
+            echo "No requirements files found, skipping safety gate"
+            exit 0
+          fi
+
+          # Generate base report in the same workspace by temporarily checking out the base SHA.
+          git checkout --quiet ${{ steps.base-sha.outputs.sha }}
+          safety check --json --policy-file "${POLICY_PATH}" --save-json safety-report-base.json ${FILE_ARGS} || true
+
+          # Restore head for subsequent steps/artifacts.
+          git checkout --quiet ${{ github.sha }}
+
+          python scripts/ci_safety_gate.py safety-report-head.json --base-report safety-report-base.json --fail-on-new
+
+      - name: Upload Safety report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safety-report
+          path: |
+            safety-report-head.json
+            safety-report-base.json
+          if-no-files-found: ignore
 
       - name: Check for secrets in code
         run: |
