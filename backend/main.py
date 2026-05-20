@@ -109,6 +109,7 @@ async def lifespan(app: FastAPI):
     # 后台任务列表(用于关闭时正确取消)
     background_tasks = []
     app.state.cloud_sync_runtime = None
+    app.state.collection_leader_lock = None
 
     startup_start = time.time()
     logger.info("[启动] 西虹ERP系统后端服务启动中...")
@@ -475,6 +476,34 @@ async def lifespan(app: FastAPI):
             )
 
         # v4.7.0新增:标记中断的采集任务并初始化调度器
+        # collection scheduler + queue runner leader lock gating
+        enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in (
+            "true",
+            "1",
+        )
+        deployment_role = os.getenv("DEPLOYMENT_ROLE", "").lower()
+        leader_lock_acquired = True
+        if enable_collection and deployment_role != "cloud":
+            try:
+                from backend.services.collection_leader_lock import CollectionLeaderLock
+
+                lock = CollectionLeaderLock()
+                acquired = await lock.acquire()
+                app.state.collection_leader_lock = lock
+                leader_lock_acquired = bool(acquired)
+                if not leader_lock_acquired:
+                    logger.info(
+                        "[CollectionLeaderLock] Leader lock not acquired; skip starting "
+                        "CollectionScheduler and CollectionQueueRunner"
+                    )
+            except Exception as lock_err:
+                logger.warning(
+                    f"[CollectionLeaderLock] Acquire failed (non-blocking): {lock_err}"
+                )
+                leader_lock_acquired = False
+        else:
+            leader_lock_acquired = True
+
         try:
             from backend.services.task_service import TaskService
             from backend.services.collection_scheduler import (
@@ -513,6 +542,10 @@ async def lifespan(app: FastAPI):
                     "[调度器] 未启用采集调度器 (ENABLE_COLLECTION=false 或 DEPLOYMENT_ROLE=cloud)"
                 )
             # 初始化采集调度器
+            elif not leader_lock_acquired:
+                logger.info(
+                    "[CollectionLeaderLock] Leader lock not acquired; skip CollectionScheduler init/start/load schedules"
+                )
             elif APSCHEDULER_AVAILABLE:
                 scheduler = CollectionScheduler.get_instance(
                     db_session_factory=SessionLocal
@@ -595,7 +628,7 @@ async def lifespan(app: FastAPI):
                 "1",
             )
             deployment_role = os.getenv("DEPLOYMENT_ROLE", "").lower()
-            if enable_collection and deployment_role != "cloud":
+            if enable_collection and deployment_role != "cloud" and leader_lock_acquired:
                 from backend.models.database import AsyncSessionLocal
                 from backend.services.collection_config_run_service import (
                     CollectionConfigRunService,
@@ -620,6 +653,10 @@ async def lifespan(app: FastAPI):
                 await queue_runner.start()
                 app.state.collection_queue_runner = queue_runner
                 logger.info("[QueueRunner] Collection config queue runner started")
+            elif enable_collection and deployment_role != "cloud" and not leader_lock_acquired:
+                logger.info(
+                    "[CollectionLeaderLock] Leader lock not acquired; skip CollectionQueueRunner start"
+                )
         except Exception as queue_runner_err:
             logger.warning(
                 f"[QueueRunner] Initialization failed (non-blocking): {queue_runner_err}"
@@ -682,6 +719,14 @@ async def lifespan(app: FastAPI):
             logger.info("[QueueRunner] Collection config queue runner stopped")
     except Exception as e:
         logger.debug(f"[关闭] QueueRunner shutdown warning (ignorable): {e}")
+
+    try:
+        lock = getattr(app.state, "collection_leader_lock", None)
+        if lock is not None:
+            await lock.release()
+            logger.info("[CollectionLeaderLock] Released leader lock")
+    except Exception as e:
+        logger.warning(f"[CollectionLeaderLock] Release failed (non-blocking): {e}")
 
     # v4.12.0修复:正确取消后台任务,优雅处理CancelledError异常
     # 使用try-except包装整个关闭流程,避免CancelledError影响关闭
