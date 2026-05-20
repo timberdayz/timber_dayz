@@ -186,8 +186,22 @@ async def bootstrap_dashboard_assets_if_needed(
 
     acquired = False
     if wait_for_lock:
-        await _advisory_lock(session, _DASHBOARD_BOOTSTRAP_LOCK_KEY)
-        acquired = True
+        # Avoid blocking `pg_advisory_lock` under a default statement_timeout.
+        # Prefer a bounded retry loop with pg_try_advisory_lock so callers
+        # can surface a clear "bootstrap in progress" outcome instead of
+        # crashing on QueryCanceledError.
+        await session.execute(text("SET LOCAL statement_timeout = 0"))
+        import asyncio
+
+        deadline_seconds = 240.0
+        poll_interval = 2.0
+        waited = 0.0
+        while waited <= deadline_seconds:
+            acquired = await _try_advisory_lock(session, _DASHBOARD_BOOTSTRAP_LOCK_KEY)
+            if acquired:
+                break
+            await asyncio.sleep(poll_interval)
+            waited += poll_interval
     else:
         acquired = await _try_advisory_lock(session, _DASHBOARD_BOOTSTRAP_LOCK_KEY)
 
