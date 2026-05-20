@@ -555,6 +555,41 @@ async def lifespan(app: FastAPI):
 
                 # 加载所有启用的定时配置
                 loaded_count = await scheduler.load_all_schedules()
+
+                # Startup reconcile: remove stale collection_config_* jobs from jobstore
+                try:
+                    from backend.models.database import AsyncSessionLocal
+                    from backend.services.collection_scheduler_reconcile import (
+                        reconcile_collection_schedules,
+                    )
+                    from modules.core.db import CollectionConfig
+                    from sqlalchemy import select
+
+                    async def list_enabled_config_crons() -> dict[int, str]:
+                        async with AsyncSessionLocal() as db:
+                            result = await db.execute(
+                                select(CollectionConfig.id, CollectionConfig.schedule_cron).where(
+                                    CollectionConfig.schedule_enabled == True,
+                                    CollectionConfig.is_active == True,
+                                    CollectionConfig.schedule_cron.isnot(None),
+                                )
+                            )
+                            rows = result.all()
+                            return {int(row[0]): str(row[1]) for row in rows}
+
+                    removed_count = await reconcile_collection_schedules(
+                        scheduler, list_enabled_config_crons
+                    )
+                    if removed_count:
+                        logger.info(
+                            "[CollectionScheduler] Reconciled jobstore: removed %s stale schedules",
+                            removed_count,
+                        )
+                except Exception as reconcile_err:
+                    logger.warning(
+                        "[CollectionScheduler] Startup reconcile failed (non-blocking): %s",
+                        reconcile_err,
+                    )
                 logger.info(f"[调度器] 已加载 {loaded_count} 个定时采集配置")
 
                 # 注册清理任务到调度器(每天凌晨3点执行)
