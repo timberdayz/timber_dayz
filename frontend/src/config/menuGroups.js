@@ -268,7 +268,6 @@ export const routeDisplayNames = {
   '/inventory/grns': '入库单管理',
   '/inventory/alerts': '库存预警',
   '/inventory/reconciliation': '库存对账',
-  '/inventory-dashboard-v3': '库存看板',
   // ⚠️ v4.12.0移除：数据浏览器功能已移除
   // '/data-browser': '数据浏览器',
   '/financial-management': '财务结算中心',
@@ -290,8 +289,5 @@ export const routeDisplayNames = {
  * 废弃路由（不在菜单中显示）
  */
 export const deprecatedRoutes = [
-  '/sales-dashboard',  // 旧版销售看板，被v3替代
-  '/sales-analysis',   // 销售分析（功能已合并到销售看板）
-  '/top-products',      // TopN产品排行（功能已合并到销售看板）
-  '/sales-trend'        // 销售趋势分析（功能已合并到销售看板）
+  // 2026-05-21 清理：相关历史路由已从 router 移除
 ]

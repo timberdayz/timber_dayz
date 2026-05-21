@@ -33,7 +33,6 @@ import { useRoute } from 'vue-router'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { useUserStore } from '@/stores/user'
 import { useAuthStore } from '@/stores/auth'
-// import Sidebar from '@/components/common/Sidebar.vue'  // 旧版本（保留备份）
 import GroupedSidebar from '@/components/common/GroupedSidebar.vue'  // ✅ 新版分组菜单
 import Header from '@/components/common/Header.vue'  // ⭐ v4.19.0: 使用 Header 组件（包含通知图标）
 import IcpFooter from '@/components/common/IcpFooter.vue'  // ICP 备案号页脚
@@ -65,7 +64,7 @@ onMounted(() => {
   if (authStore.isLoggedIn) {
     userStore.initUserInfo()
   }
-  console.log('🚀 西虹ERP系统前端已启动')
+  console.log('西红ERP系统前端已启动')
 })
 </script>
 

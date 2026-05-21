@@ -41,7 +41,7 @@ const routes = [
       title: '用户审批',
       icon: 'User',
       permission: 'user-management',
-      roles: ['admin', 'manager', 'operator', 'finance']
+      roles: ['admin']
     }
   },
   {
@@ -61,17 +61,6 @@ const routes = [
     component: () => import('@/domains/platform/views/UltraSimplePage.vue'),
     meta: {
       title: '超简化页面',
-      icon: 'Setting',
-      permission: 'system-settings',
-      roles: ['admin', 'manager', 'operator', 'finance']
-    }
-  },
-  {
-    path: '/test-legacy',
-    name: 'TestLegacy',
-    component: () => import('@/domains/platform/views/TestPage.vue'),
-    meta: {
-      title: '测试页面',
       icon: 'Setting',
       permission: 'system-settings',
       roles: ['admin']
@@ -97,28 +86,6 @@ const routes = [
       icon: 'DataBoard',
       permission: 'annual-summary',
       roles: ['admin']  // 仅管理员可访问（与销售目标管理一致）
-    }
-  },
-  {
-    path: '/sales-analysis',
-    name: 'SalesAnalysis',
-    component: () => import('@/domains/business/views/SalesAnalysis.vue'),
-    meta: {
-      title: '销售分析',
-      icon: 'TrendCharts',
-      permission: 'sales-analysis',
-      roles: ['admin', 'manager', 'operator', 'finance', 'investor']
-    }
-  },
-  {
-    path: '/sales-dashboard',
-    name: 'SalesDashboard',
-    component: () => import('@/domains/business/views/SalesDashboard.vue'),
-    meta: {
-      title: '销售看板',
-      icon: 'DataAnalysis',
-      permission: 'sales-dashboard',
-      roles: ['admin', 'manager', 'operator', 'finance', 'investor']
     }
   },
   {
@@ -455,17 +422,6 @@ const routes = [
     }
   },
   {
-    path: '/top-products',
-    name: 'TopProducts',
-    component: () => import('@/domains/business/views/TopProducts.vue'),  // 已废弃，不在菜单显示
-    meta: {
-      title: 'TopN产品排行',
-      icon: 'TrendCharts',
-      permission: 'system-settings',
-      roles: ['admin']
-    }
-  },
-  {
     path: '/inventory-health',
     name: 'InventoryHealth',
     component: () => import('@/domains/business/views/InventoryHealthDashboard.vue'),  // v4.9.0: 库存健康
@@ -485,17 +441,6 @@ const routes = [
       icon: 'Medal',
       permission: 'inventory-dashboard:view',
       roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/sales-trend',
-    name: 'SalesTrend',
-    component: () => import('@/domains/business/views/SalesTrendChart.vue'),  // 已废弃，不在菜单显示
-    meta: {
-      title: '销售趋势分析',
-      icon: 'TrendCharts',
-      permission: 'system-settings',
-      roles: ['admin']
     }
   },
   {
@@ -540,17 +485,6 @@ const routes = [
       icon: 'TrendCharts',
       permission: 'sales-dashboard',
       roles: ['admin', 'manager', 'operator', 'finance']
-    }
-  },
-  {
-    path: '/inventory-dashboard-v3',
-    name: 'InventoryDashboardV3',
-    component: () => import('@/domains/business/views/InventoryDashboardSimple.vue'),  // 临时使用简化版
-    meta: {
-      title: '库存看板v3',
-      icon: 'DataLine',
-      permission: 'inventory-dashboard:view',
-      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -945,7 +879,7 @@ const routes = [
       title: '我的跟投收益',
       icon: 'Money',
       permission: 'my-follow-investment-income',
-      roles: ['admin', 'manager', 'operator', 'finance', 'investor']
+      roles: ['admin', 'investor']
     }
   },
   {
@@ -978,7 +912,7 @@ const routes = [
       title: '绩效公示',
       icon: 'View',
       permission: 'performance:read',
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']  // 全员可见
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']  // 全员可见
     }
   },
   {

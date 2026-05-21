@@ -64,7 +64,6 @@ test('inventory dashboard pages are open to admin manager operator', () => {
   for (const routePath of [
     '/inventory-health',
     '/product-quality',
-    '/inventory-dashboard-v3',
   ]) {
     const route = findRoute(routePath)
     assert.deepEqual(route.roles, ['admin', 'manager', 'operator'])
@@ -118,9 +117,6 @@ test('sales and store operation pages remain admin only', () => {
 })
 
 test('sales and store view pages remain broadly visible to operations roles', () => {
-  const salesAnalysis = findRoute('/sales-analysis')
-  assert.deepEqual(salesAnalysis.roles, ['admin', 'manager', 'operator', 'finance'])
-
   const salesDashboard = findRoute('/sales-dashboard-v3')
   assert.deepEqual(salesDashboard.roles, ['admin', 'manager', 'operator', 'finance'])
 

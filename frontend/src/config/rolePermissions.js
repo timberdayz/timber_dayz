@@ -23,7 +23,7 @@ export const ROLE_CONFIG = {
       'store-management', 'store-analytics', 'account-management', 'account-alignment',
       'sales-reports', 'inventory-reports', 'finance-reports-detail',
       'vendor-reports', 'custom-reports',
-      'human-resources', 'employee-management', 'my-income', 'attendance-management', 'performance:read', 'performance:config',
+      'human-resources', 'employee-management', 'my-income', 'my-follow-investment-income', 'attendance-management', 'performance:read', 'performance:config',
       'my-tasks', 'my-requests', 'approval-history', 'workflow-config',
       'system-notifications', 'alerts', 'message-settings',
       'training-management', 'training-integration', 'my-training',
