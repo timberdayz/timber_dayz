@@ -9,8 +9,7 @@ const source = readFileSync(resolve(repoRoot, 'src/domains/business/views/financ
 test('ExpenseManagement page shows marketing terminology instead of salary terminology', () => {
   assert.equal(source.includes('本月营销费用'), true)
   assert.equal(source.includes('年度营销费用'), true)
-  assert.equal(source.includes('营销费用(¥)'), true)
-  assert.equal(source.includes('本月工资'), false)
-  assert.equal(source.includes('年度工资'), false)
-  assert.equal(source.includes('工资(¥)'), false)
+  assert.equal(source.includes('label=\"营销费用\"'), true)
+  assert.equal(source.includes('total_salary'), false)
+  assert.equal(source.includes('row.salary'), false)
 })

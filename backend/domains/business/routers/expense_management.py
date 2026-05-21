@@ -53,6 +53,22 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/expenses", tags=["费用管理"])
 
 
+def _calc_total_cost(
+    rent: float,
+    marketing_fee: float,
+    utilities: float,
+    ai_token_cost: float,
+    other_costs: float,
+) -> float:
+    return (
+        float(rent or 0)
+        + float(marketing_fee or 0)
+        + float(utilities or 0)
+        + float(ai_token_cost or 0)
+        + float(other_costs or 0)
+    )
+
+
 async def _resolve_shop_platform_code(db: AsyncSession, shop_id: str) -> Optional[str]:
     result = await db.execute(
         select(ShopAccount).where(
@@ -157,8 +173,9 @@ async def get_expense_summary(
                     COALESCE(SUM("租金"), 0) as total_rent,
                     COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                     COALESCE(SUM("水电费"), 0) as total_utilities,
+                    COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                    COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0) as total_amount
+                    COALESCE(SUM("成本合计"), 0) as total_amount
                 FROM a_class.operating_costs
                 WHERE "年月" = :year_month
                 GROUP BY "年月"
@@ -173,8 +190,9 @@ async def get_expense_summary(
                     COALESCE(SUM("租金"), 0) as total_rent,
                     COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                     COALESCE(SUM("水电费"), 0) as total_utilities,
+                    COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                    COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0) as total_amount
+                    COALESCE(SUM("成本合计"), 0) as total_amount
                 FROM a_class.operating_costs
                 GROUP BY "年月"
                 ORDER BY "年月" DESC
@@ -189,8 +207,9 @@ async def get_expense_summary(
                 "total_rent": float(row[2] or 0),
                 "total_marketing_fee": float(row[3] or 0),
                 "total_utilities": float(row[4] or 0),
-                "total_other_costs": float(row[5] or 0),
-                "total_amount": float(row[6] or 0),
+                "total_ai_token_cost": float(row[5] or 0),
+                "total_other_costs": float(row[6] or 0),
+                "total_amount": float(row[7] or 0),
             }
             for row in rows
         ]
@@ -237,8 +256,9 @@ async def get_yearly_expense_summary(
                 COALESCE(SUM("租金"), 0) as total_rent,
                 COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                 COALESCE(SUM("水电费"), 0) as total_utilities,
+                COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
                 COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0) as total_amount,
+                COALESCE(SUM("成本合计"), 0) as total_amount,
                 COUNT(DISTINCT "店铺ID") as shop_count,
                 COUNT(DISTINCT "年月") as month_count
             FROM a_class.operating_costs
@@ -254,10 +274,11 @@ async def get_yearly_expense_summary(
                     "total_rent": float(row[0] or 0),
                     "total_marketing_fee": float(row[1] or 0),
                     "total_utilities": float(row[2] or 0),
-                    "total_other_costs": float(row[3] or 0),
-                    "total_amount": float(row[4] or 0),
-                    "shop_count": row[5] or 0,
-                    "month_count": row[6] or 0,
+                    "total_ai_token_cost": float(row[3] or 0),
+                    "total_other_costs": float(row[4] or 0),
+                    "total_amount": float(row[5] or 0),
+                    "shop_count": row[6] or 0,
+                    "month_count": row[7] or 0,
                 }
             }
         else:
@@ -268,6 +289,7 @@ async def get_yearly_expense_summary(
                     "total_rent": 0,
                     "total_marketing_fee": 0,
                     "total_utilities": 0,
+                    "total_ai_token_cost": 0,
                     "total_other_costs": 0,
                     "total_amount": 0,
                     "shop_count": 0,
@@ -318,7 +340,12 @@ async def list_expenses_by_shop(
                 "租金" as rent,
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
+                "AI Token费用" as ai_token_cost,
                 "其他成本" as other_costs,
+                "成本合计" as total_cost,
+                "备注" as note,
+                "附件" as attachments,
+                "是否锁定" as locked,
                 "创建时间" as created_at,
                 "更新时间" as updated_at
             FROM a_class.operating_costs
@@ -336,8 +363,9 @@ async def list_expenses_by_shop(
             rent = float(row.rent or 0)
             marketing_fee = float(row.marketing_fee or 0)
             utilities = float(row.utilities or 0)
+            ai_token_cost = float(row.ai_token_cost or 0)
             other_costs = float(row.other_costs or 0)
-            row_total = rent + marketing_fee + utilities + other_costs
+            row_total = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
             total_amount += row_total
             
             items.append({
@@ -347,8 +375,13 @@ async def list_expenses_by_shop(
                 "rent": rent,
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
+                "ai_token_cost": ai_token_cost,
                 "other_costs": other_costs,
+                "total_cost": row_total,
                 "total": row_total,
+                "note": row.note,
+                "attachments": row.attachments or [],
+                "locked": bool(row.locked or False),
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
             })
@@ -359,6 +392,7 @@ async def list_expenses_by_shop(
             "total_rent": sum(item["rent"] for item in items),
             "total_marketing_fee": sum(item["marketing_fee"] for item in items),
             "total_utilities": sum(item["utilities"] for item in items),
+            "total_ai_token_cost": sum(item.get("ai_token_cost", 0) for item in items),
             "total_other_costs": sum(item["other_costs"] for item in items),
             "month_count": len(items),
         }
@@ -429,7 +463,12 @@ async def list_expenses(
                 "租金" as rent,
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
+                "AI Token费用" as ai_token_cost,
                 "其他成本" as other_costs,
+                "成本合计" as total_cost,
+                "备注" as note,
+                "附件" as attachments,
+                "是否锁定" as locked,
                 "创建时间" as created_at,
                 "更新时间" as updated_at
             FROM a_class.operating_costs
@@ -449,8 +488,9 @@ async def list_expenses(
             rent = float(row.rent or 0)
             marketing_fee = float(row.marketing_fee or 0)
             utilities = float(row.utilities or 0)
+            ai_token_cost = float(row.ai_token_cost or 0)
             other_costs = float(row.other_costs or 0)
-            total_amount = rent + marketing_fee + utilities + other_costs
+            total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
             
             items.append({
                 "id": row.id,
@@ -459,8 +499,13 @@ async def list_expenses(
                 "rent": rent,
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
+                "ai_token_cost": ai_token_cost,
                 "other_costs": other_costs,
+                "total_cost": total_amount,
                 "total": total_amount,
+                "note": row.note,
+                "attachments": row.attachments or [],
+                "locked": bool(row.locked or False),
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
             })
@@ -505,7 +550,12 @@ async def get_expense(
                 "租金" as rent,
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
+                "AI Token费用" as ai_token_cost,
                 "其他成本" as other_costs,
+                "成本合计" as total_cost,
+                "备注" as note,
+                "附件" as attachments,
+                "是否锁定" as locked,
                 "创建时间" as created_at,
                 "更新时间" as updated_at
             FROM a_class.operating_costs
@@ -527,8 +577,9 @@ async def get_expense(
         rent = float(row.rent or 0)
         marketing_fee = float(row.marketing_fee or 0)
         utilities = float(row.utilities or 0)
+        ai_token_cost = float(row.ai_token_cost or 0)
         other_costs = float(row.other_costs or 0)
-        total_amount = rent + marketing_fee + utilities + other_costs
+        total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
         
         return {
             "success": True,
@@ -539,8 +590,13 @@ async def get_expense(
                 "rent": rent,
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
+                "ai_token_cost": ai_token_cost,
                 "other_costs": other_costs,
+                "total_cost": total_amount,
                 "total": total_amount,
+                "note": row.note,
+                "attachments": row.attachments or [],
+                "locked": bool(row.locked or False),
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
             }
@@ -570,18 +626,50 @@ async def create_or_update_expense(
     注意:使用原始SQL执行upsert，因为数据库表使用中文字段名
     """
     try:
+        lock_check = text(
+            """
+            SELECT COALESCE("是否锁定", false) AS locked
+            FROM a_class.operating_costs
+            WHERE "店铺ID" = :shop_id AND "年月" = :year_month
+            """
+        )
+        lock_row = (
+            await db.execute(
+                lock_check, {"shop_id": request.shop_id, "year_month": request.year_month}
+            )
+        ).fetchone()
+        if lock_row and bool(lock_row.locked):
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="该店铺该月份已锁定，无法修改",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请先解锁该月份或联系管理员处理",
+                status_code=400,
+            )
+
+        total_cost = _calc_total_cost(
+            request.rent,
+            request.marketing_fee,
+            request.utilities,
+            request.ai_token_cost,
+            request.other_costs,
+        )
         # 使用UPSERT语法(ON CONFLICT DO UPDATE)
         upsert_query = text("""
             INSERT INTO a_class.operating_costs 
-                ("店铺ID", "年月", "租金", "营销费用", "水电费", "其他成本", "创建时间", "更新时间")
+                ("店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计", "备注", "附件", "创建时间", "更新时间")
             VALUES 
-                (:shop_id, :year_month, :rent, :marketing_fee, :utilities, :other_costs, NOW(), NOW())
+                (:shop_id, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :other_costs, :total_cost, :note, :attachments, NOW(), NOW())
             ON CONFLICT ("店铺ID", "年月") 
             DO UPDATE SET 
                 "租金" = EXCLUDED."租金",
                 "营销费用" = EXCLUDED."营销费用",
                 "水电费" = EXCLUDED."水电费",
+                "AI Token费用" = EXCLUDED."AI Token费用",
                 "其他成本" = EXCLUDED."其他成本",
+                "成本合计" = EXCLUDED."成本合计",
+                "备注" = EXCLUDED."备注",
+                "附件" = EXCLUDED."附件",
                 "更新时间" = NOW()
             RETURNING 
                 id,
@@ -590,7 +678,12 @@ async def create_or_update_expense(
                 "租金" as rent,
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
+                "AI Token费用" as ai_token_cost,
                 "其他成本" as other_costs,
+                "成本合计" as total_cost,
+                "备注" as note,
+                "附件" as attachments,
+                "是否锁定" as locked,
                 "创建时间" as created_at,
                 "更新时间" as updated_at
         """)
@@ -601,7 +694,11 @@ async def create_or_update_expense(
             "rent": request.rent,
             "marketing_fee": request.marketing_fee,
             "utilities": request.utilities,
+            "ai_token_cost": request.ai_token_cost,
             "other_costs": request.other_costs,
+            "total_cost": total_cost,
+            "note": request.note,
+            "attachments": request.attachments or [],
         })
         
         await db.commit()
@@ -626,8 +723,9 @@ async def create_or_update_expense(
         rent = float(row.rent or 0)
         marketing_fee = float(row.marketing_fee or 0)
         utilities = float(row.utilities or 0)
+        ai_token_cost = float(row.ai_token_cost or 0)
         other_costs = float(row.other_costs or 0)
-        total_amount = rent + marketing_fee + utilities + other_costs
+        total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
         
         return {
             "success": True,
@@ -638,8 +736,13 @@ async def create_or_update_expense(
                 "rent": rent,
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
+                "ai_token_cost": ai_token_cost,
                 "other_costs": other_costs,
+                "total_cost": total_amount,
                 "total": total_amount,
+                "note": row.note,
+                "attachments": row.attachments or [],
+                "locked": bool(row.locked or False),
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
             },
@@ -679,7 +782,11 @@ async def update_expense(
                 "租金" as rent,
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
-                "其他成本" as other_costs
+                "AI Token费用" as ai_token_cost,
+                "其他成本" as other_costs,
+                "备注" as note,
+                "附件" as attachments,
+                "是否锁定" as locked
             FROM a_class.operating_costs
             WHERE id = :expense_id
         """)
@@ -694,6 +801,15 @@ async def update_expense(
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
                 recovery_suggestion="请检查费用ID是否正确",
                 status_code=404
+            )
+
+        if bool(getattr(row, "locked", False)):
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="该记录已锁定，无法修改",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请先解锁该月份或联系管理员处理",
+                status_code=400,
             )
         
         # 构建UPDATE语句(只更新提供的字段)
@@ -718,12 +834,40 @@ async def update_expense(
             params["utilities"] = update_data["utilities"]
         else:
             params["utilities"] = float(row.utilities or 0)
+
+        if "ai_token_cost" in update_data:
+            update_fields.append('"AI Token费用" = :ai_token_cost')
+            params["ai_token_cost"] = update_data["ai_token_cost"]
+        else:
+            params["ai_token_cost"] = float(getattr(row, "ai_token_cost", 0) or 0)
             
         if "other_costs" in update_data:
             update_fields.append('"其他成本" = :other_costs')
             params["other_costs"] = update_data["other_costs"]
         else:
             params["other_costs"] = float(row.other_costs or 0)
+
+        if "note" in update_data:
+            update_fields.append('"备注" = :note')
+            params["note"] = update_data["note"]
+        else:
+            params["note"] = getattr(row, "note", None)
+
+        if "attachments" in update_data:
+            update_fields.append('"附件" = :attachments')
+            params["attachments"] = update_data["attachments"] or []
+        else:
+            params["attachments"] = getattr(row, "attachments", None) or []
+
+        total_cost = _calc_total_cost(
+            params["rent"],
+            params["marketing_fee"],
+            params["utilities"],
+            params["ai_token_cost"],
+            params["other_costs"],
+        )
+        update_fields.append('"成本合计" = :total_cost')
+        params["total_cost"] = total_cost
         
         if not update_fields:
             # 没有字段需要更新
@@ -746,7 +890,12 @@ async def update_expense(
                 "租金" as rent,
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
+                "AI Token费用" as ai_token_cost,
                 "其他成本" as other_costs,
+                "成本合计" as total_cost,
+                "备注" as note,
+                "附件" as attachments,
+                "是否锁定" as locked,
                 "创建时间" as created_at,
                 "更新时间" as updated_at
         """)
@@ -761,8 +910,9 @@ async def update_expense(
         rent = float(updated_row.rent or 0)
         marketing_fee = float(updated_row.marketing_fee or 0)
         utilities = float(updated_row.utilities or 0)
+        ai_token_cost = float(updated_row.ai_token_cost or 0)
         other_costs = float(updated_row.other_costs or 0)
-        total_amount = rent + marketing_fee + utilities + other_costs
+        total_amount = float(updated_row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
         
         return {
             "success": True,
@@ -773,8 +923,13 @@ async def update_expense(
                 "rent": rent,
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
+                "ai_token_cost": ai_token_cost,
                 "other_costs": other_costs,
+                "total_cost": total_amount,
                 "total": total_amount,
+                "note": updated_row.note,
+                "attachments": updated_row.attachments or [],
+                "locked": bool(updated_row.locked or False),
                 "created_at": updated_row.created_at,
                 "updated_at": updated_row.updated_at,
             },

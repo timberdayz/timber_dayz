@@ -3,7 +3,7 @@
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +18,10 @@ class ExpenseCreateRequest(BaseModel):
     rent: float = Field(0.0, ge=0, description="租金(CNY)")
     marketing_fee: float = Field(0.0, ge=0, description="营销费用(CNY)")
     utilities: float = Field(0.0, ge=0, description="水电费(CNY)")
+    ai_token_cost: float = Field(0.0, ge=0, description="AI Token费用(CNY)")
     other_costs: float = Field(0.0, ge=0, description="其他成本(CNY)")
+    note: Optional[str] = Field(None, description="备注")
+    attachments: Optional[list[Any]] = Field(None, description="附件(JSON数组)")
 
 
 class ExpenseUpdateRequest(BaseModel):
@@ -27,7 +30,10 @@ class ExpenseUpdateRequest(BaseModel):
     rent: Optional[float] = Field(None, ge=0)
     marketing_fee: Optional[float] = Field(None, ge=0)
     utilities: Optional[float] = Field(None, ge=0)
+    ai_token_cost: Optional[float] = Field(None, ge=0)
     other_costs: Optional[float] = Field(None, ge=0)
+    note: Optional[str] = Field(None)
+    attachments: Optional[list[Any]] = Field(None)
 
 
 class ExpenseResponse(BaseModel):
@@ -39,8 +45,13 @@ class ExpenseResponse(BaseModel):
     rent: float
     marketing_fee: float
     utilities: float
+    ai_token_cost: float
     other_costs: float
+    total_cost: float
     total: float
+    note: Optional[str] = None
+    attachments: list[Any] = Field(default_factory=list)
+    locked: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -56,5 +67,6 @@ class ExpenseSummaryResponse(BaseModel):
     total_rent: float
     total_marketing_fee: float
     total_utilities: float
+    total_ai_token_cost: float
     total_other_costs: float
     total_amount: float

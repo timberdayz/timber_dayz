@@ -15,7 +15,7 @@
         style="width: 180px;"
         @change="handlePeriodChange"
       />
-      <el-radio-group v-model="filters.groupBy" size="default" @change="loadPerformanceList">
+      <el-radio-group v-model="filters.groupBy" size="default" @change="handleGroupByChange">
         <el-radio-button value="shop">按店铺</el-radio-button>
         <el-radio-button value="person">按人员</el-radio-button>
       </el-radio-group>
@@ -32,19 +32,19 @@
         配置权重
       </el-button>
       <el-button :icon="Download" @click="handleExport" v-if="hasPermission('performance:export')">导出报表</el-button>
-      <el-select v-model="poolFilter" size="default" style="width: 120px;" @change="() => {}">
+      <el-select v-if="filters.groupBy === 'shop'" v-model="poolFilter" size="default" style="width: 120px;" @change="() => {}">
         <el-option label="全部池" value="all" />
         <el-option label="正式池" value="official" />
         <el-option label="观察池" value="observation" />
       </el-select>
-      <el-select v-model="alertFilter" size="default" style="width: 130px;" @change="() => {}">
+      <el-select v-if="filters.groupBy === 'shop'" v-model="alertFilter" size="default" style="width: 130px;" @change="() => {}">
         <el-option label="全部预警" value="all" />
         <el-option label="无预警" value="none" />
         <el-option label="黄牌" value="yellow" />
         <el-option label="红牌" value="red" />
         <el-option label="淘汰评估" value="elimination" />
       </el-select>
-      <el-select v-model="filters.platform" placeholder="选择平台" clearable size="default" style="width: 140px; margin-left: auto;" @change="loadPerformanceList">
+      <el-select v-if="filters.groupBy === 'shop'" v-model="filters.platform" placeholder="选择平台" clearable size="default" style="width: 140px; margin-left: auto;" @change="loadPerformanceList">
         <el-option label="全部平台" value="" />
         <el-option label="Shopee" value="Shopee" />
         <el-option label="Lazada" value="Lazada" />
@@ -88,46 +88,62 @@
         <el-table-column :prop="filters.groupBy === 'person' ? 'employee_name' : 'shop_name'" :label="filters.groupBy === 'person' ? '人员' : '店铺'" width="180" fixed="left" show-overflow-tooltip>
           <template #default="{ row }">{{ filters.groupBy === 'person' ? (row.employee_name || row.employee_code || '—') : (row.shop_name || row.shop_id || '—') }}</template>
         </el-table-column>
-        <el-table-column label="销售额目标" width="110" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="销售额目标" width="110" align="right">
           <template #default="{ row }">{{ formatCell(row.sales_target) }}</template>
         </el-table-column>
-        <el-table-column label="销售额达成" width="110" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="销售额达成" width="110" align="right">
           <template #default="{ row }">{{ formatCell(row.sales_achieved) }}</template>
         </el-table-column>
-        <el-table-column label="销售额达成率" width="120" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="销售额达成率" width="120" align="right">
           <template #default="{ row }">{{ formatPercent(row.sales_rate) }}</template>
         </el-table-column>
-        <el-table-column label="销售额得分" width="100" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="销售额得分" width="100" align="right">
           <template #default="{ row }">{{ row.sales_score != null ? Number(row.sales_score).toFixed(1) : '—' }}</template>
         </el-table-column>
-        <el-table-column label="毛利目标" width="100" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利目标" width="100" align="right">
           <template #default="{ row }">{{ formatCell(row.profit_target) }}</template>
         </el-table-column>
-        <el-table-column label="毛利达成" width="100" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利达成" width="100" align="right">
           <template #default="{ row }">{{ formatCell(row.profit_achieved) }}</template>
         </el-table-column>
-        <el-table-column label="毛利达成率" width="110" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利达成率" width="110" align="right">
           <template #default="{ row }">{{ formatPercent(row.profit_rate) }}</template>
         </el-table-column>
-        <el-table-column label="毛利得分" width="90" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利得分" width="90" align="right">
           <template #default="{ row }">{{ row.profit_score != null ? Number(row.profit_score).toFixed(1) : '—' }}</template>
         </el-table-column>
-        <el-table-column label="重点产品目标" width="120" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品目标" width="120" align="right">
           <template #default="{ row }">{{ formatCell(row.key_product_target) }}</template>
         </el-table-column>
-        <el-table-column label="重点产品达成" width="120" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品达成" width="120" align="right">
           <template #default="{ row }">{{ formatCell(row.key_product_achieved) }}</template>
         </el-table-column>
-        <el-table-column label="重点产品达成率" width="130" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品达成率" width="130" align="right">
           <template #default="{ row }">{{ formatPercent(row.key_product_rate) }}</template>
         </el-table-column>
-        <el-table-column label="重点产品得分" width="110" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品得分" width="110" align="right">
           <template #default="{ row }">{{ row.key_product_score != null ? Number(row.key_product_score).toFixed(1) : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="operation_score" label="运营得分" width="100" align="right" sortable>
+        <el-table-column v-if="filters.groupBy === 'shop'" prop="operation_score" label="店铺运营得分" width="120" align="right" sortable>
           <template #default="{ row }">{{ row.operation_score != null ? Number(row.operation_score).toFixed(1) : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="total_score" label="总分" width="90" align="right" sortable>
+
+        <el-table-column v-if="filters.groupBy === 'person'" label="实际销售额" width="120" align="right">
+          <template #default="{ row }">{{ formatCell(row.sales_achieved) }}</template>
+        </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'person'" label="店铺汇总达成率" width="140" align="right">
+          <template #default="{ row }">{{ formatPercent(row.sales_rate) }}</template>
+        </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'person'" label="个人运营加减分(人工)" width="160" align="right">
+          <template #default="{ row }">
+            <el-tag v-if="row.personal_adjustment_total != null" :type="Number(row.personal_adjustment_total || 0) >= 0 ? 'success' : 'danger'" size="small">
+              {{ Number(row.personal_adjustment_total || 0) > 0 ? '+' : '' }}{{ Number(row.personal_adjustment_total || 0).toFixed(1) }}
+            </el-tag>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="total_score" :label="filters.groupBy === 'person' ? '个人绩效总分' : '总分'" width="120" align="right" sortable>
           <template #default="{ row }">
             <el-tag v-if="row.total_score != null" :type="row.total_score >= 90 ? 'success' : row.total_score >= 80 ? 'warning' : 'danger'" size="small">{{ Number(row.total_score).toFixed(1) }}</el-tag>
             <span v-else>—</span>
@@ -136,16 +152,16 @@
         <el-table-column prop="rank" label="排名" width="80" align="center" sortable>
           <template #default="{ row }">{{ row.rank != null ? `第${row.rank}名` : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="performance_coefficient" label="绩效系数" width="100" align="right" sortable>
+        <el-table-column v-if="filters.groupBy === 'shop'" prop="performance_coefficient" label="绩效系数" width="100" align="right" sortable>
           <template #default="{ row }">{{ row.performance_coefficient != null ? Number(row.performance_coefficient).toFixed(2) : '—' }}</template>
         </el-table-column>
-        <el-table-column label="赛马池" width="100" align="center">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="赛马池" width="100" align="center">
           <template #default="{ row }">{{ rankingPoolText(row) }}</template>
         </el-table-column>
-        <el-table-column label="预警" width="120" align="center">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="预警" width="120" align="center">
           <template #default="{ row }">{{ performanceAlertText(row) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="操作" width="90" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="handleViewDetail(row)" v-if="row.platform_code && row.shop_id">详情</el-button>
           </template>
@@ -176,7 +192,7 @@
     <!-- 绩效详情 -->
 
 
-    <el-card v-if="hasPermission('performance:config')" style="margin-top: 20px;">
+    <el-card v-if="hasPermission('performance:config') && filters.groupBy === 'person'" style="margin-top: 20px;">
       <template #header>
         <div class="card-header">
           <span>个人绩效调整项</span>
@@ -478,12 +494,15 @@ const totalWeight = computed(() => {
          configForm.key_product_weight + configForm.operation_weight
 })
 const formulaText = computed(() => {
-  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 重点产品(${weightConfig.key_product_weight}%) + 运营得分(${weightConfig.operation_weight}%)`
+  if (filters.groupBy === 'person') {
+    return '店铺汇总绩效分 + 个人运营加减分(人工) + 考勤扣分(自动)，最终限制在 0-100'
+  }
+  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 重点产品(${weightConfig.key_product_weight}%) + 店铺运营得分(${weightConfig.operation_weight}%)`
 })
 
 const currentGroupPolicyText = computed(() => {
   if (filters.groupBy === 'person') {
-    return '人员绩效分按挂店店铺绩效承接结果叠加个人加减项；提成系数按挂店店铺赛马结果加权继承。'
+    return '人员绩效总分=挂店店铺绩效聚合 + 个人运营加减分(人工录入，未来可对接飞书) + 考勤扣分(自动)；最终限制在 0-100。'
   }
   return '店铺总分由销售、毛利、重点产品和运营四项组成；正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
 })
@@ -566,6 +585,9 @@ function performanceAlertText(row) {
 }
 
 const filteredPerformanceData = computed(() => {
+  if (filters.groupBy !== 'shop') {
+    return performanceList.data || []
+  }
   return (performanceList.data || []).filter((row) => {
     const pool = row?.score_details?.summary?.ranking_pool_status || 'unknown'
     const alertTypes = row?.score_details?.summary?.performance_alert_types || []
@@ -617,7 +639,7 @@ const detailMetricCards = computed(() => {
     },
     {
       key: 'operation_score',
-      label: '运营得分',
+      label: '店铺运营得分',
       weight: weightConfig.operation_weight,
       metric: data.operation_score,
       successThreshold: 18,
@@ -708,7 +730,17 @@ const loadAdjustmentList = async () => {
 }
 
 const handleRefreshAll = async () => {
-  await Promise.all([loadPerformanceList(), loadAdjustmentList()])
+  await loadPerformanceList()
+  if (filters.groupBy === 'person') {
+    await loadAdjustmentList()
+  }
+}
+
+const handleGroupByChange = async () => {
+  await loadPerformanceList()
+  if (filters.groupBy === 'person') {
+    await loadAdjustmentList()
+  }
 }
 
 const handlePeriodChange = async () => {

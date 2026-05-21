@@ -4,6 +4,8 @@ CREATE SCHEMA IF NOT EXISTS api;
 DO $bootstrap$
 DECLARE
     marketing_fee_expr text;
+    ai_token_expr text;
+    total_cost_expr text;
 BEGIN
     IF EXISTS (
         SELECT 1
@@ -23,6 +25,30 @@ BEGIN
         marketing_fee_expr := 'COALESCE("工资", 0)';
     ELSE
         marketing_fee_expr := '0';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'a_class'
+          AND table_name = 'operating_costs'
+          AND column_name = 'AI Token费用'
+    ) THEN
+        ai_token_expr := 'COALESCE(\"AI Token费用\", 0)';
+    ELSE
+        ai_token_expr := '0';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'a_class'
+          AND table_name = 'operating_costs'
+          AND column_name = '成本合计'
+    ) THEN
+        total_cost_expr := 'COALESCE(\"成本合计\", 0)';
+    ELSE
+        total_cost_expr := format('COALESCE(\"租金\", 0) + %s + COALESCE(\"水电费\", 0) + %s + COALESCE(\"其他成本\", 0)', marketing_fee_expr, ai_token_expr);
     END IF;
 
     IF EXISTS (
@@ -161,7 +187,7 @@ BEGIN
             SELECT
                 to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
                 "店铺ID" AS shop_id,
-                SUM("租金" + %s + "水电费" + "其他成本") AS estimated_expenses
+                SUM(%s) AS estimated_expenses
             FROM a_class.operating_costs
             GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
         )
@@ -212,7 +238,7 @@ BEGIN
             ON ds.period_date = m.anchor_date
            AND ds.platform_code = m.platform_code
            AND COALESCE(ds.shop_id, '') = COALESCE(m.shop_id, '')
-        $view$, marketing_fee_expr);
+        $view$, total_cost_expr);
     END IF;
 END
 $bootstrap$;

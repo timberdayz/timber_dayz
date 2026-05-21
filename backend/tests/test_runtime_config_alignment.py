@@ -148,6 +148,16 @@ def test_prod_compose_uses_dedicated_migrate_service_and_disables_runtime_migrat
     assert beat_env["RUN_MIGRATIONS"] == "0"
 
 
+def test_prod_compose_injects_release_tag_into_runtime_services():
+    compose = _read_yaml("docker-compose.prod.yml")
+    services = compose["services"]
+
+    assert services["backend"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
+    assert services["migrate"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
+    assert services["celery-worker"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
+    assert services["celery-beat"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
+
+
 def test_prod_celery_healthcheck_uses_worker_readiness():
     compose = _read_yaml("docker-compose.prod.yml")
     health_test = compose["services"]["celery-worker"]["healthcheck"]["test"]

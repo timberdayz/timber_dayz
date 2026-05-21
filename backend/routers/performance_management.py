@@ -39,7 +39,8 @@ from modules.core.db import (
     ShopAlert,
     TargetBreakdown,
     Employee,
-    EmployeePerformance,
+	EmployeePerformance,
+	EmployeePerformanceAdjustment,
     # [DELETED] v4.19.0: FactOrder 已删除
     FactProductMetric,
     DimShop,
@@ -999,6 +1000,28 @@ async def list_performance_scores(
                     nm = r[1] if hasattr(r, "__getitem__") and len(r) > 1 else getattr(r, "name", "")
                     name_map[ec] = nm or ec
 
+            adjustment_total_by_code: Dict[str, float] = {}
+            if period and codes:
+                try:
+                    adj_rows = (
+                        await db.execute(
+                            select(EmployeePerformanceAdjustment).where(
+                                EmployeePerformanceAdjustment.year_month == period,
+                                EmployeePerformanceAdjustment.status == "active",
+                                EmployeePerformanceAdjustment.employee_code.in_(codes),
+                            )
+                        )
+                    ).scalars().all()
+                    for adj in adj_rows:
+                        ec = (getattr(adj, "employee_code", None) or "").strip()
+                        if not ec:
+                            continue
+                        adjustment_total_by_code[ec] = adjustment_total_by_code.get(ec, 0.0) + float(
+                            getattr(adj, "score_delta", 0) or 0.0
+                        )
+                except Exception as adj_err:
+                    logger.warning("employee performance adjustment aggregation failed: %s", adj_err)
+
             # 计算排名
             sorted_ep = sorted(
                 all_ep,
@@ -1033,6 +1056,7 @@ async def list_performance_scores(
                     "key_product_achieved": None,
                     "key_product_rate": None,
                     "operation_score": None,
+                    "personal_adjustment_total": adjustment_total_by_code.get(ec),
                     "total_score": scr,
                     "rank": rank_by_code.get(ec),
                     "performance_coefficient": None,

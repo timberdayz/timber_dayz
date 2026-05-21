@@ -73,7 +73,7 @@
             <div class="stat-item">
               <div class="stat-label">本月总费用</div>
               <div class="stat-value primary">
-                ¥{{ formatNumber(monthlySummary.total_amount) }}
+                {{ formatNumber(monthlySummary.total_amount) }}
               </div>
             </div>
           </el-card>
@@ -83,7 +83,7 @@
             <div class="stat-item">
               <div class="stat-label">年度累计</div>
               <div class="stat-value warning">
-                ¥{{ formatNumber(yearlySummary.total_amount) }}
+                {{ formatNumber(yearlySummary.total_amount) }}
               </div>
             </div>
           </el-card>
@@ -93,7 +93,7 @@
             <div class="stat-item">
               <div class="stat-label">本月租金</div>
               <div class="stat-value">
-                ¥{{ formatNumber(monthlySummary.total_rent) }}
+                {{ formatNumber(monthlySummary.total_rent) }}
               </div>
             </div>
           </el-card>
@@ -103,7 +103,7 @@
             <div class="stat-item">
               <div class="stat-label">本月营销费用</div>
               <div class="stat-value">
-                ¥{{ formatNumber(monthlySummary.total_marketing_fee) }}
+                {{ formatNumber(monthlySummary.total_marketing_fee) }}
               </div>
             </div>
           </el-card>
@@ -113,7 +113,7 @@
             <div class="stat-item">
               <div class="stat-label">本月水电</div>
               <div class="stat-value">
-                ¥{{ formatNumber(monthlySummary.total_utilities) }}
+                {{ formatNumber(monthlySummary.total_utilities) }}
               </div>
             </div>
           </el-card>
@@ -123,7 +123,7 @@
             <div class="stat-item">
               <div class="stat-label">本月其他</div>
               <div class="stat-value">
-                ¥{{ formatNumber(monthlySummary.total_other) }}
+                {{ formatNumber(monthlySummary.total_other) }}
               </div>
             </div>
           </el-card>
@@ -178,7 +178,7 @@
           </el-table-column>
           <el-table-column
             prop="rent"
-            label="租金(¥)"
+            label="租金"
             width="130"
             align="right"
           >
@@ -195,7 +195,7 @@
           </el-table-column>
           <el-table-column
             prop="marketing_fee"
-            label="营销费用(¥)"
+            label="营销费用"
             width="130"
             align="right"
           >
@@ -212,7 +212,7 @@
           </el-table-column>
           <el-table-column
             prop="utilities"
-            label="水电费(¥)"
+            label="水电费"
             width="130"
             align="right"
           >
@@ -228,8 +228,25 @@
             </template>
           </el-table-column>
           <el-table-column
+            prop="ai_token_cost"
+            label="AI Token费用"
+            width="140"
+            align="right"
+          >
+            <template #default="{ row }">
+              <el-input-number
+                v-model="row.ai_token_cost"
+                :min="0"
+                :precision="2"
+                :controls="false"
+                class="erp-w-full"
+                @change="updateRowTotal(row)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column
             prop="other_costs"
-            label="其他成本(¥)"
+            label="其他费用"
             width="130"
             align="right"
           >
@@ -244,14 +261,26 @@
               />
             </template>
           </el-table-column>
+          <el-table-column prop="note" label="备注" min-width="220">
+            <template #default="{ row }">
+              <el-input
+                v-model="row.note"
+                type="textarea"
+                :rows="1"
+                autosize
+                placeholder="可选"
+                @change="() => {}"
+              />
+            </template>
+          </el-table-column>
           <el-table-column
-            prop="total"
-            label="合计(¥)"
+            prop="total_cost"
+            label="成本合计"
             width="120"
             align="right"
           >
             <template #default="{ row }">
-              <strong>¥{{ formatNumber(row.total) }}</strong>
+              <strong>{{ formatNumber(row.total_cost ?? row.total) }}</strong>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="80" align="center">
@@ -294,7 +323,7 @@
         <div class="quick-split-meta">当前月份：{{ selectedMonth || '-' }}</div>
         <div class="quick-split-meta">拆分店铺数：{{ monthlyTableData.length }}</div>
         <el-form label-position="top" class="quick-split-form">
-          <el-form-item label="总租金(¥)">
+          <el-form-item label="总租金">
             <el-input-number
               v-model="quickSplitForm.rent"
               :min="0"
@@ -303,7 +332,7 @@
               class="erp-w-full"
             />
           </el-form-item>
-          <el-form-item label="总营销费用(¥)">
+          <el-form-item label="总营销费用">
             <el-input-number
               v-model="quickSplitForm.marketing_fee"
               :min="0"
@@ -312,7 +341,7 @@
               class="erp-w-full"
             />
           </el-form-item>
-          <el-form-item label="总水电费(¥)">
+          <el-form-item label="总水电费">
             <el-input-number
               v-model="quickSplitForm.utilities"
               :min="0"
@@ -321,7 +350,16 @@
               class="erp-w-full"
             />
           </el-form-item>
-          <el-form-item label="总其他成本(¥)">
+          <el-form-item label="总AI Token费用">
+            <el-input-number
+              v-model="quickSplitForm.ai_token_cost"
+              :min="0"
+              :precision="2"
+              :controls="false"
+              class="erp-w-full"
+            />
+          </el-form-item>
+          <el-form-item label="总其他费用">
             <el-input-number
               v-model="quickSplitForm.other_costs"
               :min="0"
@@ -382,7 +420,7 @@
             <div class="stat-item">
               <div class="stat-label">年度总费用</div>
               <div class="stat-value primary">
-                ¥{{ formatNumber(shopSummary.total_amount) }}
+                {{ formatNumber(shopSummary.total_amount) }}
               </div>
             </div>
           </el-card>
@@ -392,7 +430,7 @@
             <div class="stat-item">
               <div class="stat-label">月均费用</div>
               <div class="stat-value">
-                ¥{{
+                {{
                   formatNumber(
                     shopSummary.month_count > 0
                       ? shopSummary.total_amount / shopSummary.month_count
@@ -408,7 +446,7 @@
             <div class="stat-item">
               <div class="stat-label">年度租金</div>
               <div class="stat-value">
-                ¥{{ formatNumber(shopSummary.total_rent) }}
+                {{ formatNumber(shopSummary.total_rent) }}
               </div>
             </div>
           </el-card>
@@ -418,7 +456,7 @@
             <div class="stat-item">
               <div class="stat-label">年度营销费用</div>
               <div class="stat-value">
-                ¥{{ formatNumber(shopSummary.total_marketing_fee) }}
+                {{ formatNumber(shopSummary.total_marketing_fee) }}
               </div>
             </div>
           </el-card>
@@ -428,7 +466,7 @@
             <div class="stat-item">
               <div class="stat-label">年度水电</div>
               <div class="stat-value">
-                ¥{{ formatNumber(shopSummary.total_utilities) }}
+                {{ formatNumber(shopSummary.total_utilities) }}
               </div>
             </div>
           </el-card>
@@ -438,7 +476,7 @@
             <div class="stat-item">
               <div class="stat-label">年度其他</div>
               <div class="stat-value">
-                ¥{{ formatNumber(shopSummary.total_other_costs) }}
+                {{ formatNumber(shopSummary.total_other_costs) }}
               </div>
             </div>
           </el-card>
@@ -475,7 +513,7 @@
           </el-table-column>
           <el-table-column
             prop="rent"
-            label="租金(¥)"
+            label="租金"
             width="130"
             align="right"
           >
@@ -492,7 +530,7 @@
           </el-table-column>
           <el-table-column
             prop="marketing_fee"
-            label="营销费用(¥)"
+            label="营销费用"
             width="130"
             align="right"
           >
@@ -509,7 +547,7 @@
           </el-table-column>
           <el-table-column
             prop="utilities"
-            label="水电费(¥)"
+            label="水电费"
             width="130"
             align="right"
           >
@@ -525,8 +563,25 @@
             </template>
           </el-table-column>
           <el-table-column
+            prop="ai_token_cost"
+            label="AI Token费用"
+            width="140"
+            align="right"
+          >
+            <template #default="{ row }">
+              <el-input-number
+                v-model="row.ai_token_cost"
+                :min="0"
+                :precision="2"
+                :controls="false"
+                class="erp-w-full"
+                @change="updateShopRowTotal(row)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column
             prop="other_costs"
-            label="其他成本(¥)"
+            label="其他费用"
             width="130"
             align="right"
           >
@@ -541,14 +596,26 @@
               />
             </template>
           </el-table-column>
+          <el-table-column prop="note" label="备注" min-width="220">
+            <template #default="{ row }">
+              <el-input
+                v-model="row.note"
+                type="textarea"
+                :rows="1"
+                autosize
+                placeholder="可选"
+                @change="() => {}"
+              />
+            </template>
+          </el-table-column>
           <el-table-column
-            prop="total"
-            label="合计(¥)"
+            prop="total_cost"
+            label="成本合计"
             width="120"
             align="right"
           >
             <template #default="{ row }">
-              <strong>¥{{ formatNumber(row.total) }}</strong>
+              <strong>{{ formatNumber(row.total_cost ?? row.total) }}</strong>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="80" align="center">
@@ -622,6 +689,7 @@ const quickSplitForm = reactive({
   rent: 0,
   marketing_fee: 0,
   utilities: 0,
+  ai_token_cost: 0,
   other_costs: 0
 })
 
@@ -631,6 +699,7 @@ const monthlySummary = reactive({
   total_rent: 0,
   total_marketing_fee: 0,
   total_utilities: 0,
+  total_ai_token_cost: 0,
   total_other: 0
 })
 
@@ -640,6 +709,7 @@ const yearlySummary = reactive({
   total_rent: 0,
   total_marketing_fee: 0,
   total_utilities: 0,
+  total_ai_token_cost: 0,
   total_other_costs: 0
 })
 
@@ -654,6 +724,7 @@ const shopSummary = reactive({
   total_rent: 0,
   total_marketing_fee: 0,
   total_utilities: 0,
+  total_ai_token_cost: 0,
   total_other_costs: 0,
   month_count: 0
 })
@@ -673,9 +744,13 @@ const formatNumber = (num) => {
 
 const normalizeExpenseRow = (item = {}) => {
   const marketingFee = Number(item.marketing_fee) || 0
+  const aiTokenCost = Number(item.ai_token_cost) || 0
   return {
     ...item,
-    marketing_fee: marketingFee
+    marketing_fee: marketingFee,
+    ai_token_cost: aiTokenCost,
+    note: item.note ?? '',
+    total_cost: Number(item.total_cost ?? item.total) || 0
   }
 }
 
@@ -765,8 +840,12 @@ const loadMonthlyExpenses = async () => {
         rent: 0,
         marketing_fee: 0,
         utilities: 0,
+        ai_token_cost: 0,
         other_costs: 0,
+        total_cost: 0,
         total: 0,
+        note: '',
+        attachments: [],
         saving: false
       }))
 
@@ -793,6 +872,7 @@ const loadMonthlyExpenses = async () => {
       yearlySummary.total_rent = yearlyRes.total_rent || 0
       yearlySummary.total_marketing_fee = yearlyRes.total_marketing_fee || 0
       yearlySummary.total_utilities = yearlyRes.total_utilities || 0
+      yearlySummary.total_ai_token_cost = yearlyRes.total_ai_token_cost || 0
       yearlySummary.total_other_costs = yearlyRes.total_other_costs || 0
     }
   } catch (error) {
@@ -815,6 +895,7 @@ const calculateMonthlySummary = () => {
   monthlySummary.total_rent = 0
   monthlySummary.total_marketing_fee = 0
   monthlySummary.total_utilities = 0
+  monthlySummary.total_ai_token_cost = 0
   monthlySummary.total_other = 0
 
   monthlyTableData.value
@@ -822,23 +903,27 @@ const calculateMonthlySummary = () => {
       const rent = Number(item.rent) || 0
       const marketingFee = Number(item.marketing_fee) || 0
       const utilities = Number(item.utilities) || 0
+      const aiTokenCost = Number(item.ai_token_cost) || 0
       const otherCosts = Number(item.other_costs) || 0
 
-      monthlySummary.total_amount += rent + marketingFee + utilities + otherCosts
+      monthlySummary.total_amount += rent + marketingFee + utilities + aiTokenCost + otherCosts
       monthlySummary.total_rent += rent
       monthlySummary.total_marketing_fee += marketingFee
       monthlySummary.total_utilities += utilities
+      monthlySummary.total_ai_token_cost += aiTokenCost
       monthlySummary.total_other += otherCosts
     })
 }
 
 // 更新行合计
 const updateRowTotal = (row) => {
-  row.total =
+  row.total_cost =
     (Number(row.rent) || 0) +
     (Number(row.marketing_fee) || 0) +
     (Number(row.utilities) || 0) +
+    (Number(row.ai_token_cost) || 0) +
     (Number(row.other_costs) || 0)
+  row.total = row.total_cost
   calculateMonthlySummary()
 }
 
@@ -922,12 +1007,14 @@ const handleApplyQuickSplit = async () => {
   const rentAllocations = distributeEvenly(quickSplitForm.rent, rowCount)
   const marketingAllocations = distributeEvenly(quickSplitForm.marketing_fee, rowCount)
   const utilityAllocations = distributeEvenly(quickSplitForm.utilities, rowCount)
+  const aiTokenAllocations = distributeEvenly(quickSplitForm.ai_token_cost, rowCount)
   const otherAllocations = distributeEvenly(quickSplitForm.other_costs, rowCount)
 
   monthlyTableData.value.forEach((row, index) => {
     row.rent = rentAllocations[index]
     row.marketing_fee = marketingAllocations[index]
     row.utilities = utilityAllocations[index]
+    row.ai_token_cost = aiTokenAllocations[index]
     row.other_costs = otherAllocations[index]
     updateRowTotal(row)
   })
@@ -956,7 +1043,9 @@ const handleSaveRow = async (row) => {
       rent: Number(row.rent) || 0,
       marketing_fee: Number(row.marketing_fee) || 0,
       utilities: Number(row.utilities) || 0,
-      other_costs: Number(row.other_costs) || 0
+      ai_token_cost: Number(row.ai_token_cost) || 0,
+      other_costs: Number(row.other_costs) || 0,
+      note: row.note || null
     }
 
     await api.post('/expenses', payload)
@@ -1010,7 +1099,9 @@ const handleBatchSave = async () => {
       (row.rent > 0 ||
         row.marketing_fee > 0 ||
         row.utilities > 0 ||
-        row.other_costs > 0)
+        row.ai_token_cost > 0 ||
+        row.other_costs > 0 ||
+        (row.note && String(row.note).trim().length > 0))
   )
 
   if (rowsToSave.length === 0) {
@@ -1037,7 +1128,9 @@ const handleBatchSave = async () => {
           rent: Number(row.rent) || 0,
           marketing_fee: Number(row.marketing_fee) || 0,
           utilities: Number(row.utilities) || 0,
-          other_costs: Number(row.other_costs) || 0
+          ai_token_cost: Number(row.ai_token_cost) || 0,
+          other_costs: Number(row.other_costs) || 0,
+          note: row.note || null
         }
 
         await api.post('/expenses', payload)
@@ -1106,6 +1199,7 @@ const loadShopExpenses = async () => {
       shopSummary.total_rent = res.summary.total_rent || 0
       shopSummary.total_marketing_fee = res.summary.total_marketing_fee || 0
       shopSummary.total_utilities = res.summary.total_utilities || 0
+      shopSummary.total_ai_token_cost = res.summary.total_ai_token_cost || 0
       shopSummary.total_other_costs = res.summary.total_other_costs || 0
       shopSummary.month_count = res.summary.month_count || 0
     } else {
@@ -1125,17 +1219,20 @@ const resetShopSummary = () => {
   shopSummary.total_rent = 0
   shopSummary.total_marketing_fee = 0
   shopSummary.total_utilities = 0
+  shopSummary.total_ai_token_cost = 0
   shopSummary.total_other_costs = 0
   shopSummary.month_count = 0
 }
 
 // 更新店铺行合计
 const updateShopRowTotal = (row) => {
-  row.total =
+  row.total_cost =
     (Number(row.rent) || 0) +
     (Number(row.marketing_fee) || 0) +
     (Number(row.utilities) || 0) +
+    (Number(row.ai_token_cost) || 0) +
     (Number(row.other_costs) || 0)
+  row.total = row.total_cost
 }
 
 // 添加月份行
@@ -1152,8 +1249,12 @@ const handleAddMonthRow = () => {
     rent: 0,
     marketing_fee: 0,
     utilities: 0,
+    ai_token_cost: 0,
     other_costs: 0,
+    total_cost: 0,
     total: 0,
+    note: '',
+    attachments: [],
     saving: false
   })
 }
@@ -1173,7 +1274,9 @@ const handleSaveShopRow = async (row) => {
       rent: Number(row.rent) || 0,
       marketing_fee: Number(row.marketing_fee) || 0,
       utilities: Number(row.utilities) || 0,
-      other_costs: Number(row.other_costs) || 0
+      ai_token_cost: Number(row.ai_token_cost) || 0,
+      other_costs: Number(row.other_costs) || 0,
+      note: row.note || null
     }
 
     await api.post('/expenses', payload)

@@ -1440,9 +1440,11 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
                         "店铺ID" VARCHAR(255),
                         "年月" VARCHAR(7),
                         "租金" NUMERIC,
-                        "工资" NUMERIC,
+                        "营销费用" NUMERIC,
                         "水电费" NUMERIC,
-                        "其他成本" NUMERIC
+                        "AI Token费用" NUMERIC,
+                        "其他成本" NUMERIC,
+                        "成本合计" NUMERIC
                     )
                     """
                 )
@@ -1463,10 +1465,10 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
             await session.execute(
                 text(
                     """
-                    INSERT INTO a_class.operating_costs ("店铺ID", "年月", "租金", "工资", "水电费", "其他成本")
+                    INSERT INTO a_class.operating_costs ("店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计")
                     VALUES
-                        ('shopee新加坡3C店', '2025-09', 100, 200, 300, 400),
-                        ('Tiktok 2店', '2025-09', 100, 200, 200, 300)
+                        ('shopee新加坡3C店', '2025-09', 100, 200, 300, 0, 400, 1000),
+                        ('Tiktok 2店', '2025-09', 100, 200, 200, 0, 300, 800)
                     """
                 )
             )

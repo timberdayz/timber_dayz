@@ -60,7 +60,7 @@ async def get_annual_cost_aggregate(
     if granularity == "monthly":
         a_sql = text(
             """
-            SELECT COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) AS total_a
+            SELECT COALESCE(SUM("成本合计"), 0) AS total_a
             FROM a_class.operating_costs
             WHERE "年月" = :ym
             """
@@ -69,7 +69,7 @@ async def get_annual_cost_aggregate(
     else:
         a_sql = text(
             """
-            SELECT COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) AS total_a
+            SELECT COALESCE(SUM("成本合计"), 0) AS total_a
             FROM a_class.operating_costs
             WHERE "年月" LIKE :ym_prefix
             """
@@ -161,7 +161,7 @@ async def get_annual_cost_aggregate_by_shop(
         a_sql = text(
             """
             SELECT "店铺ID" AS shop_key,
-                   COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) AS total_a
+                   COALESCE(SUM("成本合计"), 0) AS total_a
             FROM a_class.operating_costs
             WHERE "年月" = :ym
             GROUP BY "店铺ID"
@@ -172,7 +172,7 @@ async def get_annual_cost_aggregate_by_shop(
         a_sql = text(
             """
             SELECT "店铺ID" AS shop_key,
-                   COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) AS total_a
+                   COALESCE(SUM("成本合计"), 0) AS total_a
             FROM a_class.operating_costs
             WHERE "年月" LIKE :ym_prefix
             GROUP BY "店铺ID"

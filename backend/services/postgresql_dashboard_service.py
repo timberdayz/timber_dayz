@@ -1017,13 +1017,57 @@ class PostgresqlDashboardService:
         year_month = period_month.strftime("%Y-%m")
         async with AsyncSessionLocal() as session:
             columns = await self._get_table_columns("a_class", "operating_costs")
-            if {"year_month", "rent", "marketing_fee", "utilities", "other_costs"}.issubset(columns):
+            if {"year_month", "total_cost"}.issubset(columns):
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT SUM(total_cost)
+                        FROM a_class.operating_costs
+                        WHERE year_month = :year_month
+                        """
+                    ),
+                    {"year_month": year_month},
+                )
+            elif {"year_month", "rent", "marketing_fee", "utilities", "other_costs", "ai_token_cost"}.issubset(columns):
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT SUM(rent + marketing_fee + utilities + ai_token_cost + other_costs)
+                        FROM a_class.operating_costs
+                        WHERE year_month = :year_month
+                        """
+                    ),
+                    {"year_month": year_month},
+                )
+            elif {"year_month", "rent", "marketing_fee", "utilities", "other_costs"}.issubset(columns):
                 result = await session.execute(
                     text(
                         """
                         SELECT SUM(rent + marketing_fee + utilities + other_costs)
                         FROM a_class.operating_costs
                         WHERE year_month = :year_month
+                        """
+                    ),
+                    {"year_month": year_month},
+                )
+            elif {"年月", "成本合计"}.issubset(columns):
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT COALESCE(SUM("成本合计"), 0)
+                        FROM a_class.operating_costs
+                        WHERE "年月" = :year_month
+                        """
+                    ),
+                    {"year_month": year_month},
+                )
+            elif {"年月", "租金", "营销费用", "水电费", "其他成本", "AI Token费用"}.issubset(columns):
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT COALESCE(SUM("租金" + "营销费用" + "水电费" + "AI Token费用" + "其他成本"), 0)
+                        FROM a_class.operating_costs
+                        WHERE "年月" = :year_month
                         """
                     ),
                     {"year_month": year_month},

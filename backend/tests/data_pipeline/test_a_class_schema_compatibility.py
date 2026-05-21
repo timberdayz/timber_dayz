@@ -18,9 +18,12 @@ def test_annual_summary_shop_month_uses_current_operating_cost_columns():
         assert '"店铺ID"' in text
         assert "rent" in text
         assert '"租金"' in text
-        assert '"工资"' in text
+        # Backward-compatible: legacy schemas may still use "工资" but the expense module now
+        # standardizes on "营销费用" and prefers "成本合计" when available.
+        assert ('"营销费用"' in text) or ('"工资"' in text)
         assert '"水电费"' in text
         assert '"其他成本"' in text
+        assert ('"成本合计"' in text) or ("SUM(" in text and "total_cost" in text)
 
 
 def test_target_completion_service_prefers_current_sales_target_columns():
