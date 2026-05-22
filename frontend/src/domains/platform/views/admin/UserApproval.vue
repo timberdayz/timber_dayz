@@ -20,6 +20,9 @@
             <el-tag v-if="total > 0" type="warning">{{ total }} 待审批</el-tag>
           </div>
           <div class="card-header__actions">
+            <el-button type="danger" :disabled="selectedUserIds.length === 0" @click="batchReject">
+              批量拒绝 ({{ selectedUserIds.length }})
+            </el-button>
             <el-button @click="refreshUsers" :loading="loading">
               <el-icon><Refresh /></el-icon>
               刷新
@@ -33,7 +36,9 @@
         v-loading="loading"
         stripe
         style="width: 100%"
+        @selection-change="handleSelectionChange"
       >
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="user_id" label="用户ID" width="100" />
         <el-table-column prop="username" label="用户名" width="150" />
         <el-table-column prop="email" label="邮箱" width="200" />
@@ -131,19 +136,19 @@
       title="拒绝用户"
       width="500px"
     >
-      <el-form :model="rejectForm" :rules="rejectRules" ref="rejectFormRef" label-width="100px">
+      <el-form :model="rejectForm" label-width="100px">
         <el-form-item label="用户名">
           <el-input v-model="rejectForm.username" disabled />
         </el-form-item>
         <el-form-item label="邮箱">
           <el-input v-model="rejectForm.email" disabled />
         </el-form-item>
-        <el-form-item label="拒绝原因" prop="reason">
+        <el-form-item label="拒绝原因">
           <el-input
             v-model="rejectForm.reason"
             type="textarea"
             :rows="4"
-            placeholder="请输入拒绝原因（至少5个字符）"
+            placeholder="可选"
           />
         </el-form-item>
       </el-form>
@@ -184,7 +189,6 @@ const approveForm = reactive({
 // 拒绝对话框
 const rejectDialogVisible = ref(false)
 const rejecting = ref(false)
-const rejectFormRef = ref(null)
 const rejectForm = reactive({
   userId: null,
   username: '',
@@ -192,12 +196,7 @@ const rejectForm = reactive({
   reason: ''
 })
 
-const rejectRules = {
-  reason: [
-    { required: true, message: '请输入拒绝原因', trigger: 'blur' },
-    { min: 5, message: '拒绝原因至少5个字符', trigger: 'blur' }
-  ]
-}
+const selectedUserIds = ref([])
 
 // 角色相关
 const rolesLoading = ref(false)
@@ -299,28 +298,65 @@ const handleReject = (user) => {
 
 // 确认拒绝
 const confirmReject = async () => {
-  if (!rejectFormRef.value) return
-  
-  await rejectFormRef.value.validate(async (valid) => {
-    if (!valid) return
+  rejecting.value = true
+  try {
+    await usersApi.rejectUser(rejectForm.userId, {
+      reason: rejectForm.reason || ''
+    })
 
-    rejecting.value = true
-    try {
-      await usersApi.rejectUser(rejectForm.userId, {
-        reason: rejectForm.reason
-      })
-      
-      ElMessage.success('用户已拒绝')
-      window.dispatchEvent(new CustomEvent('pending-users-updated'))
-      rejectDialogVisible.value = false
-      await loadPendingUsers()
-    } catch (error) {
-      console.error('拒绝用户失败:', error)
-      ElMessage.error('拒绝用户失败: ' + (error.message || '未知错误'))
-    } finally {
-      rejecting.value = false
+    ElMessage.success('用户已拒绝')
+    window.dispatchEvent(new CustomEvent('pending-users-updated'))
+    rejectDialogVisible.value = false
+    await loadPendingUsers()
+  } catch (error) {
+    console.error('拒绝用户失败:', error)
+    ElMessage.error('拒绝用户失败: ' + (error.message || '未知错误'))
+  } finally {
+    rejecting.value = false
+  }
+}
+
+const handleSelectionChange = (rows) => {
+  selectedUserIds.value = (rows || []).map((row) => row.user_id)
+}
+
+const batchReject = async () => {
+  if (!selectedUserIds.value.length) return
+
+  const promptResult = await ElMessageBox.prompt(
+    `将拒绝 ${selectedUserIds.value.length} 个待审批用户，可选填写拒绝原因：`,
+    '批量拒绝',
+    {
+      confirmButtonText: '确认拒绝',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputPlaceholder: '可选',
+      inputValue: ''
     }
-  })
+  ).catch(() => null)
+
+  if (!promptResult) return
+
+  try {
+    const payload = await usersApi.rejectUsersBatch(selectedUserIds.value, (promptResult.value || '').trim())
+    const summary = payload?.summary || {}
+    const failedItems = (payload?.results || []).filter((item) => !item.ok)
+
+    ElMessage.success(`批量拒绝完成：成功 ${summary.success ?? 0}，失败 ${summary.failed ?? 0}`)
+    if (failedItems.length) {
+      await ElMessageBox.alert(
+        failedItems.map((item) => `user_id=${item.user_id}: ${item.error_message || 'failed'}`).join('\\n'),
+        '部分失败',
+        { type: 'warning' }
+      )
+    }
+
+    window.dispatchEvent(new CustomEvent('pending-users-updated'))
+    await loadPendingUsers()
+  } catch (error) {
+    console.error('批量拒绝用户失败:', error)
+    ElMessage.error('批量拒绝失败: ' + (error.message || '未知错误'))
+  }
 }
 
 // 分页处理
@@ -381,4 +417,3 @@ onMounted(() => {
   justify-content: flex-end;
 }
 </style>
-

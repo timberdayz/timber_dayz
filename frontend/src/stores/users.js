@@ -88,6 +88,20 @@ export const useUsersStore = defineStore('users', () => {
     }
   }
 
+  const deleteUsersBatch = async (userIds = [], reason = '') => {
+    try {
+      const payload = await usersApi.deleteUsersBatch(userIds, reason)
+      const summary = payload?.summary || {}
+      ElMessage.success(`批量删除完成：成功 ${summary.success ?? 0}，失败 ${summary.failed ?? 0}`)
+      await fetchUsers()
+      await fetchDeletedUsers()
+      return payload
+    } catch (error) {
+      ElMessage.error('批量删除用户失败: ' + (error.response?.data?.detail || error.message))
+      throw error
+    }
+  }
+
   // 获取已删除用户列表
   const fetchDeletedUsers = async (page = 1, pageSize = 20) => {
     try {
@@ -146,6 +160,7 @@ export const useUsersStore = defineStore('users', () => {
     createUser,
     updateUser,
     deleteUser,
+    deleteUsersBatch,
     restoreUser,
     resetUserPassword
   }

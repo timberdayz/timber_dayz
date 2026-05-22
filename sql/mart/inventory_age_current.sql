@@ -1,29 +1,7 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'mart'
-          AND c.relname = 'inventory_age_current'
-          AND c.relkind = 'v'
-    ) THEN
-        EXECUTE 'DROP VIEW mart.inventory_age_current CASCADE';
-    ELSIF EXISTS (
-        SELECT 1
-        FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'mart'
-          AND c.relname = 'inventory_age_current'
-          AND c.relkind = 'm'
-    ) THEN
-        EXECUTE 'DROP MATERIALIZED VIEW mart.inventory_age_current CASCADE';
-    END IF;
-END
-$$;
-
+-- This table is maintained by the inventory age refresh service.
+-- Use Alembic for schema evolution; keep bootstrap SQL idempotent.
 CREATE TABLE IF NOT EXISTS mart.inventory_age_current (
     platform_code VARCHAR(64) NOT NULL,
     sku_key VARCHAR(255) NOT NULL,
@@ -53,3 +31,4 @@ CREATE INDEX IF NOT EXISTS ix_inventory_age_current_age_days
 
 CREATE INDEX IF NOT EXISTS ix_inventory_age_current_bucket
     ON mart.inventory_age_current (bucket);
+

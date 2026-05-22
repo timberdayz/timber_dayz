@@ -203,22 +203,42 @@ def ensure_postgresql_dashboard_assets(project_root):
         return True
 
     safe_print("  [修复] 检测到 PostgreSQL Dashboard 资产缺失，开始初始化...")
+    hygiene_result = subprocess.run(
+        [sys.executable, str(project_root / "scripts" / "verify_sql_asset_hygiene.py")],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        encoding="utf-8",
+        errors="ignore",
+    )
+    if hygiene_result.returncode != 0:
+        safe_print("  [WARNING] SQL 资产卫生检查未通过，跳过自动初始化（将继续启动本地服务）")
+        output = (hygiene_result.stdout or hygiene_result.stderr or "").splitlines()[-20:]
+        for line in output:
+            if line.strip():
+                safe_print(f"    {line}")
+        return True
     apply_result = subprocess.run(
         [sys.executable, str(script_path)],
         cwd=project_root,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=900,
         encoding="utf-8",
         errors="ignore",
     )
     if apply_result.returncode != 0:
-        safe_print("  [ERROR] PostgreSQL Dashboard 资产初始化失败")
+        # Local bootstrap may legitimately report "not ready" (exit code 1) when
+        # assets drift or bootstrap is handled elsewhere. Do not block local
+        # dev startup on this step; warn and continue so core modules (such as
+        # expense management) remain usable.
+        safe_print("  [WARNING] PostgreSQL Dashboard 资产初始化未完成（将继续启动本地服务）")
         output = (apply_result.stdout or apply_result.stderr or "").splitlines()[-20:]
         for line in output:
             if line.strip():
                 safe_print(f"    {line}")
-        return False
+        return True
 
     safe_print("  [OK] PostgreSQL Dashboard 资产初始化完成")
     return True
@@ -1035,7 +1055,7 @@ def _frontend_has_cli_dependency(frontend_dir, package_name):
     return any((bin_dir / candidate).exists() for candidate in candidates)
 
 
-def start_backend(runtime_mode="development"):
+def start_backend(runtime_mode="development", *, windowed: bool | None = None):
     """启动本地后端服务。"""
     safe_print("\n[启动] 后端服务...")
     safe_print(f"  地址: http://localhost:{ACTIVE_BACKEND_PORT}")
@@ -1046,24 +1066,75 @@ def start_backend(runtime_mode="development"):
         return None
 
     if sys_platform.system() == "Windows":
-        work_dir = str(project_root.resolve())
-        work_dir_ps = work_dir.replace("'", "''")
-        inner_cmd = (
-            "`$env:PYTHONPATH='{}'; `$env:APP_RUNTIME_MODE='{}'; python -m uvicorn backend.app.main:app "
-            "--host 127.0.0.1 --port {} --loop asyncio"
-        ).format(work_dir_ps, runtime_mode, ACTIVE_BACKEND_PORT)
-        cmd = (
-            'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" '
-            '-WorkingDirectory "{}"'
-        ).format(inner_cmd.replace('"', '`"'), work_dir.replace('"', '`"'))
+        if windowed is None:
+            windowed = runtime_mode == "development"
 
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(project_root.resolve())
+        env["APP_RUNTIME_MODE"] = runtime_mode
+        logs_dir = project_root / "logs"
+        logs_dir.mkdir(exist_ok=True)
+
+        if windowed:
+            work_dir_ps = str(project_root.resolve()).replace("'", "''")
+            logs_dir_ps = str(logs_dir.resolve()).replace("'", "''")
+            out_log_ps = f"{logs_dir_ps}\\\\backend-local.out.log"
+
+            # Avoid brittle quoting/escaping by generating a launcher script and executing it in a new window.
+            backend_launcher = logs_dir / "backend-local.launch.ps1"
+            backend_launcher.write_text(
+                "\n".join(
+                    [
+                        f"$ErrorActionPreference = 'Continue'",
+                        f"$env:PYTHONPATH = '{work_dir_ps}'",
+                        f"$env:APP_RUNTIME_MODE = '{runtime_mode}'",
+                        "",
+                        # Redirect stderr to stdout and tee to a stable log file.
+                        f"python -m uvicorn backend.app.main:app --host 127.0.0.1 --port {ACTIVE_BACKEND_PORT} --loop asyncio 2>&1 | Tee-Object -FilePath '{out_log_ps}' -Append",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+                errors="ignore",
+            )
+
+            launcher = subprocess.Popen(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    (
+                        'Start-Process powershell -ArgumentList "-NoExit", "-File", \\"{}\\" '
+                        '-WorkingDirectory "{}"'
+                    ).format(str(backend_launcher.resolve()), work_dir_ps),
+                ],
+                cwd=project_root,
+                env=env,
+            )
+            safe_print("  [OK] 后端服务已在新窗口启动（日志: logs/backend-local.out.log）")
+            return launcher
+
+        backend_out = (logs_dir / "backend-local.out.log").open("a", encoding="utf-8", errors="ignore")
+        backend_err = (logs_dir / "backend-local.err.log").open("a", encoding="utf-8", errors="ignore")
         process = subprocess.Popen(
-            ["powershell", "-Command", cmd],
-            shell=True,
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "backend.app.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(ACTIVE_BACKEND_PORT),
+                "--loop",
+                "asyncio",
+            ],
             cwd=project_root,
+            env=env,
+            stdout=backend_out,
+            stderr=backend_err,
         )
-        safe_print("  [OK] 后端服务已在新窗口启动")
-        safe_print("  提示: 查看新打开的 PowerShell 窗口获取详细日志")
+        safe_print("  [OK] 后端服务已启动（日志: logs/backend-local.*.log）")
         return process
 
     env = os.environ.copy()
@@ -1328,6 +1399,16 @@ def main():
     parser = argparse.ArgumentParser(description="西虹ERP系统启动脚本（修复版）")
     parser.add_argument("--backend-only", action="store_true", help="仅启动后端")
     parser.add_argument("--frontend-only", action="store_true", help="仅启动前端")
+    parser.add_argument(
+        "--backend-window",
+        action="store_true",
+        help="Windows: 在新窗口启动后端（开发环境默认开启）",
+    )
+    parser.add_argument(
+        "--backend-headless",
+        action="store_true",
+        help="Windows: 后端不弹窗，后台运行并写入 logs/backend-local.*.log",
+    )
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     parser.add_argument("--no-celery", action="store_true", help="不启动Celery worker")
     parser.add_argument("--use-docker", action="store_true", help="后端 Docker + 前端本地模式")
@@ -1418,14 +1499,29 @@ def main():
                 safe_print("\n[ERROR] PostgreSQL Dashboard 资产检查失败")
                 raise SystemExit(1)
 
-            backend_process = start_backend(runtime_mode=backend_runtime_mode or "development")
+            backend_windowed: bool | None = None
+            if args.backend_window and args.backend_headless:
+                safe_print("\n[ERROR] 不能同时指定 --backend-window 和 --backend-headless")
+                raise SystemExit(1)
+            if args.backend_window:
+                backend_windowed = True
+            elif args.backend_headless:
+                backend_windowed = False
+
+            backend_process = start_backend(
+                runtime_mode=backend_runtime_mode or "development",
+                windowed=backend_windowed,
+            )
             if backend_process is None:
                 safe_print("\n[ERROR] 后端服务未启动")
                 raise SystemExit(1)
             processes.append(("backend", backend_process))
 
             time.sleep(2)
-            if wait_for_service(backend_port, "后端API", 20):
+            # Backend startup can exceed 20s on some Windows setups (first import,
+            # migration checks, dashboard drift detection). Use a more forgiving
+            # wait to avoid false negatives.
+            if wait_for_service(backend_port, "后端API", 180):
                 safe_print("  [OK] 后端API就绪")
             else:
                 safe_print("  [ERROR] 后端启动失败，请查看后端窗口日志")

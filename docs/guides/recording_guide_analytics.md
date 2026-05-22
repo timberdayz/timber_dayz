@@ -199,7 +199,7 @@ platforms:
 
 - 开发文档：`docs/` 目录
 - 配置示例：`modules/platforms/shopee/components/products_config.py`
-- 技术架构：`.cursorrules` 文件
+- 技术架构：`AGENTS.md` 文件
 
 ---
 

@@ -138,7 +138,7 @@ def main():
         ("modules/core/db/schema.py", "Core ORM schema"),
         ("modules/core/db/__init__.py", "Core DB exports"),
         ("backend/models/database.py", "Backend DB connector"),
-        (".cursorrules", "Architecture rules"),
+        ("AGENTS.md", "Repository rules"),
     ]
     
     missing = []

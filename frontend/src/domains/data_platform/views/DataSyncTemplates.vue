@@ -597,7 +597,7 @@ const handleRepreview = () => {
 }
 
 // 保存模板
-const handleWorkbenchSave = async ({ deduplicationFields: selectedFields }) => {
+const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, headerRow: selectedHeaderRow }) => {
   const context = updateWorkbenchContext.value?.context
   const template = context?.template
 
@@ -615,7 +615,7 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields }) => {
       granularity: template.granularity,
       saveMode: 'new_version',
       baseTemplateId: template.id,
-      headerRow: template.header_row ?? 0,
+      headerRow: selectedHeaderRow ?? context?.current_header_row ?? template.header_row ?? 0,
       headerColumns: context.current_header_columns,
       deduplicationFields: selectedFields,
       fieldParseRules: template.field_parse_rules || []

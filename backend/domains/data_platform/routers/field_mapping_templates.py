@@ -210,6 +210,10 @@ def _validate_field_parse_rules(
 @router.post("/templates/save", response_model=TemplateSaveResponse)
 async def save_mapping_template(
     request: TemplateSaveRequest,
+    header_row: Optional[int] = Query(
+        None,
+        description="Optional override header row for current file preview (0=Excel第1行)",
+    ),
     db: AsyncSession = Depends(get_async_db),
 ):
     """保存模板，并将更新语义统一为创建新版本。"""
@@ -396,6 +400,10 @@ async def get_template_update_context(
     template_id: int,
     mode: str = Query("with-sample", description="更新模式(core-only 或 with-sample)"),
     file_id: Optional[int] = Query(None, description="用于更新模板的候选文件ID"),
+    header_row: Optional[int] = Query(
+        None,
+        description="可选：覆盖当前文件预览使用的表头行(0=Excel第1行)",
+    ),
     db: AsyncSession = Depends(get_async_db),
 ):
     """Return template update context for the dedicated update workbench."""
@@ -421,6 +429,7 @@ async def get_template_update_context(
 
         template_header_columns = template.header_columns or []
         template_deduplication_fields = template.deduplication_fields or []
+        effective_header_row = header_row if header_row is not None else (template.header_row or 0)
         response_data: Dict[str, Any] = {
             "template": TemplateContextSummary(
                 id=template.id,
@@ -439,6 +448,7 @@ async def get_template_update_context(
             "template_header_columns": template_header_columns,
             "current_file": None,
             "current_header_columns": [],
+            "current_header_row": effective_header_row,
             "sample_data": {},
             "preview_data": [],
             "update_mode": mode,
@@ -495,7 +505,7 @@ async def get_template_update_context(
                 }
             )
         elif file_id is not None:
-            file_preview = await _load_file_update_preview(db, file_id, template.header_row or 0)
+            file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
             current_header_columns = file_preview["header_columns"]
             matcher = get_template_matcher(db)
             header_changes = await matcher.detect_header_changes(
@@ -516,6 +526,7 @@ async def get_template_update_context(
                 {
                     "current_file": file_preview["file"],
                     "current_header_columns": current_header_columns,
+                    "current_header_row": effective_header_row,
                     "sample_data": file_preview.get("sample_data", {}),
                     "preview_data": file_preview.get("preview_data", []),
                     "header_changes": header_changes,

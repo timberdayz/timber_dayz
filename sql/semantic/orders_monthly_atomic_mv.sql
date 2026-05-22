@@ -1,5 +1,8 @@
 CREATE SCHEMA IF NOT EXISTS semantic;
 
+-- Deploy-time bootstrap rebuilds the full dashboard pipeline. Dropping the MV with CASCADE is
+-- acceptable here because downstream semantic/mart/api views will be recreated by the runner
+-- in dependency order.
 DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv CASCADE;
 
 CREATE MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv AS

@@ -30,6 +30,7 @@ import uuid
 import asyncio
 
 from pathlib import Path
+import os
 from modules.core.db import CatalogFile
 from modules.core.logger import get_logger
 from backend.services.template_matcher import get_template_matcher
@@ -120,8 +121,14 @@ class DataSyncService:
             get_data_input_dir(),
             get_data_raw_dir(),
             project_root / "downloads",
-            project_root / "temp" / "outputs"
+            project_root / "temp",
         ]
+
+        extra_allowed = os.getenv("DATA_SYNC_ALLOWED_ROOTS", "").strip()
+        if extra_allowed:
+            for token in [part.strip() for part in extra_allowed.split(";") if part.strip()]:
+                candidate = Path(token)
+                allowed_roots.append(candidate if candidate.is_absolute() else (project_root / token))
         
         resolved_str = str(resolved_path.resolve())
         for root in allowed_roots:
@@ -129,8 +136,17 @@ class DataSyncService:
             if resolved_str.startswith(root_str):
                 return resolved_str
         
-        # 如果不在允许的根目录内,仍然返回解析后的路径(兼容旧数据)
-        logger.warning(f"[DataSync] 文件路径不在允许的根目录内: {file_path} -> {resolved_str}")
+        strict_mode = os.getenv("DATA_SYNC_STRICT_ALLOWED_ROOTS", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if strict_mode:
+            raise ValueError(f"[SafePath] 文件路径不在允许的目录中: {file_path} -> {resolved_str}")
+
+        # 兼容旧数据：返回解析后的路径，但只做一次较轻提示，避免刷屏
+        logger.info(f"[DataSync] 文件路径不在允许根目录内(已放行): {file_path} -> {resolved_str}")
         return resolved_str
     
     @staticmethod

@@ -1,78 +1,96 @@
 # Agent Instructions
 
-This repository uses a skill-first workflow.
+This file is the single active rule entrypoint for this repository.
 
-## Current Workflow
+## Rule Priority
 
-- Use `superpowers` as the default development workflow for design, debugging, TDD, review, and verification.
+1. Direct user instructions
+2. This file
+3. Detailed references under `docs/`
+4. Active skills such as `superpowers`, `planning-with-files`, and explicit `gstack-*` helpers
+5. Historical material under `archive/`, `docs/archive/`, and `openspec/`
+
+If another document conflicts with this file, follow this file and update the other document when the task includes rule maintenance.
+
+## Current Tool Model
+
+- Primary development agent: Codex
+- Supplemental review or consultation agent: Claude
+- Cursor is not part of the active workflow
+- Do not use `.cursorrules` or `.cursor/rules/*` as active rule sources
+- `CLAUDE.md`, if present, is a thin Claude adapter and must not duplicate repository rules
+
+## Default Workflow
+
+- Use `superpowers` as the default workflow for design, debugging, TDD, review, and verification.
 - Use `planning-with-files` for complex multi-step work. The root files `task_plan.md`, `findings.md`, and `progress.md` are intentionally allowed and are gitignored.
-- `gstack` is allowed as a supplemental skillset, but it does not replace `superpowers` as the default repository workflow.
-- Prefer explicit `gstack-*` skill names or slash commands when using `gstack`, so generic verbs such as review, plan, qa, or ship do not become ambiguous.
-- Treat `.cursorrules` as a repository-specific constraint file, not as a replacement for skills.
-- Treat `openspec/` as a historical archive only. Do not use OpenSpec as the active workflow unless the user explicitly asks to inspect archived OpenSpec material.
+- Use `gstack` only as a supplemental skillset through explicit `gstack-*` flows or direct user requests.
+- Prefer explicit `gstack-*` skill names so generic verbs such as review, plan, QA, or ship stay unambiguous.
+- Treat `openspec/` as a historical archive only. Do not route active work through OpenSpec unless the user explicitly asks to inspect archived OpenSpec material.
+
+## Pre-Launch Development Constraints
+
+Until production launch is stable:
+
+- Prioritize launch-blocking work over cleanup.
+- Do not perform broad refactors unless they are required to unblock launch.
+- Keep each task scoped to a clear business area and validation path.
+- Do not add new root-level temporary reports, screenshots, or one-off scripts.
+- Record non-blocking technical debt for the post-launch V2 rebuild instead of fixing it opportunistically.
+
+Detailed rules: `docs/guides/PRE_LAUNCH_RULES.md`.
+
+## Core Stack Constraints
+
+- Backend stack: FastAPI + SQLAlchemy async + Pydantic + PostgreSQL
+- Frontend stack: Vue 3 + Element Plus + Pinia + Vite
+- ORM SSOT: `modules/core/db/schema.py`
+- Pydantic contracts belong in `backend/schemas/`, not in routers
+- New backend routes should declare `response_model` when the endpoint returns a typed payload
+- New backend runtime code uses `AsyncSession` and `get_async_db()`
+- Do not use synchronous ORM patterns such as `db.query()` in new async runtime code
+- CRUD-style services should reuse `AsyncCRUDService` from `backend/services/base_service.py`
+- Frontend API access goes through `frontend/src/api/`
+- Runtime Playwright inside backend code must use `async_playwright`
+- Use `datetime.now(timezone.utc)`, not `datetime.utcnow()`
+- Windows terminal and log output must avoid emoji
+
+## Dashboard Architecture
+
+- The active Dashboard direction is PostgreSQL-first.
+- Dashboard data flow is `b_class raw -> semantic -> mart -> api -> backend router -> frontend`.
+- `semantic` is the standardization layer, `mart` is the reusable aggregate layer, and `api` is the page-module query layer.
+- Metabase is historical-only and is not part of the active runtime or deployment path.
+- New production Dashboard work must not add dependencies on Metabase when equivalent PostgreSQL assets exist.
+
+Detailed rules: `docs/architecture/DASHBOARD.md`.
 
 ## Collection Authoring Workflow
 
 - The active collection component authoring workflow is `pwcli + playwright skill + agent`.
 - Use `pwcli` for page exploration, snapshots, state comparison, and locator discovery.
-- Use agent-generated canonical Python components as the only supported output path for new collection work.
-- Do not default to `tools/record_component.py`, `tools/launch_inspector_recorder.py`, backend `/recorder` flows, or frontend recorder flows for new component authoring unless the user explicitly asks to inspect or maintain the legacy recorder path.
-- Treat legacy recorder scripts, `/recorder` APIs, and recorder-oriented docs as historical or maintenance-only unless explicitly requested.
-- Primary workflow reference for collection authoring is `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
-- Collection testing/runtime environment baseline reference is `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`.
-- Standard debugging workflow reference after collection test failures is `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`.
-
-## pwcli Command Precedence
-
-- In this repository, new PowerShell terminals are expected to auto-load user-facing `pwcli` helper commands from the PowerShell profile.
-- Before suggesting new command setup steps, first check whether the environment already exposes:
-  - `pwcli`
-  - `Open-PwcliMiaoshou`
-  - `Open-PwcliShopee`
-  - `Open-PwcliTiktok`
-  - `Save-PwcliMiaoshouState`
-  - `Save-PwcliShopeeState`
-  - `Save-PwcliTiktokState`
-  - `Show-PwcliPaths`
-  - `pwsnap`
-  - `pwnote`
-  - `pwshot`
-  - `pwpack`
-- When these commands already exist, prefer them in user-facing guidance over longer repo-local wrapper commands or manual function definitions.
-- When collecting snapshot or note evidence for agent consumption, prefer Markdown artifacts (`.md`) over `.txt` unless the user explicitly asks for another format.
-- Treat repo-local scripts such as `scripts/pwcli.ps1`, `scripts/pw-open.ps1`, `scripts/pw-step.ps1`, `scripts/pw-note.ps1`, `scripts/pw-shot.ps1`, and `scripts/pw-pack.ps1` as implementation assets or fallback paths unless the user explicitly asks to use or modify them.
-- When discussing how to record or explore pages, prefer the shortest already-available user command path, then describe any lower-level fallback only if needed.
-
-## Rule Sources
-
-1. User instructions
-2. Repository-specific constraints in `.cursorrules`
-3. Active skills such as `superpowers` and `planning-with-files`
-4. Other downloaded skills such as `gstack`
-5. Reference docs in `docs/DEVELOPMENT_RULES/`
-6. Archived material in `openspec/`
-
-## Key Repository Constraints
-
-- Backend stack: FastAPI + SQLAlchemy async + Pydantic
-- Frontend stack: Vue 3 + Element Plus + Pinia + Vite
-- ORM SSOT: `modules/core/db/schema.py`
-- Runtime Playwright inside backend code must stay async-first
-- Windows terminal/log output must avoid emoji
-
-## Dashboard Architecture
-
-- The active Dashboard cutover direction is PostgreSQL-first, replacing Metabase on the online query path.
-- Dashboard data flow is `b_class raw -> semantic -> mart -> api -> backend router -> frontend`.
-- `semantic` is the standardization layer, `mart` is the reusable aggregate layer, and `api` is the page-module query layer.
-- Metabase is historical-only and is no longer part of the active runtime or deployment path.
-- The runtime switch for the new Dashboard path is `USE_POSTGRESQL_DASHBOARD_ROUTER`.
+- Use agent-generated canonical Python components as the supported output path for new collection work.
+- Do not default to legacy recorder scripts, backend `/recorder` APIs, or frontend recorder pages for new component authoring unless the user explicitly asks to maintain legacy recorder paths.
+- Primary workflow reference: `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
+- Collection runtime baseline: `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`.
+- Collection failure debugging: `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`.
 
 ## Release Model
 
-- The GitHub deployment pipeline is tag-driven, not `origin/main` driven.
-- Treat release tags such as `vX.Y.Z` as the deployment source of truth.
-- `origin/main` may lag behind the currently deployed tag and that alone is not an error.
-- Local `main` currently tracks `cnb/main`; `origin/main` is only the GitHub remote-tracking branch.
+- GitHub deployment is tag-driven, not `origin/main` driven.
+- Release tags such as `vX.Y.Z` are the deployment source of truth.
+- Local `main` currently tracks `cnb/main`; `origin/main` is the GitHub remote-tracking branch.
+- `origin/main` may lag behind the deployed tag and that alone is not an error.
+
+Detailed workflow: `docs/guides/RELEASE_CHECKLIST.md`.
+
+## Documentation Map
+
+- `docs/guides/DEVELOPMENT_WORKFLOW.md`: startup, validation, testing, and release commands
+- `docs/guides/PRE_LAUNCH_RULES.md`: launch-period change constraints
+- `docs/architecture/README.md`: architecture overview
+- `docs/architecture/DASHBOARD.md`: Dashboard data flow and runtime direction
+- `docs/DEVELOPMENT_RULES/README.md`: detailed implementation standards index
+- `docs/superpowers/README.md`: skill-first spec and plan locations
 
 Answer users in Chinese unless they explicitly ask for another language.

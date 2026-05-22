@@ -1,18 +1,9 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_matviews
-        WHERE schemaname = 'mart'
-          AND matviewname = 'inventory_backlog_base_mv'
-    ) THEN
-        EXECUTE $mv$
-CREATE MATERIALIZED VIEW mart.inventory_backlog_base_mv AS
--- Current backlog calculation runs on company-level inventory scope.
--- shop_id remains a reserved interface field and is not part of the current
--- latest snapshot, sales join, or risk aggregation key.
+-- Best practice note:
+-- Avoid dynamic SQL for MV create/refresh inside SQL assets. To keep bootstrap idempotent,
+-- expose a stable VIEW and let deploy-time bootstrap decide whether to materialize.
+CREATE OR REPLACE VIEW mart.inventory_backlog_base AS
 WITH latest_snapshot AS (
     SELECT
         snapshot_date,
@@ -164,26 +155,4 @@ SELECT
         + base.estimated_turnover_days * 2
     ) AS clearance_priority_score
 FROM turnover_enriched base;
-$mv$;
-    END IF;
-END$$;
 
-REFRESH MATERIALIZED VIEW mart.inventory_backlog_base_mv;
-
-CREATE INDEX IF NOT EXISTS ix_inventory_backlog_base_mv_snapshot_platform
-ON mart.inventory_backlog_base_mv (snapshot_date, platform_code);
-
-CREATE INDEX IF NOT EXISTS ix_inventory_backlog_base_mv_snapshot_turnover
-ON mart.inventory_backlog_base_mv (snapshot_date, estimated_turnover_days);
-
-CREATE INDEX IF NOT EXISTS ix_inventory_backlog_base_mv_snapshot_clearance_order
-ON mart.inventory_backlog_base_mv (
-    snapshot_date,
-    clearance_priority_score DESC,
-    inventory_value DESC,
-    estimated_turnover_days DESC
-);
-
-CREATE OR REPLACE VIEW mart.inventory_backlog_base AS
-SELECT *
-FROM mart.inventory_backlog_base_mv;

@@ -18,6 +18,7 @@ from backend.schemas.auth import (
     ApproveUserRequest,
     PendingUserResponse,
     RejectUserRequest,
+    UserIdBatchRequest,
     ResetPasswordRequest,
     ResetPasswordResponse,
     UnlockAccountRequest,
@@ -523,6 +524,73 @@ async def delete_user(
         )
 
 
+@router.post("/delete-batch", response_model=dict)
+async def delete_users_batch(
+    request_body: UserIdBatchRequest,
+    current_user: DimUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """批量删除用户(软删除, 最多200个)"""
+    normalized_reason = (request_body.reason or "").strip() or None
+    unique_user_ids = list(dict.fromkeys(request_body.user_ids))
+
+    results: list[dict] = []
+
+    for user_id in unique_user_ids:
+        try:
+            result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                raise ValueError("User not found")
+            if user.status == "deleted":
+                raise ValueError("User already deleted")
+            if user.user_id == current_user.user_id:
+                raise ValueError("Cannot delete current user")
+
+            await db.execute(
+                update(UserSession)
+                .where(UserSession.user_id == user_id, UserSession.is_active)
+                .values(
+                    is_active=False,
+                    revoked_at=datetime.now(timezone.utc),
+                    revoked_reason="User deleted",
+                )
+            )
+
+            user.is_active = False
+            user.status = "deleted"
+            await _clear_employee_user_id(db, user_id)
+
+            await audit_service.log_action(
+                user_id=current_user.user_id,
+                action="delete_user",
+                resource="user",
+                resource_id=str(user.user_id),
+                ip_address="127.0.0.1",
+                user_agent="Unknown",
+                details={
+                    "username": user.username,
+                    "email": user.email,
+                    "reason": normalized_reason,
+                    "batch": True,
+                },
+            )
+
+            await db.commit()
+            results.append({"user_id": user_id, "ok": True, "error_message": None})
+        except Exception as exc:
+            await db.rollback()
+            results.append({"user_id": user_id, "ok": False, "error_message": str(exc)})
+
+    success_count = sum(1 for item in results if item["ok"])
+    failed_count = len(results) - success_count
+    payload = {
+        "summary": {"total": len(results), "success": success_count, "failed": failed_count},
+        "results": results,
+    }
+    return success_response(data=payload, message="Batch deletion completed")
+
+
 @router.post("/{user_id:int}/restore")
 async def restore_user(
     user_id: int,
@@ -916,9 +984,11 @@ async def reject_user(
             status_code=400,
         )
 
+    normalized_reason = (request_body.reason or "").strip() or None
+
     user.status = "rejected"
     user.is_active = False
-    user.rejection_reason = request_body.reason
+    user.rejection_reason = normalized_reason
     user.approved_by = current_user.user_id
     await _clear_employee_user_id(db, user_id)
 
@@ -928,7 +998,7 @@ async def reject_user(
         user_id=user.user_id,
         action="reject",
         approved_by=current_user.user_id,
-        reason=request_body.reason,
+        reason=normalized_reason,
     )
     db.add(approval_log)
 
@@ -944,7 +1014,7 @@ async def reject_user(
         details={
             "rejected_user_id": user.user_id,
             "rejected_username": user.username,
-            "reason": request_body.reason,
+            "reason": normalized_reason,
         },
     )
 
@@ -956,7 +1026,7 @@ async def reject_user(
             user_id=user.user_id,
             actor_user_id=current_user.user_id,
             action="reject",
-            comment=request_body.reason,
+            comment=normalized_reason,
         )
     except Exception as exc:
         logger.warning(f"[approval-center] failed to sync user rejection decision: {exc}")
@@ -967,7 +1037,7 @@ async def reject_user(
         db=db,
         user_id=user.user_id,
         rejected_by=current_user.username,
-        reason=request_body.reason,
+        reason=normalized_reason,
     )
 
     await db.commit()
@@ -980,6 +1050,97 @@ async def reject_user(
         },
         message="用户已拒绝",
     )
+
+
+@router.post("/reject-batch", response_model=dict)
+@role_based_rate_limit(endpoint_type="default")
+async def reject_users_batch(
+    request_body: UserIdBatchRequest,
+    request: Request,
+    current_user: DimUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """批量拒绝用户(仅 pending, 最多200个)"""
+    normalized_reason = (request_body.reason or "").strip() or None
+    unique_user_ids = list(dict.fromkeys(request_body.user_ids))
+
+    results: list[dict] = []
+
+    for user_id in unique_user_ids:
+        try:
+            result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                raise ValueError("User not found")
+            if user.status != "pending":
+                raise ValueError(f"Only pending users can be rejected (current={user.status})")
+
+            user.status = "rejected"
+            user.is_active = False
+            user.rejection_reason = normalized_reason
+            user.approved_by = current_user.user_id
+            await _clear_employee_user_id(db, user_id)
+
+            await db.flush()
+
+            approval_log = UserApprovalLog(
+                user_id=user.user_id,
+                action="reject",
+                approved_by=current_user.user_id,
+                reason=normalized_reason,
+            )
+            db.add(approval_log)
+
+            await audit_service.log_action(
+                user_id=current_user.user_id,
+                action="user_rejected",
+                resource="user",
+                resource_id=str(user.user_id),
+                ip_address="127.0.0.1",
+                user_agent="Unknown",
+                details={
+                    "rejected_user_id": user.user_id,
+                    "rejected_username": user.username,
+                    "reason": normalized_reason,
+                    "batch": True,
+                },
+            )
+
+            try:
+                from backend.services.approval_center_service import sync_user_registration_approval_decision
+
+                await sync_user_registration_approval_decision(
+                    db=db,
+                    user_id=user.user_id,
+                    actor_user_id=current_user.user_id,
+                    action="reject",
+                    comment=normalized_reason,
+                )
+            except Exception as exc:
+                logger.warning(f"[approval-center] failed to sync user rejection decision: {exc}")
+
+            from backend.routers.notifications import notify_user_rejected
+
+            await notify_user_rejected(
+                db=db,
+                user_id=user.user_id,
+                rejected_by=current_user.username,
+                reason=normalized_reason,
+            )
+
+            await db.commit()
+            results.append({"user_id": user_id, "ok": True, "error_message": None})
+        except Exception as exc:
+            await db.rollback()
+            results.append({"user_id": user_id, "ok": False, "error_message": str(exc)})
+
+    success_count = sum(1 for item in results if item["ok"])
+    failed_count = len(results) - success_count
+    payload = {
+        "summary": {"total": len(results), "success": success_count, "failed": failed_count},
+        "results": results,
+    }
+    return success_response(data=payload, message="Batch rejection completed")
 
 
 @router.get("/pending", response_model=List[PendingUserResponse])

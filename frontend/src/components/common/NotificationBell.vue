@@ -387,15 +387,9 @@ const handleQuickAction = async (notification, action) => {
             confirmButtonText: 'Confirm',
             cancelButtonText: 'Cancel',
             inputPlaceholder: 'Rejection reason',
-            inputValidator: (value) => {
-              if (!value || value.trim().length === 0) {
-                return 'Please provide a reason'
-              }
-              return true
-            }
           }
         )
-        await executeQuickAction(notification, action.action_type, value.trim(), loadingKey)
+        await executeQuickAction(notification, action.action_type, (value || '').trim(), loadingKey)
       } catch (e) {
         // 用户取消
         return

@@ -10,6 +10,22 @@
       <div class="template-update-workbench-drawer__meta">
         <el-tag size="small" type="info">Mode: {{ updateMode }}</el-tag>
         <el-tag size="small">{{ headerSource }}</el-tag>
+        <div v-if="showHeaderRowControl" class="template-update-workbench-drawer__header-row">
+          <el-input-number
+            v-model="selectedHeaderRow"
+            :min="0"
+            :max="100"
+            :step="1"
+            size="small"
+            controls-position="right"
+            style="width: 140px"
+            @change="reloadContext"
+          />
+          <span class="template-update-workbench-drawer__header-row-label">
+            表头行 (Excel第{{ selectedHeaderRow + 1 }}行)
+          </span>
+          <el-button size="small" :loading="reloadingContext" @click="reloadContext">重新加载</el-button>
+        </div>
       </div>
 
       <TemplateChangeSummaryCard :summary="changeSummary" />
@@ -68,6 +84,9 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+
+import api from '@/api'
 
 import HeaderDiffViewer from './HeaderDiffViewer.vue'
 import TemplateChangeSummaryCard from './TemplateChangeSummaryCard.vue'
@@ -87,7 +106,8 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'save', 'close'])
 
-const workbenchContext = computed(() => props.context?.context ?? null)
+const activeContext = ref(null)
+const workbenchContext = computed(() => activeContext.value ?? props.context?.context ?? null)
 const templateContext = computed(() => workbenchContext.value?.template ?? props.context?.template ?? {})
 const currentHeaderColumns = computed(() => workbenchContext.value?.current_header_columns ?? [])
 const templateHeaderColumns = computed(() => workbenchContext.value?.template_header_columns ?? [])
@@ -107,6 +127,28 @@ const updateMode = computed(() => workbenchContext.value?.update_mode ?? 'with-s
 const headerSource = computed(() => workbenchContext.value?.header_source ?? 'sample-file')
 
 const selectedDeduplicationFields = ref([])
+const selectedHeaderRow = ref(0)
+const reloadingContext = ref(false)
+
+const fallbackFileId = computed(() => props.context?.row?.sample_file_id ?? null)
+const currentFileId = computed(() => workbenchContext.value?.current_file?.id ?? fallbackFileId.value)
+const showHeaderRowControl = computed(() => updateMode.value !== 'core-only' && !!currentFileId.value)
+
+watch(
+  () => props.context,
+  (next) => {
+    activeContext.value = next?.context ?? null
+  },
+  { immediate: true, deep: true },
+)
+
+watch(
+  workbenchContext,
+  (next) => {
+    selectedHeaderRow.value = next?.current_header_row ?? next?.template?.header_row ?? 0
+  },
+  { immediate: true },
+)
 
 watch(
   [existingDeduplicationFieldsAvailable, recommendedDeduplicationFields, currentHeaderColumns],
@@ -137,7 +179,29 @@ const changeSummary = computed(() => ({
 function handleSave() {
   emit('save', {
     deduplicationFields: [...selectedDeduplicationFields.value],
+    headerRow: selectedHeaderRow.value,
   })
+}
+
+async function reloadContext() {
+  const templateId = templateContext.value?.id
+  const fileId = currentFileId.value
+  if (!templateId || !fileId) return
+
+  reloadingContext.value = true
+  try {
+    const context = await api.getTemplateUpdateContext(templateId, {
+      mode: updateMode.value,
+      fileId,
+      headerRow: selectedHeaderRow.value,
+    })
+    activeContext.value = context
+  } catch (error) {
+    console.error('重新加载模板更新上下文失败:', error)
+    ElMessage.error(error?.message || '重新加载失败')
+  } finally {
+    reloadingContext.value = false
+  }
 }
 
 function handleClose() {
@@ -156,6 +220,20 @@ function handleClose() {
 .template-update-workbench-drawer__meta {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.template-update-workbench-drawer__header-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.template-update-workbench-drawer__header-row-label {
+  font-size: 12px;
+  color: #606266;
 }
 
 .template-update-workbench-drawer__section {

@@ -728,14 +728,15 @@ export default {
     )
   },
 
-  async getTemplateUpdateContext(templateId, { mode, fileId } = {}) {
+  async getTemplateUpdateContext(templateId, { mode, fileId, headerRow } = {}) {
     if (!templateId) {
       throw new Error('templateId为必填项')
     }
     return await this._get(`/field-mapping/templates/${templateId}/update-context`, {
       params: {
         mode: mode || 'with-sample',
-        file_id: fileId || null
+        file_id: fileId || null,
+        header_row: headerRow === undefined ? null : headerRow
       }
     })
   },

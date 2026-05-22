@@ -107,7 +107,9 @@ async def test_template_update_context_returns_diff_and_deduplication_groups(
 
     from backend.routers import field_mapping_templates as router_module
 
-    async def fake_load_file_update_preview(*_, **__):
+    async def fake_load_file_update_preview(db, file_id, header_row):
+        assert file_id == file_record.id
+        assert header_row == expected_header_row
         return {
             "file": {
                 "id": file_record.id,
@@ -147,9 +149,10 @@ async def test_template_update_context_returns_diff_and_deduplication_groups(
         raising=False,
     )
 
+    expected_header_row = 3
     response = await client.get(
         f"/api/field-mapping/templates/{template.id}/update-context",
-        params={"file_id": file_record.id},
+        params={"file_id": file_record.id, "header_row": expected_header_row},
     )
 
     assert response.status_code == 200
@@ -164,6 +167,7 @@ async def test_template_update_context_returns_diff_and_deduplication_groups(
     assert data["current_file"]["id"] == file_record.id
     assert data["current_file"]["file_name"] == file_record.file_name
     assert data["current_header_columns"] == ["order_id", "amount", "platform_sku", "new_metric"]
+    assert data["current_header_row"] == expected_header_row
     assert data["preview_data"][0]["order_id"] == "SO-1"
     assert data["header_changes"]["detected"] is True
     assert data["added_fields"] == ["new_metric"]
@@ -229,6 +233,7 @@ async def test_template_update_context_core_only_uses_template_headers_as_field_
     assert data["removed_fields"] == []
     assert data["match_rate"] == 100.0
     assert data["update_mode"] == "core-only"
+    assert data["current_header_row"] == 1
     assert data["header_source"] == "template"
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["missing_field"]

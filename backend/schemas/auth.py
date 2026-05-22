@@ -211,12 +211,34 @@ class ApproveUserRequest(BaseModel):
 
 class RejectUserRequest(BaseModel):
     """用户拒绝请求"""
-    reason: str = Field(
-        ...,
-        min_length=1,  # v4.19.0 P1安全要求:修改为1字符(允许简短原因)
+    reason: Optional[str] = Field(
+        None,
         max_length=500,  # v4.19.0 P1安全要求:最多500字符
-        description="拒绝原因(必填,1-500字符)"
+        description="拒绝原因(可选,0-500字符)"
     )
+
+
+class UserIdBatchRequest(BaseModel):
+    """用户批量操作请求"""
+    user_ids: List[int] = Field(..., min_length=1, max_length=200, description="用户ID列表")
+    reason: Optional[str] = Field(None, max_length=500, description="原因/备注(可选,0-500字符)")
+
+
+class BatchItemResult(BaseModel):
+    user_id: int
+    ok: bool
+    error_message: Optional[str] = None
+
+
+class BatchSummary(BaseModel):
+    total: int
+    success: int
+    failed: int
+
+
+class BatchUserActionResponse(BaseModel):
+    summary: BatchSummary
+    results: List[BatchItemResult]
 
 class PendingUserResponse(BaseModel):
     """待审批用户响应"""

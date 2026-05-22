@@ -1,0 +1,66 @@
+name: Dashboard Assets Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PYTHONUTF8: "1"
+
+jobs:
+  dashboard-assets:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp_user
+          POSTGRES_PASSWORD: erp_pass
+          POSTGRES_DB: xihong_erp_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U erp_user -d xihong_erp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Prepare env
+        run: |
+          if [ -f env.template ]; then
+            cp env.template .env
+          elif [ -f .env.template ]; then
+            cp .env.template .env
+          else
+            touch .env
+          fi
+          echo "ENVIRONMENT=development" >> .env
+          echo "USE_POSTGRESQL_DASHBOARD_ROUTER=true" >> .env
+          echo "DATABASE_URL=postgresql+asyncpg://erp_user:erp_pass@127.0.0.1:5432/xihong_erp_ci" >> .env
+
+      - name: SQL hygiene
+        run: |
+          python scripts/verify_sql_asset_hygiene.py
+
+      - name: Bootstrap dashboard assets
+        run: |
+          python scripts/bootstrap_postgresql_dashboard.py
+

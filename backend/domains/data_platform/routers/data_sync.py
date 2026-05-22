@@ -2058,6 +2058,8 @@ async def get_detailed_template_coverage(
         missing_list = []
         needs_update_list = []
         template_status_service = DataSyncTemplateStatusService(db)
+        detailed_coverage_missing_files: list[str] = []
+        detailed_coverage_error_types: dict[str, int] = {}
         
         for platform, domain, sub_domain, granularity in all_combinations:
             if not platform or not domain or not granularity:
@@ -2155,7 +2157,13 @@ async def get_detailed_template_coverage(
                             else:
                                 update_reason = f"匹配率{header_changes.get('match_rate', 0):.1f}%"
                     except Exception as e:
-                        logger.warning(f"[DetailedCoverage] 检测模板更新失败: {e}")
+                        if isinstance(e, FileNotFoundError):
+                            detailed_coverage_missing_files.append(str(getattr(sample_file, "file_path", "")))
+                        else:
+                            error_type = type(e).__name__
+                            detailed_coverage_error_types[error_type] = (
+                                detailed_coverage_error_types.get(error_type, 0) + 1
+                            )
                 
                 covered_list.append({
                     **combo_info,
@@ -2192,6 +2200,18 @@ async def get_detailed_template_coverage(
         # 总组合数 = 所有模板数(已覆盖)+ 缺少模板的文件组合数(未覆盖)
         coverage_percentage = (len(template_combinations) / total_combinations * 100) if total_combinations > 0 else 0
         
+        if detailed_coverage_missing_files:
+            preview = ", ".join(detailed_coverage_missing_files[:3])
+            suffix = "" if len(detailed_coverage_missing_files) <= 3 else f" ... (+{len(detailed_coverage_missing_files) - 3})"
+            logger.info(
+                f"[DetailedCoverage] 跳过 {len(detailed_coverage_missing_files)} 个示例文件缺失: {preview}{suffix}"
+            )
+        if detailed_coverage_error_types:
+            summary = ", ".join(
+                f"{name}={count}" for name, count in sorted(detailed_coverage_error_types.items())
+            )
+            logger.warning(f"[DetailedCoverage] 示例文件检测出现异常(已聚合): {summary}")
+
         return success_response(
             data={
                 'summary': {

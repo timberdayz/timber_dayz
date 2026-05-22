@@ -125,6 +125,7 @@ class TemplateUpdateContextData(BaseModel):
     template_header_columns: List[str]
     current_file: Optional[TemplateCurrentFileSummary] = None
     current_header_columns: List[str]
+    current_header_row: int = 0
     sample_data: Dict[str, Any] = Field(default_factory=dict)
     preview_data: List[Dict[str, Any]] = Field(default_factory=list)
     update_mode: TemplateUpdateMode

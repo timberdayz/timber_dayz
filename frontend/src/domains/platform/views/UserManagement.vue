@@ -24,6 +24,14 @@
             <el-icon><Refresh /></el-icon>
             刷新
           </el-button>
+          <el-button
+            type="danger"
+            plain
+            :disabled="selectedActiveUserIds.length === 0 || selectedActiveUserIds.includes(currentUserId)"
+            @click="batchDeleteUsers"
+          >
+            批量删除 ({{ selectedActiveUserIds.length }})
+          </el-button>
         </el-col>
         <el-col :span="12">
           <el-input
@@ -58,7 +66,9 @@
             v-loading="usersStore.isLoading"
             stripe
             class="erp-w-full"
+            @selection-change="handleActiveSelectionChange"
           >
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="username" label="用户名" width="150" />
         <el-table-column prop="email" label="邮箱" width="200" />
@@ -396,6 +406,13 @@ const loadingDetail = ref(false)
 // 当前用户ID（不能删除自己）
 const currentUserId = computed(() => authStore.user?.id)
 
+const selectedActiveRows = ref([])
+const selectedActiveUserIds = computed(() => (selectedActiveRows.value || []).map((row) => row.id))
+
+const handleActiveSelectionChange = (rows) => {
+  selectedActiveRows.value = rows || []
+}
+
 // 可用角色
 const availableRoles = ref([])
 
@@ -610,6 +627,46 @@ const deleteUser = async (user) => {
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除用户失败: ' + error.message)
+    }
+  }
+}
+
+const batchDeleteUsers = async () => {
+  if (!selectedActiveUserIds.value.length) return
+  if (selectedActiveUserIds.value.includes(currentUserId.value)) {
+    ElMessage.warning('不能删除自己')
+    return
+  }
+
+  const promptResult = await ElMessageBox.prompt(
+    `将软删除 ${selectedActiveUserIds.value.length} 个用户（可在“已删除用户”标签页恢复）。\n可选填写删除原因：`,
+    '批量删除确认',
+    {
+      confirmButtonText: '确定删除',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputPlaceholder: '可选',
+      inputValue: ''
+    }
+  ).catch(() => null)
+
+  if (!promptResult) return
+
+  try {
+    const payload = await usersStore.deleteUsersBatch(selectedActiveUserIds.value, (promptResult.value || '').trim())
+    const failedItems = (payload?.results || []).filter((item) => !item.ok)
+    if (failedItems.length) {
+      await ElMessageBox.alert(
+        failedItems.map((item) => `user_id=${item.user_id}: ${item.error_message || 'failed'}`).join('\\n'),
+        '部分失败',
+        { type: 'warning' }
+      )
+    }
+    selectedActiveRows.value = []
+    await refreshUsers()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量删除用户失败: ' + error.message)
     }
   }
 }

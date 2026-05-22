@@ -1,31 +1,44 @@
 #!/usr/bin/env python3
 """
-根目录Markdown白名单检查
+Validate root Markdown file hygiene.
 
-允许的根目录MD文件：README.md, CHANGELOG.md, API_CONTRACT.md。
-其他MD文件需移动到 docs/。
+Long-form reports and historical notes should live under docs/ or archive/.
 """
 
-from pathlib import Path
+from __future__ import annotations
+
 import sys
+from pathlib import Path
 
 
-ALLOWED = {"README.md", "CHANGELOG.md", "API_CONTRACT.md", "FIELD_DICTIONARY_REFERENCE.md"}
+ALLOWED = {
+    "AGENTS.md",
+    "API_CONTRACT.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "FIELD_DICTIONARY_REFERENCE.md",
+    "README.md",
+    "findings.md",
+    "progress.md",
+    "task_plan.md",
+}
 
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    md_files = [p.name for p in root.glob("*.md")]
-    violations = [f for f in md_files if f not in ALLOWED]
+    md_files = sorted(path.name for path in root.glob("*.md"))
+    violations = [file_name for file_name in md_files if file_name not in ALLOWED]
+
     if violations:
-        print("[ERROR] 根目录存在不允许的Markdown文件:\n  - " + "\n  - ".join(violations))
-        print("请将文档移动到 docs/ 或加入白名单策略后再提交。")
+        print("[ERROR] Root Markdown files outside the allowlist:")
+        for file_name in violations:
+            print(f"  - {file_name}")
+        print("Move long-form reports to docs/ or archive/, or update the allowlist intentionally.")
         return 1
-    print("[OK] 根目录Markdown白名单检查通过")
+
+    print("[OK] Root Markdown allowlist check passed")
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

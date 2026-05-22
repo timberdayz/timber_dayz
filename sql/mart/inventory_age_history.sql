@@ -1,29 +1,7 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'mart'
-          AND c.relname = 'inventory_age_history'
-          AND c.relkind = 'v'
-    ) THEN
-        EXECUTE 'DROP VIEW mart.inventory_age_history CASCADE';
-    ELSIF EXISTS (
-        SELECT 1
-        FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'mart'
-          AND c.relname = 'inventory_age_history'
-          AND c.relkind = 'm'
-    ) THEN
-        EXECUTE 'DROP MATERIALIZED VIEW mart.inventory_age_history CASCADE';
-    END IF;
-END
-$$;
-
+-- History table for inventory age snapshots.
+-- Use Alembic for schema evolution; keep bootstrap SQL idempotent.
 CREATE TABLE IF NOT EXISTS mart.inventory_age_history (
     snapshot_date DATE NOT NULL,
     platform_code VARCHAR(64) NOT NULL,
@@ -54,3 +32,4 @@ CREATE INDEX IF NOT EXISTS ix_inventory_age_history_snapshot_date
 
 CREATE INDEX IF NOT EXISTS ix_inventory_age_history_platform_age
     ON mart.inventory_age_history (platform_code, age_days DESC);
+

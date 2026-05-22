@@ -321,6 +321,54 @@ async def test_user_rejection(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_user_rejection_reason_optional(monkeypatch):
+    user = DimUser(
+        user_id=203,
+        username="reject_user_optional_reason",
+        email="reject_optional@test.com",
+        password_hash=auth_service.hash_password("test123456"),
+        full_name="Reject User",
+        status="pending",
+        is_active=False,
+    )
+    current_user = SimpleNamespace(user_id=999, username="test_admin")
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_scalar_result(user))
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.add = MagicMock()
+    sync_mock = AsyncMock()
+    monkeypatch.setattr(
+        "backend.services.approval_center_service.sync_user_registration_approval_decision",
+        sync_mock,
+    )
+
+    response = await users_admin_router.reject_user(
+        user_id=203,
+        request_body=RejectUserRequest(reason=""),
+        request=_request_stub(),
+        current_user=current_user,
+        db=db,
+    )
+
+    data = _payload(response)
+    assert data["success"] is True
+    assert data["data"]["status"] == "rejected"
+    assert user.status == "rejected"
+    assert user.is_active is False
+    assert user.rejection_reason is None
+    sync_mock.assert_awaited_once()
+    assert sync_mock.await_args.kwargs == {
+        "db": db,
+        "user_id": 203,
+        "actor_user_id": 999,
+        "action": "reject",
+        "comment": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_pending_users_list():
     users = [
         DimUser(

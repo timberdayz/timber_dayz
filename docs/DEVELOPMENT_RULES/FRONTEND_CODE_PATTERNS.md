@@ -7,7 +7,7 @@
 
 ---
 
-## Mandatory Rules (enforced in `.cursorrules`)
+## Mandatory Rules
 
 1. **No direct axios calls in Vue components.** All HTTP requests must go through `frontend/src/api/*.js`.
 2. **State may only be modified via Pinia `actions` or `$patch()`.** Never mutate store state directly in components.

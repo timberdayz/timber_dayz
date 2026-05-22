@@ -434,7 +434,7 @@ PostgreSQL数据库
 ### 在线文档
 - **技术文档**: `docs/FIELD_MAPPING_OPTIMIZATION_SUMMARY.md`
 - **API文档**: `docs/API_DOCUMENTATION.md`
-- **开发规范**: `.cursorrules`
+- **开发规范**: `AGENTS.md`
 
 ### 问题反馈
 - 检查浏览器控制台错误信息

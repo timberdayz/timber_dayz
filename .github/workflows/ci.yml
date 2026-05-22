@@ -66,6 +66,10 @@ jobs:
         run: |
           python scripts/verify_rules_completeness.py
 
+      - name: Verify SQL asset hygiene
+        run: |
+          python scripts/verify_sql_asset_hygiene.py
+
       - name: Install Playwright browsers
         run: |
           pip install playwright || echo "Playwright installation failed, continuing..."

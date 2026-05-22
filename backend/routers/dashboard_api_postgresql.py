@@ -70,6 +70,40 @@ def _reject_business_overview_legacy_params(request: Request) -> None:
         },
     )
 
+
+def _require_dashboard_assets_ready(request: Request) -> None:
+    report = getattr(getattr(request, "app", None), "state", None)
+    report = getattr(report, "dashboard_assets_report", None)
+    if not isinstance(report, dict):
+        return
+    if report.get("ready") is True:
+        return
+
+    detail: dict[str, Any] = {
+        "message": "PostgreSQL dashboard assets are not ready. Run deploy-time bootstrap and retry.",
+        "ready": report.get("ready"),
+        "missing_schemas": report.get("missing_schemas"),
+        "missing_objects": report.get("missing_objects"),
+        "assets_drift": report.get("assets_drift"),
+        "assets_fingerprint_expected": report.get("assets_fingerprint_expected"),
+        "assets_fingerprint_last": report.get("assets_fingerprint_last"),
+        "hint": {
+            "bootstrap_command": "python scripts/bootstrap_postgresql_dashboard.py",
+            "startup_policy": "production startup should only inspect/ready-check; heavy SQL must run at deploy time",
+            "env": "AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=true (dev only)",
+        },
+    }
+    raise HTTPException(status_code=503, detail=detail)
+
+
+@router.get("/assets/status")
+async def get_dashboard_assets_status(request: Request):
+    report = getattr(getattr(request, "app", None), "state", None)
+    report = getattr(report, "dashboard_assets_report", None)
+    ready = getattr(getattr(request, "app", None), "state", None)
+    ready = getattr(ready, "dashboard_assets_ready", None)
+    return success_response(data={"ready": bool(ready), "report": report})
+
 def _isoformat_utc_now_seconds() -> str:
     now = datetime.now(timezone.utc).replace(microsecond=0)
     return f"{now.isoformat()}Z"
@@ -273,6 +307,7 @@ async def get_business_overview_kpi_postgresql(
     shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         _reject_business_overview_legacy_params(request)
         granularity_value = granularity if isinstance(granularity, str) else None
         effective_granularity = (granularity_value or "monthly").strip().lower()
@@ -332,6 +367,7 @@ async def get_business_overview_comparison_postgresql(
     shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         _reject_business_overview_legacy_params(request)
         effective_platform_code = platform_code
         effective_period_key = period_key
@@ -388,6 +424,7 @@ async def get_business_overview_bootstrap_postgresql(
     shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         _reject_business_overview_legacy_params(request)
         granularity_value = granularity if isinstance(granularity, str) else None
         effective_granularity = (granularity_value or "monthly").strip().lower()
@@ -508,6 +545,7 @@ async def get_annual_summary_kpi_postgresql(
     period: str = Query(..., description="YYYY-MM or YYYY"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
 
@@ -542,6 +580,7 @@ async def get_business_overview_shop_racing_postgresql(
     shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         _reject_business_overview_legacy_params(request)
         effective_platform = platform_code
         effective_period_key = period_key
@@ -601,6 +640,7 @@ async def get_business_overview_traffic_ranking_postgresql(
     shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         _reject_business_overview_legacy_params(request)
         target_date = period_key
         effective_platform = platform_code
@@ -659,6 +699,7 @@ async def get_business_overview_inventory_backlog_postgresql(
     date: Optional[str] = Query(None, description="anchor date"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"days": days, "limit": limit, "granularity": granularity, "date": date}
         cache_params = _normalize_cache_params(params)
 
@@ -695,6 +736,7 @@ async def get_business_overview_operational_metrics_postgresql(
     shop_id: Optional[str] = Query(None, description="canonical shop id"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         _reject_business_overview_legacy_params(request)
         if granularity and str(granularity).strip().lower() != "monthly":
             raise ValueError("granularity must be monthly")
@@ -759,6 +801,7 @@ async def get_store_analysis_capabilities_postgresql(
     _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"platform": platform, "shop_id": shop_id}
         cache_params = _normalize_cache_params(params)
 
@@ -788,6 +831,7 @@ async def get_store_analysis_shops_postgresql(
     _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"platform": platform}
         cache_params = _normalize_cache_params(params)
 
@@ -820,6 +864,7 @@ async def get_store_analysis_overview_postgresql(
     _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
         cache_params = _normalize_cache_params(params)
 
@@ -857,6 +902,7 @@ async def get_store_analysis_comparison_postgresql(
     _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
         cache_params = _normalize_cache_params(params)
 
@@ -895,6 +941,7 @@ async def get_store_analysis_top_products_postgresql(
     _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date, "limit": limit}
         cache_params = _normalize_cache_params(params)
 
@@ -933,6 +980,7 @@ async def get_store_analysis_traffic_summary_postgresql(
     _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
         cache_params = _normalize_cache_params(params)
 
@@ -970,6 +1018,7 @@ async def get_store_analysis_traffic_trend_postgresql(
     _current_user: Any = Depends(_get_store_analysis_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"platform": platform, "shop_id": shop_id, "granularity": granularity, "date": date}
         cache_params = _normalize_cache_params(params)
 
@@ -1006,6 +1055,7 @@ async def get_b_cost_analysis_overview_postgresql(
     _current_user: Any = Depends(_get_b_cost_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"period_month": period_month, "platform": platform, "shop_id": shop_id}
         cache_params = _normalize_cache_params(
             {
@@ -1047,6 +1097,7 @@ async def get_b_cost_analysis_shop_month_postgresql(
     _current_user: Any = Depends(_get_b_cost_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"period_month": period_month, "platform": platform, "shop_id": shop_id}
         cache_params = _normalize_cache_params(
             {
@@ -1090,6 +1141,7 @@ async def get_b_cost_analysis_order_detail_postgresql(
     _current_user: Any = Depends(_get_b_cost_authorized_user),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {
             "period_month": period_month,
             "platform": platform,
@@ -1138,6 +1190,7 @@ async def get_clearance_ranking_postgresql(
     month: Optional[str] = Query(None, description="legacy month alias"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         target_date = date or month
         params = {"limit": limit, "granularity": granularity, "date": target_date}
         cache_params = _normalize_cache_params(params)
@@ -1172,6 +1225,7 @@ async def get_annual_summary_trend_postgresql(
     period: str = Query(..., description="YYYY-MM or YYYY"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
 
@@ -1201,6 +1255,7 @@ async def get_annual_summary_platform_share_postgresql(
     period: str = Query(..., description="YYYY-MM or YYYY"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
 
@@ -1230,6 +1285,7 @@ async def get_annual_summary_by_shop_postgresql(
     period: str = Query(..., description="YYYY-MM or YYYY"),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
 
@@ -1260,6 +1316,7 @@ async def get_annual_summary_target_completion_postgresql(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
+        _require_dashboard_assets_ready(request)
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
 

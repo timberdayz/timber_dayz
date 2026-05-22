@@ -119,6 +119,14 @@ export default {
     return await api._post(`/users/${userId}/reject`, rejectionData)
   },
 
+  async rejectUsersBatch(userIds = [], reason = '') {
+    return await api._post('/users/reject-batch', { user_ids: userIds, reason })
+  },
+
+  async deleteUsersBatch(userIds = [], reason = '') {
+    return await api._post('/users/delete-batch', { user_ids: userIds, reason })
+  },
+
   /**
    * 获取待审批用户列表
    * @param {number} page - 页码（默认1）

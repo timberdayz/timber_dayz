@@ -10,10 +10,10 @@
 
 ## Active Source Of Truth
 
-- Rule entrypoints:
+- Rule entrypoint:
   - [`AGENTS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/AGENTS.md)
+- Tool adapter:
   - [`CLAUDE.md`](F:/Vscode/python_programme/AI_code/xihong_erp/CLAUDE.md)
-  - [`\.cursorrules`](F:/Vscode/python_programme/AI_code/xihong_erp/.cursorrules)
 - Detailed reference:
   - [`docs/DEVELOPMENT_RULES/README.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/DEVELOPMENT_RULES/README.md)
 
@@ -53,5 +53,5 @@ Key files:
 
 1. Do not revert default CI back to full-repository lint/test scanning
 2. Keep release operations tag-driven
-3. Keep repository-specific constraints in `.cursorrules`, not ad hoc workflow comments
+3. Keep repository-specific constraints in `AGENTS.md`, not ad hoc workflow comments
 4. When a future session investigates CI failures, inspect the latest GitHub Actions run first before changing rules

@@ -271,6 +271,7 @@ async def lifespan(app: FastAPI):
             from backend.models.database import AsyncSessionLocal
             from backend.services.data_pipeline.dashboard_bootstrap import (
                 bootstrap_dashboard_assets_if_needed,
+                inspect_dashboard_assets,
             )
 
             async with AsyncSessionLocal() as session:
@@ -286,7 +287,17 @@ async def lifespan(app: FastAPI):
                     )
                     await session.commit()
                 else:
-                    dashboard_bootstrap_report = {"bootstrapped": False, "skipped": True}
+                    dashboard_bootstrap_report = await inspect_dashboard_assets(session)
+                    dashboard_bootstrap_report["bootstrapped"] = False
+                    dashboard_bootstrap_report["skipped"] = True
+
+            # Expose readiness report for route-level graceful degradation.
+            try:
+                app.state.dashboard_assets_report = dashboard_bootstrap_report
+                app.state.dashboard_assets_ready = bool(dashboard_bootstrap_report.get("ready"))
+            except Exception:
+                app.state.dashboard_assets_report = {"ready": False, "error": "failed to persist report"}
+                app.state.dashboard_assets_ready = False
             startup_metrics["dashboard_bootstrap"] = time.time() - step_start
             if dashboard_bootstrap_report.get("skipped"):
                 logger.info(
@@ -316,8 +327,26 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             if not dashboard_bootstrap_completed:
                 startup_metrics["dashboard_bootstrap"] = time.time() - step_start
-                logger.error(f"[ERROR] PostgreSQL Dashboard 资产初始化失败: {e}")
-                raise
+                logger.error(
+                    f"[ERROR] PostgreSQL Dashboard 资产初始化失败: {e}",
+                    exc_info=True,
+                )
+                if settings.ENVIRONMENT != "production":
+                    logger.warning(
+                        "[WARN] 已跳过 PostgreSQL Dashboard 资产初始化失败以继续启动开发服务。"
+                        "如需禁用启动期自动初始化，请设置 AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false"
+                    )
+                    try:
+                        app.state.dashboard_assets_report = {
+                            "ready": False,
+                            "error": f"startup bootstrap failed: {e}",
+                        }
+                        app.state.dashboard_assets_ready = False
+                    except Exception:
+                        pass
+                    dashboard_bootstrap_completed = True
+                else:
+                    raise
             startup_metrics["pool_warmup"] = time.time() - step_start
             logger.warning(f"[WARN] 连接池预热失败: {e}")
 

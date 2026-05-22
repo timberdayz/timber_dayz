@@ -155,7 +155,7 @@ from modules.core.db import Base, DimProduct
 - `docs/ARCHITECTURE_AUDIT_REPORT_20250130.md` - 完整审计报告
 - `docs/FINAL_ARCHITECTURE_STATUS.md` - 本文档（最终状态）
 - `ARCHITECTURE_CLEANUP_COMPLETE.md` - 清理完成报告（根目录）
-- `.cursorrules` - 架构规范（强制遵守）
+- `AGENTS.md` - 架构规范（强制遵守）
 
 ### 技术文档
 - `docs/V4_4_0_COMPLETE_DEPLOYMENT_REPORT.md` - v4.4.0财务域部署
@@ -230,7 +230,7 @@ python scripts/verify_architecture_ssot.py
 ### 每季度执行（人工）
 
 - [ ] 架构全面审计
-- [ ] 更新.cursorrules规范
+- [ ] 更新AGENTS.md规范
 - [ ] Agent培训材料更新
 - [ ] 技术债务清理
 
@@ -256,7 +256,7 @@ python scripts/verify_architecture_ssot.py
 1. ✅ 创建SSOT验证脚本（自动化检查）
 2. ✅ 完善架构文档（Agent指南）
 3. ✅ 明确归档策略（不直接删除）
-4. ✅ 更新.cursorrules（强制规范）
+4. ✅ 更新AGENTS.md（强制规范）
 
 ### 给未来的建议
 

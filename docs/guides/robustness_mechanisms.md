@@ -545,7 +545,7 @@ steps:
 
 - [组件Schema规范](component_schema.md) - YAML配置详细说明
 - [Phase 2.5实施报告](../PHASE_2_5_FINAL_SUMMARY.md) - 容错机制实施总结
-- [开发规范](.cursorrules) - 项目开发规范
+- [开发规范](../../AGENTS.md) - 项目开发规范
 
 ---
 
