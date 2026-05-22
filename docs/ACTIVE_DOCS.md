@@ -11,6 +11,7 @@ Do not use full-repository search as the first step when one of these files cove
 - `docs/guides/AGENT_TASK_CONTRACT.md`: repository task framing for active skill workflows
 - `docs/guides/ENVIRONMENT_MODEL.md`: local, Docker, production, and collection environment boundaries
 - `docs/guides/DEVELOPMENT_ENVIRONMENT.md`: local machine, runtime, and application setup baseline
+- `docs/guides/ENV_FILE_CONTRACT.md`: `.env*` and `env*.example` ownership, edit, and secrecy rules
 - `docs/guides/CHANGE_CONTROL.md`: phase-specific scope constraints
 - `docs/guides/VERIFICATION_MATRIX.md`: verification checks by changed surface
 - `docs/guides/DOCUMENT_LIFECYCLE.md`: active, reference, runbook, and archive document policy
@@ -18,6 +19,7 @@ Do not use full-repository search as the first step when one of these files cove
 ## Development And Release
 
 - `docs/guides/DEVELOPMENT_WORKFLOW.md`: startup, validation, testing, and release commands
+- `docs/guides/COLLECTION_AUTHORING_RULES.md`: clean active collection authoring rules
 - `docs/guides/PWCLI_COMMAND_REFERENCE.md`: `pwcli`, `pwcap`, and evidence helper command reference
 - `docs/guides/PRE_LAUNCH_RULES.md`: launch-period change constraints
 - `docs/guides/RELEASE_CHECKLIST.md`: tag-driven production release checklist
@@ -43,8 +45,8 @@ Do not use full-repository search as the first step when one of these files cove
 
 ## Collection
 
-- `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`: active collection authoring workflow
-- `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`: collection environment baseline
+- `docs/guides/COLLECTION_AUTHORING_RULES.md`: active collection authoring workflow
+- `docs/guides/PWCLI_COMMAND_REFERENCE.md`: active `pwcli` command reference
 - `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`: collection debugging workflow
 - `docs/guides/CANONICAL_COLLECTION_COMPONENTS.md`: canonical collection component reference
 - `docs/guides/ACTIVE_COLLECTION_COMPONENTS.md`: active component inventory
@@ -59,6 +61,8 @@ Do not use full-repository search as the first step when one of these files cove
 ## Historical Material
 
 - `docs/archive/`: archived reports, old rule references, and historical cleanup material
+- `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`: legacy long-form collection reference with encoding damage
+- `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`: legacy long-form environment reference with encoding damage
 - `openspec/`: historical archive only
 
 Historical material is useful for traceability, not as the current rule source.

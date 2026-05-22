@@ -1,3 +1,17 @@
+# Legacy PWCLI Agent Collection SOP
+
+Status: legacy reference with encoding damage. Do not use this file as the first rule source for new collection authoring.
+
+Active clean entrypoints:
+
+- `docs/guides/COLLECTION_AUTHORING_RULES.md`
+- `docs/guides/PWCLI_COMMAND_REFERENCE.md`
+- `docs/guides/DEVELOPMENT_ENVIRONMENT.md`
+
+The content below is preserved for historical traceability only.
+
+---
+
 # pwcli + agent 采集脚本开发 SOP
 
 版本: v1.0  

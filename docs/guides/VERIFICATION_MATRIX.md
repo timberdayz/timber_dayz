@@ -7,6 +7,7 @@ This file maps changed surfaces to repository-specific checks. The active verifi
 - Run `python scripts/verify_rules_completeness.py`.
 - Run `python scripts/verify_root_md_whitelist.py` when root Markdown or documentation policy changes.
 - Run `python -m py_compile scripts/verify_rules_completeness.py scripts/verify_root_md_whitelist.py scripts/verify_architecture_ssot.py` when verification scripts change.
+- Run `powershell -ExecutionPolicy Bypass -File .\scripts\verify_pwcli_helpers.ps1` when `pwcli` helper rules or wrappers change.
 
 ## Architecture Changes
 
@@ -27,6 +28,7 @@ This file maps changed surfaces to repository-specific checks. The active verifi
 ## Collection Changes
 
 - Use `pwcli` evidence for page behavior changes.
+- Use `docs/guides/COLLECTION_AUTHORING_RULES.md` as the clean active collection authoring entrypoint.
 - Verify canonical components under `modules/platforms/<platform>/components/`.
 - Preserve Markdown snapshots and notes when evidence is needed for agent handoff.
 

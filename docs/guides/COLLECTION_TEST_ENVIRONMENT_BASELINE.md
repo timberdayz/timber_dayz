@@ -1,3 +1,17 @@
+# Legacy Collection Test Environment Baseline
+
+Status: legacy reference with encoding damage. Do not use this file as the first environment rule source.
+
+Active clean entrypoints:
+
+- `docs/guides/DEVELOPMENT_ENVIRONMENT.md`
+- `docs/guides/ENVIRONMENT_MODEL.md`
+- `docs/guides/COLLECTION_AUTHORING_RULES.md`
+
+The content below is preserved for historical traceability only.
+
+---
+
 # 采集测试环境基线
 
 适用范围:

@@ -47,6 +47,7 @@ Detailed rules: `docs/guides/PRE_LAUNCH_RULES.md`.
 - Use `docs/guides/AGENT_TASK_CONTRACT.md` to clarify scope, non-scope, verification, and handoff context.
 - Use `docs/guides/ENVIRONMENT_MODEL.md` before acting across local, Docker, production, or collection environments.
 - Use `docs/guides/DEVELOPMENT_ENVIRONMENT.md` for local OS, shell, runtime, Docker, Redis, PostgreSQL, Node, Python, and Playwright assumptions.
+- Use `docs/guides/ENV_FILE_CONTRACT.md` before reading or changing `.env*` and `env*.example` files.
 - Use `docs/guides/VERIFICATION_MATRIX.md` when the verification skill needs repository-specific commands.
 - Use `docs/guides/CHANGE_CONTROL.md` to apply phase-specific scope boundaries.
 
@@ -81,9 +82,10 @@ Detailed rules: `docs/architecture/DASHBOARD.md`.
 - Use `pwcli` for page exploration, snapshots, state comparison, and locator discovery.
 - Use agent-generated canonical Python components as the supported output path for new collection work.
 - Do not default to legacy recorder scripts, backend `/recorder` APIs, or frontend recorder pages for new component authoring unless the user explicitly asks to maintain legacy recorder paths.
-- Primary workflow reference: `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
+- Primary clean workflow reference: `docs/guides/COLLECTION_AUTHORING_RULES.md`.
 - Command reference: `docs/guides/PWCLI_COMMAND_REFERENCE.md`.
-- Collection runtime baseline: `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`.
+- Legacy long-form collection references may contain encoding damage. Do not use them as first rule sources.
+- Collection runtime baseline: `docs/guides/DEVELOPMENT_ENVIRONMENT.md` and `docs/guides/ENVIRONMENT_MODEL.md`.
 - Collection failure debugging: `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`.
 
 ## Release Model
@@ -101,7 +103,9 @@ Detailed workflow: `docs/guides/RELEASE_CHECKLIST.md`.
 - `docs/guides/AGENT_TASK_CONTRACT.md`: repository task framing for active skill workflows
 - `docs/guides/ENVIRONMENT_MODEL.md`: local, Docker, production, and collection environment boundaries
 - `docs/guides/DEVELOPMENT_ENVIRONMENT.md`: local machine, runtime, and application setup baseline
+- `docs/guides/ENV_FILE_CONTRACT.md`: `.env*` and `env*.example` ownership, edit, and secrecy rules
 - `docs/guides/DEVELOPMENT_WORKFLOW.md`: startup, validation, testing, and release commands
+- `docs/guides/COLLECTION_AUTHORING_RULES.md`: clean active collection authoring rules
 - `docs/guides/PWCLI_COMMAND_REFERENCE.md`: `pwcli`, `pwcap`, and evidence helper command reference
 - `docs/guides/PRE_LAUNCH_RULES.md`: launch-period change constraints
 - `docs/guides/CHANGE_CONTROL.md`: phase-specific change-scope rules

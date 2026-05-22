@@ -27,7 +27,9 @@ REQUIRED_FILES = {
     "docs/guides/PRE_LAUNCH_RULES.md": PROJECT_ROOT / "docs" / "guides" / "PRE_LAUNCH_RULES.md",
     "docs/guides/ENVIRONMENT_MODEL.md": PROJECT_ROOT / "docs" / "guides" / "ENVIRONMENT_MODEL.md",
     "docs/guides/DEVELOPMENT_ENVIRONMENT.md": PROJECT_ROOT / "docs" / "guides" / "DEVELOPMENT_ENVIRONMENT.md",
+    "docs/guides/ENV_FILE_CONTRACT.md": PROJECT_ROOT / "docs" / "guides" / "ENV_FILE_CONTRACT.md",
     "docs/guides/AGENT_TASK_CONTRACT.md": PROJECT_ROOT / "docs" / "guides" / "AGENT_TASK_CONTRACT.md",
+    "docs/guides/COLLECTION_AUTHORING_RULES.md": PROJECT_ROOT / "docs" / "guides" / "COLLECTION_AUTHORING_RULES.md",
     "docs/guides/PWCLI_COMMAND_REFERENCE.md": PROJECT_ROOT / "docs" / "guides" / "PWCLI_COMMAND_REFERENCE.md",
     "docs/guides/CHANGE_CONTROL.md": PROJECT_ROOT / "docs" / "guides" / "CHANGE_CONTROL.md",
     "docs/guides/VERIFICATION_MATRIX.md": PROJECT_ROOT / "docs" / "guides" / "VERIFICATION_MATRIX.md",
@@ -37,6 +39,7 @@ REQUIRED_FILES = {
     "docs/architecture/DASHBOARD.md": PROJECT_ROOT / "docs" / "architecture" / "DASHBOARD.md",
     "docs/architecture/BOUNDARIES.md": PROJECT_ROOT / "docs" / "architecture" / "BOUNDARIES.md",
     "docs/adr/README.md": PROJECT_ROOT / "docs" / "adr" / "README.md",
+    "scripts/verify_pwcli_helpers.ps1": PROJECT_ROOT / "scripts" / "verify_pwcli_helpers.ps1",
 }
 
 RETIRED_FILES = {
@@ -55,6 +58,8 @@ REQUIRED_PHRASES = {
         "Superpowers Repository Adapters",
         "docs/ACTIVE_DOCS.md",
         "docs/guides/DEVELOPMENT_ENVIRONMENT.md",
+        "docs/guides/ENV_FILE_CONTRACT.md",
+        "docs/guides/COLLECTION_AUTHORING_RULES.md",
         "docs/guides/PWCLI_COMMAND_REFERENCE.md",
         "docs/architecture/PROJECT_STRUCTURE.md",
         "Answer users in Chinese",
@@ -67,6 +72,8 @@ REQUIRED_PHRASES = {
     "docs/ACTIVE_DOCS.md": [
         "current documentation entrypoints agents should prefer",
         "Rule And Agent Context",
+        "ENV_FILE_CONTRACT.md",
+        "COLLECTION_AUTHORING_RULES.md",
         "Historical material is useful for traceability",
     ],
     "docs/DEVELOPMENT_RULES/README.md": [
@@ -99,15 +106,29 @@ REQUIRED_PHRASES = {
         "Node.js 24.14.0",
         "python run.py --local",
         "Playwright",
+        "ENV_FILE_CONTRACT.md",
+    ],
+    "docs/guides/ENV_FILE_CONTRACT.md": [
+        "Do not commit real secrets",
+        ".env.production.passwords.txt",
+        "env.production.cloud.example",
+        "state which environment is affected",
     ],
     "docs/guides/AGENT_TASK_CONTRACT.md": [
         "repository adapter for `superpowers`",
         "Recommended Task Fields",
     ],
+    "docs/guides/COLLECTION_AUTHORING_RULES.md": [
+        "active, clean entrypoint for collection authoring",
+        "modules/platforms/<platform>/components/",
+        "Do not use legacy recorder flows",
+        "legacy long-form material",
+    ],
     "docs/guides/PWCLI_COMMAND_REFERENCE.md": [
         "agent-facing command reference for `pwcli`, `pwcap`",
         "Get-Command pwcli",
         "pwcap",
+        "verify_pwcli_helpers.ps1",
         "scripts/pw-cap.ps1",
         "Markdown artifacts",
     ],
@@ -118,10 +139,12 @@ REQUIRED_PHRASES = {
     "docs/guides/VERIFICATION_MATRIX.md": [
         "active verification workflow",
         "Collection Changes",
+        "verify_pwcli_helpers.ps1",
     ],
     "docs/guides/DOCUMENT_LIFECYCLE.md": [
         "`AGENTS.md` is the only active rule entrypoint",
         "Reports And Historical Notes",
+        "encoding damage",
     ],
     "docs/architecture/README.md": [
         "The active repository rule entrypoint is `AGENTS.md`",
@@ -147,6 +170,12 @@ REQUIRED_PHRASES = {
         "Architecture Decision Records",
         "When To Add An ADR",
         "Accepted Decisions",
+    ],
+    "scripts/verify_pwcli_helpers.ps1": [
+        "requiredHelpers",
+        "pwcap",
+        "requiredScripts",
+        "[PASS] pwcli helper commands and fallback scripts are available",
     ],
 }
 

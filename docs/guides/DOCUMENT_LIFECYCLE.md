@@ -18,6 +18,7 @@
 
 - Reports and historical notes should not become active rules.
 - Move old reports to `docs/archive/` or `archive/` when they are no longer current.
+- If a retained legacy document contains encoding damage or outdated workflow content, add a status warning at the top and point agents to a clean active entrypoint.
 - Treat `openspec/` as historical unless the user explicitly asks to inspect it.
 
 ## Agent Rules

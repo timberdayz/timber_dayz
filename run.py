@@ -1379,19 +1379,19 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
 
 def wait_for_service(port, name, max_wait=30):
     """等待服务启动"""
-    import socket
+    import urllib.request
 
     safe_print(f"\n[等待] {name}服务启动中...")
+    readiness_url = f"http://127.0.0.1:{port}/healthz/ready"
 
     for i in range(max_wait):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            result = sock.connect_ex(('127.0.0.1', port))
-            if result == 0:
-                safe_print(f"  [OK] {name}已就绪 ({i+1}秒)")
-                return True
-        finally:
-            sock.close()
+            with urllib.request.urlopen(readiness_url, timeout=2) as response:
+                if getattr(response, "status", 0) == 200:
+                    safe_print(f"  [OK] {name}已就绪 ({i+1}秒)")
+                    return True
+        except Exception:
+            pass
 
         if (i + 1) % 5 == 0:
             safe_print(f"  等待中... {i+1}/{max_wait}秒")
@@ -1399,6 +1399,7 @@ def wait_for_service(port, name, max_wait=30):
         time.sleep(1)
 
     safe_print(f"  [WARNING] {name}启动超时")
+    safe_print(f"  提示: 可手动检查 {readiness_url}")
     return False
 
 

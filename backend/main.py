@@ -89,6 +89,35 @@ logger = get_logger(__name__)
 settings = get_settings()
 APP_VERSION = _load_app_version()
 
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def should_init_db_on_startup(environment: str) -> bool:
+    if environment == "production":
+        return False
+    return _env_flag("ENABLE_INIT_DB_ON_STARTUP", default=False)
+
+
+def should_auto_bootstrap_dashboard_on_startup(environment: str) -> bool:
+    if environment == "production":
+        return False
+    return _env_flag("AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP", default=False)
+
+
+os.environ.setdefault(
+    "AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP",
+    "true" if should_auto_bootstrap_dashboard_on_startup(settings.ENVIRONMENT) else "false",
+)
+
+if not should_init_db_on_startup(settings.ENVIRONMENT):
+    def init_db() -> None:  # type: ignore[no-redef]
+        return None
+
 # 安全认证
 @asynccontextmanager
 async def lifespan(app: FastAPI):

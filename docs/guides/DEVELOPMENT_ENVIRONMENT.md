@@ -41,7 +41,7 @@ Do not invent alternative startup paths unless the task explicitly requires debu
 
 ## Environment Variables
 
-Use the existing environment examples and runtime guides as the source of truth. For local Redis, the expected baseline is:
+Use `docs/guides/ENV_FILE_CONTRACT.md` before reading or changing `.env*` and `env*.example` files. Use the existing environment examples and runtime guides as the source of truth. For local Redis, the expected baseline is:
 
 ```env
 REDIS_PORT=16379
@@ -55,6 +55,7 @@ Do not start a duplicate manual Redis container when the repository Docker runti
 ## Agent Rules
 
 - Before changing runtime assumptions, inspect `docs/guides/ENVIRONMENT_MODEL.md` and `docs/guides/LOCAL_DEV_RUNTIME_GUIDE.md`.
+- Before reading or changing environment files, inspect `docs/guides/ENV_FILE_CONTRACT.md`.
 - Before adding new dependencies, verify whether they affect local, Docker, production, or collection environments.
 - For collection work, also inspect `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`.
 - For launch-period work, follow `docs/guides/PRE_LAUNCH_RULES.md` and avoid broad environment refactors.

@@ -26,6 +26,12 @@ Before suggesting setup steps, first check helper availability:
 Get-Command pwcli, Open-PwcliMiaoshou, Open-PwcliShopee, Open-PwcliTiktok, Save-PwcliMiaoshouState, Save-PwcliShopeeState, Save-PwcliTiktokState, Show-PwcliPaths, pwsnap, pwnote, pwshot, pwpack, pwcap -ErrorAction SilentlyContinue
 ```
 
+For a repository-owned self-check, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify_pwcli_helpers.ps1
+```
+
 If these commands exist, prefer them in user-facing guidance over longer repo-local script paths.
 
 ## Primary Commands
