@@ -12,13 +12,18 @@ This directory contains architecture references. The active repository rule entr
 
 - `backend/`: FastAPI routers, schemas, services, and API-facing application logic
 - `modules/core/`: shared core database and domain primitives
+- `modules/components/`: shared collection component base classes and reusable primitives
+- `modules/platforms/`: platform adapters and platform-specific canonical components
+- `modules/services/`: shared service layer used by backend and collection runtime code
 - `frontend/`: Vue application, stores, API wrappers, and UI modules
-- `collectors/`: collection-specific runtime and component logic
+- `collectors/`: legacy or narrow collector entrypoints, not the default destination for new canonical components
 - `sql/`: PostgreSQL semantic, mart, and API-layer assets
 - `docs/DEVELOPMENT_RULES/`: detailed implementation standards
 
 ## Detailed References
 
+- Project structure: `docs/architecture/PROJECT_STRUCTURE.md`
+- Domain and module boundaries: `docs/architecture/BOUNDARIES.md`
 - Dashboard architecture: `docs/architecture/DASHBOARD.md`
 - Backend patterns: `docs/DEVELOPMENT_RULES/CODE_PATTERNS.md`
 - API and contracts: `docs/DEVELOPMENT_RULES/API_AND_CONTRACTS.md`

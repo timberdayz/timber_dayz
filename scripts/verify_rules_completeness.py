@@ -19,13 +19,24 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_FILES = {
     "AGENTS.md": PROJECT_ROOT / "AGENTS.md",
     "CLAUDE.md": PROJECT_ROOT / "CLAUDE.md",
+    "docs/ACTIVE_DOCS.md": PROJECT_ROOT / "docs" / "ACTIVE_DOCS.md",
     "docs/DEVELOPMENT_RULES/README.md": PROJECT_ROOT / "docs" / "DEVELOPMENT_RULES" / "README.md",
     "docs/superpowers/README.md": PROJECT_ROOT / "docs" / "superpowers" / "README.md",
     "docs/guides/DEVELOPMENT_RULES.md": PROJECT_ROOT / "docs" / "guides" / "DEVELOPMENT_RULES.md",
     "docs/guides/DEVELOPMENT_WORKFLOW.md": PROJECT_ROOT / "docs" / "guides" / "DEVELOPMENT_WORKFLOW.md",
     "docs/guides/PRE_LAUNCH_RULES.md": PROJECT_ROOT / "docs" / "guides" / "PRE_LAUNCH_RULES.md",
+    "docs/guides/ENVIRONMENT_MODEL.md": PROJECT_ROOT / "docs" / "guides" / "ENVIRONMENT_MODEL.md",
+    "docs/guides/DEVELOPMENT_ENVIRONMENT.md": PROJECT_ROOT / "docs" / "guides" / "DEVELOPMENT_ENVIRONMENT.md",
+    "docs/guides/AGENT_TASK_CONTRACT.md": PROJECT_ROOT / "docs" / "guides" / "AGENT_TASK_CONTRACT.md",
+    "docs/guides/PWCLI_COMMAND_REFERENCE.md": PROJECT_ROOT / "docs" / "guides" / "PWCLI_COMMAND_REFERENCE.md",
+    "docs/guides/CHANGE_CONTROL.md": PROJECT_ROOT / "docs" / "guides" / "CHANGE_CONTROL.md",
+    "docs/guides/VERIFICATION_MATRIX.md": PROJECT_ROOT / "docs" / "guides" / "VERIFICATION_MATRIX.md",
+    "docs/guides/DOCUMENT_LIFECYCLE.md": PROJECT_ROOT / "docs" / "guides" / "DOCUMENT_LIFECYCLE.md",
     "docs/architecture/README.md": PROJECT_ROOT / "docs" / "architecture" / "README.md",
+    "docs/architecture/PROJECT_STRUCTURE.md": PROJECT_ROOT / "docs" / "architecture" / "PROJECT_STRUCTURE.md",
     "docs/architecture/DASHBOARD.md": PROJECT_ROOT / "docs" / "architecture" / "DASHBOARD.md",
+    "docs/architecture/BOUNDARIES.md": PROJECT_ROOT / "docs" / "architecture" / "BOUNDARIES.md",
+    "docs/adr/README.md": PROJECT_ROOT / "docs" / "adr" / "README.md",
 }
 
 RETIRED_FILES = {
@@ -41,12 +52,22 @@ REQUIRED_PHRASES = {
         "`superpowers`",
         "`planning-with-files`",
         "Pre-Launch Development Constraints",
+        "Superpowers Repository Adapters",
+        "docs/ACTIVE_DOCS.md",
+        "docs/guides/DEVELOPMENT_ENVIRONMENT.md",
+        "docs/guides/PWCLI_COMMAND_REFERENCE.md",
+        "docs/architecture/PROJECT_STRUCTURE.md",
         "Answer users in Chinese",
     ],
     "CLAUDE.md": [
         "`AGENTS.md` as the single active rule entrypoint",
         "Claude is a supplemental assistant",
         "Do not treat `.cursorrules`",
+    ],
+    "docs/ACTIVE_DOCS.md": [
+        "current documentation entrypoints agents should prefer",
+        "Rule And Agent Context",
+        "Historical material is useful for traceability",
     ],
     "docs/DEVELOPMENT_RULES/README.md": [
         "Active rule entrypoint",
@@ -68,13 +89,64 @@ REQUIRED_PHRASES = {
         "until the first production launch is stable",
         "Prohibited Changes",
     ],
+    "docs/guides/ENVIRONMENT_MODEL.md": [
+        "repository adapter for `superpowers`",
+        "Production Collection Runtime",
+    ],
+    "docs/guides/DEVELOPMENT_ENVIRONMENT.md": [
+        "agent-facing baseline for local development environment assumptions",
+        "Python 3.13.13",
+        "Node.js 24.14.0",
+        "python run.py --local",
+        "Playwright",
+    ],
+    "docs/guides/AGENT_TASK_CONTRACT.md": [
+        "repository adapter for `superpowers`",
+        "Recommended Task Fields",
+    ],
+    "docs/guides/PWCLI_COMMAND_REFERENCE.md": [
+        "agent-facing command reference for `pwcli`, `pwcap`",
+        "Get-Command pwcli",
+        "pwcap",
+        "scripts/pw-cap.ps1",
+        "Markdown artifacts",
+    ],
+    "docs/guides/CHANGE_CONTROL.md": [
+        "not a replacement workflow",
+        "V2 Rebuild Phase",
+    ],
+    "docs/guides/VERIFICATION_MATRIX.md": [
+        "active verification workflow",
+        "Collection Changes",
+    ],
+    "docs/guides/DOCUMENT_LIFECYCLE.md": [
+        "`AGENTS.md` is the only active rule entrypoint",
+        "Reports And Historical Notes",
+    ],
     "docs/architecture/README.md": [
         "The active repository rule entrypoint is `AGENTS.md`",
         "ORM source of truth",
+        "PROJECT_STRUCTURE.md",
+    ],
+    "docs/architecture/PROJECT_STRUCTURE.md": [
+        "agent-facing map of repository ownership",
+        "ORM SSOT is `modules/core/db/schema.py`",
+        "Platform-specific canonical components belong in `modules/platforms/<platform>/components/`",
+        "Frontend API access belongs in `frontend/src/api/`",
+        "Do not add new root-level temporary reports",
     ],
     "docs/architecture/DASHBOARD.md": [
         "PostgreSQL-first",
         "Metabase is historical-only",
+    ],
+    "docs/architecture/BOUNDARIES.md": [
+        "ownership boundaries for agents",
+        "Collection",
+    ],
+    "docs/adr/README.md": [
+        "Architecture Decision Records",
+        "When To Add An ADR",
+        "Accepted Decisions",
     ],
 }
 

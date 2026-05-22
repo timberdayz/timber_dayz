@@ -19,6 +19,20 @@ This directory is a detailed reference for repository-specific implementation st
 
 Use this directory for deep-dive references and templates. Do not treat it as the default workflow engine.
 
+## Governance References
+
+- Active docs index: [`docs/ACTIVE_DOCS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/ACTIVE_DOCS.md)
+- Environment boundaries: [`docs/guides/ENVIRONMENT_MODEL.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/ENVIRONMENT_MODEL.md)
+- Development environment: [`docs/guides/DEVELOPMENT_ENVIRONMENT.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/DEVELOPMENT_ENVIRONMENT.md)
+- Agent task contract: [`docs/guides/AGENT_TASK_CONTRACT.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/AGENT_TASK_CONTRACT.md)
+- Change control: [`docs/guides/CHANGE_CONTROL.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/CHANGE_CONTROL.md)
+- Verification matrix: [`docs/guides/VERIFICATION_MATRIX.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/VERIFICATION_MATRIX.md)
+- Document lifecycle: [`docs/guides/DOCUMENT_LIFECYCLE.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/DOCUMENT_LIFECYCLE.md)
+- PWCLI command reference: [`docs/guides/PWCLI_COMMAND_REFERENCE.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/PWCLI_COMMAND_REFERENCE.md)
+- Project structure: [`docs/architecture/PROJECT_STRUCTURE.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/architecture/PROJECT_STRUCTURE.md)
+- Architecture boundaries: [`docs/architecture/BOUNDARIES.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/architecture/BOUNDARIES.md)
+- Architecture decisions: [`docs/adr/README.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/adr/README.md)
+
 ## Core Files
 
 | File | Purpose |

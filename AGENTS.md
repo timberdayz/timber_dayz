@@ -40,6 +40,16 @@ Until production launch is stable:
 
 Detailed rules: `docs/guides/PRE_LAUNCH_RULES.md`.
 
+## Superpowers Repository Adapters
+
+`superpowers` remains the workflow engine. These files provide repository-specific context and must not be treated as replacement workflows.
+
+- Use `docs/guides/AGENT_TASK_CONTRACT.md` to clarify scope, non-scope, verification, and handoff context.
+- Use `docs/guides/ENVIRONMENT_MODEL.md` before acting across local, Docker, production, or collection environments.
+- Use `docs/guides/DEVELOPMENT_ENVIRONMENT.md` for local OS, shell, runtime, Docker, Redis, PostgreSQL, Node, Python, and Playwright assumptions.
+- Use `docs/guides/VERIFICATION_MATRIX.md` when the verification skill needs repository-specific commands.
+- Use `docs/guides/CHANGE_CONTROL.md` to apply phase-specific scope boundaries.
+
 ## Core Stack Constraints
 
 - Backend stack: FastAPI + SQLAlchemy async + Pydantic + PostgreSQL
@@ -72,6 +82,7 @@ Detailed rules: `docs/architecture/DASHBOARD.md`.
 - Use agent-generated canonical Python components as the supported output path for new collection work.
 - Do not default to legacy recorder scripts, backend `/recorder` APIs, or frontend recorder pages for new component authoring unless the user explicitly asks to maintain legacy recorder paths.
 - Primary workflow reference: `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
+- Command reference: `docs/guides/PWCLI_COMMAND_REFERENCE.md`.
 - Collection runtime baseline: `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`.
 - Collection failure debugging: `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`.
 
@@ -86,10 +97,21 @@ Detailed workflow: `docs/guides/RELEASE_CHECKLIST.md`.
 
 ## Documentation Map
 
+- `docs/ACTIVE_DOCS.md`: current documentation entrypoints agents should prefer
+- `docs/guides/AGENT_TASK_CONTRACT.md`: repository task framing for active skill workflows
+- `docs/guides/ENVIRONMENT_MODEL.md`: local, Docker, production, and collection environment boundaries
+- `docs/guides/DEVELOPMENT_ENVIRONMENT.md`: local machine, runtime, and application setup baseline
 - `docs/guides/DEVELOPMENT_WORKFLOW.md`: startup, validation, testing, and release commands
+- `docs/guides/PWCLI_COMMAND_REFERENCE.md`: `pwcli`, `pwcap`, and evidence helper command reference
 - `docs/guides/PRE_LAUNCH_RULES.md`: launch-period change constraints
+- `docs/guides/CHANGE_CONTROL.md`: phase-specific change-scope rules
+- `docs/guides/VERIFICATION_MATRIX.md`: repository checks by changed surface
+- `docs/guides/DOCUMENT_LIFECYCLE.md`: active, reference, runbook, and archive document policy
 - `docs/architecture/README.md`: architecture overview
+- `docs/architecture/PROJECT_STRUCTURE.md`: repository file tree, ownership, and placement boundaries
+- `docs/architecture/BOUNDARIES.md`: module and domain boundaries
 - `docs/architecture/DASHBOARD.md`: Dashboard data flow and runtime direction
+- `docs/adr/README.md`: architecture decision record policy and accepted decisions
 - `docs/DEVELOPMENT_RULES/README.md`: detailed implementation standards index
 - `docs/superpowers/README.md`: skill-first spec and plan locations
 

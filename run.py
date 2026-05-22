@@ -189,8 +189,10 @@ def ensure_postgresql_dashboard_assets(project_root):
         return False
 
     safe_print("  [检查] PostgreSQL Dashboard 资产...")
+    # Use JSON output so we can distinguish "missing" vs "drift" and avoid
+    # blocking local startup on heavy bootstrap work.
     check_result = subprocess.run(
-        [sys.executable, str(script_path), "--check"],
+        [sys.executable, str(script_path), "--check", "--json"],
         cwd=project_root,
         capture_output=True,
         text=True,
@@ -202,7 +204,34 @@ def ensure_postgresql_dashboard_assets(project_root):
         safe_print("  [OK] PostgreSQL Dashboard 资产完整")
         return True
 
-    safe_print("  [修复] 检测到 PostgreSQL Dashboard 资产缺失，开始初始化...")
+    report = None
+    try:
+        import json as _json
+
+        report = _json.loads((check_result.stdout or "").strip() or "{}")
+    except Exception:
+        report = None
+
+    # Best practice: local startup should not be blocked by deploy-time-heavy SQL.
+    # If assets are missing or drifted, we warn and continue. Dashboard routes will
+    # degrade (503) until bootstrap is completed.
+    missing_objects = None
+    assets_drift = None
+    if isinstance(report, dict):
+        missing_objects = report.get("missing_objects")
+        assets_drift = report.get("assets_drift")
+
+    if assets_drift:
+        safe_print("  [WARNING] PostgreSQL Dashboard 资产发生漂移（SQL 指纹不一致），跳过自动初始化（将继续启动本地服务）")
+        safe_print("  提示: 请在空闲时手动执行 `python scripts/bootstrap_postgresql_dashboard.py` 进行部署期初始化")
+        return True
+
+    if isinstance(missing_objects, list) and missing_objects:
+        safe_print("  [WARNING] PostgreSQL Dashboard 资产不完整，跳过自动初始化（将继续启动本地服务）")
+        safe_print("  提示: 请在空闲时手动执行 `python scripts/bootstrap_postgresql_dashboard.py` 进行部署期初始化")
+        return True
+
+    safe_print("  [修复] 检测到 PostgreSQL Dashboard 资产未就绪，开始初始化...")
     hygiene_result = subprocess.run(
         [sys.executable, str(project_root / "scripts" / "verify_sql_asset_hygiene.py")],
         cwd=project_root,
@@ -219,8 +248,21 @@ def ensure_postgresql_dashboard_assets(project_root):
             if line.strip():
                 safe_print(f"    {line}")
         return True
+    # As a fallback, allow manual forcing via env var for users who prefer auto-bootstrap.
+    auto_bootstrap = os.getenv("AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not auto_bootstrap:
+        safe_print("  [SKIP] 未启用启动期自动初始化（AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false）")
+        safe_print("  提示: 如需自动初始化，请设置环境变量 AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=true")
+        safe_print("  提示: 手动执行 `python scripts/bootstrap_postgresql_dashboard.py` 更符合生产化最佳实践")
+        return True
+
     apply_result = subprocess.run(
-        [sys.executable, str(script_path)],
+        [sys.executable, str(script_path), "--json"],
         cwd=project_root,
         capture_output=True,
         text=True,
