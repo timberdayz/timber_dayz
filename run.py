@@ -613,7 +613,7 @@ def _report_migrate_failure(reason):
 
 def start_services_with_docker_compose(use_collection=False, runtime_mode="production"):
     """使用Docker Compose启动服务（v4.19.6新增，生产模式：确保所有服务在容器中运行）
-    use_collection: 若为 True，加载 docker-compose.collection-dev.yml，使 backend 使用 Dockerfile.collection（带 Playwright）
+    use_collection: 若为 True，加载 docker-compose.collection-dev.yml，使 backend-collector 使用 Dockerfile.collection（带 Playwright）
     """
     safe_print("\n[启动] 使用Docker Compose启动服务...")
     
@@ -700,11 +700,11 @@ def start_services_with_docker_compose(use_collection=False, runtime_mode="produ
     safe_print(f"  [INFO] Docker Compose Profile: {profile_name}")
     
     
-    # [v4.19.x] 采集模式：使 backend 使用 Dockerfile.collection（带 Playwright）
+    # [v4.19.x] 采集模式：使 backend-collector 使用 Dockerfile.collection（带 Playwright）
     compose_collection_dev = project_root / "docker-compose.collection-dev.yml"
     if use_collection and compose_collection_dev.exists():
         compose_files.extend(["-f", str(compose_collection_dev)])
-        safe_print("  [INFO] 已加载采集开发配置（backend 使用 Dockerfile.collection，端口 8001）")
+        safe_print("  [INFO] 已加载采集开发配置（backend-collector 使用 Dockerfile.collection）")
     
     compose_env = os.environ.copy()
     compose_env["APP_RUNTIME_MODE"] = runtime_mode
@@ -749,12 +749,16 @@ def start_services_with_docker_compose(use_collection=False, runtime_mode="produ
         except Exception as e:
             safe_print(f"  [WARNING] 无法检查数据库连接: {e}")
         
+        docker_backend_service = "backend-collector" if use_collection else "backend-api"
+        backend_container = (
+            "xihong_erp_backend_collector" if use_collection else "xihong_erp_backend_api"
+        )
+
         # 启动后端API（生产模式：必须在Docker中运行）
         safe_print("  [启动] 后端API服务...")
         safe_print("  提示: 首次构建可能需要几分钟，请耐心等待...")
-        backend_container = "xihong_erp_backend"
         try:
-            cmd = compose_command + compose_files + ["--profile", profile_name, "up", "-d", "backend"]
+            cmd = compose_command + compose_files + ["--profile", profile_name, "up", "-d", docker_backend_service]
             # [FIX] 增加超时到300秒（5分钟），首次构建需要更长时间
             result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore', env=compose_env)
             
@@ -798,9 +802,9 @@ def start_services_with_docker_compose(use_collection=False, runtime_mode="produ
                     if line.strip():
                         safe_print(f"    {line}")
                 safe_print("\n  诊断建议:")
-                safe_print("    1. 查看完整日志: docker logs xihong_erp_backend")
+                safe_print(f"    1. 查看完整日志: docker logs {backend_container}")
                 safe_print("    2. 检查容器状态: docker ps -a | grep backend")
-                safe_print("    3. 手动启动: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d backend")
+                safe_print(f"    3. 手动启动: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile {profile_name} up -d {docker_backend_service}")
                 return False
             
             # [BEST PRACTICE] 现代化Docker最佳实践：等待后端服务健康检查通过（容器运行 != 服务就绪）
@@ -823,9 +827,9 @@ def start_services_with_docker_compose(use_collection=False, runtime_mode="produ
                             if line.strip():
                                 safe_print(f"    {line}")
                         safe_print("\n  诊断建议:")
-                        safe_print("    1. 查看完整日志: docker logs xihong_erp_backend -f")
+                        safe_print(f"    1. 查看完整日志: docker logs {backend_container} -f")
                         safe_print("    2. 检查数据库连接配置")
-                        safe_print("    3. 检查容器环境变量: docker exec xihong_erp_backend env | grep DATABASE")
+                        safe_print(f"    3. 检查容器环境变量: docker exec {backend_container} env | grep DATABASE")
                         return False
                     # 检查容器日志中是否有错误
                     logs = show_docker_container_logs(backend_container, 30)
@@ -839,7 +843,7 @@ def start_services_with_docker_compose(use_collection=False, runtime_mode="produ
                 try:
                     import urllib.request
                     import urllib.error
-                    response = urllib.request.urlopen("http://localhost:8001/health", timeout=5)
+                    response = urllib.request.urlopen("http://localhost:8001/healthz/ready", timeout=5)
                     if response.status == 200:
                         safe_print(f"  [OK] 后端服务健康检查通过（尝试 {i+1}/{max_health_retries}）")
                         backend_healthy = True
@@ -851,7 +855,7 @@ def start_services_with_docker_compose(use_collection=False, runtime_mode="produ
                             safe_print(f"  [等待] 后端服务启动中... (尝试 {i+1}/{max_health_retries})")
                             # 如果等待时间超过60秒，显示容器状态
                             if i >= 6:
-                                safe_print("  提示: 如果长时间等待，请查看容器日志: docker logs xihong_erp_backend -f")
+                                safe_print(f"  提示: 如果长时间等待，请查看容器日志: docker logs {backend_container} -f")
                         time.sleep(10)  # 等待10秒后重试
                     else:
                         # 最后一次重试失败，显示完整错误信息
@@ -863,9 +867,9 @@ def start_services_with_docker_compose(use_collection=False, runtime_mode="produ
                             if line.strip():
                                 safe_print(f"    {line}")
                         safe_print("\n  诊断建议:")
-                        safe_print("    1. 查看完整日志: docker logs xihong_erp_backend -f")
-                        safe_print("    2. 测试健康检查: curl http://localhost:8001/health")
-                        safe_print("    3. 检查数据库连接: docker exec xihong_erp_backend env | grep DATABASE_URL")
+                        safe_print(f"    1. 查看完整日志: docker logs {backend_container} -f")
+                        safe_print("    2. 测试健康检查: curl http://localhost:8001/healthz/ready")
+                        safe_print(f"    3. 检查数据库连接: docker exec {backend_container} env | grep DATABASE_URL")
                         safe_print("    4. 检查容器状态: docker ps -a | grep backend")
                         return False
                 except Exception as e:
@@ -892,8 +896,8 @@ def start_services_with_docker_compose(use_collection=False, runtime_mode="produ
         except subprocess.TimeoutExpired:
             safe_print("  [ERROR] 后端API构建超时（超过5分钟）")
             safe_print("  提示: 请手动构建和启动:")
-            safe_print("    docker-compose -f docker-compose.yml -f docker-compose.dev.yml build backend")
-            safe_print("    docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d backend")
+            safe_print(f"    docker-compose -f docker-compose.yml -f docker-compose.dev.yml build {docker_backend_service}")
+            safe_print(f"    docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile {profile_name} up -d {docker_backend_service}")
             return False
         
         # 启动Celery Worker / Beat（生产模式：必须在Docker中运行）
@@ -1605,7 +1609,7 @@ def main():
 
         if not args.frontend_only:
             safe_print(f"[后端] API文档:  http://localhost:{backend_port}/api/docs")
-            safe_print(f"[后端] 健康检查: http://localhost:{backend_port}/health")
+            safe_print(f"[后端] 健康检查: http://localhost:{backend_port}/healthz/ready")
 
         if args.use_docker or args.local:
             safe_print("[任务] Celery Worker已启动（Docker容器，处理数据同步任务）")

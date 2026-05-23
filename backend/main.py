@@ -109,6 +109,40 @@ def should_auto_bootstrap_dashboard_on_startup(environment: str) -> bool:
     return _env_flag("AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP", default=False)
 
 
+def resolve_background_task_role(environment: str) -> str:
+    explicit_role = os.getenv("DEPLOYMENT_ROLE", "").strip().lower()
+    if explicit_role in {"api", "cloud", "collector", "local", "all"}:
+        return "api" if explicit_role == "cloud" else explicit_role
+
+    runtime_mode = os.getenv("APP_RUNTIME_MODE", "").strip().lower()
+    if runtime_mode == "collector":
+        return "collector"
+
+    if environment == "production":
+        return "api"
+    return "all"
+
+
+def should_start_cloud_sync_worker(background_role: str) -> bool:
+    return background_role in {"collector", "local", "all"}
+
+
+def should_start_resource_monitor(background_role: str) -> bool:
+    return background_role in {"api", "local", "all"}
+
+
+def should_start_websocket_cleanup(background_role: str) -> bool:
+    return background_role in {"api", "local", "all"}
+
+
+def should_start_collection_scheduler(background_role: str) -> bool:
+    return background_role in {"collector", "local", "all"}
+
+
+def should_start_collection_queue_runner(background_role: str) -> bool:
+    return background_role in {"collector", "local", "all"}
+
+
 os.environ.setdefault(
     "AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP",
     "true" if should_auto_bootstrap_dashboard_on_startup(settings.ENVIRONMENT) else "false",
@@ -145,11 +179,42 @@ async def lifespan(app: FastAPI):
 
     # 环境标识
     env_mode = os.getenv("ENVIRONMENT", "development")
+    background_role = resolve_background_task_role(env_mode)
     logger.info(f"[环境] 运行环境: {env_mode}")
     if env_mode == "production":
         logger.info("[安全] 生产环境模式:安全检查已启用")
     else:
         logger.info("[开发] 开发环境模式:使用默认配置")
+
+    logger.info("[Role] Background task role: %s", background_role)
+
+    if not should_start_resource_monitor(background_role):
+        try:
+            import backend.services.resource_monitor as _resource_monitor_module
+
+            class _SkippedResourceMonitor:
+                async def start(self):
+                    return None
+
+                async def stop(self):
+                    return None
+
+            _resource_monitor_module.get_resource_monitor = lambda: _SkippedResourceMonitor()
+            logger.info("[ResourceMonitor] Pre-skipped for background role: %s", background_role)
+        except Exception as resource_gate_err:
+            logger.warning("[ResourceMonitor] Skip hook failed: %s", resource_gate_err)
+
+    if not should_start_websocket_cleanup(background_role):
+        try:
+            import backend.domains.platform.routers.notification_websocket as _notification_ws_module
+
+            async def _skip_cleanup_task():
+                return None
+
+            _notification_ws_module.start_cleanup_task = _skip_cleanup_task
+            logger.info("[WS] Cleanup pre-skipped for background role: %s", background_role)
+        except Exception as websocket_gate_err:
+            logger.warning("[WS] Skip hook failed: %s", websocket_gate_err)
 
     try:
         # 1. 环境配置(<1秒)
@@ -409,24 +474,27 @@ async def lifespan(app: FastAPI):
             logger.debug(f"[SKIP] 后台修复任务未启动: {repair_err}")
 
         # v4.6.3新增:初始化Redis缓存(可选,不影响主流程)
-        try:
-            cloud_sync_runtime = build_cloud_sync_runtime_from_env()
-            app.state.cloud_sync_runtime = cloud_sync_runtime
-            if cloud_sync_runtime is None:
-                logger.info("[CloudSync] Cloud sync worker not enabled")
-            else:
-                started = await cloud_sync_runtime.start()
-                if started:
-                    logger.info("[CloudSync] Cloud sync worker started")
+        if should_start_cloud_sync_worker(background_role):
+            try:
+                cloud_sync_runtime = build_cloud_sync_runtime_from_env()
+                app.state.cloud_sync_runtime = cloud_sync_runtime
+                if cloud_sync_runtime is None:
+                    logger.info("[CloudSync] Cloud sync worker not enabled")
                 else:
-                    logger.warning(
-                        "[CloudSync] Cloud sync worker not started because runtime is not configured"
-                    )
-        except Exception as cloud_sync_err:
-            logger.error(
-                f"[CloudSync] Failed to start cloud sync worker: {cloud_sync_err}"
-            )
-            raise
+                    started = await cloud_sync_runtime.start()
+                    if started:
+                        logger.info("[CloudSync] Cloud sync worker started")
+                    else:
+                        logger.warning(
+                            "[CloudSync] Cloud sync worker not started because runtime is not configured"
+                        )
+            except Exception as cloud_sync_err:
+                logger.error(
+                    f"[CloudSync] Failed to start cloud sync worker: {cloud_sync_err}"
+                )
+                raise
+        else:
+            logger.info("[CloudSync] Skipped for background role: %s", background_role)
 
         try:
             from backend.utils.redis_client import init_redis
@@ -535,7 +603,7 @@ async def lifespan(app: FastAPI):
 
         # v4.7.0新增:标记中断的采集任务并初始化调度器
         # collection scheduler + queue runner leader lock gating
-        enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in (
+        enable_collection = should_start_collection_scheduler(background_role) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
             "true",
             "1",
         )
@@ -590,7 +658,7 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"[恢复] 标记 {interrupted_count} 个中断任务")
 
             # 按部署角色决定是否启动采集调度器（v4.19.x 本地与云端部署角色区分）
-            enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in (
+            enable_collection = should_start_collection_scheduler(background_role) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
                 "true",
                 "1",
             )
@@ -716,7 +784,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"[调度器] 初始化失败(不影响主功能): {scheduler_err}")
 
         try:
-            enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in (
+            enable_collection = should_start_collection_queue_runner(background_role) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
                 "true",
                 "1",
             )

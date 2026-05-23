@@ -165,7 +165,7 @@ docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" up -d postgres r
 
 ```bash
 # 执行数据库迁移（Alembic）
-docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" run --rm --no-deps backend alembic upgrade head
+docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" run --rm --no-deps backend-api alembic upgrade head
 # 失败时阻断部署
 ```
 
@@ -173,7 +173,7 @@ docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" run --rm --no-de
 
 ```bash
 # 执行 Day-1 Bootstrap（创建基础角色、可选管理员账号）
-docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" run --rm --no-deps backend \
+docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" run --rm --no-deps backend-api \
   python3 /app/scripts/bootstrap_production.py
 # 失败时阻断部署
 ```
@@ -488,10 +488,10 @@ T=5-10min [部署完成，服务可用]
 **原因**：服务启动时间过长或配置错误
 **解决**：
 
-1. 查看容器日志：`docker logs xihong_erp_backend`（替换容器名）
+1. 查看容器日志：`docker logs xihong_erp_backend_api`（替换容器名）
 2. 检查健康检查配置：`docker inspect <container_name> | grep -A 10 Healthcheck`
-3. 手动验证健康端点：`docker exec xihong_erp_backend curl http://localhost:8000/health`
-4. 检查环境变量配置：`docker exec xihong_erp_backend env | grep DATABASE`
+3. 手动验证健康端点：`docker exec xihong_erp_backend_api curl http://localhost:8000/healthz/ready`
+4. 检查环境变量配置：`docker exec xihong_erp_backend_api env | grep DATABASE`
 
 ### 问题 5：构建失败或超时
 

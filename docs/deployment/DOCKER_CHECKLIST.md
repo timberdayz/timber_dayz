@@ -87,7 +87,7 @@
 
 - [ ] 后端容器健康（生产模式）
   ```bash
-  curl -f http://localhost:8001/health
+  curl -f http://localhost:8001/healthz/ready
   # 应返回: {"status":"healthy"}
   ```
 
@@ -198,7 +198,7 @@
 
 - [ ] API响应时间正常
   ```bash
-  curl -w "响应时间: %{time_total}秒\n" -o /dev/null -s http://localhost:8001/health
+  curl -w "响应时间: %{time_total}秒\n" -o /dev/null -s http://localhost:8001/healthz/ready
   # 应<2秒
   ```
 
@@ -238,7 +238,7 @@
 
 - [ ] 健康检查端点
   ```bash
-  curl http://localhost:8001/health
+  curl http://localhost:8001/healthz/ready
   ```
 
 - [ ] API文档可访问
@@ -330,7 +330,7 @@
 
 - [ ] 测试健康端点
   ```bash
-  curl http://localhost:8001/health
+  curl http://localhost:8001/healthz/ready
   ```
 
 ---

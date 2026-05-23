@@ -311,10 +311,10 @@ def verify_schema_completeness():
 ```bash
 # scripts/deploy_remote_production.sh
 # Phase 2: 运行 Alembic 迁移
-"${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads
+"${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads
 
 # Phase 2.5: 验证表结构完整性
-"${compose_cmd_base[@]}" run --rm --no-deps backend python -c "
+"${compose_cmd_base[@]}" run --rm --no-deps backend-api python -c "
 from backend.models.database import verify_schema_completeness
 result = verify_schema_completeness()
 if not result['all_tables_exist']:
@@ -369,7 +369,7 @@ python -m alembic upgrade head
 # scripts/deploy_remote_production.sh
 # Phase 2: 运行 Alembic 迁移（必须成功）
 echo "[INFO] Phase 2: Running Alembic migrations..."
-"${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads
+"${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads
 MIGRATION_EXIT_CODE=$?
 
 if [ ${MIGRATION_EXIT_CODE} -ne 0 ]; then
@@ -380,7 +380,7 @@ fi
 
 # Phase 2.5: 验证表结构完整性
 echo "[INFO] Phase 2.5: Verifying schema completeness..."
-"${compose_cmd_base[@]}" run --rm --no-deps backend python -c "
+"${compose_cmd_base[@]}" run --rm --no-deps backend-api python -c "
 from backend.models.database import verify_schema_completeness
 result = verify_schema_completeness()
 if not result['all_tables_exist']:

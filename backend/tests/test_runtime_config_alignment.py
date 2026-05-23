@@ -10,9 +10,17 @@ def _read_yaml(relative_path: str) -> dict:
     return yaml.safe_load((PROJECT_ROOT / relative_path).read_text(encoding="utf-8"))
 
 
+def test_base_compose_uses_backend_api_service_name():
+    compose = _read_yaml("docker-compose.yml")
+    services = compose["services"]
+
+    assert "backend-api" in services
+    assert "backend" not in services
+
+
 def test_dev_backend_mounts_tools_directory():
     compose = _read_yaml("docker-compose.dev.yml")
-    volumes = compose["services"]["backend"]["volumes"]
+    volumes = compose["services"]["backend-api"]["volumes"]
 
     assert any(
         str(volume).startswith("./tools:/app/tools")
@@ -22,7 +30,7 @@ def test_dev_backend_mounts_tools_directory():
 
 def test_dev_backend_mounts_profiles_directory_for_session_reuse():
     compose = _read_yaml("docker-compose.dev.yml")
-    volumes = compose["services"]["backend"]["volumes"]
+    volumes = compose["services"]["backend-api"]["volumes"]
 
     assert any(
         str(volume).startswith("./profiles:/app/profiles")
@@ -46,7 +54,7 @@ def test_backend_image_copies_runtime_tool_scripts():
 
 def test_prod_compose_uses_container_internal_database_urls():
     compose = _read_yaml("docker-compose.prod.yml")
-    backend_env = compose["services"]["backend"]["environment"]
+    backend_env = compose["services"]["backend-api"]["environment"]
     worker_env = compose["services"]["celery-worker"]["environment"]
 
     assert backend_env["DATABASE_URL"] == "${DATABASE_URL}"
@@ -64,7 +72,7 @@ def test_prod_compose_does_not_keep_legacy_secret_fallbacks():
 
 def test_prod_compose_forces_production_runtime_mode():
     compose = _read_yaml("docker-compose.prod.yml")
-    backend_env = compose["services"]["backend"]["environment"]
+    backend_env = compose["services"]["backend-api"]["environment"]
     worker_env = compose["services"]["celery-worker"]["environment"]
 
     assert backend_env["ENVIRONMENT"] == "production"
@@ -74,14 +82,14 @@ def test_prod_compose_forces_production_runtime_mode():
 
 def test_prod_compose_allows_backend_host_for_nginx_proxy():
     compose = _read_yaml("docker-compose.prod.yml")
-    backend_env = compose["services"]["backend"]["environment"]
+    backend_env = compose["services"]["backend-api"]["environment"]
 
     assert backend_env["ALLOWED_HOSTS"].endswith(",backend")
 
 
 def test_dev_compose_allows_backend_host_for_nginx_proxy():
     compose = _read_yaml("docker-compose.dev.yml")
-    backend_env = compose["services"]["backend"]["environment"]
+    backend_env = compose["services"]["backend-api"]["environment"]
 
     assert backend_env["ALLOWED_HOSTS"].endswith(",backend")
 
@@ -98,7 +106,7 @@ def test_dev_compose_uses_dedicated_migrate_service_and_disables_runtime_migrati
     services = compose["services"]
 
     migrate = services["migrate"]
-    backend_env = services["backend"]["environment"]
+    backend_env = services["backend-api"]["environment"]
     worker_env = services["celery-worker"]["environment"]
     beat_env = services["celery-beat"]["environment"]
 
@@ -107,6 +115,14 @@ def test_dev_compose_uses_dedicated_migrate_service_and_disables_runtime_migrati
     assert backend_env["RUN_MIGRATIONS"] == "0"
     assert worker_env["RUN_MIGRATIONS"] == "0"
     assert beat_env["RUN_MIGRATIONS"] == "0"
+
+
+def test_dev_backend_healthcheck_uses_readiness_endpoint():
+    compose = _read_yaml("docker-compose.dev.yml")
+    health_test = compose["services"]["backend-api"]["healthcheck"]["test"]
+    health_joined = " ".join(str(part) for part in health_test)
+
+    assert "/healthz/ready" in health_joined
 
 
 def test_dev_celery_healthcheck_uses_worker_readiness():
@@ -137,7 +153,7 @@ def test_prod_compose_uses_dedicated_migrate_service_and_disables_runtime_migrat
     services = compose["services"]
 
     migrate = services["migrate"]
-    backend_env = services["backend"]["environment"]
+    backend_env = services["backend-api"]["environment"]
     worker_env = services["celery-worker"]["environment"]
     beat_env = services["celery-beat"]["environment"]
 
@@ -148,14 +164,56 @@ def test_prod_compose_uses_dedicated_migrate_service_and_disables_runtime_migrat
     assert beat_env["RUN_MIGRATIONS"] == "0"
 
 
+def test_prod_backend_role_is_api_only():
+    compose = _read_yaml("docker-compose.prod.yml")
+    backend_env = compose["services"]["backend-api"]["environment"]
+
+    assert backend_env["DEPLOYMENT_ROLE"] == "api"
+
+
+def test_prod_backend_healthcheck_uses_readiness_endpoint():
+    compose = _read_yaml("docker-compose.prod.yml")
+    health_test = compose["services"]["backend-api"]["healthcheck"]["test"]
+    health_joined = " ".join(str(part) for part in health_test)
+
+    assert "/healthz/ready" in health_joined
+
+
+def test_prod_nginx_health_proxy_uses_backend_readiness_endpoint():
+    nginx_conf = (PROJECT_ROOT / "nginx" / "nginx.prod.conf").read_text(encoding="utf-8")
+
+    assert 'proxy_pass http://$backend_upstream/healthz/ready;' in nginx_conf
+
+
 def test_prod_compose_injects_release_tag_into_runtime_services():
     compose = _read_yaml("docker-compose.prod.yml")
     services = compose["services"]
 
-    assert services["backend"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
+    assert services["backend-api"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
     assert services["migrate"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
     assert services["celery-worker"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
     assert services["celery-beat"]["environment"]["APP_VERSION"] == "${IMAGE_TAG}"
+
+
+def test_dev_compose_declares_explicit_backend_api_and_collector_services():
+    compose = _read_yaml("docker-compose.dev.yml")
+    services = compose["services"]
+
+    assert "backend-api" in services
+    assert "backend-collector" in services
+    assert "backend" not in services
+    assert services["backend-api"]["environment"]["DEPLOYMENT_ROLE"] == "api"
+    assert services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
+
+
+def test_prod_compose_declares_explicit_backend_api_and_collector_services():
+    compose = _read_yaml("docker-compose.prod.yml")
+    services = compose["services"]
+
+    assert "backend-api" in services
+    assert "backend-collector" in services
+    assert "backend" not in services
+    assert services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
 
 
 def test_prod_celery_healthcheck_uses_worker_readiness():
@@ -222,7 +280,7 @@ def test_remote_production_deploy_does_not_start_celery_exporter_by_default():
     ).read_text(encoding="utf-8")
 
     assert 'up -d backend celery-worker celery-beat celery-exporter' not in deploy_script
-    assert 'up -d backend celery-worker celery-beat' in deploy_script
+    assert 'up -d --no-build backend-api celery-worker celery-beat' in deploy_script
 
 
 def test_remote_production_deploy_removes_legacy_celery_exporter_container():

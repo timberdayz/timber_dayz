@@ -8,14 +8,14 @@
 
 ### 云端生产环境
 
-- 使用默认 backend 镜像
+- 使用 `backend-api` 服务作为默认后端镜像入口
 - `ENABLE_COLLECTION=false` 或 `DEPLOYMENT_ROLE=cloud`
 - 只负责 API、看板和业务读写
 - 不执行采集、不执行 Playwright、不执行本地到云端同步脚本
 
 ### 本地 / 采集环境
 
-- 使用 `backend-full` / collection 路径
+- 使用 `backend-collector` / collection 路径
 - `ENABLE_COLLECTION=true` 或 `DEPLOYMENT_ROLE=local`
 - 负责数据采集与同步
 - 可运行 Playwright 与采集调度器
@@ -29,20 +29,20 @@ python run.py --use-docker --collection
 等价 Compose：
 
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml --profile dev-full up -d
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml --profile collection up -d backend-collector
 ```
 
 ## 核对清单
 
 ### 云端
 
-- [ ] 使用默认 backend 镜像
+- [ ] 使用 `backend-api` 服务
 - [ ] 已关闭 collection 角色
 - [ ] `DATABASE_URL` 指向云端 PostgreSQL
 
 ### 本地 / 采集
 
-- [ ] 使用 `backend-full` 或本地 `Dockerfile.collection`
+- [ ] 使用 `backend-collector` 或本地 `Dockerfile.collection`
 - [ ] 已启用 collection 角色
 - [ ] `DATABASE_URL` 指向本地采集库
 - [ ] 如需同步，已配置 `CLOUD_DATABASE_URL`

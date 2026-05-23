@@ -143,7 +143,7 @@ services:
 
   backend:
     build: ./backend
-    container_name: xihong_erp_backend
+    container_name: xihong_erp_backend_api
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_HOST: redis
@@ -333,7 +333,7 @@ ufw deny 6379/tcp  # Redis不对外开放
 
 ```bash
 # Docker容器日志
-docker logs xihong_erp_backend -f
+docker logs xihong_erp_backend_api -f
 docker logs xihong_erp_frontend -f
 docker logs xihong_erp_postgres -f
 
@@ -383,13 +383,13 @@ crontab -e
 
 1. 检查PostgreSQL是否运行：`docker ps | grep postgres`
 2. 检查环境变量配置：`cat .env`
-3. 查看错误日志：`docker logs xihong_erp_backend`
+3. 查看错误日志：`docker logs xihong_erp_backend_api`
 
 ### 前端无法访问API
 
 1. 检查CORS配置：`CORS_ORIGINS`
 2. 检查API URL：`VITE_API_URL`
-3. 检查网络连接：`curl http://localhost:8001/health`
+3. 检查网络连接：`curl http://localhost:8001/healthz/ready`
 
 ### Superset无法加载
 
@@ -411,4 +411,3 @@ crontab -e
 **部署完成后，请访问**: http://localhost:5173
 
 祝您使用愉快！🎉
-

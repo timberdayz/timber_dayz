@@ -9,7 +9,7 @@
 #   Legacy Metabase overlays were removed from the active collection startup path.
 
 services:
-  backend:
+  backend-collector:
     build:
       context: .
       dockerfile: Dockerfile.collection

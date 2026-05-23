@@ -70,13 +70,13 @@ services:
       - full
 
   # FastAPI后端
-  backend:
+  backend-api: &backend_api_service
     build:
       context: .
       dockerfile: Dockerfile.backend
       args:
         - ENVIRONMENT=production
-    container_name: xihong_erp_backend
+    container_name: xihong_erp_backend_api
     restart: always
     environment:
       # 数据库配置
@@ -100,6 +100,7 @@ services:
       ENVIRONMENT: "production"
       APP_ENV: production
       RUN_MIGRATIONS: "0"
+      DEPLOYMENT_ROLE: "api"
       DEBUG: "false"
       LOG_LEVEL: INFO
       APP_VERSION: ${IMAGE_TAG}
@@ -139,9 +140,11 @@ services:
       migrate:
         condition: service_completed_successfully
     networks:
-      - erp_network
+      erp_network:
+        aliases:
+          - backend
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -157,6 +160,50 @@ services:
     profiles:
       - production
       - full
+
+  backend-collector:
+    <<: *backend_api_service
+    container_name: xihong_erp_backend_collector
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-erp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      ENVIRONMENT: "production"
+      APP_ENV: production
+      RUN_MIGRATIONS: "0"
+      DEPLOYMENT_ROLE: "collector"
+      APP_RUNTIME_MODE: "collector"
+      ENABLE_COLLECTION: "true"
+      DEBUG: "false"
+      LOG_LEVEL: INFO
+      APP_VERSION: ${IMAGE_TAG}
+      USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-true}
+      AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP: ${AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP:-false}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},backend
+      PROJECT_ROOT: /app
+      DATA_DIR: /app/data
+      DATA_RAW_DIR: /app/data/raw
+      DOWNLOADS_DIR: /app/downloads
+      TEMP_DIR: /app/temp
+      LOGS_DIR: /app/logs
+      DB_POOL_SIZE: 4
+      DB_MAX_OVERFLOW: 4
+      DB_POOL_TIMEOUT: 30
+      DB_POOL_RECYCLE: 3600
+      CPU_EXECUTOR_WORKERS: 2
+      IO_EXECUTOR_WORKERS: 8
+    ports: []
+    profiles:
+      - collector
+
 
   # Vue.js前端
   migrate:
@@ -202,7 +249,7 @@ services:
     # 明确清空端口映射，确保生产环境不暴露端口
     ports: [] # 清空端口映射，服务仍可通过 frontend:80 在容器网络内访问
     depends_on:
-      - backend
+      - backend-api
     networks:
       - erp_network
     healthcheck:
@@ -235,7 +282,7 @@ services:
       - "80:80"
       - "443:443"
     depends_on:
-      backend:
+      backend-api:
         condition: service_healthy
       frontend:
         condition: service_healthy

@@ -156,7 +156,7 @@ def check_profiles():
         return False
     
     # 检查关键服务是否有 profiles（使用更准确的匹配）
-    services_needing_profiles = ["backend", "frontend", "postgres", "redis"]
+    services_needing_profiles = ["backend-api", "frontend", "postgres", "redis"]
     missing_profiles = []
     
     for service in services_needing_profiles:
@@ -215,7 +215,7 @@ def check_prod_profiles():
         return False
     
     # 检查关键服务是否在合并后的配置中
-    services_needing_profiles = ["backend", "frontend", "nginx", "celery-worker", "celery-beat"]
+    services_needing_profiles = ["backend-api", "frontend", "nginx", "celery-worker", "celery-beat"]
     missing_profiles = []
     
     for service in services_needing_profiles:
@@ -294,7 +294,7 @@ def check_healthchecks():
         safe_print("  [WARN] Docker Compose 配置验证失败，无法检查 healthcheck")
         return False
     
-    services_with_healthcheck = ["backend", "frontend", "postgres", "redis"]
+    services_with_healthcheck = ["backend-api", "frontend", "postgres", "redis"]
     missing_healthcheck = []
     
     for service in services_with_healthcheck:

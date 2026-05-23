@@ -99,7 +99,7 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 
 ```yaml
 healthcheck:
-  test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+  test: ["CMD-SHELL", "curl -f http://localhost:8000/healthz/ready || exit 1"]
   interval: 10s      # 每10秒检查一次
   timeout: 5s        # 超时时间5秒
   retries: 5         # 失败重试5次
@@ -130,9 +130,9 @@ docker ps -a | grep backend
 docker logs xihong_erp_backend_dev -f
 
 # 测试后端健康检查
-curl http://localhost:8001/health
+curl http://localhost:8001/healthz/ready
 # 或在 PowerShell 中：
-Invoke-WebRequest -Uri http://localhost:8001/health
+Invoke-WebRequest -Uri http://localhost:8001/healthz/ready
 ```
 
 ### 常见问题
@@ -147,7 +147,7 @@ Invoke-WebRequest -Uri http://localhost:8001/health
 docker logs xihong_erp_backend_dev --tail 50
 
 # 2. 测试健康检查端点
-curl http://localhost:8001/health
+curl http://localhost:8001/healthz/ready
 
 # 3. 检查容器内进程
 docker exec xihong_erp_backend_dev ps aux | grep uvicorn
@@ -332,7 +332,7 @@ POSTGRES_PORT=5432
 
 1. 查看本文档的"诊断和调试"章节
 2. 查看容器日志：`docker logs <container_name> -f`
-3. 检查健康检查端点：`curl http://localhost:8001/health`
+3. 检查健康检查端点：`curl http://localhost:8001/healthz/ready`
 4. 查看项目文档：`docs/` 目录
 
 ---
