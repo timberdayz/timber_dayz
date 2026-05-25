@@ -37,6 +37,107 @@ def test_dashboard_module_targets_track_business_overview_refreshing_targets():
     assert "semantic.fact_orders_monthly_atomic_mv" in targets
 
 
+def test_build_module_report_does_not_keep_stale_refreshing_without_active_run():
+    report = dashboard_bootstrap._build_module_report(
+        module_name="business_overview",
+        module_state={
+            "status": "refreshing",
+            "asset_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(
+                dashboard_bootstrap._module_core_plan("business_overview")
+            ),
+            "details_json": {
+                "refresh_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(
+                    dashboard_bootstrap._module_refresh_plan("business_overview")
+                )
+            },
+        },
+        existing_objects=set(
+            dashboard_bootstrap._module_core_plan("business_overview")
+            + dashboard_bootstrap._module_refresh_plan("business_overview")
+        ),
+        active_refresh_run=None,
+    )
+
+    assert report["status"] == "ready"
+    assert report["ready"] is True
+
+
+def test_build_module_report_marks_refreshing_when_active_run_exists():
+    report = dashboard_bootstrap._build_module_report(
+        module_name="business_overview",
+        module_state={
+            "status": "ready",
+            "asset_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(
+                dashboard_bootstrap._module_core_plan("business_overview")
+            ),
+            "details_json": {
+                "refresh_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(
+                    dashboard_bootstrap._module_refresh_plan("business_overview")
+                )
+            },
+        },
+        existing_objects=set(
+            dashboard_bootstrap._module_core_plan("business_overview")
+            + dashboard_bootstrap._module_refresh_plan("business_overview")
+        ),
+        active_refresh_run={"run_id": "run-active"},
+    )
+
+    assert report["status"] == "refreshing"
+    assert report["ready"] is True
+
+
+@pytest.mark.asyncio
+async def test_inspect_dashboard_assets_ignores_stale_refreshing_state(monkeypatch):
+    existing_objects = set()
+    for module_name in dashboard_bootstrap.DASHBOARD_MODULE_TARGETS:
+        existing_objects.update(dashboard_bootstrap._module_core_plan(module_name))
+        existing_objects.update(dashboard_bootstrap._module_refresh_plan(module_name))
+    existing_objects.update(dashboard_bootstrap.DASHBOARD_REQUIRED_OBJECTS)
+
+    async def fake_collect(_session):
+        return set(dashboard_bootstrap.DASHBOARD_REQUIRED_SCHEMAS), existing_objects
+
+    business_core_fp = dashboard_bootstrap._compute_targets_fingerprint(
+        dashboard_bootstrap._module_core_plan("business_overview")
+    )
+    business_refresh_fp = dashboard_bootstrap._compute_targets_fingerprint(
+        dashboard_bootstrap._module_refresh_plan("business_overview")
+    )
+    clearance_core_fp = dashboard_bootstrap._compute_targets_fingerprint(
+        dashboard_bootstrap._module_core_plan("clearance_ranking")
+    )
+
+    async def fake_load_state(_session):
+        return {
+            "business_overview": {
+                "status": "refreshing",
+                "asset_fingerprint_applied": business_core_fp,
+                "details_json": {"refresh_fingerprint_applied": business_refresh_fp},
+            },
+            "clearance_ranking": {
+                "status": "ready",
+                "asset_fingerprint_applied": clearance_core_fp,
+                "details_json": {},
+            },
+        }
+
+    monkeypatch.setattr(dashboard_bootstrap, "_collect_existing_assets", fake_collect)
+    monkeypatch.setattr(dashboard_bootstrap, "_load_dashboard_asset_state", fake_load_state)
+    async def fake_load_active_runs(_session):
+        return {}
+
+    monkeypatch.setattr(
+        dashboard_bootstrap,
+        "_load_active_dashboard_refresh_runs",
+        fake_load_active_runs,
+    )
+
+    report = await dashboard_bootstrap.inspect_dashboard_assets(object())
+
+    assert report["modules"]["business_overview"]["status"] == "ready"
+
+
 @pytest.mark.asyncio
 async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(monkeypatch):
     calls = []

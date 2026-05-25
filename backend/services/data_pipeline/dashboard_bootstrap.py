@@ -158,6 +158,52 @@ def _normalize_json_value(value: Any) -> dict[str, Any]:
     return {}
 
 
+async def _load_active_dashboard_refresh_runs(
+    session: AsyncSession,
+) -> dict[str, dict[str, Any]]:
+    try:
+        reg = await session.execute(text("SELECT to_regclass('ops.pipeline_run_log')"))
+        if reg.scalar_one_or_none() is None:
+            return {}
+        result = await session.execute(
+            text(
+                """
+                SELECT pipeline_name,
+                       run_id,
+                       status,
+                       started_at,
+                       completed_at,
+                       context
+                FROM ops.pipeline_run_log
+                WHERE status = 'running'
+                  AND (
+                      pipeline_name LIKE 'dashboard_materialization_refresh.%'
+                      OR pipeline_name LIKE 'dashboard_materialization_rebuild_core.%'
+                      OR (
+                          trigger_source = 'materialization_refresh'
+                          AND context ? 'module_name'
+                      )
+                  )
+                ORDER BY started_at DESC
+                """
+            )
+        )
+        runs: dict[str, dict[str, Any]] = {}
+        for row in result.mappings():
+            context = _normalize_json_value(row.get("context"))
+            pipeline_name = str(row.get("pipeline_name") or "")
+            module_name = context.get("module_name")
+            if not module_name and "." in pipeline_name:
+                module_name = pipeline_name.rsplit(".", 1)[-1]
+            if not module_name:
+                continue
+            runs[module_name] = dict(row)
+            runs[module_name]["context"] = context
+        return runs
+    except Exception:
+        return {}
+
+
 async def _try_advisory_lock(session: AsyncSession, key: int) -> bool:
     result = await session.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})
     return bool(result.scalar_one())
@@ -292,6 +338,7 @@ def _build_module_report(
     module_name: str,
     module_state: dict[str, Any] | None,
     existing_objects: set[str],
+    active_refresh_run: dict[str, Any] | None,
 ) -> dict[str, Any]:
     module = DASHBOARD_MODULE_TARGETS[module_name]
     core_targets = _module_core_plan(module_name)
@@ -305,6 +352,7 @@ def _build_module_report(
     core_missing = [target for target in core_targets if target not in existing_objects]
     refresh_missing = [target for target in refresh_targets if target not in existing_objects]
     stored_status = (module_state or {}).get("status")
+    active_refreshing = active_refresh_run is not None
 
     if core_missing or (core_expected and core_applied != core_expected) or stored_status == "failed":
         status = "drift"
@@ -312,7 +360,7 @@ def _build_module_report(
     elif refresh_targets and (
         refresh_missing
         or (refresh_expected and refresh_applied != refresh_expected)
-        or stored_status == "refreshing"
+        or active_refreshing
     ):
         status = "refreshing"
         ready = True
@@ -335,12 +383,14 @@ def _build_module_report(
         "refresh_fingerprint_applied": refresh_applied,
         "run_id": (module_state or {}).get("run_id"),
         "details": details,
+        "active_refresh_run": active_refresh_run,
     }
 
 
 async def inspect_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
     existing_schemas, existing_objects = await _collect_existing_assets(session)
     state_rows = await _load_dashboard_asset_state(session)
+    active_refresh_runs = await _load_active_dashboard_refresh_runs(session)
 
     modules: dict[str, dict[str, Any]] = {}
     for module_name in DASHBOARD_MODULE_TARGETS:
@@ -348,6 +398,7 @@ async def inspect_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
             module_name=module_name,
             module_state=state_rows.get(module_name),
             existing_objects=existing_objects,
+            active_refresh_run=active_refresh_runs.get(module_name),
         )
 
     missing_schemas = [
@@ -394,7 +445,7 @@ async def bootstrap_dashboard_assets(
             module_name=module_name,
             asset_fingerprint_expected=core_expected,
             asset_fingerprint_applied=existing_state.get("asset_fingerprint_applied"),
-            status="refreshing" if refresh_targets else "ready",
+            status="drift",
             run_id=existing_state.get("run_id"),
             details_json={
                 **existing_details,
@@ -425,7 +476,7 @@ async def bootstrap_dashboard_assets(
             module_name=module_name,
             asset_fingerprint_expected=core_expected,
             asset_fingerprint_applied=core_expected,
-            status="refreshing" if refresh_targets else "ready",
+            status="ready",
             run_id=run_id,
             details_json={
                 "refresh_fingerprint_expected": refresh_expected,
