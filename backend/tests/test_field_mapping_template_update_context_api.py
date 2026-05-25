@@ -356,7 +356,14 @@ async def test_save_mapping_template_persists_field_parse_rules_and_update_conte
         field_parse_rules = row["field_parse_rules"]
         if isinstance(field_parse_rules, str):
             field_parse_rules = json.loads(field_parse_rules)
-        assert field_parse_rules == parse_rules
+        assert len(field_parse_rules) == 1
+        assert field_parse_rules[0]["target_field"] == "metric_date"
+        assert field_parse_rules[0]["source_column"] == "order_time"
+        assert field_parse_rules[0]["value_kind"] == "single_date"
+        assert field_parse_rules[0]["date_format"] == "yyyy-mm-dd hh:mm:ss"
+        assert field_parse_rules[0]["strict"] is True
+        assert field_parse_rules[0]["source_label"] == "order_time"
+        assert field_parse_rules[0]["source_aliases"] == []
 
     context_response = await client.get(
         f"/api/field-mapping/templates/{template_id}/update-context",
@@ -373,6 +380,76 @@ async def test_save_mapping_template_persists_field_parse_rules_and_update_conte
     assert returned_rules[0]["value_kind"] == "single_date"
     assert returned_rules[0]["date_format"] == "yyyy-mm-dd hh:mm:ss"
     assert returned_rules[0]["strict"] is True
+    assert returned_rules[0]["source_label"] == "order_time"
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_persists_header_bindings_and_update_context_returns_them(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+    header_bindings = [
+        {
+            "raw_name": "Unnamed: 0",
+            "display_name": "日期",
+            "semantic_role": "metric_date",
+            "aliases": ["日期", "统计日期"],
+            "position": 0,
+            "sample_type": "date",
+            "confidence": 0.98,
+        },
+        {
+            "raw_name": "GMV",
+            "display_name": "GMV",
+            "semantic_role": None,
+            "aliases": [],
+            "position": 1,
+            "sample_type": "number",
+            "confidence": 0.5,
+        },
+    ]
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "analytics",
+            "granularity": "daily",
+            "header_row": 0,
+            "header_columns": ["Unnamed: 0", "GMV"],
+            "deduplication_fields": ["Unnamed: 0"],
+            "template_name": "header_bindings_template",
+            "created_by": "test",
+            "header_bindings": header_bindings,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("SELECT header_bindings FROM core.field_mapping_templates WHERE id = :id"),
+            {"id": template_id},
+        )
+        row = result.mappings().one()
+        persisted_header_bindings = row["header_bindings"]
+        if isinstance(persisted_header_bindings, str):
+            persisted_header_bindings = json.loads(persisted_header_bindings)
+        assert persisted_header_bindings == header_bindings
+
+    context_response = await client.get(
+        f"/api/field-mapping/templates/{template_id}/update-context",
+        params={"mode": "core-only"},
+    )
+
+    assert context_response.status_code == 200
+    context_payload = context_response.json()
+    assert context_payload["success"] is True
+    returned_bindings = context_payload["data"]["template"]["header_bindings"]
+    assert returned_bindings == header_bindings
 
 
 @pytest.mark.asyncio
@@ -424,7 +501,13 @@ async def test_save_mapping_template_accepts_file_date_token_parse_rules(
         field_parse_rules = row["field_parse_rules"]
         if isinstance(field_parse_rules, str):
             field_parse_rules = json.loads(field_parse_rules)
-        assert field_parse_rules == parse_rules
+        assert len(field_parse_rules) == 1
+        assert field_parse_rules[0]["target_field"] == "metric_date"
+        assert field_parse_rules[0]["source_column"] == "__file_date_from__"
+        assert field_parse_rules[0]["value_kind"] == "single_date"
+        assert field_parse_rules[0]["date_format"] == "yyyy-mm-dd"
+        assert field_parse_rules[0]["strict"] is True
+        assert field_parse_rules[0]["source_aliases"] == []
 
 
 @pytest.mark.asyncio

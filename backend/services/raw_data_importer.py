@@ -406,6 +406,25 @@ class RawDataImporter:
                 raw_value = getattr(self, "file_date_to", None)
             else:
                 raw_value = row.get(source_column)
+                if raw_value is None:
+                    alias_candidates = [
+                        str(rule.get("source_label", "")).strip(),
+                        *[
+                            str(alias).strip()
+                            for alias in rule.get("source_aliases", []) or []
+                            if str(alias).strip()
+                        ],
+                    ]
+                    lowered_row_keys = {
+                        str(key).strip().lower(): key
+                        for key in row.keys()
+                        if str(key).strip()
+                    }
+                    for alias in alias_candidates:
+                        matched_key = lowered_row_keys.get(alias.lower())
+                        if matched_key is not None:
+                            raw_value = row.get(matched_key)
+                            break
             try:
                 parsed_date, parsed_datetime = parse_date_by_declared_format(
                     raw_value,

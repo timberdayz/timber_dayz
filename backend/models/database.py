@@ -81,6 +81,7 @@ DATA_SYNC_CRITICAL_COLUMNS: dict[str, set[str]] = {
     "core.staging_orders": {"file_id"},
     "core.staging_product_metrics": {"file_id"},
     "core.staging_inventory": {"file_id"},
+    "core.field_mapping_templates": {"header_bindings"},
 }
 RUNTIME_TABLE_SCHEMAS: dict[str, str] = {
     "catalog_files": "public",

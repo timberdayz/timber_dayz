@@ -328,8 +328,47 @@ async def lifespan(app: FastAPI):
                     f"{startup_metrics['table_init']:.2f}秒)"
                 )
             else:
-                # 开发环境:可以使用 init_db(),但记录警告
+                # 开发环境:允许 init_db(),但仍要求关键表结构与迁移状态完整,避免运行期500
                 init_db()
+                result = verify_schema_completeness()
+
+                if not result["all_tables_exist"]:
+                    missing_tables = result["missing_tables"][:10]
+                    logger.error(
+                        f"[ERROR] 开发环境表结构不完整, 缺失表 ({len(result['missing_tables'])} 张): "
+                        f"{', '.join(missing_tables)}"
+                    )
+                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    raise RuntimeError(
+                        f"Development schema incompleteness: {len(result['missing_tables'])} tables missing"
+                    )
+
+                if not result.get("all_critical_columns_exist", True):
+                    missing_columns = result.get("missing_columns", [])[:10]
+                    logger.error(
+                        f"[ERROR] 开发环境关键列缺失({len(result.get('missing_columns', []))} 列): "
+                        f"{', '.join(missing_columns)}"
+                    )
+                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    raise RuntimeError(
+                        f"Development schema missing critical columns: {len(result.get('missing_columns', []))}"
+                    )
+
+                if result["migration_status"] not in ["up_to_date", "not_initialized"]:
+                    logger.error(
+                        f"[ERROR] 开发环境 Alembic 迁移状态异常: {result['migration_status']}"
+                    )
+                    logger.error(
+                        f"[ERROR] 当前版本: {result.get('current_revision', 'N/A')}"
+                    )
+                    logger.error(
+                        f"[ERROR] 最新版本: {result.get('head_revision', 'N/A')}"
+                    )
+                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    raise RuntimeError(
+                        f"Development migration status invalid: {result['migration_status']}"
+                    )
+
                 startup_metrics["table_init"] = time.time() - step_start
                 logger.info(
                     f"[OK] 数据库表初始化完成(开发模式) ({startup_metrics['table_init']:.2f}秒)"
@@ -341,8 +380,8 @@ async def lifespan(app: FastAPI):
                 logger.error(f"[ERROR] 数据库验证失败: {e}")
                 raise
             else:
-                # 开发环境:仅警告
-                logger.warning(f"[WARN] 数据库表初始化部分失败: {e}")
+                logger.error(f"[ERROR] 开发环境数据库验证失败: {e}")
+                raise
 
         try:
             from backend.models.database import AsyncSessionLocal

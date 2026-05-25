@@ -245,6 +245,7 @@ import TemplateCreateWorkbenchDrawer from '@/components/dataSync/TemplateCreateW
 import TemplateGovernancePanel from '@/components/dataSync/TemplateGovernancePanel.vue'
 import TemplateManualUpdateModeDialog from '@/components/dataSync/TemplateManualUpdateModeDialog.vue'
 import TemplateUpdateWorkbenchDrawer from '@/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
+import { inferHeaderBindings } from '@/domains/data_platform/utils/headerBindings'
 import { buildTemplateUpdateFieldParseRulesPayload } from '@/domains/data_platform/utils/templateUpdateFieldParseRules'
 
 // 状态
@@ -611,7 +612,13 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
   try {
     const { rules: nextFieldParseRules, droppedRules } = buildTemplateUpdateFieldParseRulesPayload({
       currentHeaderColumns: context.current_header_columns,
+      currentHeaderBindings: context.current_header_bindings || [],
+      templateHeaderBindings: template.header_bindings || [],
       existingRules: template.field_parse_rules || []
+    })
+    const headerBindings = inferHeaderBindings({
+      headerColumns: context.current_header_columns,
+      sampleData: context.sample_data || {}
     })
     const result = await api.saveTemplate({
       platform: template.platform,
@@ -623,6 +630,8 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
       headerRow: selectedHeaderRow ?? context?.current_header_row ?? template.header_row ?? 0,
       headerColumns: context.current_header_columns,
       deduplicationFields: selectedFields,
+      headerBindings,
+      sampleData: context.sample_data || {},
       fieldParseRules: nextFieldParseRules
     })
 
@@ -668,6 +677,10 @@ const handleSaveTemplate = async () => {
 
   savingTemplate.value = true
   try {
+    const headerBindings = inferHeaderBindings({
+      headerColumns: headerColumns.value,
+      sampleData: sampleData.value
+    })
     const result = await api.saveTemplate({
       platform: fileFilters.value.platform,
       dataDomain: fileFilters.value.domain,  // 使用dataDomain参数名
@@ -677,6 +690,8 @@ const handleSaveTemplate = async () => {
       headerRow: headerRow.value,
       headerColumns: headerColumns.value,
       deduplicationFields: deduplicationFields.value,  // v4.14.0新增：核心字段列表（必填）
+      headerBindings,
+      sampleData: sampleData.value,
       fieldParseRules: fieldParseRules.value
     })
 

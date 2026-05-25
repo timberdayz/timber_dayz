@@ -116,3 +116,30 @@ def test_raw_data_importer_field_parse_rules_support_file_date_from_token():
     assert period_end_date == date(2026, 3, 1)
     assert period_start_time is None
     assert period_end_time is None
+
+
+def test_raw_data_importer_field_parse_rules_support_source_alias_fallback():
+    importer = _make_importer()
+
+    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
+        importer._extract_period_dates_by_rules(
+            row={"统计日期": "2026-03-12 12:30:00"},
+            field_parse_rules=[
+                {
+                    "target_field": "metric_date",
+                    "source_column": "Unnamed: 0",
+                    "source_label": "日期",
+                    "source_aliases": ["日期", "统计日期"],
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd hh:mm:ss",
+                    "strict": True,
+                }
+            ],
+        )
+    )
+
+    assert metric_date == date(2026, 3, 12)
+    assert period_start_date == date(2026, 3, 12)
+    assert period_end_date == date(2026, 3, 12)
+    assert period_start_time == datetime(2026, 3, 12, 12, 30, 0)
+    assert period_end_time == datetime(2026, 3, 12, 12, 30, 0)

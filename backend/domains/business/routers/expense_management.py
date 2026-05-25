@@ -31,6 +31,7 @@ from sqlalchemy import text, select, or_
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+import json
 
 from backend.models.database import get_async_db
 from backend.utils.api_response import error_response
@@ -654,12 +655,17 @@ async def create_or_update_expense(
             request.ai_token_cost,
             request.other_costs,
         )
+
+        # asyncpg 对 jsonb 参数的默认编码行为依赖驱动配置，直接传 Python list/dict 可能导致类型错误。
+        # 统一序列化为 JSON 字符串，并在 SQL 中显式 cast 为 jsonb。
+        attachments_json = json.dumps(request.attachments or [], ensure_ascii=False)
+
         # 使用UPSERT语法(ON CONFLICT DO UPDATE)
         upsert_query = text("""
             INSERT INTO a_class.operating_costs 
                 ("店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计", "备注", "附件", "创建时间", "更新时间")
             VALUES 
-                (:shop_id, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :other_costs, :total_cost, :note, :attachments, NOW(), NOW())
+                (:shop_id, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :other_costs, :total_cost, :note, CAST(:attachments AS jsonb), NOW(), NOW())
             ON CONFLICT ("店铺ID", "年月") 
             DO UPDATE SET 
                 "租金" = EXCLUDED."租金",
@@ -698,7 +704,7 @@ async def create_or_update_expense(
             "other_costs": request.other_costs,
             "total_cost": total_cost,
             "note": request.note,
-            "attachments": request.attachments or [],
+            "attachments": attachments_json,
         })
         
         await db.commit()
@@ -854,10 +860,11 @@ async def update_expense(
             params["note"] = getattr(row, "note", None)
 
         if "attachments" in update_data:
-            update_fields.append('"附件" = :attachments')
-            params["attachments"] = update_data["attachments"] or []
+            update_fields.append('"附件" = CAST(:attachments AS jsonb)')
+            params["attachments"] = json.dumps(update_data["attachments"] or [], ensure_ascii=False)
         else:
-            params["attachments"] = getattr(row, "attachments", None) or []
+            # 数据库存的是 jsonb，读取出来可能是 list/dict；为了统一 update 绑定参数，仍序列化回字符串
+            params["attachments"] = json.dumps(getattr(row, "attachments", None) or [], ensure_ascii=False)
 
         total_cost = _calc_total_cost(
             params["rent"],

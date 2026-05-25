@@ -402,6 +402,9 @@ class FieldMappingTemplate(Base):
     # v4.14.0新增:核心去重字段列表(用于data_hash计算)
     deduplication_fields = Column(JSONB, nullable=True, comment="核心去重字段列表(JSONB数组),用于data_hash计算,不受表头变化影响")
 
+    # v4.22.1新增:模板列语义绑定(用于脏表头/空表头场景的稳定重连)
+    header_bindings = Column(JSONB, nullable=True, comment="模板列语义绑定(JSONB数组)")
+
     # v4.22.0新增:字段级解析规则(用于metric_date等严格解析)
     field_parse_rules = Column(JSONB, nullable=True, comment="字段解析规则(JSONB数组)")
     

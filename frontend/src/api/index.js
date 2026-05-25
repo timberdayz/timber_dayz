@@ -771,6 +771,8 @@ export default {
     headerColumns,
     subDomain,
     deduplicationFields,
+    headerBindings = [],
+    sampleData = {},
     fieldParseRules = []
   }) {
     // Support both domain and dataDomain parameter names
@@ -799,6 +801,8 @@ export default {
       sub_domain: subDomain || null,
       sheet_name: sheetName || null,
       deduplication_fields: deduplicationFields,
+      header_bindings: headerBindings,
+      sample_data: sampleData || {},
       field_parse_rules: fieldParseRules,
       save_mode: saveMode || 'create',
       base_template_id: baseTemplateId || null,

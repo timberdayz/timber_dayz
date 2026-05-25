@@ -12,9 +12,22 @@ TemplateFieldParseRuleValueKind = Literal["single_date", "date_range"]
 TemplateFieldParseRuleRangePick = Literal["start", "end"]
 
 
+class TemplateHeaderBinding(BaseModel):
+    raw_name: str = Field(..., description="Physical source column name")
+    display_name: Optional[str] = Field(None, description="Human-readable semantic label")
+    semantic_role: Optional[str] = Field(None, description="Semantic role such as metric_date")
+    aliases: List[str] = Field(default_factory=list, description="Alternative labels for matching")
+    position: Optional[int] = Field(None, description="0-based column position")
+    sample_type: Optional[str] = Field(None, description="Sample-inferred type")
+    confidence: Optional[float] = Field(None, description="Inference confidence")
+
+
 class TemplateFieldParseRule(BaseModel):
     target_field: str = Field(..., description="Target standard field")
     source_column: str = Field(..., description="Original source column")
+    source_label: Optional[str] = Field(None, description="Semantic display label for source column")
+    source_aliases: List[str] = Field(default_factory=list, description="Alternative source labels")
+    source_semantic_role: Optional[str] = Field(None, description="Semantic role for source column")
     value_kind: TemplateFieldParseRuleValueKind = Field(..., description="single_date or date_range")
     date_format: str = Field(..., description="Declared date format")
     strict: bool = Field(True, description="Whether parsing should be strict")
@@ -37,6 +50,11 @@ class TemplateSaveRequest(BaseModel):
     sheet_name: Optional[str] = Field(None, description="Sheet name")
     encoding: str = Field("utf-8", description="File encoding")
     deduplication_fields: Optional[List[str]] = Field(None, description="Core deduplication fields")
+    header_bindings: Optional[List[TemplateHeaderBinding]] = Field(
+        None,
+        description="Template column semantic bindings",
+    )
+    sample_data: Dict[str, Any] = Field(default_factory=dict, description="Preview sample row keyed by source column")
     field_parse_rules: Optional[List[TemplateFieldParseRule]] = Field(
         None,
         description="Field-level parsing rules",
@@ -80,6 +98,7 @@ class TemplateContextSummary(BaseModel):
     status: Optional[str] = None
     field_count: int
     deduplication_fields: List[str] = Field(default_factory=list)
+    header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
 
 
@@ -128,6 +147,7 @@ class TemplateUpdateContextData(BaseModel):
     current_header_row: int = 0
     sample_data: Dict[str, Any] = Field(default_factory=dict)
     preview_data: List[Dict[str, Any]] = Field(default_factory=list)
+    current_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     update_mode: TemplateUpdateMode
     header_source: str
     header_changes: HeaderChangesPayload
@@ -162,6 +182,7 @@ class TemplateListItem(BaseModel):
     status: Optional[str] = None
     field_count: int = 0
     deduplication_fields: List[str] = Field(default_factory=list)
+    header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
     usage_count: int = 0
     success_rate: float = 0.0

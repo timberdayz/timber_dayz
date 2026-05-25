@@ -57,3 +57,13 @@ def test_verify_schema_completeness_reports_missing_sync_columns(monkeypatch):
     assert result["all_critical_columns_exist"] is False
     assert result["missing_columns"] == ["core.data_quarantine.catalog_file_id"]
     assert result["migration_status"] == "up_to_date"
+
+
+def test_data_sync_critical_columns_include_template_header_bindings():
+    import backend.models.database as database_module
+
+    assert "core.field_mapping_templates" in database_module.DATA_SYNC_CRITICAL_COLUMNS
+    assert (
+        "header_bindings"
+        in database_module.DATA_SYNC_CRITICAL_COLUMNS["core.field_mapping_templates"]
+    )

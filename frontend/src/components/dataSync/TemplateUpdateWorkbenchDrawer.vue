@@ -58,7 +58,7 @@
             size="small"
             type="primary"
           >
-            {{ field }}
+            {{ formatFieldLabel(field) }}
           </el-tag>
         </div>
         <div v-else class="template-update-workbench-drawer__muted">
@@ -87,6 +87,7 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import api from '@/api'
+import { formatHeaderBindingLabel } from '@/domains/data_platform/utils/headerBindings'
 
 import HeaderDiffViewer from './HeaderDiffViewer.vue'
 import TemplateChangeSummaryCard from './TemplateChangeSummaryCard.vue'
@@ -123,6 +124,7 @@ const recommendedDeduplicationFields = computed(
   () => workbenchContext.value?.recommended_deduplication_fields ?? [],
 )
 const previewData = computed(() => workbenchContext.value?.preview_data ?? [])
+const currentHeaderBindings = computed(() => workbenchContext.value?.current_header_bindings ?? [])
 const updateMode = computed(() => workbenchContext.value?.update_mode ?? 'with-sample')
 const headerSource = computed(() => workbenchContext.value?.header_source ?? 'sample-file')
 
@@ -181,6 +183,10 @@ function handleSave() {
     deduplicationFields: [...selectedDeduplicationFields.value],
     headerRow: selectedHeaderRow.value,
   })
+}
+
+function formatFieldLabel(field) {
+  return formatHeaderBindingLabel(field, currentHeaderBindings.value)
 }
 
 async function reloadContext() {

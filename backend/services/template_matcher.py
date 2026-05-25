@@ -246,6 +246,7 @@ class TemplateMatcher:
                 'encoding': template.encoding or 'utf-8',
                 'field_count': template.field_count or len(header_columns),
                 'header_columns': header_columns,  # v4.6.0:返回原始表头字段列表
+                'header_bindings': template.header_bindings or [],
                 'template_name': template.template_name,
                 'version': template.version,
                 'status': template.status

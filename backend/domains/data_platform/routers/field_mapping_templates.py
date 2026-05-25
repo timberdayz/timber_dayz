@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+import re
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -89,6 +91,7 @@ async def _load_file_update_preview(
             "sub_domain": catalog_file.sub_domain,
         },
         "header_columns": header_columns,
+        "header_bindings": _normalize_header_bindings(None, header_columns, sample_data),
         "sample_data": sample_data,
         "preview_data": df.head(20).to_dict("records"),
     }
@@ -141,6 +144,124 @@ def _normalize_field_parse_rules(request_rules: list[Any] | None) -> list[dict[s
         elif isinstance(rule, dict):
             normalized.append({k: v for k, v in rule.items() if v is not None})
     return normalized
+
+
+def _looks_like_unnamed_header(column_name: str) -> bool:
+    return str(column_name).strip().lower().startswith("unnamed:")
+
+
+def _looks_like_date_value(raw_value: Any) -> bool:
+    text = str(raw_value or "").strip()
+    if not text:
+        return False
+    candidates = [text, text.replace("/", "-")]
+    for candidate in candidates:
+        iso_candidate = candidate.replace("Z", "+00:00")
+        try:
+            datetime.fromisoformat(iso_candidate)
+            return True
+        except ValueError:
+            pass
+        if re.match(r"^\d{4}-\d{1,2}-\d{1,2}( \d{1,2}:\d{2}(:\d{2})?)?$", candidate):
+            return True
+    return False
+
+
+def _looks_like_number_value(raw_value: Any) -> bool:
+    text = str(raw_value or "").strip()
+    if not text:
+        return False
+    try:
+        float(text.replace(",", ""))
+        return True
+    except ValueError:
+        return False
+
+
+def _normalize_header_bindings(
+    request_bindings: list[Any] | None,
+    header_columns: list[str],
+    sample_data: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    sample_data = sample_data or {}
+    requested_by_raw: dict[str, dict[str, Any]] = {}
+    for binding in request_bindings or []:
+        if hasattr(binding, "model_dump"):
+            binding_dict = binding.model_dump(exclude_none=True)
+        elif isinstance(binding, dict):
+            binding_dict = {k: v for k, v in binding.items() if v is not None}
+        else:
+            continue
+        raw_name = str(binding_dict.get("raw_name", "")).strip()
+        if raw_name:
+            requested_by_raw[raw_name] = binding_dict
+
+    normalized: list[dict[str, Any]] = []
+    for position, raw_name in enumerate(header_columns):
+        requested = requested_by_raw.get(raw_name, {})
+        sample_value = sample_data.get(raw_name)
+        sample_type = requested.get("sample_type")
+        confidence = requested.get("confidence")
+        if not sample_type:
+            if _looks_like_date_value(sample_value):
+                sample_type = "date"
+                confidence = confidence if confidence is not None else 0.98
+            elif _looks_like_number_value(sample_value):
+                sample_type = "number"
+                confidence = confidence if confidence is not None else 0.7
+            else:
+                sample_type = "string"
+                confidence = confidence if confidence is not None else 0.5
+
+        display_name = str(requested.get("display_name", "")).strip() or raw_name
+        semantic_role = requested.get("semantic_role")
+        aliases = [str(alias).strip() for alias in requested.get("aliases", []) if str(alias).strip()]
+        if _looks_like_unnamed_header(raw_name) and sample_type == "date":
+            if display_name == raw_name:
+                display_name = "日期"
+            if not semantic_role:
+                semantic_role = "metric_date"
+            aliases = list(dict.fromkeys([display_name, "日期", "统计日期", *aliases]))
+        elif display_name != raw_name:
+            aliases = list(dict.fromkeys([display_name, *aliases]))
+
+        normalized.append(
+            {
+                "raw_name": raw_name,
+                "display_name": display_name,
+                "semantic_role": semantic_role,
+                "aliases": aliases,
+                "position": requested.get("position", position),
+                "sample_type": sample_type,
+                "confidence": confidence,
+            }
+        )
+    return normalized
+
+
+def _enrich_field_parse_rules(
+    field_parse_rules: list[dict[str, Any]],
+    header_bindings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    bindings_by_raw = {
+        str(binding.get("raw_name", "")).strip(): binding
+        for binding in header_bindings or []
+        if str(binding.get("raw_name", "")).strip()
+    }
+    enriched: list[dict[str, Any]] = []
+    for rule in field_parse_rules or []:
+        source_column = str(rule.get("source_column", "")).strip()
+        binding = bindings_by_raw.get(source_column)
+        enriched_rule = dict(rule)
+        if binding:
+            if binding.get("display_name") and not enriched_rule.get("source_label"):
+                enriched_rule["source_label"] = binding["display_name"]
+            if binding.get("aliases") and not enriched_rule.get("source_aliases"):
+                enriched_rule["source_aliases"] = list(binding["aliases"])
+            if binding.get("semantic_role") and not enriched_rule.get("source_semantic_role"):
+                enriched_rule["source_semantic_role"] = binding["semantic_role"]
+        enriched.append(enriched_rule)
+    return enriched
 
 
 def _validate_field_parse_rules(
@@ -240,7 +361,15 @@ async def save_mapping_template(
         # 货币代码/地区代码归一化只用于“比较/匹配”逻辑，不用于模板存储。
         header_columns = list(header_columns)
         header_row = request.header_row
-        field_parse_rules = _normalize_field_parse_rules(request.field_parse_rules)
+        header_bindings = _normalize_header_bindings(
+            request.header_bindings,
+            header_columns,
+            request.sample_data,
+        )
+        field_parse_rules = _enrich_field_parse_rules(
+            _normalize_field_parse_rules(request.field_parse_rules),
+            header_bindings,
+        )
         if not isinstance(header_row, int) or header_row < 0 or header_row > 100:
             raise ValueError(f"header_row必须在0-100之间, 当前值: {header_row}")
 
@@ -297,6 +426,7 @@ async def save_mapping_template(
             sheet_name=request.sheet_name,
             encoding=request.encoding,
             deduplication_fields=deduplication_fields,
+            header_bindings=header_bindings,
             field_parse_rules=field_parse_rules,
             save_mode=request.save_mode,
             base_template_id=request.base_template_id,
@@ -443,6 +573,11 @@ async def get_template_update_context(
                 status=template.status,
                 field_count=template.field_count or len(template_header_columns),
                 deduplication_fields=template_deduplication_fields,
+                header_bindings=_normalize_header_bindings(
+                    template.header_bindings,
+                    template_header_columns,
+                    {},
+                ),
                 field_parse_rules=template.field_parse_rules or [],
             ).model_dump(),
             "template_header_columns": template_header_columns,
@@ -451,6 +586,7 @@ async def get_template_update_context(
             "current_header_row": effective_header_row,
             "sample_data": {},
             "preview_data": [],
+            "current_header_bindings": [],
             "update_mode": mode,
             "header_source": "template" if mode == "core-only" else "sample-file",
             "header_changes": {
@@ -490,6 +626,11 @@ async def get_template_update_context(
             response_data.update(
                 {
                     "current_header_columns": template_header_columns,
+                    "current_header_bindings": _normalize_header_bindings(
+                        template.header_bindings,
+                        template_header_columns,
+                        {},
+                    ),
                     "header_changes": {
                         "detected": False,
                         "added_fields": [],
@@ -507,6 +648,7 @@ async def get_template_update_context(
         elif file_id is not None:
             file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
             current_header_columns = file_preview["header_columns"]
+            current_header_bindings = file_preview.get("header_bindings", [])
             matcher = get_template_matcher(db)
             header_changes = await matcher.detect_header_changes(
                 template_id,
@@ -526,6 +668,7 @@ async def get_template_update_context(
                 {
                     "current_file": file_preview["file"],
                     "current_header_columns": current_header_columns,
+                    "current_header_bindings": current_header_bindings,
                     "current_header_row": effective_header_row,
                     "sample_data": file_preview.get("sample_data", {}),
                     "preview_data": file_preview.get("preview_data", []),

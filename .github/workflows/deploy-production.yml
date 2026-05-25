@@ -159,7 +159,13 @@ jobs:
 
       - name: Verify Legacy SQL Compatibility (Release Gate)
         run: |
-          python scripts/verify_sql_legacy_compat.py
+          if [ "${{ steps.changed-files.outputs.has_prev_tag }}" == "true" ] && [ -f "temp/changed_files.txt" ]; then
+            echo "[INFO] Validating changed SQL assets only..."
+            python scripts/verify_sql_legacy_compat.py --changed-files temp/changed_files.txt
+          else
+            echo "[INFO] No previous release tag diff available; validating all SQL assets..."
+            python scripts/verify_sql_legacy_compat.py
+          fi
 
       # [NOTE] 鍙戝竷闂ㄧ锛歵ag 鍙戝竷蹇呴』閫氳繃杩欎簺妫€鏌ワ紱澶辫触浼氶樆鏂?build 鍜?deploy
       # [FIX] 鍙獙璇佹敼鍔ㄧ殑 router 鏂囦欢锛岄伩鍏嶅巻鍙查仐鐣欓棶棰橀樆鏂柊鍙戝竷
