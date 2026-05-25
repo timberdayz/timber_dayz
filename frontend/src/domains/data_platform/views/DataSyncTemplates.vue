@@ -245,6 +245,7 @@ import TemplateCreateWorkbenchDrawer from '@/components/dataSync/TemplateCreateW
 import TemplateGovernancePanel from '@/components/dataSync/TemplateGovernancePanel.vue'
 import TemplateManualUpdateModeDialog from '@/components/dataSync/TemplateManualUpdateModeDialog.vue'
 import TemplateUpdateWorkbenchDrawer from '@/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
+import { buildTemplateUpdateFieldParseRulesPayload } from '@/domains/data_platform/utils/templateUpdateFieldParseRules'
 
 // 状态
 const loading = ref(false)
@@ -608,6 +609,10 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
 
   savingTemplate.value = true
   try {
+    const { rules: nextFieldParseRules, droppedRules } = buildTemplateUpdateFieldParseRulesPayload({
+      currentHeaderColumns: context.current_header_columns,
+      existingRules: template.field_parse_rules || []
+    })
     const result = await api.saveTemplate({
       platform: template.platform,
       dataDomain: template.data_domain,
@@ -618,11 +623,17 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
       headerRow: selectedHeaderRow ?? context?.current_header_row ?? template.header_row ?? 0,
       headerColumns: context.current_header_columns,
       deduplicationFields: selectedFields,
-      fieldParseRules: template.field_parse_rules || []
+      fieldParseRules: nextFieldParseRules
     })
 
     if (result && (result.success || result.template_id)) {
       ElMessage.success(result.message || '模板更新成功')
+      if (droppedRules.length > 0) {
+        const droppedSummary = droppedRules
+          .map(rule => `${rule.target_field} <- ${rule.source_column}`)
+          .join(', ')
+        ElMessage.warning(`已自动移除失效日期规则: ${droppedSummary}`)
+      }
       isWorkbenchVisible.value = false
       await loadTemplates()
       await loadGovernanceStats()
