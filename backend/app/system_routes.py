@@ -46,7 +46,11 @@ def register_system_routes(app, settings, app_version, get_db):
 
         dashboard_ready = bool(getattr(app.state, "dashboard_assets_ready", True))
         dashboard_report = getattr(app.state, "dashboard_assets_report", None) or {}
-        if dashboard_ready:
+        dashboard_modules = dashboard_report.get("modules") if isinstance(dashboard_report, dict) else None
+        dashboard_has_non_ready_module = isinstance(dashboard_modules, dict) and any(
+            module_report.get("status") != "ready" for module_report in dashboard_modules.values()
+        )
+        if dashboard_ready and not dashboard_has_non_ready_module:
             health_status["checks"]["dashboard"]["status"] = "ready"
         else:
             health_status["checks"]["dashboard"]["status"] = "degraded"

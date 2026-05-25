@@ -364,26 +364,13 @@ async def lifespan(app: FastAPI):
             dashboard_bootstrap_completed = False
             from backend.models.database import AsyncSessionLocal
             from backend.services.data_pipeline.dashboard_bootstrap import (
-                bootstrap_dashboard_assets_if_needed,
                 inspect_dashboard_assets,
             )
 
             async with AsyncSessionLocal() as session:
-                auto_bootstrap = os.getenv(
-                    "AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP",
-                    "false" if settings.ENVIRONMENT == "production" else "true",
-                ).lower() in ("true", "1")
-
-                if auto_bootstrap:
-                    dashboard_bootstrap_report = await bootstrap_dashboard_assets_if_needed(
-                        session,
-                        wait_for_lock=False,
-                    )
-                    await session.commit()
-                else:
-                    dashboard_bootstrap_report = await inspect_dashboard_assets(session)
-                    dashboard_bootstrap_report["bootstrapped"] = False
-                    dashboard_bootstrap_report["skipped"] = True
+                dashboard_bootstrap_report = await inspect_dashboard_assets(session)
+                dashboard_bootstrap_report["bootstrapped"] = False
+                dashboard_bootstrap_report["startup_policy"] = "inspect_only"
 
             # Expose readiness report for route-level graceful degradation.
             try:

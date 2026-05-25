@@ -1348,14 +1348,9 @@ class PostgresqlDashboardService:
         platform: str | None = None,
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
-        if granularity == "monthly":
-            source_table = "api.business_overview_shop_racing_monthly_module"
-            where_clause = "src.period_key = :period_key"
-            params: dict[str, Any] = {"granularity": granularity, "period_key": period_key}
-        else:
-            source_table = "api.business_overview_shop_racing_module"
-            where_clause = "src.granularity = :granularity AND src.period_key = :period_key"
-            params = {"granularity": granularity, "period_key": period_key}
+        source_table = "api.business_overview_shop_racing_module"
+        where_clause = "src.granularity = :granularity AND src.period_key = :period_key"
+        params: dict[str, Any] = {"granularity": granularity, "period_key": period_key}
 
         query = f"""
             SELECT

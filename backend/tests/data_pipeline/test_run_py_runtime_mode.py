@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 def _load_run_module():
     spec = importlib.util.spec_from_file_location("run_module_runtime_mode", "run.py")
@@ -71,3 +73,72 @@ def test_run_py_prefers_backend_app_main_entrypoint():
     text = Path("run.py").read_text(encoding="utf-8", errors="replace")
 
     assert "backend.app.main:app" in text
+
+
+def test_parser_rejects_conflicting_local_and_docker_modes():
+    module = _load_run_module()
+    parser = module.build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["--local", "--use-docker"])
+
+    assert exc_info.value.code == 2
+
+
+def test_start_backend_uses_reload_for_windows_headless_local(monkeypatch, tmp_path):
+    module = _load_run_module()
+    module.ACTIVE_BACKEND_PORT = 18001
+
+    monkeypatch.setattr(module.sys_platform, "system", lambda: "Windows")
+    monkeypatch.setattr(module, "_require_local_port_available", lambda port, service: True)
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "run.py"))
+
+    captured = {}
+
+    class DummyProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return DummyProcess()
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+
+    process = module.start_backend(runtime_mode="development", windowed=False)
+
+    assert process is not None
+    assert "--reload" in captured["cmd"]
+
+
+def test_cleanup_local_processes_terminates_started_children():
+    module = _load_run_module()
+
+    events = []
+
+    class DummyProcess:
+        def __init__(self, name):
+            self.name = name
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            events.append(("terminate", self.name))
+
+        def wait(self, timeout=None):
+            events.append(("wait", self.name, timeout))
+
+        def kill(self):
+            events.append(("kill", self.name))
+
+    processes = [
+        ("backend", DummyProcess("backend")),
+        ("frontend", DummyProcess("frontend")),
+    ]
+
+    module.cleanup_processes(processes)
+
+    assert ("terminate", "backend") in events
+    assert ("terminate", "frontend") in events

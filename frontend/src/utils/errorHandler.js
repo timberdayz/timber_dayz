@@ -148,6 +148,26 @@ export function getRecoverySuggestion(error) {
   return null
 }
 
+export function getDashboardAssetUnavailableInfo(error) {
+  const response = error?.response
+  const detail = response?.data?.detail || error?.detail
+  if (!response || response.status !== 503 || !detail || typeof detail !== 'object') {
+    return null
+  }
+  if (
+    typeof detail.message !== 'string' ||
+    !detail.message.toLowerCase().includes('dashboard assets are not ready')
+  ) {
+    return null
+  }
+  return {
+    moduleName: detail.module_name || null,
+    status: detail.status || (detail.assets_drift ? 'drift' : 'unready'),
+    message: detail.message,
+    hint: detail.hint || null
+  }
+}
+
 /**
  * 处理API错误（统一处理逻辑）
  * @param {Error} error - 错误对象

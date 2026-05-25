@@ -6,7 +6,6 @@ from starlette.requests import Request
 
 from backend.routers import dashboard_api_postgresql as dashboard_router
 from backend.routers.dashboard_api_postgresql import (
-    get_annual_summary_kpi_postgresql,
     get_business_overview_bootstrap_postgresql,
     get_business_overview_comparison_postgresql,
     get_business_overview_kpi_postgresql,
@@ -47,16 +46,12 @@ class _PostgresqlServiceStub:
     async def get_business_overview_shop_racing(self, *args, **kwargs):
         return self.payload
 
-    async def get_annual_summary_kpi(self, *args, **kwargs):
-        return self.payload
-
 
 def test_postgresql_dashboard_router_exposes_expected_contract_paths():
     paths = {route.path for route in dashboard_router.router.routes}
     assert "/api/dashboard/business-overview/kpi" in paths
     assert "/api/dashboard/business-overview/comparison" in paths
     assert "/api/dashboard/business-overview/bootstrap" in paths
-    assert "/api/dashboard/annual-summary/kpi" in paths
 
 
 def test_business_overview_kpi_contract_shape(monkeypatch):
@@ -180,41 +175,4 @@ def test_business_overview_bootstrap_contract_shape(monkeypatch):
         "operational_metrics",
         "traffic_ranking",
         "shop_racing",
-    }.issubset(data.keys())
-
-
-def test_annual_summary_kpi_contract_shape(monkeypatch):
-    request = _make_request("/api/dashboard/annual-summary/kpi")
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _PostgresqlServiceStub(
-            {
-                "gmv": 1000,
-                "total_cost": 400,
-                "cost_to_revenue_ratio": 0.4,
-                "roi": 1.5,
-                "gross_margin": 0.2,
-                "net_margin": 0.1,
-            }
-        ),
-    )
-
-    response = asyncio.run(
-        get_annual_summary_kpi_postgresql(
-            request=request,
-            granularity="monthly",
-            period="2026-03",
-        )
-    )
-
-    body = json.loads(response.body.decode("utf-8"))
-    data = body["data"]
-    assert body["success"] is True
-    assert {
-        "gmv",
-        "total_cost",
-        "cost_to_revenue_ratio",
-        "roi",
-        "gross_margin",
-        "net_margin",
     }.issubset(data.keys())

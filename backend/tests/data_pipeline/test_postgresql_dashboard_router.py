@@ -8,10 +8,6 @@ from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
 from backend.routers.dashboard_api_postgresql import (
-    get_annual_summary_by_shop_postgresql,
-    get_annual_summary_kpi_postgresql,
-    get_annual_summary_target_completion_postgresql,
-    get_annual_summary_trend_postgresql,
     get_business_overview_comparison_postgresql,
     get_business_overview_inventory_backlog_postgresql,
     get_business_overview_kpi_postgresql,
@@ -25,6 +21,32 @@ from backend.routers.dashboard_api_postgresql import (
 
 def _make_request(path: str):
     app = SimpleNamespace(state=SimpleNamespace())
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 8001),
+            "app": app,
+        }
+    )
+
+
+def _make_dashboard_not_ready_request(path: str):
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            dashboard_assets_report={
+                "ready": False,
+                "missing_schemas": [],
+                "missing_objects": [],
+                "assets_drift": True,
+                "assets_fingerprint_expected": "expected",
+                "assets_fingerprint_last": "actual",
+            }
+        )
+    )
     return Request(
         {
             "type": "http",
@@ -167,114 +189,6 @@ def test_postgresql_comparison_route_returns_service_payload(monkeypatch):
     assert "metrics" in body["data"]
 
 
-def test_postgresql_annual_summary_kpi_route_returns_service_payload(monkeypatch):
-    class _ServiceStub:
-        async def get_annual_summary_kpi(self, granularity, period):
-            return {
-                "gmv": 300,
-                "total_cost": 100,
-                "profit": 70,
-                "gross_margin": 23.33,
-                "net_margin": -10.0,
-                "roi": -0.3,
-            }
-
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
-
-    response = asyncio.run(
-        get_annual_summary_kpi_postgresql(
-            request=_make_request("/api/dashboard/annual-summary/kpi"),
-            granularity="yearly",
-            period="2026",
-        )
-    )
-
-    body = json.loads(response.body.decode("utf-8"))
-    assert body["success"] is True
-    assert body["data"]["roi"] == -0.3
-
-
-def test_postgresql_annual_summary_trend_route_returns_service_payload(monkeypatch):
-    class _ServiceStub:
-        async def get_annual_summary_trend(self, granularity, period):
-            return [{"period_month": "2026-03-01", "gmv": 300, "total_cost": 100, "profit": 70}]
-
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
-
-    response = asyncio.run(
-        get_annual_summary_trend_postgresql(
-            request=_make_request("/api/dashboard/annual-summary/trend"),
-            granularity="yearly",
-            period="2026",
-        )
-    )
-
-    body = json.loads(response.body.decode("utf-8"))
-    assert body["success"] is True
-    assert body["data"][0]["gmv"] == 300
-
-
-def test_postgresql_annual_summary_by_shop_route_returns_service_payload(monkeypatch):
-    class _ServiceStub:
-        async def get_annual_summary_by_shop(self, granularity, period):
-            return [{"shop_id": "shop-a", "platform_code": "shopee", "gmv": 300, "roi": 0.2}]
-
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
-
-    response = asyncio.run(
-        get_annual_summary_by_shop_postgresql(
-            request=_make_request("/api/dashboard/annual-summary/by-shop"),
-            granularity="yearly",
-            period="2026",
-        )
-    )
-
-    body = json.loads(response.body.decode("utf-8"))
-    assert body["success"] is True
-    assert body["data"][0]["shop_id"] == "shop-a"
-
-
-def test_postgresql_annual_summary_target_completion_route_returns_service_payload(monkeypatch):
-    class _ServiceStub:
-        async def get_annual_summary_target_completion(self, db, granularity, period):
-            return {
-                "target_gmv": 1000,
-                "achieved_gmv": 800,
-                "achievement_rate_gmv": 80.0,
-                "target_orders": 80,
-                "target_profit": None,
-                "achieved_profit": 120,
-                "achievement_rate_profit": None,
-            }
-
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
-
-    response = asyncio.run(
-        get_annual_summary_target_completion_postgresql(
-            request=_make_request("/api/dashboard/annual-summary/target-completion"),
-            granularity="yearly",
-            period="2026",
-            db=None,
-        )
-    )
-
-    body = json.loads(response.body.decode("utf-8"))
-    assert body["success"] is True
-    assert body["data"]["achievement_rate_gmv"] == 80.0
-
-
 def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
         async def get_business_overview_shop_racing(self, granularity, target_date, group_by, platform):
@@ -406,11 +320,6 @@ def test_postgresql_dashboard_router_exposes_compatibility_paths():
     assert "/api/dashboard/business-overview/inventory-backlog" in paths
     assert "/api/dashboard/business-overview/operational-metrics" in paths
     assert "/api/dashboard/clearance-ranking" in paths
-    assert "/api/dashboard/annual-summary/kpi" in paths
-    assert "/api/dashboard/annual-summary/trend" in paths
-    assert "/api/dashboard/annual-summary/platform-share" in paths
-    assert "/api/dashboard/annual-summary/by-shop" in paths
-    assert "/api/dashboard/annual-summary/target-completion" in paths
 
 
 def test_postgresql_inventory_backlog_route_returns_summary_payload(monkeypatch):
@@ -624,3 +533,42 @@ def test_postgresql_clearance_ranking_route_forwards_granularity_and_date(monkey
         "granularity": "monthly",
         "target_date": "2026-03-01",
     }
+
+
+@pytest.mark.parametrize(
+    ("route_func", "kwargs"),
+    [
+        (
+            get_business_overview_inventory_backlog_postgresql,
+            {
+                "request": _make_dashboard_not_ready_request("/api/dashboard/business-overview/inventory-backlog"),
+                "days": 30,
+                "limit": 20,
+            },
+        ),
+        (
+            get_business_overview_operational_metrics_postgresql,
+            {
+                "request": _make_dashboard_not_ready_request("/api/dashboard/business-overview/operational-metrics"),
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": None,
+                "shop_id": None,
+            },
+        ),
+        (
+            get_clearance_ranking_postgresql,
+            {
+                "request": _make_dashboard_not_ready_request("/api/dashboard/clearance-ranking"),
+                "limit": 10,
+            },
+        ),
+    ],
+)
+def test_dashboard_routes_preserve_http_503_when_assets_not_ready(route_func, kwargs):
+    try:
+        response = asyncio.run(route_func(**kwargs))
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 503
+    else:
+        assert response.status_code == 503

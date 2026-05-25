@@ -31,14 +31,12 @@
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
-import { useUserStore } from '@/stores/user'
 import { useAuthStore } from '@/stores/auth'
 import GroupedSidebar from '@/components/common/GroupedSidebar.vue'  // ✅ 新版分组菜单
 import Header from '@/components/common/Header.vue'  // ⭐ v4.19.0: 使用 Header 组件（包含通知图标）
 import IcpFooter from '@/components/common/IcpFooter.vue'  // ICP 备案号页脚
 
 const route = useRoute()
-const userStore = useUserStore()
 const authStore = useAuthStore()
 
 // ⭐ v4.19.0: 判断是否为公开路由（登录、注册页面不显示系统布局）
@@ -61,9 +59,6 @@ onMounted(() => {
   }
   
   // 初始化用户信息（用于权限检查）
-  if (authStore.isLoggedIn) {
-    userStore.initUserInfo()
-  }
   console.log('西红ERP系统前端已启动')
 })
 </script>

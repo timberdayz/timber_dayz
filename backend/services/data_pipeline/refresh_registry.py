@@ -29,7 +29,6 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "mart.inventory_backlog_base": ["mart.inventory_snapshot_latest", "mart.inventory_snapshot_change", "semantic.fact_orders_atomic"],
     "mart.hr_shop_monthly_profit": ["semantic.fact_orders_atomic"],
     "mart.b_cost_shop_month": ["semantic.fact_orders_atomic"],
-    "mart.annual_summary_shop_month": ["semantic.fact_orders_atomic", "semantic.fact_analytics_atomic"],
     "api.business_overview_kpi_module": ["mart.platform_month_kpi"],
     "api.business_overview_comparison_platform_module": ["mart.platform_day_kpi", "mart.platform_week_kpi", "mart.platform_month_kpi"],
     "api.business_overview_comparison_module": ["mart.shop_day_kpi", "mart.shop_week_kpi", "mart.shop_month_kpi"],
@@ -48,10 +47,6 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "api.b_cost_analysis_shop_month_module": ["mart.b_cost_shop_month"],
     "api.b_cost_analysis_order_detail_module": ["semantic.fact_orders_atomic"],
     "api.clearance_ranking_module": ["mart.inventory_backlog_base", "api.inventory_backlog_summary_module"],
-    "api.annual_summary_kpi_module": ["mart.annual_summary_shop_month"],
-    "api.annual_summary_trend_module": ["mart.annual_summary_shop_month"],
-    "api.annual_summary_platform_share_module": ["mart.annual_summary_shop_month"],
-    "api.annual_summary_by_shop_module": ["mart.annual_summary_shop_month"],
 }
 
 SQL_TARGET_PATHS: dict[str, str] = {
@@ -81,7 +76,6 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "mart.inventory_current": "sql/mart/inventory_current.sql",
     "mart.inventory_backlog_base": "sql/mart/inventory_backlog_base.sql",
     "mart.b_cost_shop_month": "sql/mart/b_cost_shop_month.sql",
-    "mart.annual_summary_shop_month": "sql/mart/annual_summary_shop_month.sql",
     "api.business_overview_kpi_module": "sql/api_modules/business_overview_kpi_module.sql",
     "api.business_overview_comparison_platform_module": "sql/api_modules/business_overview_comparison_platform_module.sql",
     "api.business_overview_comparison_module": "sql/api_modules/business_overview_comparison_module.sql",
@@ -100,10 +94,6 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "api.b_cost_analysis_shop_month_module": "sql/api_modules/b_cost_analysis_shop_month_module.sql",
     "api.b_cost_analysis_order_detail_module": "sql/api_modules/b_cost_analysis_order_detail_module.sql",
     "api.clearance_ranking_module": "sql/api_modules/clearance_ranking_module.sql",
-    "api.annual_summary_kpi_module": "sql/api_modules/annual_summary_kpi_module.sql",
-    "api.annual_summary_trend_module": "sql/api_modules/annual_summary_trend_module.sql",
-    "api.annual_summary_platform_share_module": "sql/api_modules/annual_summary_platform_share_module.sql",
-    "api.annual_summary_by_shop_module": "sql/api_modules/annual_summary_by_shop_module.sql",
 }
 
 

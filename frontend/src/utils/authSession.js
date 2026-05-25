@@ -131,3 +131,17 @@ export function clearPersistedAuthState(storage) {
     'activeRole',
   ].forEach((key) => storage.removeItem(key))
 }
+
+const AUTH_RECOVERY_FAILED_KEY = 'auth_recovery_failed'
+
+export function markAuthRecoveryFailed(storage) {
+  storage.setItem(AUTH_RECOVERY_FAILED_KEY, '1')
+}
+
+export function hasAuthRecoveryFailed(storage) {
+  return storage.getItem(AUTH_RECOVERY_FAILED_KEY) === '1'
+}
+
+export function resetAuthRecoveryState(storage) {
+  storage.removeItem(AUTH_RECOVERY_FAILED_KEY)
+}

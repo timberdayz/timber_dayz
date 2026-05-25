@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS ops.data_lineage_registry (
     UNIQUE (target_name, source_name)
 );
 
+CREATE TABLE IF NOT EXISTS ops.dashboard_asset_state (
+    module_name VARCHAR(128) PRIMARY KEY,
+    asset_fingerprint_expected VARCHAR(128),
+    asset_fingerprint_applied VARCHAR(128),
+    status VARCHAR(32) NOT NULL DEFAULT 'drift',
+    run_id VARCHAR(128),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    details_json JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
 CREATE INDEX IF NOT EXISTS ix_pipeline_run_log_status
 ON ops.pipeline_run_log (status, started_at DESC);
 
@@ -64,3 +74,6 @@ ON ops.data_freshness_log (status, last_succeeded_at DESC);
 
 CREATE INDEX IF NOT EXISTS ix_data_lineage_registry_target_name
 ON ops.data_lineage_registry (target_name, active);
+
+CREATE INDEX IF NOT EXISTS ix_dashboard_asset_state_status
+ON ops.dashboard_asset_state (status, updated_at DESC);

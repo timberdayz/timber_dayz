@@ -33,6 +33,9 @@ from pathlib import Path
 import platform as sys_platform
 import os
 
+_WINDOWS_CHILD_JOB_HANDLE = None
+_WINDOWS_CHILD_JOB_INIT_FAILED = False
+
 BACKEND_PORT = 8001
 FRONTEND_PORT = 5173
 ACTIVE_BACKEND_PORT = BACKEND_PORT
@@ -64,7 +67,7 @@ def safe_print(text):
 def print_banner():
     """打印系统横幅"""
     safe_print("\n" + "="*80)
-    safe_print("西虹ERP系统 v4.24.1")
+    safe_print("西虹ERP系统 v4.24.2")
     safe_print("="*80)
     safe_print("现代化跨境电商管理平台")
     safe_print("FastAPI + Vue.js 3 + PostgreSQL + Celery")
@@ -92,18 +95,36 @@ def check_postgresql():
             return True
         elif "xihong_erp_postgres" in stdout:
             safe_print("  [WARNING] PostgreSQL容器正在运行但可能不健康")
-            return True  # 仍然尝试继续
         else:
-            safe_print("  [WARNING] PostgreSQL容器未检测到")
-            safe_print("  提示: 如果使用本地PostgreSQL，可以忽略此警告")
-            return True  # 不阻止启动，让后端自己检查数据库连接
+            safe_print("  [INFO] 未检测到项目 PostgreSQL 容器，继续检查 DATABASE_URL 指向的实例")
     except FileNotFoundError:
-        safe_print("  [WARNING] Docker未安装或不在PATH中")
-        safe_print("  提示: 如果使用本地PostgreSQL，可以忽略此警告")
-        return True  # 不阻止启动
+        safe_print("  [INFO] Docker未安装或不在PATH中，继续检查 DATABASE_URL 指向的实例")
     except Exception as e:
-        safe_print(f"  [WARNING] Docker检查跳过: {type(e).__name__}")
-        return True  # 继续尝试，不阻止启动
+        safe_print(f"  [WARNING] Docker检查异常: {type(e).__name__}，继续检查 DATABASE_URL 指向的实例")
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if not database_url:
+        safe_print("  [ERROR] 未设置 DATABASE_URL，无法确认 PostgreSQL 是否可用")
+        return False
+
+    try:
+        from urllib.parse import urlparse
+        import socket
+
+        parsed = urlparse(database_url)
+        if not parsed.hostname:
+            safe_print("  [ERROR] DATABASE_URL 缺少主机信息")
+            return False
+
+        port = parsed.port or 5432
+        sock = socket.create_connection((parsed.hostname, port), timeout=3)
+        sock.close()
+        safe_print(f"  [OK] PostgreSQL 实例可连接: {parsed.hostname}:{port}")
+        return True
+    except Exception as e:
+        safe_print(f"  [ERROR] PostgreSQL 不可连接: {type(e).__name__}")
+        safe_print("  提示: 请确认 DATABASE_URL、Docker postgres 容器或本地 PostgreSQL 服务状态")
+        return False
 
 def check_redis():
     """检查Redis是否运行（Celery需要Redis）"""
@@ -329,7 +350,7 @@ def _require_local_port_available(port, service_name):
     """启动本地服务前确认端口可用，避免误把其他服务当成本项目。"""
     if _is_port_in_use(port):
         safe_print(f"  [ERROR] {service_name} 所需端口 {port} 已被占用")
-        safe_print(f"  鎻愮ず: 璇峰厛閲婃斁 localhost:{port}锛屽啀閲嶈瘯 python run.py --local")
+        safe_print(f"  提示: 请先释放 localhost:{port}，再重试 python run.py --local")
         return False
     return True
 
@@ -1090,6 +1111,157 @@ def _resolve_backend_runtime_mode(args):
     return "development"
 
 
+def _apply_no_color_env(env: dict) -> dict:
+    """禁用子进程彩色输出，避免日志文件混入 ANSI 转义序列。"""
+    env["NO_COLOR"] = "1"
+    env["CLICOLOR"] = "0"
+    env["FORCE_COLOR"] = "0"
+    return env
+
+
+def _get_windows_child_job_handle():
+    """创建并缓存 Windows kill-on-close job object。"""
+    global _WINDOWS_CHILD_JOB_HANDLE, _WINDOWS_CHILD_JOB_INIT_FAILED
+
+    if sys_platform.system() != "Windows":
+        return None
+    if _WINDOWS_CHILD_JOB_HANDLE is not None:
+        return _WINDOWS_CHILD_JOB_HANDLE
+    if _WINDOWS_CHILD_JOB_INIT_FAILED:
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+        JobObjectExtendedLimitInformation = 9
+
+        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+
+        job_handle = kernel32.CreateJobObjectW(None, None)
+        if not job_handle:
+            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+
+        job_info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        job_info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        ok = kernel32.SetInformationJobObject(
+            job_handle,
+            JobObjectExtendedLimitInformation,
+            ctypes.byref(job_info),
+            ctypes.sizeof(job_info),
+        )
+        if not ok:
+            raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
+
+        _WINDOWS_CHILD_JOB_HANDLE = job_handle
+        return _WINDOWS_CHILD_JOB_HANDLE
+    except Exception as exc:
+        _WINDOWS_CHILD_JOB_INIT_FAILED = True
+        safe_print(f"  [WARNING] Windows 子进程自动回收不可用: {type(exc).__name__}")
+        return None
+
+
+def _register_process_with_windows_job(process):
+    """将子进程挂到 Windows job object，父进程消失时自动终止。"""
+    if sys_platform.system() != "Windows":
+        return False
+
+    job_handle = _get_windows_child_job_handle()
+    process_handle = getattr(process, "_handle", None)
+    if not job_handle or not process_handle:
+        return False
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        ok = kernel32.AssignProcessToJobObject(job_handle, wintypes.HANDLE(process_handle))
+        if not ok:
+            raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject failed")
+        return True
+    except Exception as exc:
+        safe_print(f"  [WARNING] Windows 子进程注册自动回收失败: {type(exc).__name__}")
+        return False
+
+
+def build_parser():
+    """构建 CLI 参数解析器。"""
+    parser = argparse.ArgumentParser(description="西虹ERP系统启动脚本（修复版）")
+    parser.add_argument("--backend-only", action="store_true", help="仅启动后端")
+    parser.add_argument("--frontend-only", action="store_true", help="仅启动前端")
+    parser.add_argument(
+        "--backend-window",
+        action="store_true",
+        help="Windows: 在新窗口启动后端（开发环境默认开启）",
+    )
+    parser.add_argument(
+        "--backend-headless",
+        action="store_true",
+        help="Windows: 后端不弹窗，后台运行并写入 logs/backend-local.*.log",
+    )
+    parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    parser.add_argument("--no-celery", action="store_true", help="不启动Celery worker")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--use-docker", action="store_true", help="后端 Docker + 前端本地模式")
+    mode_group.add_argument(
+        "--local",
+        action="store_true",
+        help="本地采集测试模式：Docker 启动 postgres、redis、celery-worker、celery-beat，本机启动后端与前端",
+    )
+    parser.add_argument(
+        "--collection",
+        action="store_true",
+        help="采集模式：与 --use-docker 同时使用时，backend 使用带 Playwright 的镜像",
+    )
+    return parser
+
+
 def _frontend_has_cli_dependency(frontend_dir, package_name):
     """检查前端关键 CLI 依赖是否已正确安装，避免空 node_modules 误判为可启动。"""
     package_dir = frontend_dir / "node_modules" / package_name
@@ -1115,11 +1287,26 @@ def start_backend(runtime_mode="development", *, windowed: bool | None = None):
         if windowed is None:
             windowed = runtime_mode == "development"
 
-        env = os.environ.copy()
+        env = _apply_no_color_env(os.environ.copy())
         env["PYTHONPATH"] = str(project_root.resolve())
         env["APP_RUNTIME_MODE"] = runtime_mode
         logs_dir = project_root / "logs"
         logs_dir.mkdir(exist_ok=True)
+
+        uvicorn_cmd = [
+            "python",
+            "-m",
+            "uvicorn",
+            "backend.app.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(ACTIVE_BACKEND_PORT),
+            "--loop",
+            "asyncio",
+        ]
+        if runtime_mode == "development":
+            uvicorn_cmd.append("--reload")
 
         if windowed:
             work_dir_ps = str(project_root.resolve()).replace("'", "''")
@@ -1135,8 +1322,8 @@ def start_backend(runtime_mode="development", *, windowed: bool | None = None):
                         f"$env:PYTHONPATH = '{work_dir_ps}'",
                         f"$env:APP_RUNTIME_MODE = '{runtime_mode}'",
                         "",
-                        # Redirect stderr to stdout and tee to a stable log file.
-                        f"python -m uvicorn backend.app.main:app --host 127.0.0.1 --port {ACTIVE_BACKEND_PORT} --loop asyncio 2>&1 | Tee-Object -FilePath '{out_log_ps}' -Append",
+                        # Redirect stderr to stdout and tee to a stable log file for the current run.
+                        f"{' '.join(uvicorn_cmd)} 2>&1 | Tee-Object -FilePath '{out_log_ps}'",
                     ]
                 )
                 + "\n",
@@ -1150,7 +1337,8 @@ def start_backend(runtime_mode="development", *, windowed: bool | None = None):
                     "-NoProfile",
                     "-Command",
                     (
-                        'Start-Process powershell -ArgumentList "-NoExit", "-File", \\"{}\\" '
+                        'Start-Process powershell -WindowStyle Normal '
+                        '-ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", \\"{}\\" '
                         '-WorkingDirectory "{}"'
                     ).format(str(backend_launcher.resolve()), work_dir_ps),
                 ],
@@ -1160,30 +1348,20 @@ def start_backend(runtime_mode="development", *, windowed: bool | None = None):
             safe_print("  [OK] 后端服务已在新窗口启动（日志: logs/backend-local.out.log）")
             return launcher
 
-        backend_out = (logs_dir / "backend-local.out.log").open("a", encoding="utf-8", errors="ignore")
-        backend_err = (logs_dir / "backend-local.err.log").open("a", encoding="utf-8", errors="ignore")
+        backend_out = (logs_dir / "backend-local.out.log").open("w", encoding="utf-8", errors="ignore")
+        backend_err = (logs_dir / "backend-local.err.log").open("w", encoding="utf-8", errors="ignore")
         process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "backend.app.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(ACTIVE_BACKEND_PORT),
-                "--loop",
-                "asyncio",
-            ],
+            [sys.executable] + uvicorn_cmd[1:],
             cwd=project_root,
             env=env,
             stdout=backend_out,
             stderr=backend_err,
         )
+        _register_process_with_windows_job(process)
         safe_print("  [OK] 后端服务已启动（日志: logs/backend-local.*.log）")
         return process
 
-    env = os.environ.copy()
+    env = _apply_no_color_env(os.environ.copy())
     env["APP_RUNTIME_MODE"] = runtime_mode
     process = subprocess.Popen(
         [
@@ -1240,22 +1418,27 @@ def start_frontend():
     if sys_platform.system() == "Windows":
         frontend_path = str(frontend_dir.resolve())
         node_bin_dir = os.path.dirname(npm_exe)
-        env = os.environ.copy()
+        env = _apply_no_color_env(os.environ.copy())
         env["Path"] = node_bin_dir + os.pathsep + env.get("Path", env.get("PATH", ""))
         env["VITE_DEV_PROXY_TARGET"] = f"http://127.0.0.1:{ACTIVE_BACKEND_PORT}"
-        create_new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        logs_dir = Path(__file__).parent / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        frontend_out = (logs_dir / "frontend-local.out.log").open("w", encoding="utf-8", errors="ignore")
+        frontend_err = (logs_dir / "frontend-local.err.log").open("w", encoding="utf-8", errors="ignore")
         process = subprocess.Popen(
             [npm_exe, "run", "dev", "--", "--port", str(picked_port), "--strictPort"],
             cwd=frontend_path,
             env=env,
             shell=False,
-            creationflags=create_new_console,
+            stdout=frontend_out,
+            stderr=frontend_err,
         )
-        safe_print("  [OK] 前端服务已在新窗口启动")
+        _register_process_with_windows_job(process)
+        safe_print("  [OK] 前端服务已启动（日志: logs/frontend-local.*.log）")
         safe_print(f"  [INFO] Vite 使用 strictPort=true，固定监听 {picked_port}")
         return process, picked_port
 
-    env = os.environ.copy()
+    env = _apply_no_color_env(os.environ.copy())
     env["VITE_DEV_PROXY_TARGET"] = f"http://127.0.0.1:{ACTIVE_BACKEND_PORT}"
     process = subprocess.Popen([npm_exe, "run", "dev", "--", "--port", str(picked_port), "--strictPort"], cwd=frontend_dir, env=env)
     safe_print("  [OK] 前端服务已启动")
@@ -1439,36 +1622,37 @@ def _prompt_continue_without_celery():
     return choice == "y"
 
 
+def cleanup_processes(processes):
+    """尽力关闭已启动的本地子进程，避免失败后残留占端口。"""
+    for name, process in reversed(processes):
+        if process is None:
+            continue
+        try:
+            poll = getattr(process, "poll", None)
+            if callable(poll) and poll() is not None:
+                continue
+            terminate = getattr(process, "terminate", None)
+            if callable(terminate):
+                terminate()
+            wait = getattr(process, "wait", None)
+            if callable(wait):
+                try:
+                    wait(timeout=5)
+                    continue
+                except Exception:
+                    pass
+            kill = getattr(process, "kill", None)
+            if callable(kill):
+                kill()
+        except Exception as exc:
+            safe_print(f"  [WARNING] 清理{name}进程失败: {exc}")
+
+
 def main():
     """主函数。"""
     global ACTIVE_BACKEND_PORT
 
-    parser = argparse.ArgumentParser(description="西虹ERP系统启动脚本（修复版）")
-    parser.add_argument("--backend-only", action="store_true", help="仅启动后端")
-    parser.add_argument("--frontend-only", action="store_true", help="仅启动前端")
-    parser.add_argument(
-        "--backend-window",
-        action="store_true",
-        help="Windows: 在新窗口启动后端（开发环境默认开启）",
-    )
-    parser.add_argument(
-        "--backend-headless",
-        action="store_true",
-        help="Windows: 后端不弹窗，后台运行并写入 logs/backend-local.*.log",
-    )
-    parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
-    parser.add_argument("--no-celery", action="store_true", help="不启动Celery worker")
-    parser.add_argument("--use-docker", action="store_true", help="后端 Docker + 前端本地模式")
-    parser.add_argument(
-        "--collection",
-        action="store_true",
-        help="采集模式：与 --use-docker 同时使用时，backend 使用带 Playwright 的镜像",
-    )
-    parser.add_argument(
-        "--local",
-        action="store_true",
-        help="本地采集测试模式：Docker 启动 postgres、redis、celery-worker、celery-beat，本机启动后端与前端",
-    )
+    parser = build_parser()
     args = parser.parse_args()
     backend_runtime_mode = _resolve_backend_runtime_mode(args)
 
@@ -1554,6 +1738,10 @@ def main():
                 backend_windowed = True
             elif args.backend_headless:
                 backend_windowed = False
+            elif args.local and sys_platform.system() == "Windows":
+                # Local acceptance is more reliable when backend stays attached as a
+                # background child process instead of a detached PowerShell window.
+                backend_windowed = False
 
             backend_process = start_backend(
                 runtime_mode=backend_runtime_mode or "development",
@@ -1633,14 +1821,18 @@ def main():
             time.sleep(10)
             if not args.frontend_only and not _is_port_in_use(backend_port):
                 safe_print("[WARNING] 后端服务似乎已停止")
+                cleanup_processes(processes)
                 break
 
     except KeyboardInterrupt:
+        cleanup_processes(processes)
         safe_print("\n\n[退出] 监控脚本已退出")
-        safe_print("[提示] 后端、前端和 Celery Worker 服务仍在独立窗口运行")
+        safe_print("[提示] 已尝试关闭当前脚本启动的本地子进程")
     except SystemExit:
+        cleanup_processes(processes)
         raise
     except Exception as exc:
+        cleanup_processes(processes)
         safe_print(f"\n[ERROR] 启动失败: {exc}")
         import traceback
 

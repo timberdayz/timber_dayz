@@ -1,8 +1,8 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
--- Canonical schema contract:
--- - a_class.sales_targets_a columns: year_month (YYYY-MM), shop_id, target_sales_amount, target_quantity
--- Legacy column-name compatibility should be handled at ingestion/semantic layer instead of dynamic SQL.
+-- Current launch contract:
+-- - a_class.sales_targets_a columns: "年月", "店铺ID", "目标销售额", "目标订单数"
+-- Pre-launch: align SQL asset with current production-style table shape directly.
 
 CREATE OR REPLACE VIEW api.business_overview_comparison_module AS
 WITH daily AS (
@@ -45,12 +45,12 @@ weekly AS (
 ),
 monthly_target AS (
     SELECT
-        to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
-        shop_id AS shop_id,
-        COALESCE(SUM(target_sales_amount), 0) AS target_sales_amount,
-        COALESCE(SUM(target_quantity), 0) AS target_sales_quantity
+        to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
+        "店铺ID" AS shop_id,
+        COALESCE(SUM("目标销售额"), 0) AS target_sales_amount,
+        COALESCE(SUM("目标订单数"), 0) AS target_sales_quantity
     FROM a_class.sales_targets_a
-    GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
+    GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
 ),
 monthly AS (
     SELECT
@@ -79,4 +79,3 @@ UNION ALL
 SELECT * FROM weekly
 UNION ALL
 SELECT * FROM monthly;
-

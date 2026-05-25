@@ -49,6 +49,15 @@ _BUSINESS_OVERVIEW_LEGACY_QUERY_KEYS = {
     "end_date",
 }
 
+_DASHBOARD_MODULE_ROUTE_PREFIXES = {
+    "clearance_ranking": ("/api/dashboard/clearance-ranking",),
+    "business_overview": (
+        "/api/dashboard/business-overview/",
+        "/api/dashboard/store-analysis/",
+        "/api/dashboard/b-cost-analysis/",
+    ),
+}
+
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
     return {k: "" if v is None else str(v) for k, v in params.items()}
@@ -72,25 +81,55 @@ def _reject_business_overview_legacy_params(request: Request) -> None:
 
 
 def _require_dashboard_assets_ready(request: Request) -> None:
+    def _resolve_dashboard_module_name(path: str) -> str | None:
+        for module_name, prefixes in _DASHBOARD_MODULE_ROUTE_PREFIXES.items():
+            if any(path.startswith(prefix) for prefix in prefixes):
+                return module_name
+        return None
+
     report = getattr(getattr(request, "app", None), "state", None)
     report = getattr(report, "dashboard_assets_report", None)
     if not isinstance(report, dict):
         return
+
+    module_name = _resolve_dashboard_module_name(getattr(request, "url", None).path if getattr(request, "url", None) else request.scope.get("path", ""))
+    modules = report.get("modules")
+    module_report = modules.get(module_name) if isinstance(modules, dict) and module_name else None
+
+    if isinstance(module_report, dict):
+        if module_report.get("status") in {"ready", "refreshing"}:
+            return
+        detail: dict[str, Any] = {
+            "message": "PostgreSQL dashboard assets are not ready. Run deploy-time bootstrap and retry.",
+            "module_name": module_name,
+            "status": module_report.get("status"),
+            "ready": module_report.get("ready"),
+            "assets_drift": module_report.get("assets_drift"),
+            "core_missing_objects": module_report.get("core_missing_objects"),
+            "refresh_missing_objects": module_report.get("refresh_missing_objects"),
+            "asset_fingerprint_expected": module_report.get("asset_fingerprint_expected"),
+            "asset_fingerprint_applied": module_report.get("asset_fingerprint_applied"),
+            "refresh_fingerprint_expected": module_report.get("refresh_fingerprint_expected"),
+            "refresh_fingerprint_applied": module_report.get("refresh_fingerprint_applied"),
+            "hint": {
+                "bootstrap_command": f"python scripts/bootstrap_postgresql_dashboard.py --module {module_name}",
+                "startup_policy": "runtime only inspects readiness; SQL asset publish happens at deploy time",
+            },
+        }
+        raise HTTPException(status_code=503, detail=detail)
+
     if report.get("ready") is True:
         return
 
-    detail: dict[str, Any] = {
+    detail = {
         "message": "PostgreSQL dashboard assets are not ready. Run deploy-time bootstrap and retry.",
         "ready": report.get("ready"),
         "missing_schemas": report.get("missing_schemas"),
         "missing_objects": report.get("missing_objects"),
         "assets_drift": report.get("assets_drift"),
-        "assets_fingerprint_expected": report.get("assets_fingerprint_expected"),
-        "assets_fingerprint_last": report.get("assets_fingerprint_last"),
         "hint": {
-            "bootstrap_command": "python scripts/bootstrap_postgresql_dashboard.py",
-            "startup_policy": "production startup should only inspect/ready-check; heavy SQL must run at deploy time",
-            "env": "AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=true (dev only)",
+            "bootstrap_command": "python scripts/bootstrap_postgresql_dashboard.py --module all",
+            "startup_policy": "runtime only inspects readiness; SQL asset publish happens at deploy time",
         },
     }
     raise HTTPException(status_code=503, detail=detail)
@@ -351,6 +390,12 @@ async def get_business_overview_kpi_postgresql(
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except HTTPException:
         raise
+    except HTTPException:
+        raise
+    except HTTPException:
+        raise
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -406,6 +451,10 @@ async def get_business_overview_comparison_postgresql(
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
+    except HTTPException:
+        raise
     except HTTPException:
         raise
     except ValueError as e:
@@ -531,6 +580,10 @@ async def get_business_overview_bootstrap_postgresql(
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except HTTPException:
         raise
+    except HTTPException:
+        raise
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -538,7 +591,7 @@ async def get_business_overview_bootstrap_postgresql(
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
 
 
-@router.get("/annual-summary/kpi")
+# annual-summary removed pre-launch
 async def get_annual_summary_kpi_postgresql(
     request: Request,
     granularity: str = Query(..., description="monthly|yearly"),
@@ -720,6 +773,8 @@ async def get_business_overview_inventory_backlog_postgresql(
             _produce_payload,
         )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -786,6 +841,8 @@ async def get_business_overview_operational_metrics_postgresql(
                             if warning not in warnings:
                                 warnings.append(warning)
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -817,6 +874,8 @@ async def get_store_analysis_capabilities_postgresql(
             _produce_payload,
         )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -847,6 +906,8 @@ async def get_store_analysis_shops_postgresql(
             _produce_payload,
         )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -885,6 +946,8 @@ async def get_store_analysis_overview_postgresql(
             _produce_payload,
         )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -1211,6 +1274,8 @@ async def get_clearance_ranking_postgresql(
             _produce_payload,
         )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except HTTPException:
+        raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
@@ -1218,7 +1283,7 @@ async def get_clearance_ranking_postgresql(
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
 
 
-@router.get("/annual-summary/trend")
+# annual-summary removed pre-launch
 async def get_annual_summary_trend_postgresql(
     request: Request,
     granularity: str = Query(..., description="monthly|yearly"),
@@ -1248,7 +1313,7 @@ async def get_annual_summary_trend_postgresql(
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
 
 
-@router.get("/annual-summary/platform-share")
+# annual-summary removed pre-launch
 async def get_annual_summary_platform_share_postgresql(
     request: Request,
     granularity: str = Query(..., description="monthly|yearly"),
@@ -1278,7 +1343,7 @@ async def get_annual_summary_platform_share_postgresql(
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
 
 
-@router.get("/annual-summary/by-shop")
+# annual-summary removed pre-launch
 async def get_annual_summary_by_shop_postgresql(
     request: Request,
     granularity: str = Query(..., description="monthly|yearly"),
@@ -1308,7 +1373,7 @@ async def get_annual_summary_by_shop_postgresql(
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
 
 
-@router.get("/annual-summary/target-completion")
+# annual-summary removed pre-launch
 async def get_annual_summary_target_completion_postgresql(
     request: Request,
     granularity: str = Query(..., description="monthly|yearly"),

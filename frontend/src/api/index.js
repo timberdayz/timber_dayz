@@ -2,7 +2,9 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import {
+  hasAuthRecoveryFailed,
   hasAnyPersistedAuthArtifact,
+  markAuthRecoveryFailed,
   readPersistedAuthState
 } from '@/utils/authSession'
 
@@ -247,6 +249,14 @@ api.interceptors.request.use(
     // 排除不需要认证的接口
     const needsAuth = !NO_AUTH_PATHS.some((path) => config.url.includes(path))
     if (needsAuth) {
+      if (hasAuthRecoveryFailed(localStorage)) {
+        const invalidatedError = new Error('Authentication session invalidated')
+        invalidatedError.code = 401
+        invalidatedError.type = 'AuthError'
+        invalidatedError.isApiError = true
+        return Promise.reject(invalidatedError)
+      }
+
       let token = null
       try {
         const store = getAuthStore()
@@ -542,6 +552,7 @@ api.interceptors.response.use(
           }
         }
 
+        markAuthRecoveryFailed(localStorage)
         forceLocalLogout()
         redirectToLogin()
         return Promise.reject(refreshError)
@@ -560,6 +571,7 @@ api.interceptors.response.use(
           }
         }
 
+        markAuthRecoveryFailed(localStorage)
         forceLocalLogout()
         redirectToLogin()
         return Promise.reject(refreshError)
@@ -2127,6 +2139,10 @@ export default {
     return await this._get(
       `/dashboard/business-overview/bootstrap${queryString ? '?' + queryString : ''}`
     )
+  },
+
+  async getDashboardAssetsStatus() {
+    return await this._get('/dashboard/assets/status')
   },
 
   async getBusinessOverviewComparison(params) {

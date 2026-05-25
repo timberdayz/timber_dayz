@@ -24,10 +24,10 @@ def load_script_module():
 def test_bootstrap_script_exposes_dashboard_targets():
     script = load_script_module()
 
-    assert "api.business_overview_operational_metrics_module" in script.DASHBOARD_BOOTSTRAP_TARGETS
-    assert "api.business_overview_comparison_module" in script.DASHBOARD_BOOTSTRAP_TARGETS
+    assert "business_overview" in script.DASHBOARD_MODULE_TARGETS
+    assert "clearance_ranking" in script.DASHBOARD_MODULE_TARGETS
     assert "ops.pipeline_run_log" in script.DASHBOARD_REQUIRED_OBJECTS
-    assert "core.field_alias_rules" in script.DASHBOARD_REQUIRED_OBJECTS
+    assert "ops.dashboard_asset_state" in script.DASHBOARD_REQUIRED_OBJECTS
 
 
 def test_bootstrap_script_supports_check_mode():
@@ -37,3 +37,13 @@ def test_bootstrap_script_supports_check_mode():
     args = parser.parse_args(["--check"])
 
     assert args.check is True
+
+
+def test_bootstrap_script_supports_module_selection():
+    script = load_script_module()
+
+    parser = script.build_parser()
+    args = parser.parse_args(["--module", "business_overview", "--json"])
+
+    assert args.module == "business_overview"
+    assert args.json is True

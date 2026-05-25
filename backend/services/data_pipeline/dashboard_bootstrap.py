@@ -7,26 +7,155 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.data_pipeline.refresh_registry import SQL_TARGET_PATHS, topologically_sort_targets
+from backend.services.data_pipeline.refresh_registry import (
+    PIPELINE_DEPENDENCIES,
+    SQL_TARGET_PATHS,
+)
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, execute_sql_file
 
 
-DASHBOARD_BOOTSTRAP_TARGETS = topologically_sort_targets(list(SQL_TARGET_PATHS.keys()))
+DASHBOARD_MODULE_TARGETS: dict[str, dict[str, list[str]]] = {
+    "business_overview": {
+        "core_targets": [
+            "api.business_overview_kpi_module",
+            "api.business_overview_comparison_platform_module",
+            "api.business_overview_comparison_module",
+            "api.business_overview_shop_racing_module",
+            "api.business_overview_traffic_ranking_module",
+            "api.business_overview_inventory_backlog_module",
+            "api.inventory_backlog_summary_module",
+            "api.business_overview_operational_metrics_module",
+        ],
+        "refresh_targets": [
+            "semantic.fact_orders_monthly_atomic_mv",
+        ],
+    },
+    "clearance_ranking": {
+        "core_targets": [
+            "api.inventory_backlog_summary_module",
+            "api.clearance_ranking_module",
+        ],
+        "refresh_targets": [],
+    },
+}
+
 DASHBOARD_REQUIRED_SCHEMAS = ("semantic", "mart", "api", "ops")
 OPS_TABLES = (
     "ops.pipeline_run_log",
     "ops.pipeline_step_log",
     "ops.data_freshness_log",
     "ops.data_lineage_registry",
+    "ops.dashboard_asset_state",
 )
-EXTRA_TABLES = (
-    "core.field_alias_rules",
-)
-DASHBOARD_REQUIRED_OBJECTS = [*DASHBOARD_BOOTSTRAP_TARGETS, *OPS_TABLES, *EXTRA_TABLES]
+EXTRA_TABLES = ("core.field_alias_rules",)
 
-# Global bootstrap lock to avoid deadlocks during concurrent startup/deploy.
-# Chosen as a stable 32-bit integer key derived from a human label.
-_DASHBOARD_BOOTSTRAP_LOCK_KEY = 918_240_113  # "bootstrap_postgresql_dashboard"
+DASHBOARD_BOOTSTRAP_TARGETS = sorted(
+    {
+        target
+        for module in DASHBOARD_MODULE_TARGETS.values()
+        for target in module["core_targets"]
+    }
+)
+DASHBOARD_REQUIRED_OBJECTS = [
+    *sorted(
+        {
+            target
+            for module in DASHBOARD_MODULE_TARGETS.values()
+            for target in [*module["core_targets"], *module["refresh_targets"]]
+        }
+    ),
+    *OPS_TABLES,
+    *EXTRA_TABLES,
+]
+
+_DASHBOARD_BOOTSTRAP_LOCK_KEY = 918_240_113
+
+
+def _resolve_module_names(module: str = "all") -> list[str]:
+    if module == "all":
+        return list(DASHBOARD_MODULE_TARGETS.keys())
+    if module not in DASHBOARD_MODULE_TARGETS:
+        raise ValueError(f"Unknown dashboard module: {module}")
+    return [module]
+
+
+def _topological_sort_targets(
+    targets: list[str],
+    *,
+    blocked_targets: set[str] | None = None,
+) -> list[str]:
+    ordered: list[str] = []
+    blocked = blocked_targets or set()
+    temporary: set[str] = set()
+    permanent: set[str] = set(blocked)
+
+    def visit(target: str) -> None:
+        if target in permanent:
+            return
+        if target in temporary:
+            raise ValueError(f"Cycle detected in refresh dependency graph at {target}")
+        temporary.add(target)
+        for dependency in PIPELINE_DEPENDENCIES.get(target, []):
+            visit(dependency)
+        temporary.remove(target)
+        permanent.add(target)
+        if target not in ordered:
+            ordered.append(target)
+
+    for target in targets:
+        visit(target)
+    return ordered
+
+
+def _module_core_plan(module_name: str) -> list[str]:
+    module = DASHBOARD_MODULE_TARGETS[module_name]
+    return _topological_sort_targets(
+        module["core_targets"],
+        blocked_targets=set(module["refresh_targets"]),
+    )
+
+
+def _module_refresh_plan(module_name: str) -> list[str]:
+    module = DASHBOARD_MODULE_TARGETS[module_name]
+    refresh_targets = module["refresh_targets"]
+    return _topological_sort_targets(refresh_targets) if refresh_targets else []
+
+
+def _all_dashboard_core_plan() -> list[str]:
+    targets: list[str] = []
+    for module_name in DASHBOARD_MODULE_TARGETS:
+        targets.extend(_module_core_plan(module_name))
+    ordered: list[str] = []
+    for target in targets:
+        if target not in ordered:
+            ordered.append(target)
+    return ordered
+
+
+def _compute_targets_fingerprint(targets: list[str]) -> str | None:
+    if not targets:
+        return None
+
+    hasher = hashlib.sha256()
+    root = Path(__file__).resolve().parents[3]
+    for target in sorted(set(targets)):
+        path = root / SQL_TARGET_PATHS[target]
+        hasher.update(target.encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(str(path).encode("utf-8"))
+        hasher.update(b"\0")
+        try:
+            hasher.update(path.read_bytes())
+        except FileNotFoundError:
+            hasher.update(b"")
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
+def _normalize_json_value(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    return {}
 
 
 async def _try_advisory_lock(session: AsyncSession, key: int) -> bool:
@@ -38,45 +167,91 @@ async def _advisory_unlock(session: AsyncSession, key: int) -> None:
     try:
         await session.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
     except Exception:
-        # Best-effort: if the session is already closed/failed, unlock isn't possible.
         pass
 
 
 async def _advisory_lock(session: AsyncSession, key: int) -> None:
-    # Block until lock acquired (used by deploy-time bootstrap).
     await session.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
 
 
-def _compute_dashboard_assets_fingerprint() -> str:
-    """Stable fingerprint for dashboard SQL assets, used for drift detection.
-
-    Note: This is intentionally file-content-based (not DB-based) so that local
-    code changes reliably trigger a bootstrap refresh on the same database.
-    """
-    hasher = hashlib.sha256()
-    root = Path(__file__).resolve().parents[3]
-
-    paths: list[Path] = []
-    for target, rel_path in SQL_TARGET_PATHS.items():
-        _ = target
-        paths.append(root / rel_path)
-    paths.append(root / "sql" / "ops" / "create_pipeline_tables.sql")
-    paths.append(root / "sql" / "ops" / "create_field_alias_rules.sql")
-
-    for path in sorted({p.resolve() for p in paths}, key=lambda p: str(p).lower()):
-        hasher.update(str(path).encode("utf-8"))
-        hasher.update(b"\0")
-        try:
-            content = path.read_bytes()
-        except FileNotFoundError:
-            content = b""
-        hasher.update(content)
-        hasher.update(b"\0")
-
-    return hasher.hexdigest()
+async def _load_dashboard_asset_state(session: AsyncSession) -> dict[str, dict[str, Any]]:
+    try:
+        reg = await session.execute(text("SELECT to_regclass('ops.dashboard_asset_state')"))
+        if reg.scalar_one_or_none() is None:
+            return {}
+        result = await session.execute(
+            text(
+                """
+                SELECT module_name,
+                       asset_fingerprint_expected,
+                       asset_fingerprint_applied,
+                       status,
+                       run_id,
+                       updated_at,
+                       details_json
+                FROM ops.dashboard_asset_state
+                """
+            )
+        )
+        rows = {}
+        for row in result.mappings():
+            rows[row["module_name"]] = dict(row)
+        return rows
+    except Exception:
+        return {}
 
 
-async def inspect_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
+async def _upsert_dashboard_asset_state(
+    session: AsyncSession,
+    *,
+    module_name: str,
+    asset_fingerprint_expected: str | None,
+    asset_fingerprint_applied: str | None,
+    status: str,
+    run_id: str | None,
+    details_json: dict[str, Any] | None = None,
+) -> None:
+    await session.execute(
+        text(
+            """
+            INSERT INTO ops.dashboard_asset_state (
+                module_name,
+                asset_fingerprint_expected,
+                asset_fingerprint_applied,
+                status,
+                run_id,
+                updated_at,
+                details_json
+            ) VALUES (
+                :module_name,
+                :asset_fingerprint_expected,
+                :asset_fingerprint_applied,
+                :status,
+                :run_id,
+                NOW(),
+                CAST(:details_json AS jsonb)
+            )
+            ON CONFLICT (module_name) DO UPDATE
+            SET asset_fingerprint_expected = EXCLUDED.asset_fingerprint_expected,
+                asset_fingerprint_applied = EXCLUDED.asset_fingerprint_applied,
+                status = EXCLUDED.status,
+                run_id = EXCLUDED.run_id,
+                updated_at = NOW(),
+                details_json = EXCLUDED.details_json
+            """
+        ),
+        {
+            "module_name": module_name,
+            "asset_fingerprint_expected": asset_fingerprint_expected,
+            "asset_fingerprint_applied": asset_fingerprint_applied,
+            "status": status,
+            "run_id": run_id,
+            "details_json": __import__("json").dumps(details_json or {}),
+        },
+    )
+
+
+async def _collect_existing_assets(session: AsyncSession) -> tuple[set[str], set[str]]:
     schema_result = await session.execute(
         text(
             """
@@ -109,68 +284,229 @@ async def inspect_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
         {"schemas": ["semantic", "mart", "api", "ops", "core"]},
     )
     existing_objects = {f"{row[0]}.{row[1]}" for row in object_result.fetchall()}
+    return existing_schemas, existing_objects
 
-    missing_schemas = [schema for schema in DASHBOARD_REQUIRED_SCHEMAS if schema not in existing_schemas]
-    missing_objects = [name for name in DASHBOARD_REQUIRED_OBJECTS if name not in existing_objects]
 
-    expected_fingerprint = _compute_dashboard_assets_fingerprint()
-    last_fingerprint = None
-    drift = False
+def _build_module_report(
+    *,
+    module_name: str,
+    module_state: dict[str, Any] | None,
+    existing_objects: set[str],
+) -> dict[str, Any]:
+    module = DASHBOARD_MODULE_TARGETS[module_name]
+    core_targets = _module_core_plan(module_name)
+    refresh_targets = _module_refresh_plan(module_name)
+    core_expected = _compute_targets_fingerprint(core_targets)
+    refresh_expected = _compute_targets_fingerprint(refresh_targets)
 
-    # Drift detection: if assets exist but were bootstrapped under a different SQL fingerprint,
-    # treat as "not ready" so run.py can re-bootstrap automatically.
-    try:
-        reg = await session.execute(text("SELECT to_regclass('ops.pipeline_run_log')"))
-        pipeline_run_log_exists = reg.scalar_one_or_none() is not None
-        if pipeline_run_log_exists:
-            result = await session.execute(
-                text(
-                    """
-                    SELECT context->>'assets_fingerprint'
-                    FROM ops.pipeline_run_log
-                    WHERE pipeline_name = 'bootstrap_postgresql_dashboard'
-                      AND status = 'success'
-                    ORDER BY completed_at DESC NULLS LAST, started_at DESC
-                    LIMIT 1
-                    """
-                )
-            )
-            last_fingerprint = result.scalar_one_or_none()
-            drift = (last_fingerprint != expected_fingerprint) if last_fingerprint else True
-    except Exception:
-        # If we cannot read bootstrap history, don't hard-fail readiness on drift.
-        drift = False
+    details = _normalize_json_value((module_state or {}).get("details_json"))
+    core_applied = (module_state or {}).get("asset_fingerprint_applied")
+    refresh_applied = details.get("refresh_fingerprint_applied")
+    core_missing = [target for target in core_targets if target not in existing_objects]
+    refresh_missing = [target for target in refresh_targets if target not in existing_objects]
+    stored_status = (module_state or {}).get("status")
+
+    if core_missing or (core_expected and core_applied != core_expected) or stored_status == "failed":
+        status = "drift"
+        ready = False
+    elif refresh_targets and (
+        refresh_missing
+        or (refresh_expected and refresh_applied != refresh_expected)
+        or stored_status == "refreshing"
+    ):
+        status = "refreshing"
+        ready = True
+    else:
+        status = "ready"
+        ready = True
 
     return {
-        "ready": (not missing_schemas and not missing_objects and not drift),
-        "existing_schemas": sorted(existing_schemas),
-        "missing_schemas": missing_schemas,
-        "missing_objects": missing_objects,
-        "assets_fingerprint_expected": expected_fingerprint,
-        "assets_fingerprint_last": last_fingerprint,
-        "assets_drift": drift,
+        "module_name": module_name,
+        "status": status,
+        "ready": ready,
+        "core_targets": core_targets,
+        "refresh_targets": refresh_targets,
+        "core_missing_objects": core_missing,
+        "refresh_missing_objects": refresh_missing,
+        "assets_drift": status == "drift",
+        "asset_fingerprint_expected": core_expected,
+        "asset_fingerprint_applied": core_applied,
+        "refresh_fingerprint_expected": refresh_expected,
+        "refresh_fingerprint_applied": refresh_applied,
+        "run_id": (module_state or {}).get("run_id"),
+        "details": details,
     }
 
 
-async def bootstrap_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
-    # Bootstrap may rebuild large semantic/materialized assets and can exceed
-    # the normal 120s query timeout configured for interactive runtime traffic.
+async def inspect_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
+    existing_schemas, existing_objects = await _collect_existing_assets(session)
+    state_rows = await _load_dashboard_asset_state(session)
+
+    modules: dict[str, dict[str, Any]] = {}
+    for module_name in DASHBOARD_MODULE_TARGETS:
+        modules[module_name] = _build_module_report(
+            module_name=module_name,
+            module_state=state_rows.get(module_name),
+            existing_objects=existing_objects,
+        )
+
+    missing_schemas = [
+        schema for schema in DASHBOARD_REQUIRED_SCHEMAS if schema not in existing_schemas
+    ]
+    missing_objects = [
+        name for name in DASHBOARD_REQUIRED_OBJECTS if name not in existing_objects
+    ]
+    ready = all(report["ready"] for report in modules.values())
+    assets_drift = any(report["status"] == "drift" for report in modules.values())
+
+    return {
+        "ready": ready,
+        "existing_schemas": sorted(existing_schemas),
+        "missing_schemas": missing_schemas,
+        "missing_objects": missing_objects,
+        "assets_drift": assets_drift,
+        "modules": modules,
+    }
+
+
+async def bootstrap_dashboard_assets(
+    session: AsyncSession,
+    *,
+    module: str = "all",
+) -> dict[str, Any]:
     await session.execute(text("SET LOCAL statement_timeout = 0"))
     await execute_sql_file(session, "sql/ops/create_pipeline_tables.sql")
     await execute_sql_file(session, "sql/ops/create_field_alias_rules.sql")
-    fingerprint = _compute_dashboard_assets_fingerprint()
-    run_id = await execute_refresh_plan(
-        session,
-        targets=DASHBOARD_BOOTSTRAP_TARGETS,
-        pipeline_name="bootstrap_postgresql_dashboard",
-        trigger_source="bootstrap",
-        context={
-            "target_count": len(DASHBOARD_BOOTSTRAP_TARGETS),
-            "assets_fingerprint": fingerprint,
-        },
-    )
+
+    selected_modules = _resolve_module_names(module)
+    module_run_ids: dict[str, str | None] = {}
+
+    for module_name in selected_modules:
+        core_targets = _module_core_plan(module_name)
+        refresh_targets = _module_refresh_plan(module_name)
+        core_expected = _compute_targets_fingerprint(core_targets)
+        refresh_expected = _compute_targets_fingerprint(refresh_targets)
+        existing_state = (await _load_dashboard_asset_state(session)).get(module_name, {})
+        existing_details = _normalize_json_value(existing_state.get("details_json"))
+
+        await _upsert_dashboard_asset_state(
+            session,
+            module_name=module_name,
+            asset_fingerprint_expected=core_expected,
+            asset_fingerprint_applied=existing_state.get("asset_fingerprint_applied"),
+            status="refreshing" if refresh_targets else "ready",
+            run_id=existing_state.get("run_id"),
+            details_json={
+                **existing_details,
+                "refresh_fingerprint_expected": refresh_expected,
+                "refresh_fingerprint_applied": existing_details.get("refresh_fingerprint_applied"),
+                "core_targets": core_targets,
+                "refresh_targets": refresh_targets,
+            },
+        )
+
+        run_id = await execute_refresh_plan(
+            session,
+            targets=core_targets,
+            pipeline_name=f"bootstrap_postgresql_dashboard.{module_name}",
+            trigger_source="bootstrap",
+            context={
+                "module_name": module_name,
+                "target_count": len(core_targets),
+                "asset_fingerprint": core_expected,
+                "refresh_target_count": len(refresh_targets),
+            },
+            preordered=True,
+        )
+        module_run_ids[module_name] = run_id
+
+        await _upsert_dashboard_asset_state(
+            session,
+            module_name=module_name,
+            asset_fingerprint_expected=core_expected,
+            asset_fingerprint_applied=core_expected,
+            status="refreshing" if refresh_targets else "ready",
+            run_id=run_id,
+            details_json={
+                "refresh_fingerprint_expected": refresh_expected,
+                "refresh_fingerprint_applied": existing_details.get("refresh_fingerprint_applied"),
+                "core_targets": core_targets,
+                "refresh_targets": refresh_targets,
+            },
+        )
+
     report = await inspect_dashboard_assets(session)
-    report["run_id"] = run_id
+    report["run_ids"] = module_run_ids
+    report["module"] = module
+    return report
+
+
+async def refresh_dashboard_materialization_assets(
+    session: AsyncSession,
+    *,
+    module: str = "all",
+) -> dict[str, Any]:
+    await session.execute(text("SET LOCAL statement_timeout = 0"))
+    selected_modules = _resolve_module_names(module)
+    module_run_ids: dict[str, str | None] = {}
+
+    for module_name in selected_modules:
+        refresh_targets = _module_refresh_plan(module_name)
+        if not refresh_targets:
+            continue
+        core_targets = _all_dashboard_core_plan()
+
+        state = (await _load_dashboard_asset_state(session)).get(module_name, {})
+        details = _normalize_json_value(state.get("details_json"))
+        refresh_expected = _compute_targets_fingerprint(refresh_targets)
+
+        refresh_run_id = await execute_refresh_plan(
+            session,
+            targets=refresh_targets,
+            pipeline_name=f"dashboard_materialization_refresh.{module_name}",
+            trigger_source="materialization_refresh",
+            context={
+                "module_name": module_name,
+                "target_count": len(refresh_targets),
+                "refresh_fingerprint": refresh_expected,
+            },
+            preordered=True,
+        )
+        run_id = await execute_refresh_plan(
+            session,
+            targets=core_targets,
+            pipeline_name=f"dashboard_materialization_rebuild_core.{module_name}",
+            trigger_source="materialization_refresh",
+            context={
+                "module_name": module_name,
+                "target_count": len(core_targets),
+                "asset_fingerprint": state.get("asset_fingerprint_expected"),
+                "refresh_run_id": refresh_run_id,
+            },
+            preordered=True,
+        )
+        module_run_ids[module_name] = run_id
+
+        await _upsert_dashboard_asset_state(
+            session,
+            module_name=module_name,
+            asset_fingerprint_expected=state.get("asset_fingerprint_expected"),
+            asset_fingerprint_applied=state.get("asset_fingerprint_applied"),
+            status="ready",
+            run_id=run_id,
+            details_json={
+                **details,
+                "refresh_fingerprint_expected": refresh_expected,
+                "refresh_fingerprint_applied": refresh_expected,
+                "refresh_run_id": refresh_run_id,
+                "refresh_targets": refresh_targets,
+                "core_targets": core_targets,
+            },
+        )
+
+    report = await inspect_dashboard_assets(session)
+    report["run_ids"] = module_run_ids
+    report["module"] = module
     return report
 
 
@@ -178,18 +514,19 @@ async def bootstrap_dashboard_assets_if_needed(
     session: AsyncSession,
     *,
     wait_for_lock: bool = False,
+    module: str = "all",
 ) -> dict[str, Any]:
     report = await inspect_dashboard_assets(session)
-    if report["ready"]:
+    selected_modules = _resolve_module_names(module)
+    if all(
+        report["modules"][module_name]["status"] in {"ready", "refreshing"}
+        for module_name in selected_modules
+    ):
         report["bootstrapped"] = False
         return report
 
     acquired = False
     if wait_for_lock:
-        # Avoid blocking `pg_advisory_lock` under a default statement_timeout.
-        # Prefer a bounded retry loop with pg_try_advisory_lock so callers
-        # can surface a clear "bootstrap in progress" outcome instead of
-        # crashing on QueryCanceledError.
         await session.execute(text("SET LOCAL statement_timeout = 0"))
         import asyncio
 
@@ -206,13 +543,12 @@ async def bootstrap_dashboard_assets_if_needed(
         acquired = await _try_advisory_lock(session, _DASHBOARD_BOOTSTRAP_LOCK_KEY)
 
     if not acquired:
-        # Another instance is bootstrapping. Avoid deadlock by not racing it.
         report["bootstrapped"] = False
         report["bootstrap_in_progress"] = True
         return report
 
     try:
-        report = await bootstrap_dashboard_assets(session)
+        report = await bootstrap_dashboard_assets(session, module=module)
         report["bootstrapped"] = True
         return report
     finally:

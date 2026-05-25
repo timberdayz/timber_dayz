@@ -13,6 +13,16 @@
       </template>
     </PageHeader>
 
+    <el-alert
+      v-if="dashboardAssetNotice"
+      :title="dashboardAssetNotice.title"
+      :description="dashboardAssetNotice.description"
+      :type="dashboardAssetNotice.type"
+      show-icon
+      :closable="false"
+      class="dashboard-asset-alert"
+    />
+
     <!-- 全局日期（页面级主控，各模块可跟随或手动覆盖） -->
     <div class="global-date-bar">
       <span class="global-date-label">全局日期</span>
@@ -1205,13 +1215,15 @@ import {
 } from '@/utils/dataFormatter'
 import {
   showError as showApiError,
-  handleApiError
+  handleApiError,
+  getDashboardAssetUnavailableInfo
 } from '@/utils/errorHandler'
 import { normalizeClearanceRankingResponse } from '@/utils/businessOverviewData'
 import PageHeader from '@/components/common/PageHeader.vue'
 
 // 响应式数据
 const loading = ref(false)
+const dashboardAssetNotice = ref(null)
 const loadingKPI = ref(false)
 const loadingComparison = ref(false)
 const loadingInventory = ref(false)
@@ -1224,6 +1236,64 @@ const globalDate = ref(
     return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`
   })()
 )
+
+function clearDashboardAssetNotice() {
+  dashboardAssetNotice.value = null
+}
+
+function setDashboardAssetNotice({ moduleName = '', status = 'warning', message = '', hint = null }) {
+  const labels = {
+    business_overview: '业务概览',
+    clearance_ranking: '滞销清理排名'
+  }
+  dashboardAssetNotice.value = {
+    title:
+      status === 'refreshing'
+        ? `${labels[moduleName] || 'Dashboard 模块'}数据刷新中`
+        : `${labels[moduleName] || 'Dashboard 模块'}暂不可用`,
+    description: [message, hint?.bootstrap_command ? `建议命令: ${hint.bootstrap_command}` : '']
+      .filter(Boolean)
+      .join(' '),
+    type: status === 'refreshing' ? 'warning' : 'error'
+  }
+}
+
+function consumeDashboardAssetError(error, fallbackModuleName = 'business_overview') {
+  const info = getDashboardAssetUnavailableInfo(error)
+  if (!info) return false
+  setDashboardAssetNotice({
+    moduleName: info.moduleName || fallbackModuleName,
+    status: info.status,
+    message: info.message,
+    hint: info.hint
+  })
+  return true
+}
+
+async function refreshDashboardAssetNotice() {
+  try {
+    const payload = await api.getDashboardAssetsStatus()
+    const modules = payload?.report?.modules || {}
+    const blocked = [modules.business_overview, modules.clearance_ranking].filter(
+      (moduleReport) => moduleReport && moduleReport.status && moduleReport.status !== 'ready'
+    )
+    if (!blocked.length) {
+      clearDashboardAssetNotice()
+      return
+    }
+    const primary = blocked[0]
+    setDashboardAssetNotice({
+      moduleName: primary.module_name,
+      status: primary.status,
+      message:
+        primary.status === 'refreshing'
+          ? 'Dashboard SQL 资产正在刷新，页面可能展示旧数据或局部空态。'
+          : 'Dashboard SQL 资产未就绪，当前页面会降级展示。'
+    })
+  } catch (_error) {
+    // Best-effort only; page can still rely on API-level error fallback.
+  }
+}
 const useGlobalDate = ref({
   comparison: true,
   shopRacing: true,
@@ -1852,7 +1922,9 @@ const loadComparisonData = async () => {
     updateComparisonTable()
   } catch (error) {
     console.error('加载数据对比失败:', error)
-    handleApiError(error, { showMessage: true, logError: true })
+    if (!consumeDashboardAssetError(error, 'business_overview')) {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
     comparisonData.value = { metrics: {}, today: {}, yesterday: {}, average: {} }
     comparisonTableData.value = []
     targetValue.value = 0
@@ -2228,7 +2300,9 @@ const loadKPIData = async () => {
     }
   } catch (error) {
     console.error('??KPI????:', error)
-    handleApiError(error, { showMessage: true, logError: true })
+    if (!consumeDashboardAssetError(error, 'business_overview')) {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
   } finally {
     loadingKPI.value = false
   }
@@ -2440,7 +2514,9 @@ const loadShopRacingData = async () => {
     }
   } catch (error) {
     console.error('加载店铺赛马数据失败:', error)
-    handleApiError(error, { showMessage: true, logError: true })
+    if (!consumeDashboardAssetError(error, 'business_overview')) {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
     shopRacingData.value = []
   } finally {
     loadingShopRacing.value = false
@@ -2505,7 +2581,9 @@ const loadOperationalMetrics = async () => {
     }
   } catch (error) {
     console.error('加载经营指标数据失败:', error)
-    handleApiError(error, { showMessage: true, logError: true })
+    if (!consumeDashboardAssetError(error, 'business_overview')) {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
   } finally {
     loadingOperational.value = false
   }
@@ -2568,7 +2646,9 @@ const loadTrafficRanking = async () => {
     }))
   } catch (error) {
     console.error('加载流量排名失败:', error)
-    handleApiError(error, { showMessage: true, logError: true })
+    if (!consumeDashboardAssetError(error, 'business_overview')) {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
   } finally {
     loadingTrafficRanking.value = false
   }
@@ -2592,7 +2672,9 @@ const loadInventoryBacklog = async () => {
     }
   } catch (error) {
     console.error('加载库存滞销数据失败:', error)
-    handleApiError(error, { showMessage: true, logError: true })
+    if (!consumeDashboardAssetError(error, 'business_overview')) {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
   } finally {
     loadingInventory.value = false
   }
@@ -2625,7 +2707,9 @@ const loadClearanceRanking = async (granularity) => {
     }
   } catch (error) {
     console.error('加载滞销清理排名失败:', error)
-    handleApiError(error, { showMessage: true, logError: true })
+    if (!consumeDashboardAssetError(error, 'clearance_ranking')) {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
   } finally {
     loadingClearanceRanking.value = false
   }
@@ -2743,7 +2827,9 @@ const loadCriticalTierBootstrap = async () => {
     applyOperationalPayload(payload?.operational_metrics)
   } catch (error) {
     console.error('[BusinessOverview] bootstrap 加载失败:', error)
-    handleApiError(error, { showMessage: true, logError: true })
+    if (!consumeDashboardAssetError(error, 'business_overview')) {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
     await Promise.allSettled([
       loadKPIData(),
       loadComparisonData(),
@@ -2759,6 +2845,7 @@ const loadCriticalTierBootstrap = async () => {
 const refreshData = async () => {
   loading.value = true
   try {
+    await refreshDashboardAssetNotice()
     applyGlobalToModules()
     await loadCriticalTierBootstrap()
     const results = await Promise.allSettled([
@@ -2772,7 +2859,9 @@ const refreshData = async () => {
     const failedResults = results.filter((result) => result.status === 'rejected')
     if (failedResults.length > 0) {
       console.warn('[BusinessOverview] 部分模块刷新失败，但页面已保留可用数据', failedResults)
-      ElMessage.warning('部分模块刷新失败，已显示可用数据')
+      if (!dashboardAssetNotice.value) {
+        ElMessage.warning('部分模块刷新失败，已显示可用数据')
+      }
       return
     }
 
@@ -2842,6 +2931,10 @@ watch(
   background: white;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.dashboard-asset-alert {
+  margin-bottom: 16px;
 }
 
 .global-date-label {

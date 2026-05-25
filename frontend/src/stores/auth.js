@@ -8,6 +8,7 @@ import { normalizeRoleCode, applyRolePermissions } from '@/config/rolePermission
 import { hasAnyRole, hasPermissionForRoles } from '@/utils/authRoles'
 import {
   clearPersistedAuthState,
+  resetAuthRecoveryState,
   hasAnyPersistedAuthArtifact,
   readPersistedAuthState,
   writePersistedAuthState,
@@ -25,6 +26,7 @@ export const useAuthStore = defineStore('auth', () => {
     refreshToken.value = ''
     user.value = null
     clearPersistedAuthState(localStorage)
+    resetAuthRecoveryState(localStorage)
 
     try {
       const userStore = useUserStore()
@@ -56,6 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
         refresh_token: refreshTokenValue,
         user_info: userInfo,
       })
+      resetAuthRecoveryState(localStorage)
 
       const userStore = useUserStore()
       userStore.hydrateFromStorage()
@@ -110,6 +113,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       token.value = accessToken
       localStorage.setItem('access_token', token.value)
+      resetAuthRecoveryState(localStorage)
 
       const newRefreshToken = response?.refresh_token || response?.data?.refresh_token
       if (newRefreshToken) {

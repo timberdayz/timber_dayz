@@ -1,10 +1,8 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
--- Canonical contract (best practice):
--- - a_class.sales_targets_a: year_month, shop_id, target_sales_amount
--- - a_class.operating_costs: year_month, shop_id, total (or rent/marketing_fee/utilities/other)
--- Compatibility with legacy Chinese-column variants should be implemented in semantic/alias layers,
--- not via dynamic SQL inside API assets.
+-- Current launch contract:
+-- - a_class.sales_targets_a: "年月", "店铺ID", "目标销售额"
+-- - a_class.operating_costs: "年月", "店铺ID", "成本合计" (or rent-like Chinese columns)
 CREATE OR REPLACE VIEW api.business_overview_operational_metrics_module AS
 WITH base_month_kpi AS (
     SELECT
@@ -32,21 +30,21 @@ WITH base_month_kpi AS (
 ),
 monthly_targets AS (
     SELECT
-        to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
-        shop_id AS shop_id,
-        SUM(target_sales_amount) AS monthly_target
+        to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
+        "店铺ID" AS shop_id,
+        SUM("目标销售额") AS monthly_target
     FROM a_class.sales_targets_a
-    GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
+    GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
 ),
 monthly_costs AS (
     SELECT
-        to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
-        shop_id AS shop_id,
+        to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
+        "店铺ID" AS shop_id,
         SUM(
-            COALESCE(total, COALESCE(rent, 0) + COALESCE(marketing_fee, 0) + COALESCE(utilities, 0) + COALESCE(other, 0))
+            COALESCE("成本合计", COALESCE("租金", 0) + COALESCE("营销费用", 0) + COALESCE("水电费", 0) + COALESCE("其他成本", 0))
         ) AS estimated_expenses
     FROM a_class.operating_costs
-    GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
+    GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
 )
 SELECT
     m.period_month,
@@ -91,4 +89,3 @@ LEFT JOIN mart.shop_day_kpi ds
     ON ds.period_date = m.anchor_date
    AND ds.platform_code = m.platform_code
    AND COALESCE(ds.shop_id, '') = COALESCE(m.shop_id, '');
-

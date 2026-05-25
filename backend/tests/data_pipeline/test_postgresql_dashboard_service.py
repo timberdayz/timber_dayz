@@ -724,8 +724,7 @@ async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(
 
     assert result[0]["target_amount"] == 120
     assert result[0]["achievement_rate"] == 83.33
-    assert "api.business_overview_shop_racing_monthly_module" in captured[0][0]
-    assert "api.business_overview_shop_racing_module" not in captured[0][0]
+    assert "api.business_overview_shop_racing_module" in captured[0][0]
 
 
 @pytest.mark.asyncio
@@ -762,7 +761,7 @@ async def test_postgresql_dashboard_service_shop_racing_prefers_resolved_display
 
     assert result[0]["name"] == "Singapore(HX Home)"
     assert result[0]["shop_id"] == "1308200830"
-    assert "api.business_overview_shop_racing_monthly_module" in captured[0][0]
+    assert "api.business_overview_shop_racing_module" in captured[0][0]
 
 
 @pytest.mark.asyncio
@@ -1076,7 +1075,7 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "api.business_overview_shop_racing_monthly_module")
+            await execute_sql_target(session, "api.business_overview_shop_racing_module")
             await session.commit()
 
         monkeypatch.setattr(

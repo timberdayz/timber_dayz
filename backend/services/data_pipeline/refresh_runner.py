@@ -418,9 +418,10 @@ async def execute_refresh_plan(
     continue_on_error: bool = False,
     max_attempts: int = 1,
     retry_backoff_seconds: float = 0.0,
+    preordered: bool = False,
 ) -> str:
     run_id = f"run_{uuid.uuid4().hex}"
-    ordered_targets = build_refresh_plan(targets)
+    ordered_targets = list(targets) if preordered else build_refresh_plan(targets)
     await _ensure_ops_tables(db)
     await _insert_run_log(
         db,
