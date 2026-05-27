@@ -101,7 +101,10 @@ mapped AS (
         COALESCE(raw_data->>'点击率', raw_data->>'click_rate', raw_data->>'Click Rate', raw_data->>'CTR') AS click_rate_raw,
         COALESCE(raw_data->>'转化率', raw_data->>'conversion_rate', raw_data->>'Conversion Rate', raw_data->>'CVR') AS conversion_rate_raw,
         COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
-        COALESCE(raw_data->>'成交金额', raw_data->>'GMV', raw_data->>'gmv', raw_data->>'sales_amount') AS gmv_raw,
+        COALESCE(raw_data->>'SKU 订单数', raw_data->>'sku_order_count', raw_data->>'SKU Order Count') AS sku_order_count_raw,
+        COALESCE(raw_data->>'GMV', raw_data->>'gmv') AS gmv_raw,
+        COALESCE(raw_data->>'总成交额', raw_data->>'成交金额', raw_data->>'sales_amount') AS total_transaction_amount_raw,
+        COALESCE(raw_data->>'商品访客数', raw_data->>'product_visitor_count', raw_data->>'Product Visitor Count') AS product_visitor_count_raw,
         COALESCE(raw_data->>'跳出率', raw_data->>'bounce_rate', raw_data->>'Bounce Rate') AS bounce_rate_raw,
         raw_data,
         header_columns,
@@ -141,7 +144,10 @@ resolved AS (
         m.click_rate_raw,
         m.conversion_rate_raw,
         m.order_count_raw,
+        m.sku_order_count_raw,
         m.gmv_raw,
+        m.total_transaction_amount_raw,
+        m.product_visitor_count_raw,
         m.bounce_rate_raw,
         m.raw_data,
         m.header_columns,
@@ -240,9 +246,21 @@ cleaned AS (
             ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
         END AS order_count,
         CASE
+            WHEN sku_order_count_raw IS NULL THEN NULL
+            ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sku_order_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+        END AS sku_order_count,
+        CASE
             WHEN gmv_raw IS NULL THEN NULL
             ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
         END AS gmv,
+        CASE
+            WHEN total_transaction_amount_raw IS NULL THEN NULL
+            ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(total_transaction_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+        END AS total_transaction_amount,
+        CASE
+            WHEN product_visitor_count_raw IS NULL THEN NULL
+            ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+        END AS product_visitor_count,
         CASE
             WHEN bounce_rate_raw IS NULL THEN NULL
             ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(bounce_rate_raw, '%', ''), ',', '.'), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric / 100.0
@@ -292,7 +310,10 @@ SELECT
     COALESCE(click_rate, 0) AS click_rate,
     COALESCE(conversion_rate, 0) AS conversion_rate,
     COALESCE(order_count, 0) AS order_count,
+    COALESCE(sku_order_count, 0) AS sku_order_count,
     COALESCE(gmv, 0) AS gmv,
+    COALESCE(total_transaction_amount, 0) AS total_transaction_amount,
+    COALESCE(product_visitor_count, 0) AS product_visitor_count,
     COALESCE(bounce_rate, 0) AS bounce_rate,
     raw_data,
     header_columns,

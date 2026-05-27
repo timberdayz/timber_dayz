@@ -186,6 +186,20 @@ class DataSyncService:
         self._save_auto_meta(catalog_file, meta, auto_meta)
 
     @staticmethod
+    def _mark_file_failed(catalog_file: CatalogFile, message: Optional[str]) -> None:
+        catalog_file.status = "failed"
+        catalog_file.error_message = message or "未知错误"
+
+    @staticmethod
+    def _mark_file_ingested(catalog_file: CatalogFile) -> None:
+        catalog_file.status = "ingested"
+        catalog_file.error_message = None
+        try:
+            setattr(catalog_file, "last_processed_at", datetime.now())
+        except Exception:
+            catalog_file.last_processed = datetime.now()
+
+    @staticmethod
     def _format_header_change_reason(header_changes: Dict[str, Any]) -> str:
         added_fields = header_changes.get("added_fields", []) or []
         removed_fields = header_changes.get("removed_fields", []) or []
@@ -682,6 +696,7 @@ class DataSyncService:
                     extract_images=True,
                     deduplication_fields=deduplication_fields,  # [*] v4.14.0新增:传递核心去重字段
                     sub_domain=sub_domain_value,  # [*] v4.16.0修复:优先从catalog_file获取
+                    template_id=getattr(template, "id", None),
                 )
                 
                 # 更新状态
@@ -691,7 +706,7 @@ class DataSyncService:
                     if result.get("skipped", False):
                         if skip_reason in ["empty_file_no_data_rows", "empty_file_no_data", "empty_file_already_processed"]:
                             # 空文件:已在上层处理,这里只记录日志
-                            catalog_file.status = "ingested"
+                            self._mark_file_ingested(catalog_file)
                             self._record_status(catalog_file, "success", f"文件为空,已标记为已处理")
                             logger.info(
                                 f"[DataSync] [v4.15.0] [OK] 文件{catalog_file.file_name}({file_id})为空文件,"
@@ -705,7 +720,7 @@ class DataSyncService:
                             
                             if updated_count > 0:
                                 # UPSERT策略:有更新
-                                catalog_file.status = "ingested"
+                                self._mark_file_ingested(catalog_file)
                                 self._record_status(catalog_file, "success", f"所有数据都已存在,已更新{updated_count}行(UPSERT策略)")
                                 logger.info(
                                     f"[DataSync] [v4.16.0] [OK] 文件{catalog_file.file_name}({file_id})所有数据都已存在,"
@@ -713,20 +728,20 @@ class DataSyncService:
                                 )
                             else:
                                 # 异常情况:标记为跳过(但应该不会发生)
-                                catalog_file.status = "ingested"
+                                self._mark_file_ingested(catalog_file)
                                 self._record_status(catalog_file, "success", f"所有数据都已存在,已跳过重复数据")
                                 logger.warning(
                                     f"[DataSync] [v4.16.0] [WARN] 文件{catalog_file.file_name}({file_id})所有数据都已存在,"
                                     f"但updated=0(异常情况,应该不会发生)"
                                 )
                     elif result.get("quarantined", 0) > 0:
-                        catalog_file.status = "ingested"  # 部分隔离也标记为已同步
+                        self._mark_file_ingested(catalog_file)  # 部分隔离也标记为已同步
                         self._record_status(catalog_file, "quarantined", f"部分数据已隔离")
                     else:
-                        catalog_file.status = "ingested"
+                        self._mark_file_ingested(catalog_file)
                         self._record_status(catalog_file, "success", f"入库成功")
                 else:
-                    catalog_file.status = 'failed'
+                    self._mark_file_failed(catalog_file, result.get("message", "未知错误"))
                     self._record_status(catalog_file, "failed", result.get("message", "未知错误"))
                 
                 await self.db.commit()
@@ -749,7 +764,7 @@ class DataSyncService:
                 # [*] 修复:处理数据库事务回滚问题
                 try:
                     await self.db.rollback()  # 先回滚,清除错误状态
-                    catalog_file.status = 'failed'
+                    self._mark_file_failed(catalog_file, f'ingest_failed: {str(e)}')
                     self._record_status(catalog_file, "failed", f'ingest_failed: {str(e)}')
                     await self.db.commit()
                 except Exception as commit_error:
@@ -763,7 +778,7 @@ class DataSyncService:
                         )
                         catalog_file = result.scalar_one_or_none()
                         if catalog_file:
-                            catalog_file.status = 'failed'
+                            self._mark_file_failed(catalog_file, f'ingest_failed: {str(e)}')
                             self._record_status(catalog_file, "failed", f'ingest_failed: {str(e)}')
                             await self.db.commit()
                     except Exception as retry_error:
@@ -800,7 +815,7 @@ class DataSyncService:
                         catalog_file = result.scalar_one_or_none()
                         if catalog_file and catalog_file.status == 'processing':
                             # 如果文件状态还是processing,更新为failed
-                            catalog_file.status = 'failed'
+                            self._mark_file_failed(catalog_file, f'sync_failed: {str(e)}')
                             self._record_status(catalog_file, "failed", f'sync_failed: {str(e)}')
                             await self.db.commit()
                     except Exception as retry_error:

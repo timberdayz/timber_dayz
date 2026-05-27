@@ -86,6 +86,22 @@ class RawDataImporter:
             表名字符串
         """
         return self.table_manager.get_table_name(platform, data_domain, sub_domain, granularity)
+
+    def _validate_metric_date_against_file_range(self, metric_date: Optional[date]) -> None:
+        if metric_date is None:
+            return
+
+        file_date_from = getattr(self, "file_date_from", None)
+        file_date_to = getattr(self, "file_date_to", None)
+
+        if file_date_from and metric_date < file_date_from:
+            raise ValueError(
+                f"metric_date {metric_date.isoformat()} is earlier than file_date_from {file_date_from.isoformat()}"
+            )
+        if file_date_to and metric_date > file_date_to:
+            raise ValueError(
+                f"metric_date {metric_date.isoformat()} is later than file_date_to {file_date_to.isoformat()}"
+            )
     
     def extract_metric_date(self, row: Dict[str, Any], header_columns: List[str]) -> Optional[date]:
         """
@@ -220,7 +236,8 @@ class RawDataImporter:
             if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", s):
                 for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
                     try:
-                        return datetime.strptime(s, fmt).date()
+                        parsed = datetime.strptime(s, fmt).date()
+                        return (parsed, parsed, None, None)
                     except ValueError:
                         continue
         except Exception:
@@ -554,6 +571,8 @@ class RawDataImporter:
                     )
                     if metric_date is None:
                         raise ValueError("failed to resolve metric_date from field_parse_rules")
+
+                self._validate_metric_date_against_file_range(metric_date)
                 
                 # [*] v4.15.0新增:获取货币代码
                 currency_code = None
@@ -682,7 +701,7 @@ class RawDataImporter:
                     else:
                         where_clause += " AND shop_id IS NULL"
                 
-                # services域需要sub_domain条件
+                # services 域也必须按平台/店铺定位，避免跨店铺 UPSERT 覆盖
                 if data_domain.lower() == 'services' and sub_domain:
                     where_clause += " AND sub_domain = :sub_domain"
                     where_params['sub_domain'] = sub_domain
@@ -834,17 +853,11 @@ class RawDataImporter:
                 # [WARN] 注意:PostgreSQL不支持ON CONFLICT ON INDEX语法,必须使用表达式
                 if is_expression_index:
                     # 表达式索引:使用表达式本身(与索引定义一致)
-                    if data_domain.lower() == 'services' and sub_domain:
-                        conflict_clause = "(data_domain, sub_domain, granularity, data_hash)"
-                    else:
-                        # [*] 关键:表达式索引使用COALESCE表达式,与索引定义完全一致
-                        conflict_clause = "(platform_code, COALESCE(shop_id, ''), data_domain, granularity, data_hash)"
+                    # [*] 关键:表达式索引使用COALESCE表达式,与索引定义完全一致
+                    conflict_clause = "(platform_code, COALESCE(shop_id, ''), data_domain, granularity, data_hash)"
                 else:
                     # 普通索引:使用列名列表
-                    if data_domain.lower() == 'services' and sub_domain:
-                        conflict_clause = "(data_domain, sub_domain, granularity, data_hash)"
-                    else:
-                        conflict_clause = "(platform_code, shop_id, data_domain, granularity, data_hash)"
+                    conflict_clause = "(platform_code, shop_id, data_domain, granularity, data_hash)"
                 
                 if is_upsert:
                     # UPSERT策略:ON CONFLICT ... DO UPDATE
@@ -1084,7 +1097,9 @@ class RawDataImporter:
                             where_params = {}
                             
                             if data_domain.lower() == 'services' and sub_domain:
-                                # services域:使用sub_domain的唯一约束
+                                # services域:也必须带 platform/shop，避免跨店铺更新到同一行
+                                where_conditions.append('platform_code = :platform_code')
+                                where_conditions.append('COALESCE(shop_id, \'\') = COALESCE(:shop_id, \'\')')
                                 where_conditions.append('data_domain = :data_domain')
                                 where_conditions.append('sub_domain = :sub_domain')
                                 where_conditions.append('granularity = :granularity')

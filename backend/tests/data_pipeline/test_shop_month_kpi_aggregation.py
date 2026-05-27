@@ -100,11 +100,27 @@ def test_analytics_monthly_atomic_sql_asset():
         "sql/semantic/analytics_monthly_atomic.sql",
         "CREATE OR REPLACE VIEW semantic.fact_analytics_monthly_atomic AS",
         (
+            "semantic.fact_analytics_monthly_atomic_mv",
+            "gmv",
+            "order_count",
+            "sku_order_count",
+            "total_transaction_amount",
+            "product_visitor_count",
+            "visitor_count",
+            "page_views",
+        ),
+    )
+
+
+def test_analytics_monthly_atomic_mv_sql_asset():
+    _assert_sql_asset(
+        "sql/semantic/analytics_monthly_atomic_mv.sql",
+        "CREATE MATERIALIZED VIEW semantic.fact_analytics_monthly_atomic_mv AS",
+        (
             "b_class.fact_shopee_analytics_monthly",
             "b_class.fact_tiktok_analytics_monthly",
             "b_class.fact_miaoshou_analytics_monthly",
-            "visitor_count",
-            "page_views",
+            "ix_fact_analytics_monthly_atomic_mv_period_platform_shop",
         ),
     )
 

@@ -258,14 +258,14 @@
             <div class="metric-item">
               <div class="metric-label">
                 <el-tooltip
-                  content="来源：经营成本表（租金+营销/薪资+水电+其他）按月汇总。注意：当按平台筛选时，费用可能缺失（不会再用全公司费用兜底）。"
+                  :content="operationalExpensesTooltip"
                   placement="top"
                 >
                   <span>预估费用</span>
                 </el-tooltip>
               </div>
               <div class="metric-value">
-                {{ formatNumber(operationalMetrics.estimated_expenses) }}
+                {{ operationalMetrics.estimated_expenses == null ? '--' : formatNumber(operationalMetrics.estimated_expenses) }}
               </div>
             </div>
             <div class="metric-item">
@@ -2107,6 +2107,10 @@ const operationalMetrics = ref({
   monthly_order_count: null,
   today_order_count: null
 })
+const operationalMeta = ref({
+  expenses_source: null,
+  warnings: []
+})
 
 // 图表实例
 let comparisonChartInstance = null
@@ -2118,6 +2122,30 @@ const formatInteger = formatIntegerUtil
 const formatPercent = (value, isDecimal = true) => {
   return formatPercentUtil(value, 2, '-', isDecimal)
 }
+
+const operationalExpensesTooltip = computed(() => {
+  const source = operationalMeta.value?.expenses_source
+  const warnings = Array.isArray(operationalMeta.value?.warnings)
+    ? operationalMeta.value.warnings
+    : []
+  const hasPlatformExpenseGap = warnings.some((warning) =>
+    String(warning).includes('estimated_expenses_missing_for_platform')
+  )
+  const sourceLabel =
+    source === 'shop_month_rows_sum'
+      ? '来源：经营成本表按平台+店铺+月份汇总。'
+      : source === 'company_month_fallback_sum'
+        ? '来源：经营成本表公司级月汇总兜底。'
+        : source === null
+          ? '来源：经营成本表。'
+          : `来源：${source}。`
+  const warningLabel = hasPlatformExpenseGap
+    ? ' 警告：当前平台筛选下缺少费用归属数据，系统不会回退到全公司费用。'
+    : warnings.length
+      ? ` 警告：${warnings.join('；')}`
+      : ''
+  return `${sourceLabel} 口径：租金+营销费用+水电费+AI Token费用+其他成本。${warningLabel}`
+})
 
 // 获取变化类型
 const getChangeType = (change) => {
@@ -2565,6 +2593,10 @@ const loadOperationalMetrics = async () => {
 
     // 响应拦截器已处理success字段，直接使用data
     if (response) {
+      operationalMeta.value = {
+        expenses_source: response.meta?.expenses_source ?? null,
+        warnings: Array.isArray(response.meta?.warnings) ? response.meta.warnings : []
+      }
       operationalMetrics.value = {
         monthly_target: response.monthly_target ?? null,
         monthly_total_achieved: response.monthly_total_achieved ?? null,
@@ -2807,6 +2839,10 @@ const loadCriticalTierBootstrap = async () => {
 
     const applyOperationalPayload = (data) => {
       if (!data) return
+      operationalMeta.value = {
+        expenses_source: data.meta?.expenses_source ?? null,
+        warnings: Array.isArray(data.meta?.warnings) ? data.meta.warnings : []
+      }
       operationalMetrics.value = {
         monthly_target: data.monthly_target ?? null,
         monthly_total_achieved: data.monthly_total_achieved ?? null,

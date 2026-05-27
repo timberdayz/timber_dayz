@@ -39,12 +39,24 @@ monthly_targets AS (
 monthly_costs AS (
     SELECT
         to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
+        LOWER(TRIM(COALESCE(platform_code, ''))) AS platform_code,
         "店铺ID" AS shop_id,
         SUM(
-            COALESCE("成本合计", COALESCE("租金", 0) + COALESCE("营销费用", 0) + COALESCE("水电费", 0) + COALESCE("其他成本", 0))
+            COALESCE(
+                "成本合计",
+                COALESCE("租金", 0)
+                + COALESCE("营销费用", 0)
+                + COALESCE("水电费", 0)
+                + COALESCE("AI Token费用", 0)
+                + COALESCE("其他成本", 0)
+            )
         ) AS estimated_expenses
     FROM a_class.operating_costs
-    GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
+    WHERE "删除时间" IS NULL
+    GROUP BY
+        to_date("年月" || '-01', 'YYYY-MM-DD'),
+        LOWER(TRIM(COALESCE(platform_code, ''))),
+        "店铺ID"
 )
 SELECT
     m.period_month,
@@ -84,6 +96,7 @@ LEFT JOIN monthly_targets t
    AND COALESCE(m.shop_id, '') = COALESCE(t.shop_id, '')
 LEFT JOIN monthly_costs c
     ON m.period_month = c.period_month
+   AND LOWER(COALESCE(m.platform_code, '')) = COALESCE(c.platform_code, '')
    AND COALESCE(m.shop_id, '') = COALESCE(c.shop_id, '')
 LEFT JOIN mart.shop_day_kpi ds
     ON ds.period_date = m.anchor_date

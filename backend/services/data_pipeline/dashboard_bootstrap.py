@@ -28,6 +28,7 @@ DASHBOARD_MODULE_TARGETS: dict[str, dict[str, list[str]]] = {
         ],
         "refresh_targets": [
             "semantic.fact_orders_monthly_atomic_mv",
+            "semantic.fact_analytics_monthly_atomic_mv",
         ],
     },
     "clearance_ranking": {
@@ -456,6 +457,21 @@ async def bootstrap_dashboard_assets(
             },
         )
 
+        refresh_run_id = None
+        if refresh_targets:
+            refresh_run_id = await execute_refresh_plan(
+                session,
+                targets=refresh_targets,
+                pipeline_name=f"bootstrap_postgresql_dashboard_refresh.{module_name}",
+                trigger_source="bootstrap",
+                context={
+                    "module_name": module_name,
+                    "target_count": len(refresh_targets),
+                    "refresh_fingerprint": refresh_expected,
+                },
+                preordered=True,
+            )
+
         run_id = await execute_refresh_plan(
             session,
             targets=core_targets,
@@ -466,6 +482,7 @@ async def bootstrap_dashboard_assets(
                 "target_count": len(core_targets),
                 "asset_fingerprint": core_expected,
                 "refresh_target_count": len(refresh_targets),
+                "refresh_run_id": refresh_run_id,
             },
             preordered=True,
         )
@@ -480,7 +497,8 @@ async def bootstrap_dashboard_assets(
             run_id=run_id,
             details_json={
                 "refresh_fingerprint_expected": refresh_expected,
-                "refresh_fingerprint_applied": existing_details.get("refresh_fingerprint_applied"),
+                "refresh_fingerprint_applied": refresh_expected if refresh_targets else existing_details.get("refresh_fingerprint_applied"),
+                "refresh_run_id": refresh_run_id,
                 "core_targets": core_targets,
                 "refresh_targets": refresh_targets,
             },

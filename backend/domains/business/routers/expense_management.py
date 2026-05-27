@@ -86,6 +86,17 @@ async def _resolve_shop_platform_code(db: AsyncSession, shop_id: str) -> Optiona
     return (row.platform or "").lower() or None
 
 
+async def _ensure_platform_code(
+    db: AsyncSession,
+    platform_code: Optional[str],
+    shop_id: str,
+) -> Optional[str]:
+    normalized = str(platform_code or "").strip().lower()
+    if normalized:
+        return normalized
+    return await _resolve_shop_platform_code(db, shop_id)
+
+
 # ==================== Request/Response Models ====================
 
 # ==================== API Endpoints ====================
@@ -179,6 +190,7 @@ async def get_expense_summary(
                     COALESCE(SUM("成本合计"), 0) as total_amount
                 FROM a_class.operating_costs
                 WHERE "年月" = :year_month
+                  AND "删除时间" IS NULL
                 GROUP BY "年月"
                 ORDER BY "年月" DESC
             """)
@@ -195,6 +207,7 @@ async def get_expense_summary(
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
                     COALESCE(SUM("成本合计"), 0) as total_amount
                 FROM a_class.operating_costs
+                WHERE "删除时间" IS NULL
                 GROUP BY "年月"
                 ORDER BY "年月" DESC
             """)
@@ -264,6 +277,7 @@ async def get_yearly_expense_summary(
                 COUNT(DISTINCT "年月") as month_count
             FROM a_class.operating_costs
             WHERE "年月" LIKE :year_pattern
+              AND "删除时间" IS NULL
         """)
         db_result = await db.execute(query, {"year_pattern": f"{year}-%"})
         row = db_result.fetchone()
@@ -337,6 +351,7 @@ async def list_expenses_by_shop(
             SELECT 
                 id,
                 "店铺ID" as shop_id,
+                "platform_code" as platform_code,
                 "年月" as year_month,
                 "租金" as rent,
                 "营销费用" as marketing_fee,
@@ -351,6 +366,7 @@ async def list_expenses_by_shop(
                 "更新时间" as updated_at
             FROM a_class.operating_costs
             WHERE {where_clause}
+              AND "删除时间" IS NULL
             ORDER BY "年月" ASC
         """)
         
@@ -372,6 +388,7 @@ async def list_expenses_by_shop(
             items.append({
                 "id": row.id,
                 "shop_id": row.shop_id,
+                "platform_code": row.platform_code,
                 "year_month": row.year_month,
                 "rent": rent,
                 "marketing_fee": marketing_fee,
@@ -451,6 +468,7 @@ async def list_expenses(
             SELECT COUNT(*) 
             FROM a_class.operating_costs 
             WHERE {where_clause}
+              AND "删除时间" IS NULL
         """)
         total = (await db.execute(count_query, params)).scalar() or 0
         
@@ -460,6 +478,7 @@ async def list_expenses(
             SELECT 
                 id,
                 "店铺ID" as shop_id,
+                "platform_code" as platform_code,
                 "年月" as year_month,
                 "租金" as rent,
                 "营销费用" as marketing_fee,
@@ -474,6 +493,7 @@ async def list_expenses(
                 "更新时间" as updated_at
             FROM a_class.operating_costs
             WHERE {where_clause}
+              AND "删除时间" IS NULL
             ORDER BY "年月" DESC, "店铺ID"
             LIMIT :limit OFFSET :offset
         """)
@@ -496,6 +516,7 @@ async def list_expenses(
             items.append({
                 "id": row.id,
                 "shop_id": row.shop_id,
+                "platform_code": row.platform_code,
                 "year_month": row.year_month,
                 "rent": rent,
                 "marketing_fee": marketing_fee,
@@ -531,6 +552,93 @@ async def list_expenses(
         )
 
 
+@router.get("/deleted", response_model=Dict[str, Any])
+async def list_deleted_expenses(
+    shop_id: Optional[str] = Query(None, description="店铺ID筛选"),
+    year_month: Optional[str] = Query(None, description="年月筛选(YYYY-MM)"),
+    year: Optional[str] = Query(None, description="年份筛选(YYYY)"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    """查询已删除费用记录（软删除记录）"""
+    try:
+        where_conditions = ['"删除时间" IS NOT NULL']
+        params = {}
+        if shop_id:
+            where_conditions.append('"店铺ID" = :shop_id')
+            params["shop_id"] = shop_id
+        if year_month:
+            where_conditions.append('"年月" = :year_month')
+            params["year_month"] = year_month
+        if year:
+            where_conditions.append('"年月" LIKE :year_pattern')
+            params["year_pattern"] = f"{year}-%"
+
+        query = text(f"""
+            SELECT
+                id,
+                "店铺ID" as shop_id,
+                "platform_code" as platform_code,
+                "年月" as year_month,
+                "租金" as rent,
+                "营销费用" as marketing_fee,
+                "水电费" as utilities,
+                "AI Token费用" as ai_token_cost,
+                "其他成本" as other_costs,
+                "成本合计" as total_cost,
+                "备注" as note,
+                "附件" as attachments,
+                "是否锁定" as locked,
+                "删除时间" as deleted_at,
+                "删除人" as deleted_by,
+                "创建时间" as created_at,
+                "更新时间" as updated_at
+            FROM a_class.operating_costs
+            WHERE {' AND '.join(where_conditions)}
+            ORDER BY "删除时间" DESC, "更新时间" DESC
+        """)
+        result = await db.execute(query, params)
+        rows = result.fetchall()
+        items = []
+        for row in rows:
+            rent = float(row.rent or 0)
+            marketing_fee = float(row.marketing_fee or 0)
+            utilities = float(row.utilities or 0)
+            ai_token_cost = float(row.ai_token_cost or 0)
+            other_costs = float(row.other_costs or 0)
+            total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
+            items.append({
+                "id": row.id,
+                "shop_id": row.shop_id,
+                "platform_code": row.platform_code,
+                "year_month": row.year_month,
+                "rent": rent,
+                "marketing_fee": marketing_fee,
+                "utilities": utilities,
+                "ai_token_cost": ai_token_cost,
+                "other_costs": other_costs,
+                "total_cost": total_amount,
+                "total": total_amount,
+                "note": row.note,
+                "attachments": row.attachments or [],
+                "locked": bool(row.locked or False),
+                "deleted_at": row.deleted_at,
+                "deleted_by": row.deleted_by,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            })
+        return {"success": True, "data": {"items": items}}
+    except Exception as e:
+        logger.error(f"查询已删除费用失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="查询失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            status_code=500
+        )
+
+
 @router.get("/{expense_id}", response_model=Dict[str, Any])
 async def get_expense(
     expense_id: int,
@@ -547,6 +655,7 @@ async def get_expense(
             SELECT 
                 id,
                 "店铺ID" as shop_id,
+                "platform_code" as platform_code,
                 "年月" as year_month,
                 "租金" as rent,
                 "营销费用" as marketing_fee,
@@ -561,6 +670,7 @@ async def get_expense(
                 "更新时间" as updated_at
             FROM a_class.operating_costs
             WHERE id = :expense_id
+              AND "删除时间" IS NULL
         """)
         
         result = await db.execute(query, {"expense_id": expense_id})
@@ -587,6 +697,7 @@ async def get_expense(
             "data": {
                 "id": row.id,
                 "shop_id": row.shop_id,
+                "platform_code": row.platform_code,
                 "year_month": row.year_month,
                 "rent": rent,
                 "marketing_fee": marketing_fee,
@@ -631,12 +742,29 @@ async def create_or_update_expense(
             """
             SELECT COALESCE("是否锁定", false) AS locked
             FROM a_class.operating_costs
-            WHERE "店铺ID" = :shop_id AND "年月" = :year_month
+            WHERE COALESCE("platform_code", '') = :platform_code
+              AND "店铺ID" = :shop_id
+              AND "年月" = :year_month
+              AND "删除时间" IS NULL
             """
         )
+        requested_platform_code = await _ensure_platform_code(db, request.platform_code, request.shop_id)
+        if not requested_platform_code:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="无法识别店铺所属平台",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请重新选择店铺，或补齐该店铺的平台账号映射",
+                status_code=400,
+            )
         lock_row = (
             await db.execute(
-                lock_check, {"shop_id": request.shop_id, "year_month": request.year_month}
+                lock_check,
+                {
+                    "platform_code": requested_platform_code,
+                    "shop_id": request.shop_id,
+                    "year_month": request.year_month,
+                },
             )
         ).fetchone()
         if lock_row and bool(lock_row.locked):
@@ -647,6 +775,8 @@ async def create_or_update_expense(
                 recovery_suggestion="请先解锁该月份或联系管理员处理",
                 status_code=400,
             )
+
+        platform_code = requested_platform_code
 
         total_cost = _calc_total_cost(
             request.rent,
@@ -663,11 +793,12 @@ async def create_or_update_expense(
         # 使用UPSERT语法(ON CONFLICT DO UPDATE)
         upsert_query = text("""
             INSERT INTO a_class.operating_costs 
-                ("店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计", "备注", "附件", "创建时间", "更新时间")
+                ("店铺ID", "platform_code", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计", "备注", "附件", "创建时间", "更新时间")
             VALUES 
-                (:shop_id, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :other_costs, :total_cost, :note, CAST(:attachments AS jsonb), NOW(), NOW())
-            ON CONFLICT ("店铺ID", "年月") 
+                (:shop_id, :platform_code, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :other_costs, :total_cost, :note, CAST(:attachments AS jsonb), NOW(), NOW())
+            ON CONFLICT ("platform_code", "店铺ID", "年月") 
             DO UPDATE SET 
+                "platform_code" = EXCLUDED."platform_code",
                 "租金" = EXCLUDED."租金",
                 "营销费用" = EXCLUDED."营销费用",
                 "水电费" = EXCLUDED."水电费",
@@ -680,6 +811,7 @@ async def create_or_update_expense(
             RETURNING 
                 id,
                 "店铺ID" as shop_id,
+                "platform_code" as platform_code,
                 "年月" as year_month,
                 "租金" as rent,
                 "营销费用" as marketing_fee,
@@ -696,6 +828,7 @@ async def create_or_update_expense(
         
         result = await db.execute(upsert_query, {
             "shop_id": request.shop_id,
+            "platform_code": platform_code,
             "year_month": request.year_month,
             "rent": request.rent,
             "marketing_fee": request.marketing_fee,
@@ -714,7 +847,6 @@ async def create_or_update_expense(
             raise Exception("Upsert操作未返回数据")
 
         try:
-            platform_code = await _resolve_shop_platform_code(db, request.shop_id)
             if platform_code:
                 await sync_monthly_cost_entry_task(
                     db,
@@ -738,6 +870,7 @@ async def create_or_update_expense(
             "data": {
                 "id": row.id,
                 "shop_id": row.shop_id,
+                "platform_code": row.platform_code,
                 "year_month": row.year_month,
                 "rent": rent,
                 "marketing_fee": marketing_fee,
@@ -784,6 +917,7 @@ async def update_expense(
             SELECT 
                 id,
                 "店铺ID" as shop_id,
+                "platform_code" as platform_code,
                 "年月" as year_month,
                 "租金" as rent,
                 "营销费用" as marketing_fee,
@@ -795,6 +929,7 @@ async def update_expense(
                 "是否锁定" as locked
             FROM a_class.operating_costs
             WHERE id = :expense_id
+              AND "删除时间" IS NULL
         """)
         
         result = await db.execute(select_query, {"expense_id": expense_id})
@@ -817,12 +952,27 @@ async def update_expense(
                 recovery_suggestion="请先解锁该月份或联系管理员处理",
                 status_code=400,
             )
-        
+
         # 构建UPDATE语句(只更新提供的字段)
         update_fields = []
         params = {"expense_id": expense_id}
         
         update_data = request.dict(exclude_unset=True)
+        platform_code = await _ensure_platform_code(
+            db,
+            update_data.get("platform_code"),
+            row.shop_id,
+        )
+        if not platform_code:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="无法识别店铺所属平台",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请重新选择店铺，或补齐该店铺的平台账号映射",
+                status_code=400,
+            )
+        update_fields.append('"platform_code" = :platform_code')
+        params["platform_code"] = platform_code
         if "rent" in update_data:
             update_fields.append('"租金" = :rent')
             params["rent"] = update_data["rent"]
@@ -893,6 +1043,7 @@ async def update_expense(
             RETURNING 
                 id,
                 "店铺ID" as shop_id,
+                "platform_code" as platform_code,
                 "年月" as year_month,
                 "租金" as rent,
                 "营销费用" as marketing_fee,
@@ -926,6 +1077,7 @@ async def update_expense(
             "data": {
                 "id": updated_row.id,
                 "shop_id": updated_row.shop_id,
+                "platform_code": updated_row.platform_code,
                 "year_month": updated_row.year_month,
                 "rent": rent,
                 "marketing_fee": marketing_fee,
@@ -961,14 +1113,14 @@ async def delete_expense(
     current_user: DimUser = Depends(get_current_user),
 ):
     """
-    删除费用
+    删除费用（软删除）
     
     注意:使用原始SQL删除，因为数据库表使用中文字段名
     """
     try:
         # 先检查记录是否存在
         check_query = text("""
-            SELECT id FROM a_class.operating_costs WHERE id = :expense_id
+            SELECT id FROM a_class.operating_costs WHERE id = :expense_id AND "删除时间" IS NULL
         """)
         result = await db.execute(check_query, {"expense_id": expense_id})
         if not result.fetchone():
@@ -980,16 +1132,22 @@ async def delete_expense(
                 status_code=404
             )
         
-        # 执行删除
         delete_query = text("""
-            DELETE FROM a_class.operating_costs WHERE id = :expense_id
+            UPDATE a_class.operating_costs
+            SET "删除时间" = NOW(),
+                "删除人" = :deleted_by,
+                "更新时间" = NOW()
+            WHERE id = :expense_id
         """)
-        await db.execute(delete_query, {"expense_id": expense_id})
+        await db.execute(
+            delete_query,
+            {"expense_id": expense_id, "deleted_by": getattr(current_user, "user_id", None)},
+        )
         await db.commit()
         
         return {
             "success": True,
-            "message": "费用删除成功"
+            "message": "费用已删除(软删除，可恢复)"
         }
     except Exception as e:
         await db.rollback()
@@ -997,6 +1155,52 @@ async def delete_expense(
         return error_response(
             code=ErrorCode.DATABASE_QUERY_ERROR,
             message="删除失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            status_code=500
+        )
+
+
+@router.post("/{expense_id}/restore", response_model=Dict[str, Any])
+async def restore_expense(
+    expense_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        check_query = text("""
+            SELECT id
+            FROM a_class.operating_costs
+            WHERE id = :expense_id
+              AND "删除时间" IS NOT NULL
+        """)
+        result = await db.execute(check_query, {"expense_id": expense_id})
+        if not result.fetchone():
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="费用记录不存在或未被删除",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请检查费用ID是否正确",
+                status_code=404,
+            )
+
+        restore_query = text("""
+            UPDATE a_class.operating_costs
+            SET "删除时间" = NULL,
+                "删除人" = NULL,
+                "更新时间" = NOW()
+            WHERE id = :expense_id
+        """)
+        await db.execute(restore_query, {"expense_id": expense_id})
+        await db.commit()
+
+        return {"success": True, "message": "费用记录已恢复"}
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"恢复费用失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="恢复失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
             status_code=500

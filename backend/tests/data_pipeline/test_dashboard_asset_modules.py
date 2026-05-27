@@ -35,6 +35,7 @@ def test_dashboard_module_targets_track_business_overview_refreshing_targets():
     targets = dashboard_bootstrap.DASHBOARD_MODULE_TARGETS["business_overview"]["refresh_targets"]
 
     assert "semantic.fact_orders_monthly_atomic_mv" in targets
+    assert "semantic.fact_analytics_monthly_atomic_mv" in targets
 
 
 def test_build_module_report_does_not_keep_stale_refreshing_without_active_run():

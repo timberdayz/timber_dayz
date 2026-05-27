@@ -24,6 +24,7 @@ Do not use full-repository search as the first step when one of these files cove
 - `docs/guides/PRE_LAUNCH_RULES.md`: launch-period change constraints
 - `docs/guides/RELEASE_CHECKLIST.md`: tag-driven production release checklist
 - `docs/guides/ENGINEERING_STATUS.md`: current engineering status and CI model
+- `docs/guides/BUSINESS_OVERVIEW_METRIC_LINEAGE.md`: Business Overview key-metric lineage and verification path
 
 ## Architecture
 

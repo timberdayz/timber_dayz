@@ -1,7 +1,7 @@
 """Add header bindings to field mapping templates.
 
 Revision ID: 20260525_header_bindings
-Revises: 20260521_operating_costs_add_cost_total_note_lock
+Revises: 20260521_operating_costs_cost_fields
 Create Date: 2026-05-25
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "20260525_header_bindings"
-down_revision = "20260521_operating_costs_add_cost_total_note_lock"
+down_revision = "20260521_operating_costs_cost_fields"
 branch_labels = None
 depends_on = None
 

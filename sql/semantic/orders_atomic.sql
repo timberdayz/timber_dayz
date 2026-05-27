@@ -87,7 +87,6 @@ mapped AS (
         COALESCE(
             raw_data->>'销售额',
             raw_data->>'销售金额',
-            raw_data->>'实付金额',
             raw_data->>'总收入',
             raw_data->>'GMV',
             raw_data->>'订单金额',
@@ -96,14 +95,15 @@ mapped AS (
             raw_data->>'Sales Amount'
         ) AS sales_amount_raw,
         COALESCE(
+            raw_data->>'buyer_payment_rmb',
+            raw_data->>'买家支付(RMB)',
+            raw_data->>'买家实付金额_rmb',
+            raw_data->>'买家实付金额(RMB)',
+            raw_data->>'buyer_payment',
+            raw_data->>'买家支付',
             raw_data->>'实付金额',
             raw_data->>'买家实付金额',
             raw_data->>'总收入',
-            raw_data->>'buyer_payment_rmb',
-            raw_data->>'buyer_payment',
-            raw_data->>'买家支付(RMB)',
-            raw_data->>'买家支付',
-            raw_data->>'买家实付金额(RMB)',
             raw_data->>'paid_amount',
             raw_data->>'Paid Amount'
         ) AS paid_amount_raw,

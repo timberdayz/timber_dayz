@@ -27,18 +27,24 @@ A 类数据为「用户配置/主数据」，成本侧即**经营成本（运营
 | 库表列名（中文） | ORM 属性名 | 类型 | 含义 |
 |-----------------|------------|------|------|
 | id | id | bigint | 主键 |
-| 店铺ID | shop_id | varchar(256) | 店铺标识 |
+| 店铺ID | shop_id | varchar(256) | 平台内店铺标识 |
+| platform_code | platform_code | varchar(32) | 平台编码，费用归属的显式维度键 |
 | 年月 | year_month | varchar(7) | 年月，格式 YYYY-MM |
 | 租金 | rent | numeric(15,2) | 租金 |
 | 营销费用 | marketing_fee | numeric(15,2) | 营销费用 |
 | 水电费 | utilities | numeric(15,2) | 水电费 |
+| AI Token费用 | ai_token_cost | numeric(15,2) | AI Token费用 |
 | 其他成本 | other_costs | numeric(15,2) | 其他成本 |
+| 成本合计 | total_cost | numeric(15,2) | 五类费用合计 |
+| 备注 | note | text | 备注 |
+| 附件 | attachments | jsonb | 附件列表 |
+| 是否锁定 | locked | boolean | 月度锁定标记 |
 | 创建时间 | created_at | timestamp | 创建时间 |
 | 更新时间 | updated_at | timestamp | 更新时间 |
 
-- **单条运营成本** = 租金 + 营销费用 + 水电费 + 其他成本（当前四列之和）；若后续扩展新列（见下），则单条 = **所有成本列之和**。
-- **唯一约束**：`(店铺ID, 年月)`，名称 `uq_operating_costs_a_shop_month`。
-- **索引**：`ix_operating_costs_a_shop`(店铺ID)、`ix_operating_costs_a_month`(年月)。
+- **单条运营成本** = 租金 + 营销费用 + 水电费 + AI Token费用 + 其他成本。
+- **唯一约束**：`(platform_code, 店铺ID, 年月)`，名称 `uq_operating_costs_a_platform_shop_month`。
+- **索引**：`ix_operating_costs_a_shop`(店铺ID)、`ix_operating_costs_a_platform_shop`(platform_code, 店铺ID)、`ix_operating_costs_a_month`(年月)、`ix_operating_costs_locked`(是否锁定)。
 - **表位置**：`modules/core/db/schema.py` 中 `OperatingCost`，schema 为 `a_class`。
 - **扩展原则（方案 B）**：费用应尽可能**按科目明确列示**，不全部塞入「其他成本」。后续可通过表结构扩展增加明确列（如广告费、行政费等），由单独变更（如「扩展 operating_costs 费用科目」）实现：迁移加列、费用管理 API/前端增加录入项，总成本公式仍为「operating_costs 所有成本列之和」。
 
@@ -52,10 +58,10 @@ A 类数据为「用户配置/主数据」，成本侧即**经营成本（运营
 
 - **operating_costs**：来自**费用管理**功能。
   - API：`/api/expenses`（GET/POST/PUT/DELETE 等，见 `backend/routers/expense_management.py`）。
-  - 前端：费用管理页，用户按「店铺ID + 年月」录入或导入。
+  - 前端：费用管理页，用户按「platform_code + 店铺ID + 年月」录入或导入。
 - **汇总方式**：
-  - **按周期**：按「年月」汇总 operating_costs **所有成本列之和**（当前为四列：租金、营销费用、水电费、其他成本；扩展后包含新增列）。
-  - **按店铺**：按「店铺ID」汇总上述金额。按店铺下钻时，A 类与订单侧店铺口径一致方案见第 5 节。
+  - **按周期**：按「年月」汇总 operating_costs **所有成本列之和**（当前为五列：租金、营销费用、水电费、AI Token费用、其他成本）。
+  - **按店铺**：按 `platform_code + 店铺ID` 汇总上述金额。按店铺下钻时，A 类与订单侧店铺口径一致方案见第 5 节。
 
 ---
 
@@ -153,14 +159,14 @@ B 类数据为「业务发生数据」，成本侧即**与订单/商品直接相
 
 ## 5. 按店铺下钻：A 类与订单侧店铺口径一致方案
 
-- **A 类**：`a_class.operating_costs.店铺ID`（即 ORM 的 `shop_id`），与费用管理录入时的「店铺」一致。
+- **A 类**：`a_class.operating_costs.platform_code + 店铺ID`（即 ORM 的 `platform_code + shop_id`），与费用管理录入时的「平台 + 店铺」一致。
 - **订单侧**：Orders 及事实表使用 `platform_code`、`shop_id`（或组合 `platform_code + shop_id`）标识店铺。
-- **JOIN 一致方案**：按店铺下钻时，须约定「operating_costs.店铺ID」与「Orders 的 platform_code、shop_id」的对应规则（例如：同一业务店铺在 A 类用某字符串 ID，在 B 类用 platform_code+shop_id 组合）。成本聚合与年度按店铺接口实现时，按该约定做 JOIN 或关联查询，保证总成本、比率按店铺正确归属。
+- **JOIN 一致方案**：按店铺下钻时，A 类与 B 类统一按 `platform_code + shop_id` 连接，不再依赖单字符串「店铺ID」猜测映射。成本聚合与年度按店铺接口实现时，必须同时使用平台和店铺两个维度，保证总成本、比率按店铺正确归属。
 - **具体约定（add-orders-model-cost-and-annual-kpi 实现）**：  
-  - **店铺键**：订单侧统一使用 `platform_code|shop_id` 作为店铺键（如 `shopee|123`、`tiktok|abc`）。  
-  - **A 类与 B 类一致**：在费用管理录入运营成本时，**店铺ID** 填写为 `platform_code|shop_id`（与 dim_shops / 订单事实表一致），则后端按店铺汇总时可将 A 类与 B 类合并到同一店铺键。  
+  - **店铺键**：订单侧统一使用 `platform_code + shop_id` 作为 canonical 业务键；如需单字符串展示，可派生 `platform_code|shop_id`。  
+  - **A 类与 B 类一致**：在费用管理录入运营成本时，`platform_code` 与 `店铺ID` 分列保存；后端按店铺汇总时按两个维度合并 A 类与 B 类。  
   - **实现位置**：`backend/services/annual_cost_aggregate.py` 中 `get_annual_cost_aggregate_by_shop()`；接口 `GET /api/dashboard/annual-summary/by-shop` 返回按 `shop_key` 的列表，每项含 total_cost_a、total_cost_b、total_cost、gmv、各比率。  
-  - 若使用其他店铺ID 格式（如仅 shop_id），需后续扩展映射表并在本节引用。
+  - 若存在历史仅 `shop_id` 无 `platform_code` 的记录，必须先回填平台后再纳入业务概览经营费用链路。
 
 ---
 

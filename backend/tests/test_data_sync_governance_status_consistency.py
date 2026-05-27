@@ -254,3 +254,64 @@ async def test_governance_detailed_coverage_includes_failed_header_changed_files
     coverage = response.json()["data"]
     assert coverage["summary"]["needs_update_count"] == 1
     assert coverage["needs_update"][0]["sample_file_name"] == "tiktok_orders_drift_failed.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_governance_detailed_coverage_skips_temp_development_sample_files(
+    data_sync_client,
+):
+    client, session_factory, tmp_path = data_sync_client
+    now = datetime.now(timezone.utc)
+
+    real_sample_path = tmp_path / "shopee_products_daily_real.xlsx"
+    real_sample_path.write_text("demo", encoding="utf-8")
+
+    async with session_factory() as session:
+        session.add(
+            FieldMappingTemplate(
+                platform="shopee",
+                data_domain="products",
+                granularity="daily",
+                sub_domain=None,
+                template_name="shopee_products__daily_v1",
+                version=1,
+                status="published",
+                header_row=0,
+                header_columns=["商品编号", "商品交易总额"],
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add_all(
+            [
+                CatalogFile(
+                    file_path="temp/development/shopee_products_daily_20250128_case3.xlsx",
+                    file_name="shopee_products_daily_20250128_case3.xlsx",
+                    source="data/raw",
+                    platform_code="shopee",
+                    source_platform="shopee",
+                    data_domain="products",
+                    granularity="daily",
+                    status="pending",
+                    first_seen_at=now,
+                ),
+                CatalogFile(
+                    file_path=str(real_sample_path),
+                    file_name=real_sample_path.name,
+                    source="data/raw",
+                    platform_code="shopee",
+                    source_platform="shopee",
+                    data_domain="products",
+                    granularity="daily",
+                    status="ingested",
+                    first_seen_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await client.get("/api/data-sync/governance/detailed-coverage")
+
+    assert response.status_code == 200
+    coverage = response.json()["data"]
+    assert coverage["covered"][0]["sample_file_name"] == "shopee_products_daily_real.xlsx"

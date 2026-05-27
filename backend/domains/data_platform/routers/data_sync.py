@@ -97,6 +97,20 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+def _is_governance_excluded_sample_file(catalog_file: CatalogFile | None) -> bool:
+    if catalog_file is None:
+        return False
+
+    file_path = str(getattr(catalog_file, "file_path", "") or "").replace("\\", "/").lower()
+    file_name = str(getattr(catalog_file, "file_name", "") or "").lower()
+
+    if file_path.startswith("temp/development/") or "/temp/development/" in file_path:
+        return True
+    if "_case" in file_name and "products" in file_name:
+        return True
+    return False
+
+
 # ==================== 数据同步API ====================
 
 @router.post("/data-sync/preview")
@@ -2116,9 +2130,17 @@ async def get_detailed_template_coverage(
                             else_=2,
                         ),
                         CatalogFile.first_seen_at.desc()
-                    ).limit(1)
+                    ).limit(20)
                 )
-                sample_file = sample_file_result.scalar_one_or_none()
+                sample_file_candidates = sample_file_result.scalars().all()
+                sample_file = next(
+                    (
+                        candidate
+                        for candidate in sample_file_candidates
+                        if not _is_governance_excluded_sample_file(candidate)
+                    ),
+                    None,
+                )
                 sample_file_info = {
                     'sample_file_id': sample_file.id if sample_file else None,
                     'sample_file_name': sample_file.file_name if sample_file else None,

@@ -271,10 +271,10 @@ async def lifespan(app: FastAPI):
         # [SCHEMA MIGRATION] 生产环境:只验证,不创建;开发环境:可以使用 init_db()
         step_start = time.time()
         try:
+            from backend.models.database import verify_schema_completeness
+
             if settings.ENVIRONMENT == "production":
                 # 生产环境:验证表结构完整性,不创建表
-                from backend.models.database import verify_schema_completeness
-
                 result = verify_schema_completeness()
 
                 if not result["all_tables_exist"]:

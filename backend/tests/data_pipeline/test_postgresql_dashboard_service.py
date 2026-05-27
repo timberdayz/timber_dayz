@@ -1330,6 +1330,32 @@ async def test_postgresql_dashboard_service_comparison_loads_total_month_target_
             await session.execute(
                 text(
                     """
+                    CREATE TABLE a_class.sales_targets_a (
+                        "年月" VARCHAR(7),
+                        "店铺ID" VARCHAR(255),
+                        "目标销售额" NUMERIC,
+                        "目标订单数" NUMERIC,
+                        "目标单量" NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.sales_targets_a (
+                        "年月" VARCHAR(7),
+                        "店铺ID" VARCHAR(255),
+                        "目标销售额" NUMERIC,
+                        "目标订单数" NUMERIC,
+                        "目标单量" NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
                     CREATE TABLE a_class.sales_targets (
                         id INTEGER PRIMARY KEY,
                         target_name VARCHAR(255),
@@ -1436,6 +1462,7 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
                 text(
                     """
                     CREATE TABLE a_class.operating_costs (
+                        "platform_code" VARCHAR(32),
                         "店铺ID" VARCHAR(255),
                         "年月" VARCHAR(7),
                         "租金" NUMERIC,
@@ -1464,10 +1491,10 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
             await session.execute(
                 text(
                     """
-                    INSERT INTO a_class.operating_costs ("店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计")
+                    INSERT INTO a_class.operating_costs ("platform_code", "店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计")
                     VALUES
-                        ('shopee新加坡3C店', '2025-09', 100, 200, 300, 0, 400, 1000),
-                        ('Tiktok 2店', '2025-09', 100, 200, 200, 0, 300, 800)
+                        ('shopee', 'shopee新加坡3C店', '2025-09', 100, 200, 300, 0, 400, 1000),
+                        ('tiktok', 'Tiktok 2店', '2025-09', 100, 200, 200, 0, 300, 800)
                     """
                 )
             )
@@ -1480,6 +1507,23 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
         service = PostgresqlDashboardService()
 
         async def fake_fetch_rows(query, params):
+            async with session_factory() as session:
+                cost_row = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT "成本合计" AS total_cost, "删除时间" AS deleted_at
+                            FROM a_class.operating_costs
+                            WHERE "platform_code" = 'tiktok'
+                              AND "店铺ID" = 'shop-1'
+                              AND "年月" = '2026-03'
+                            """
+                        )
+                    )
+                ).fetchone()
+            estimated_expenses = None
+            if cost_row and cost_row.deleted_at is None:
+                estimated_expenses = float(cost_row.total_cost or 0)
             return [
                 {
                     "monthly_target": 0,
@@ -1488,7 +1532,7 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
                     "monthly_achievement_rate": 0,
                     "time_gap": 0,
                     "estimated_gross_profit": 3000,
-                    "estimated_expenses": 0,
+                    "estimated_expenses": estimated_expenses,
                     "operating_result": 0,
                     "monthly_order_count": 200,
                     "today_order_count": 12,
@@ -1496,6 +1540,13 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
             ]
 
         monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+        monkeypatch.setattr(
+            service,
+            "_load_target_summary",
+            lambda *args, **kwargs: __import__("asyncio").sleep(
+                0, result={"target_amount": 0.0, "target_quantity": 0.0}
+            ),
+        )
         result = await service.get_business_overview_operational_metrics(
             month="2025-09-01",
             platform=None,
@@ -1503,6 +1554,164 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
 
         assert result["monthly_target"] == 1100000
         assert result["monthly_total_achieved"] == 25000
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_operational_metrics_respects_soft_deleted_expenses(monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+    from datetime import datetime, timezone
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.sales_targets_a (
+                        "年月" VARCHAR(7),
+                        "店铺ID" VARCHAR(255),
+                        "目标销售额" NUMERIC,
+                        "目标订单数" NUMERIC,
+                        "目标单量" NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.operating_costs (
+                        "platform_code" VARCHAR(32),
+                        "店铺ID" VARCHAR(255),
+                        "年月" VARCHAR(7),
+                        "租金" NUMERIC,
+                        "营销费用" NUMERIC,
+                        "水电费" NUMERIC,
+                        "AI Token费用" NUMERIC,
+                        "其他成本" NUMERIC,
+                        "成本合计" NUMERIC,
+                        "删除时间" TIMESTAMPTZ,
+                        "删除人" BIGINT
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+
+        async def fake_fetch_rows(query, params):
+            async with session_factory() as session:
+                cost_row = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT "成本合计" AS total_cost, "删除时间" AS deleted_at
+                            FROM a_class.operating_costs
+                            WHERE "platform_code" = 'tiktok'
+                              AND "店铺ID" = 'shop-1'
+                              AND "年月" = '2026-03'
+                            """
+                        )
+                    )
+                ).fetchone()
+            estimated_expenses = None
+            if cost_row and cost_row.deleted_at is None:
+                estimated_expenses = float(cost_row.total_cost or 0)
+            return [
+                {
+                    "monthly_target": 0,
+                    "monthly_total_achieved": 25000,
+                    "today_sales": 1200,
+                    "monthly_achievement_rate": 0,
+                    "time_gap": 0,
+                    "estimated_gross_profit": 3000,
+                    "estimated_expenses": estimated_expenses,
+                    "operating_result": 0,
+                    "monthly_order_count": 200,
+                    "today_order_count": 12,
+                }
+            ]
+
+        monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+        async with session_factory() as session:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.operating_costs
+                        ("platform_code", "店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计", "删除时间", "删除人")
+                    VALUES
+                        ('tiktok', 'shop-1', '2026-03', 10, 60, 5, 6, 30, 111, NULL, NULL)
+                    """
+                )
+            )
+            await session.commit()
+
+        before = await service.get_business_overview_operational_metrics(
+            month="2026-03-01",
+            platform="tiktok",
+        )
+        assert before["estimated_expenses"] == 111
+
+        async with session_factory() as session:
+            await session.execute(
+                text(
+                    """
+                    UPDATE a_class.operating_costs
+                    SET "删除时间" = :deleted_at,
+                        "删除人" = 1
+                    WHERE "platform_code" = 'tiktok'
+                      AND "店铺ID" = 'shop-1'
+                      AND "年月" = '2026-03'
+                    """
+                ),
+                {"deleted_at": datetime.now(timezone.utc)},
+            )
+            await session.commit()
+
+        after_delete = await service.get_business_overview_operational_metrics(
+            month="2026-03-01",
+            platform="tiktok",
+        )
+        assert after_delete["estimated_expenses"] is None
+
+        async with session_factory() as session:
+            await session.execute(
+                text(
+                    """
+                    UPDATE a_class.operating_costs
+                    SET "删除时间" = NULL,
+                        "删除人" = NULL
+                    WHERE "platform_code" = 'tiktok'
+                      AND "店铺ID" = 'shop-1'
+                      AND "年月" = '2026-03'
+                    """
+                )
+            )
+            await session.commit()
+
+        after_restore = await service.get_business_overview_operational_metrics(
+            month="2026-03-01",
+            platform="tiktok",
+        )
+        assert after_restore["estimated_expenses"] == 111
 
         await engine.dispose()
 

@@ -139,6 +139,10 @@ class PlatformTableManager:
         else:
             # [*] v4.18.1新增:表存在时,检查并补齐缺失的period列(兼容旧表)
             self._ensure_period_columns_exist(table_name)
+            self._ensure_unique_hash_index_contract(
+                table_name=table_name,
+                data_domain=data_domain,
+            )
             logger.debug(f"[PlatformTableManager] 表已存在: {table_name}")
         
         return table_name
@@ -268,6 +272,53 @@ class PlatformTableManager:
         except Exception as e:
             self.db.rollback()
             logger.error(f"[PlatformTableManager] [v4.18.1] 补齐period列失败: {e}", exc_info=True)
+
+    def _ensure_unique_hash_index_contract(self, table_name: str, data_domain: str) -> None:
+        """
+        修复历史 services 表唯一索引缺少平台/店铺维度的问题。
+        """
+        try:
+            index_name = f"uq_{table_name}_hash"
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT indexdef
+                    FROM pg_indexes
+                    WHERE schemaname = 'b_class'
+                      AND indexname = :index_name
+                    """
+                ),
+                {"index_name": index_name},
+            ).fetchone()
+            if not row:
+                return
+
+            index_def = str(row[0] or "")
+            expected_fragment = "platform_code, COALESCE(shop_id, ''), data_domain, granularity, data_hash"
+            if data_domain.lower() != "services":
+                return
+            if expected_fragment in index_def:
+                return
+
+            logger.warning(
+                f"[PlatformTableManager] 检测到 services 唯一索引契约过旧，准备修复: {index_name}"
+            )
+            self.db.execute(text(f'DROP INDEX IF EXISTS b_class."{index_name}"'))
+            self.db.execute(
+                text(
+                    f'''
+                    CREATE UNIQUE INDEX IF NOT EXISTS "{index_name}"
+                    ON b_class."{table_name}" (platform_code, COALESCE(shop_id, ''), data_domain, granularity, data_hash)
+                    '''
+                )
+            )
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            logger.error(
+                f"[PlatformTableManager] 修复唯一索引契约失败 (表={table_name}): {e}",
+                exc_info=True,
+            )
     
     def _create_base_table(
         self,
@@ -326,16 +377,10 @@ class PlatformTableManager:
             
             # 创建唯一索引(使用COALESCE处理NULL值)
             # [WARN] PostgreSQL的UNIQUE约束不支持表达式,需要使用唯一索引
-            if data_domain.lower() == 'services':
-                unique_index_sql = text(f"""
-                    CREATE UNIQUE INDEX IF NOT EXISTS "uq_{table_name}_hash" 
-                    ON b_class."{table_name}" (data_domain, sub_domain, granularity, data_hash)
-                """)
-            else:
-                unique_index_sql = text(f"""
-                    CREATE UNIQUE INDEX IF NOT EXISTS "uq_{table_name}_hash" 
-                    ON b_class."{table_name}" (platform_code, COALESCE(shop_id, ''), data_domain, granularity, data_hash)
-                """)
+            unique_index_sql = text(f"""
+                CREATE UNIQUE INDEX IF NOT EXISTS "uq_{table_name}_hash" 
+                ON b_class."{table_name}" (platform_code, COALESCE(shop_id, ''), data_domain, granularity, data_hash)
+            """)
             
             self.db.execute(unique_index_sql)
             
@@ -453,4 +498,3 @@ async def async_ensure_table_exists(
     
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _sync_ensure_table)
-

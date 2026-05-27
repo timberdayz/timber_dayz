@@ -307,6 +307,43 @@ def ensure_postgresql_dashboard_assets(project_root):
     return True
 
 
+def ensure_local_schema_ready():
+    """本机后端启动前校验迁移与关键列状态，避免带病启动。"""
+    safe_print("\n[检查] 本地数据库迁移状态...")
+    try:
+        from backend.models.database import verify_schema_completeness
+
+        result = verify_schema_completeness()
+    except Exception as exc:
+        safe_print(f"  [ERROR] 数据库结构校验失败: {exc}")
+        safe_print("  提示: 请先执行 `alembic upgrade heads` 后重试")
+        return False
+
+    if not result.get("all_tables_exist", True):
+        missing_tables = ", ".join((result.get("missing_tables") or [])[:10])
+        safe_print(f"  [ERROR] 数据库缺表: {missing_tables}")
+        safe_print("  提示: 请先执行 `alembic upgrade heads`")
+        return False
+
+    if not result.get("all_critical_columns_exist", True):
+        missing_columns = ", ".join((result.get("missing_columns") or [])[:10])
+        safe_print(f"  [ERROR] 数据库缺关键列: {missing_columns}")
+        safe_print("  提示: 请先执行 `alembic upgrade heads`")
+        return False
+
+    if result.get("migration_status") not in ("up_to_date", "not_initialized"):
+        safe_print(
+            "  [ERROR] Alembic 迁移未对齐: "
+            f"current={result.get('current_revision', 'N/A')} "
+            f"head={result.get('head_revision', 'N/A')}"
+        )
+        safe_print("  提示: 请先执行 `alembic upgrade heads`")
+        return False
+
+    safe_print("  [OK] 本地数据库迁移状态正常")
+    return True
+
+
 def warn_legacy_shop_session_artifacts(project_root):
     """启动期告警：提醒当前磁盘上仍有店铺级会话残留。"""
     try:
@@ -1726,6 +1763,9 @@ def main():
 
     try:
         if not args.frontend_only and not args.use_docker:
+            if not ensure_local_schema_ready():
+                raise SystemExit(1)
+
             if not ensure_postgresql_dashboard_assets(project_root):
                 safe_print("\n[ERROR] PostgreSQL Dashboard 资产检查失败")
                 raise SystemExit(1)

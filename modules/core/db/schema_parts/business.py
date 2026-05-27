@@ -1940,11 +1940,17 @@ class OperatingCost(Base):
     表结构(a_class.operating_costs):
     - id: bigint (PK)
     - 店铺ID: character varying(256)
+    - platform_code: character varying(32)
     - 年月: character varying(7)
     - 租金: numeric(15,2)
     - 营销费用: numeric(15,2)
     - 水电费: numeric(15,2)
+    - AI Token费用: numeric(15,2)
     - 其他成本: numeric(15,2)
+    - 成本合计: numeric(15,2)
+    - 备注: text
+    - 附件: jsonb
+    - 是否锁定: boolean
     - 创建时间: timestamp
     - 更新时间: timestamp
     """
@@ -1953,18 +1959,29 @@ class OperatingCost(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     # 使用 name 参数映射到数据库中的中文列名
     shop_id = Column("店铺ID", String(256), nullable=False)
+    platform_code = Column(String(32), nullable=True)
     year_month = Column("年月", String(7), nullable=False)
     rent = Column("租金", Numeric(15, 2), nullable=False, default=0.0)
     marketing_fee = Column("营销费用", Numeric(15, 2), nullable=False, default=0.0)
     utilities = Column("水电费", Numeric(15, 2), nullable=False, default=0.0)
+    ai_token_cost = Column("AI Token费用", Numeric(15, 2), nullable=False, default=0.0)
     other_costs = Column("其他成本", Numeric(15, 2), nullable=False, default=0.0)
+    total_cost = Column("成本合计", Numeric(15, 2), nullable=False, default=0.0)
+    note = Column("备注", Text, nullable=True)
+    attachments = Column("附件", JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    locked = Column("是否锁定", Boolean, nullable=False, server_default=text("false"))
+    deleted_at = Column("删除时间", DateTime(timezone=True), nullable=True)
+    deleted_by = Column("删除人", BigInteger, nullable=True)
     created_at = Column("创建时间", DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column("更新时间", DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
-        UniqueConstraint("店铺ID", "年月", name="uq_operating_costs_a_shop_month"),
+        UniqueConstraint("platform_code", "店铺ID", "年月", name="uq_operating_costs_a_platform_shop_month"),
         Index("ix_operating_costs_a_shop", "店铺ID"),
+        Index("ix_operating_costs_a_platform_shop", "platform_code", "店铺ID"),
         Index("ix_operating_costs_a_month", "年月"),
+        Index("ix_operating_costs_locked", "是否锁定"),
+        Index("ix_operating_costs_deleted_at", "删除时间"),
         {"schema": "a_class"},
     )
 

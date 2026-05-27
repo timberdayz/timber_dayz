@@ -289,7 +289,7 @@
               <el-tag v-else type="info" size="small">新增</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column label="操作" width="210" fixed="right">
             <template #default="{ row, $index }">
               <el-button
                 size="small"
@@ -307,9 +307,37 @@
               >
                 删除
               </el-button>
+              <el-button
+                v-if="row.id"
+                size="small"
+                type="warning"
+                plain
+                @click="handleRestoreRow(row)"
+              >
+                恢复
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
+
+        <div v-if="deletedMonthlyData.length" class="erp-mt-md">
+          <div class="deleted-expenses-title">已删除费用记录</div>
+          <el-table :data="deletedMonthlyData" size="small" border>
+            <el-table-column prop="year_month" label="月份" width="110" />
+            <el-table-column prop="platform_code" label="平台" width="110" />
+            <el-table-column prop="shop_id" label="店铺ID" min-width="180" />
+            <el-table-column prop="total_cost" label="成本合计" width="120" align="right">
+              <template #default="{ row }">
+                {{ formatNumber(row.total_cost) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" align="center">
+              <template #default="{ row }">
+                <el-button size="small" type="warning" plain @click="handleRestoreRow(row)">恢复</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </el-card>
 
       <el-dialog
@@ -624,7 +652,7 @@
               <el-tag v-else type="info" size="small">新增</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column label="操作" width="210" fixed="right">
             <template #default="{ row, $index }">
               <el-button
                 size="small"
@@ -642,9 +670,36 @@
               >
                 删除
               </el-button>
+              <el-button
+                v-if="row.id"
+                size="small"
+                type="warning"
+                plain
+                @click="handleRestoreShopRow(row)"
+              >
+                恢复
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
+
+        <div v-if="deletedShopData.length" class="erp-mt-md">
+          <div class="deleted-expenses-title">已删除费用记录</div>
+          <el-table :data="deletedShopData" size="small" border>
+            <el-table-column prop="year_month" label="月份" width="110" />
+            <el-table-column prop="platform_code" label="平台" width="110" />
+            <el-table-column prop="total_cost" label="成本合计" width="120" align="right">
+              <template #default="{ row }">
+                {{ formatNumber(row.total_cost) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" align="center">
+              <template #default="{ row }">
+                <el-button size="small" type="warning" plain @click="handleRestoreShopRow(row)">恢复</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
 
         <!-- 添加新月份按钮 -->
         <div class="erp-mt-md">
@@ -717,6 +772,8 @@ const yearlySummary = reactive({
 const selectedShopId = ref(null)
 const selectedYear = ref(null)
 const shopTableData = ref([])
+const deletedMonthlyData = ref([])
+const deletedShopData = ref([])
 
 // 店铺汇总
 const shopSummary = reactive({
@@ -747,11 +804,29 @@ const normalizeExpenseRow = (item = {}) => {
   const aiTokenCost = Number(item.ai_token_cost) || 0
   return {
     ...item,
+    platform_code: item.platform_code ?? null,
     marketing_fee: marketingFee,
     ai_token_cost: aiTokenCost,
     note: item.note ?? '',
     total_cost: Number(item.total_cost ?? item.total) || 0
   }
+}
+
+const buildExpenseRowKey = (row = {}) =>
+  `${row.platform_code || ''}|${row.shop_id || ''}`
+
+const isMeaningfulExpenseRow = (row = {}) => {
+  const note = String(row.note || '').trim()
+  const attachments = Array.isArray(row.attachments) ? row.attachments : []
+  return (
+    (Number(row.rent) || 0) > 0 ||
+    (Number(row.marketing_fee) || 0) > 0 ||
+    (Number(row.utilities) || 0) > 0 ||
+    (Number(row.ai_token_cost) || 0) > 0 ||
+    (Number(row.other_costs) || 0) > 0 ||
+    note.length > 0 ||
+    attachments.length > 0
+  )
 }
 
 const initTaskContext = () => {
@@ -816,24 +891,28 @@ const loadMonthlyExpenses = async () => {
   monthlyError.value = null // 重置错误状态
   try {
     // 并行加载月度数据和年度汇总
-    const [monthlyRes, yearlyRes] = await Promise.all([
+    const [monthlyRes, yearlyRes, deletedRes] = await Promise.all([
       api.get('/expenses', {
         params: { year_month: selectedMonth.value, page_size: 1000 }
       }),
       api.get('/expenses/summary/yearly', {
         params: { year: selectedMonth.value.substring(0, 4) }
+      }),
+      api.get('/expenses/deleted', {
+        params: { year_month: selectedMonth.value }
       })
     ])
 
     // 处理月度数据
     const existingData = monthlyRes.items || []
-    const shopIdSet = new Set(existingData.map((item) => item.shop_id))
+    const shopKeySet = new Set(existingData.map((item) => buildExpenseRowKey(item)))
 
     // 为没有数据的店铺创建空白行
     const newRows = availableShops.value
-      .filter((shop) => !shopIdSet.has(shop.shop_id))
+      .filter((shop) => !shopKeySet.has(buildExpenseRowKey(shop)))
       .map((shop) => ({
         id: null,
+        platform_code: shop.platform_code,
         shop_id: shop.shop_id,
         shop_name: shop.shop_name,
         year_month: selectedMonth.value,
@@ -856,7 +935,7 @@ const loadMonthlyExpenses = async () => {
         .map((item) => ({
           ...normalizeExpenseRow(item),
           shop_name:
-            availableShops.value.find((s) => s.shop_id === item.shop_id)
+            availableShops.value.find((s) => buildExpenseRowKey(s) === buildExpenseRowKey(item))
               ?.shop_name || item.shop_id,
           saving: false
         })),
@@ -875,6 +954,7 @@ const loadMonthlyExpenses = async () => {
       yearlySummary.total_ai_token_cost = yearlyRes.total_ai_token_cost || 0
       yearlySummary.total_other_costs = yearlyRes.total_other_costs || 0
     }
+    deletedMonthlyData.value = deletedRes.items || []
   } catch (error) {
     console.error('加载费用数据失败:', error)
     // 设置错误状态，区分"无数据"和"加载失败"
@@ -883,6 +963,7 @@ const loadMonthlyExpenses = async () => {
       recovery: error.recovery_suggestion || '请检查网络连接或联系管理员'
     }
     monthlyTableData.value = []
+    deletedMonthlyData.value = []
     ElMessage.error(monthlyError.value.message)
   } finally {
     loading.value = false
@@ -931,6 +1012,7 @@ const updateRowTotal = (row) => {
 const handleShopChange = (row) => {
   const shop = availableShops.value.find((s) => s.shop_id === row.shop_id)
   if (shop) {
+    row.platform_code = shop.platform_code
     row.shop_name = shop.shop_name
   }
 }
@@ -1034,10 +1116,15 @@ const handleSaveRow = async (row) => {
     ElMessage.warning('请先选择月份')
     return
   }
+  if (!isMeaningfulExpenseRow(row)) {
+    ElMessage.warning('空白费用记录无需保存，请直接保留空白行')
+    return
+  }
 
   row.saving = true
   try {
     const payload = {
+      platform_code: row.platform_code,
       shop_id: row.shop_id,
       year_month: selectedMonth.value,
       rent: Number(row.rent) || 0,
@@ -1070,8 +1157,8 @@ const handleDeleteRow = async (row, index) => {
 
   try {
     await ElMessageBox.confirm(
-      `确定要删除 ${row.shop_name || row.shop_id} 的费用记录吗？`,
-      '确认删除',
+      `确定要删除 ${selectedMonth.value} / ${row.platform_code || '-'} / ${row.shop_name || row.shop_id} 的本月费用记录吗？删除后会保留一条空白编辑行，可重新保存恢复。`,
+      '确认删除本月费用',
       { type: 'warning' }
     )
 
@@ -1123,6 +1210,7 @@ const handleBatchSave = async () => {
     for (const row of rowsToSave) {
       try {
         const payload = {
+          platform_code: row.platform_code,
           shop_id: row.shop_id,
           year_month: selectedMonth.value,
           rent: Number(row.rent) || 0,
@@ -1185,13 +1273,17 @@ const loadShopExpenses = async () => {
       params.year = selectedYear.value
     }
 
-    const res = await api.get('/expenses/by-shop', { params })
+    const [res, deletedRes] = await Promise.all([
+      api.get('/expenses/by-shop', { params }),
+      api.get('/expenses/deleted', { params })
+    ])
 
     // 处理数据
     shopTableData.value = (res.items || []).map((item) => ({
       ...normalizeExpenseRow(item),
       saving: false
     }))
+    deletedShopData.value = deletedRes.items || []
 
     // 更新汇总
     if (res.summary) {
@@ -1208,6 +1300,7 @@ const loadShopExpenses = async () => {
   } catch (error) {
     console.error('加载店铺费用失败:', error)
     ElMessage.error(error.message || '加载店铺费用失败')
+    deletedShopData.value = []
   } finally {
     loading.value = false
   }
@@ -1222,6 +1315,18 @@ const resetShopSummary = () => {
   shopSummary.total_ai_token_cost = 0
   shopSummary.total_other_costs = 0
   shopSummary.month_count = 0
+}
+
+const handleRestoreRow = async (row) => {
+  if (!row.id) return
+  try {
+    await api.post(`/expenses/${row.id}/restore`)
+    ElMessage.success('恢复成功')
+    await loadMonthlyExpenses()
+  } catch (error) {
+    console.error('恢复失败:', error)
+    ElMessage.error(error.message || '恢复失败')
+  }
 }
 
 // 更新店铺行合计
@@ -1244,6 +1349,8 @@ const handleAddMonthRow = () => {
 
   shopTableData.value.push({
     id: null,
+    platform_code:
+      availableShops.value.find((shop) => shop.shop_id === selectedShopId.value)?.platform_code || null,
     shop_id: selectedShopId.value,
     year_month: '',
     rent: 0,
@@ -1265,10 +1372,15 @@ const handleSaveShopRow = async (row) => {
     ElMessage.warning('请选择月份')
     return
   }
+  if (!isMeaningfulExpenseRow(row)) {
+    ElMessage.warning('空白费用记录无需保存，请直接保留空白行')
+    return
+  }
 
   row.saving = true
   try {
     const payload = {
+      platform_code: row.platform_code,
       shop_id: selectedShopId.value,
       year_month: row.year_month,
       rent: Number(row.rent) || 0,
@@ -1300,8 +1412,8 @@ const handleDeleteShopRow = async (row, index) => {
 
   try {
     await ElMessageBox.confirm(
-      `确定要删除 ${row.year_month} 的费用记录吗？`,
-      '确认删除',
+      `确定要删除 ${row.year_month} / ${row.platform_code || '-'} / ${selectedShopId.value} 的费用记录吗？删除后可重新新增同月记录恢复。`,
+      '确认删除费用记录',
       { type: 'warning' }
     )
 
@@ -1313,6 +1425,18 @@ const handleDeleteShopRow = async (row, index) => {
       console.error('删除失败:', error)
       ElMessage.error(error.message || '删除失败')
     }
+  }
+}
+
+const handleRestoreShopRow = async (row) => {
+  if (!row.id) return
+  try {
+    await api.post(`/expenses/${row.id}/restore`)
+    ElMessage.success('恢复成功')
+    await loadShopExpenses()
+  } catch (error) {
+    console.error('恢复失败:', error)
+    ElMessage.error(error.message || '恢复失败')
   }
 }
 

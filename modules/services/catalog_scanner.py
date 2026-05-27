@@ -56,6 +56,45 @@ KNOWN_DATA_DOMAINS = VALID_DATA_DOMAINS
 KNOWN_GRANULARITIES = VALID_GRANULARITIES
 
 
+def _allow_dev_catalog_registration() -> bool:
+    return os.getenv("ALLOW_DEV_CATALOG_REGISTRATION", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _is_temp_development_path(file_path: Path) -> bool:
+    normalized = str(Path(file_path)).replace("\\", "/").lower()
+    return normalized.startswith("temp/development/") or "/temp/development/" in normalized
+
+
+def _should_skip_catalog_registration(file_path: Path) -> bool:
+    if _allow_dev_catalog_registration():
+        return False
+    return _is_temp_development_path(file_path)
+
+
+def _build_catalog_path_candidates(file_path: Path) -> list[str]:
+    """兼容历史 catalog 记录里的不同路径格式，优先复用旧记录而不是继续插新行。"""
+    resolved = Path(file_path)
+    try:
+        absolute = resolved.resolve()
+    except Exception:
+        absolute = resolved
+    relative = to_relative_path(resolved)
+    candidates = {
+        relative,
+        relative.replace("/", "\\"),
+        str(resolved),
+        str(resolved).replace("/", "\\"),
+        str(absolute),
+        str(absolute).replace("/", "\\"),
+    }
+    return [candidate for candidate in candidates if candidate]
+
+
 @dataclass
 class ScanResult:
     """扫描结果"""
@@ -404,6 +443,11 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                 if _is_repaired_cache(file_path):
                     continue
                 
+                if _should_skip_catalog_registration(file_path):
+                    skipped += 1
+                    logger.info(f"跳过开发测试文件注册: {file_path}")
+                    continue
+                
                 seen += 1
                 
                 try:
@@ -642,14 +686,15 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                     # 6. Upsert(基于file_hash和file_path双重去重)
                     # [*] v4.17.3修复:增强去重机制,同时检查file_hash和file_path
                     # [*] v4.18.0修复:使用相对路径匹配,保持与存储格式一致,确保云端迁移兼容
+                    path_candidates = _build_catalog_path_candidates(file_path)
                     existing = session.execute(
                         select(CatalogFile).where(
                             or_(
                                 CatalogFile.file_hash == file_hash,
-                                CatalogFile.file_path == relative_file_path
+                                CatalogFile.file_path.in_(path_candidates),
                             )
-                        )
-                    ).scalar_one_or_none()
+                        ).order_by(CatalogFile.id.asc())
+                    ).scalars().first()
                     
                     if existing:
                         # 更新现有记录(文件可能被移动)- v4.3.5: 同样强制小写化
@@ -804,6 +849,10 @@ def register_single_file(file_path: str) -> Optional[int]:
     
     if not file_path_obj.exists():
         logger.warning(f"文件不存在,无法注册: {file_path}")
+        return None
+
+    if _should_skip_catalog_registration(file_path_obj):
+        logger.info(f"跳过开发测试文件注册: {file_path_obj}")
         return None
     
     # 检查文件格式
@@ -965,14 +1014,15 @@ def register_single_file(file_path: str) -> Optional[int]:
         relative_file_path = to_relative_path(file_path_obj)
         relative_meta_path = to_relative_path(meta_file) if meta_file.exists() else None
         
+        path_candidates = _build_catalog_path_candidates(file_path_obj)
         existing = session.execute(
             select(CatalogFile).where(
                 or_(
                     CatalogFile.file_hash == file_hash,
-                    CatalogFile.file_path == relative_file_path
+                    CatalogFile.file_path.in_(path_candidates),
                 )
-            )
-        ).scalar_one_or_none()
+            ).order_by(CatalogFile.id.asc())
+        ).scalars().first()
         
         if existing:
             # 更新现有记录

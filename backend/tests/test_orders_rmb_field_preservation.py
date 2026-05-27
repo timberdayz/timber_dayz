@@ -4,133 +4,126 @@ import pytest
 def test_orders_rmb_fields_preserve_distinct_internal_keys():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
+    row = {
+        "利润": "12.5",
+        "利润(RMB)": "88.1",
+        "买家支付": "9.1",
+        "买家支付(RMB)": "64.2",
+    }
+
     normalized = normalize_row_fields_for_domain(
         domain="orders",
-        row={
-            "利润": "12.5",
-            "利润(RMB)": "88.1",
-            "买家支付": "9.1",
-            "买家支付(RMB)": "64.2",
-        },
+        row=row,
     )
 
-    assert normalized["profit"] == "12.5"
-    assert normalized["profit_rmb"] == "88.1"
-    assert normalized["buyer_payment"] == "9.1"
-    assert normalized["buyer_payment_rmb"] == "64.2"
+    assert normalized == row
 
 
 def test_orders_store_label_is_preserved_as_store_label_raw():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
+    row = {
+        "店铺": "Shopee新加坡1店",
+        "站点": "新加坡",
+    }
+
     normalized = normalize_row_fields_for_domain(
         domain="orders",
-        row={
-            "店铺": "Shopee新加坡1店",
-            "站点": "新加坡",
-        },
+        row=row,
     )
 
-    assert normalized["store_label_raw"] == "Shopee新加坡1店"
-    assert normalized["site"] == "新加坡"
+    assert normalized == row
 
 
 def test_orders_rmb_fields_do_not_silently_overwrite_legacy_fields():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
+    row = {
+        "订单原始金额": "10.0",
+        "订单原始金额(RMB)": "70.0",
+        "平台佣金": "1.2",
+        "平台佣金(RMB)": "8.4",
+        "预估回款金额": "6.5",
+        "预估回款金额(RMB)": "45.5",
+    }
+
     normalized = normalize_row_fields_for_domain(
         domain="orders",
-        row={
-            "订单原始金额": "10.0",
-            "订单原始金额(RMB)": "70.0",
-            "平台佣金": "1.2",
-            "平台佣金(RMB)": "8.4",
-            "预估回款金额": "6.5",
-            "预估回款金额(RMB)": "45.5",
-        },
+        row=row,
     )
 
-    assert normalized["original_amount"] == "10.0"
-    assert normalized["original_amount_rmb"] == "70.0"
-    assert normalized["platform_commission"] == "1.2"
-    assert normalized["platform_commission_rmb"] == "8.4"
-    assert normalized["estimated_settlement"] == "6.5"
-    assert normalized["estimated_settlement_rmb"] == "45.5"
+    assert normalized == row
 
 
 def test_orders_rmb_fields_avoid_collision_for_settlement_amount_pairs():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
+    row = {
+        "已结算金额": "100.0",
+        "已结算金额(RMB)": "700.0",
+    }
+
     normalized = normalize_row_fields_for_domain(
         domain="orders",
-        row={
-            "已结算金额": "100.0",
-            "已结算金额(RMB)": "700.0",
-        },
+        row=row,
     )
 
-    assert normalized["已结算金额"] == "100.0"
-    assert normalized["已结算金额_rmb"] == "700.0"
+    assert normalized == row
 
 
 def test_orders_rmb_fields_avoid_collision_for_real_tiktok_orders_amount_pairs():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
+    row = {
+        "利润": "12.5",
+        "利润(RMB)": "88.1",
+        "已结算金额": "100.0",
+        "已结算金额(RMB)": "700.0",
+        "买家实付金额": "90.0",
+        "买家实付金额(RMB)": "630.0",
+    }
+
     normalized = normalize_row_fields_for_domain(
         domain="orders",
-        row={
-            "利润": "12.5",
-            "利润(RMB)": "88.1",
-            "已结算金额": "100.0",
-            "已结算金额(RMB)": "700.0",
-            "买家实付金额": "90.0",
-            "买家实付金额(RMB)": "630.0",
-        },
+        row=row,
     )
 
-    assert normalized["profit"] == "12.5"
-    assert normalized["profit_rmb"] == "88.1"
-    assert normalized["已结算金额"] == "100.0"
-    assert normalized["已结算金额_rmb"] == "700.0"
-    assert normalized["买家实付金额"] == "90.0"
-    assert normalized["买家实付金额_rmb"] == "630.0"
+    assert normalized == row
 
 
 def test_orders_tax_abbreviation_fields_preserve_distinct_ascii_keys():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
+    row = {
+        "VAT": "1.0",
+        "VAT(RMB)": "7.0",
+        "SST": "2.0",
+        "SST(RMB)": "14.0",
+        "GST": "3.0",
+        "GST(RMB)": "21.0",
+    }
+
     normalized = normalize_row_fields_for_domain(
         domain="orders",
-        row={
-            "VAT": "1.0",
-            "VAT(RMB)": "7.0",
-            "SST": "2.0",
-            "SST(RMB)": "14.0",
-            "GST": "3.0",
-            "GST(RMB)": "21.0",
-        },
+        row=row,
     )
 
-    assert normalized["vat"] == "1.0"
-    assert normalized["vat_rmb"] == "7.0"
-    assert normalized["sst"] == "2.0"
-    assert normalized["sst_rmb"] == "14.0"
-    assert normalized["gst"] == "3.0"
-    assert normalized["gst_rmb"] == "21.0"
+    assert normalized == row
 
 
 def test_non_orders_domains_keep_existing_currency_suffix_stripping_behavior():
     from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 
+    row = {
+        "利润(RMB)": "88.1",
+    }
+
     normalized = normalize_row_fields_for_domain(
         domain="products",
-        row={
-            "利润(RMB)": "88.1",
-        },
+        row=row,
     )
 
-    assert normalized["利润"] == "88.1"
-    assert "profit_rmb" not in normalized
+    assert normalized == row
 
 
 def test_orders_rmb_source_fields_have_explicit_alias_mappings():

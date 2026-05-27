@@ -35,3 +35,4 @@ This file defines ownership boundaries for agents.
 - Dashboard runtime is PostgreSQL-first.
 - Data flow is `b_class raw -> semantic -> mart -> api -> backend router -> frontend`.
 - Metabase is historical-only for active runtime decisions.
+- Semantic field unification must follow the architecture rule: same-platform, same-domain, same-file coexisting fields split by default; only cross-platform business-equivalent fields merge into canonical semantic fields.

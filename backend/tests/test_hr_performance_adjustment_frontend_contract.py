@@ -11,7 +11,7 @@ def test_api_index_exposes_hr_performance_adjustment_methods():
 
 
 def test_hr_performance_management_view_exposes_adjustment_panel():
-    text = Path("frontend/src/views/hr/PerformanceManagement.vue").read_text(encoding="utf-8")
+    text = Path("frontend/src/domains/business/views/hr/PerformanceManagement.vue").read_text(encoding="utf-8")
 
     assert "adjustmentDialogVisible" in text
     assert "openCreateAdjustment" in text
@@ -21,8 +21,8 @@ def test_hr_performance_management_view_exposes_adjustment_panel():
 
 
 def test_performance_views_expose_ranking_pool_and_alert_helpers():
-    mgmt = Path("frontend/src/views/hr/PerformanceManagement.vue").read_text(encoding="utf-8")
-    display = Path("frontend/src/views/hr/PerformanceDisplay.vue").read_text(encoding="utf-8")
+    mgmt = Path("frontend/src/domains/business/views/hr/PerformanceManagement.vue").read_text(encoding="utf-8")
+    display = Path("frontend/src/domains/business/views/hr/PerformanceDisplay.vue").read_text(encoding="utf-8")
 
     assert "rankingPoolText" in mgmt
     assert "performanceAlertText" in mgmt

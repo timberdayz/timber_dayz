@@ -27,7 +27,7 @@ test('frontend API exposes employee salary helpers', () => {
 test('router exposes dedicated employee salary page', () => {
   assert.equal(routerSource.includes("path: '/employee-salary'"), true)
   assert.equal(routerSource.includes("name: 'EmployeeSalary'"), true)
-  assert.equal(routerSource.includes("views/hr/EmployeeSalary.vue"), true)
+  assert.equal(routerSource.includes("domains/business/views/hr/EmployeeSalary.vue"), true)
 })
 
 test('human resources menu includes employee salary entry', () => {

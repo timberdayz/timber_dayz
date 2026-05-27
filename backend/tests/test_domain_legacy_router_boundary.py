@@ -6,39 +6,6 @@ from pathlib import Path
 
 
 ALLOWED_LEGACY_ROUTER_IMPORTS: dict[str, list[str]] = {
-    'backend/domains/business/routers/dashboard_api_postgresql.py': [
-        'import backend.routers.dashboard_api_postgresql as legacy_module',
-    ],
-    'backend/domains/business/routers/follow_investment.py': [
-        'import backend.routers.follow_investment as legacy_module',
-    ],
-    'backend/domains/business/routers/hr_attendance.py': [
-        'import backend.routers.hr_attendance as legacy_module',
-    ],
-    'backend/domains/business/routers/hr_commission.py': [
-        'import backend.routers.hr_commission as legacy_module',
-    ],
-    'backend/domains/business/routers/hr_department.py': [
-        'import backend.routers.hr_department as legacy_module',
-    ],
-    'backend/domains/business/routers/hr_employee.py': [
-        'import backend.routers.hr_employee as legacy_module',
-    ],
-    'backend/domains/business/routers/hr_salary.py': [
-        'import backend.routers.hr_salary as legacy_module',
-    ],
-    'backend/domains/business/routers/monthly_profit_settlement.py': [
-        'import backend.routers.monthly_profit_settlement as legacy_module',
-    ],
-    'backend/domains/business/routers/mv.py': [
-        'import backend.routers.mv as legacy_module',
-    ],
-    'backend/domains/business/routers/performance_management.py': [
-        'import backend.routers.performance_management as legacy_module',
-    ],
-    'backend/domains/business/routers/profit_basis.py': [
-        'import backend.routers.profit_basis as legacy_module',
-    ],
     'backend/domains/collection/routers/collection_tasks.py': [
         'import backend.routers.collection_tasks as legacy_module',
     ],
@@ -148,6 +115,22 @@ def test_domain_and_service_runtime_imports_do_not_expand_legacy_router_surface(
     )
 
 
+def test_business_domain_runtime_imports_do_not_depend_on_backend_routers() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    business_base = repo_root / 'backend' / 'domains' / 'business'
+    findings: dict[str, list[str]] = {}
+    for path in business_base.rglob('*.py'):
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path))
+        hits = _legacy_router_import_statements(tree)
+        if hits:
+            findings[path.relative_to(repo_root).as_posix()] = hits
+
+    assert findings == {}, (
+        'Business domain modules must not depend on backend.routers legacy modules. '
+        f'found={findings}'
+    )
+
+
 def _exported_names(module: object) -> set[str]:
     module_all = getattr(module, '__all__', None)
     if module_all is not None:
@@ -157,10 +140,6 @@ def _exported_names(module: object) -> set[str]:
 
 def test_representative_domain_shims_preserve_legacy_public_exports() -> None:
     representative_pairs = [
-        (
-            'backend.domains.business.routers.hr_employee',
-            'backend.routers.hr_employee',
-        ),
         (
             'backend.domains.collection.routers.component_versions',
             'backend.routers.component_versions',

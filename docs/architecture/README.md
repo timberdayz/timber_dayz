@@ -25,6 +25,9 @@ This directory contains architecture references. The active repository rule entr
 - Project structure: `docs/architecture/PROJECT_STRUCTURE.md`
 - Domain and module boundaries: `docs/architecture/BOUNDARIES.md`
 - Dashboard architecture: `docs/architecture/DASHBOARD.md`
+- Data sync contract: `docs/architecture/DATA_SYNC_CONTRACT.md`
+- Semantic field rules: `docs/architecture/SEMANTIC_FIELD_RULES.md`
+- Field alias migration prep: `docs/architecture/FIELD_ALIAS_RULES_MIGRATION_PREP.md`
 - Backend patterns: `docs/DEVELOPMENT_RULES/CODE_PATTERNS.md`
 - API and contracts: `docs/DEVELOPMENT_RULES/API_AND_CONTRACTS.md`
 - Database rules: `docs/DEVELOPMENT_RULES/DATABASE.md`

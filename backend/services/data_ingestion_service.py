@@ -88,6 +88,25 @@ ORDERS_EXPLICIT_FIELD_MAP = {
 }
 
 
+def _format_sync_stage_error(stage: str, detail: str) -> str:
+    return f"数据同步失败:{stage},{detail}"
+
+
+def validate_metric_date_contract(
+    *,
+    metric_date: Optional[date],
+    file_date_from: Optional[date],
+    file_date_to: Optional[date],
+) -> bool:
+    if metric_date is None:
+        return True
+    if file_date_from and metric_date < file_date_from:
+        return False
+    if file_date_to and metric_date > file_date_to:
+        return False
+    return True
+
+
 def normalize_field_name_for_domain(
     domain: str,
     field_name: str,
@@ -149,27 +168,8 @@ def normalize_row_fields_for_domain(
     row: Dict[str, Any],
     currency_extractor=None,
 ) -> Dict[str, Any]:
-    extractor = currency_extractor or get_currency_extractor()
-    normalized_row: Dict[str, Any] = {}
-    source_fields_by_target: Dict[str, str] = {}
-
-    for field_name, value in row.items():
-        normalized_field_name = normalize_field_name_for_domain(
-            domain,
-            field_name,
-            currency_extractor=extractor,
-        )
-        previous_source = source_fields_by_target.get(normalized_field_name)
-        if previous_source and previous_source != field_name:
-            raise ValueError(
-                f"Field normalization collision in domain={domain}: "
-                f"{previous_source} and {field_name} both map to {normalized_field_name}"
-            )
-
-        normalized_row[normalized_field_name] = value
-        source_fields_by_target[normalized_field_name] = field_name
-
-    return normalized_row
+    del domain, currency_extractor
+    return dict(row)
 
 
 class DataIngestionService:
@@ -305,6 +305,7 @@ class DataIngestionService:
         header_columns: Optional[List[str]] = None,  # [*] v4.6.0 DSS架构:原始表头字段列表
         deduplication_fields: Optional[List[str]] = None,  # [*] v4.14.0新增:核心去重字段列表
         sub_domain: Optional[str] = None,  # [*] v4.14.0新增:子类型
+        template_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         数据入库主方法
@@ -525,6 +526,9 @@ class DataIngestionService:
                     # 获取RawDataImporter和DeduplicationService实例
                     raw_importer = get_raw_data_importer(self.db)
                     dedup_service = DeduplicationService(self.db)
+                    if file_record:
+                        setattr(raw_importer, "file_date_from", getattr(file_record, "date_from", None))
+                        setattr(raw_importer, "file_date_to", getattr(file_record, "date_to", None))
                     
                     # 获取granularity(从file_record或默认daily)
                     granularity = getattr(file_record, 'granularity', None) or "daily"
@@ -619,7 +623,7 @@ class DataIngestionService:
                     
                     # [*] v4.16.0修复:准备归一化的header_columns用于动态列管理
                     # 动态列应该使用归一化的列名(不包含货币代码),避免创建重复的列
-                    normalized_header_columns = currency_extractor.normalize_field_list(header_columns_for_storage)
+                    normalized_header_columns = list(header_columns_for_storage)
                     
                     # [*] v4.17.0修复:优先使用file_record.platform_code,确保表名正确
                     # 如果platform_code为空,会导致表名错误(如fact__inventory_snapshot)
@@ -648,7 +652,7 @@ class DataIngestionService:
                         currency_codes=currency_codes,  # [*] v4.15.0新增:货币代码列表
                         sub_domain=sub_domain_value,  # [*] v4.16.0新增:子类型(services域必须提供)
                         original_header_columns=header_columns_for_storage,  # [*] v4.16.0新增:原始header_columns(包含货币代码,用于保存到数据库)
-                        template_id=None  # [*] v4.17.0新增:模板ID(暂时为None,后续从template获取)
+                        template_id=template_id
                     )
                     
                     # [*] v4.15.0修改:处理新的返回值格式(字典)
@@ -755,7 +759,7 @@ class DataIngestionService:
 
                     return {
                         "success": False,
-                        "message": f"数据入库失败:RawDataImporter异常,{raw_import_error}",
+                        "message": _format_sync_stage_error("raw_storage", raw_import_error),
                         "staged": 0,
                         "imported": 0,
                         "amount_imported": 0,
@@ -1016,7 +1020,7 @@ class DataIngestionService:
                         )
                         return {
                             "success": False,
-                            "message": f"数据入库失败:RawDataImporter异常,import_result未定义",
+                            "message": _format_sync_stage_error("raw_storage", "import_result未定义"),
                             "staged": 0,
                             "imported": 0,
                             "amount_imported": 0,

@@ -109,14 +109,15 @@ mapped_monthly_orders AS (
         ) AS order_id,
         CASE
             WHEN COALESCE(
+                raw_data->>'buyer_payment_rmb',
+                raw_data->>'买家支付(RMB)',
+                raw_data->>'买家实付金额_rmb',
+                raw_data->>'买家实付金额(RMB)',
+                raw_data->>'buyer_payment',
+                raw_data->>'买家支付',
                 raw_data->>'实付金额',
                 raw_data->>'买家实付金额',
                 raw_data->>'总收入',
-                raw_data->>'buyer_payment_rmb',
-                raw_data->>'buyer_payment',
-                raw_data->>'买家支付(RMB)',
-                raw_data->>'买家支付',
-                raw_data->>'买家实付金额(RMB)',
                 raw_data->>'paid_amount',
                 raw_data->>'Paid Amount'
             ) IS NULL THEN NULL
@@ -124,14 +125,15 @@ mapped_monthly_orders AS (
                 REGEXP_REPLACE(
                     REPLACE(REPLACE(REPLACE(REPLACE(
                         COALESCE(
+                            raw_data->>'buyer_payment_rmb',
+                            raw_data->>'买家支付(RMB)',
+                            raw_data->>'买家实付金额_rmb',
+                            raw_data->>'买家实付金额(RMB)',
+                            raw_data->>'buyer_payment',
+                            raw_data->>'买家支付',
                             raw_data->>'实付金额',
                             raw_data->>'买家实付金额',
                             raw_data->>'总收入',
-                            raw_data->>'buyer_payment_rmb',
-                            raw_data->>'buyer_payment',
-                            raw_data->>'买家支付(RMB)',
-                            raw_data->>'买家支付',
-                            raw_data->>'买家实付金额(RMB)',
                             raw_data->>'paid_amount',
                             raw_data->>'Paid Amount'
                         ),

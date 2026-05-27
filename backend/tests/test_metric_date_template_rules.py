@@ -143,3 +143,29 @@ def test_raw_data_importer_field_parse_rules_support_source_alias_fallback():
     assert period_end_date == date(2026, 3, 12)
     assert period_start_time == datetime(2026, 3, 12, 12, 30, 0)
     assert period_end_time == datetime(2026, 3, 12, 12, 30, 0)
+
+
+def test_validate_metric_date_contract_rejects_date_outside_file_range():
+    from backend.services.data_ingestion_service import validate_metric_date_contract
+
+    assert (
+        validate_metric_date_contract(
+            metric_date=date(2026, 4, 16),
+            file_date_from=date(2026, 5, 16),
+            file_date_to=date(2026, 5, 16),
+        )
+        is False
+    )
+
+
+def test_validate_metric_date_contract_accepts_date_within_file_range():
+    from backend.services.data_ingestion_service import validate_metric_date_contract
+
+    assert (
+        validate_metric_date_contract(
+            metric_date=date(2026, 5, 16),
+            file_date_from=date(2026, 5, 1),
+            file_date_to=date(2026, 5, 31),
+        )
+        is True
+    )

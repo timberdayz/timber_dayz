@@ -64,6 +64,33 @@ SUB_DOMAIN_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
 }
 
 
+def _append_required_identity_fields(
+    fields: List[str],
+    *,
+    data_domain: str,
+    sub_domain: Optional[str] = None,
+) -> List[str]:
+    """
+    为 data_hash 计算补齐最小身份字段，避免不同平台/店铺发生跨文件冲突。
+    """
+    required_fields = ["platform_code", "shop_id"]
+    if data_domain == "services" and sub_domain:
+        required_fields.append("sub_domain")
+
+    merged: List[str] = []
+    seen = set()
+    for field in [*(fields or []), *required_fields]:
+        normalized = str(field).strip()
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        merged.append(normalized)
+    return merged
+
+
 def get_default_deduplication_fields(
     data_domain: str,
     sub_domain: Optional[str] = None
@@ -120,18 +147,28 @@ def get_deduplication_fields(
     """
     # 1. 优先使用模板配置
     if template_fields:
-        logger.debug(
-            f"[DedupFields] 使用模板配置的核心字段: {template_fields}"
+        merged_fields = _append_required_identity_fields(
+            template_fields,
+            data_domain=data_domain,
+            sub_domain=sub_domain,
         )
-        return template_fields
+        logger.debug(
+            f"[DedupFields] 使用模板配置的核心字段: {merged_fields}"
+        )
+        return merged_fields
     
     # 2. 使用默认配置
     default_fields = get_default_deduplication_fields(data_domain, sub_domain)
     if default_fields:
-        logger.debug(
-            f"[DedupFields] 使用默认配置的核心字段: {default_fields}"
+        merged_fields = _append_required_identity_fields(
+            default_fields,
+            data_domain=data_domain,
+            sub_domain=sub_domain,
         )
-        return default_fields
+        logger.debug(
+            f"[DedupFields] 使用默认配置的核心字段: {merged_fields}"
+        )
+        return merged_fields
     
     # 3. 如果没有配置,返回空列表(表示使用所有业务字段)
     logger.debug(
@@ -178,4 +215,3 @@ def get_upsert_update_fields(data_domain: str) -> List[str]:
         f"[UpsertFields] 数据域 {data_domain} 的更新字段: {fields}"
     )
     return fields
-
