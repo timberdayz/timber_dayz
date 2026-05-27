@@ -85,7 +85,7 @@ def test_parser_rejects_conflicting_local_and_docker_modes():
     assert exc_info.value.code == 2
 
 
-def test_start_backend_uses_reload_for_windows_headless_local(monkeypatch, tmp_path):
+def test_start_backend_can_disable_reload_for_windows_headless_local(monkeypatch, tmp_path):
     module = _load_run_module()
     module.ACTIVE_BACKEND_PORT = 18001
 
@@ -106,10 +106,62 @@ def test_start_backend_uses_reload_for_windows_headless_local(monkeypatch, tmp_p
 
     monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
 
-    process = module.start_backend(runtime_mode="development", windowed=False)
+    process = module.start_backend(runtime_mode="development", windowed=False, enable_reload=False)
 
     assert process is not None
-    assert "--reload" in captured["cmd"]
+    assert "--reload" not in captured["cmd"]
+
+
+def test_start_celery_worker_includes_collection_queue_on_windows(monkeypatch):
+    module = _load_run_module()
+
+    monkeypatch.setattr(module.sys_platform, "system", lambda: "Windows")
+
+    captured = {}
+
+    class DummyProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return DummyProcess()
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(module, "safe_print", lambda *args, **kwargs: None)
+
+    process = module.start_celery_worker()
+
+    assert process is not None
+    assert "data_sync,scheduled,data_processing,collection" in captured["cmd"][2]
+    assert "PROJECT_ROOT" in captured["cmd"][2]
+
+
+def test_start_collection_worker_sets_project_root_env(monkeypatch, tmp_path):
+    module = _load_run_module()
+    monkeypatch.setattr(module.sys_platform, "system", lambda: "Windows")
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "run.py"))
+    monkeypatch.setattr(module, "safe_print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_register_process_with_windows_job", lambda process: None)
+
+    captured = {}
+
+    class DummyProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return DummyProcess()
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+
+    process = module.start_collection_worker()
+
+    assert process is not None
+    assert captured["kwargs"]["env"]["PROJECT_ROOT"] == str(tmp_path)
 
 
 def test_cleanup_local_processes_terminates_started_children():

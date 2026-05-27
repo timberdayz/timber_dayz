@@ -633,6 +633,12 @@ class VerificationRequiredError(Exception):
         super().__init__(f"Verification required: {verification_type}")
 
 
+@dataclass
+class BrowserDiagnosticsSession:
+    trace_path: Optional[str] = None
+    event_counts: Dict[str, int] = field(default_factory=dict)
+
+
 class TaskCancelledError(Exception):
     """任务被取消"""
     pass
@@ -688,6 +694,8 @@ class CollectionExecutorV2:
         
         # 任务上下文缓存(用于暂停/恢复)
         self._task_contexts: Dict[str, TaskContext] = {}
+        self._task_progress_state: Dict[str, Dict[str, Any]] = {}
+        self._browser_diagnostics: Dict[str, List[BrowserDiagnosticsSession]] = {}
         
         # 下载目录
         self.temp_dir = Path(os.getenv('TEMP_DIR', 'temp'))
@@ -1613,6 +1621,8 @@ class CollectionExecutorV2:
         browser_instance = browser
         created_browser_instance = None
         page_context_to_close = None
+        diagnostics_session = None
+        diagnostics_failed = False
         if browser_instance is None and page is not None:
             try:
                 browser_instance = page.context.browser
@@ -1723,6 +1733,12 @@ class CollectionExecutorV2:
                 params = bundle["params"]
                 play_context = bundle["play_context"]
                 page = bundle["page"]
+                diagnostics_session = await self._start_browser_diagnostics(
+                    task_id=task_id,
+                    play_context=play_context,
+                    page=page,
+                    scope="main",
+                )
                 login_result = bundle["login_result"]
                 params["_main_account_shared_state_prepared"] = True
                 if isinstance(login_result, CollectionResult):
@@ -1768,12 +1784,13 @@ class CollectionExecutorV2:
                 )
                 play_context = runtime_bundle.context
                 page = runtime_bundle.page
+                diagnostics_session = await self._start_browser_diagnostics(
+                    task_id=task_id,
+                    play_context=play_context,
+                    page=page,
+                    scope="main",
+                )
 
-            if page_context_to_close is not None:
-                try:
-                    await page_context_to_close.close()
-                except Exception as e:
-                    logger.debug("Close passed-in context: %s", e)
         except TaskCancelledError:
             return CollectionResult(
                 task_id=task_id,
@@ -2080,6 +2097,7 @@ class CollectionExecutorV2:
         
         except Exception as e:
             logger.exception(f"Task {task_id} failed: {e}")
+            diagnostics_failed = True
             
             # 保存错误截图
             try:
@@ -2104,18 +2122,16 @@ class CollectionExecutorV2:
                 total_domains=total_domains_count,
             )
         finally:
-            try:
-                if play_context is not None:
-                    await play_context.close()
-            except Exception as _e:
-                logger.debug("Close play_context: %s", _e)
-            try:
-                if created_browser_instance is not None and hasattr(created_browser_instance, "close"):
-                    maybe_close = created_browser_instance.close()
-                    if inspect.isawaitable(maybe_close):
-                        await maybe_close
-            except Exception as _e:
-                logger.debug("Close created browser_instance: %s", _e)
+            await self._cleanup_browser_runtime(
+                task_id=task_id,
+                page=page,
+                play_context=play_context,
+                browser=created_browser_instance,
+                diagnostics=diagnostics_session,
+                failed=diagnostics_failed,
+                scope="main",
+                extra_context=page_context_to_close,
+            )
 
     async def _record_version_usage(self, component: Dict[str, Any], success: bool) -> None:
         """
@@ -2343,10 +2359,10 @@ class CollectionExecutorV2:
         if "locale" not in context_options:
             context_options["locale"] = "zh-CN"
 
-        try:
-            await old_context.close()
-        except Exception as e:
-            logger.debug("Close old runtime context before session recreation failed: %s", e)
+        await self._close_playwright_resource(
+            old_context,
+            label="old_runtime_context",
+        )
 
         new_context = await browser.new_context(**context_options)
         await runtime_session.apply_stealth_init_scripts(new_context)
@@ -2445,9 +2461,15 @@ class CollectionExecutorV2:
                         )
                         await _save_session_async(session_platform, session_account_id, storage_state)
                 finally:
-                    await headed_context.close()
+                    await self._close_playwright_resource(
+                        headed_context,
+                        label="headful_fallback_context",
+                    )
             finally:
-                await headed_browser.close()
+                await self._close_playwright_resource(
+                    headed_browser,
+                    label="headful_fallback_browser",
+                )
 
         if browser is None:
             return False, old_context, None
@@ -4276,6 +4298,10 @@ class CollectionExecutorV2:
         """
         更新任务状态；可选传入 details 写入步骤日志(step_id/component/data_domain/success/duration_ms/error)。
         """
+        self._task_progress_state[task_id] = {
+            "progress": progress,
+            "current_domain": current_domain,
+        }
         logger.debug(f"Task {task_id}: {progress}% - {message}")
         if self.status_callback:
             try:
@@ -4293,6 +4319,241 @@ class CollectionExecutorV2:
                 logger.error(f"Status callback failed: {e}")
         
         # v4.7.4: 进度通过 HTTP 轮询获取,不再使用 WebSocket
+
+    def _build_trace_output_path(self, task_id: str, scope: str) -> Path:
+        trace_dir = self.temp_dir / "traces" / task_id
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        safe_scope = re.sub(r"[^a-zA-Z0-9_-]+", "_", scope).strip("_") or "runtime"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return trace_dir / f"{timestamp}_{safe_scope}.zip"
+
+    async def _emit_browser_diagnostic(
+        self,
+        task_id: str,
+        message: str,
+        *,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        state = self._task_progress_state.get(task_id) or {}
+        progress = int(state.get("progress", 0) or 0)
+        current_domain = state.get("current_domain")
+        payload = {
+            "step_id": "browser_diagnostics",
+            "component": "browser_diagnostics",
+            **(details or {}),
+        }
+        await self._update_status(
+            task_id,
+            progress,
+            message,
+            current_domain=current_domain,
+            details=payload,
+        )
+
+    def _schedule_browser_diagnostic(
+        self,
+        task_id: str,
+        message: str,
+        *,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(
+            self._emit_browser_diagnostic(task_id, message, details=details)
+        )
+
+    async def _start_browser_diagnostics(
+        self,
+        *,
+        task_id: str,
+        play_context: Any,
+        page: Any,
+        scope: str,
+    ) -> BrowserDiagnosticsSession:
+        session = BrowserDiagnosticsSession()
+        self._browser_diagnostics.setdefault(task_id, []).append(session)
+        trace_path = self._build_trace_output_path(task_id, scope)
+        tracing = getattr(play_context, "tracing", None)
+        if tracing is not None and hasattr(tracing, "start"):
+            try:
+                await tracing.start(screenshots=True, snapshots=True, sources=False)
+                session.trace_path = str(trace_path)
+            except Exception as exc:
+                self._schedule_browser_diagnostic(
+                    task_id,
+                    "浏览器 trace 启动失败",
+                    details={
+                        "diagnostic_event": "trace_start_failed",
+                        "error": str(exc),
+                        "scope": scope,
+                    },
+                )
+
+        event_limits = {
+            "pageerror": 5,
+            "requestfailed": 10,
+            "console": 10,
+        }
+
+        def _allow_event(event_type: str) -> bool:
+            count = session.event_counts.get(event_type, 0)
+            if count >= event_limits.get(event_type, 5):
+                return False
+            session.event_counts[event_type] = count + 1
+            return True
+
+        def _on_page_error(error: Any) -> None:
+            if not _allow_event("pageerror"):
+                return
+            self._schedule_browser_diagnostic(
+                task_id,
+                "页面脚本错误",
+                details={
+                    "diagnostic_event": "pageerror",
+                    "scope": scope,
+                    "error": str(error),
+                    "url": getattr(page, "url", None),
+                },
+            )
+
+        def _on_request_failed(request: Any) -> None:
+            if not _allow_event("requestfailed"):
+                return
+            failure = None
+            try:
+                failure = request.failure
+                if callable(failure):
+                    failure = failure()
+            except Exception:
+                failure = None
+            self._schedule_browser_diagnostic(
+                task_id,
+                "网络请求失败",
+                details={
+                    "diagnostic_event": "requestfailed",
+                    "scope": scope,
+                    "url": getattr(request, "url", None),
+                    "method": getattr(request, "method", None),
+                    "failure": str(failure) if failure is not None else None,
+                },
+            )
+
+        def _on_console(message_obj: Any) -> None:
+            try:
+                msg_type = message_obj.type
+                if callable(msg_type):
+                    msg_type = msg_type()
+            except Exception:
+                msg_type = None
+            if msg_type not in {"error", "warning"}:
+                return
+            if not _allow_event("console"):
+                return
+            text = None
+            try:
+                text = message_obj.text
+                if callable(text):
+                    text = text()
+            except Exception:
+                text = None
+            self._schedule_browser_diagnostic(
+                task_id,
+                "浏览器控制台告警",
+                details={
+                    "diagnostic_event": "console",
+                    "scope": scope,
+                    "console_type": msg_type,
+                    "text": text,
+                    "url": getattr(page, "url", None),
+                },
+            )
+
+        if not hasattr(page, "on"):
+            return session
+        page.on("pageerror", _on_page_error)
+        page.on("requestfailed", _on_request_failed)
+        page.on("console", _on_console)
+        return session
+
+    async def _stop_browser_diagnostics(
+        self,
+        *,
+        task_id: str,
+        play_context: Any,
+        diagnostics: Optional[BrowserDiagnosticsSession],
+        failed: bool = False,
+        scope: str = "runtime",
+    ) -> None:
+        if diagnostics is None or diagnostics.trace_path is None:
+            return
+        tracing = getattr(play_context, "tracing", None)
+        if tracing is None or not hasattr(tracing, "stop"):
+            return
+        try:
+            await tracing.stop(path=diagnostics.trace_path)
+            if failed:
+                await self._emit_browser_diagnostic(
+                    task_id,
+                    "浏览器 trace 已保存",
+                    details={
+                        "diagnostic_event": "trace_saved",
+                        "scope": scope,
+                        "trace_path": diagnostics.trace_path,
+                    },
+                )
+        except Exception as exc:
+            await self._emit_browser_diagnostic(
+                task_id,
+                "浏览器 trace 保存失败",
+                details={
+                    "diagnostic_event": "trace_stop_failed",
+                    "scope": scope,
+                    "trace_path": diagnostics.trace_path,
+                    "error": str(exc),
+                },
+            )
+
+    async def _close_playwright_resource(self, resource: Any, *, label: str) -> None:
+        if resource is None or not hasattr(resource, "close"):
+            return
+        try:
+            maybe_close = resource.close()
+            if inspect.isawaitable(maybe_close):
+                await maybe_close
+        except Exception as exc:
+            logger.debug("Close %s failed: %s", label, exc)
+
+    async def _cleanup_browser_runtime(
+        self,
+        *,
+        task_id: str,
+        page: Any = None,
+        play_context: Any = None,
+        browser: Any = None,
+        diagnostics: Optional[BrowserDiagnosticsSession] = None,
+        failed: bool = False,
+        scope: str = "main",
+        extra_context: Any = None,
+    ) -> None:
+        if play_context is not None:
+            try:
+                await self._stop_browser_diagnostics(
+                    task_id=task_id,
+                    play_context=play_context,
+                    diagnostics=diagnostics,
+                    failed=failed,
+                    scope=scope,
+                )
+            except Exception as exc:
+                logger.debug("Stop browser diagnostics failed: %s", exc)
+        await self._close_playwright_resource(page, label=f"{scope}_page")
+        if extra_context is not None and extra_context is not play_context:
+            await self._close_playwright_resource(extra_context, label=f"{scope}_extra_context")
+        await self._close_playwright_resource(play_context, label=f"{scope}_context")
+        await self._close_playwright_resource(browser, label=f"{scope}_browser")
     
     async def _check_cancelled(self, task_id: str) -> None:
         """
@@ -4728,6 +4989,8 @@ class CollectionExecutorV2:
         """
         domain_context = None
         domain_page = None
+        diagnostics_session = None
+        diagnostics_failed = False
         opts = dict(context_options or {})
         opts["storage_state"] = storage_state
         opts.setdefault("accept_downloads", True)
@@ -4738,6 +5001,12 @@ class CollectionExecutorV2:
             domain_context = await browser.new_context(**opts)
             await runtime_session.apply_stealth_init_scripts(domain_context)
             domain_page = await domain_context.new_page()
+            diagnostics_session = await self._start_browser_diagnostics(
+                task_id=task_id,
+                play_context=domain_context,
+                page=domain_page,
+                scope=f"parallel_{data_domain}",
+            )
             logger.info(f"Task {task_id}: [{domain_index+1}/{total_domains}] Starting {data_domain} in parallel context")
             await self._update_status(
                 task_id, progress, f"[并行] 采集 {data_domain} 开始",
@@ -4795,6 +5064,7 @@ class CollectionExecutorV2:
             logger.info(f"Task {task_id}: [{domain_index+1}/{total_domains}] {data_domain} completed (success={export_result.success})")
             return (file_path, export_result.success)
         except Exception as e:
+            diagnostics_failed = True
             duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
             await self._update_status(
                 task_id, progress, f"[并行] 采集 {data_domain} 失败",
@@ -4805,14 +5075,11 @@ class CollectionExecutorV2:
             return (None, False)
         
         finally:
-            # 清理
-            if domain_page:
-                try:
-                    await domain_page.close()
-                except:
-                    pass
-            if domain_context:
-                try:
-                    await domain_context.close()
-                except:
-                    pass
+            await self._cleanup_browser_runtime(
+                task_id=task_id,
+                page=domain_page,
+                play_context=domain_context,
+                diagnostics=diagnostics_session,
+                failed=diagnostics_failed,
+                scope=f"parallel_{data_domain}",
+            )
