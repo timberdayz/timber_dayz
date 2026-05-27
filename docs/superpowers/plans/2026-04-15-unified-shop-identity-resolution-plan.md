@@ -1,4 +1,4 @@
-# Unified Shop Identity Resolution Implementation Plan
+﻿# Unified Shop Identity Resolution Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -28,7 +28,7 @@
 - `sql/api_modules/business_overview_shop_racing_module.sql`
 - `sql/api_modules/business_overview_traffic_ranking_module.sql`
 - `backend/services/data_pipeline/refresh_registry.py`
-- `backend/routers/shop_account_aliases.py`
+- `backend/domains/collection/routers/shop_account_aliases.py`
 - `frontend/src/views/BusinessOverview.vue`
 
 **Reference:**
@@ -269,7 +269,7 @@ git commit -m "fix: remove duplicate shops from dashboard modules"
 ## Task 6: Improve Unmatched Alias Diagnostics
 
 **Files:**
-- Modify: `backend/routers/shop_account_aliases.py`
+- Modify: `backend/domains/collection/routers/shop_account_aliases.py`
 - Modify: `frontend/src/views/BusinessOverview.vue`
 - Test: `backend/tests/test_shop_account_aliases_api.py`
 
@@ -301,7 +301,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/shop_account_aliases.py frontend/src/views/BusinessOverview.vue backend/tests/test_shop_account_aliases_api.py
+git add backend/domains/collection/routers/shop_account_aliases.py frontend/src/views/BusinessOverview.vue backend/tests/test_shop_account_aliases_api.py
 git commit -m "feat: classify unmatched shop identities"
 ```
 
@@ -398,3 +398,4 @@ git commit -m "feat: unify shop identity resolution across orders and analytics"
 - verify dashboard contract tests return to previous shape
 
 Plan complete and saved to `docs/superpowers/plans/2026-04-15-unified-shop-identity-resolution-plan.md`. Ready to execute?
+

@@ -1,4 +1,4 @@
-# Business Overview Read Model Unification (Follow-up Track Plan)
+﻿# Business Overview Read Model Unification (Follow-up Track Plan)
 
 ## Metadata
 
@@ -18,7 +18,7 @@ This track is successful only if the policy is enforceable via automated gates, 
 
 In scope:
 
-- business overview dashboard endpoints under `backend/routers/dashboard_api_postgresql.py`
+- business overview dashboard endpoints under `backend/domains/business/routers/dashboard_api_postgresql.py`
 - `backend/services/postgresql_dashboard_service.py` business overview read paths
 - read models under `sql/api_modules/business_overview_*`
 - data pipeline dependencies and refresh targeting for impacted read models
@@ -136,3 +136,4 @@ Minimum:
 
 - keep existing endpoints intact while improving read-model usage
 - keep changes isolated so a rollback can revert only business overview service logic and tests
+

@@ -1,4 +1,4 @@
-# Collection Config Queue Runner Implementation Plan
+﻿# Collection Config Queue Runner Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -34,7 +34,7 @@
   - 定时触发改为“入队 run”
 - `backend/services/collection_config_execution.py`
   - 从“展开任务并直接后台启动”改为“只展开任务记录”
-- `backend/routers/collection_tasks.py`
+- `backend/domains/collection/routers/collection_tasks.py`
   - 手动运行配置改为创建 queued run
   - 快速采集增加闸门
 - `backend/main.py`
@@ -229,7 +229,7 @@ git commit -m "refactor: queue scheduled collection config runs"
 ## Task 5: Convert Manual Config Run Endpoint To Queue Submission
 
 **Files:**
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/schemas/collection.py`
 - Test: `backend/tests/test_collection_execution_startup_paths.py`
 
@@ -261,7 +261,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/collection_tasks.py backend/schemas/collection.py backend/tests/test_collection_execution_startup_paths.py
+git add backend/domains/collection/routers/collection_tasks.py backend/schemas/collection.py backend/tests/test_collection_execution_startup_paths.py
 git commit -m "feat: enqueue manual collection config runs"
 ```
 
@@ -317,7 +317,7 @@ git commit -m "feat: add collection queue runner"
 
 **Files:**
 - Modify: `backend/services/collection_queue_runner.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Test: `backend/tests/test_collection_task_live_updates.py`
 
 - [ ] **Step 1: Write failing sequential execution test**
@@ -350,14 +350,14 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/services/collection_queue_runner.py backend/routers/collection_tasks.py backend/tests/test_collection_task_live_updates.py
+git add backend/services/collection_queue_runner.py backend/domains/collection/routers/collection_tasks.py backend/tests/test_collection_task_live_updates.py
 git commit -m "feat: execute config run tasks sequentially"
 ```
 
 ## Task 8: Add Quick Collection Gate While Config Runs Are Active
 
 **Files:**
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Test: `backend/tests/test_collection_account_capability_alignment.py`
 - Test: `backend/tests/test_task_center_collection_projection.py`
 
@@ -388,7 +388,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/collection_tasks.py backend/tests/test_collection_account_capability_alignment.py backend/tests/test_task_center_collection_projection.py
+git add backend/domains/collection/routers/collection_tasks.py backend/tests/test_collection_account_capability_alignment.py backend/tests/test_task_center_collection_projection.py
 git commit -m "feat: gate quick collection during config runs"
 ```
 
@@ -506,3 +506,4 @@ git commit -m "feat: add serialized collection config queue runner"
 - Follow TDD strictly for each task.
 - Keep commits small and scoped to the task being completed.
 - Do not widen scope into “global two-run parallelism” or “quick collection priority queue” in this implementation.
+

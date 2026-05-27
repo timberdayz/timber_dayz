@@ -81,7 +81,7 @@ async def test_promote_to_stable_route_rejects_archive_only_file(monkeypatch):
     db.refresh = AsyncMock()
 
     monkeypatch.setattr(
-        "backend.routers.component_versions.is_archive_only_file",
+        "backend.domains.collection.routers.component_versions.is_archive_only_file",
         lambda path: True,
     )
 

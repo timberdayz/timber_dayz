@@ -1,4 +1,4 @@
-# 采集正式运行主路径收敛设计
+﻿# 采集正式运行主路径收敛设计
 
 日期：2026-03-19
 
@@ -197,7 +197,7 @@
 
 正式入口包括：
 
-- 手动任务创建：`backend/routers/collection_tasks.py`
+- 手动任务创建：`backend/domains/collection/routers/collection_tasks.py`
 - 定时任务触发：`backend/services/collection_scheduler.py`
 
 这两个入口都必须在创建执行上下文前完成组件解析。
@@ -373,18 +373,19 @@ manifest 至少包含：
 
 重点涉及：
 
-- `backend/routers/collection_tasks.py`
+- `backend/domains/collection/routers/collection_tasks.py`
 - `backend/services/collection_scheduler.py`
 - `modules/apps/collection_center/executor_v2.py`
 - `modules/apps/collection_center/python_component_adapter.py`
 - `backend/services/component_version_service.py`
 - 新增 `backend/services/component_runtime_resolver.py`
-- `backend/routers/component_recorder.py`
-- `frontend/src/views/ComponentRecorder.vue`
-- `frontend/src/views/ComponentVersions.vue`
+- `backend/domains/collection/routers/component_recorder.py`
+- `frontend/src/domains/collection/views/ComponentRecorder.vue`
+- `frontend/src/domains/collection/views/ComponentVersions.vue`
 
 ## 结论
 
 第一阶段的本质不是“再做一个版本管理功能”，而是**把正式运行权从代码文件本身转移到 stable 版本解析结果**。
 
 只要这一步完成，系统就能真正切断旧路径，把录制、保存、测试、验收、正式运行串成一条清晰的主链路。之后再做 worker 拆分、运行隔离、资源调度，都会更稳。
+

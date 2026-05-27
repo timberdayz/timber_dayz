@@ -1,4 +1,4 @@
-# Business Overview And Annual Summary Aggregate Fix Implementation Plan
+﻿# Business Overview And Annual Summary Aggregate Fix Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -25,7 +25,7 @@
 ### Backend code
 - Modify: `backend/services/data_pipeline/refresh_registry.py`
 - Modify: `backend/services/postgresql_dashboard_service.py`
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 
 ### Frontend code
 - Modify: `frontend/src/views/BusinessOverview.vue`
@@ -88,7 +88,7 @@ git add backend/tests/data_pipeline/test_dashboard_platform_aggregate_sql.py bac
 ### Task 2: Rebuild Business Overview KPI API contract for day/week/month
 
 **Files:**
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 - Modify: `backend/tests/data_pipeline/test_postgresql_dashboard_router.py`
 - Modify: `backend/tests/data_pipeline/test_dashboard_router_switch.py`
 
@@ -125,7 +125,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add backend/routers/dashboard_api_postgresql.py backend/tests/data_pipeline/test_postgresql_dashboard_router.py backend/tests/data_pipeline/test_dashboard_router_switch.py
+git add backend/domains/business/routers/dashboard_api_postgresql.py backend/tests/data_pipeline/test_postgresql_dashboard_router.py backend/tests/data_pipeline/test_dashboard_router_switch.py
  git commit -m "feat: support granular business overview kpi requests"
 ```
 
@@ -293,3 +293,4 @@ Update `findings.md` and `progress.md` with final audited modules, defects fixed
 git add findings.md progress.md
  git commit -m "docs: record dashboard aggregate audit verification"
 ```
+

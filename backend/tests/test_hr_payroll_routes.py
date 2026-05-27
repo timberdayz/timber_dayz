@@ -30,7 +30,7 @@ class _ResultRows:
 
 
 def _load_hr_salary_module():
-    return importlib.import_module("backend.routers.hr_salary")
+    return importlib.import_module("backend.domains.business.routers.hr_salary")
 
 
 def _json_body(resp):

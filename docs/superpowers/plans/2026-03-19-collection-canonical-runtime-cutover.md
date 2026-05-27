@@ -1,4 +1,4 @@
-# Collection Canonical Runtime Cutover Implementation Plan
+﻿# Collection Canonical Runtime Cutover Implementation Plan
 
 Status: completed on 2026-03-20 and merged into `main`
 
@@ -25,7 +25,7 @@ Status: completed on 2026-03-20 and merged into `main`
 
 ### Modified Files
 
-- `backend/routers/collection_tasks.py`
+- `backend/domains/collection/routers/collection_tasks.py`
   - 手动任务 preflight 检查
   - 创建后台任务时传入 runtime manifest，而不是只传 data domain
 - `backend/services/collection_scheduler.py`
@@ -40,12 +40,12 @@ Status: completed on 2026-03-20 and merged into `main`
 - `backend/services/component_version_service.py`
   - 补充 stable-only 运行查询辅助方法
   - 将“正式可运行”语义固定到 stable
-- `backend/routers/component_recorder.py`
+- `backend/domains/collection/routers/component_recorder.py`
   - 强化“保存即 draft”的接口语义与响应文案
-- `frontend/src/views/ComponentRecorder.vue`
+- `frontend/src/domains/collection/views/ComponentRecorder.vue`
   - 强化“录制保存不等于正式发布”的文案
   - 保存后引导进入测试/验收/稳定版提升流程
-- `frontend/src/views/ComponentVersions.vue`
+- `frontend/src/domains/collection/views/ComponentVersions.vue`
   - 强化 stable-only 正式运行语义
   - 对非 stable 版本的操作提示更明确
 - `modules/utils/collection_template_generator.py`
@@ -164,7 +164,7 @@ git commit -m "feat: add stable-only runtime resolver for collection components"
 ### Task 2: Preflight Manual And Scheduled Tasks
 
 **Files:**
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/services/collection_scheduler.py`
 - Modify: `tests/test_component_runtime_resolver.py`
 
@@ -239,7 +239,7 @@ Expected: PASS
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/routers/collection_tasks.py backend/services/collection_scheduler.py tests/test_component_runtime_resolver.py
+git add backend/domains/collection/routers/collection_tasks.py backend/services/collection_scheduler.py tests/test_component_runtime_resolver.py
 git commit -m "feat: add stable component preflight for collection task entrypoints"
 ```
 
@@ -374,9 +374,9 @@ git commit -m "refactor: reserve adapter module loading for test and debug flows
 ### Task 5: Make Recorder Save Draft-Only And Clarify Version Semantics
 
 **Files:**
-- Modify: `backend/routers/component_recorder.py`
-- Modify: `frontend/src/views/ComponentRecorder.vue`
-- Modify: `frontend/src/views/ComponentVersions.vue`
+- Modify: `backend/domains/collection/routers/component_recorder.py`
+- Modify: `frontend/src/domains/collection/views/ComponentRecorder.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
 - Test: `backend/tests/test_component_recorder_lint.py`
 
 - [ ] **Step 1: Write failing backend and UI-facing semantic checks**
@@ -423,7 +423,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/routers/component_recorder.py frontend/src/views/ComponentRecorder.vue frontend/src/views/ComponentVersions.vue backend/tests/test_component_recorder_lint.py
+git add backend/domains/collection/routers/component_recorder.py frontend/src/domains/collection/views/ComponentRecorder.vue frontend/src/domains/collection/views/ComponentVersions.vue backend/tests/test_component_recorder_lint.py
 git commit -m "feat: mark recorder saves as draft-only and clarify stable runtime semantics"
 ```
 
@@ -523,3 +523,4 @@ git commit -m "chore: verify stable-only canonical collection runtime cutover"
 - [ ] 顺序执行和并行执行都只走 stable file_path
 - [ ] 录制保存默认为 draft，不进入正式采集
 - [ ] 旧模板生成器与原始回放脚本不再能进入正式运行链路
+

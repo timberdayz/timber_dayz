@@ -1,4 +1,4 @@
-# Queued Config Run Cancel Implementation Plan
+﻿# Queued Config Run Cancel Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -18,7 +18,7 @@
   Responsibility: expose cancel endpoint for config runs
 - Modify: `frontend/src/api/collection.js`
   Responsibility: add config-run cancel API call
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
   Responsibility: render cancel action for queued runs and refresh queue state
 - Modify: `backend/tests/test_collection_config_run_service.py`
   Responsibility: cover service-level queued cancel rules
@@ -54,7 +54,7 @@
 **Files:**
 - Modify: `backend/tests/test_collection_frontend_contracts.py`
 - Modify: `frontend/src/api/collection.js`
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 
 - [ ] **Step 1: Write the failing frontend contract test**
 - [ ] **Step 2: Run `python -m pytest backend/tests/test_collection_frontend_contracts.py -q` and verify the new test fails**
@@ -69,3 +69,4 @@
 - [ ] **Step 1: Run `python -m pytest backend/tests/test_collection_config_run_service.py backend/tests/test_collection_config_schedule_sync_api.py backend/tests/test_collection_frontend_contracts.py -q`**
 - [ ] **Step 2: Run `git status --short` and `git diff --stat`**
 - [ ] **Step 3: Confirm only queued-config-run cancel related files changed**
+

@@ -1,4 +1,4 @@
-# Labor Efficiency Employee Identity Implementation Plan
+﻿# Labor Efficiency Employee Identity Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -20,7 +20,7 @@
 ### Backend schemas and routers
 
 - Modify: `backend/schemas/hr.py`
-- Modify: `backend/routers/hr_employee.py`
+- Modify: `backend/domains/business/routers/hr_employee.py`
 
 ### Dashboard runtime and SQL assets
 
@@ -28,7 +28,7 @@
 - Modify: `sql/metabase_questions/annual_summary_kpi.sql`
 - Modify: `sql/api_modules/business_overview_kpi_module.sql` only if module shape must expose employee count metadata
 - Modify: `backend/services/postgresql_dashboard_service.py`
-- Modify: `backend/routers/dashboard_api_postgresql.py` only if response contract needs extra fields
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py` only if response contract needs extra fields
 
 ### Tests
 
@@ -193,7 +193,7 @@ git commit -m "feat: expose employee identity in hr schemas"
 ## Task 4: Harden HR Auto-Creation And CRUD Logic
 
 **Files:**
-- Modify: `backend/routers/hr_employee.py`
+- Modify: `backend/domains/business/routers/hr_employee.py`
 - Test: `backend/tests/test_hr_employee_identity.py`
 
 - [ ] **Step 1: Write failing auto-profile test**
@@ -234,7 +234,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/routers/hr_employee.py backend/tests/test_hr_employee_identity.py
+git add backend/domains/business/routers/hr_employee.py backend/tests/test_hr_employee_identity.py
 git commit -m "feat: harden hr identity defaults"
 ```
 
@@ -342,7 +342,7 @@ git commit -m "fix: compute postgresql labor efficiency from employee identity"
 
 **Files:**
 - Modify: `backend/tests/data_pipeline/test_postgresql_dashboard_router.py`
-- Modify: `backend/routers/dashboard_api_postgresql.py` only if needed
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py` only if needed
 
 - [ ] **Step 1: Write or update router contract test**
 
@@ -369,7 +369,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/tests/data_pipeline/test_postgresql_dashboard_router.py backend/routers/dashboard_api_postgresql.py
+git add backend/tests/data_pipeline/test_postgresql_dashboard_router.py backend/domains/business/routers/dashboard_api_postgresql.py
 git commit -m "test: align router labor efficiency contract"
 ```
 
@@ -425,3 +425,4 @@ git commit -m "docs: record labor efficiency identity rollout verification"
 - legacy SQL assets filter labor-efficiency denominator to `employee_identity_type='employee'`
 - PostgreSQL business-overview KPI computes real labor efficiency instead of returning `0`
 - visitors and investors never count toward labor efficiency
+

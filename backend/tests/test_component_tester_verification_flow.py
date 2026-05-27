@@ -12,6 +12,12 @@ from backend.services.verification_service import VerificationService
 from backend.services.verification_state_store import VerificationStateStore
 
 
+def _payload(response):
+    if hasattr(response, "body"):
+        return json.loads(response.body)
+    return response
+
+
 def _make_test_dir(test_id: str) -> Path:
     project_root = Path(__file__).resolve().parents[2]
     test_dir = project_root / "temp" / "component_tests" / test_id
@@ -42,7 +48,7 @@ async def test_get_test_status_exposes_shared_verification_fields():
         encoding="utf-8",
     )
 
-    resp = await get_test_status(version_id=1, test_id=test_id, db=None)
+    resp = _payload(await get_test_status(version_id=1, test_id=test_id, db=None))
 
     assert resp["status"] == "verification_required"
     assert resp["verification_id"] == "verify-1"
@@ -87,11 +93,11 @@ async def test_post_test_resume_marks_progress_as_verification_submitted():
         encoding="utf-8",
     )
 
-    body = await post_test_resume(
+    body = _payload(await post_test_resume(
         version_id=1,
         test_id=test_id,
         body=ComponentTestResumeRequest(captcha_code="1234"),
-    )
+    ))
 
     assert body["success"] is True
     updated_progress = json.loads(progress_path.read_text(encoding="utf-8"))
@@ -122,7 +128,7 @@ async def test_get_test_status_exposes_manual_continue_mode_for_slide_captcha():
         encoding="utf-8",
     )
 
-    resp = await get_test_status(version_id=1, test_id=test_id, db=None)
+    resp = _payload(await get_test_status(version_id=1, test_id=test_id, db=None))
 
     assert resp["verification_type"] == "slide_captcha"
     assert resp["verification_input_mode"] == "manual_continue"
@@ -164,11 +170,11 @@ async def test_post_test_resume_accepts_manual_completed_for_slide_captcha():
         encoding="utf-8",
     )
 
-    body = await post_test_resume(
+    body = _payload(await post_test_resume(
         version_id=1,
         test_id=test_id,
         body=ComponentTestResumeRequest(manual_completed=True),
-    )
+    ))
 
     assert body["success"] is True
     updated_progress = json.loads(progress_path.read_text(encoding="utf-8"))

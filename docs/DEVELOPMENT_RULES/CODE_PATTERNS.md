@@ -1,4 +1,4 @@
-# 代码模式模板 - Agent 开发参考
+﻿# 代码模式模板 - Agent 开发参考
 
 **版本**: v4.20.0  
 **更新**: 2026-03-16  
@@ -1044,7 +1044,7 @@ def provide_service(service_cls: Type[ServiceType], *args: Any, **kwargs: Any):
 ### 8.2 Router 中使用（示例：HR 收入重算）
 
 ```python
-# backend/routers/hr_employee.py
+# backend/domains/business/routers/hr_employee.py
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.base_service import provide_service
 
@@ -1133,3 +1133,4 @@ async def test_calculate_income_uses_overridden_service(auth_headers: dict[str, 
 **最后更新**: 2026-03-16  
 **维护**: AI Agent Team  
 **状态**: v4.20.0 - 代码模式模板参考文档
+

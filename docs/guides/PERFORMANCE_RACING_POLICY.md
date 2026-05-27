@@ -160,5 +160,5 @@ profit_basis_amount = orders_profit_amount - a_class_cost_amount
 
 相关页面：
 
-- `frontend/src/views/hr/PerformanceManagement.vue`
-- `frontend/src/views/hr/PerformanceDisplay.vue`
+- `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
+- `frontend/src/domains/business/views/hr/PerformanceDisplay.vue`

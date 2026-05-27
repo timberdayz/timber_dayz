@@ -15,6 +15,6 @@ def test_historical_runtime_assets_are_explicitly_non_runtime():
 
 
 def test_hr_commission_no_longer_describes_metabase_computation():
-    text = Path("backend/routers/hr_commission.py").read_text(encoding="utf-8", errors="replace")
+    text = Path("backend/domains/business/routers/hr_commission.py").read_text(encoding="utf-8", errors="replace")
 
     assert "由Metabase定时计算" not in text

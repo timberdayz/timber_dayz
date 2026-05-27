@@ -1,4 +1,4 @@
-# Performance Profit Basis Alignment Implementation Plan
+﻿# Performance Profit Basis Alignment Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -96,7 +96,7 @@ git commit -m "feat: use profit basis snapshots for hr income"
 **Files:**
 - Modify: `backend/services/hr_income_calculation_service.py`
 - Modify: `backend/tests/test_hr_income_calculation_service.py`
-- Modify: `backend/routers/performance_management.py` (only if a small read-path adjustment is needed)
+- Modify: `backend/domains/business/routers/performance_management.py` (only if a small read-path adjustment is needed)
 
 - [ ] **Step 1: Load assigned store performance rows inside HR income calculation**
 
@@ -143,8 +143,8 @@ git commit -m "feat: derive employee performance from store performance"
 
 **Files:**
 - Inspect: `backend/services/payroll_generation_service.py`
-- Inspect: `backend/routers/hr_commission.py`
-- Inspect: `frontend/src/views/hr/PerformanceManagement.vue`
+- Inspect: `backend/domains/business/routers/hr_commission.py`
+- Inspect: `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
 
 - [ ] **Step 1: Verify payroll still consumes the same fields**
 
@@ -209,3 +209,4 @@ Document:
 git add progress.md findings.md
 git commit -m "docs: record performance and profit basis alignment"
 ```
+

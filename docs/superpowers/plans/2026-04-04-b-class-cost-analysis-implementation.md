@@ -1,4 +1,4 @@
-# B类成本分析页面 Implementation Plan
+﻿# B类成本分析页面 Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -270,7 +270,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/tests/test_postgresql_dashboard_b_cost_routes.py backend/services/postgresql_dashboard_service.py backend/routers/dashboard_api_postgresql.py
+git add backend/tests/test_postgresql_dashboard_b_cost_routes.py backend/services/postgresql_dashboard_service.py backend/domains/business/routers/dashboard_api_postgresql.py
 git commit -m "feat: add dashboard b cost analysis routes"
 ```
 
@@ -428,3 +428,4 @@ git commit -m "test: verify b cost analysis flow"
 3. Task 3 后端路由与服务
 4. Task 4 前端页面
 5. Task 5 验证与收尾
+

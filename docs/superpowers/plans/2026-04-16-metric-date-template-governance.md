@@ -1,4 +1,4 @@
-# Metric Date Template Governance Implementation Plan
+﻿# Metric Date Template Governance Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -29,7 +29,7 @@
 
 - Modify: `modules/services/smart_date_parser.py`
 - Modify: `backend/services/raw_data_importer.py`
-- Modify: `backend/routers/field_mapping_ingest.py`
+- Modify: `backend/domains/data_platform/routers/field_mapping_ingest.py`
 - Test: `backend/tests/test_data_ingestion_raw_import_failure.py`
 - Create: `backend/tests/test_metric_date_template_rules.py`
 
@@ -175,7 +175,7 @@ git commit -m "feat: add strict declared date parser"
 ### Task 4: Make Governed Ingestion Use Template Rules
 
 **Files:**
-- Modify: `backend/routers/field_mapping_ingest.py`
+- Modify: `backend/domains/data_platform/routers/field_mapping_ingest.py`
 - Modify: `backend/services/raw_data_importer.py`
 - Modify: `backend/services/field_mapping_template_service.py`
 - Test: `backend/tests/test_data_ingestion_raw_import_failure.py`
@@ -213,7 +213,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/field_mapping_ingest.py backend/services/raw_data_importer.py backend/services/field_mapping_template_service.py backend/tests/test_data_ingestion_raw_import_failure.py backend/tests/test_metric_date_template_rules.py
+git add backend/domains/data_platform/routers/field_mapping_ingest.py backend/services/raw_data_importer.py backend/services/field_mapping_template_service.py backend/tests/test_data_ingestion_raw_import_failure.py backend/tests/test_metric_date_template_rules.py
 git commit -m "fix: enforce template date rules during ingestion"
 ```
 
@@ -351,3 +351,4 @@ git commit -m "chore: complete metric date template governance rollout"
 - For governed finance-facing data-sync flows, strict declared parsing is mandatory.
 - Treat fallback-to-today as a data corruption bug, not a resilience feature.
 - Historical re-import should be executed only after all code and tests pass.
+

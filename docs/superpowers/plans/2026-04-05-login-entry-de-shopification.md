@@ -1,4 +1,4 @@
-# Login Entry De-Shopification Implementation Plan
+﻿# Login Entry De-Shopification Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -31,7 +31,7 @@
   Responsibility: same as above for TikTok.
 - `modules/utils/login_status_detector.py`
   Responsibility: keep platform homepage success based on URL pattern + homepage signals rather than precise shop-specific URLs.
-- `backend/routers/main_accounts.py`
+- `backend/domains/collection/routers/main_accounts.py`
   Responsibility: normalize or overwrite `login_url` on create/update so shop-bound URLs cannot persist in the test environment.
 - `frontend/src/views/AccountManagement.vue`
   Responsibility: remove the implication that login URL is a free-form shop-specific runtime setting; hide it or make it read-only as appropriate.
@@ -215,7 +215,7 @@ git commit -m "fix: align homepage-based login success semantics"
 ## Task 4: Normalize Main-Account Writes
 
 **Files:**
-- Modify: `backend/routers/main_accounts.py`
+- Modify: `backend/domains/collection/routers/main_accounts.py`
 - Test: `backend/tests/test_main_accounts_api.py`
 
 - [ ] **Step 1: Write the failing API tests**
@@ -256,7 +256,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/main_accounts.py backend/tests/test_main_accounts_api.py
+git add backend/domains/collection/routers/main_accounts.py backend/tests/test_main_accounts_api.py
 git commit -m "feat: normalize main account login urls on write"
 ```
 
@@ -348,7 +348,7 @@ git commit -m "feat: simplify main account login url ui"
 - Verify: `backend/services/platform_login_entry_service.py`
 - Verify: `modules/apps/collection_center/executor_v2.py`
 - Verify: `modules/platforms/*/components/login.py`
-- Verify: `backend/routers/main_accounts.py`
+- Verify: `backend/domains/collection/routers/main_accounts.py`
 - Verify: `frontend/src/views/AccountManagement.vue`
 
 - [ ] **Step 1: Run backend verification**
@@ -377,7 +377,7 @@ Expected: PASS
 Run:
 
 ```bash
-python -m py_compile backend/services/platform_login_entry_service.py backend/routers/main_accounts.py modules/apps/collection_center/executor_v2.py modules/platforms/shopee/components/login.py modules/platforms/miaoshou/components/login.py modules/platforms/tiktok/components/login.py modules/utils/login_status_detector.py
+python -m py_compile backend/services/platform_login_entry_service.py backend/domains/collection/routers/main_accounts.py modules/apps/collection_center/executor_v2.py modules/platforms/shopee/components/login.py modules/platforms/miaoshou/components/login.py modules/platforms/tiktok/components/login.py modules/utils/login_status_detector.py
 ```
 
 Expected: PASS
@@ -403,3 +403,4 @@ git commit -m "feat: de-shopify runtime login entry handling"
 - Keep homepage success semantics explicit: URL fuzzy match plus homepage feature signals.
 - Do not collapse login success and target-shop correctness into one check.
 - Runtime should stay strict and single-source-of-truth in this phase; avoid compatibility branches unless the implementation is blocked without them.
+

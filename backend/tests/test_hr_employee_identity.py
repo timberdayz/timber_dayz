@@ -39,5 +39,5 @@ def test_employee_response_includes_identity_type():
 
 
 def test_me_profile_auto_created_record_defaults_to_visitor():
-    source = Path("backend/routers/hr_employee.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/hr_employee.py").read_text(encoding="utf-8")
     assert 'employee_identity_type="visitor"' in source

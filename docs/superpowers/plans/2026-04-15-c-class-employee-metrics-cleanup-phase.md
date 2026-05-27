@@ -1,4 +1,4 @@
-# C-Class Employee Metrics Cleanup Phase Implementation Plan
+﻿# C-Class Employee Metrics Cleanup Phase Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -14,8 +14,8 @@
 
 ### Runtime cleanup
 
-- Modify: `backend/routers/hr_commission.py`
-- Modify: `backend/routers/performance_management.py`
+- Modify: `backend/domains/business/routers/hr_commission.py`
+- Modify: `backend/domains/business/routers/performance_management.py`
 - Modify: `backend/services/payroll_generation_service.py`
 - Modify: `backend/services/hr_income_calculation_service.py`
 
@@ -48,12 +48,12 @@ from pathlib import Path
 
 
 def test_runtime_no_longer_contains_employee_performance_cn_fallback():
-    source = Path("backend/routers/hr_commission.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/hr_commission.py").read_text(encoding="utf-8")
     assert "_load_employee_performance_cn_fallback" not in source
 
 
 def test_runtime_no_longer_contains_employee_commissions_cn_fallback():
-    source = Path("backend/routers/hr_commission.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/hr_commission.py").read_text(encoding="utf-8")
     assert "_load_employee_commissions_cn_fallback" not in source
 ```
 
@@ -72,7 +72,7 @@ git commit -m "test: add c-class employee metrics cleanup contract"
 ## Task 2: Remove Reader Fallback From HR Commission Routes
 
 **Files:**
-- Modify: `backend/routers/hr_commission.py`
+- Modify: `backend/domains/business/routers/hr_commission.py`
 - Modify: `backend/tests/test_hr_commission_profit_basis_routes.py`
 
 - [ ] **Step 1: Replace fallback-specific tests with English-column success tests**
@@ -104,7 +104,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/hr_commission.py backend/tests/test_hr_commission_profit_basis_routes.py
+git add backend/domains/business/routers/hr_commission.py backend/tests/test_hr_commission_profit_basis_routes.py
 git commit -m "refactor: remove hr commission chinese fallback"
 ```
 
@@ -191,7 +191,7 @@ git commit -m "refactor: remove hr income chinese fallback writes"
 ## Task 5: Remove Person-Mode Fallback From Performance Management
 
 **Files:**
-- Modify: `backend/routers/performance_management.py`
+- Modify: `backend/domains/business/routers/performance_management.py`
 - Modify: `backend/tests/test_performance_management_person_fallback.py`
 
 - [ ] **Step 1: Replace fallback-specific tests with English-column tests**
@@ -215,7 +215,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/performance_management.py backend/tests/test_performance_management_person_fallback.py
+git add backend/domains/business/routers/performance_management.py backend/tests/test_performance_management_person_fallback.py
 git commit -m "refactor: remove performance person-mode chinese fallback"
 ```
 
@@ -349,3 +349,4 @@ git commit -m "docs: record c-class employee metrics cleanup rehearsal"
 - local PostgreSQL rehearsal succeeds after dropping Chinese columns
 - all targeted payroll, performance, commission, and income flows still pass
 - the repository no longer carries dual-schema complexity for these two C-class tables
+

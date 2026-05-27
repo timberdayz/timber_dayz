@@ -1,4 +1,4 @@
-# Recorder Segment Validation Implementation Plan
+﻿# Recorder Segment Validation Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -69,7 +69,7 @@ git commit -m "test: lock recorder segment validation contracts"
 
 **Files:**
 - Modify: `tools/launch_inspector_recorder.py`
-- Modify: `backend/routers/component_recorder.py`
+- Modify: `backend/domains/collection/routers/component_recorder.py`
 - Test: `backend/tests/test_component_recorder_gate_contract.py`
 
 - [ ] **Step 1: Add a helper that incrementally writes the latest step payload whenever recorder state changes**
@@ -100,7 +100,7 @@ Expected: PASS
 - [ ] **Step 5: Commit the live sync work**
 
 ```bash
-git add tools/launch_inspector_recorder.py backend/routers/component_recorder.py backend/tests/test_component_recorder_gate_contract.py
+git add tools/launch_inspector_recorder.py backend/domains/collection/routers/component_recorder.py backend/tests/test_component_recorder_gate_contract.py
 git commit -m "feat: stream live recorder steps from inspector output"
 ```
 
@@ -108,7 +108,7 @@ git commit -m "feat: stream live recorder steps from inspector output"
 
 **Files:**
 - Create: `backend/services/recorder_segment_validator.py`
-- Modify: `backend/routers/component_recorder.py`
+- Modify: `backend/domains/collection/routers/component_recorder.py`
 - Modify: `backend/schemas/component_recorder.py`
 - Test: `backend/tests/test_recorder_segment_validator.py`
 
@@ -147,7 +147,7 @@ evaluate_login_ready(...)
 evaluate_export_complete(...)
 ```
 
-- [ ] **Step 6: Add `POST /recorder/validate-segment` in `backend/routers/component_recorder.py`**
+- [ ] **Step 6: Add `POST /recorder/validate-segment` in `backend/domains/collection/routers/component_recorder.py`**
 
 ```python
 @router.post("/recorder/validate-segment")
@@ -163,14 +163,14 @@ Expected: PASS
 - [ ] **Step 8: Commit the validator backend**
 
 ```bash
-git add backend/services/recorder_segment_validator.py backend/routers/component_recorder.py backend/schemas/component_recorder.py backend/tests/test_recorder_segment_validator.py
+git add backend/services/recorder_segment_validator.py backend/domains/collection/routers/component_recorder.py backend/schemas/component_recorder.py backend/tests/test_recorder_segment_validator.py
 git commit -m "feat: add recorder segment validation backend"
 ```
 
 ### Task 4: Add recorder page segment validation UI
 
 **Files:**
-- Modify: `frontend/src/views/ComponentRecorder.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentRecorder.vue`
 
 - [ ] **Step 1: Add client-side contiguous selection checks and validation state**
 
@@ -204,7 +204,7 @@ Expected: PASS
 - [ ] **Step 6: Commit the recorder UI work**
 
 ```bash
-git add frontend/src/views/ComponentRecorder.vue
+git add frontend/src/domains/collection/views/ComponentRecorder.vue
 git commit -m "feat: validate recorder step segments from the recorder page"
 ```
 
@@ -214,7 +214,7 @@ git commit -m "feat: validate recorder step segments from the recorder page"
 - Verify: `backend/tests/test_component_recorder_gate_contract.py`
 - Verify: `backend/tests/test_recorder_segment_validator.py`
 - Verify: `backend/tests/test_component_tester_gate_contract.py`
-- Verify: `frontend/src/views/ComponentRecorder.vue`
+- Verify: `frontend/src/domains/collection/views/ComponentRecorder.vue`
 
 - [ ] **Step 1: Run the consolidated backend test set**
 
@@ -244,3 +244,4 @@ Document missing browser/manual evidence explicitly in the final summary
 git add ...
 git commit -m "test: verify recorder segment validation flow"
 ```
+

@@ -1,6 +1,6 @@
 import pytest
 
-from backend.routers.performance_management import invalidate_performance_related_caches
+from backend.domains.business.routers.performance_management import invalidate_performance_related_caches
 from backend.routers.target_management import invalidate_target_related_caches
 
 

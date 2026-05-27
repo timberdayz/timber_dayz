@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from starlette.requests import Request
 
 from backend.routers import dashboard_api_postgresql as dashboard_router
-from backend.routers.dashboard_api_postgresql import (
+from backend.domains.business.routers.dashboard_api_postgresql import (
     get_business_overview_bootstrap_postgresql,
     get_business_overview_comparison_postgresql,
     get_business_overview_kpi_postgresql,

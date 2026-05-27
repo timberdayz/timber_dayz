@@ -2,7 +2,7 @@ from pathlib import Path
 import re
 
 
-SOURCE = Path("backend/routers/hr_commission.py").read_text(encoding="utf-8")
+SOURCE = Path("backend/domains/business/routers/hr_commission.py").read_text(encoding="utf-8")
 
 
 def test_put_shop_commission_config_requires_year_month_in_body() -> None:

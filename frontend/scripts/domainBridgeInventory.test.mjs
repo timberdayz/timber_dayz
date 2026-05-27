@@ -10,12 +10,12 @@ const routerPath = path.join(frontendRoot, 'src/router/index.js')
 
 const EXPECTED_ROUTE_WRAPPER_COUNT = 0
 const EXPECTED_UNIQUE_WRAPPER_COUNT = 0
-const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 106
+const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 100
 const EXPECTED_DIRECT_DOMAIN_COUNTS = {
-  business: 52,
+  business: 47,
   collection: 6,
   data_platform: 9,
-  platform: 39,
+  platform: 38,
 }
 const EXPECTED_WRAPPER_DOMAIN_COUNTS = {}
 const EXPECTED_ROUTE_SPECIFIERS = [
@@ -24,10 +24,7 @@ const EXPECTED_ROUTE_SPECIFIERS = [
   '@/domains/platform/views/admin/UserApproval.vue',
   '@/domains/platform/views/approval/TaskDetail.vue',
   '@/domains/platform/views/UltraSimplePage.vue',
-  '@/domains/platform/views/TestPage.vue',
   '@/domains/business/views/BusinessOverview.vue',
-  '@/domains/business/views/SalesAnalysis.vue',
-  '@/domains/business/views/SalesDashboard.vue',
   '@/domains/business/views/sales/OrderManagement.vue',
   '@/domains/business/views/sales/SalesDetailByProduct.vue',
   '@/domains/business/views/inventory/InventoryBalances.vue',
@@ -57,14 +54,11 @@ const EXPECTED_ROUTE_SPECIFIERS = [
   '@/domains/data_platform/views/DataSyncRefreshQueue.vue',
   '@/domains/data_platform/views/CloudSyncManagement.vue',
   '@/domains/data_platform/views/DataConsistency.vue',
-  '@/domains/business/views/TopProducts.vue',
   '@/domains/business/views/InventoryHealthDashboard.vue',
   '@/domains/business/views/ProductQualityDashboard.vue',
-  '@/domains/business/views/SalesTrendChart.vue',
   '@/domains/data_platform/views/DataQuarantine.vue',
   '@/domains/business/views/AccountAlignment.vue',
   '@/domains/business/views/SalesDashboard.vue',
-  '@/domains/business/views/InventoryDashboardSimple.vue',
   '@/domains/platform/views/UserManagement.vue',
   '@/domains/platform/views/RoleManagement.vue',
   '@/domains/platform/views/PermissionManagement.vue',

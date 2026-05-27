@@ -1,4 +1,4 @@
-# Dim Shops Core Canonical Design
+﻿# Dim Shops Core Canonical Design
 
 ## Goal
 
@@ -74,8 +74,8 @@ This phase is explicitly deferred.
 
 ### Read paths
 
-- `backend/routers/hr_commission.py`
-- `backend/routers/performance_management.py`
+- `backend/domains/business/routers/hr_commission.py`
+- `backend/domains/business/routers/performance_management.py`
 - `backend/routers/sales_campaign.py`
 - `backend/routers/target_management.py`
 - `backend/services/clearance_ranking_service.py`
@@ -98,3 +98,4 @@ This phase is explicitly deferred.
 - `DimShop` is explicitly bound to `core`
 - active read/write paths that use `DimShop` still pass
 - `public.dim_shops` cleanup remains deferred to a later dedicated phase
+

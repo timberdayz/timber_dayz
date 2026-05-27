@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
-from backend.routers.dashboard_api_postgresql import (
+from backend.domains.business.routers.dashboard_api_postgresql import (
     get_business_overview_comparison_postgresql,
     get_business_overview_inventory_backlog_postgresql,
     get_business_overview_kpi_postgresql,

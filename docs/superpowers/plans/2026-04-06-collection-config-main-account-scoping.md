@@ -1,4 +1,4 @@
-# Collection Config Main-Account Scoping Implementation Plan
+﻿# Collection Config Main-Account Scoping Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -32,7 +32,7 @@
   Responsibility: verify config execution behavior still works after config-header scoping changes.
 - `frontend/src/api/collection.js`
   Responsibility: expose the new config query filters and request/response fields.
-- `frontend/src/views/collection/CollectionConfig.vue`
+- `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
   Responsibility: replace hardcoded platform options, add main-account filters/fields, fix select width, and scope dialog shops by `platform + main_account_id`.
 - `frontend/scripts/collectionConfigGranularityUi.test.mjs`
   Responsibility: continue locking list-level collection config UI expectations after filters grow.
@@ -170,7 +170,7 @@ git commit -m "feat: filter and validate collection configs by main account"
 **Files:**
 - Create: `frontend/scripts/collectionConfigMainAccountUi.test.mjs`
 - Modify: `frontend/src/api/collection.js`
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/scripts/collectionConfigGranularityUi.test.mjs`
 - Modify: `frontend/scripts/collectionConfigShopScopeUi.test.mjs`
 - Test: `frontend/scripts/collectionConfigMainAccountUi.test.mjs`
@@ -220,7 +220,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/api/collection.js frontend/src/views/collection/CollectionConfig.vue frontend/scripts/collectionConfigMainAccountUi.test.mjs frontend/scripts/collectionConfigGranularityUi.test.mjs frontend/scripts/collectionConfigShopScopeUi.test.mjs
+git add frontend/src/api/collection.js frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/scripts/collectionConfigMainAccountUi.test.mjs frontend/scripts/collectionConfigGranularityUi.test.mjs frontend/scripts/collectionConfigShopScopeUi.test.mjs
 git commit -m "feat: scope collection config ui by main account"
 ```
 
@@ -294,3 +294,4 @@ git commit -m "test: verify main-account-scoped collection config execution"
 - Respect `@test-driven-development` for each task: write the failing test, run it, then implement the minimal code.
 - Respect `@verification-before-completion` before claiming any task or final result is complete.
 - Keep `task_plan.md`, `findings.md`, and `progress.md` updated as work advances.
+

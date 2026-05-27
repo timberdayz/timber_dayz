@@ -1,4 +1,4 @@
-# Collection Config Alignment Implementation Plan
+﻿# Collection Config Alignment Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -80,9 +80,9 @@ git commit -m "refactor: align collection config contract with runtime time sele
 ### Task 2: Align Manual Run Semantics With Scheduled Semantics
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `backend/services/collection_scheduler.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Test: `backend/tests/test_collection_scheduler_capability_filter.py`
 
 - [ ] **Step 1: Add failing coverage for account-scope and task-scope alignment**
@@ -122,14 +122,14 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue backend/services/collection_scheduler.py backend/routers/collection_tasks.py backend/tests/test_collection_scheduler_capability_filter.py
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue backend/services/collection_scheduler.py backend/domains/collection/routers/collection_tasks.py backend/tests/test_collection_scheduler_capability_filter.py
 git commit -m "fix: align manual and scheduled collection account scope"
 ```
 
 ### Task 3: Constrain The Config UI To Real Platform Capabilities
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/src/constants/collection.js`
 - Test: `frontend/scripts/collectionApiContract.test.mjs`
 
@@ -172,14 +172,14 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue frontend/src/constants/collection.js frontend/scripts/collectionApiContract.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/constants/collection.js frontend/scripts/collectionApiContract.test.mjs
 git commit -m "refactor: constrain collection config UI to runtime-supported options"
 ```
 
 ### Task 4: Verify Config-To-Task Mapping End To End
 
 **Files:**
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/routers/collection_config.py`
 - Test: `backend/tests/test_component_runtime_resolver.py`
 - Test: `backend/tests/test_component_test_runtime_config.py`
@@ -221,7 +221,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/collection_tasks.py backend/routers/collection_config.py backend/tests/test_component_runtime_resolver.py backend/tests/test_component_test_runtime_config.py
+git add backend/domains/collection/routers/collection_tasks.py backend/routers/collection_config.py backend/tests/test_component_runtime_resolver.py backend/tests/test_component_test_runtime_config.py
 git commit -m "refactor: align collection config to task runtime mapping"
 ```
 
@@ -255,7 +255,7 @@ Expected: PASS
 Run:
 
 ```bash
-python -m py_compile backend/schemas/collection.py backend/services/collection_contracts.py backend/routers/collection_config.py backend/routers/collection_tasks.py backend/services/collection_scheduler.py
+python -m py_compile backend/schemas/collection.py backend/services/collection_contracts.py backend/routers/collection_config.py backend/domains/collection/routers/collection_tasks.py backend/services/collection_scheduler.py
 ```
 
 Expected: no output
@@ -270,3 +270,4 @@ git commit -m "test: verify collection config alignment"
 ---
 
 Plan complete and saved to `docs/superpowers/plans/2026-03-31-collection-config-alignment.md`. Ready to execute?
+

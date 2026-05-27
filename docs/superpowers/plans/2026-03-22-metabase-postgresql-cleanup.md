@@ -1,4 +1,4 @@
-# Metabase To PostgreSQL Cleanup Plan
+﻿# Metabase To PostgreSQL Cleanup Plan
 
 **Date:** 2026-03-22
 
@@ -91,8 +91,8 @@ Required adjustment:
 
 ### Secondary runtime consumers
 
-- `backend/routers/hr_commission.py`
-- `backend/routers/performance_management.py`
+- `backend/domains/business/routers/hr_commission.py`
+- `backend/domains/business/routers/performance_management.py`
 - `backend/services/hr_income_calculation_service.py`
 - `backend/services/cache_warmup_service.py`
 
@@ -317,3 +317,4 @@ Start with **Batch 1** and **Batch 2** together, because they are the minimum se
 After that:
 - Batch 3 removes deployment burden
 - Batch 4 and Batch 5 clean up the remaining confusion
+

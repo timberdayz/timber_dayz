@@ -1,4 +1,4 @@
-# PostgreSQL Dashboard Granularity Alignment Implementation Plan
+﻿# PostgreSQL Dashboard Granularity Alignment Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -248,7 +248,7 @@ Expected: all accepted route params are either honored or removed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/dashboard_api_postgresql.py frontend/src/api/dashboard.js
+git add backend/domains/business/routers/dashboard_api_postgresql.py frontend/src/api/dashboard.js
 git commit -m "fix: align dashboard filter parameter contract"
 ```
 
@@ -282,3 +282,4 @@ Verify one real sample month/shop:
 git add .
 git commit -m "test: verify dashboard granularity alignment"
 ```
+

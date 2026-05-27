@@ -372,7 +372,7 @@ def test_component_recorder_router_uses_shop_account_loader_without_platform_acc
 
     text = (
         Path(__file__).resolve().parents[2]
-        / "backend/routers/component_recorder.py"
+        / "backend/domains/collection/routers/component_recorder.py"
     ).read_text(encoding="utf-8")
 
     assert "get_shop_account_loader_service" in text

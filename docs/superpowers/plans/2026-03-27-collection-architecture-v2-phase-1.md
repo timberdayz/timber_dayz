@@ -1,4 +1,4 @@
-# Collection Architecture V2 Phase 1 Implementation Plan
+﻿# Collection Architecture V2 Phase 1 Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -64,13 +64,13 @@ Phase 1 may simplify topology and execution boundaries, but it must not break th
 
 ### Modified backend/runtime files
 
-- `backend/routers/component_versions.py`
+- `backend/domains/collection/routers/component_versions.py`
   - Stop hardcoding platform allowlists inline; route batch registration and list filtering through the topology service.
 - `backend/services/collection_contracts.py`
   - Remain the SSOT for `time_selection`, preset-to-granularity mapping, and legacy compatibility normalization.
 - `backend/routers/collection_config.py`
   - Continue converging formal collection config onto `time_selection`.
-- `backend/routers/collection_tasks.py`
+- `backend/domains/collection/routers/collection_tasks.py`
   - Ensure task creation uses the same normalized contract as tests and formal config.
 - `backend/schemas/component_version.py`
   - Keep test request schema aligned to the unified contract and reject conflicting input shapes.
@@ -87,9 +87,9 @@ Phase 1 may simplify topology and execution boundaries, but it must not break th
 
 ### Modified frontend/docs files
 
-- `frontend/src/views/ComponentVersions.vue`
+- `frontend/src/domains/collection/views/ComponentVersions.vue`
   - Surface only the V2 time-selection model and hide legacy/conflicting input combinations.
-- `frontend/src/views/ComponentRecorder.vue`
+- `frontend/src/domains/collection/views/ComponentRecorder.vue`
   - Stop implying recorder-generated compatibility files are primary maintenance targets.
 - `docs/guides/CANONICAL_COLLECTION_COMPONENTS.md`
   - Rewrite around V2 slot rules and freeze/archive guidance.
@@ -161,7 +161,7 @@ git commit -m "refactor: add V2 collection component topology rules"
 ### Task 2: Converge Registration And Discovery On The Topology Service
 
 **Files:**
-- Modify: `backend/routers/component_versions.py`
+- Modify: `backend/domains/collection/routers/component_versions.py`
 - Modify: `modules/apps/collection_center/python_component_adapter.py`
 - Test: `backend/tests/test_component_versions_canonical_registration.py`
 
@@ -178,7 +178,7 @@ Expected: FAIL with current inline allowlist logic.
 
 - [ ] **Step 2: Route batch registration through the topology service**
 
-Modify `backend/routers/component_versions.py` to replace inline allowlist checks with imports from `backend/services/collection_component_topology.py`.
+Modify `backend/domains/collection/routers/component_versions.py` to replace inline allowlist checks with imports from `backend/services/collection_component_topology.py`.
 
 - [ ] **Step 3: Route adapter discovery through the same slot logic**
 
@@ -195,7 +195,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/component_versions.py modules/apps/collection_center/python_component_adapter.py backend/tests/test_component_versions_canonical_registration.py
+git add backend/domains/collection/routers/component_versions.py modules/apps/collection_center/python_component_adapter.py backend/tests/test_component_versions_canonical_registration.py
 git commit -m "refactor: converge registration on V2 topology rules"
 ```
 
@@ -206,7 +206,7 @@ git commit -m "refactor: converge registration on V2 topology rules"
 - Modify: `backend/schemas/component_version.py`
 - Modify: `backend/schemas/collection.py`
 - Modify: `backend/routers/collection_config.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `tools/test_component.py`
 - Test: `backend/tests/test_collection_contracts.py`
 - Test: `backend/tests/test_collection_time_selection_contract.py`
@@ -250,7 +250,7 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/services/collection_contracts.py backend/schemas/component_version.py backend/schemas/collection.py backend/routers/collection_config.py backend/routers/collection_tasks.py tools/test_component.py backend/tests/test_collection_contracts.py backend/tests/test_collection_time_selection_contract.py backend/tests/test_component_test_runtime_config.py backend/tests/test_component_tester_runtime_config.py
+git add backend/services/collection_contracts.py backend/schemas/component_version.py backend/schemas/collection.py backend/routers/collection_config.py backend/domains/collection/routers/collection_tasks.py tools/test_component.py backend/tests/test_collection_contracts.py backend/tests/test_collection_time_selection_contract.py backend/tests/test_component_test_runtime_config.py backend/tests/test_component_tester_runtime_config.py
 git commit -m "refactor: unify collection time selection contract"
 ```
 
@@ -300,8 +300,8 @@ git commit -m "refactor: simplify collection execution chain for V2"
 ### Task 5: Freeze Legacy Layers Out Of Default Surfaces
 
 **Files:**
-- Modify: `frontend/src/views/ComponentVersions.vue`
-- Modify: `frontend/src/views/ComponentRecorder.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentRecorder.vue`
 - Modify: `docs/superpowers/specs/2026-03-27-collection-architecture-v2-design.md`
 - Test: `frontend/scripts/componentVersionsVerificationUi.test.mjs`
 
@@ -326,7 +326,7 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/src/views/ComponentVersions.vue frontend/src/views/ComponentRecorder.vue docs/superpowers/specs/2026-03-27-collection-architecture-v2-design.md frontend/scripts/componentVersionsVerificationUi.test.mjs
+git add frontend/src/domains/collection/views/ComponentVersions.vue frontend/src/domains/collection/views/ComponentRecorder.vue docs/superpowers/specs/2026-03-27-collection-architecture-v2-design.md frontend/scripts/componentVersionsVerificationUi.test.mjs
 git commit -m "refactor: freeze legacy collection component surfaces"
 ```
 
@@ -360,7 +360,7 @@ Expected: PASS
 Run:
 
 ```bash
-python -m py_compile backend/routers/component_versions.py backend/routers/collection_config.py backend/routers/collection_tasks.py backend/services/collection_component_topology.py backend/services/collection_contracts.py modules/apps/collection_center/python_component_adapter.py modules/apps/collection_center/executor_v2.py modules/apps/collection_center/transition_gates.py tools/test_component.py
+python -m py_compile backend/domains/collection/routers/component_versions.py backend/routers/collection_config.py backend/domains/collection/routers/collection_tasks.py backend/services/collection_component_topology.py backend/services/collection_contracts.py modules/apps/collection_center/python_component_adapter.py modules/apps/collection_center/executor_v2.py modules/apps/collection_center/transition_gates.py tools/test_component.py
 ```
 
 Expected: no output
@@ -397,3 +397,4 @@ Do not combine those platform migrations into this foundation phase.
 - Keep `pwcli` limited to development/exploration, never formal runtime.
 
 Plan complete and saved to `docs/superpowers/plans/2026-03-27-collection-architecture-v2-phase-1.md`. Ready to execute?
+

@@ -1,4 +1,4 @@
-# Operation Score Minimal Closure Implementation Plan
+﻿# Operation Score Minimal Closure Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -23,7 +23,7 @@
   - 补一条 operation 目标参与绩效计算的验收测试
 
 ### Files to inspect while implementing
-- `F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/performance_management.py`
+- `F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/business/routers/performance_management.py`
 - `F:/Vscode/python_programme/AI_code/xihong_erp/backend/schemas/target.py`
 - `F:/Vscode/python_programme/AI_code/xihong_erp/modules/core/db/schema.py`
 
@@ -231,7 +231,7 @@ git commit -m "test: cover achieved value for operation targets"
 
 **Files:**
 - Modify: `F:/Vscode/python_programme/AI_code/xihong_erp/backend/tests/test_add_performance_income_acceptance.py`
-- Inspect: `F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/performance_management.py`
+- Inspect: `F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/business/routers/performance_management.py`
 
 - [ ] **Step 1: 写 failing test - operation 目标参与店铺绩效计算**
 
@@ -356,3 +356,4 @@ Expected:
 - 后端会校验 operation 目标的关键字段
 - operation 目标可参与绩效重算，`operation_score` 有数值
 - 前端目标管理页与绩效页可看到运营得分相关结果
+

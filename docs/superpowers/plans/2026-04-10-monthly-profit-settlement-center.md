@@ -1,4 +1,4 @@
-# Monthly Profit Settlement Center Implementation Plan
+﻿# Monthly Profit Settlement Center Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -264,7 +264,7 @@ git commit -m "feat: add monthly profit settlement aggregation service"
 ### Task 5: Add finance routes for the monthly settlement center
 
 **Files:**
-- Create: `backend/routers/monthly_profit_settlement.py`
+- Create: `backend/domains/business/routers/monthly_profit_settlement.py`
 - Modify: `backend/main.py`
 - Test: `backend/tests/test_monthly_profit_settlement_routes.py`
 
@@ -274,8 +274,8 @@ Prefix:
 - `/api/finance/monthly-profit-settlement`
 
 Reuse the same finance-role gate style used by:
-- `backend/routers/profit_basis.py`
-- `backend/routers/follow_investment.py`
+- `backend/domains/business/routers/profit_basis.py`
+- `backend/domains/business/routers/follow_investment.py`
 
 - [ ] **Step 2: Add the GET route for month query**
 
@@ -308,7 +308,7 @@ Expected: PASS
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/routers/monthly_profit_settlement.py backend/main.py backend/tests/test_monthly_profit_settlement_routes.py
+git add backend/domains/business/routers/monthly_profit_settlement.py backend/main.py backend/tests/test_monthly_profit_settlement_routes.py
 git commit -m "feat: add monthly profit settlement routes"
 ```
 
@@ -362,7 +362,7 @@ git commit -m "feat: add finance client support for monthly settlement center"
 ### Task 7: Add the monthly settlement center UI to finance management
 
 **Files:**
-- Modify: `frontend/src/views/FinancialManagement.vue`
+- Modify: `frontend/src/domains/business/views/FinancialManagement.vue`
 - Optionally create: `frontend/src/components/finance/MonthlyProfitSettlementSummary.vue`
 - Optionally create: `frontend/src/components/finance/MonthlyProfitSettlementDetails.vue`
 
@@ -429,7 +429,7 @@ If no build or test target is available, at minimum verify imports and template 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add frontend/src/views/FinancialManagement.vue frontend/src/components/finance
+git add frontend/src/domains/business/views/FinancialManagement.vue frontend/src/components/finance
 git commit -m "feat: add monthly profit settlement center UI"
 ```
 
@@ -437,7 +437,7 @@ git commit -m "feat: add monthly profit settlement center UI"
 
 **Files:**
 - Modify: `backend/services/monthly_profit_settlement_service.py`
-- Modify: `backend/routers/monthly_profit_settlement.py`
+- Modify: `backend/domains/business/routers/monthly_profit_settlement.py`
 - Test: `backend/tests/test_monthly_profit_settlement_service.py`
 - Test: `backend/tests/test_monthly_profit_settlement_routes.py`
 
@@ -470,7 +470,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/services/monthly_profit_settlement_service.py backend/routers/monthly_profit_settlement.py backend/tests/test_monthly_profit_settlement_service.py backend/tests/test_monthly_profit_settlement_routes.py
+git add backend/services/monthly_profit_settlement_service.py backend/domains/business/routers/monthly_profit_settlement.py backend/tests/test_monthly_profit_settlement_service.py backend/tests/test_monthly_profit_settlement_routes.py
 git commit -m "feat: add monthly settlement status guardrails"
 ```
 
@@ -544,3 +544,4 @@ At minimum capture:
 git add progress.md findings.md task_plan.md
 git commit -m "chore: record monthly settlement verification evidence"
 ```
+

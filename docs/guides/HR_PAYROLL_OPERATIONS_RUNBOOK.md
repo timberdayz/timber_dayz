@@ -59,16 +59,16 @@
 
 ### Frontend pages
 
-- `frontend/src/views/hr/PerformanceManagement.vue`
+- `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
   - 发起月度绩效重算
   - 接收并展示工资单锁定冲突
-- `frontend/src/views/hr/EmployeeSalary.vue`
+- `frontend/src/domains/business/views/hr/EmployeeSalary.vue`
   - 维护固定薪资
   - 录入月度奖金、扣款等人工字段
   - 刷新、确认、退回、发放工资单
-- `frontend/src/views/HumanResources.vue`
+- `frontend/src/domains/business/views/HumanResources.vue`
   - 继续承担员工、部门、职位、考勤等基础人力管理
-- `frontend/src/views/hr/MyIncome.vue`
+- `frontend/src/domains/business/views/hr/MyIncome.vue`
   - 只展示工资单口径的完整工资单明细
   - 不承担任何录入职责
 

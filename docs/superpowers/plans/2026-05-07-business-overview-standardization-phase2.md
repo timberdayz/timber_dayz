@@ -1,4 +1,4 @@
-# Business Overview Standardization (Phase-2) Implementation Plan
+﻿# Business Overview Standardization (Phase-2) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -26,7 +26,7 @@
 ## Affected Code Areas (File Map)
 
 **Backend router/service**
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 - Modify: `backend/services/postgresql_dashboard_service.py`
 - Modify: `backend/services/cache_warmup_service.py`（如需统一 bootstrap warmup 行为）
 
@@ -51,7 +51,7 @@
 
 **Files:**
 - Modify: `backend/services/postgresql_dashboard_service.py`
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 - Test: `backend/tests/data_pipeline/test_business_overview_module_consistency.py`
 
 - [ ] **Step 1: Write failing contract tests (envelope + normalization)**
@@ -193,7 +193,7 @@ Run: `python -m pytest -q backend/tests/data_pipeline/test_postgresql_dashboard_
 ### Task 7: Standardize `bootstrap` (aggregation + meta/warnings + cache behavior)
 
 **Files:**
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 - Modify: `backend/services/postgresql_dashboard_service.py`
 - Test: `backend/tests/data_pipeline/test_business_overview_module_consistency.py`
 
@@ -237,4 +237,5 @@ Include:
 - [ ] **Step 5: Commit**
 
 Commit: `report: business overview phase-2 acceptance`
+
 

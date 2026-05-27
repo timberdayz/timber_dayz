@@ -1,4 +1,4 @@
-# Collection Config Shop Scope And Scheduler Implementation Plan
+﻿# Collection Config Shop Scope And Scheduler Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -24,7 +24,7 @@
   Responsibility: update config CRUD, add save-time validation, and expose the new config-detail payload.
 - `backend/routers/collection_schedule.py`
   Responsibility: keep explicit schedule endpoints aligned with the new save-time scheduler synchronization flow.
-- `backend/routers/collection_tasks.py`
+- `backend/domains/collection/routers/collection_tasks.py`
   Responsibility: stop relying on frontend per-shop loops and reuse the backend config execution service for config runs.
 - `backend/services/collection_contracts.py`
   Responsibility: centralize shop-scope validation, capability filtering, and domain/sub-domain normalization helpers.
@@ -36,7 +36,7 @@
   Responsibility: switch config payloads to `shop_scopes` and add a backend-driven config-run entry point if implemented.
 - `frontend/src/constants/collection.js`
   Responsibility: reuse domain labels/helpers and add shop-scope-specific helpers if the page needs them.
-- `frontend/src/views/collection/CollectionConfig.vue`
+- `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
   Responsibility: move from global domain selection to per-shop domain selection while keeping config-header controls on the same screen.
 - `backend/tests/test_collection_config_api.py`
   Responsibility: cover config CRUD behavior under the new contract.
@@ -233,11 +233,11 @@ git commit -m "feat: sync collection scheduler state during config saves"
 **Files:**
 - Create: `backend/services/collection_config_execution.py`
 - Create: `backend/tests/test_collection_config_execution_service.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/services/collection_scheduler.py`
 - Modify: `backend/tests/test_collection_scheduler_capability_filter.py`
 - Modify: `frontend/src/api/collection.js`
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Test: `backend/tests/test_collection_config_execution_service.py`
 
 - [ ] **Step 1: Write the failing config-execution service test**
@@ -283,7 +283,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/services/collection_config_execution.py backend/routers/collection_tasks.py backend/services/collection_scheduler.py backend/tests/test_collection_config_execution_service.py backend/tests/test_collection_scheduler_capability_filter.py frontend/src/api/collection.js frontend/src/views/collection/CollectionConfig.vue
+git add backend/services/collection_config_execution.py backend/domains/collection/routers/collection_tasks.py backend/services/collection_scheduler.py backend/tests/test_collection_config_execution_service.py backend/tests/test_collection_scheduler_capability_filter.py frontend/src/api/collection.js frontend/src/domains/collection/views/collection/CollectionConfig.vue
 git commit -m "feat: unify collection config execution across manual and scheduled runs"
 ```
 
@@ -291,7 +291,7 @@ git commit -m "feat: unify collection config execution across manual and schedul
 
 **Files:**
 - Create: `frontend/scripts/collectionConfigShopScopeUi.test.mjs`
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/src/api/collection.js`
 - Modify: `frontend/src/constants/collection.js`
 - Test: `frontend/scripts/collectionConfigShopScopeUi.test.mjs`
@@ -343,7 +343,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue frontend/src/api/collection.js frontend/src/constants/collection.js frontend/scripts/collectionConfigShopScopeUi.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/api/collection.js frontend/src/constants/collection.js frontend/scripts/collectionConfigShopScopeUi.test.mjs
 git commit -m "feat: rebuild collection config ui around shop scopes"
 ```
 
@@ -354,7 +354,7 @@ git commit -m "feat: rebuild collection config ui around shop scopes"
 - Modify: `backend/routers/collection_schedule.py`
 - Modify: `backend/routers/collection_config.py`
 - Modify: `frontend/src/api/collection.js`
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Test: `backend/tests/test_collection_config_api.py`
 - Test: `backend/tests/test_collection_config_schedule_sync_api.py`
 - Test: `backend/tests/test_collection_time_selection_contract.py`
@@ -400,7 +400,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/schemas/collection.py backend/routers/collection_schedule.py backend/routers/collection_config.py frontend/src/api/collection.js frontend/src/views/collection/CollectionConfig.vue backend/tests/test_collection_config_api.py backend/tests/test_collection_config_schedule_sync_api.py backend/tests/test_collection_time_selection_contract.py backend/tests/test_collection_frontend_contracts.py frontend/scripts/collectionConfigShopScopeUi.test.mjs
+git add backend/schemas/collection.py backend/routers/collection_schedule.py backend/routers/collection_config.py frontend/src/api/collection.js frontend/src/domains/collection/views/collection/CollectionConfig.vue backend/tests/test_collection_config_api.py backend/tests/test_collection_config_schedule_sync_api.py backend/tests/test_collection_time_selection_contract.py backend/tests/test_collection_frontend_contracts.py frontend/scripts/collectionConfigShopScopeUi.test.mjs
 git commit -m "feat: expose collection scheduler observability for shop-scope configs"
 ```
 
@@ -421,3 +421,4 @@ git commit -m "feat: expose collection scheduler observability for shop-scope co
 - One config expands into one task per shop scope.
 - One shop failure does not prevent other shop tasks from running.
 - The config page no longer communicates a global shared domain set as the execution truth.
+

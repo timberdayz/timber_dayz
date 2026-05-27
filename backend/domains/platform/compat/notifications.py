@@ -40,3 +40,26 @@ async def revoke_all_user_sessions(*args: Any, **kwargs: Any) -> Any:
 
     return await revoke_all_user_sessions_func(*args, **kwargs)
 
+
+async def notify_password_reset(*args: Any, **kwargs: Any) -> Any:
+    from backend.routers.notifications import notify_password_reset as notify_password_reset_func
+
+    return await notify_password_reset_func(*args, **kwargs)
+
+
+async def notify_user_approved(*args: Any, **kwargs: Any) -> Any:
+    from backend.routers.notifications import notify_user_approved as notify_user_approved_func
+
+    return await notify_user_approved_func(*args, **kwargs)
+
+
+async def notify_user_rejected(*args: Any, **kwargs: Any) -> Any:
+    from backend.routers.notifications import notify_user_rejected as notify_user_rejected_func
+
+    return await notify_user_rejected_func(*args, **kwargs)
+
+
+async def notify_user_suspended(*args: Any, **kwargs: Any) -> Any:
+    from backend.routers.notifications import notify_user_suspended as notify_user_suspended_func
+
+    return await notify_user_suspended_func(*args, **kwargs)

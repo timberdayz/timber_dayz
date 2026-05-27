@@ -1,4 +1,4 @@
-# Canonical Collection Components Implementation Plan
+﻿# Canonical Collection Components Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -16,9 +16,9 @@
   - 三平台 canonical 槽位清单与成熟度评估
 - `docs/guides/COMPONENT_REUSE_WORKFLOW.md`
   - 复用成熟 export 的操作说明
-- `backend/routers/component_versions.py`
+- `backend/domains/collection/routers/component_versions.py`
   - 后续应收口 batch register 逻辑，只注册/展示 canonical 组件
-- `frontend/src/views/ComponentVersions.vue`
+- `frontend/src/domains/collection/views/ComponentVersions.vue`
   - 后续应按 canonical 槽位展示组件，而不是把测试件/别名平铺给用户
 - `modules/platforms/*/components/*.py`
   - canonical 组件基础实现
@@ -61,7 +61,7 @@ Expected:
 ## Task 2: Define Registration Rules
 
 **Files:**
-- Modify: `backend/routers/component_versions.py`
+- Modify: `backend/domains/collection/routers/component_versions.py`
 - Test: `backend/tests/test_component_versions_canonical_registration.py`
 
 - [ ] **Step 1: Write the failing test for batch register filtering**
@@ -81,7 +81,7 @@ Expected: FAIL because canonical filtering is not implemented yet.
 
 - [ ] **Step 3: Implement canonical registration filtering**
 
-Implement in `backend/routers/component_versions.py`:
+Implement in `backend/domains/collection/routers/component_versions.py`:
 - define allowlist/skiplist based on canonical inventory
 - skip test files, aliases, generic wrappers, config files, tool files
 
@@ -97,14 +97,14 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add backend/routers/component_versions.py backend/tests/test_component_versions_canonical_registration.py docs/guides/CANONICAL_COLLECTION_COMPONENTS.md docs/guides/COLLECTION_SCRIPT_REFERENCE.md docs/guides/COMPONENT_REUSE_WORKFLOW.md
+git add backend/domains/collection/routers/component_versions.py backend/tests/test_component_versions_canonical_registration.py docs/guides/CANONICAL_COLLECTION_COMPONENTS.md docs/guides/COLLECTION_SCRIPT_REFERENCE.md docs/guides/COMPONENT_REUSE_WORKFLOW.md
 git commit -m "feat: enforce canonical collection component registration"
 ```
 
 ## Task 3: Make Component Management UI Canonical-First
 
 **Files:**
-- Modify: `frontend/src/views/ComponentVersions.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
 - Test: `frontend` manual verification
 
 - [ ] **Step 1: Decide canonical-first grouping rule**
@@ -130,7 +130,7 @@ Manual checks:
 - [ ] **Step 4: Commit**
 
 ```powershell
-git add frontend/src/views/ComponentVersions.vue
+git add frontend/src/domains/collection/views/ComponentVersions.vue
 git commit -m "feat: make component version manager canonical-first"
 ```
 
@@ -215,3 +215,4 @@ Expected: PASS or one clear actionable failure.
 git add <canonical files>
 git commit -m "fix: improve canonical collection component"
 ```
+

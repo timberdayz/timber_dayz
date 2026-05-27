@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
@@ -1627,29 +1627,18 @@ async def calculate_performance_scores(
                 )
             upserts += 1
         await _sync_performance_alerts(db, calc_list, alerts_by_shop)
-        await db.commit()
+        await db.flush()
         income_service = HRIncomeCalculationService(db=db)
-        income_result = await income_service.calculate_month(period)
-        warnings: List[Dict[str, Any]] = []
+        income_result = await income_service.calculate_month(period, commit=False)
         payroll_result: Dict[str, Any] = {
             "year_month": period,
             "payroll_upserts": 0,
             "locked_conflicts": 0,
             "locked_conflict_details": [],
         }
-        try:
-            payroll_service = PayrollGenerationService(db=db)
-            payroll_result = await payroll_service.generate_month(period)
-            await db.commit()
-        except Exception as payroll_err:
-            await db.rollback()
-            logger.warning("[PerformanceManagement] payroll generation failed for %s: %s", period, payroll_err)
-            warnings.append(
-                {
-                    "stage": "payroll_generation",
-                    "message": str(payroll_err),
-                }
-            )
+        payroll_service = PayrollGenerationService(db=db)
+        payroll_result = await payroll_service.generate_month(period)
+        await db.commit()
         try:
             employee_rows = (
                 await db.execute(
@@ -1690,9 +1679,8 @@ async def calculate_performance_scores(
                 "payroll_upserts": payroll_result.get("payroll_upserts", 0),
                 "payroll_locked_conflicts": payroll_result.get("locked_conflicts", 0),
                 "payroll_locked_conflict_details": payroll_result.get("locked_conflict_details", []),
-                "warnings": warnings,
             },
-            message="绩效计算完成，工资联动部分失败" if warnings else "绩效计算完成",
+            message="绩效计算完成",
         )
     except HTTPException:
         raise
@@ -1706,12 +1694,14 @@ async def calculate_performance_scores(
             status_code=400
         )
     except Exception as e:
+        await db.rollback()
         logger.error(f"计算绩效评分失败: {e}", exc_info=True)
         return error_response(
             code=ErrorCode.DATABASE_QUERY_ERROR,
-            message="计算绩效评分失败",
+            message="绩效计算失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
             recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
+

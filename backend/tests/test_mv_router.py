@@ -3,7 +3,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 from backend.main import app
-from backend.routers.mv import get_all_mv_status, refresh_all_materialized_views, router
+from backend.domains.business.routers.mv import get_all_mv_status, refresh_all_materialized_views, router
 
 
 class _RowsResult:
@@ -68,7 +68,7 @@ def test_get_all_mv_status_awaits_execute_and_uses_refresh_log():
 
     fake_select = lambda *args, **kwargs: _FakeSelect()
 
-    with patch("backend.routers.mv.select", fake_select), patch(
+    with patch("backend.domains.business.routers.mv.select", fake_select), patch(
         "modules.core.db.MaterializedViewRefreshLog", _FakeRefreshLogModel
     ):
         response = asyncio.run(get_all_mv_status(db=db))

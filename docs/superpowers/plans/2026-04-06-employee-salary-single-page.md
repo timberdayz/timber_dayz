@@ -1,4 +1,4 @@
-# Employee Salary Single-Page Implementation Plan
+﻿# Employee Salary Single-Page Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -16,7 +16,7 @@
 
 - Modify: `backend/schemas/hr.py`
   - Add request/response contracts for salary structure update/history and optional employee-salary aggregate responses.
-- Modify: `backend/routers/hr_salary.py`
+- Modify: `backend/domains/business/routers/hr_salary.py`
   - Expand salary structure APIs to support current config retrieval, version history retrieval, and versioned create/update behavior.
   - Add an employee-centric payroll refresh/read path if needed by the page.
 - Modify: `backend/services/payroll_generation_service.py`
@@ -28,7 +28,7 @@
 
 ### Frontend
 
-- Create: `frontend/src/views/hr/EmployeeSalary.vue`
+- Create: `frontend/src/domains/business/views/hr/EmployeeSalary.vue`
   - Main HR salary page.
 - Modify: `frontend/src/router/index.js`
   - Add new route entry.
@@ -36,7 +36,7 @@
   - Add menu item under human resources.
 - Modify: `frontend/src/api/index.js`
   - Add frontend API helpers for new salary-structure and employee-salary flows.
-- Optionally modify: `frontend/src/views/HumanResources.vue`
+- Optionally modify: `frontend/src/domains/business/views/HumanResources.vue`
   - Reduce or reword the old payroll tab so it stops acting like the primary salary business entry.
 - Test: `frontend/scripts/employeeSalaryUi.test.mjs`
   - Source-level assertions for the new page structure and labels.
@@ -54,7 +54,7 @@
 
 **Files:**
 - Modify: `backend/schemas/hr.py`
-- Modify: `backend/routers/hr_salary.py`
+- Modify: `backend/domains/business/routers/hr_salary.py`
 - Test: `backend/tests/test_hr_payroll_routes.py`
 
 - [ ] **Step 1: Write failing tests for salary structure current-record and history behavior**
@@ -98,7 +98,7 @@ Keep fields aligned with existing `SalaryStructureCreate`.
 
 - [ ] **Step 4: Implement salary structure route changes**
 
-Implement in `backend/routers/hr_salary.py`:
+Implement in `backend/domains/business/routers/hr_salary.py`:
 - Keep `GET /api/hr/salary-structures`
 - Change `GET /api/hr/salary-structures/{employee_code}` to select the current record using:
   - `status == "active"`
@@ -121,7 +121,7 @@ Expected:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/schemas/hr.py backend/routers/hr_salary.py backend/tests/test_hr_payroll_routes.py
+git add backend/schemas/hr.py backend/domains/business/routers/hr_salary.py backend/tests/test_hr_payroll_routes.py
 git commit -m "feat: support versioned hr salary structures"
 ```
 
@@ -131,7 +131,7 @@ git commit -m "feat: support versioned hr salary structures"
 
 **Files:**
 - Modify: `backend/services/payroll_generation_service.py`
-- Modify: `backend/routers/hr_salary.py`
+- Modify: `backend/domains/business/routers/hr_salary.py`
 - Test: `backend/tests/test_payroll_generation_service.py`
 - Test: `backend/tests/test_hr_payroll_routes.py`
 
@@ -171,7 +171,7 @@ In `backend/services/payroll_generation_service.py`:
 
 - [ ] **Step 4: Expose route for the page**
 
-In `backend/routers/hr_salary.py` add a route like:
+In `backend/domains/business/routers/hr_salary.py` add a route like:
 ```python
 @router.post("/payroll-records/{employee_code}/{year_month}/refresh")
 ```
@@ -194,7 +194,7 @@ Expected:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/services/payroll_generation_service.py backend/routers/hr_salary.py backend/tests/test_payroll_generation_service.py backend/tests/test_hr_payroll_routes.py
+git add backend/services/payroll_generation_service.py backend/domains/business/routers/hr_salary.py backend/tests/test_payroll_generation_service.py backend/tests/test_hr_payroll_routes.py
 git commit -m "feat: add employee payroll refresh flow"
 ```
 
@@ -323,9 +323,9 @@ git commit -m "feat: add employee salary route"
 ### Task 5: Build Employee Salary Page
 
 **Files:**
-- Create: `frontend/src/views/hr/EmployeeSalary.vue`
+- Create: `frontend/src/domains/business/views/hr/EmployeeSalary.vue`
 - Modify: `frontend/src/api/index.js`
-- Optionally modify: `frontend/src/views/HumanResources.vue`
+- Optionally modify: `frontend/src/domains/business/views/HumanResources.vue`
 - Test: `frontend/scripts/employeeSalaryUi.test.mjs`
 
 - [ ] **Step 1: Write failing source-level UI tests**
@@ -358,7 +358,7 @@ Expected:
 
 - [ ] **Step 3: Implement the page skeleton first**
 
-Create `frontend/src/views/hr/EmployeeSalary.vue` with:
+Create `frontend/src/domains/business/views/hr/EmployeeSalary.vue` with:
 - left employee list
 - right fixed salary card
 - right monthly input card
@@ -396,7 +396,7 @@ Expected:
 
 - [ ] **Step 7: Optionally simplify old HumanResources payroll messaging**
 
-If needed, update `frontend/src/views/HumanResources.vue` so:
+If needed, update `frontend/src/domains/business/views/HumanResources.vue` so:
 - it no longer reads like the primary salary business page
 - it can link or direct users to `员工薪资`
 
@@ -405,7 +405,7 @@ Only do this if it reduces ambiguity without destabilizing unrelated HR tabs.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add frontend/src/views/hr/EmployeeSalary.vue frontend/src/api/index.js frontend/src/views/HumanResources.vue frontend/scripts/employeeSalaryUi.test.mjs frontend/scripts/employeeSalaryRouteUi.test.mjs
+git add frontend/src/domains/business/views/hr/EmployeeSalary.vue frontend/src/api/index.js frontend/src/domains/business/views/HumanResources.vue frontend/scripts/employeeSalaryUi.test.mjs frontend/scripts/employeeSalaryRouteUi.test.mjs
 git commit -m "feat: add employee salary management page"
 ```
 
@@ -478,7 +478,7 @@ Expected:
 
 Run:
 ```powershell
-python -m ruff check backend/schemas/hr.py backend/routers/hr_salary.py backend/services/payroll_generation_service.py backend/tests/test_hr_payroll_routes.py backend/tests/test_payroll_generation_service.py
+python -m ruff check backend/schemas/hr.py backend/domains/business/routers/hr_salary.py backend/services/payroll_generation_service.py backend/tests/test_hr_payroll_routes.py backend/tests/test_payroll_generation_service.py
 ```
 
 Expected:
@@ -511,3 +511,4 @@ git commit -m "chore: finalize employee salary single-page rollout"
 - Do not convert `MyIncome` into an editable page.
 - Do not create separate `奖金管理`, `底薪管理`, or `工资条管理` pages.
 - If the current backend route naming becomes ambiguous, improve names only where doing so does not create broad API churn.
+

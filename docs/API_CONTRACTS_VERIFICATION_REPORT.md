@@ -1,4 +1,4 @@
-# API契约标准化验证报告
+﻿# API契约标准化验证报告
 
 **验证时间**: 2025-11-21  
 **版本**: v4.6.0  
@@ -54,7 +54,7 @@
 - ✅ `frontend/src/views/BusinessOverview.vue` - 已更新响应处理逻辑
 - ✅ `frontend/src/views/store/StoreAnalytics.vue` - 已更新响应处理逻辑
 - ✅ `frontend/src/views/target/TargetManagement.vue` - 已更新响应处理逻辑
-- ✅ `frontend/src/views/hr/PerformanceManagement.vue` - 已更新响应处理逻辑
+- ✅ `frontend/src/domains/business/views/hr/PerformanceManagement.vue` - 已更新响应处理逻辑
 
 **验证结果**: ✅ **100%通过** - 所有前端视图文件已更新
 
@@ -212,4 +212,5 @@
 **验证完成时间**: 2025-11-21  
 **验证人员**: AI Agent Team  
 **验证结果**: ✅ **100%通过，生产就绪**
+
 

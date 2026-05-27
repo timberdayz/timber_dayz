@@ -1,4 +1,4 @@
-# Employee Collaboration Task Center V1 Implementation Plan
+﻿# Employee Collaboration Task Center V1 Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -53,11 +53,11 @@
   - Add task notification type handling and helper entrypoints.
 - Modify: `backend/schemas/notification.py`
   - Add task-related notification enums and payload support.
-- Modify: `backend/routers/users_me.py`
+- Modify: `backend/domains/platform/routers/users_me.py`
   - Ensure notification preferences can serve newly added task notification types.
 - Modify: `backend/routers/expense_management.py`
   - Create or refresh employee tasks when monthly cost actions require owner follow-up.
-- Modify: `backend/routers/performance_management.py`
+- Modify: `backend/domains/business/routers/performance_management.py`
   - Create or refresh employee tasks for performance confirmation actions.
 - Modify: `backend/services/permission_service.py`
   - Add employee task center permissions if the repository still requires explicit registration.
@@ -74,11 +74,11 @@
   - Ensure employee-facing roles can access the task inbox and detail page.
 - Modify: `frontend/src/components/common/NotificationBell.vue`
   - Route task notifications into task detail or task-linked business pages.
-- Modify: `frontend/src/views/settings/NotificationPreferences.vue`
+- Modify: `frontend/src/domains/platform/views/settings/NotificationPreferences.vue`
   - Show new task notification types.
 - Modify: `frontend/src/views/finance/ExpenseManagement.vue`
   - Accept task context and complete or refresh linked cost-entry tasks.
-- Modify: `frontend/src/views/hr/PerformanceManagement.vue`
+- Modify: `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
   - Accept task context and complete or refresh linked performance-confirmation tasks.
 - Modify: `frontend/src/views/procurement/PurchaseOrders.vue`
   - Add a bridge placeholder for replenishment task templates until procurement runtime exists.
@@ -278,11 +278,11 @@ git commit -m "feat: add employee task api"
 **Files:**
 - Modify: `backend/schemas/notification.py`
 - Modify: `backend/routers/notifications.py`
-- Modify: `backend/routers/users_me.py`
+- Modify: `backend/domains/platform/routers/users_me.py`
 - Create: `backend/services/employee_task_notifications.py`
 - Create: `backend/tests/test_employee_task_notifications.py`
 - Modify: `frontend/src/components/common/NotificationBell.vue`
-- Modify: `frontend/src/views/settings/NotificationPreferences.vue`
+- Modify: `frontend/src/domains/platform/views/settings/NotificationPreferences.vue`
 
 - [ ] **Step 1: Write failing notification contract tests**
 
@@ -345,7 +345,7 @@ Expected: PASS after the route and notification updates in later tasks.
 - [ ] **Step 8: Commit notification integration**
 
 ```bash
-git add backend/schemas/notification.py backend/routers/notifications.py backend/routers/users_me.py backend/services/employee_task_notifications.py backend/tests/test_employee_task_notifications.py frontend/src/components/common/NotificationBell.vue frontend/src/views/settings/NotificationPreferences.vue
+git add backend/schemas/notification.py backend/routers/notifications.py backend/domains/platform/routers/users_me.py backend/services/employee_task_notifications.py backend/tests/test_employee_task_notifications.py frontend/src/components/common/NotificationBell.vue frontend/src/domains/platform/views/settings/NotificationPreferences.vue
 git commit -m "feat: add employee task notifications"
 ```
 
@@ -432,10 +432,10 @@ git commit -m "feat: build employee task center frontend"
 
 **Files:**
 - Modify: `backend/routers/expense_management.py`
-- Modify: `backend/routers/performance_management.py`
+- Modify: `backend/domains/business/routers/performance_management.py`
 - Create: `backend/tests/test_employee_task_sources.py`
 - Modify: `frontend/src/views/finance/ExpenseManagement.vue`
-- Modify: `frontend/src/views/hr/PerformanceManagement.vue`
+- Modify: `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
 
 - [ ] **Step 1: Write failing source-adapter tests**
 
@@ -488,7 +488,7 @@ Run:
 - [ ] **Step 8: Commit automatic source adapters**
 
 ```bash
-git add backend/routers/expense_management.py backend/routers/performance_management.py backend/tests/test_employee_task_sources.py frontend/src/views/finance/ExpenseManagement.vue frontend/src/views/hr/PerformanceManagement.vue
+git add backend/routers/expense_management.py backend/domains/business/routers/performance_management.py backend/tests/test_employee_task_sources.py frontend/src/views/finance/ExpenseManagement.vue frontend/src/domains/business/views/hr/PerformanceManagement.vue
 git commit -m "feat: add employee task source adapters"
 ```
 
@@ -588,3 +588,4 @@ git commit -m "docs: add employee task center runbook"
 - Keep reminder delivery inside the existing notification infrastructure.
 
 Plan complete and saved to `docs/superpowers/plans/2026-04-11-employee-collaboration-task-center-v1.md`. Ready to execute?
+

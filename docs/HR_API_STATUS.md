@@ -24,7 +24,7 @@ The following runtime capabilities are available in the repository today:
 
 ### 1. Performance management
 
-- Router: `backend/routers/performance_management.py`
+- Router: `backend/domains/business/routers/performance_management.py`
 - Main route: `POST /performance/scores/calculate`
 - Status: implemented
 
@@ -39,7 +39,7 @@ Capabilities:
 
 ### 2. Employee profile and My Income
 
-- Router: `backend/routers/hr_employee.py`
+- Router: `backend/domains/business/routers/hr_employee.py`
 - Main routes:
   - `GET /api/hr/me/profile`
   - `PUT /api/hr/me/profile`
@@ -55,7 +55,7 @@ Capabilities:
 
 ### 3. Payroll management
 
-- Router: `backend/routers/hr_salary.py`
+- Router: `backend/domains/business/routers/hr_salary.py`
 - Main routes:
   - `GET /api/hr/payroll-records`
   - `GET /api/hr/payroll-records/{employee_code}/{year_month}`
@@ -77,7 +77,7 @@ Capabilities:
 
 ### 4. Salary structures
 
-- Router: `backend/routers/hr_salary.py`
+- Router: `backend/domains/business/routers/hr_salary.py`
 - Main routes:
   - `GET /api/hr/salary-structures`
   - `GET /api/hr/salary-structures/{employee_code}`
@@ -88,16 +88,16 @@ Capabilities:
 
 ### Implemented pages
 
-- `frontend/src/views/HumanResources.vue`
+- `frontend/src/domains/business/views/HumanResources.vue`
   - payroll list
   - draft edit
   - confirm / reopen / pay actions
   - payroll runbook entry
-- `frontend/src/views/hr/MyIncome.vue`
+- `frontend/src/domains/business/views/hr/MyIncome.vue`
   - payroll-only income view
   - full payroll breakdown
   - payroll runbook entry
-- `frontend/src/views/hr/PerformanceManagement.vue`
+- `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
   - monthly recalculation trigger
   - payroll locked-conflict dialog
 

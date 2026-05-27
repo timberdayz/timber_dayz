@@ -1,4 +1,4 @@
-# C-Class Employee Metrics English Column Migration Design
+﻿# C-Class Employee Metrics English Column Migration Design
 
 ## Goal
 
@@ -58,8 +58,8 @@ Current physical columns:
 ### Already Compatible Paths
 
 - `backend/services/hr_income_calculation_service.py`
-- `backend/routers/performance_management.py`
-- `backend/routers/hr_commission.py`
+- `backend/domains/business/routers/performance_management.py`
+- `backend/domains/business/routers/hr_commission.py`
 - `backend/services/payroll_generation_service.py`
 
 These paths now include fallback behavior and can survive the current Chinese-column database state.
@@ -334,3 +334,4 @@ This migration is complete when:
 - critical readers and writers run successfully without relying on fallback
 - English columns have the expected constraints and indexes
 - Chinese legacy columns are retired only after verified stability
+

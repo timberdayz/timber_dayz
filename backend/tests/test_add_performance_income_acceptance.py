@@ -1,4 +1,4 @@
-"""
+﻿"""
 add-performance-and-personal-income 验收测试
 
 覆盖点:
@@ -16,10 +16,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 from starlette.requests import Request
 
-from backend.routers.hr_employee import get_my_income
+from backend.domains.business.routers.hr_employee import get_my_income
 from backend.schemas.hr import MyIncomeBreakdown, PayrollIncomeBreakdown
-import backend.routers.performance_management as performance_management_module
-from backend.routers.performance_management import calculate_performance_scores, list_performance_scores
+import backend.domains.business.routers.performance_management as performance_management_module
+from backend.domains.business.routers.performance_management import calculate_performance_scores, list_performance_scores
 from modules.core.db import PerformanceScore
 
 
@@ -109,7 +109,7 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
-
+    db.rollback = AsyncMock()
     config = SimpleNamespace(
         id=1,
         sales_max_score=30,
@@ -120,20 +120,11 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+        if execute_calls["n"] == 1:
             return _ScalarOneResult(config)
-        if n == 2:
-            return _ScalarsResult([])
-        if n == 3:
-            return _ScalarOneResult(None)
-        if n == 4:
-            return _ScalarsResult([])
-        if n == 5:
-            return _ScalarOneResult(None)
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _ScalarsResult([])
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -155,7 +146,7 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
             self.db = db
             self.metabase_service = metabase_service
 
-        async def calculate_month(self, year_month):
+        async def calculate_month(self, year_month, **kwargs):
             income_calls["count"] += 1
             assert year_month == "2025-01"
             return {
@@ -235,7 +226,7 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
     assert body["success"] is True
     assert income_calls["count"] == 1
     assert payroll_calls["count"] == 1
-    assert db.commit.await_count >= 2
+    assert db.commit.await_count >= 1
     assert body["data"]["shop_performance_upserts"] == 1
     assert body["data"]["commission_upserts"] == 2
     assert body["data"]["employee_performance_upserts"] == 2
@@ -270,7 +261,7 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
     assert created.score_details["operation"]["status"] == "pending_design"
 
 
-def test_calculate_returns_partial_success_when_payroll_generation_fails(monkeypatch):
+def test_calculate_rolls_back_when_payroll_generation_fails(monkeypatch):
     class _ScalarOneResult:
         def __init__(self, value):
             self._value = value
@@ -294,6 +285,7 @@ def test_calculate_returns_partial_success_when_payroll_generation_fails(monkeyp
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     config = SimpleNamespace(
         id=1,
@@ -305,20 +297,11 @@ def test_calculate_returns_partial_success_when_payroll_generation_fails(monkeyp
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+        if execute_calls["n"] == 1:
             return _ScalarOneResult(config)
-        if n == 2:
-            return _ScalarsResult([])
-        if n == 3:
-            return _ScalarOneResult(None)
-        if n == 4:
-            return _ScalarsResult([])
-        if n == 5:
-            return _ScalarOneResult(None)
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _ScalarsResult([])
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -336,7 +319,7 @@ def test_calculate_returns_partial_success_when_payroll_generation_fails(monkeyp
         def __init__(self, db, metabase_service=None):
             self.db = db
 
-        async def calculate_month(self, year_month):
+        async def calculate_month(self, year_month, **kwargs):
             return {
                 "year_month": year_month,
                 "employee_count": 2,
@@ -395,24 +378,10 @@ def test_calculate_returns_partial_success_when_payroll_generation_fails(monkeyp
     )
 
     body = _json_body(resp)
-    assert body["success"] is True
-    assert body["message"] == "绩效计算完成，工资联动部分失败"
-    assert body["data"]["shop_performance_upserts"] == 1
-    assert body["data"]["employee_performance_upserts"] == 2
-    assert body["data"]["payroll_upserts"] == 0
-    assert body["data"]["warnings"] == [
-        {
-            "stage": "payroll_generation",
-            "message": "employee_commissions schema mismatch",
-        }
-    ]
-    assert db.commit.await_count >= 1
-    perf_score_rows = [
-        call.args[0]
-        for call in db.add.call_args_list
-        if call.args and isinstance(call.args[0], PerformanceScore)
-    ]
-    assert len(perf_score_rows) == 1
+    assert body["success"] is False
+    assert body["message"] == "绩效计算失败"
+    assert "employee_commissions schema mismatch" in (((body.get("error") or {}).get("detail")) or "")
+    assert db.rollback.await_count >= 1
 
 
 def test_calculate_uses_operation_target_achieved_value(monkeypatch):
@@ -436,6 +405,7 @@ def test_calculate_uses_operation_target_achieved_value(monkeypatch):
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     config = SimpleNamespace(
         id=1,
@@ -462,7 +432,7 @@ def test_calculate_uses_operation_target_achieved_value(monkeypatch):
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
         n = execute_calls["n"]
         if n == 1:
@@ -497,7 +467,7 @@ def test_calculate_uses_operation_target_achieved_value(monkeypatch):
         def __init__(self, db, metabase_service=None):
             self.db = db
 
-        async def calculate_month(self, year_month):
+        async def calculate_month(self, year_month, **kwargs):
             return {
                 "year_month": year_month,
                 "employee_count": 0,
@@ -614,6 +584,7 @@ def test_calculate_skips_invalid_unknown_shop_ids(monkeypatch):
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     config = SimpleNamespace(
         id=1,
@@ -640,7 +611,7 @@ def test_calculate_skips_invalid_unknown_shop_ids(monkeypatch):
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
         n = execute_calls["n"]
         if n == 1:
@@ -683,7 +654,7 @@ def test_calculate_skips_invalid_unknown_shop_ids(monkeypatch):
         def __init__(self, db, metabase_service=None):
             self.db = db
 
-        async def calculate_month(self, year_month):
+        async def calculate_month(self, year_month, **kwargs):
             return {
                 "year_month": year_month,
                 "employee_count": 0,
@@ -797,6 +768,7 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     config = SimpleNamespace(
         id=1,
@@ -823,7 +795,7 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
         n = execute_calls["n"]
         if n == 1:
@@ -911,7 +883,7 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
             (),
             {
                 "__init__": lambda self, db, metabase_service=None: setattr(self, "db", db),
-                "calculate_month": lambda self, year_month: asyncio.sleep(0, result={
+                "calculate_month": lambda self, year_month, **kwargs: asyncio.sleep(0, result={
                     "year_month": year_month,
                     "employee_count": 0,
                     "commission_upserts": 0,
@@ -1015,7 +987,7 @@ def test_list_scores_shop_hides_pending_dimensions_from_partial_results():
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
         if execute_calls["n"] == 1:
             return _ShopRows([shop])
@@ -1083,6 +1055,7 @@ def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     config = SimpleNamespace(
         id=1,
@@ -1102,7 +1075,7 @@ def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
         n = execute_calls["n"]
         if n == 1:
@@ -1115,6 +1088,8 @@ def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
             return _ScalarsResult([])
         if n == 5:
             return _ScalarOneResult(None)
+        if n == 6:
+            return _ScalarsResult([])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -1132,7 +1107,7 @@ def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
         def __init__(self, db, metabase_service=None):
             self.db = db
 
-        async def calculate_month(self, year_month):
+        async def calculate_month(self, year_month, **kwargs):
             return {
                 "year_month": year_month,
                 "employee_count": 0,
@@ -1205,6 +1180,7 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     config = SimpleNamespace(
         id=1,
@@ -1243,7 +1219,7 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
         n = execute_calls["n"]
         if n == 1:
@@ -1256,6 +1232,8 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
             return _ScalarsResult([])
         if n == 5:
             return _ScalarOneResult(None)
+        if n == 6:
+            return _ScalarsResult([])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -1273,7 +1251,7 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
         def __init__(self, db, metabase_service=None):
             self.db = db
 
-        async def calculate_month(self, year_month):
+        async def calculate_month(self, year_month, **kwargs):
             return {
                 "year_month": year_month,
                 "employee_count": 0,
@@ -1345,6 +1323,7 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     config = SimpleNamespace(
         id=1,
@@ -1378,7 +1357,7 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
 
     execute_calls = {"n": 0}
 
-    async def _execute(_stmt):
+    async def _execute(_stmt, *args, **kwargs):
         execute_calls["n"] += 1
         n = execute_calls["n"]
         if n == 1:
@@ -1418,7 +1397,7 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
         def __init__(self, db, metabase_service=None):
             self.db = db
 
-        async def calculate_month(self, year_month):
+        async def calculate_month(self, year_month, **kwargs):
             return {
                 "year_month": year_month,
                 "employee_count": 0,
@@ -1479,7 +1458,7 @@ def test_my_income_unlinked_returns_linked_false_and_audit_called(monkeypatch):
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
 
     request = Request(
         {
@@ -1518,7 +1497,7 @@ def test_my_income_non_employee_identity_returns_linked_false(monkeypatch):
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
 
     request = Request(
         {
@@ -1595,7 +1574,7 @@ def _deprecated_my_income_linked_fallback_to_cn_columns_when_orm_columns_missing
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
 
     request = Request(
         {
@@ -1670,7 +1649,7 @@ def test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback(monkey
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
 
     request = Request(
         {
@@ -1746,7 +1725,7 @@ def test_my_income_linked_without_payroll_returns_empty_income_state(monkeypatch
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
 
     request = Request(
         {
@@ -1767,3 +1746,7 @@ def test_my_income_linked_without_payroll_returns_empty_income_state(monkeypatch
     assert resp.total_income is None
     assert resp.breakdown is None
     assert called["count"] == 1
+
+
+
+

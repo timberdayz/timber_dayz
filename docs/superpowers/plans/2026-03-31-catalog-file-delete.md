@@ -1,4 +1,4 @@
-# Catalog File Delete Implementation Plan
+﻿# Catalog File Delete Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -94,7 +94,7 @@ Expected: PASS
 ### Task 3: Expose Delete APIs
 
 **Files:**
-- Modify: `backend/routers/field_mapping_files.py`
+- Modify: `backend/domains/data_platform/routers/field_mapping_files.py`
 - Create: `backend/schemas/catalog_file_delete.py`
 
 - [ ] **Step 1: Add Pydantic response models for delete impact and delete result**
@@ -171,3 +171,4 @@ Manual checks:
 - Ingested file shows delete impact before final confirmation
 - Delete success refreshes the file list
 - Deleted file no longer appears in the list
+

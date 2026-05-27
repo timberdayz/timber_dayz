@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from starlette.requests import Request
 
-from backend.routers.performance_management import list_performance_scores
+from backend.domains.business.routers.performance_management import list_performance_scores
 
 
 class _ScalarResult:

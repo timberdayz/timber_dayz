@@ -1,4 +1,4 @@
-# 前端视图响应处理逻辑更新总结
+﻿# 前端视图响应处理逻辑更新总结
 
 ## 更新时间
 2025-11-21
@@ -65,7 +65,7 @@ if (response && Array.isArray(response)) {
 }
 ```
 
-### 3. `frontend/src/views/hr/PerformanceManagement.vue`
+### 3. `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
 **更新内容**：
 - ✅ 移除了所有`response.success`检查
 - ✅ 移除了未使用的`hrStore`导入
@@ -220,4 +220,5 @@ api.interceptors.response.use(
 - `docs/API_CONTRACTS.md` - API契约标准文档
 - `docs/FRONTEND_API_CALL_VALIDATION.md` - 前端API调用验证文档
 - `docs/E2E_TEST_GUIDE.md` - 端到端测试指南
+
 

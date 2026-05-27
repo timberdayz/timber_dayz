@@ -1,4 +1,4 @@
-# Collection Config And Recorder Hardening Implementation Plan
+﻿# Collection Config And Recorder Hardening Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -13,7 +13,7 @@
 ### Task 1: 统一账号能力适配规则
 
 **Files:**
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/services/collection_scheduler.py`
 - Modify: `backend/routers/collection_config.py`
 - Modify: `backend/schemas/collection.py`
@@ -57,18 +57,18 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/routers/collection_tasks.py backend/services/collection_scheduler.py backend/routers/collection_config.py backend/schemas/collection.py backend/tests/test_collection_account_capability_alignment.py backend/tests/test_collection_scheduler_capability_filter.py
+git add backend/domains/collection/routers/collection_tasks.py backend/services/collection_scheduler.py backend/routers/collection_config.py backend/schemas/collection.py backend/tests/test_collection_account_capability_alignment.py backend/tests/test_collection_scheduler_capability_filter.py
 git commit -m "fix: align collection capability filtering across manual and scheduled tasks"
 ```
 
 ### Task 2: 收口定时配置，支持多时间点且避免单选 UI 误导
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/src/api/collection.js`
 - Modify: `backend/routers/collection_schedule.py`
 - Test: `backend/tests/test_collection_schedule_contract.py`
-- Test: `frontend/src/views/collection/CollectionConfig.vue` (manual QA notes in plan execution)
+- Test: `frontend/src/domains/collection/views/collection/CollectionConfig.vue` (manual QA notes in plan execution)
 
 - [ ] **Step 1: 写失败测试，锁定多时间点 Cron 的接口契约**
 
@@ -105,7 +105,7 @@ Expected: UI 不再暗示“只能单时点”
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue frontend/src/api/collection.js backend/routers/collection_schedule.py backend/tests/test_collection_schedule_contract.py
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/api/collection.js backend/routers/collection_schedule.py backend/tests/test_collection_schedule_contract.py
 git commit -m "fix: expose multi-time collection schedule presets"
 ```
 
@@ -117,7 +117,7 @@ git commit -m "fix: expose multi-time collection schedule presets"
 - Modify: `backend/services/component_runtime_resolver.py`
 - Modify: `modules/apps/collection_center/executor_v2.py`
 - Modify: `backend/services/collection_scheduler.py`
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/src/api/collection.js`
 - Test: `backend/tests/test_collection_domain_subtype_scope.py`
 - Test: `backend/tests/test_component_runtime_resolver_domain_subtype_scope.py`
@@ -171,14 +171,14 @@ Expected: PASS
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/services/component_name_utils.py backend/schemas/collection.py backend/services/component_runtime_resolver.py modules/apps/collection_center/executor_v2.py backend/services/collection_scheduler.py frontend/src/views/collection/CollectionConfig.vue frontend/src/api/collection.js backend/tests/test_collection_domain_subtype_scope.py backend/tests/test_component_runtime_resolver_domain_subtype_scope.py
+git add backend/services/component_name_utils.py backend/schemas/collection.py backend/services/component_runtime_resolver.py modules/apps/collection_center/executor_v2.py backend/services/collection_scheduler.py frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/api/collection.js backend/tests/test_collection_domain_subtype_scope.py backend/tests/test_component_runtime_resolver_domain_subtype_scope.py
 git commit -m "refactor: model collection subtypes per data domain"
 ```
 
 ### Task 4: 修正配置页“执行配置”与任务创建参数不一致
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/src/api/collection.js`
 - Test: `backend/tests/test_collection_config_run_payload.py`
 
@@ -215,7 +215,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue frontend/src/api/collection.js backend/tests/test_collection_config_run_payload.py
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/api/collection.js backend/tests/test_collection_config_run_payload.py
 git commit -m "fix: align config-run payload with task creation contract"
 ```
 
@@ -223,10 +223,10 @@ git commit -m "fix: align config-run payload with task creation contract"
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/services/collection_scheduler.py`
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
-- Modify: `frontend/src/views/collection/CollectionTasks.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue`
 - Test: `backend/tests/test_collection_date_range_contract.py`
 
 - [ ] **Step 1: 写失败测试，锁定预设日期与运行时键名不一致**
@@ -263,17 +263,17 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add modules/apps/collection_center/executor_v2.py backend/routers/collection_tasks.py backend/services/collection_scheduler.py frontend/src/views/collection/CollectionConfig.vue frontend/src/views/collection/CollectionTasks.vue backend/tests/test_collection_date_range_contract.py
+git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/services/collection_scheduler.py frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/domains/collection/views/collection/CollectionTasks.vue backend/tests/test_collection_date_range_contract.py
 git commit -m "fix: normalize collection preset date range contract"
 ```
 
 ### Task 6: 收紧录制到 stable 运行的治理闭环
 
 **Files:**
-- Modify: `backend/routers/component_recorder.py`
-- Modify: `backend/routers/component_versions.py`
-- Modify: `frontend/src/views/ComponentRecorder.vue`
-- Modify: `frontend/src/views/ComponentVersions.vue`
+- Modify: `backend/domains/collection/routers/component_recorder.py`
+- Modify: `backend/domains/collection/routers/component_versions.py`
+- Modify: `frontend/src/domains/collection/views/ComponentRecorder.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
 - Test: `backend/tests/test_component_recorder_stable_handoff.py`
 - Test: `backend/tests/test_component_versions_promote_route.py`
 
@@ -315,7 +315,7 @@ Expected: 用户路径清晰，无“录完即可投产”的误导
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/routers/component_recorder.py backend/routers/component_versions.py frontend/src/views/ComponentRecorder.vue frontend/src/views/ComponentVersions.vue backend/tests/test_component_recorder_stable_handoff.py backend/tests/test_component_versions_promote_route.py
+git add backend/domains/collection/routers/component_recorder.py backend/domains/collection/routers/component_versions.py frontend/src/domains/collection/views/ComponentRecorder.vue frontend/src/domains/collection/views/ComponentVersions.vue backend/tests/test_component_recorder_stable_handoff.py backend/tests/test_component_versions_promote_route.py
 git commit -m "fix: clarify draft-to-stable collection component handoff"
 ```
 
@@ -356,3 +356,4 @@ git commit -m "test: verify collection config and recorder hardening"
 ```
 
 Plan complete and saved to `docs/superpowers/plans/2026-03-25-collection-config-recorder-hardening.md`. Ready to execute?
+

@@ -88,7 +88,7 @@ async def test_target_breakdown_list_reads_shop_name_from_core_dim_shops(dim_sho
 
 @pytest.mark.asyncio
 async def test_shop_performance_reads_shop_name_from_core_dim_shops(dim_shops_core_read_session):
-    from backend.routers.performance_management import get_shop_performance
+    from backend.domains.business.routers.performance_management import get_shop_performance
 
     dim_shops_core_read_session.add(DimPlatform(platform_code="shopee", name="Shopee", is_active=True))
     dim_shops_core_read_session.add(
@@ -123,7 +123,7 @@ async def test_shop_performance_reads_shop_name_from_core_dim_shops(dim_shops_co
 
 @pytest.mark.asyncio
 async def test_employee_assignment_list_reads_shop_name_from_core_dim_shops(dim_shops_core_read_session):
-    from backend.routers.hr_commission import list_employee_shop_assignments
+    from backend.domains.business.routers.hr_commission import list_employee_shop_assignments
 
     dim_shops_core_read_session.add(DimPlatform(platform_code="shopee", name="Shopee", is_active=True))
     dim_shops_core_read_session.add(

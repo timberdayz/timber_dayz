@@ -1,4 +1,4 @@
-# Dim Shops Runtime Alignment Investigation
+﻿# Dim Shops Runtime Alignment Investigation
 
 **Date:** 2026-03-28
 **Scope:** `DimShop` ORM ownership, backend runtime search path, and production physical table state
@@ -54,8 +54,8 @@ That combination means unqualified runtime access to `dim_shops` is structurally
 Audited active code shows `DimShop` participates in both reads and writes:
 
 - read paths:
-  - `backend/routers/hr_commission.py`
-  - `backend/routers/performance_management.py`
+  - `backend/domains/business/routers/hr_commission.py`
+  - `backend/domains/business/routers/performance_management.py`
   - `backend/routers/sales_campaign.py`
   - `backend/routers/target_management.py`
   - `backend/services/clearance_ranking_service.py`
@@ -118,3 +118,4 @@ Instead, run a dedicated alignment task:
 ## Conclusion
 
 `dim_shops` has now been removed from generic wave-2 duplicate cleanup handling and moved into a dedicated runtime/schema-alignment track, with local Phase A and Phase B archive work both implemented and rehearsed.
+

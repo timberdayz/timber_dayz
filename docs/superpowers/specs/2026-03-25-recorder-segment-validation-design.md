@@ -1,4 +1,4 @@
-# Recorder Segment Validation Design
+﻿# Recorder Segment Validation Design
 
 **Date:** 2026-03-25  
 **Last Updated:** 2026-03-25
@@ -24,9 +24,9 @@ Out of scope for the first version:
 The repository already has the main pieces of the workflow:
 
 - recorder UI:
-  - `frontend/src/views/ComponentRecorder.vue`
+  - `frontend/src/domains/collection/views/ComponentRecorder.vue`
 - recorder backend:
-  - `backend/routers/component_recorder.py`
+  - `backend/domains/collection/routers/component_recorder.py`
   - `backend/schemas/component_recorder.py`
 - recorder runtime:
   - `tools/launch_inspector_recorder.py`
@@ -92,9 +92,9 @@ If the user explicitly selects a signal, backend uses that signal.
 
 `tools/launch_inspector_recorder.py` incrementally writes the current step payload to `steps_file` whenever the recorded step set changes.
 
-`backend/routers/component_recorder.py` updates `/recorder/steps` to read the latest `steps_file` during active recording, instead of relying only on the in-memory session snapshot.
+`backend/domains/collection/routers/component_recorder.py` updates `/recorder/steps` to read the latest `steps_file` during active recording, instead of relying only on the in-memory session snapshot.
 
-`frontend/src/views/ComponentRecorder.vue` continues polling `/recorder/status` and `/recorder/steps`, so the step editor reflects live actions before recording stops.
+`frontend/src/domains/collection/views/ComponentRecorder.vue` continues polling `/recorder/status` and `/recorder/steps`, so the step editor reflects live actions before recording stops.
 
 ## Channel B: Segment Validation
 
@@ -259,3 +259,4 @@ Recommended implementation order:
 3. backend validator service and route
 4. recorder page UI integration
 5. targeted verification and regression tests
+

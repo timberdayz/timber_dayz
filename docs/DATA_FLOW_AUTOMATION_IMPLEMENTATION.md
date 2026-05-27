@@ -1,4 +1,4 @@
-# 数据流转流程自动化实现文档
+﻿# 数据流转流程自动化实现文档
 
 ## 概述
 
@@ -40,7 +40,7 @@
      - `create_target`：创建后触发事件
      - `update_target`：更新后触发事件
      - `delete_target`：删除后触发事件
-   - ✅ 在绩效管理API路由中添加事件触发（`backend/routers/performance_management.py`）
+   - ✅ 在绩效管理API路由中添加事件触发（`backend/domains/business/routers/performance_management.py`）
      - `create_performance_config`：创建后触发事件
      - `update_performance_config`：更新后触发事件
 
@@ -198,4 +198,5 @@ include=[
 - [数据分类传输规范指南](docs/DATA_CLASSIFICATION_API_GUIDE.md)
 - [C类数据查询策略指南](docs/C_CLASS_DATA_QUERY_STRATEGY_GUIDE.md)
 - [API契约标准](docs/API_CONTRACTS.md)
+
 

@@ -1,4 +1,4 @@
-# C-Class Employee Metrics Cleanup Phase Design
+﻿# C-Class Employee Metrics Cleanup Phase Design
 
 ## Goal
 
@@ -111,8 +111,8 @@ Retained English columns:
 
 Remove temporary Chinese-column fallback logic from:
 
-- `backend/routers/hr_commission.py`
-- `backend/routers/performance_management.py`
+- `backend/domains/business/routers/hr_commission.py`
+- `backend/domains/business/routers/performance_management.py`
 - `backend/services/payroll_generation_service.py`
 
 Only remove fallback after tests confirm English columns are used successfully.
@@ -246,3 +246,4 @@ Cleanup is complete when:
 - the two tables physically contain only English business columns
 - all targeted payroll, performance, commission, and income flows still pass
 - the repository no longer needs dual-schema reasoning for these tables
+

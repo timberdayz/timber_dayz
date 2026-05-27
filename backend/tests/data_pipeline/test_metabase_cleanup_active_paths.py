@@ -18,7 +18,7 @@ def test_backend_schemas_no_longer_export_metabase_contracts():
 
 
 def test_legacy_mv_router_describes_postgresql_primary_architecture():
-    text = Path("backend/routers/mv.py").read_text(encoding="utf-8", errors="replace")
+    text = Path("backend/domains/business/routers/mv.py").read_text(encoding="utf-8", errors="replace")
 
     assert "DSS/Metabase" not in text
     assert "PostgreSQL semantic/mart/api" in text

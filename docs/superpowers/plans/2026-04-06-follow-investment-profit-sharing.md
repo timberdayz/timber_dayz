@@ -1,4 +1,4 @@
-# Unified Profit Basis And Follow Investment Implementation Plan
+﻿# Unified Profit Basis And Follow Investment Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -120,8 +120,8 @@ Run: `python -m pytest backend/tests/test_follow_investment_service.py -q`
 ### Task 7: Add profit-basis routes and finance follow-investment routes
 
 **Files:**
-- Create: `backend/routers/profit_basis.py`
-- Create: `backend/routers/follow_investment.py`
+- Create: `backend/domains/business/routers/profit_basis.py`
+- Create: `backend/domains/business/routers/follow_investment.py`
 - Modify: `backend/routers/__init__.py` or the main router registration site
 - Test: `backend/tests/test_profit_basis_routes.py`
 - Test: `backend/tests/test_follow_investment_routes.py`
@@ -177,7 +177,7 @@ Run: `python -m pytest backend/tests/test_profit_basis_routes.py backend/tests/t
 
 **Files:**
 - Modify: `frontend/src/router/index.js`
-- Create or modify: `frontend/src/views/hr/MyFollowInvestmentIncome.vue`
+- Create or modify: `frontend/src/domains/business/views/hr/MyFollowInvestmentIncome.vue`
 
 - [ ] **Step 1: Add a route for current-user follow-investment income**
 
@@ -188,7 +188,7 @@ Run: `python -m pytest backend/tests/test_profit_basis_routes.py backend/tests/t
 ### Task 11: Prepare HR profit-sharing convergence
 
 **Files:**
-- Modify: `backend/routers/hr_commission.py`
+- Modify: `backend/domains/business/routers/hr_commission.py`
 - Modify: HR commission calculation services
 - Test: relevant HR commission tests
 
@@ -212,3 +212,4 @@ Run: `python -m pytest backend/tests/test_finance_schema_contract.py backend/tes
 - [ ] **Step 2: Run any available frontend verification for modified finance files**
 
 - [ ] **Step 3: Record the final evidence and residual risks in the planning files**
+

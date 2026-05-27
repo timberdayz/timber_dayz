@@ -1,4 +1,4 @@
-# Recording Gates And Export Container Alignment Implementation Plan
+﻿# Recording Gates And Export Container Alignment Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -36,14 +36,14 @@
   - Refactor recorder pre-login to use shared gate helpers
   - Block Inspector until `login_ready`
 
-- `backend/routers/component_recorder.py`
+- `backend/domains/collection/routers/component_recorder.py`
   - Make recorder start/status contract truthful about gate progress
   - Stop implying “ready to record” when only subprocess startup has happened
 
 - `backend/schemas/component_recorder.py`
   - Extend recorder contract models to carry gate/status semantics
 
-- `frontend/src/views/ComponentRecorder.vue`
+- `frontend/src/domains/collection/views/ComponentRecorder.vue`
   - Reflect recorder gate states in UI
   - Show “checking login / waiting verification / ready to record / failed before recording”
 
@@ -177,7 +177,7 @@ git commit -m "feat: add shared collection transition gates"
 
 **Files:**
 - Modify: `tools/launch_inspector_recorder.py`
-- Modify: `backend/routers/component_recorder.py`
+- Modify: `backend/domains/collection/routers/component_recorder.py`
 - Modify: `backend/schemas/component_recorder.py`
 - Test: `backend/tests/test_inspector_recorder_auto_login.py`
 - Test: `backend/tests/test_component_recorder_gate_contract.py`
@@ -260,14 +260,14 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add tools/launch_inspector_recorder.py backend/routers/component_recorder.py backend/schemas/component_recorder.py backend/tests/test_component_recorder_gate_contract.py backend/tests/test_inspector_recorder_auto_login.py
+git add tools/launch_inspector_recorder.py backend/domains/collection/routers/component_recorder.py backend/schemas/component_recorder.py backend/tests/test_component_recorder_gate_contract.py backend/tests/test_inspector_recorder_auto_login.py
 git commit -m "feat: make recorder login gate explicit"
 ```
 
 ### Task 3: Recorder UI State Alignment
 
 **Files:**
-- Modify: `frontend/src/views/ComponentRecorder.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentRecorder.vue`
 
 - [ ] **Step 1: Add a failing UI checklist in the plan and verify current UI assumptions**
 
@@ -309,7 +309,7 @@ Expected:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/src/views/ComponentRecorder.vue
+git add frontend/src/domains/collection/views/ComponentRecorder.vue
 git commit -m "feat: align recorder ui with gate states"
 ```
 
@@ -518,4 +518,5 @@ git commit -m "feat: unify recording, tester, and runtime transition gates"
 - Favor small helper extraction over large rewrites.
 - When adding recorder state files/status propagation, keep the payload minimal and truthful.
 - Do not claim export success from button clicks, toasts, or modal disappearance alone.
+
 

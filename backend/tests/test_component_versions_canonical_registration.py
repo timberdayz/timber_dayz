@@ -60,15 +60,13 @@ async def test_batch_register_only_registers_canonical_components(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.is_active_component_name",
+        "backend.domains.collection.routers.component_versions.is_active_component_name",
         lambda name: name in {"shopee/login", "shopee/products_export"},
     )
     project_root = tmp_path
-    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
-    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
-    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
     monkeypatch.setattr(
-        "backend.routers.component_versions.__file__", str(fake_router_file)
+        "backend.domains.collection.routers.component_versions.get_project_root",
+        lambda: str(project_root),
     )
 
     shopee_dir = project_root / "modules" / "platforms" / "shopee" / "components"
@@ -106,14 +104,14 @@ async def test_batch_register_uses_shop_switch_as_tiktok_canonical_entry(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.is_active_component_name",
+        "backend.domains.collection.routers.component_versions.is_active_component_name",
         lambda name: name in {"tiktok/login", "tiktok/shop_switch"},
     )
     project_root = tmp_path
-    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
-    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
-    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
-    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.component_versions.get_project_root",
+        lambda: str(project_root),
+    )
 
     tiktok_dir = project_root / "modules" / "platforms" / "tiktok" / "components"
     _write_component(tiktok_dir / "login.py", "TiktokLogin", "login")
@@ -144,7 +142,7 @@ async def test_batch_register_discovers_tiktok_domain_export_entries(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.is_active_component_name",
+        "backend.domains.collection.routers.component_versions.is_active_component_name",
         lambda name: name
         in {
             "tiktok/analytics_export",
@@ -152,10 +150,10 @@ async def test_batch_register_discovers_tiktok_domain_export_entries(
         },
     )
     project_root = tmp_path
-    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
-    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
-    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
-    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.component_versions.get_project_root",
+        lambda: str(project_root),
+    )
 
     tiktok_dir = project_root / "modules" / "platforms" / "tiktok" / "components"
     _write_component(tiktok_dir / "analytics_export.py", "TiktokAnalyticsExport", "export")
@@ -188,7 +186,7 @@ async def test_list_versions_returns_all_platform_components(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.list_active_component_names",
+        "backend.domains.collection.routers.component_versions.list_active_component_names",
         lambda: ["shopee/login", "shopee/products_export"],
     )
     now = datetime.now(timezone.utc)
@@ -258,7 +256,7 @@ async def test_list_versions_collapses_multiple_versions_to_single_working_row(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.list_active_component_names",
+        "backend.domains.collection.routers.component_versions.list_active_component_names",
         lambda: ["shopee/login"],
     )
     older = datetime(2026, 3, 20, tzinfo=timezone.utc)
@@ -309,7 +307,7 @@ async def test_list_versions_component_type_export_matches_domain_exports(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.list_active_component_names",
+        "backend.domains.collection.routers.component_versions.list_active_component_names",
         lambda: ["shopee/products_export", "shopee/login"],
     )
     now = datetime.now(timezone.utc)
@@ -358,7 +356,7 @@ async def test_list_versions_platform_only_does_not_apply_canonical_whitelist(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.list_active_component_names",
+        "backend.domains.collection.routers.component_versions.list_active_component_names",
         lambda: ["miaoshou/login"],
     )
     now = datetime.now(timezone.utc)
@@ -452,7 +450,7 @@ async def test_list_versions_defaults_to_active_manifest_components_only(
     await component_version_session.commit()
 
     monkeypatch.setattr(
-        "backend.routers.component_versions.list_active_component_names",
+        "backend.domains.collection.routers.component_versions.list_active_component_names",
         lambda: ["miaoshou/login"],
     )
 
@@ -476,14 +474,14 @@ async def test_batch_register_includes_split_miaoshou_order_exports_when_present
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.is_active_component_name",
+        "backend.domains.collection.routers.component_versions.is_active_component_name",
         lambda name: name in {"miaoshou/login", "miaoshou/orders_shopee_export", "miaoshou/orders_tiktok_export"},
     )
     project_root = tmp_path
-    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
-    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
-    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
-    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.component_versions.get_project_root",
+        lambda: str(project_root),
+    )
 
     miaoshou_dir = project_root / "modules" / "platforms" / "miaoshou" / "components"
     _write_component(miaoshou_dir / "login.py", "MiaoshouLogin", "login")
@@ -516,14 +514,14 @@ async def test_batch_register_accepts_any_domain_export_filename_by_rule(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.is_active_component_name",
+        "backend.domains.collection.routers.component_versions.is_active_component_name",
         lambda name: name == "shopee/services_agent_export",
     )
     project_root = tmp_path
-    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
-    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
-    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
-    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.component_versions.get_project_root",
+        lambda: str(project_root),
+    )
 
     shopee_dir = project_root / "modules" / "platforms" / "shopee" / "components"
     _write_component(shopee_dir / "services_agent_export.py", "ShopeeServicesAgentExport", "export")
@@ -550,14 +548,14 @@ async def test_batch_register_skips_legacy_generic_export_file(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
-        "backend.routers.component_versions.is_active_component_name",
+        "backend.domains.collection.routers.component_versions.is_active_component_name",
         lambda name: name == "tiktok/orders_export",
     )
     project_root = tmp_path
-    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
-    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
-    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
-    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.component_versions.get_project_root",
+        lambda: str(project_root),
+    )
 
     tiktok_dir = project_root / "modules" / "platforms" / "tiktok" / "components"
     _write_component(tiktok_dir / "export.py", "TiktokExport", "export")
@@ -584,12 +582,12 @@ async def test_batch_register_skips_non_active_canonical_files_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ):
     project_root = tmp_path
-    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
-    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
-    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
-    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
     monkeypatch.setattr(
-        "backend.routers.component_versions.is_active_component_name",
+        "backend.domains.collection.routers.component_versions.get_project_root",
+        lambda: str(project_root),
+    )
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.component_versions.is_active_component_name",
         lambda name: name == "miaoshou/login",
     )
 

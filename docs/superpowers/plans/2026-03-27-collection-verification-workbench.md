@@ -1,4 +1,4 @@
-# Collection Verification Workbench Implementation Plan
+﻿# Collection Verification Workbench Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -15,7 +15,7 @@
 ### Task 1: Add collection verification item backend contract
 
 **Files:**
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/schemas/collection.py`
 - Test: `backend/tests/test_collection_multi_account_verification_contract.py`
 - Test: `backend/tests/test_collection_verification_flow.py`
@@ -52,7 +52,7 @@ Expected: PASS
 ### Task 2: Add dedicated verification-items aggregation endpoint
 
 **Files:**
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/schemas/collection.py`
 - Test: `backend/tests/test_collection_multi_account_verification_contract.py`
 
@@ -202,3 +202,4 @@ Log whether the collection-task workbench passes:
 - Do not create a separate verification center page in this plan.
 - Do not introduce OCR or screenshot auto-cropping.
 - Keep the workbench inside `CollectionTasks.vue` for now.
+

@@ -1,4 +1,4 @@
-# Collection Execution Mode And Verification Preview Implementation Plan
+﻿# Collection Execution Mode And Verification Preview Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -24,7 +24,7 @@
 
 **Files:**
 - Modify: `modules/apps/collection_center/browser_config_helper.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `modules/apps/collection_center/executor_v2.py` if parameter plumbing needs adjustment
 
 - [ ] **Step 1: Introduce an execution-mode-aware launch helper that preserves debug override only for explicit headed/manual flows**
@@ -57,3 +57,4 @@
 - [ ] **Step 1: Run the full targeted backend pytest suite for touched execution-mode files**
 - [ ] **Step 2: Run the relevant frontend node:test scripts for shared verification dialog usage**
 - [ ] **Step 3: Inspect `git diff --stat` and confirm the change set matches the approved scope**
+

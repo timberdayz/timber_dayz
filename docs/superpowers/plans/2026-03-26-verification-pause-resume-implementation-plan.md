@@ -1,4 +1,4 @@
-# Verification Pause Resume Implementation Plan
+﻿# Verification Pause Resume Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -61,8 +61,8 @@ git commit -m "feat: add shared verification pause resume contract"
 
 **Files:**
 - Modify: `tools/launch_inspector_recorder.py`
-- Modify: `backend/routers/component_recorder.py`
-- Modify: `frontend/src/views/ComponentRecorder.vue`
+- Modify: `backend/domains/collection/routers/component_recorder.py`
+- Modify: `frontend/src/domains/collection/views/ComponentRecorder.vue`
 - Create: `frontend/src/components/verification/VerificationResumeDialog.vue`
 - Test: `backend/tests/test_component_recorder_gate_contract.py`
 
@@ -101,7 +101,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/launch_inspector_recorder.py backend/routers/component_recorder.py frontend/src/views/ComponentRecorder.vue frontend/src/components/verification/VerificationResumeDialog.vue backend/tests/test_component_recorder_gate_contract.py
+git add tools/launch_inspector_recorder.py backend/domains/collection/routers/component_recorder.py frontend/src/domains/collection/views/ComponentRecorder.vue frontend/src/components/verification/VerificationResumeDialog.vue backend/tests/test_component_recorder_gate_contract.py
 git commit -m "feat: unify recorder verification pause resume flow"
 ```
 
@@ -109,7 +109,7 @@ git commit -m "feat: unify recorder verification pause resume flow"
 
 **Files:**
 - Modify: `tools/test_component.py`
-- Modify: `backend/routers/component_versions.py`
+- Modify: `backend/domains/collection/routers/component_versions.py`
 - Test: `backend/tests/test_component_tester_gate_contract.py`
 - Test: `backend/tests/test_component_tester_verification_flow.py`
 
@@ -145,7 +145,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/test_component.py backend/routers/component_versions.py backend/tests/test_component_tester_gate_contract.py backend/tests/test_component_tester_verification_flow.py
+git add tools/test_component.py backend/domains/collection/routers/component_versions.py backend/tests/test_component_tester_gate_contract.py backend/tests/test_component_tester_verification_flow.py
 git commit -m "feat: unify component test verification pause resume flow"
 ```
 
@@ -153,7 +153,7 @@ git commit -m "feat: unify component test verification pause resume flow"
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: task-detail/task-center frontend views
 - Test: `backend/tests/test_collection_verification_flow.py`
 
@@ -189,7 +189,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add modules/apps/collection_center/executor_v2.py backend/routers/collection_tasks.py backend/tests/test_collection_verification_flow.py
+git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/tests/test_collection_verification_flow.py
 git commit -m "feat: unify collection task verification pause resume flow"
 ```
 
@@ -238,3 +238,4 @@ Expected: PASS
 git add backend/tests/test_collection_multi_account_verification_contract.py ...
 git commit -m "feat: surface multi-account verification items in task ui"
 ```
+

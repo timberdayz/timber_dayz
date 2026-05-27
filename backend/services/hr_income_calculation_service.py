@@ -11,6 +11,7 @@ Sources:
 
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -24,6 +25,7 @@ from modules.core.db import (
     EmployeePerformanceAdjustment,
     EmployeeShopAssignment,
     PerformanceScore,
+    SalaryStructure,
     ShopCommissionConfig,
     ShopProfitBasis,
 )
@@ -66,6 +68,21 @@ class HRIncomeCalculationService:
     @staticmethod
     def _shop_key(platform_code: Any, shop_id: Any) -> str:
         return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
+
+    @staticmethod
+    def _year_month_last_day(year_month: str):
+        period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+        return period_start.replace(day=monthrange(period_start.year, period_start.month)[1])
+
+    @staticmethod
+    def _coerce_date(value: Any):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        if isinstance(value, datetime):
+            return value.date()
+        return value
 
     @staticmethod
     def _score_details_field(details: Dict[str, Any] | None, *keys: str) -> Any:
@@ -269,7 +286,57 @@ class HRIncomeCalculationService:
             adjustment_by_employee[employee_code] = adjustment_by_employee.get(employee_code, 0.0) + delta
         return adjustment_by_employee
 
-    async def calculate_month(self, year_month: str) -> Dict[str, Any]:
+    async def _load_default_commission_ratio_by_employee(
+        self,
+        year_month: str,
+        assignments: list[Any],
+    ) -> Dict[str, float]:
+        employee_codes = sorted(
+            {
+                (row.employee_code or "").strip()
+                for row in assignments
+                if (row.employee_code or "").strip()
+            }
+        )
+        if not employee_codes:
+            return {}
+
+        effective_cutoff = self._year_month_last_day(year_month)
+        rows = (
+            await self.db.execute(
+                select(SalaryStructure)
+                .where(
+                    SalaryStructure.status == "active",
+                    SalaryStructure.employee_code.in_(employee_codes),
+                )
+                .order_by(
+                    SalaryStructure.employee_code,
+                    SalaryStructure.effective_date.desc(),
+                    SalaryStructure.id.desc(),
+                )
+            )
+        ).scalars().all()
+
+        ratio_by_employee: Dict[str, float] = {}
+        fallback_by_employee: Dict[str, float] = {}
+        for row in rows:
+            employee_code = (getattr(row, "employee_code", None) or "").strip()
+            if not employee_code:
+                continue
+            ratio = self._to_float(getattr(row, "commission_ratio", None), 0.0)
+            if employee_code not in fallback_by_employee:
+                fallback_by_employee[employee_code] = ratio
+            if employee_code in ratio_by_employee:
+                continue
+            effective_date = self._coerce_date(getattr(row, "effective_date", None))
+            if effective_date is not None and effective_date <= effective_cutoff:
+                ratio_by_employee[employee_code] = ratio
+
+        for employee_code, ratio in fallback_by_employee.items():
+            ratio_by_employee.setdefault(employee_code, ratio)
+        return ratio_by_employee
+
+    async def calculate_month(self, year_month: str, commit: bool = True) -> Dict[str, Any]:
         try:
             datetime.strptime(year_month, "%Y-%m")
         except ValueError as exc:
@@ -316,6 +383,9 @@ class HRIncomeCalculationService:
             year_month, assignments
         )
         manual_adjustment_by_employee = await self._load_manual_adjustment_by_employee(
+            year_month, assignments
+        )
+        default_commission_ratio_by_employee = await self._load_default_commission_ratio_by_employee(
             year_month, assignments
         )
 
@@ -369,6 +439,11 @@ class HRIncomeCalculationService:
             # Commission aggregation: still based on commission ratio.
             ratio = self._to_float(row.commission_ratio, 0.0)
             if ratio <= 0:
+                ratio = self._to_float(
+                    default_commission_ratio_by_employee.get(employee_code),
+                    0.0,
+                )
+            if ratio <= 0:
                 continue
             comm_rec = commission_agg.setdefault(
                 employee_code,
@@ -401,6 +476,11 @@ class HRIncomeCalculationService:
                 if (row.employee_code or "").strip() != employee_code:
                     continue
                 ratio = self._to_float(row.commission_ratio, 0.0)
+                if ratio <= 0:
+                    ratio = self._to_float(
+                        default_commission_ratio_by_employee.get(employee_code),
+                        0.0,
+                    )
                 if ratio <= 0:
                     continue
                 shop_key = self._shop_key(row.platform_code, row.shop_id)
@@ -492,7 +572,8 @@ class HRIncomeCalculationService:
                 )
             performance_upserts += 1
 
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return {
             "year_month": year_month,
             "employee_count": len(performance_agg),

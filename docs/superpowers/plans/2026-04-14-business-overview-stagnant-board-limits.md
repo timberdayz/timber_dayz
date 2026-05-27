@@ -1,4 +1,4 @@
-# Business Overview Stagnant Board Limits Implementation Plan
+﻿# Business Overview Stagnant Board Limits Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -38,7 +38,7 @@ Expected: FAIL because the route currently only forwards `days`.
 
 **Files:**
 - Modify: `backend/services/postgresql_dashboard_service.py`
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 
 - [ ] **Step 1: Implement minimal service change**
 
@@ -96,3 +96,4 @@ Run:
 - [ ] **Step 2: Record results**
 
 Update planning files with the final status, findings, and exact verification output.
+

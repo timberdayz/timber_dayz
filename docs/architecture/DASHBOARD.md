@@ -20,7 +20,7 @@ b_class raw -> semantic -> mart -> api -> backend router -> frontend
 - `sql/semantic/`: standardization and normalization
 - `sql/mart/`: reusable aggregates
 - `sql/api_modules/`: page-module query contracts
-- `backend/routers/dashboard_api_postgresql.py`: backend route entrypoint
+- `backend/domains/business/routers/dashboard_api_postgresql.py`: backend route entrypoint
 - `frontend/src/api/`: frontend API access
 
 ## Rules

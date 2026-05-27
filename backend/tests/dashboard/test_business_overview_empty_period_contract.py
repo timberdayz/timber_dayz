@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from starlette.requests import Request
 
-from backend.routers.dashboard_api_postgresql import (
+from backend.domains.business.routers.dashboard_api_postgresql import (
     get_business_overview_comparison_postgresql,
     get_business_overview_kpi_postgresql,
     get_business_overview_operational_metrics_postgresql,
@@ -161,4 +161,3 @@ def test_bo_list_modules_empty_period_returns_empty_list(monkeypatch, endpoint_f
     assert body["meta"]["is_empty_period"] is True
     assert body["meta"]["data_status"] == "empty_period"
     assert body["data"] == []
-

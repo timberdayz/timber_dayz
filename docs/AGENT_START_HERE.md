@@ -1,4 +1,4 @@
-# Agent快速上手指南
+﻿# Agent快速上手指南
 
 ## 当前主架构
 
@@ -15,7 +15,7 @@
 - 汇总层在 `sql/mart/`。
 - 页面模块层在 `sql/api_modules/`。
 - Dashboard 主服务入口是 `backend/services/postgresql_dashboard_service.py`。
-- Dashboard 新路由入口是 `backend/routers/dashboard_api_postgresql.py`。
+- Dashboard 新路由入口是 `backend/domains/business/routers/dashboard_api_postgresql.py`。
 - 旧 Dashboard 兼容路由仅作为回退链路。
 
 ## 开发 Dashboard 时的规则
@@ -70,3 +70,4 @@ python scripts/check_postgresql_dashboard_ops.py
 - 新功能走 PostgreSQL。
 - 不再依赖 Metabase 运行时。
 - 先看 `semantic / mart / api`，再看 legacy。
+

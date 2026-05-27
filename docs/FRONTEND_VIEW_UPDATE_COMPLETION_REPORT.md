@@ -1,4 +1,4 @@
-# 前端视图响应处理逻辑更新完成报告
+﻿# 前端视图响应处理逻辑更新完成报告
 
 ## 📅 完成时间
 2025-11-21
@@ -73,7 +73,7 @@
 - ✅ Linter检查通过，无语法错误
 - ✅ 分页响应处理逻辑已更新
 
-### 3. `frontend/src/views/hr/PerformanceManagement.vue` ✅
+### 3. `frontend/src/domains/business/views/hr/PerformanceManagement.vue` ✅
 
 **完成内容**：
 - ✅ 移除了所有`response.success`检查（4处）
@@ -177,4 +177,5 @@ api.interceptors.response.use(
 所有前端视图的响应处理逻辑已成功更新完成，代码已通过语法检查，页面已成功加载。等待后端服务启动后，即可进行完整的端到端测试。
 
 **完成率**: 100% ✅
+
 

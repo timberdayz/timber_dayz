@@ -13,6 +13,7 @@ from modules.core.db import (
     EmployeeCommission,
     EmployeePerformance,
     EmployeePerformanceAdjustment,
+    SalaryStructure,
     EmployeeShopAssignment,
     PerformanceScore,
     ShopCommissionConfig,
@@ -273,6 +274,75 @@ def test_calculate_month_updates_existing_records_with_english_orm_path():
     assert all("insert into c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
     assert all("update c_class.employee_performance" not in sql.lower() for sql in executed_sql)
     assert all("insert into c_class.employee_performance" not in sql.lower() for sql in executed_sql)
+
+
+def test_calculate_month_falls_back_to_salary_structure_commission_ratio_when_assignment_ratio_missing():
+    db = AsyncMock()
+    added = []
+
+    assignment = SimpleNamespace(
+        employee_code="E003",
+        platform_code="Shopee",
+        shop_id="S3",
+        commission_ratio=None,
+        status="active",
+        year_month="2026-03",
+    )
+    cfg = SimpleNamespace(
+        year_month="2026-03",
+        platform_code="Shopee",
+        shop_id="S3",
+        allocatable_profit_rate=1.0,
+    )
+    salary = SimpleNamespace(
+        employee_code="E003",
+        commission_ratio=0.15,
+        status="active",
+        effective_date="2026-03-01",
+    )
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=[assignment])
+            if entity is ShopCommissionConfig:
+                return _MockResult(rows=[cfg])
+            if entity is SalaryStructure:
+                return _MockResult(rows=[salary])
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=None)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+            return _MockResult(rows=[])
+        return _MockResult(
+            mapping_rows=[
+                {
+                    "platform_code": "Shopee",
+                    "shop_id": "S3",
+                    "gmv": 2000,
+                    "profit": 500,
+                    "achievement_rate": 100,
+                }
+            ]
+        )
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+
+    service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|s3": {"profit_basis_amount": 1000.0}}
+    )
+
+    result = asyncio.run(service.calculate_month("2026-03"))
+
+    assert result["commission_upserts"] == 1
+    commission = next(x for x in added if isinstance(x, EmployeeCommission))
+    assert commission.sales_amount == pytest.approx(300.0)
+    assert commission.commission_amount == pytest.approx(150.0)
+    assert commission.commission_rate == pytest.approx(0.5)
 
 
 def test_load_profit_basis_by_shop_prefers_shop_profit_basis_snapshot(monkeypatch):

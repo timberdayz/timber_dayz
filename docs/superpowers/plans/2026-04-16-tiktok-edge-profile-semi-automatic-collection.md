@@ -1,4 +1,4 @@
-# TikTok Edge Profile Semi-Automatic Collection Implementation Plan
+﻿# TikTok Edge Profile Semi-Automatic Collection Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -22,7 +22,7 @@
 - `modules/apps/collection_center/runtime_session.py`
 - `modules/apps/collection_center/executor_v2.py`
 - `modules/apps/collection_center/browser_config_helper.py`
-- `backend/routers/collection_tasks.py`
+- `backend/domains/collection/routers/collection_tasks.py`
 - `backend/tests/test_browser_config_helper.py`
 - `backend/tests/test_collection_queue_runner.py`
 - `backend/tests/test_component_tester_runtime_config.py`
@@ -233,7 +233,7 @@ git commit -m "feat: open tiktok runtime bundles from attached edge"
 
 **Files:**
 - Modify: `modules/apps/collection_center/runtime_session.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Test: `backend/tests/test_tiktok_runtime_strategy.py`
 - Test: `backend/tests/test_collection_queue_runner.py`
 
@@ -268,7 +268,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add modules/apps/collection_center/runtime_session.py backend/routers/collection_tasks.py backend/tests/test_tiktok_runtime_strategy.py backend/tests/test_collection_queue_runner.py
+git add modules/apps/collection_center/runtime_session.py backend/domains/collection/routers/collection_tasks.py backend/tests/test_tiktok_runtime_strategy.py backend/tests/test_collection_queue_runner.py
 git commit -m "feat: resolve dedicated tiktok edge profile settings"
 ```
 
@@ -276,7 +276,7 @@ git commit -m "feat: resolve dedicated tiktok edge profile settings"
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Test: `backend/tests/test_tiktok_pause_resume_runtime.py`
 
 - [ ] **Step 1: Write the failing pause-resume tests**
@@ -318,7 +318,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add modules/apps/collection_center/executor_v2.py backend/routers/collection_tasks.py backend/tests/test_tiktok_pause_resume_runtime.py
+git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/tests/test_tiktok_pause_resume_runtime.py
 git commit -m "feat: pause tiktok tasks for manual verification recovery"
 ```
 
@@ -326,7 +326,7 @@ git commit -m "feat: pause tiktok tasks for manual verification recovery"
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Test: `backend/tests/test_tiktok_pause_resume_runtime.py`
 
 - [ ] **Step 1: Extend failing tests for same-session continuation**
@@ -357,7 +357,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add modules/apps/collection_center/executor_v2.py backend/routers/collection_tasks.py backend/tests/test_tiktok_pause_resume_runtime.py
+git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/tests/test_tiktok_pause_resume_runtime.py
 git commit -m "feat: resume paused tiktok edge-profile tasks"
 ```
 
@@ -511,3 +511,4 @@ git commit -m "feat: add tiktok edge-profile semi-automatic formal collection"
 - 恢复文档中的全局基线描述，仅保留 TikTok 设计 spec 作为历史记录
 
 Plan complete and saved to `docs/superpowers/plans/2026-04-16-tiktok-edge-profile-semi-automatic-collection.md`. Ready to execute?
+

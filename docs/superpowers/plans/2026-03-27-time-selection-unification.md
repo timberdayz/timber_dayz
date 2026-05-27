@@ -1,4 +1,4 @@
-# Time Selection Unification Implementation Plan
+﻿# Time Selection Unification Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -62,7 +62,7 @@ Expected:
 ### Task 3: Update runtime config construction for component tests
 
 **Files:**
-- Modify: `backend/routers/component_versions.py`
+- Modify: `backend/domains/collection/routers/component_versions.py`
 - Modify: `tools/test_component.py`
 - Modify: `backend/tests/test_component_test_runtime_config.py`
 - Modify: `backend/tests/test_component_tester_runtime_config.py`
@@ -89,7 +89,7 @@ Expected:
 
 **Files:**
 - Modify: `backend/routers/collection_config.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/schemas/collection.py`
 - Modify: `backend/services/collection_contracts.py`
 - Create or modify tests near collection contracts / tasks if needed
@@ -189,3 +189,4 @@ pytest backend/tests/test_component_loader_dataclass_runtime.py backend/tests/te
 
 Expected:
 - 0 failures
+

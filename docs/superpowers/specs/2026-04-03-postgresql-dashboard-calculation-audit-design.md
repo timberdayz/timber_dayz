@@ -1,4 +1,4 @@
-# PostgreSQL Dashboard Calculation Audit Playbook
+﻿# PostgreSQL Dashboard Calculation Audit Playbook
 
 ## Scope
 
@@ -20,7 +20,7 @@ Covered runtime routes and modules:
 - `annual_summary_target_completion`
 - annual cost aggregate service: `backend/services/annual_cost_aggregate.py`
 
-Note: repository discussions sometimes describe this scope as "11 modules", but the current PostgreSQL router surface in `backend/routers/dashboard_api_postgresql.py` exposes the 12 dashboard routes listed above. This playbook audits the concrete code surface, not the shorthand count.
+Note: repository discussions sometimes describe this scope as "11 modules", but the current PostgreSQL router surface in `backend/domains/business/routers/dashboard_api_postgresql.py` exposes the 12 dashboard routes listed above. This playbook audits the concrete code surface, not the shorthand count.
 
 ## Goal
 
@@ -38,12 +38,12 @@ The active runtime chain is:
 
 Key code anchors:
 
-- Raw ingest: `backend/routers/field_mapping_ingest.py`, `backend/services/raw_data_importer.py`
+- Raw ingest: `backend/domains/data_platform/routers/field_mapping_ingest.py`, `backend/services/raw_data_importer.py`
 - Semantic SQL: `sql/semantic/*.sql`
 - Mart SQL: `sql/mart/*.sql`
 - API module SQL: `sql/api_modules/*.sql`
 - Service layer: `backend/services/postgresql_dashboard_service.py`
-- Router layer: `backend/routers/dashboard_api_postgresql.py`
+- Router layer: `backend/domains/business/routers/dashboard_api_postgresql.py`
 - Frontend API client: `frontend/src/api/dashboard.js`
 
 ## Core Findings Before Audit
@@ -618,3 +618,4 @@ The first live audit should focus on one month where:
 - both dashboard and annual-cost views are actively used
 
 That sample will tell us quickly whether the minus-sign risk is theoretical or already affecting production numbers.
+

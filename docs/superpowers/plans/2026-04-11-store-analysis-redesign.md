@@ -1,4 +1,4 @@
-# Store Analysis Redesign Implementation Plan
+﻿# Store Analysis Redesign Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -215,7 +215,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/tests/test_store_analysis_dashboard_routes.py backend/services/postgresql_dashboard_service.py backend/routers/dashboard_api_postgresql.py
+git add backend/tests/test_store_analysis_dashboard_routes.py backend/services/postgresql_dashboard_service.py backend/domains/business/routers/dashboard_api_postgresql.py
 git commit -m "feat: add store analysis dashboard routes"
 ```
 
@@ -352,3 +352,4 @@ git commit -m "test: verify store analysis redesign flow"
 3. Task 3: add backend routes and service methods
 4. Task 4: rebuild frontend store analysis page
 5. Task 5: verify contracts and guardrails
+

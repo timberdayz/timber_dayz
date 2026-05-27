@@ -1,4 +1,4 @@
-# Collection Coverage Audit And Batch Remediation Design
+﻿# Collection Coverage Audit And Batch Remediation Design
 
 **Date:** 2026-04-05
 
@@ -247,7 +247,7 @@ Response fields:
 
 Add a new view, recommended path:
 
-- `frontend/src/views/collection/CollectionCoverageAudit.vue`
+- `frontend/src/domains/collection/views/collection/CollectionCoverageAudit.vue`
 
 This keeps the current config page focused and avoids overloading one screen with both editing and auditing concerns.
 
@@ -323,3 +323,4 @@ After this phase is stable, the next logical phase is:
 4. stronger remediation presets by platform and business type
 
 Those should build on the audit/remediation flow, not replace it.
+

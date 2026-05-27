@@ -349,7 +349,7 @@ def upgrade() -> None:
         conn.execute(text("""
             CREATE TABLE a_class.salary_structures (
                 id BIGSERIAL PRIMARY KEY,
-                employee_code VARCHAR(64) NOT NULL UNIQUE,
+                employee_code VARCHAR(64) NOT NULL,
                 base_salary NUMERIC(15, 2) NOT NULL DEFAULT 0.0,
                 position_salary NUMERIC(15, 2) NOT NULL DEFAULT 0.0,
                 housing_allowance NUMERIC(15, 2) NOT NULL DEFAULT 0.0,
@@ -367,6 +367,7 @@ def upgrade() -> None:
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """))
+        conn.execute(text("ALTER TABLE a_class.salary_structures ADD CONSTRAINT uq_salary_structures_employee_effective_date UNIQUE (employee_code, effective_date)"))
         conn.execute(text("CREATE INDEX ix_salary_structures_a_employee ON a_class.salary_structures(employee_code)"))
         conn.execute(text("CREATE INDEX ix_salary_structures_a_status ON a_class.salary_structures(status)"))
         safe_print("  - salary_structures table created")

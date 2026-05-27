@@ -24,7 +24,7 @@ def test_dashboard_api_index_uses_platform_not_platforms_for_business_overview_r
 
 
 def test_dashboard_router_supports_platform_alias_for_shop_and_traffic_routes():
-    text = Path("backend/routers/dashboard_api_postgresql.py").read_text(
+    text = Path("backend/domains/business/routers/dashboard_api_postgresql.py").read_text(
         encoding="utf-8",
         errors="replace",
     )

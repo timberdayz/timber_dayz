@@ -1,4 +1,4 @@
-# Approval Center Unified Implementation Plan
+﻿# Approval Center Unified Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -37,13 +37,13 @@
   - Register approval-center router.
 - Modify: `backend/services/employee_task_service.py`
   - Add approval-task projection creation / closure helpers if needed.
-- Modify: `backend/routers/users_admin.py`
+- Modify: `backend/domains/platform/routers/users_admin.py`
   - Route user registration approval through approval-center lifecycle.
-- Modify: `backend/routers/hr_attendance.py`
+- Modify: `backend/domains/business/routers/hr_attendance.py`
   - Align leave and overtime approval flows with approval-center lifecycle.
-- Modify: `backend/routers/monthly_profit_settlement.py`
+- Modify: `backend/domains/business/routers/monthly_profit_settlement.py`
   - Align settlement approval state with approval-center instance state.
-- Modify: `backend/routers/follow_investment.py`
+- Modify: `backend/domains/business/routers/follow_investment.py`
   - Align follow-investment approval state with approval-center instance state.
 
 ### New frontend files
@@ -250,10 +250,10 @@ git commit -m "feat: add approval center api"
 ## Task 4: Integrate Existing Approval-Capable Flows
 
 **Files:**
-- Modify: `backend/routers/users_admin.py`
-- Modify: `backend/routers/hr_attendance.py`
-- Modify: `backend/routers/monthly_profit_settlement.py`
-- Modify: `backend/routers/follow_investment.py`
+- Modify: `backend/domains/platform/routers/users_admin.py`
+- Modify: `backend/domains/business/routers/hr_attendance.py`
+- Modify: `backend/domains/business/routers/monthly_profit_settlement.py`
+- Modify: `backend/domains/business/routers/follow_investment.py`
 - Modify: `backend/tests/test_users_admin_routes.py`
 - Modify: `backend/tests/test_monthly_profit_settlement_routes.py`
 - Modify: `backend/tests/test_follow_investment_routes.py`
@@ -335,7 +335,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit flow integrations**
 
 ```bash
-git add backend/routers/users_admin.py backend/routers/hr_attendance.py backend/routers/monthly_profit_settlement.py backend/routers/follow_investment.py backend/tests/test_users_admin_routes.py backend/tests/test_monthly_profit_settlement_routes.py backend/tests/test_follow_investment_routes.py
+git add backend/domains/platform/routers/users_admin.py backend/domains/business/routers/hr_attendance.py backend/domains/business/routers/monthly_profit_settlement.py backend/domains/business/routers/follow_investment.py backend/tests/test_users_admin_routes.py backend/tests/test_monthly_profit_settlement_routes.py backend/tests/test_follow_investment_routes.py
 git commit -m "feat: route existing approvals through approval center"
 ```
 
@@ -457,3 +457,4 @@ git commit -m "docs: update approval center guidance"
 ```
 
 Plan complete and saved to `docs/superpowers/plans/2026-04-13-approval-center-unified-implementation.md`. Ready to execute?
+

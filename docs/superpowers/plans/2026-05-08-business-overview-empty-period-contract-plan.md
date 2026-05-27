@@ -1,4 +1,4 @@
-# Business Overview Empty Period Contract Implementation Plan
+﻿# Business Overview Empty Period Contract Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -221,7 +221,8 @@ Run:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/services/postgresql_dashboard_service.py backend/routers/dashboard_api_postgresql.py backend/tests/dashboard/test_business_overview_empty_period_contract.py
+git add backend/services/postgresql_dashboard_service.py backend/domains/business/routers/dashboard_api_postgresql.py backend/tests/dashboard/test_business_overview_empty_period_contract.py
 git commit -m "feat(dashboard): business overview empty period contract"
 ```
+
 

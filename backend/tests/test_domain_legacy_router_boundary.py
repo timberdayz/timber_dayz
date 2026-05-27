@@ -6,40 +6,16 @@ from pathlib import Path
 
 
 ALLOWED_LEGACY_ROUTER_IMPORTS: dict[str, list[str]] = {
-    'backend/domains/collection/routers/collection_tasks.py': [
-        'import backend.routers.collection_tasks as legacy_module',
-    ],
-    'backend/domains/collection/routers/component_recorder.py': [
-        'import backend.routers.component_recorder as legacy_module',
-    ],
-    'backend/domains/collection/routers/component_versions.py': [
-        'import backend.routers.component_versions as legacy_module',
-    ],
-    'backend/domains/collection/routers/main_accounts.py': [
-        'import backend.routers.main_accounts as legacy_module',
-    ],
-    'backend/domains/collection/routers/shop_account_aliases.py': [
-        'import backend.routers.shop_account_aliases as legacy_module',
-    ],
-    'backend/domains/data_platform/routers/field_mapping_files.py': [
-        'import backend.routers.field_mapping_files as legacy_module',
-    ],
-    'backend/domains/data_platform/routers/field_mapping_ingest.py': [
-        'import backend.routers.field_mapping_ingest as legacy_module',
-    ],
-    'backend/domains/data_platform/routers/field_mapping_status.py': [
-        'import backend.routers.field_mapping_status as legacy_module',
-    ],
     'backend/domains/platform/compat/notifications.py': [
         'from backend.routers.notifications import create_notification as create_notification_func',
         'from backend.routers.notifications import notify_account_locked as notify_account_locked_func',
         'from backend.routers.notifications import notify_account_unlocked as notify_account_unlocked_func',
+        'from backend.routers.notifications import notify_password_reset as notify_password_reset_func',
+        'from backend.routers.notifications import notify_user_approved as notify_user_approved_func',
         'from backend.routers.notifications import notify_user_registered as notify_user_registered_func',
+        'from backend.routers.notifications import notify_user_rejected as notify_user_rejected_func',
+        'from backend.routers.notifications import notify_user_suspended as notify_user_suspended_func',
         'from backend.routers.notifications import revoke_all_user_sessions as revoke_all_user_sessions_func',
-    ],
-    'backend/domains/platform/routers/users.py': [
-        'import backend.routers.users_admin as legacy_admin_module',
-        'import backend.routers.users_me as legacy_me_module',
     ],
 }
 
@@ -131,6 +107,54 @@ def test_business_domain_runtime_imports_do_not_depend_on_backend_routers() -> N
     )
 
 
+def test_collection_domain_runtime_imports_do_not_depend_on_backend_routers() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    collection_base = repo_root / 'backend' / 'domains' / 'collection'
+    findings: dict[str, list[str]] = {}
+    for path in collection_base.rglob('*.py'):
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path))
+        hits = _legacy_router_import_statements(tree)
+        if hits:
+            findings[path.relative_to(repo_root).as_posix()] = hits
+
+    assert findings == {}, (
+        'Collection domain modules must not depend on backend.routers legacy modules. '
+        f'found={findings}'
+    )
+
+
+def test_data_platform_domain_runtime_imports_do_not_depend_on_backend_routers() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    data_platform_base = repo_root / 'backend' / 'domains' / 'data_platform'
+    findings: dict[str, list[str]] = {}
+    for path in data_platform_base.rglob('*.py'):
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path))
+        hits = _legacy_router_import_statements(tree)
+        if hits:
+            findings[path.relative_to(repo_root).as_posix()] = hits
+
+    assert findings == {}, (
+        'Data platform domain modules must not depend on backend.routers legacy modules. '
+        f'found={findings}'
+    )
+
+
+def test_platform_router_modules_do_not_depend_on_backend_routers() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    platform_router_base = repo_root / 'backend' / 'domains' / 'platform' / 'routers'
+    findings: dict[str, list[str]] = {}
+    for path in platform_router_base.rglob('*.py'):
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path))
+        hits = _legacy_router_import_statements(tree)
+        if hits:
+            findings[path.relative_to(repo_root).as_posix()] = hits
+
+    assert findings == {}, (
+        'Platform router modules must not depend on backend.routers legacy modules. '
+        f'found={findings}'
+    )
+
+
 def _exported_names(module: object) -> set[str]:
     module_all = getattr(module, '__all__', None)
     if module_all is not None:
@@ -140,14 +164,6 @@ def _exported_names(module: object) -> set[str]:
 
 def test_representative_domain_shims_preserve_legacy_public_exports() -> None:
     representative_pairs = [
-        (
-            'backend.domains.collection.routers.component_versions',
-            'backend.routers.component_versions',
-        ),
-        (
-            'backend.domains.data_platform.routers.field_mapping_ingest',
-            'backend.routers.field_mapping_ingest',
-        ),
     ]
 
     for shim_module_name, legacy_module_name in representative_pairs:

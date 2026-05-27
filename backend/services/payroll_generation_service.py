@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from calendar import monthrange
+from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict
 
@@ -49,6 +51,38 @@ class PayrollGenerationService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _coerce_date(value: Any) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        return None
+
+    @classmethod
+    def _salary_effective_cutoff(cls, year_month: str) -> date:
+        period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+        return period_start.replace(day=monthrange(period_start.year, period_start.month)[1])
+
+    @classmethod
+    def _pick_salary_structure_for_month(cls, salary_rows: list[Any], year_month: str) -> Any | None:
+        if not salary_rows:
+            return None
+        effective_cutoff = cls._salary_effective_cutoff(year_month)
+        eligible_rows = [
+            row
+            for row in salary_rows
+            if cls._coerce_date(getattr(row, "effective_date", None)) is not None
+            and cls._coerce_date(getattr(row, "effective_date", None)) <= effective_cutoff
+        ]
+        if eligible_rows:
+            return eligible_rows[0]
+        return salary_rows[0]
 
     async def _load_employee_commission(self, employee_code: str, year_month: str):
         try:
@@ -397,7 +431,7 @@ class PayrollGenerationService:
                 .order_by(desc(SalaryStructure.effective_date), desc(SalaryStructure.id))
             )
         ).scalars().all()
-        salary = salary_rows[0] if salary_rows else None
+        salary = self._pick_salary_structure_for_month(salary_rows, year_month)
         commission = await self._load_employee_commission(employee_code, year_month)
         performance = await self._load_employee_performance(employee_code, year_month)
         existing = (
@@ -483,9 +517,12 @@ class PayrollGenerationService:
             )
         ).scalars().all()
 
-        salary_by_employee = {
-            row.employee_code: row for row in salary_rows if getattr(row, "employee_code", None)
-        }
+        salary_rows_by_employee: Dict[str, list[Any]] = {}
+        for row in salary_rows:
+            employee_code = getattr(row, "employee_code", None)
+            if not employee_code:
+                continue
+            salary_rows_by_employee.setdefault(employee_code, []).append(row)
         commission_by_employee = {
             row.employee_code: row
             for row in commission_rows
@@ -501,7 +538,7 @@ class PayrollGenerationService:
         }
 
         candidate_employee_codes = (
-            set(salary_by_employee)
+            set(salary_rows_by_employee)
             | set(commission_by_employee)
             | set(performance_by_employee)
             | set(payroll_by_employee)
@@ -515,7 +552,10 @@ class PayrollGenerationService:
         locked_conflicts = 0
         locked_conflict_details = []
         for employee_code in employee_codes:
-            salary = salary_by_employee.get(employee_code)
+            salary = self._pick_salary_structure_for_month(
+                salary_rows_by_employee.get(employee_code, []),
+                year_month,
+            )
             commission = commission_by_employee.get(employee_code)
             performance = performance_by_employee.get(employee_code)
             existing = payroll_by_employee.get(employee_code)

@@ -1,4 +1,4 @@
-# Persistent Task Center Implementation Plan
+﻿# Persistent Task Center Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -300,8 +300,8 @@ git commit -m "feat(tasks): persist celery runner mapping for data sync"
 **Files:**
 - Create: `backend/tests/test_task_center_progress_compat.py`
 - Modify: `backend/services/progress_tracker.py`
-- Modify: `backend/routers/field_mapping_status.py`
-- Modify: `backend/routers/field_mapping_files.py`
+- Modify: `backend/domains/data_platform/routers/field_mapping_status.py`
+- Modify: `backend/domains/data_platform/routers/field_mapping_files.py`
 - Modify: `backend/services/auto_ingest_orchestrator.py`
 
 - [ ] **Step 1: Write the failing compatibility test**
@@ -348,8 +348,8 @@ Remove:
 - [ ] **Step 5: Update legacy callers and endpoints**
 
 Touch:
-- `backend/routers/field_mapping_status.py`
-- `backend/routers/field_mapping_files.py`
+- `backend/domains/data_platform/routers/field_mapping_status.py`
+- `backend/domains/data_platform/routers/field_mapping_files.py`
 - `backend/services/auto_ingest_orchestrator.py`
 
 Preserve old payloads while reading/writing through the new task center.
@@ -434,7 +434,7 @@ git commit -m "feat(tasks): add task subject links for file and table lookup"
 
 **Files:**
 - Create: `backend/tests/test_task_center_collection_projection.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/services/collection_scheduler.py`
 - Modify: `backend/services/task_service.py`
 
@@ -722,3 +722,4 @@ The plan is complete only when:
 - reverse lookup by file or source table exists
 - durable task logs exist
 - existing frontend task pages still function without a big-bang route cutover
+

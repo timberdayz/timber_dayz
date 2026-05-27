@@ -250,7 +250,7 @@ def test_shop_account_aliases_router_exposes_unmatched_route():
 
     text = (
         Path(__file__).resolve().parents[2]
-        / "backend/routers/shop_account_aliases.py"
+        / "backend/domains/collection/routers/shop_account_aliases.py"
     ).read_text(encoding="utf-8")
 
     assert '@router.get("/unmatched"' in text
@@ -261,7 +261,7 @@ def test_shop_account_aliases_unmatched_query_keeps_complete_json_keys():
 
     text = (
         Path(__file__).resolve().parents[2]
-        / "backend/routers/shop_account_aliases.py"
+        / "backend/domains/collection/routers/shop_account_aliases.py"
     ).read_text(encoding="utf-8")
 
     assert r'_CN_STORE_NAME = _u(r"\u5e97\u94fa\u540d\u79f0")' in text
@@ -276,7 +276,7 @@ def test_shop_account_aliases_unmatched_query_reads_semantic_orders_atomic():
 
     text = (
         Path(__file__).resolve().parents[2]
-        / "backend/routers/shop_account_aliases.py"
+        / "backend/domains/collection/routers/shop_account_aliases.py"
     ).read_text(encoding="utf-8")
 
     assert "FROM semantic.fact_orders_atomic" in text

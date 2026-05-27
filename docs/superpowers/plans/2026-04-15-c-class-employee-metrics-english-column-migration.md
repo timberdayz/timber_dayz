@@ -1,4 +1,4 @@
-# C-Class Employee Metrics English Column Migration Implementation Plan
+﻿# C-Class Employee Metrics English Column Migration Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -25,8 +25,8 @@
 
 - Modify: `backend/services/hr_income_calculation_service.py`
 - Modify: `backend/services/payroll_generation_service.py`
-- Modify: `backend/routers/hr_commission.py`
-- Modify: `backend/routers/performance_management.py` only if any remaining transitional contract adjustment is required
+- Modify: `backend/domains/business/routers/hr_commission.py`
+- Modify: `backend/domains/business/routers/performance_management.py` only if any remaining transitional contract adjustment is required
 
 ### Tests
 
@@ -270,8 +270,8 @@ git commit -m "feat: prefer english c-class reads in payroll generation"
 ## Task 6: Verify Reader Paths Still Work
 
 **Files:**
-- Modify: `backend/routers/hr_commission.py` only if transition logic needs refinement
-- Modify: `backend/routers/performance_management.py` only if transition logic needs refinement
+- Modify: `backend/domains/business/routers/hr_commission.py` only if transition logic needs refinement
+- Modify: `backend/domains/business/routers/performance_management.py` only if transition logic needs refinement
 - Test: `backend/tests/test_hr_commission_profit_basis_routes.py`
 - Test: `backend/tests/test_performance_management_person_fallback.py`
 
@@ -295,7 +295,7 @@ Goal:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/routers/hr_commission.py backend/routers/performance_management.py backend/tests/test_hr_commission_profit_basis_routes.py backend/tests/test_performance_management_person_fallback.py
+git add backend/domains/business/routers/hr_commission.py backend/domains/business/routers/performance_management.py backend/tests/test_hr_commission_profit_basis_routes.py backend/tests/test_performance_management_person_fallback.py
 git commit -m "test: verify c-class employee metric readers across transition"
 ```
 
@@ -402,3 +402,4 @@ git commit -m "test: verify c-class employee metrics english-column migration"
 - payroll, performance, commission, and income runtime paths work during transition
 - migration can be applied to the local PostgreSQL database
 - the codebase is ready for a later cleanup phase that removes Chinese columns and fallback logic
+

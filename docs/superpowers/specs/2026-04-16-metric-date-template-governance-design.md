@@ -1,4 +1,4 @@
-# Metric Date Template Governance Design
+﻿# Metric Date Template Governance Design
 
 **Date:** 2026-04-16
 
@@ -60,7 +60,7 @@ So the active runtime still has no trustworthy parsing contract to follow.
 
 ### 2.4 Ingest Path Does Not Consume Template Parsing Rules
 
-The active `/ingest` path in [field_mapping_ingest.py](/F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/field_mapping_ingest.py#L379) normalizes raw rows and passes them into `RawDataImporter`, but it does not load or enforce template-level date parsing rules.
+The active `/ingest` path in [field_mapping_ingest.py](/F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/data_platform/routers/field_mapping_ingest.py#L379) normalizes raw rows and passes them into `RawDataImporter`, but it does not load or enforce template-level date parsing rules.
 
 This means even if the template layer were extended, ingestion would still ignore it until the contract is explicitly threaded through.
 
@@ -351,3 +351,4 @@ The scope is specifically to make `metric_date` and range-date parsing determini
 The system should no longer parse `metric_date` by heuristic guessing.
 
 `metric_date` must be governed by template-declared field parsing rules, enforced strictly at ingest time, with failures quarantined rather than defaulted.
+

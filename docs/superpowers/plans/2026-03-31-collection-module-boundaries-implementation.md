@@ -1,4 +1,4 @@
-# Collection Module Boundaries Implementation Plan
+﻿# Collection Module Boundaries Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -18,18 +18,18 @@
   - Extend config/task schemas for execution mode and task-facing recovery metadata if needed.
 - Modify: `backend/routers/collection_config.py`
   - Keep config endpoints focused on template/schedule concerns and task creation handoff.
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
   - Make task endpoints the single recovery/intervention entrypoint.
 - Modify: `backend/services/collection_scheduler.py`
   - Ensure scheduled tasks inherit config execution mode.
 
 ### Frontend
 
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
   - Reduce runtime concerns; add execution mode; redirect to task view after task creation.
-- Modify: `frontend/src/views/collection/CollectionTasks.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue`
   - Add waiting-action queue, grouped task views, verification/manual intervention actions.
-- Modify: `frontend/src/views/collection/CollectionHistory.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionHistory.vue`
   - Restrict to terminal-state querying and remove runtime affordances.
 - Modify: `frontend/src/api/collection.js`
   - Add or align task recovery/headed-mode APIs.
@@ -102,10 +102,10 @@ git commit -m "test: define collection module boundary contract"
 **Files:**
 - Modify: `backend/schemas/collection.py`
 - Modify: `backend/routers/collection_config.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/services/collection_scheduler.py`
 - Modify: `frontend/src/constants/collection.js`
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `backend/tests/test_collection_config_api.py`
 
 - [ ] **Step 1: Write failing tests for execution mode propagation**
@@ -151,15 +151,15 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/schemas/collection.py backend/routers/collection_config.py backend/routers/collection_tasks.py backend/services/collection_scheduler.py frontend/src/constants/collection.js frontend/src/views/collection/CollectionConfig.vue backend/tests/test_collection_config_api.py backend/tests/test_collection_config_task_handoff_api.py
+git add backend/schemas/collection.py backend/routers/collection_config.py backend/domains/collection/routers/collection_tasks.py backend/services/collection_scheduler.py frontend/src/constants/collection.js frontend/src/domains/collection/views/collection/CollectionConfig.vue backend/tests/test_collection_config_api.py backend/tests/test_collection_config_task_handoff_api.py
 git commit -m "feat: add config-driven execution mode for collection tasks"
 ```
 
 ### Task 3: Make Config Execution Redirect Into Task Management
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
-- Modify: `frontend/src/views/collection/CollectionTasks.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue`
 - Modify: `frontend/src/api/collection.js`
 - Modify: `frontend/scripts/collectionApiContract.test.mjs`
 
@@ -199,17 +199,17 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue frontend/src/views/collection/CollectionTasks.vue frontend/src/api/collection.js frontend/scripts/collectionApiContract.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/domains/collection/views/collection/CollectionTasks.vue frontend/src/api/collection.js frontend/scripts/collectionApiContract.test.mjs
 git commit -m "refactor: hand off config execution to task management flow"
 ```
 
 ### Task 4: Build A Unified Waiting-Action Queue In Task Management
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionTasks.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue`
 - Modify: `frontend/src/components/verification/VerificationResumeDialog.vue`
 - Modify: `frontend/src/api/collection.js`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/tests/test_collection_task_intervention_contract.py`
 - Modify: `frontend/scripts/collectionTasksVerificationUi.test.mjs`
 - Create: `frontend/scripts/collectionTaskInterventionUi.test.mjs`
@@ -261,14 +261,14 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/routers/collection_tasks.py backend/tests/test_collection_task_intervention_contract.py frontend/src/views/collection/CollectionTasks.vue frontend/src/components/verification/VerificationResumeDialog.vue frontend/src/api/collection.js frontend/scripts/collectionTasksVerificationUi.test.mjs frontend/scripts/collectionTaskInterventionUi.test.mjs
+git add backend/domains/collection/routers/collection_tasks.py backend/tests/test_collection_task_intervention_contract.py frontend/src/domains/collection/views/collection/CollectionTasks.vue frontend/src/components/verification/VerificationResumeDialog.vue frontend/src/api/collection.js frontend/scripts/collectionTasksVerificationUi.test.mjs frontend/scripts/collectionTaskInterventionUi.test.mjs
 git commit -m "feat: add unified task intervention queue for collection module"
 ```
 
 ### Task 5: Restrict History To Terminal States
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionHistory.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionHistory.vue`
 - Modify: `frontend/scripts/collectionTaskInterventionUi.test.mjs`
 
 - [ ] **Step 1: Write failing UI test for history terminal-only behavior**
@@ -306,7 +306,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionHistory.vue frontend/scripts/collectionTaskInterventionUi.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionHistory.vue frontend/scripts/collectionTaskInterventionUi.test.mjs
 git commit -m "refactor: limit collection history to terminal task review"
 ```
 
@@ -342,7 +342,7 @@ Expected: PASS
 Run:
 
 ```bash
-python -m py_compile backend/schemas/collection.py backend/routers/collection_config.py backend/routers/collection_tasks.py backend/services/collection_scheduler.py
+python -m py_compile backend/schemas/collection.py backend/routers/collection_config.py backend/domains/collection/routers/collection_tasks.py backend/services/collection_scheduler.py
 ```
 
 Expected: no output
@@ -357,3 +357,5 @@ git commit -m "test: verify collection module boundary alignment"
 ---
 
 Plan complete and saved to `docs/superpowers/plans/2026-03-31-collection-module-boundaries-implementation.md`. Ready to execute?
+
+

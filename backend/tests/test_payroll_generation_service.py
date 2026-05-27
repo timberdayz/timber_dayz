@@ -517,3 +517,135 @@ def test_generate_month_reads_english_c_class_columns():
     created = next(x for x in added if isinstance(x, PayrollRecord))
     assert float(created.commission) == 300.0
     assert float(created.performance_salary) == 240.0
+
+
+def test_generate_employee_month_uses_latest_salary_version_effective_for_year_month():
+    service_cls = _load_service_cls()
+    db = AsyncMock()
+    added = []
+
+    salary_rows = [
+        SimpleNamespace(
+            employee_code="EMP030",
+            base_salary=Decimal("3000"),
+            position_salary=Decimal("1000"),
+            housing_allowance=Decimal("0"),
+            transport_allowance=Decimal("0"),
+            meal_allowance=Decimal("0"),
+            communication_allowance=Decimal("0"),
+            other_allowance=Decimal("0"),
+            performance_ratio=0.1,
+            commission_ratio=0.05,
+            status="active",
+            effective_date="2025-05-01",
+            id=302,
+        ),
+        SimpleNamespace(
+            employee_code="EMP030",
+            base_salary=Decimal("1000"),
+            position_salary=Decimal("500"),
+            housing_allowance=Decimal("0"),
+            transport_allowance=Decimal("0"),
+            meal_allowance=Decimal("0"),
+            communication_allowance=Decimal("0"),
+            other_allowance=Decimal("0"),
+            performance_ratio=0.1,
+            commission_ratio=0.05,
+            status="active",
+            effective_date="2025-01-01",
+            id=301,
+        ),
+    ]
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is Employee:
+                return _MockResult(scalar_value=SimpleNamespace(employee_code="EMP030", status="active", employee_identity_type="employee"))
+            if entity is SalaryStructure:
+                return _MockResult(rows=salary_rows)
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=SimpleNamespace(commission_amount=Decimal("300")))
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=SimpleNamespace(performance_score=80.0))
+            if entity is PayrollRecord:
+                return _MockResult(scalar_value=None)
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+
+    service = service_cls(db=db)
+    result = asyncio.run(service.generate_employee_month("EMP030", "2025-04"))
+
+    assert result["payroll_upserts"] == 1
+    created = next(x for x in added if isinstance(x, PayrollRecord))
+    assert float(created.base_salary) == 1000.0
+    assert float(created.position_salary) == 500.0
+    assert float(created.performance_salary) == 120.0
+
+
+def test_generate_month_uses_salary_version_effective_for_target_month():
+    service_cls = _load_service_cls()
+    db = AsyncMock()
+    added = []
+
+    salary_rows = [
+        SimpleNamespace(
+            employee_code="EMP031",
+            base_salary=Decimal("4000"),
+            position_salary=Decimal("1000"),
+            housing_allowance=Decimal("0"),
+            transport_allowance=Decimal("0"),
+            meal_allowance=Decimal("0"),
+            communication_allowance=Decimal("0"),
+            other_allowance=Decimal("0"),
+            performance_ratio=0.1,
+            commission_ratio=0.05,
+            status="active",
+            effective_date="2025-06-01",
+            id=402,
+        ),
+        SimpleNamespace(
+            employee_code="EMP031",
+            base_salary=Decimal("2000"),
+            position_salary=Decimal("500"),
+            housing_allowance=Decimal("0"),
+            transport_allowance=Decimal("0"),
+            meal_allowance=Decimal("0"),
+            communication_allowance=Decimal("0"),
+            other_allowance=Decimal("0"),
+            performance_ratio=0.1,
+            commission_ratio=0.05,
+            status="active",
+            effective_date="2025-02-01",
+            id=401,
+        ),
+    ]
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is Employee:
+                return _MockResult(scalar_value=SimpleNamespace(employee_code="EMP031", status="active", employee_identity_type="employee"))
+            if entity is SalaryStructure:
+                return _MockResult(rows=salary_rows)
+            if entity is EmployeeCommission:
+                return _MockResult(rows=[SimpleNamespace(employee_code="EMP031", commission_amount=Decimal("250"))])
+            if entity is EmployeePerformance:
+                return _MockResult(rows=[SimpleNamespace(employee_code="EMP031", performance_score=80.0)])
+            if entity is PayrollRecord:
+                return _MockResult(rows=[])
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+
+    service = service_cls(db=db)
+    result = asyncio.run(service.generate_month("2025-04"))
+
+    assert result["payroll_upserts"] == 1
+    created = next(x for x in added if isinstance(x, PayrollRecord))
+    assert float(created.base_salary) == 2000.0
+    assert float(created.position_salary) == 500.0
+    assert float(created.performance_salary) == 200.0

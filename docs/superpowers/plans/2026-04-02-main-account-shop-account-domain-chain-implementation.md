@@ -1,4 +1,4 @@
-# Main Account Shop Account Domain Chain Implementation Plan
+﻿# Main Account Shop Account Domain Chain Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -37,13 +37,13 @@
 - Modify: `backend/schemas/__init__.py`
 - Create: `backend/services/shop_account_loader_service.py`
 - Create: `backend/services/platform_shop_discovery_service.py`
-- Create: `backend/routers/main_accounts.py`
+- Create: `backend/domains/collection/routers/main_accounts.py`
 - Create: `backend/routers/shop_accounts.py`
-- Create: `backend/routers/shop_account_aliases.py`
+- Create: `backend/domains/collection/routers/shop_account_aliases.py`
 - Create: `backend/routers/platform_shop_discoveries.py`
-- Modify: `backend/routers/component_versions.py`
+- Modify: `backend/domains/collection/routers/component_versions.py`
 - Modify: `backend/routers/collection_config.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/main.py`
 - Modify or retire: `backend/routers/account_management.py`
 - Test: `backend/tests/test_main_accounts_api.py`
@@ -66,7 +66,7 @@
 - Modify: `frontend/src/api/index.js`
 - Modify: `frontend/src/stores/accounts.js`
 - Modify: `frontend/src/views/AccountManagement.vue`
-- Modify: `frontend/src/views/ComponentVersions.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
 - Test: `backend/tests/test_collection_frontend_contracts.py`
 
 **Responsibilities:**
@@ -97,8 +97,8 @@
 
 **Files:**
 - Modify: `backend/routers/account_alignment.py`
-- Modify: `backend/routers/performance_management.py`
-- Modify: `backend/routers/hr_commission.py`
+- Modify: `backend/domains/business/routers/performance_management.py`
+- Modify: `backend/domains/business/routers/hr_commission.py`
 - Modify: the active target-management router backing `/targets/shops`
 - Test: `backend/tests/test_account_identity_alignment.py`
 - Test: `backend/tests/test_target_management_extended_fields.py`
@@ -277,7 +277,7 @@ git commit -m "feat: add main and shop account contracts"
 ## Task 3: Replace Account Management with Main/Shop APIs
 
 **Files:**
-- Create: `backend/routers/main_accounts.py`
+- Create: `backend/domains/collection/routers/main_accounts.py`
 - Create: `backend/routers/shop_accounts.py`
 - Modify or retire: `backend/routers/account_management.py`
 - Modify: `backend/main.py`
@@ -346,7 +346,7 @@ Expected: PASS
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/routers/main_accounts.py backend/routers/shop_accounts.py backend/routers/account_management.py backend/main.py backend/tests/test_main_accounts_api.py backend/tests/test_shop_accounts_api.py
+git add backend/domains/collection/routers/main_accounts.py backend/routers/shop_accounts.py backend/routers/account_management.py backend/main.py backend/tests/test_main_accounts_api.py backend/tests/test_shop_accounts_api.py
 git commit -m "feat: add main and shop account routes"
 ```
 
@@ -354,7 +354,7 @@ git commit -m "feat: add main and shop account routes"
 
 **Files:**
 - Create: `backend/services/platform_shop_discovery_service.py`
-- Create: `backend/routers/shop_account_aliases.py`
+- Create: `backend/domains/collection/routers/shop_account_aliases.py`
 - Create: `backend/routers/platform_shop_discoveries.py`
 - Modify: `backend/routers/account_alignment.py`
 - Test: `backend/tests/test_shop_account_aliases_api.py`
@@ -423,7 +423,7 @@ Expected: PASS
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/services/platform_shop_discovery_service.py backend/routers/shop_account_aliases.py backend/routers/platform_shop_discoveries.py backend/routers/account_alignment.py backend/tests/test_shop_account_aliases_api.py backend/tests/test_platform_shop_discoveries_api.py backend/tests/test_account_identity_alignment.py
+git add backend/services/platform_shop_discovery_service.py backend/domains/collection/routers/shop_account_aliases.py backend/routers/platform_shop_discoveries.py backend/routers/account_alignment.py backend/tests/test_shop_account_aliases_api.py backend/tests/test_platform_shop_discoveries_api.py backend/tests/test_account_identity_alignment.py
 git commit -m "feat: add shop alias and discovery workflows"
 ```
 
@@ -497,10 +497,10 @@ git commit -m "feat: refactor account management frontend semantics"
 ## Task 6: Switch Component Testing to Shop-Account Semantics
 
 **Files:**
-- Modify: `backend/routers/component_versions.py`
+- Modify: `backend/domains/collection/routers/component_versions.py`
 - Modify: `backend/schemas/component_version.py`
 - Modify: `frontend/src/api/index.js`
-- Modify: `frontend/src/views/ComponentVersions.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
 - Test: `backend/tests/test_component_test_runtime_config.py`
 - Test: `backend/tests/test_component_tester_account_loading.py`
 - Test: `backend/tests/test_component_tester_runtime_config.py`
@@ -556,7 +556,7 @@ Expected: PASS
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/routers/component_versions.py backend/schemas/component_version.py frontend/src/api/index.js frontend/src/views/ComponentVersions.vue backend/tests/test_component_test_runtime_config.py backend/tests/test_component_tester_account_loading.py backend/tests/test_component_tester_runtime_config.py
+git add backend/domains/collection/routers/component_versions.py backend/schemas/component_version.py frontend/src/api/index.js frontend/src/domains/collection/views/ComponentVersions.vue backend/tests/test_component_test_runtime_config.py backend/tests/test_component_tester_account_loading.py backend/tests/test_component_tester_runtime_config.py
 git commit -m "feat: switch component testing to shop accounts"
 ```
 
@@ -641,8 +641,8 @@ git commit -m "feat: scope runtime sessions to main accounts"
 
 **Files:**
 - Modify: `backend/routers/collection_config.py`
-- Modify: `backend/routers/performance_management.py`
-- Modify: `backend/routers/hr_commission.py`
+- Modify: `backend/domains/business/routers/performance_management.py`
+- Modify: `backend/domains/business/routers/hr_commission.py`
 - Modify: `backend/routers/account_alignment.py`
 - Modify: the active router backing `/targets/shops`
 - Test: `backend/tests/test_target_management_extended_fields.py`
@@ -697,7 +697,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/routers/collection_config.py backend/routers/performance_management.py backend/routers/hr_commission.py backend/routers/account_alignment.py backend/tests/test_target_management_extended_fields.py backend/tests/test_collection_config_api.py backend/tests/test_component_versions_test_history.py
+git add backend/routers/collection_config.py backend/domains/business/routers/performance_management.py backend/domains/business/routers/hr_commission.py backend/routers/account_alignment.py backend/tests/test_target_management_extended_fields.py backend/tests/test_collection_config_api.py backend/tests/test_component_versions_test_history.py
 git commit -m "feat: complete main and shop account cutover"
 ```
 
@@ -720,3 +720,4 @@ git commit -m "feat: complete main and shop account cutover"
 - [ ] Target/commission/reporting read paths no longer depend on `platform_accounts`.
 - [ ] Focused regression suite passes.
 - [ ] Architecture and API verification scripts pass.
+

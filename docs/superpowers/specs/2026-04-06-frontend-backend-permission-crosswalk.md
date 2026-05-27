@@ -1,4 +1,4 @@
-# Frontend To Backend Permission Crosswalk
+﻿# Frontend To Backend Permission Crosswalk
 
 **Date:** 2026-04-06
 
@@ -31,10 +31,10 @@ It is intended as the maintenance reference after the permission-unification wor
 |---|---|---|---|---|---|
 | 采集配置 | `/collection-config` | [collection.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/collection.js) | [collection_config.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/collection_config.py) | Admin | Create/update/delete/coverage all aligned to admin |
 | 采集覆盖率巡检 | `/collection-coverage-audit` | [collection.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/collection.js) | [collection_config.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/collection_config.py) | Admin | Batch remediation also admin |
-| 采集任务 | `/collection-tasks` | [collection.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/collection.js) | [collection_tasks.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/collection_tasks.py) | Existing collection auth model | Not part of this round’s high-risk fix |
+| 采集任务 | `/collection-tasks` | [collection.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/collection.js) | [collection_tasks.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/collection/routers/collection_tasks.py) | Existing collection auth model | Not part of this round’s high-risk fix |
 | 采集历史 | `/collection-history` | [collection.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/collection.js) | collection history endpoints | Existing collection auth model | Not part of this round’s high-risk fix |
-| 组件录制工具 | `/component-recorder` | `@/api` generic component-recorder calls | [component_recorder.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/component_recorder.py) | Admin | Router-level admin added |
-| 组件版本管理 | `/component-versions` | `@/api` generic component-version calls | [component_versions.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/component_versions.py) | Admin | Router-level admin added |
+| 组件录制工具 | `/component-recorder` | `@/api` generic component-recorder calls | [component_recorder.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/collection/routers/component_recorder.py) | Admin | Router-level admin added |
+| 组件版本管理 | `/component-versions` | `@/api` generic component-version calls | [component_versions.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/collection/routers/component_versions.py) | Admin | Router-level admin added |
 | 数据同步相关页 | `/data-sync/*` | `@/api` generic sync calls | data-sync routers | Mixed | This session did not fully remap every data-sync read surface |
 
 ## 3. Product And Inventory
@@ -58,7 +58,7 @@ It is intended as the maintenance reference after the permission-unification wor
 
 | Frontend Page | Route | Frontend API | Backend Route Group | Auth Mode | Notes |
 |---|---|---|---|---|---|
-| 账号管理 | `/account-management` | [accounts.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/accounts.js) | [main_accounts.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/main_accounts.py), [shop_accounts.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/shop_accounts.py), [shop_account_aliases.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/shop_account_aliases.py), [platform_shop_discoveries.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/platform_shop_discoveries.py) | Admin | High-risk account surfaces aligned |
+| 账号管理 | `/account-management` | [accounts.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/accounts.js) | [main_accounts.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/collection/routers/main_accounts.py), [shop_accounts.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/shop_accounts.py), [shop_account_aliases.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/collection/routers/shop_account_aliases.py), [platform_shop_discoveries.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/platform_shop_discoveries.py) | Admin | High-risk account surfaces aligned |
 | 账号对齐 | `/account-alignment` | no dedicated frontend module import shown in this round | [account_alignment.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/account_alignment.py) | Admin | Import / batch / backfill / alias writes locked to admin |
 
 ## 5. Role And Permission Management
@@ -87,8 +87,8 @@ It is intended as the maintenance reference after the permission-unification wor
 | 我的档案 | `/employee-management` | `@/api` generic HR calls | HR self/profile endpoints | Self-scoped | Intended current-user data only |
 | 我的收入 | `/my-income` | `@/api` generic HR calls | HR self-income endpoints | Self-scoped | Current-user only |
 | 个人设置 | `/personal-settings` | page currently uses generic/global client pattern | auth / users-me / self-service endpoints | Self-scoped | Personal page |
-| 通知偏好设置 | `/settings/notifications` | [users.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/users.js) | [users_me.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/users_me.py) | Self-scoped | Current user’s notification preferences |
-| 会话管理 | `/settings/sessions` | [users.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/users.js) | [users_me.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/users_me.py) | Self-scoped | Current user’s sessions only |
+| 通知偏好设置 | `/settings/notifications` | [users.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/users.js) | [users_me.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/platform/routers/users_me.py) | Self-scoped | Current user’s notification preferences |
+| 会话管理 | `/settings/sessions` | [users.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/users.js) | [users_me.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/platform/routers/users_me.py) | Self-scoped | Current user’s sessions only |
 | 系统通知 | `/system-notifications` | [notifications.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/notifications.js) | [notifications.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/notifications.py) | Self-scoped + admin-only action gating | Page is personal surface; some buttons admin-only |
 | 预警提醒 | `/alerts` | currently under-development/no dedicated module import in this audit | alerts/notification surfaces | View/self-scoped mix | Frontend page is broad view page |
 | 消息设置 | `/message-settings` | no dedicated API import in page yet | current-user settings semantics | Personal | Frontend page treated as personal page |
@@ -119,3 +119,4 @@ These are not blockers for the current permission model, but are follow-up quali
 - Some pages still use the generic `@/api` aggregator rather than a clearly scoped domain API module.
 - Some placeholder pages do not yet have a stable backend contract worth documenting per-endpoint.
 - The crosswalk is maintained at route-group level for some domains instead of enumerating every individual endpoint, because the page implementation is still evolving.
+

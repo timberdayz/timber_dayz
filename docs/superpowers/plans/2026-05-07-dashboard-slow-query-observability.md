@@ -1,4 +1,4 @@
-# Dashboard Slow Query Observability Implementation Plan
+﻿# Dashboard Slow Query Observability Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -13,7 +13,7 @@
 ### Task 1: Add bootstrap subcall timing logs
 
 **Files:**
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 
 - [ ] **Step 1: Add per-subcall timers**
   - Measure `kpi`, `comparison`, `operational_metrics` durations using `time.perf_counter()`.
@@ -46,4 +46,5 @@
 - [ ] **Step 1: Re-run dashboard endpoints**
   - Call `/api/dashboard/business-overview/bootstrap` and `/api/dashboard/business-overview/traffic-ranking`.
   - Confirm backend logs include subcall breakdown and Postgres logs include slow SQL statements.
+
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -2056,7 +2056,7 @@ class Employee(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     
     # === 基本信息 ===
-    employee_code = Column(String(64), nullable=False, unique=True)  # 员工编号
+    employee_code = Column(String(64), nullable=False)  # 员工编号
     name = Column(String(128), nullable=False)  # 姓名
     gender = Column(String(16), nullable=True)  # 性别:male/female/other
     birth_date = Column(Date, nullable=True)  # 出生日期
@@ -2406,7 +2406,7 @@ class SalaryStructure(Base):
     __tablename__ = "salary_structures"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    employee_code = Column(String(64), nullable=False, unique=True)  # 员工编号
+    employee_code = Column(String(64), nullable=False)  # 员工编号
     
     # === 固定薪资 ===
     base_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 基本工资
@@ -2434,6 +2434,7 @@ class SalaryStructure(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
+        UniqueConstraint("employee_code", "effective_date", name="uq_salary_structures_employee_effective_date"),
         Index("ix_salary_structures_a_employee", "employee_code"),
         Index("ix_salary_structures_a_status", "status"),
         {"schema": "a_class"},
@@ -3048,3 +3049,6 @@ class SystemConfig(Base):
         Index('ix_system_config_key', 'config_key'),  # 索引
         ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_system_config_updated_by'),
     )
+
+
+

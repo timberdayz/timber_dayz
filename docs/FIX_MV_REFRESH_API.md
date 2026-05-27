@@ -1,4 +1,4 @@
-# 物化视图刷新API修复说明
+﻿# 物化视图刷新API修复说明
 
 ## 问题描述
 
@@ -14,7 +14,7 @@
 
 ## 修复内容
 
-### 1. 创建物化视图管理API (`backend/routers/mv.py`)
+### 1. 创建物化视图管理API (`backend/domains/business/routers/mv.py`)
 
 新增文件，包含两个端点：
 - `POST /api/mv/refresh-all`：刷新所有物化视图
@@ -130,9 +130,10 @@ python scripts/test_mv_refresh_api.py
 
 ## 相关文件
 
-- `backend/routers/mv.py` - 物化视图管理API
+- `backend/domains/business/routers/mv.py` - 物化视图管理API
 - `backend/main.py` - 路由注册
 - `frontend/src/views/DataBrowser.vue` - 前端数据浏览器组件
 - `frontend/src/api/index.js` - 前端API调用
 - `scripts/test_mv_refresh_api.py` - API测试脚本
+
 

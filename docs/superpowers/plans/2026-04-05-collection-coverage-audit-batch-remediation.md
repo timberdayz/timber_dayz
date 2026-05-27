@@ -1,4 +1,4 @@
-# Collection Coverage Audit And Batch Remediation Implementation Plan
+﻿# Collection Coverage Audit And Batch Remediation Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -33,7 +33,7 @@
 
 ### New files to create
 
-- `frontend/src/views/collection/CollectionCoverageAudit.vue`
+- `frontend/src/domains/collection/views/collection/CollectionCoverageAudit.vue`
   Responsibility: dedicated audit and batch remediation UI.
 - `backend/tests/test_collection_batch_remediation_api.py`
   Responsibility: verify batch remediation request validation, skip behavior, and one-config-per-shop persistence.
@@ -174,7 +174,7 @@ git commit -m "feat: add collection config batch remediation api"
 ## Task 3: Build The Collection Coverage Audit Page
 
 **Files:**
-- Create: `frontend/src/views/collection/CollectionCoverageAudit.vue`
+- Create: `frontend/src/domains/collection/views/collection/CollectionCoverageAudit.vue`
 - Modify: `frontend/src/api/collection.js`
 - Modify: `frontend/src/constants/collection.js`
 - Test: `frontend/scripts/collectionCoverageAuditUi.test.mjs`
@@ -224,14 +224,14 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionCoverageAudit.vue frontend/src/api/collection.js frontend/src/constants/collection.js frontend/scripts/collectionCoverageAuditUi.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionCoverageAudit.vue frontend/src/api/collection.js frontend/src/constants/collection.js frontend/scripts/collectionCoverageAuditUi.test.mjs
 git commit -m "feat: add collection coverage audit page"
 ```
 
 ## Task 4: Add Batch Remediation Dialog And API Wiring
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionCoverageAudit.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionCoverageAudit.vue`
 - Modify: `frontend/src/api/collection.js`
 - Test: `frontend/scripts/collectionCoverageAuditUi.test.mjs`
 
@@ -281,7 +281,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionCoverageAudit.vue frontend/src/api/collection.js frontend/scripts/collectionCoverageAuditUi.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionCoverageAudit.vue frontend/src/api/collection.js frontend/scripts/collectionCoverageAuditUi.test.mjs
 git commit -m "feat: wire collection batch remediation flow"
 ```
 
@@ -344,7 +344,7 @@ git commit -m "feat: register collection coverage audit navigation"
 **Files:**
 - Verify: `backend/routers/collection_config.py`
 - Verify: `backend/schemas/collection.py`
-- Verify: `frontend/src/views/collection/CollectionCoverageAudit.vue`
+- Verify: `frontend/src/domains/collection/views/collection/CollectionCoverageAudit.vue`
 - Verify: `frontend/src/api/collection.js`
 - Verify: `frontend/src/router/index.js`
 
@@ -404,4 +404,5 @@ git commit -m "feat: add collection coverage audit and batch remediation"
 - Do not add main-account inheritance in this phase.
 - Prefer focused helper additions over bloating `collection_config.py`.
 - The collection frontend area already contains some historical garbled text in comments / labels; do not broaden scope into a full text cleanup unless the edits are directly adjacent to this feature.
+
 

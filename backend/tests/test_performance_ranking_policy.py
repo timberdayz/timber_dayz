@@ -1,4 +1,4 @@
-from backend.routers.performance_management import (
+from backend.domains.business.routers.performance_management import (
     _apply_ranking_policy,
     _build_performance_alert_payloads,
 )

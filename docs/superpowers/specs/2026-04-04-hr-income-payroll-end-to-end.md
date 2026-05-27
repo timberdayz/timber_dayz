@@ -1,4 +1,4 @@
-# HR Income Payroll End-to-End
+﻿# HR Income Payroll End-to-End
 
 ## Goal
 
@@ -83,7 +83,7 @@ flowchart TD
 
 入口：
 
-- `backend/routers/performance_management.py`
+- `backend/domains/business/routers/performance_management.py`
 - `POST /performance/scores/calculate`
 
 逻辑：
@@ -179,8 +179,8 @@ stateDiagram-v2
 
 ### 绩效管理 / 绩效公示
 
-- `frontend/src/views/hr/PerformanceManagement.vue`
-- `frontend/src/views/hr/PerformanceDisplay.vue`
+- `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
+- `frontend/src/domains/business/views/hr/PerformanceDisplay.vue`
 
 使用：
 
@@ -194,7 +194,7 @@ stateDiagram-v2
 
 ### 我的收入
 
-- `frontend/src/views/hr/MyIncome.vue`
+- `frontend/src/domains/business/views/hr/MyIncome.vue`
 
 使用：
 
@@ -209,7 +209,7 @@ stateDiagram-v2
 
 ### 工资单管理
 
-- `frontend/src/views/HumanResources.vue`
+- `frontend/src/domains/business/views/HumanResources.vue`
 
 使用：
 
@@ -246,3 +246,4 @@ stateDiagram-v2
 - 外部支付 / 财务系统联动
 - 冲突明细在 HR 页面里的专门列表化展示
 - 更细粒度的工资单权限模型
+

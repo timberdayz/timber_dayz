@@ -1,4 +1,4 @@
-# Active Components And Archive Isolation Implementation Plan
+﻿# Active Components And Archive Isolation Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -42,16 +42,16 @@ This plan does **not** include:
   - Refuse runtime resolution for non-active or archive-only components once the guard is enabled.
 - `backend/services/component_version_service.py`
   - Add guard helpers for active/stable/archive checks where version selection or promotion occurs.
-- `backend/routers/component_versions.py`
+- `backend/domains/collection/routers/component_versions.py`
   - Default list/register/promote flows should prefer active V2 components and reject archive targets.
 - `modules/apps/collection_center/component_loader.py`
   - Reject or clearly mark archive paths when loading Python components by file path.
 
 ### Modified frontend/docs files
 
-- `frontend/src/views/ComponentVersions.vue`
+- `frontend/src/domains/collection/views/ComponentVersions.vue`
   - Default UX should communicate active vs archive-only status.
-- `frontend/src/views/ComponentRecorder.vue`
+- `frontend/src/domains/collection/views/ComponentRecorder.vue`
   - Recorder should direct users toward active canonical components only.
 - `docs/guides/CANONICAL_COLLECTION_COMPONENTS.md`
   - Cross-link to active component and archive policy.
@@ -176,8 +176,8 @@ git commit -m "refactor: guard runtime resolution with active component manifest
 ### Task 3: Guard Registration And Default Management Surfaces
 
 **Files:**
-- Modify: `backend/routers/component_versions.py`
-- Modify: `frontend/src/views/ComponentVersions.vue`
+- Modify: `backend/domains/collection/routers/component_versions.py`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
 - Modify: `frontend/scripts/componentVersionsVerificationUi.test.mjs`
 
 - [ ] **Step 1: Write failing registration/UI tests**
@@ -222,7 +222,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/component_versions.py frontend/src/views/ComponentVersions.vue frontend/scripts/componentVersionsVerificationUi.test.mjs
+git add backend/domains/collection/routers/component_versions.py frontend/src/domains/collection/views/ComponentVersions.vue frontend/scripts/componentVersionsVerificationUi.test.mjs
 git commit -m "refactor: isolate archive components from default management surfaces"
 ```
 
@@ -328,7 +328,7 @@ Expected: PASS
 Run:
 
 ```bash
-python -m py_compile backend/services/active_collection_components.py backend/services/component_runtime_resolver.py backend/services/component_version_service.py backend/routers/component_versions.py modules/apps/collection_center/component_loader.py
+python -m py_compile backend/services/active_collection_components.py backend/services/component_runtime_resolver.py backend/services/component_version_service.py backend/domains/collection/routers/component_versions.py modules/apps/collection_center/component_loader.py
 ```
 
 Expected: no output
@@ -355,3 +355,4 @@ Do not move large batches of legacy files before the guards in this plan are liv
 ---
 
 Plan complete and saved to `docs/superpowers/plans/2026-03-27-active-components-and-archive-isolation.md`. Ready to execute?
+

@@ -1,4 +1,4 @@
-# Contract-First P1任务完成报告 (2025-12-19)
+﻿# Contract-First P1任务完成报告 (2025-12-19)
 
 ## 执行概述
 
@@ -14,7 +14,7 @@
 
 **问题描述**:
 - `backend/routers/performance.py` (系统性能监控)
-- `backend/routers/performance_management.py` (员工绩效管理)
+- `backend/domains/business/routers/performance_management.py` (员工绩效管理)
 - 两个路由都使用 `prefix="/performance"`，造成路径冲突
 
 **解决方案**:
@@ -234,4 +234,5 @@ Summary:
 **报告生成**: 2025-12-19  
 **执行人**: AI Agent  
 **状态**: ✅ P1任务全部完成，schemas覆盖率提升至33%
+
 

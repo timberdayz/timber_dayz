@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from backend.dependencies.auth import get_current_user
-from backend.routers.dashboard_api_postgresql import router
+from backend.domains.business.routers.dashboard_api_postgresql import router
 from backend.services.postgresql_dashboard_service import PostgresqlDashboardService
 
 

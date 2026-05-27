@@ -1,4 +1,4 @@
-# Miaoshou Orders Export V2 Migration Implementation Plan
+﻿# Miaoshou Orders Export V2 Migration Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -23,7 +23,7 @@
 
 - Modify: `modules/apps/collection_center/python_component_adapter.py`
   - Only if orders-export loading or domain/sub-domain handling needs additional V2 tightening.
-- Modify: `backend/routers/component_versions.py`
+- Modify: `backend/domains/collection/routers/component_versions.py`
   - Only if component test runtime config for orders export needs a targeted patch.
 
 ### Tests
@@ -228,3 +228,4 @@ git commit -m "test: verify miaoshou orders export v2 migration"
 ---
 
 Plan complete and saved to `docs/superpowers/plans/2026-03-27-miaoshou-orders-export-v2-migration.md`. Ready to execute?
+

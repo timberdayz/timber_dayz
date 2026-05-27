@@ -170,7 +170,7 @@ def test_prepare_account_info_ignores_invalid_nonnumeric_shopee_shop_id_and_uses
 def test_component_versions_router_uses_shop_account_loader_without_platform_account_fallback():
     text = (
         Path(__file__).resolve().parents[2]
-        / "backend/routers/component_versions.py"
+        / "backend/domains/collection/routers/component_versions.py"
     ).read_text(encoding="utf-8")
 
     assert "get_shop_account_loader_service" in text

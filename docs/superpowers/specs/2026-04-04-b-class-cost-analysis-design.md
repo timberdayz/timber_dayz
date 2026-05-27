@@ -1,4 +1,4 @@
-# B类成本分析页面设计
+﻿# B类成本分析页面设计
 
 ## 1. 背景
 
@@ -298,7 +298,7 @@
 
 ### 6.5 backend 路由建议
 
-在 [dashboard_api_postgresql.py](/F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/dashboard_api_postgresql.py) 新增独立路由，而不是复用 annual summary 接口。
+在 [dashboard_api_postgresql.py](/F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/business/routers/dashboard_api_postgresql.py) 新增独立路由，而不是复用 annual summary 接口。
 
 建议接口：
 
@@ -484,3 +484,4 @@ B 类页按店铺展示时，必须统一店铺口径。
 本设计建议新增独立的 `B类成本分析` 页面，第一期以“店铺月汇总 + 订单明细下钻”为核心，不做导出、不做编辑，并按仓库当前 PostgreSQL Dashboard 标准链路落地。
 
 这样可以在最小范围内补齐 B 类成本前端可见性，同时避免把 A 类录入页、年度总览页和 B 类订单成本工作台混在一起。
+

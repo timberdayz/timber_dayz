@@ -1,4 +1,4 @@
-# 前端视图响应处理更新检查清单
+﻿# 前端视图响应处理更新检查清单
 
 **创建日期**: 2025-11-21  
 **目的**: 确保所有前端视图正确处理统一API响应格式
@@ -102,7 +102,7 @@ try {
 
 ---
 
-### 3. `frontend/src/views/hr/PerformanceManagement.vue`
+### 3. `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
 
 **状态**: ✅ 已修复
 
@@ -168,7 +168,7 @@ try {
 - ✅ `frontend/src/views/BusinessOverview.vue` - ✅ 已完全更新（修复formatCurrency导入和ElTag type警告）
 - ✅ `frontend/src/views/store/StoreAnalytics.vue` - ✅ 已完全更新（所有API调用，修复语法错误）
 - ✅ `frontend/src/views/target/TargetManagement.vue` - ✅ 已完全更新（所有API调用）
-- ✅ `frontend/src/views/hr/PerformanceManagement.vue` - ✅ 已完全更新（所有API调用）
+- ✅ `frontend/src/domains/business/views/hr/PerformanceManagement.vue` - ✅ 已完全更新（所有API调用）
 
 ## 📊 更新统计
 
@@ -227,4 +227,5 @@ try {
 - [API契约标准](API_CONTRACTS.md)
 - [前端API调用验证](FRONTEND_API_CALL_VALIDATION.md)
 - [Mock数据替换测试报告](MOCK_DATA_REPLACEMENT_TEST_REPORT.md)
+
 

@@ -7,8 +7,8 @@
 
 from fastapi import APIRouter
 
-import backend.routers.users_admin as legacy_admin_module
-import backend.routers.users_me as legacy_me_module
+import backend.domains.platform.routers.users_admin as legacy_admin_module
+import backend.domains.platform.routers.users_me as legacy_me_module
 
 # SSOT: 权限依赖已迁移至 backend.dependencies.auth，此处 re-export 保持向后兼容
 from backend.dependencies.auth import require_admin  # noqa: F401

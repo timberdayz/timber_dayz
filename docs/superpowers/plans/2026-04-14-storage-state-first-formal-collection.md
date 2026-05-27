@@ -1,4 +1,4 @@
-# Storage-State-First Formal Collection Implementation Plan
+﻿# Storage-State-First Formal Collection Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -16,7 +16,7 @@
   Responsibility: become the single owner of runtime mode selection, fallback rules, gate evaluation, and post-login session persistence.
 - Modify: `modules/apps/collection_center/executor_v2.py`
   Responsibility: stop hard-coding profile-first sequential collection; request a shared runtime strategy decision instead.
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
   Responsibility: stop forcing `session_runtime_mode="persistent_profile"` for formal collection entry points.
 - Modify: `tools/test_component.py`
   Responsibility: consume the same runtime strategy decision used by formal collection instead of its own private default.
@@ -236,7 +236,7 @@ git commit -m "refactor: add storage-state-first runtime strategy"
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/tests/test_collection_executor_session_alignment.py`
 
 - [ ] **Step 1: Remove hard-coded profile-first mode from formal collection entry points**
@@ -302,7 +302,7 @@ Expected: PASS, or any failures are limited to old profile-first assumptions and
 - [ ] **Step 7: Commit the formal collection switch**
 
 ```bash
-git add modules/apps/collection_center/executor_v2.py backend/routers/collection_tasks.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_executor_headful_fallback.py tests/test_executor_v2.py
+git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_executor_headful_fallback.py tests/test_executor_v2.py
 git commit -m "refactor: switch formal collection to storage-state-first"
 ```
 
@@ -370,7 +370,7 @@ git commit -m "refactor: align component tester runtime strategy"
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py`
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `backend/tests/test_collection_task_runtime_metadata.py`
 
 - [ ] **Step 1: Record runtime strategy diagnostics in task metadata**
@@ -399,7 +399,7 @@ Expected: PASS
 - [ ] **Step 4: Commit telemetry improvements**
 
 ```bash
-git add modules/apps/collection_center/executor_v2.py backend/routers/collection_tasks.py backend/tests/test_collection_task_runtime_metadata.py
+git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/tests/test_collection_task_runtime_metadata.py
 git commit -m "feat: expose collection runtime strategy diagnostics"
 ```
 
@@ -433,14 +433,15 @@ Expected: all targeted runtime/session tests pass.
 
 - [ ] **Step 3: Review scope discipline**
 
-Run: `git diff -- modules/apps/collection_center/runtime_session.py modules/apps/collection_center/executor_v2.py backend/routers/collection_tasks.py tools/test_component.py modules/utils/login_status_detector.py modules/apps/collection_center/transition_gates.py backend/tests docs/superpowers/plans`
+Run: `git diff -- modules/apps/collection_center/runtime_session.py modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py tools/test_component.py modules/utils/login_status_detector.py modules/apps/collection_center/transition_gates.py backend/tests docs/superpowers/plans`
 Expected: changes stay limited to runtime strategy, gate evaluation, diagnostics, and their tests.
 
 - [ ] **Step 4: Record final implementation commit**
 
 ```bash
-git add modules/apps/collection_center/runtime_session.py modules/apps/collection_center/executor_v2.py backend/routers/collection_tasks.py tools/test_component.py modules/utils/login_status_detector.py modules/apps/collection_center/transition_gates.py backend/tests docs/superpowers/plans
+git add modules/apps/collection_center/runtime_session.py modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py tools/test_component.py modules/utils/login_status_detector.py modules/apps/collection_center/transition_gates.py backend/tests docs/superpowers/plans
 git commit -m "refactor: make formal collection storage-state-first"
 ```
 
 Plan complete and saved to `docs/superpowers/plans/2026-04-14-storage-state-first-formal-collection.md`. Ready to execute?
+

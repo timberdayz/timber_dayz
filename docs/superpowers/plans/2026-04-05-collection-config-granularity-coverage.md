@@ -1,4 +1,4 @@
-# Collection Config Granularity And Coverage Implementation Plan
+﻿# Collection Config Granularity And Coverage Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -14,7 +14,7 @@
 
 ### Existing files to modify
 
-- `frontend/src/views/collection/CollectionConfig.vue`
+- `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
   Responsibility: main collection config management page; will gain daily/weekly/monthly tabs, grouped shop-account selector, auto-apply capability behavior, and coverage warning panels.
 - `frontend/src/api/collection.js`
   Responsibility: frontend collection config API wrapper; will gain coverage query and any grouped account query helpers required by the new UI.
@@ -143,7 +143,7 @@ git commit -m "feat: add collection config coverage and grouped shop account API
 ### Task 3: Auto-Apply Shop Account Capabilities In The Config UI
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/src/constants/collection.js`
 - Modify: `frontend/src/api/collection.js`
 - Test: `frontend/scripts/collectionConfigGranularityUi.test.mjs`
@@ -186,14 +186,14 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue frontend/src/constants/collection.js frontend/src/api/collection.js frontend/scripts/collectionConfigGranularityUi.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/constants/collection.js frontend/src/api/collection.js frontend/scripts/collectionConfigGranularityUi.test.mjs
 git commit -m "feat: auto-apply shop account capabilities in collection config"
 ```
 
 ### Task 4: Split The Config Page Into Daily Weekly Monthly Views
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/src/api/collection.js`
 - Test: `frontend/scripts/collectionConfigGranularityUi.test.mjs`
 
@@ -234,14 +234,14 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue frontend/src/api/collection.js frontend/scripts/collectionConfigGranularityUi.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/api/collection.js frontend/scripts/collectionConfigGranularityUi.test.mjs
 git commit -m "feat: organize collection configs by daily weekly monthly views"
 ```
 
 ### Task 5: Add Coverage Warning Panels And Missing-Shop Guidance
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `frontend/src/api/collection.js`
 - Test: `frontend/scripts/collectionConfigGranularityUi.test.mjs`
 - Test: `backend/tests/test_collection_config_coverage_api.py`
@@ -285,14 +285,14 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue frontend/src/api/collection.js backend/tests/test_collection_config_coverage_api.py frontend/scripts/collectionConfigGranularityUi.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue frontend/src/api/collection.js backend/tests/test_collection_config_coverage_api.py frontend/scripts/collectionConfigGranularityUi.test.mjs
 git commit -m "feat: add collection config coverage warnings by granularity"
 ```
 
 ### Task 6: Add Main Account And Region Grouped Shop Selection
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionConfig.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionConfig.vue`
 - Modify: `backend/routers/collection_config.py`
 - Modify: `backend/schemas/collection.py`
 - Test: `backend/tests/test_collection_config_coverage_api.py`
@@ -337,7 +337,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionConfig.vue backend/routers/collection_config.py backend/schemas/collection.py backend/tests/test_collection_config_coverage_api.py frontend/scripts/collectionConfigGranularityUi.test.mjs
+git add frontend/src/domains/collection/views/collection/CollectionConfig.vue backend/routers/collection_config.py backend/schemas/collection.py backend/tests/test_collection_config_coverage_api.py frontend/scripts/collectionConfigGranularityUi.test.mjs
 git commit -m "feat: group collection shop selectors by main account and region"
 ```
 
@@ -391,4 +391,5 @@ Check in the browser:
 git add .
 git commit -m "feat: upgrade collection config management by granularity and coverage"
 ```
+
 

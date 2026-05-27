@@ -1,4 +1,4 @@
-# Monthly Profit Settlement Runbook
+﻿# Monthly Profit Settlement Runbook
 
 > 涉及店铺赛马、观察池、黄牌/红牌、淘汰评估与挂店人提成继承口径时，请优先参见 `docs/guides/PERFORMANCE_RACING_POLICY.md`。
 
@@ -98,7 +98,7 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 对应页面：
 
-- `frontend/src/views/FinancialManagement.vue`
+- `frontend/src/domains/business/views/FinancialManagement.vue`
 
 后端接口：
 
@@ -363,3 +363,4 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 说明：
 - 这套规则当前是财务结算中心页面的正式前端口径，主要用于联调和人工核对
 - 如果后续业务确认需要把“可月结 / 异常”上升为后端统一规则，应再同步到后端接口或月结聚合服务
+

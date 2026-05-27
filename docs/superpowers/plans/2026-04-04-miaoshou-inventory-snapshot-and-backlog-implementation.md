@@ -1,4 +1,4 @@
-# Miaoshou Inventory Snapshot And Backlog Implementation Plan
+﻿# Miaoshou Inventory Snapshot And Backlog Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -25,7 +25,7 @@
 
 - Modify: `backend/services/data_pipeline/refresh_registry.py`
 - Modify: `backend/services/postgresql_dashboard_service.py`
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 - Modify: `backend/schemas/inventory_overview.py`
 - Modify: `backend/schemas/__init__.py`
 - Modify: `backend/services/inventory/overview_service.py`
@@ -309,7 +309,7 @@ git commit -m "feat(backlog): add stagnation-aware service ranking"
 
 **Files:**
 - Modify: `backend/tests/data_pipeline/test_postgresql_dashboard_router.py`
-- Modify: `backend/routers/dashboard_api_postgresql.py`
+- Modify: `backend/domains/business/routers/dashboard_api_postgresql.py`
 - Modify: `backend/schemas/inventory_overview.py`
 - Modify: `backend/schemas/__init__.py`
 
@@ -339,7 +339,7 @@ In `backend/schemas/inventory_overview.py`, add response models for:
 
 - [ ] **Step 4: Update router payload normalization**
 
-Modify `backend/routers/dashboard_api_postgresql.py` so the backlog and clearance endpoints return stable, explicit payloads that match the frontend expectations.
+Modify `backend/domains/business/routers/dashboard_api_postgresql.py` so the backlog and clearance endpoints return stable, explicit payloads that match the frontend expectations.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -350,7 +350,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/tests/data_pipeline/test_postgresql_dashboard_router.py backend/routers/dashboard_api_postgresql.py backend/schemas/inventory_overview.py backend/schemas/__init__.py
+git add backend/tests/data_pipeline/test_postgresql_dashboard_router.py backend/domains/business/routers/dashboard_api_postgresql.py backend/schemas/inventory_overview.py backend/schemas/__init__.py
 git commit -m "feat(backlog): stabilize dashboard router payloads"
 ```
 
@@ -515,3 +515,4 @@ git commit -m "feat(backlog): finalize miaoshou snapshot backlog mainline"
   - `stagnant_snapshot_count`
   - `estimated_stagnant_days`
   - true inventory age (future capability)
+

@@ -162,7 +162,7 @@ def test_inventory_domain_preserves_original_sku_header_names():
 def test_field_mapping_ingest_uses_orders_domain_specific_normalization():
     from pathlib import Path
 
-    text = Path("backend/routers/field_mapping_ingest.py").read_text(encoding="utf-8")
+    text = Path("backend/domains/data_platform/routers/field_mapping_ingest.py").read_text(encoding="utf-8")
 
     assert "normalize_row_fields_for_domain(" in text
 
@@ -170,7 +170,7 @@ def test_field_mapping_ingest_uses_orders_domain_specific_normalization():
 def test_field_mapping_ingest_loads_template_field_parse_rules_for_b_class_import():
     from pathlib import Path
 
-    text = Path("backend/routers/field_mapping_ingest.py").read_text(encoding="utf-8")
+    text = Path("backend/domains/data_platform/routers/field_mapping_ingest.py").read_text(encoding="utf-8")
 
     assert "_load_field_parse_rules_for_file(" in text
     assert "raw_data_importer.field_parse_rules = field_parse_rules" in text
@@ -179,7 +179,7 @@ def test_field_mapping_ingest_loads_template_field_parse_rules_for_b_class_impor
 def test_field_mapping_ingest_blocks_legacy_fallback_when_template_parse_rules_fail():
     from pathlib import Path
 
-    text = Path("backend/routers/field_mapping_ingest.py").read_text(encoding="utf-8")
+    text = Path("backend/domains/data_platform/routers/field_mapping_ingest.py").read_text(encoding="utf-8")
 
     assert 'getattr(raw_data_importer, "field_parse_rules", None)' in text
     assert "and staged == 0" in text

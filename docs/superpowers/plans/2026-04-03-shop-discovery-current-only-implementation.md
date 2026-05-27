@@ -1,4 +1,4 @@
-# Shop Discovery Current Only Implementation Plan
+﻿# Shop Discovery Current Only Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -16,7 +16,7 @@
 **Backend contracts and API**
 - Modify: `backend/schemas/platform_shop_discovery.py`
 - Modify: `backend/routers/platform_shop_discoveries.py`
-- Modify: `backend/routers/main_accounts.py`
+- Modify: `backend/domains/collection/routers/main_accounts.py`
 - Modify: `backend/main.py`
 - Modify: `backend/src` is not used in this repository and must not be introduced
 - Test: `backend/tests/test_platform_shop_discoveries_api.py`
@@ -42,7 +42,7 @@
 - Test: `frontend/scripts/accountManagementShopDiscoveryUi.test.mjs`
 
 **Component test fallback**
-- Modify: `frontend/src/views/ComponentVersions.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
 - Test: `frontend/scripts/componentVersionsShopDiscoveryFallback.test.mjs`
 
 ## Task 1: Define Discovery Contracts and Main-Account Discovery APIs
@@ -50,7 +50,7 @@
 **Files:**
 - Create: `backend/schemas/shop_discovery.py`
 - Modify: `backend/schemas/platform_shop_discovery.py`
-- Modify: `backend/routers/main_accounts.py`
+- Modify: `backend/domains/collection/routers/main_accounts.py`
 - Modify: `backend/routers/platform_shop_discoveries.py`
 - Modify: `backend/main.py`
 - Test: `backend/tests/test_main_accounts_shop_discovery_api.py`
@@ -125,7 +125,7 @@ Expected: PASS
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/schemas/shop_discovery.py backend/schemas/platform_shop_discovery.py backend/routers/main_accounts.py backend/routers/platform_shop_discoveries.py backend/main.py backend/tests/test_main_accounts_shop_discovery_api.py backend/tests/test_platform_shop_discoveries_api.py
+git add backend/schemas/shop_discovery.py backend/schemas/platform_shop_discovery.py backend/domains/collection/routers/main_accounts.py backend/routers/platform_shop_discoveries.py backend/main.py backend/tests/test_main_accounts_shop_discovery_api.py backend/tests/test_platform_shop_discoveries_api.py
 git commit -m "feat: add main account shop discovery APIs"
 ```
 
@@ -358,7 +358,7 @@ git commit -m "feat: add account management shop discovery flow"
 ## Task 5: Add Component-Test Fallback Trigger Without Breaking Shop-Scoped Testing
 
 **Files:**
-- Modify: `frontend/src/views/ComponentVersions.vue`
+- Modify: `frontend/src/domains/collection/views/ComponentVersions.vue`
 - Test: `frontend/scripts/componentVersionsShopDiscoveryFallback.test.mjs`
 
 - [ ] **Step 1: Write the failing component-versions fallback UI test**
@@ -396,7 +396,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src/views/ComponentVersions.vue frontend/scripts/componentVersionsShopDiscoveryFallback.test.mjs
+git add frontend/src/domains/collection/views/ComponentVersions.vue frontend/scripts/componentVersionsShopDiscoveryFallback.test.mjs
 git commit -m "feat: add component test shop discovery fallback"
 ```
 
@@ -444,3 +444,4 @@ Expected: PASS
 git add docs/guides/account_health_system.md docs/guides/CANONICAL_COLLECTION_COMPONENTS.md
 git commit -m "docs: align shop discovery operator guides"
 ```
+

@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_financial_management_page_exposes_follow_investment_sections():
-    text = Path("frontend/src/views/FinancialManagement.vue").read_text(encoding="utf-8")
+    text = Path("frontend/src/domains/business/views/FinancialManagement.vue").read_text(encoding="utf-8")
 
     assert "利润分配基准" in text
     assert "跟投记录" in text
@@ -22,5 +22,5 @@ def test_backend_registers_follow_investment_routers():
     assert "follow_investment" in main_text
     assert "profit_basis" in main_text
 
-    assert Path("backend/routers/follow_investment.py").exists()
-    assert Path("backend/routers/profit_basis.py").exists()
+    assert Path("backend/domains/business/routers/follow_investment.py").exists()
+    assert Path("backend/domains/business/routers/profit_basis.py").exists()

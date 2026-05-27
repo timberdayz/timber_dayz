@@ -1,4 +1,4 @@
-# Main Account Session Coordination Implementation Plan
+﻿# Main Account Session Coordination Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -23,7 +23,7 @@
 
 - `modules/apps/collection_center/executor_v2.py`
   Responsibility: split runtime into shared-state and task-private phases; integrate coordinator; remove unsafe same-main-account concurrent login/shop-switch behavior.
-- `backend/routers/collection_tasks.py`
+- `backend/domains/collection/routers/collection_tasks.py`
   Responsibility: expose waiting/preparing/current-step transitions for main-account coordination.
 - `modules/platforms/shopee/components/login.py`
   Responsibility: narrow login responsibility to authenticated platform-shell readiness and stop conflating shop readiness with login success.
@@ -37,7 +37,7 @@
   Responsibility: extend reuse tests to cover same-main-account concurrent execution boundaries.
 - `backend/tests/test_collection_frontend_contracts.py`
   Responsibility: lock task UI contract expectations for the new waiting/preparing step labels.
-- `frontend/src/views/collection/CollectionTasks.vue`
+- `frontend/src/domains/collection/views/collection/CollectionTasks.vue`
   Responsibility: consume and render the new waiting/preparing task-step text cleanly if any explicit status-label mapping is needed.
 
 ### Existing files to inspect during implementation
@@ -208,7 +208,7 @@ git commit -m "fix: decouple login success from shop-specific readiness"
 ## Task 4: Expose Main-Account Coordination States To Tasks
 
 **Files:**
-- Modify: `backend/routers/collection_tasks.py`
+- Modify: `backend/domains/collection/routers/collection_tasks.py`
 - Modify: `modules/apps/collection_center/executor_v2.py`
 - Test: `backend/tests/test_collection_task_status_contract.py`
 - Test: `backend/tests/test_collection_frontend_contracts.py`
@@ -256,14 +256,14 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/routers/collection_tasks.py modules/apps/collection_center/executor_v2.py backend/tests/test_collection_task_status_contract.py backend/tests/test_collection_frontend_contracts.py
+git add backend/domains/collection/routers/collection_tasks.py modules/apps/collection_center/executor_v2.py backend/tests/test_collection_task_status_contract.py backend/tests/test_collection_frontend_contracts.py
 git commit -m "feat: expose main account coordination task steps"
 ```
 
 ## Task 5: Minimal Task UI Wiring
 
 **Files:**
-- Modify: `frontend/src/views/collection/CollectionTasks.vue`
+- Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue`
 - Test: `backend/tests/test_collection_frontend_contracts.py`
 
 - [ ] **Step 1: Add failing assertions if needed**
@@ -300,7 +300,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/collection/CollectionTasks.vue backend/tests/test_collection_frontend_contracts.py
+git add frontend/src/domains/collection/views/collection/CollectionTasks.vue backend/tests/test_collection_frontend_contracts.py
 git commit -m "feat: surface main account coordination states in task ui"
 ```
 
@@ -309,10 +309,10 @@ git commit -m "feat: surface main account coordination states in task ui"
 **Files:**
 - Verify: `backend/services/main_account_session_coordinator.py`
 - Verify: `modules/apps/collection_center/executor_v2.py`
-- Verify: `backend/routers/collection_tasks.py`
+- Verify: `backend/domains/collection/routers/collection_tasks.py`
 - Verify: `modules/platforms/shopee/components/login.py`
 - Verify: `modules/utils/login_status_detector.py`
-- Verify: `frontend/src/views/collection/CollectionTasks.vue`
+- Verify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue`
 
 - [ ] **Step 1: Run backend verification**
 
@@ -340,7 +340,7 @@ Expected: PASS
 Run:
 
 ```bash
-python -m py_compile backend/services/main_account_session_coordinator.py backend/routers/collection_tasks.py modules/apps/collection_center/executor_v2.py modules/platforms/shopee/components/login.py modules/utils/login_status_detector.py
+python -m py_compile backend/services/main_account_session_coordinator.py backend/domains/collection/routers/collection_tasks.py modules/apps/collection_center/executor_v2.py modules/platforms/shopee/components/login.py modules/utils/login_status_detector.py
 ```
 
 Expected: PASS
@@ -368,3 +368,4 @@ git commit -m "feat: coordinate same-main-account collection session preparation
 - Favor current-step reporting over persisted-status explosion.
 - The initial first-pass platform behavior should be validated on Shopee because that is where the concrete evidence exists, but the coordinator API must remain platform-agnostic.
 - Shop-neutral login-entry cleanup should not mutate unrelated account-management UI in this phase; keep it runtime-focused unless a supporting admin fix is unavoidable.
+

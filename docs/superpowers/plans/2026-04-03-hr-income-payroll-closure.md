@@ -1,4 +1,4 @@
-# HR Income Payroll Closure Implementation Plan
+﻿# HR Income Payroll Closure Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -60,7 +60,7 @@ Run: `pytest backend/tests/test_payroll_generation_service.py -v`
 ### Task 3: Wire payroll generation into performance recalculation
 
 **Files:**
-- Modify: `backend/routers/performance_management.py`
+- Modify: `backend/domains/business/routers/performance_management.py`
 
 - [ ] **Step 1: Integrate `PayrollGenerationService` after income recalculation**
 
@@ -73,7 +73,7 @@ Run: `pytest backend/tests/test_add_performance_income_acceptance.py -k "calcula
 ### Task 4: Close backend payroll APIs
 
 **Files:**
-- Modify: `backend/routers/hr_salary.py`
+- Modify: `backend/domains/business/routers/hr_salary.py`
 - Modify: `backend/schemas/hr.py`
 
 - [ ] **Step 1: Add payroll detail/update/confirm/reopen schemas if needed**
@@ -93,7 +93,7 @@ Run: `pytest backend/tests/test_payroll_generation_service.py backend/tests/test
 ### Task 5: Make my-income payroll-only
 
 **Files:**
-- Modify: `backend/routers/hr_employee.py`
+- Modify: `backend/domains/business/routers/hr_employee.py`
 - Modify: `backend/schemas/hr.py`
 - Modify: `backend/tests/test_add_performance_income_acceptance.py`
 
@@ -111,8 +111,8 @@ Run: `pytest backend/tests/test_add_performance_income_acceptance.py -k "my_inco
 
 **Files:**
 - Modify: `frontend/src/api/index.js`
-- Modify: `frontend/src/views/hr/MyIncome.vue`
-- Modify: `frontend/src/views/HumanResources.vue`
+- Modify: `frontend/src/domains/business/views/hr/MyIncome.vue`
+- Modify: `frontend/src/domains/business/views/HumanResources.vue`
 
 - [ ] **Step 1: Add payroll detail/update/confirm/reopen API wrappers**
 
@@ -136,3 +136,4 @@ Run: `pytest backend/tests/test_payroll_generation_service.py backend/tests/test
 - [ ] **Step 2: Run any available frontend verification for modified files**
 
 - [ ] **Step 3: Record results and residual risks in planning files**
+

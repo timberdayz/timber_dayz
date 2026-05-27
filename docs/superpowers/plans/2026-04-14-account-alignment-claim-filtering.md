@@ -1,4 +1,4 @@
-# Account Alignment Claim Filtering Implementation Plan
+﻿# Account Alignment Claim Filtering Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -38,7 +38,7 @@ Expected: FAIL because the API currently allows reassignment and the view does n
 ### Task 2: Implement Minimal Frontend And Backend Changes
 
 **Files:**
-- Modify: `backend/routers/shop_account_aliases.py`
+- Modify: `backend/domains/collection/routers/shop_account_aliases.py`
 - Modify: `frontend/src/views/AccountAlignment.vue`
 
 - [ ] **Step 1: Add minimal backend protection**
@@ -85,5 +85,6 @@ Expected: PASS
 
 - [ ] **Step 2: Review for regressions**
 
-Run: `git diff -- backend/routers/shop_account_aliases.py frontend/src/views/AccountAlignment.vue backend/tests/test_shop_account_aliases_api.py backend/tests/test_account_alignment_frontend_contract.py`
+Run: `git diff -- backend/domains/collection/routers/shop_account_aliases.py frontend/src/views/AccountAlignment.vue backend/tests/test_shop_account_aliases_api.py backend/tests/test_account_alignment_frontend_contract.py`
 Expected: only the planned filtering, guard, message, and regression-test changes
+

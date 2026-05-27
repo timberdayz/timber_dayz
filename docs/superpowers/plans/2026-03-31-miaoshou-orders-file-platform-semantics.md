@@ -1,4 +1,4 @@
-# Miaoshou Orders File Platform Semantics Implementation Plan
+﻿# Miaoshou Orders File Platform Semantics Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -46,7 +46,7 @@ Expected: PASS
 ### Task 3: Update File Grouping Read Semantics
 
 **Files:**
-- Modify: `backend/routers/field_mapping_files.py`
+- Modify: `backend/domains/data_platform/routers/field_mapping_files.py`
 
 - [ ] **Step 1: Group and list files by `platform_code`**
 
@@ -65,3 +65,4 @@ Run: `pytest backend/tests/test_file_registration_service_platform_semantics.py 
 - [ ] **Step 2: If stable, run an adjacent regression test**
 
 Run: `pytest backend/tests/test_field_mapping_scan_pure_registration.py -q`
+

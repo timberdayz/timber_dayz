@@ -1,4 +1,4 @@
-# 主账号 / 店铺账号切换 Runbook
+﻿# 主账号 / 店铺账号切换 Runbook
 
 **适用范围**
 - 本次 `main_accounts / shop_accounts / shop_account_aliases / shop_account_capabilities / platform_shop_discoveries` 重构上线
@@ -278,7 +278,7 @@ Invoke-WebRequest http://127.0.0.1:8001/api/health -UseBasicParsing
 
 ### 7.2 组件版本页
 
-页面: [ComponentVersions.vue](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/views/ComponentVersions.vue)
+页面: [ComponentVersions.vue](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/domains/collection/views/ComponentVersions.vue)
 
 验收项:
 - 测试弹窗显示“测试店铺”
@@ -378,3 +378,4 @@ python -m alembic downgrade 20260401_public_alembic_archive
 - 至少一个真实主账号下的多店铺测试验证会话复用成功
 
 只要以上任一项未通过，就不要宣布切换完成。
+

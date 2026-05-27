@@ -1,4 +1,4 @@
-# Store Analysis Redesign
+﻿# Store Analysis Redesign
 
 ## Goal
 
@@ -23,7 +23,7 @@ Relevant anchors in the current repository:
 - Analytics semantic view: `sql/semantic/analytics_atomic.sql`
 - Existing store-level mart: `sql/mart/shop_day_kpi.sql`, `sql/mart/shop_week_kpi.sql`, `sql/mart/shop_month_kpi.sql`
 - Existing dashboard API modules: `sql/api_modules/business_overview_shop_racing_module.sql`, `sql/api_modules/business_overview_traffic_ranking_module.sql`, `sql/api_modules/business_overview_operational_metrics_module.sql`
-- Router/service runtime: `backend/routers/dashboard_api_postgresql.py`, `backend/services/postgresql_dashboard_service.py`
+- Router/service runtime: `backend/domains/business/routers/dashboard_api_postgresql.py`, `backend/services/postgresql_dashboard_service.py`
 - Current company dashboard page: `frontend/src/views/BusinessOverview.vue`
 
 ## Why Rebuild Instead Of Repair
@@ -458,3 +458,4 @@ V1 should:
 - reserve TikTok hourly support for future source improvements
 
 This is the lowest-risk path that produces a useful store analysis module without reintroducing legacy route families or destabilizing active data sync.
+
