@@ -183,7 +183,7 @@ async def main() -> int:
                 f"- {'[OK]' if has_rank_score else '[FAIL]'} 6.3 绩效公示有数据展示排名与得分: period={period}, rows={len(data)}, has_rank_score={has_rank_score}"
             )
 
-    # 6.4b: calculate 后 c_class.performance_scores 新增记录（当前依赖外部提案）
+    # 6.4b: calculate 后 c_class.performance_scores 有效写入（新增或更新）
     calc_period = await _pick_calculate_period()
     config_id = await _ensure_config_for_period(calc_period)
     if not config_id:
@@ -193,11 +193,13 @@ async def main() -> int:
         async with AsyncSessionLocal() as db:
             resp = await calculate_performance_scores(period=calc_period, config_id=config_id, db=db)
             body = json.loads(resp.body.decode("utf-8"))
-            error_code = (body.get("data") or {}).get("error_code")
+            payload = body.get("data") or {}
+            error_code = payload.get("error_code")
         after = await _count_performance_scores(calc_period)
-        ok_64b = after > before
+        upserts = int(payload.get("shop_performance_upserts", 0) or 0)
+        ok_64b = bool(body.get("success")) and after >= before and upserts > 0
         lines.append(
-            f"- {'[OK]' if ok_64b else '[FAIL]'} 6.4b 调用 calculate 后新增 performance_scores: config_id={config_id}, period={calc_period}, before={before}, after={after}, error_code={error_code or 'N/A'}"
+            f"- {'[OK]' if ok_64b else '[FAIL]'} 6.4b 调用 calculate 后有效写入 performance_scores: config_id={config_id}, period={calc_period}, before={before}, after={after}, upserts={upserts}, error_code={error_code or 'N/A'}"
         )
         if not ok_64b and error_code == "PERF_CALC_NOT_READY":
             lines.append("- [INFO] 6.4b 当前受 add-performance-calculation-via-metabase 未落地影响，符合预期阻塞状态")

@@ -1062,7 +1062,7 @@ async def get_task_screenshot(
         raise HTTPException(status_code=404, detail="任务没有截图")
 
     if not PathLib(screenshot_path).is_absolute():
-        project_root = PathLib(__file__).parent.parent.parent
+        project_root = PathLib(__file__).resolve().parents[4]
         screenshot_path = str(project_root / screenshot_path)
 
     if not os.path.exists(screenshot_path):

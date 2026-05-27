@@ -466,7 +466,7 @@
       :verification-type="verificationType"
       :verification-input-mode="verificationInputMode"
       :screenshot-url="verificationScreenshotUrl"
-      :submitting="false"
+      :submitting="verificationSubmitting"
       :message="currentTask?.verification_message || currentTask?.current_step || ''"
       :error-message="''"
       :expires-at="currentTask?.verification_expires_at || ''"
@@ -533,6 +533,7 @@ const verificationScreenshot = ref('')
 const verificationScreenshotUrl = ref('')
 const verificationType = ref('')
 const verificationInputMode = ref('')
+const verificationSubmitting = ref(false)
 const verificationCode = ref('')
 const currentTask = ref(null)
 
@@ -691,6 +692,23 @@ const loadTasks = async () => {
 }
 
 const syncVerificationDialogFromTasks = (taskList) => {
+  const currentTaskFromList = currentTask.value?.task_id
+    ? (taskList || []).find((task) => task.task_id === currentTask.value.task_id)
+    : null
+
+  if (verificationDialogVisible.value && currentTaskFromList) {
+    const reenteredVerification = verificationSubmitting.value
+      && ['verification_required', 'paused', 'manual_intervention_required'].includes(currentTaskFromList.status)
+    syncVerificationDialogState(currentTaskFromList, { resetInput: reenteredVerification })
+    if (currentTaskFromList.status === 'verification_submitted') {
+      verificationSubmitting.value = true
+    } else if (reenteredVerification) {
+      verificationSubmitting.value = false
+      ElMessage.warning('验证码未通过或页面再次要求验证，请根据最新截图重新输入')
+    }
+    return
+  }
+
   const verificationTask = (taskList || []).find(
     (task) => isLegacyVerificationStatus(task)
       || (task.status === 'manual_intervention_required' && task.verification_type)
@@ -816,13 +834,23 @@ const retryTask = async (row) => {
   }
 }
 
-const showResumeDialog = (row) => {
+const getVerificationScreenshotUrl = (taskId) =>
+  taskId ? collectionApi.getTaskScreenshotUrl(taskId, { ts: Date.now() }) : ''
+
+const syncVerificationDialogState = (row, { resetInput = false } = {}) => {
   currentTask.value = row
-  verificationCode.value = ''
   verificationType.value = row.verification_type || ''
   verificationInputMode.value = row.verification_input_mode || ''
   verificationScreenshot.value = row.verification_screenshot || row.error_screenshot_path || ''
-  verificationScreenshotUrl.value = row.task_id ? collectionApi.getTaskScreenshotUrl(row.task_id) : ''
+  verificationScreenshotUrl.value = getVerificationScreenshotUrl(row.task_id)
+  if (resetInput) {
+    verificationCode.value = ''
+  }
+}
+
+const showResumeDialog = (row) => {
+  verificationSubmitting.value = false
+  syncVerificationDialogState(row, { resetInput: true })
   verificationDialogVisible.value = true
 }
 
@@ -838,11 +866,17 @@ const submitVerification = async (submitted) => {
     ? { manual_completed: true }
     : (isOtp ? { otp: code } : { captcha_code: code })
   try {
+    verificationSubmitting.value = true
     await collectionApi.resumeTask(currentTask.value.task_id, payload)
-    ElMessage.success('已提交，任务将自动继续')
-    verificationDialogVisible.value = false
+    if (currentTask.value) {
+      currentTask.value.status = 'verification_submitted'
+      currentTask.value.current_step = '用户已提交验证码，等待执行器继续'
+      currentTask.value.verification_message = '用户已提交验证码，等待执行器继续'
+    }
+    ElMessage.success('验证码已提交，系统正在校验并尝试继续执行')
     loadTasks()
   } catch (error) {
+    verificationSubmitting.value = false
     ElMessage.error('提交失败: ' + (error.response?.data?.detail || error.message))
   }
 }
@@ -851,6 +885,7 @@ const skipVerification = async () => {
   if (!currentTask.value) return
   
   try {
+    verificationSubmitting.value = false
     await collectionApi.cancelTask(currentTask.value.task_id)
     ElMessage.info('任务已跳过')
     verificationDialogVisible.value = false

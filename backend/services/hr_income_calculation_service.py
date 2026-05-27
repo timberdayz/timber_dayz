@@ -1,4 +1,4 @@
-"""
+﻿"""
 HR employee income C-class write service.
 
 Sources:
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 from sqlalchemy import select, text
@@ -232,22 +233,77 @@ class HRIncomeCalculationService:
         else:
             next_month = period_start.replace(month=period_start.month + 1, day=1)
 
-        rows = (
-            await self.db.execute(
-                select(AttendanceRecord).where(
-                    AttendanceRecord.employee_code.in_(employee_codes),
-                    AttendanceRecord.attendance_date >= period_start,
-                    AttendanceRecord.attendance_date < next_month,
+        try:
+            rows = (
+                await self.db.execute(
+                    select(AttendanceRecord).where(
+                        AttendanceRecord.employee_code.in_(employee_codes),
+                        AttendanceRecord.attendance_date >= period_start,
+                        AttendanceRecord.attendance_date < next_month,
+                    )
                 )
-            )
-        ).scalars().all()
+            ).scalars().all()
+        except Exception:
+            await self.db.rollback()
+            try:
+                rows = (
+                    await self.db.execute(
+                        text(
+                            """
+                            select
+                              "员工编号" as employee_code,
+                              "状态" as status
+                            from a_class.attendance_records
+                            where "员工编号" = any(:employee_codes)
+                              and "考勤日期" >= :period_start
+                              and "考勤日期" < :next_month
+                            """
+                        ),
+                        {
+                            "employee_codes": employee_codes,
+                            "period_start": period_start,
+                            "next_month": next_month,
+                        },
+                    )
+                ).mappings().all()
+            except Exception:
+                await self.db.rollback()
+                rows = (
+                    await self.db.execute(
+                        text(
+                            """
+                            select
+                              "员工编号" as employee_code,
+                              "状态" as status
+                            from a_class.attendance_records
+                            where "员工编号" = any(:employee_codes)
+                              and "考勤日期" >= :period_start
+                              and "考勤日期" < :next_month
+                            """
+                        ),
+                        {
+                            "employee_codes": employee_codes,
+                            "period_start": period_start,
+                            "next_month": next_month,
+                        },
+                    )
+                ).mappings().all()
 
         adjustment_by_employee: Dict[str, float] = {}
         for row in rows:
-            employee_code = (getattr(row, "employee_code", None) or "").strip()
+            employee_code = (
+                row.get("employee_code", "")
+                if isinstance(row, dict)
+                else (getattr(row, "employee_code", None) or "")
+            ).strip()
             if not employee_code:
                 continue
-            status = (getattr(row, "status", None) or "").strip().lower()
+            raw_status = (
+                row.get("status", "")
+                if isinstance(row, dict)
+                else (getattr(row, "status", None) or "")
+            )
+            status = str(raw_status).strip().lower()
             delta = self.ATTENDANCE_PENALTY_BY_STATUS.get(status, 0.0)
             adjustment_by_employee[employee_code] = adjustment_by_employee.get(employee_code, 0.0) + delta
         return adjustment_by_employee
@@ -342,14 +398,14 @@ class HRIncomeCalculationService:
         except ValueError as exc:
             raise ValueError("year_month format must be YYYY-MM") from exc
 
-        assignments = (
+        assignment_rows = (
             await self.db.execute(
                 select(EmployeeShopAssignment)
                 .where(EmployeeShopAssignment.status == "active")
                 .where(EmployeeShopAssignment.year_month == year_month)
             )
         ).scalars().all()
-        if not assignments:
+        if not assignment_rows:
             return {
                 "year_month": year_month,
                 "employee_count": 0,
@@ -357,6 +413,17 @@ class HRIncomeCalculationService:
                 "performance_upserts": 0,
                 "source": "employee_shop_assignments + shop_commission_config + profit_basis_amount",
             }
+        assignments = [
+            SimpleNamespace(
+                employee_code=getattr(row, "employee_code", None),
+                platform_code=getattr(row, "platform_code", None),
+                shop_id=getattr(row, "shop_id", None),
+                commission_ratio=getattr(row, "commission_ratio", None),
+                status=getattr(row, "status", None),
+                year_month=getattr(row, "year_month", None),
+            )
+            for row in assignment_rows
+        ]
 
         cfg_rows = (
             await self.db.execute(
@@ -581,3 +648,4 @@ class HRIncomeCalculationService:
             "performance_upserts": performance_upserts,
             "source": "employee_shop_assignments + performance_scores + shop_profit_basis",
         }
+

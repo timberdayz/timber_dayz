@@ -471,3 +471,65 @@ def test_refresh_payroll_record_returns_locked_conflicts():
     assert resp["success"] is True
     assert resp["locked_conflicts"] == 1
     assert resp["locked_conflict_details"] == [{"employee_code": "EMP201"}]
+
+
+def test_refresh_payroll_record_persists_new_record_before_serializing():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    record = SimpleNamespace(
+        id=None,
+        employee_code="EMP202",
+        year_month="2025-05",
+        base_salary=1000.0,
+        position_salary=200.0,
+        performance_salary=50.0,
+        overtime_pay=0.0,
+        commission=0.0,
+        allowances=0.0,
+        bonus=0.0,
+        gross_salary=1250.0,
+        social_insurance_personal=0.0,
+        housing_fund_personal=0.0,
+        income_tax=0.0,
+        other_deductions=0.0,
+        total_deductions=0.0,
+        net_salary=1250.0,
+        social_insurance_company=0.0,
+        housing_fund_company=0.0,
+        total_cost=1250.0,
+        status="draft",
+        pay_date=None,
+        remark=None,
+        created_at=None,
+        updated_at=None,
+    )
+
+    class _FakeService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_employee_month(self, employee_code, year_month):
+            return {
+                "employee_code": employee_code,
+                "year_month": year_month,
+                "payroll_upserts": 1,
+                "locked_conflicts": 0,
+                "locked_conflict_details": [],
+                "payroll_record": record,
+            }
+
+    async def _refresh(obj):
+        obj.id = 88
+        obj.created_at = datetime.now(timezone.utc)
+        obj.updated_at = datetime.now(timezone.utc)
+
+    module.PayrollGenerationService = _FakeService
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock(side_effect=_refresh)
+
+    resp = asyncio.run(module.refresh_payroll_record("EMP202", "2025-05", db=db))
+
+    assert resp["success"] is True
+    assert resp["data"]["id"] == 88
+    assert db.commit.await_count == 1
+    assert db.refresh.await_count == 1

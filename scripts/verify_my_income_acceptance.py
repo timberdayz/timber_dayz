@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """自动化验收：我的收入链路（6.5/6.6/6.7/6.8/6.8a/6.8c）。"""
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
 from backend.models.database import AsyncSessionLocal  # noqa: E402
-from backend.routers.hr_employee import get_my_income  # noqa: E402
+from backend.domains.business.routers.hr_employee import get_my_income  # noqa: E402
 from modules.core.db import (  # noqa: E402
     DimUser,
     Employee,
@@ -50,21 +50,18 @@ async def _pick_linked_user() -> Optional[LinkedSample]:
                   u.user_id as user_id,
                   u.username as username,
                   e.employee_code as employee_code,
-                  ec."年月" as sample_month
+                  pr.year_month as sample_month
                 from dim_users u
                 join a_class.employees e on e.user_id = u.user_id
-                left join c_class.employee_commissions ec
-                  on ec."员工编号" = e.employee_code
-                left join c_class.employee_performance ep
-                  on ep."员工编号" = e.employee_code
-                 and ep."年月" = ec."年月"
+                left join a_class.payroll_records pr
+                  on pr.employee_code = e.employee_code
                 where u.is_active = true
                   and u.status = 'active'
                   and (
-                    coalesce(ec."提成金额", 0) > 0
-                    or coalesce(ep."绩效得分", 0) > 0
+                    coalesce(pr.commission, 0) > 0
+                    or coalesce(pr.performance_salary, 0) > 0
                   )
-                order by ec."年月" desc nulls last
+                order by pr.year_month desc nulls last
                 limit 1
                 """
             )
@@ -132,6 +129,14 @@ async def _candidate_months(employee_code: str, preferred_month: Optional[str] =
         if m not in uniq:
             uniq.append(m)
     return uniq
+
+
+def _extract_non_zero_income_signals(payload: Dict[str, Any]) -> Tuple[float, float]:
+    commission_amount = float(payload.get("commission_amount", 0) or 0)
+    payroll = ((payload.get("breakdown") or {}).get("payroll") or {})
+    payroll_commission = float(payroll.get("commission", 0) or 0)
+    performance_salary = float(payroll.get("performance_salary", 0) or 0)
+    return max(commission_amount, payroll_commission), performance_salary
 
 
 async def _pick_unlinked_user_id() -> Optional[Tuple[int, str]]:
@@ -240,9 +245,8 @@ async def main() -> int:
             if payload and isinstance(payload, dict):
                 data = payload
                 status = "200"
-                commission = float(data.get("commission_amount", 0) or 0)
-                score = float(data.get("performance_score", 0) or 0)
-                if commission > 0 or score > 0:
+                commission, performance_salary = _extract_non_zero_income_signals(data)
+                if commission > 0 or performance_salary > 0:
                     chosen_month = month
                     break
         if not chosen_month and months:
@@ -261,12 +265,11 @@ async def main() -> int:
             f"- {'[OK]' if ok_67 else '[FAIL]'} 6.7 月份切换可查历史: query={chosen_month}, period={period}"
         )
 
-        # 6.8a：至少一个自然月存在非空提成或绩效
-        commission_amount = float(data.get("commission_amount", 0) or 0) if isinstance(data, dict) else 0.0
-        performance_score = float(data.get("performance_score", 0) or 0) if isinstance(data, dict) else 0.0
-        ok_68a = commission_amount > 0 or performance_score > 0
+        # 6.8a：至少一个自然月存在非空提成或绩效工资
+        commission_amount, performance_salary = _extract_non_zero_income_signals(data) if isinstance(data, dict) else (0.0, 0.0)
+        ok_68a = commission_amount > 0 or performance_salary > 0
         lines.append(
-            f"- {'[OK]' if ok_68a else '[FAIL]'} 6.8a 非空样例数据: month={chosen_month}, commission_amount={commission_amount}, performance_score={performance_score}"
+            f"- {'[OK]' if ok_68a else '[FAIL]'} 6.8a 非空样例数据: month={chosen_month}, commission_amount={commission_amount}, performance_salary={performance_salary}"
         )
 
         # 6.8：安全与审计（接口只允许当前用户上下文）
@@ -316,3 +319,5 @@ async def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
+
+

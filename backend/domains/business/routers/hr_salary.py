@@ -252,6 +252,9 @@ async def refresh_payroll_record(
 
         result = await PayrollGenerationService(db).generate_employee_month(employee_code, year_month)
         record = result.get("payroll_record")
+        if record is not None and result.get("payroll_upserts", 0) > 0:
+            await db.commit()
+            await db.refresh(record)
         return {
             "success": True,
             "employee_code": result.get("employee_code", employee_code),

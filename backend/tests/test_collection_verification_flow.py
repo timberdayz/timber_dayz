@@ -328,3 +328,34 @@ async def test_on_verification_required_stops_waiting_when_task_cancelled(monkey
 
     assert value is None
     assert get_calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_task_screenshot_resolves_relative_path_from_project_root(tmp_path, monkeypatch):
+    from backend.domains.collection.routers import collection_tasks as domain_collection_tasks
+
+    task = _make_task(
+        verification_screenshot="temp/screenshots/task-1/captcha.png",
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+
+    project_root = tmp_path / "repo"
+    screenshot_path = project_root / "temp" / "screenshots" / "task-1" / "captcha.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    screenshot_path.write_bytes(b"fake-image")
+
+    fake_router_file = project_root / "backend" / "domains" / "collection" / "routers" / "collection_tasks.py"
+    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_router_file.write_text("# stub", encoding="utf-8")
+
+    monkeypatch.setattr(domain_collection_tasks, "__file__", str(fake_router_file))
+
+    response = await domain_collection_tasks.get_task_screenshot(
+        task_id="task-1",
+        db=db,
+    )
+
+    assert str(response.path) == str(screenshot_path)

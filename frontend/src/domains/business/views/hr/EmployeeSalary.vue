@@ -231,6 +231,14 @@
               </div>
             </template>
 
+            <el-alert
+              v-if="payrollRecord?.status === 'paid'"
+              title="当前工资单已发放，已进入只读状态。若发现差额，请在下个月通过“月度奖金”补发或通过“其他扣款”抵扣。"
+              type="info"
+              :closable="false"
+              style="margin-bottom: 16px;"
+            />
+
             <el-form :model="payrollForm" label-width="120px">
               <el-row :gutter="16">
                 <el-col :span="12">
@@ -670,8 +678,9 @@ const refreshPayrollResult = async () => {
   refreshingPayroll.value = true
   try {
     const response = await api.refreshHrPayrollRecord(selectedEmployee.value.employee_code, selectedMonth.value)
-    lockedConflicts.value = response?.locked_conflict_details || []
-    applyPayrollRecord(response?.data || null)
+    const record = response?.data || response || null
+    lockedConflicts.value = response?.locked_conflict_details || response?.lockedConflicts || []
+    applyPayrollRecord(record)
     ElMessage.success('工资单结果已刷新')
   } catch (error) {
     console.error('刷新工资单结果失败:', error)
@@ -684,8 +693,9 @@ const refreshPayrollResult = async () => {
 const ensurePayrollRecord = async () => {
   if (payrollRecord.value?.id) return payrollRecord.value
   const response = await api.refreshHrPayrollRecord(selectedEmployee.value.employee_code, selectedMonth.value)
-  lockedConflicts.value = response?.locked_conflict_details || []
-  applyPayrollRecord(response?.data || null)
+  const record = response?.data || response || null
+  lockedConflicts.value = response?.locked_conflict_details || response?.lockedConflicts || []
+  applyPayrollRecord(record)
   return payrollRecord.value
 }
 
@@ -772,7 +782,11 @@ const reopenPayroll = async () => {
 const markPayrollPaid = async () => {
   if (!payrollRecord.value?.id) return
   try {
-    await ElMessageBox.confirm('标记已发放后工资单将只读，是否继续？', '标记已发放', { type: 'warning' })
+    await ElMessageBox.confirm(
+      '标记已发放后工资单将只读，不能再直接修改或退回草稿。若后续发现差额，请在下个月通过“月度奖金”补发或通过“其他扣款”抵扣。是否继续？',
+      '标记已发放',
+      { type: 'warning' }
+    )
     await api.markHrPayrollRecordPaid(payrollRecord.value.id)
     ElMessage.success('工资单已标记为已发放')
     await loadPayrollRecord()

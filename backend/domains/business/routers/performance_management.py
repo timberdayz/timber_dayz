@@ -1042,7 +1042,12 @@ async def list_performance_scores(
                 ec = getattr(ep, "employee_code", "")
                 scr = float(getattr(ep, "performance_score", 0) or 0)
                 ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
-                sales_achieved = getattr(ep, "actual_sales", None)
+                raw_sales_achieved = getattr(ep, "actual_sales", None)
+                sales_achieved = (
+                    float(raw_sales_achieved)
+                    if raw_sales_achieved is not None
+                    else None
+                )
                 score_responses.append({
                     "employee_code": ec,
                     "employee_name": name_map.get(ec, ec),

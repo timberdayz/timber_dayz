@@ -240,9 +240,16 @@ export const resumeTask = async (taskId, payload = {}) => {
 }
 
 /** 获取任务验证码截图 URL（用于 <img> 展示） */
-export const getTaskScreenshotUrl = (taskId) => {
+export const getTaskScreenshotUrl = (taskId, query = {}) => {
   const base = import.meta.env.VITE_API_BASE_URL || '/api'
-  return `${base.replace(/\/$/, '')}/collection/tasks/${taskId}/screenshot`
+  const params = new URLSearchParams()
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value))
+    }
+  })
+  const queryString = params.toString()
+  return `${base.replace(/\/$/, '')}/collection/tasks/${taskId}/screenshot${queryString ? `?${queryString}` : ''}`
 }
 
 /**
