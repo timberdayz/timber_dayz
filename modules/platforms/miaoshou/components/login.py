@@ -103,6 +103,27 @@ class MiaoshouLogin(LoginComponent):
     async def _cleanup_after_login(self, page: Any) -> None:
         await self.stabilize_safe_notices(page, label="post-login cleanup")
 
+    async def _wait_for_login_surface_ready(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 15000,
+        poll_ms: int = 250,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            if await self._homepage_ready(page):
+                return True
+            try:
+                username_input = self._username_locator(page)
+                await username_input.wait_for(state="visible", timeout=min(1000, max(timeout_ms - waited, 1)))
+                return True
+            except Exception:
+                pass
+            await asyncio.sleep(poll_ms / 1000)
+            waited += poll_ms
+        return False
+
     async def _wait_for_login_outcome(
         self,
         page: Any,
@@ -178,13 +199,15 @@ class MiaoshouLogin(LoginComponent):
         login_url = acc.get("login_url") or get_platform_login_entry(self.platform)
         try:
             await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-            await asyncio.sleep(1.0)
         except Exception as e:
             return LoginResult(success=False, message=f"failed to open login page: {e}")
 
         if await self._homepage_ready(page):
             await self._cleanup_after_login(page)
             return LoginResult(success=True, message="ok")
+
+        if not await self._wait_for_login_surface_ready(page):
+            return LoginResult(success=False, message="login surface not ready")
 
         username_input = self._username_locator(page)
         await expect(username_input).to_be_visible(timeout=15000)

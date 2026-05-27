@@ -30,6 +30,7 @@ celery_app = Celery(
         "backend.tasks.scheduled_tasks",
         "backend.tasks.data_sync_tasks",  # [*] v4.19.1 恢复:数据同步任务模块
         "backend.tasks.refresh_queue_tasks",
+        "backend.tasks.collection_tasks",
         "backend.tasks.image_extraction",  # [*] 图片提取任务模块
         # [WARN] v4.6.0 DSS架构重构:已删除mv_refresh(Metabase直接查询原始表,无需物化视图)
         # [WARN] v4.6.0 DSS架构重构:已删除c_class_calculation(C类数据由Metabase定时计算)
@@ -60,6 +61,8 @@ celery_app.conf.update(
         'backend.tasks.data_processing.*': {'queue': 'data_processing'},
         'backend.tasks.scheduled_tasks.*': {'queue': 'scheduled'},
         'backend.tasks.data_sync_tasks.*': {'queue': 'data_sync'},  # [*] v4.19.1 恢复:数据同步队列
+        'backend.tasks.collection_tasks.*': {'queue': 'collection'},
+        'collection.execute_task': {'queue': 'collection'},
         'extract_product_images': {'queue': 'data_processing'},  # [*] 图片提取任务路由到 data_processing 队列
     },
     

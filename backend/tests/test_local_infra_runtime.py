@@ -43,7 +43,7 @@ def test_local_mode_reuses_running_docker_infra(monkeypatch):
         if cmd[:3] == ["docker", "ps", "--format"]:
             return SimpleNamespace(
                 returncode=0,
-                stdout="xihong_erp_postgres\nxihong_erp_redis\nxihong_erp_celery_worker\n",
+                stdout="xihong_erp_postgres\nxihong_erp_redis\nxihong_erp_celery_worker\nxihong_erp_celery_beat\n",
                 stderr="",
             )
         if cmd[:2] == ["docker", "inspect"]:
@@ -73,7 +73,7 @@ def test_local_mode_does_not_reuse_unhealthy_docker_infra(monkeypatch):
         if cmd[:3] == ["docker", "ps", "--format"]:
             return SimpleNamespace(
                 returncode=0,
-                stdout="xihong_erp_postgres\nxihong_erp_redis\nxihong_erp_celery_worker\n",
+                stdout="xihong_erp_postgres\nxihong_erp_redis\nxihong_erp_celery_worker\nxihong_erp_celery_beat\n",
                 stderr="",
             )
         if cmd[:2] == ["docker", "inspect"]:
@@ -81,7 +81,7 @@ def test_local_mode_does_not_reuse_unhealthy_docker_infra(monkeypatch):
             if not state["after_compose"] and container_name == "xihong_erp_postgres":
                 return SimpleNamespace(returncode=0, stdout="unhealthy\n", stderr="")
             return SimpleNamespace(returncode=0, stdout="healthy\n", stderr="")
-        if cmd[0] == "docker-compose":
+        if cmd[0] in {"docker-compose", "docker"}:
             state["after_compose"] = True
             return SimpleNamespace(returncode=0, stdout="started", stderr="")
         if cmd[:3] == ["docker", "exec", "xihong_erp_postgres"]:
@@ -94,7 +94,7 @@ def test_local_mode_does_not_reuse_unhealthy_docker_infra(monkeypatch):
 
     assert ok is True
     assert any(cmd[:2] == ["docker", "inspect"] for cmd in captured["calls"])
-    assert any(cmd[0] == "docker-compose" for cmd in captured["calls"])
+    assert any(cmd[0] in {"docker-compose", "docker"} for cmd in captured["calls"])
 
 
 def test_resolve_npm_path_prefers_matching_nvm_version(monkeypatch, tmp_path):
@@ -210,8 +210,74 @@ def test_start_backend_uses_loopback_host_on_windows(monkeypatch):
     run_module.start_backend()
 
     powershell_args = captured["cmd"]
-    assert powershell_args[:2] == ["powershell", "-Command"]
-    assert "--host 127.0.0.1" in powershell_args[2]
+    assert powershell_args[:2] == ["powershell", "-NoProfile"]
+    launcher_path = Path(run_module.__file__).resolve().parent / "logs" / "backend-local.launch.ps1"
+    launcher_text = launcher_path.read_text(encoding="utf-8", errors="ignore")
+    assert "--host 127.0.0.1" in launcher_text
+
+
+def test_main_local_mode_disables_backend_reload(monkeypatch):
+    run_module = _load_run_module()
+    captured = {}
+    collection_worker_started = {"value": False}
+
+    monkeypatch.setattr(
+        run_module.argparse.ArgumentParser,
+        "parse_args",
+        lambda self: SimpleNamespace(
+            backend_only=True,
+            frontend_only=False,
+            no_browser=True,
+            no_celery=True,
+            use_docker=False,
+            collection=False,
+            local=True,
+            backend_window=False,
+            backend_headless=False,
+        ),
+    )
+    monkeypatch.setattr(run_module.sys_platform, "system", lambda: "Windows")
+    monkeypatch.setattr(run_module, "print_banner", lambda: None)
+    monkeypatch.setattr(run_module, "safe_print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_module, "ensure_postgres_redis_docker", lambda project_root, with_celery=True: True)
+    monkeypatch.setattr(run_module, "check_postgresql", lambda: True)
+    monkeypatch.setattr(run_module, "ensure_postgresql_dashboard_assets", lambda project_root: True)
+    monkeypatch.setattr(run_module, "cleanup_processes", lambda processes: None)
+    monkeypatch.setattr(run_module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(run_module, "warn_legacy_shop_session_artifacts", lambda project_root: None)
+    monkeypatch.setattr(run_module, "ensure_local_schema_ready", lambda: True)
+    monkeypatch.setattr(run_module, "_choose_local_backend_port", lambda port: port)
+
+    def _fake_start_backend(*, runtime_mode="development", windowed=None, enable_reload=None):
+        captured["runtime_mode"] = runtime_mode
+        captured["windowed"] = windowed
+        captured["enable_reload"] = enable_reload
+        return SimpleNamespace()
+
+    monkeypatch.setattr(run_module, "start_backend", _fake_start_backend)
+    monkeypatch.setattr(
+        run_module,
+        "start_collection_worker",
+        lambda: collection_worker_started.__setitem__("value", True) or SimpleNamespace(),
+    )
+
+    monkeypatch.setattr(run_module, "wait_for_service", lambda port, name, max_wait=30: True)
+
+    sleep_calls = {"count": 0}
+
+    def _fake_sleep(seconds):
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] >= 3:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(run_module.time, "sleep", _fake_sleep)
+    run_module.main()
+
+    assert captured["runtime_mode"] == "development"
+    assert captured["windowed"] is False
+    assert captured["enable_reload"] is False
+    assert collection_worker_started["value"] is True
+    assert run_module.os.environ["COLLECTION_EXECUTION_BACKEND"] == "celery"
 
 
 def test_choose_local_backend_port_falls_back_when_default_not_bindable(monkeypatch):

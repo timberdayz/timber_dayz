@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import AsyncMock
 
 from modules.components.base import ExecutionContext
 from modules.platforms.miaoshou.components.login import MiaoshouLogin
@@ -67,3 +68,55 @@ async def test_miaoshou_login_wait_for_outcome_attempts_cleanup_after_welcome_re
 
     assert outcome == "success"
     assert calls["cleanup"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_miaoshou_login_wait_for_surface_accepts_delayed_username_input(monkeypatch):
+    component = MiaoshouLogin(_ctx())
+    seen = {"count": 0}
+
+    class _Locator:
+        @property
+        def first(self):
+            return self
+
+        async def wait_for(self, state="visible", timeout=0):
+            seen["count"] += 1
+            if seen["count"] < 3:
+                raise RuntimeError("not visible yet")
+
+    class _Page:
+        def get_by_role(self, role, name=None):  # noqa: ANN001
+            assert role == "textbox"
+            return _Locator()
+
+    monkeypatch.setattr(component, "_homepage_ready", AsyncMock(return_value=False))
+
+    ready = await component._wait_for_login_surface_ready(_Page(), timeout_ms=1000, poll_ms=10)
+
+    assert ready is True
+    assert seen["count"] >= 3
+
+
+@pytest.mark.asyncio
+async def test_miaoshou_login_wait_for_surface_accepts_quick_homepage_redirect(monkeypatch):
+    component = MiaoshouLogin(_ctx())
+
+    class _Locator:
+        @property
+        def first(self):
+            return self
+
+        async def wait_for(self, state="visible", timeout=0):
+            raise RuntimeError("login input never rendered")
+
+    class _Page:
+        def get_by_role(self, role, name=None):  # noqa: ANN001
+            assert role == "textbox"
+            return _Locator()
+
+    monkeypatch.setattr(component, "_homepage_ready", AsyncMock(return_value=True))
+
+    ready = await component._wait_for_login_surface_ready(_Page(), timeout_ms=1000, poll_ms=10)
+
+    assert ready is True

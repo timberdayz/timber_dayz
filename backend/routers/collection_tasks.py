@@ -9,6 +9,7 @@ import os
 import uuid
 import asyncio
 import inspect
+import dataclasses
 from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Path
@@ -60,6 +61,19 @@ CAPTCHA_REDIS_KEY_PREFIX = "collection:captcha:"
 
 VERIFICATION_WAIT_TIMEOUT = int(os.getenv("VERIFICATION_TIMEOUT", "300"))
 VERIFICATION_POLL_INTERVAL = 1.5
+
+
+def _resolve_collection_redis_client(app: Any = None):
+    redis_client = _resolve_collection_redis_client(app)
+    if redis_client is not None:
+        return redis_client
+
+    try:
+        from backend.services.cache_service import get_cache_service
+
+        return getattr(get_cache_service(), "redis_client", None)
+    except Exception:
+        return None
 
 
 def _build_config_run_response_payload(run: Any) -> dict:
@@ -198,6 +212,111 @@ async def _mirror_collection_task_log(
         )
     except Exception as exc:
         logger.debug("Collection task log mirror skipped for %s: %s", task_id, exc)
+
+
+def _should_dispatch_collection_via_celery() -> bool:
+    return os.getenv("COLLECTION_EXECUTION_BACKEND", "").strip().lower() == "celery"
+
+
+def _build_collection_execution_kwargs(
+    *,
+    task_id: str,
+    platform: str,
+    account_id: str,
+    data_domains: List[str],
+    sub_domains: Optional[List[str]],
+    date_range: Dict[str, str],
+    granularity: str,
+    debug_mode: bool,
+    parallel_mode: bool,
+    max_parallel: int,
+    runtime_manifests: Optional[Dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "platform": platform,
+        "account_id": account_id,
+        "data_domains": data_domains,
+        "sub_domains": sub_domains,
+        "date_range": date_range,
+        "granularity": granularity,
+        "debug_mode": debug_mode,
+        "execution_mode": "headed" if debug_mode else "headless",
+        "parallel_mode": parallel_mode,
+        "max_parallel": max_parallel,
+        "runtime_manifests": _make_collection_payload_json_safe(runtime_manifests),
+    }
+
+
+def _make_collection_payload_json_safe(value: Any) -> Any:
+    if dataclasses.is_dataclass(value):
+        return {
+            key: _make_collection_payload_json_safe(val)
+            for key, val in dataclasses.asdict(value).items()
+        }
+    if isinstance(value, dict):
+        return {
+            str(key): _make_collection_payload_json_safe(val)
+            for key, val in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_make_collection_payload_json_safe(item) for item in value]
+    return value
+
+
+async def _record_collection_celery_submission(
+    db: AsyncSession,
+    *,
+    task_id: str,
+    runner_id: Optional[str],
+    submission_kwargs: Dict[str, Any],
+) -> None:
+    if not runner_id:
+        return
+    try:
+        await TaskCenterService(db).update_task(
+            task_id,
+            runner_kind="celery",
+            external_runner_id=runner_id,
+            details_json={
+                "task_details": {
+                    "runner_kind": "celery",
+                    "submission_kwargs": submission_kwargs,
+                }
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to record collection celery submission for %s: %s", task_id, exc)
+
+
+async def _dispatch_collection_execution(
+    db: AsyncSession,
+    *,
+    app: Any = None,
+    **submission_kwargs: Any,
+) -> None:
+    if _should_dispatch_collection_via_celery():
+        from backend.tasks.collection_tasks import execute_collection_task
+
+        celery_task = execute_collection_task.apply_async(
+            kwargs=submission_kwargs,
+            queue="collection",
+            priority=5,
+        )
+        await _record_collection_celery_submission(
+            db,
+            task_id=submission_kwargs["task_id"],
+            runner_id=getattr(celery_task, "id", None),
+            submission_kwargs=submission_kwargs,
+        )
+        return
+
+    asyncio.create_task(
+        _execute_collection_task_background(
+            app=app,
+            **submission_kwargs,
+        )
+    )
 
 
 # ============================================================
@@ -529,22 +648,23 @@ async def create_task(
     )
 
     app = getattr(fastapi_request, "app", None)
-    asyncio.create_task(
-        _execute_collection_task_background(
-            task_id=task_uuid,
-            platform=request.platform,
-            account_id=request.account_id,
-            data_domains=filtered_domains,
-            sub_domains=normalized_sub_domains,
-            date_range=normalized_date_range,
-            granularity=effective_granularity,
-            debug_mode=request.debug_mode,
-            execution_mode="headed" if request.debug_mode else "headless",
-            parallel_mode=request.parallel_mode,
-            max_parallel=request.max_parallel,
-            runtime_manifests=runtime_manifests,
-            app=app,
-        )
+    submission_kwargs = _build_collection_execution_kwargs(
+        task_id=task_uuid,
+        platform=request.platform,
+        account_id=request.account_id,
+        data_domains=filtered_domains,
+        sub_domains=normalized_sub_domains,
+        date_range=normalized_date_range,
+        granularity=effective_granularity,
+        debug_mode=request.debug_mode,
+        parallel_mode=request.parallel_mode,
+        max_parallel=request.max_parallel,
+        runtime_manifests=runtime_manifests,
+    )
+    await _dispatch_collection_execution(
+        db,
+        app=app,
+        **submission_kwargs,
     )
 
     return _build_task_response_payload(task)
@@ -777,24 +897,23 @@ async def retry_task(
         runtime_manifests = {"login": {}, "exports": [], "exports_by_domain": {}}
 
     app = getattr(request, "app", None) if request else None
-    asyncio.create_task(
-        _execute_collection_task_background(
-            task_id=new_task.task_id,
-            platform=original_task.platform,
-            account_id=original_task.account,
-            data_domains=original_task.data_domains or [],
-            sub_domains=original_task.sub_domains,
-            date_range=original_task.date_range or {},
-            granularity=original_task.granularity or "daily",
-            debug_mode=getattr(original_task, "debug_mode", False) or False,
-            execution_mode=(
-                "headed" if getattr(original_task, "debug_mode", False) else "headless"
-            ),
-            parallel_mode=False,
-            max_parallel=1,
-            runtime_manifests=runtime_manifests,
-            app=app,
-        )
+    submission_kwargs = _build_collection_execution_kwargs(
+        task_id=new_task.task_id,
+        platform=original_task.platform,
+        account_id=original_task.account,
+        data_domains=original_task.data_domains or [],
+        sub_domains=original_task.sub_domains,
+        date_range=original_task.date_range or {},
+        granularity=original_task.granularity or "daily",
+        debug_mode=getattr(original_task, "debug_mode", False) or False,
+        parallel_mode=False,
+        max_parallel=1,
+        runtime_manifests=runtime_manifests,
+    )
+    await _dispatch_collection_execution(
+        db,
+        app=app,
+        **submission_kwargs,
     )
 
     logger.info(f"Created retry task: {new_task.task_id} (original: {task_id})")
