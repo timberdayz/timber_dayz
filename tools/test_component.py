@@ -247,6 +247,7 @@ class ComponentTester:
         *,
         session_owner_id: str,
         has_storage_state: bool,
+        has_manual_storage_state: bool,
         has_persistent_profile: bool,
         component_type: Optional[str],
     ):
@@ -256,6 +257,7 @@ class ComponentTester:
             platform=self.platform,
             session_owner_id=session_owner_id,
             has_storage_state=has_storage_state,
+            has_manual_storage_state=has_manual_storage_state,
             has_persistent_profile=has_persistent_profile,
             force_persistent_profile=False,
             execution_kind="component_test",

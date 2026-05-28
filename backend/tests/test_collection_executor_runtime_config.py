@@ -94,3 +94,26 @@ def test_runtime_task_params_keep_top_level_granularity_for_shopee_custom_date_c
 
     assert params["granularity"] == "monthly"
     assert params["params"]["granularity"] == "monthly"
+
+
+def test_runtime_task_params_mirror_reused_session_into_nested_params_for_login_components():
+    normalized_date_range = {
+        "start_date": "2026-03-01",
+        "end_date": "2026-03-31",
+        "date_from": "2026-03-01",
+        "date_to": "2026-03-31",
+    }
+
+    params = executor_v2._build_runtime_task_params(
+        task_id="task-4",
+        account={"account_id": "acc-4"},
+        platform="tiktok",
+        granularity="daily",
+        normalized_date_range=normalized_date_range,
+        task_download_dir="temp/downloads/task-4",
+        screenshot_dir="temp/screenshots/task-4",
+        reused_session=True,
+    )
+
+    assert params["reused_session"] is True
+    assert params["params"]["reused_session"] is True

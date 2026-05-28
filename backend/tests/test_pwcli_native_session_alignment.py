@@ -138,7 +138,7 @@ def test_page_summary_tolerates_console_buffer_navigation_errors() -> None:
 
 def test_save_default_storage_state_from_context_marks_account_state_as_manual_seeded(monkeypatch) -> None:
     class _FakeContext:
-        def storage_state(self):
+        def storage_state(self, **kwargs):
             return {"cookies": [{"name": "a"}], "origins": []}
 
     saved = Mock()
@@ -174,3 +174,132 @@ def test_save_default_storage_state_from_context_marks_account_state_as_manual_s
     _, _, _, metadata = saved.call_args.args
     assert metadata["manual_seeded"] is True
     assert metadata["protected"] is True
+
+
+def test_save_default_storage_state_from_context_uses_indexed_db_for_tiktok(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    class _FakeContext:
+        def storage_state(self, **kwargs):
+            observed.update(kwargs)
+            return {"cookies": [{"name": "a"}], "origins": []}
+
+    saved = Mock()
+
+    class _FakeSessionManager:
+        def __init__(self, base_path=None):  # noqa: ANN001
+            self.base_path = base_path
+
+        def save_session(self, platform, account_id, storage_state, metadata=None):  # noqa: ANN001
+            saved(platform, account_id, storage_state, metadata)
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager",
+        _FakeSessionManager,
+    )
+
+    pwcli_native.save_default_storage_state_from_context(
+        {
+            "platform": "tiktok",
+            "account_id": "acc-1",
+            "default_state_mode": "session_manager",
+            "default_state_path": "ignored",
+        },
+        _FakeContext(),
+        session_metadata={"manual_seeded": True, "protected": True},
+    )
+
+    assert observed["indexed_db"] is True
+    saved.assert_called_once()
+
+
+def test_save_default_storage_state_from_context_does_not_force_indexed_db_for_non_tiktok(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    class _FakeContext:
+        def storage_state(self, **kwargs):
+            observed.update(kwargs)
+            return {"cookies": [{"name": "a"}], "origins": []}
+
+    saved = Mock()
+
+    class _FakeSessionManager:
+        def __init__(self, base_path=None):  # noqa: ANN001
+            self.base_path = base_path
+
+        def save_session(self, platform, account_id, storage_state, metadata=None):  # noqa: ANN001
+            saved(platform, account_id, storage_state, metadata)
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager",
+        _FakeSessionManager,
+    )
+
+    pwcli_native.save_default_storage_state_from_context(
+        {
+            "platform": "miaoshou",
+            "account_id": "acc-2",
+            "default_state_mode": "session_manager",
+            "default_state_path": "ignored",
+        },
+        _FakeContext(),
+        session_metadata={"manual_seeded": True, "protected": True},
+    )
+
+    assert "indexed_db" not in observed
+    saved.assert_called_once()
+
+
+def test_save_default_storage_state_from_context_supplements_tiktok_origins_from_open_pages(monkeypatch) -> None:
+    saved = Mock()
+
+    class _FakePage:
+        def evaluate(self, script):  # noqa: ANN001
+            return {
+                "origin": "https://seller.tiktokshopglobalselling.com",
+                "localStorage": [
+                    {"name": "current_shop_region", "value": "SG"},
+                    {"name": "LOCAL_IS_EFFECTIVE", "value": "1"},
+                ],
+                "sessionStorage": [
+                    {"name": "register_libra", "value": "1"},
+                ],
+            }
+
+    class _FakeContext:
+        pages = [_FakePage()]
+
+        def storage_state(self, **kwargs):
+            return {"cookies": [{"name": "a"}], "origins": []}
+
+    class _FakeSessionManager:
+        def __init__(self, base_path=None):  # noqa: ANN001
+            self.base_path = base_path
+
+        def save_session(self, platform, account_id, storage_state, metadata=None):  # noqa: ANN001
+            saved(platform, account_id, storage_state, metadata)
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager",
+        _FakeSessionManager,
+    )
+
+    pwcli_native.save_default_storage_state_from_context(
+        {
+            "platform": "tiktok",
+            "account_id": "acc-3",
+            "default_state_mode": "session_manager",
+            "default_state_path": "ignored",
+        },
+        _FakeContext(),
+        session_metadata={"manual_seeded": True, "protected": True},
+    )
+
+    saved.assert_called_once()
+    _, _, storage_state, _ = saved.call_args.args
+    origins = storage_state["origins"]
+    assert origins[0]["origin"] == "https://seller.tiktokshopglobalselling.com"
+    assert origins[0]["localStorage"] == [
+        {"name": "current_shop_region", "value": "SG"},
+        {"name": "LOCAL_IS_EFFECTIVE", "value": "1"},
+    ]

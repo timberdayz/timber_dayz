@@ -335,25 +335,45 @@ async def load_or_bootstrap_runtime_storage_state(
     account: Optional[Dict[str, Any]] = None,
     max_age_days: int = 30,
 ) -> Optional[Dict[str, Any]]:
+    candidate = await load_runtime_session_candidate(
+        platform=platform,
+        session_owner_id=session_owner_id,
+        account=account,
+        max_age_days=max_age_days,
+    )
+    return candidate.storage_state
+
+
+async def load_runtime_session_candidate(
+    *,
+    platform: str,
+    session_owner_id: str,
+    account: Optional[Dict[str, Any]] = None,
+    max_age_days: int = 30,
+) -> RuntimeSessionCandidate:
     session_data = await _load_session_async(
         platform,
         session_owner_id,
         max_age_days=max_age_days,
     )
+    metadata = session_data.get("metadata") if isinstance(session_data, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    manual_seeded = bool(metadata.get("manual_seeded") or metadata.get("protected"))
+
     if session_data and isinstance(session_data.get("storage_state"), dict):
         candidate = session_data["storage_state"]
-        if (
-            str(platform or "").strip().lower() == "tiktok"
-            and not tiktok_storage_state_meets_quality_gate(candidate)
-        ):
-            logger.warning(
-                "Ignore low-quality persisted TikTok storage_state during runtime bootstrap (score=%s) for %s/%s",
-                tiktok_storage_state_quality_score(candidate),
-                platform,
-                session_owner_id,
-            )
+        if str(platform or "").strip().lower() == "tiktok" and not manual_seeded:
+            if not tiktok_storage_state_meets_quality_gate(candidate):
+                logger.warning(
+                    "Ignore low-quality persisted TikTok storage_state during runtime bootstrap (score=%s) for %s/%s",
+                    tiktok_storage_state_quality_score(candidate),
+                    platform,
+                    session_owner_id,
+                )
+            else:
+                return RuntimeSessionCandidate(storage_state=candidate, metadata=metadata)
         else:
-            return candidate
+            return RuntimeSessionCandidate(storage_state=candidate, metadata=metadata)
 
     loop = asyncio.get_event_loop()
     bootstrapped = await loop.run_in_executor(
@@ -365,8 +385,13 @@ async def load_or_bootstrap_runtime_storage_state(
         ),
     )
     if bootstrapped and isinstance(bootstrapped.get("storage_state"), dict):
-        return bootstrapped["storage_state"]
-    return None
+        boot_metadata = bootstrapped.get("metadata") if isinstance(bootstrapped, dict) else {}
+        boot_metadata = boot_metadata if isinstance(boot_metadata, dict) else {}
+        return RuntimeSessionCandidate(
+            storage_state=bootstrapped["storage_state"],
+            metadata=boot_metadata,
+        )
+    return RuntimeSessionCandidate(storage_state=None, metadata=metadata)
 
 
 async def _get_fingerprint_context_options_async(
@@ -464,6 +489,7 @@ class RuntimeContextBundle:
     profile_path: Optional[str] = None
     strategy_reason: Optional[str] = None
     session_source: Optional[str] = None
+    session_metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -475,11 +501,22 @@ class RuntimeStrategyDecision:
     fallback_allowed: bool
 
 
+@dataclass(frozen=True)
+class RuntimeSessionCandidate:
+    storage_state: Optional[Dict[str, Any]]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def manual_seeded(self) -> bool:
+        return bool(self.metadata.get("manual_seeded") or self.metadata.get("protected"))
+
+
 def choose_runtime_strategy(
     *,
     platform: str,
     session_owner_id: str | None,
     has_storage_state: bool,
+    has_manual_storage_state: bool,
     has_persistent_profile: bool,
     force_persistent_profile: bool,
     execution_kind: str,
@@ -502,6 +539,15 @@ def choose_runtime_strategy(
             used_storage_state=False,
             used_persistent_profile=True,
             fallback_allowed=True,
+        )
+
+    if has_manual_storage_state:
+        return RuntimeStrategyDecision(
+            mode="storage_state_fanout",
+            reason="manual_storage_state_available",
+            used_storage_state=True,
+            used_persistent_profile=False,
+            fallback_allowed=bool(has_persistent_profile or session_owner_id),
         )
 
     if has_storage_state:

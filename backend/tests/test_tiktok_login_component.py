@@ -252,6 +252,74 @@ async def test_tiktok_login_does_not_repeat_goto_when_already_on_login_page_with
 
 
 @pytest.mark.asyncio
+async def test_tiktok_login_reused_session_observes_redirect_before_touching_login_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokLogin(_ctx(config={"reused_session": True, "params": {}}))
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+    calls: list[str] = []
+
+    async def _wait_reused_session_redirect(current_page) -> bool:
+        calls.append("wait_reused_session_redirect")
+        current_page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+        return True
+
+    async def _wait_reused_session_bootstrap(current_page, **kwargs) -> str:
+        calls.append("wait_reused_session_bootstrap")
+        return "success"
+
+    monkeypatch.setattr(component, "_wait_for_reused_session_redirect", _wait_reused_session_redirect)
+    monkeypatch.setattr(component, "_wait_for_reused_session_bootstrap", _wait_reused_session_bootstrap)
+    monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert calls == ["wait_reused_session_redirect", "wait_reused_session_bootstrap"]
+
+
+@pytest.mark.asyncio
+async def test_tiktok_login_reused_session_waits_for_bootstrap_before_manual_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokLogin(_ctx(config={"reused_session": True, "params": {}}))
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+    calls: list[str] = []
+
+    async def _wait_reused_session_redirect(current_page) -> bool:
+        calls.append("wait_reused_session_redirect")
+        return True
+
+    async def _wait_reused_session_bootstrap(current_page, **kwargs) -> str:
+        calls.append("wait_reused_session_bootstrap")
+        return "needs_login"
+
+    async def _wait_login_surface_ready(current_page) -> bool:
+        calls.append("wait_login_surface_ready")
+        return True
+
+    monkeypatch.setattr(component, "_wait_for_reused_session_redirect", _wait_reused_session_redirect)
+    monkeypatch.setattr(component, "_wait_for_reused_session_bootstrap", _wait_reused_session_bootstrap)
+    monkeypatch.setattr(component, "_wait_for_login_surface_ready", _wait_login_surface_ready)
+    monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
+    monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value="bad credentials"))
+
+    result = await component.run(page)
+
+    assert result.success is False
+    assert result.message == "bad credentials"
+    assert calls == [
+        "wait_reused_session_redirect",
+        "wait_reused_session_bootstrap",
+        "wait_login_surface_ready",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tiktok_login_already_logged_in_short_circuits() -> None:
     component = TiktokLogin(_ctx())
     page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage")

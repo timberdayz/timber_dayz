@@ -93,6 +93,57 @@ async def test_collection_step_status_callback_broadcasts_progress(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_collection_step_status_callback_keeps_current_step_for_browser_diagnostics(monkeypatch):
+    from backend.routers.collection_tasks import _collection_step_status_callback
+
+    task = _make_task(current_step="等待验证码回填", progress=5)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock()
+    session.add = MagicMock()
+
+    class _SessionManager:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    send_progress = AsyncMock()
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal", lambda: _SessionManager()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.connection_manager.send_progress",
+        send_progress,
+    )
+
+    await _collection_step_status_callback(
+        task_id=task.task_id,
+        progress=5,
+        message="网络请求失败",
+        current_domain="orders:tiktok",
+        details={
+            "step_id": "browser_diagnostics",
+            "diagnostic_only": True,
+            "diagnostic_event": "requestfailed",
+        },
+    )
+
+    assert task.current_step == "等待验证码回填"
+    send_progress.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_execute_collection_task_background_broadcasts_complete_on_success(
     monkeypatch,
 ):

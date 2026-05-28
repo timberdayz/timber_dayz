@@ -7,11 +7,13 @@ import pytest
 
 from modules.apps.collection_center.runtime_session import (
     RuntimeContextBundle,
+    RuntimeSessionCandidate,
     RuntimeSessionScope,
     choose_runtime_strategy,
     build_runtime_login_gate_probe_urls,
     build_runtime_context_options,
     check_login_gate_ready,
+    load_runtime_session_candidate,
     open_persistent_runtime_bundle,
     open_storage_state_runtime_bundle,
     probe_runtime_login_gate,
@@ -401,6 +403,7 @@ def test_formal_sequential_runtime_prefers_storage_state_when_available() -> Non
         platform="miaoshou",
         session_owner_id="main-1",
         has_storage_state=True,
+        has_manual_storage_state=False,
         has_persistent_profile=True,
         force_persistent_profile=False,
         execution_kind="formal_collection",
@@ -421,6 +424,7 @@ def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tikt
         platform="tiktok",
         session_owner_id="main-1",
         has_storage_state=True,
+        has_manual_storage_state=False,
         has_persistent_profile=True,
         force_persistent_profile=False,
         execution_kind="formal_collection",
@@ -430,6 +434,24 @@ def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tikt
 
     assert decision.mode == "storage_state_fanout"
     assert decision.used_persistent_profile is False
+    assert decision.used_storage_state is True
+
+
+def test_formal_sequential_runtime_prefers_manual_storage_state_when_available() -> None:
+    decision = choose_runtime_strategy(
+        platform="tiktok",
+        session_owner_id="main-1",
+        has_storage_state=True,
+        has_manual_storage_state=True,
+        has_persistent_profile=True,
+        force_persistent_profile=False,
+        execution_kind="formal_collection",
+        component_type="export",
+        parallel_mode=False,
+    )
+
+    assert decision.mode == "storage_state_fanout"
+    assert decision.reason == "manual_storage_state_available"
     assert decision.used_storage_state is True
 
 
@@ -566,6 +588,46 @@ async def test_probe_runtime_login_gate_primes_root_page_for_tiktok_when_blank(
     # When the runtime page is about:blank, TikTok probing should do a single
     # prime navigation (login_url) and then observe without extra goto probes.
     assert page.goto_calls == ["https://seller.tiktokshopglobalselling.com/account/login"]
+
+
+@pytest.mark.asyncio
+async def test_load_runtime_session_candidate_accepts_manual_seeded_tiktok_state_even_when_quality_gate_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    low_quality_state = {
+        "cookies": [
+            {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+        ],
+        "origins": [],
+    }
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session._load_session_async",
+        AsyncMock(
+            return_value={
+                "storage_state": low_quality_state,
+                "metadata": {
+                    "manual_seeded": True,
+                    "protected": True,
+                    "quality_source": "manual",
+                },
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session._bootstrap_session_from_profile_sync",
+        lambda platform, session_owner_id, account_config=None: {"storage_state": {"unexpected": True}},
+    )
+
+    candidate = await load_runtime_session_candidate(
+        platform="tiktok",
+        session_owner_id="main-1",
+        account={"login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+    )
+
+    assert isinstance(candidate, RuntimeSessionCandidate)
+    assert candidate.storage_state == low_quality_state
+    assert candidate.manual_seeded is True
 
 
 @pytest.mark.asyncio

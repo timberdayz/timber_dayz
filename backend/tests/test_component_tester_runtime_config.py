@@ -69,6 +69,7 @@ def test_component_tester_runtime_strategy_does_not_force_profile_level_reuse():
     decision = tester._choose_runtime_strategy(
         session_owner_id="main-1",
         has_storage_state=True,
+        has_manual_storage_state=False,
         has_persistent_profile=True,
         component_type="export",
     )
@@ -83,6 +84,7 @@ def test_component_tester_and_formal_collection_share_storage_state_first_defaul
         platform="shopee",
         session_owner_id="main-1",
         has_storage_state=True,
+        has_manual_storage_state=False,
         has_persistent_profile=True,
         force_persistent_profile=False,
         execution_kind="component_test",
@@ -110,6 +112,7 @@ def test_component_tester_runtime_strategy_delegates_to_shared_runtime_session(m
     decision = tester._choose_runtime_strategy(
         session_owner_id="main-1",
         has_storage_state=True,
+        has_manual_storage_state=False,
         has_persistent_profile=True,
         component_type="export",
     )

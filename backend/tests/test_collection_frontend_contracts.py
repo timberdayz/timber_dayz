@@ -179,8 +179,8 @@ def test_collection_tasks_detail_drawer_shows_runtime_metadata():
     assert "getRuntimeSessionModeLabel" in text
     assert "getSessionSourceLabel" in text
     assert "getRuntimeStrategyReasonLabel" in text
-    assert "已找到可复用的 storage_state" in text
-    assert "storage_state 快照" in text
+    assert "已找到 storage_state，会先按快照恢复页面" in text
+    assert "storage_state 会话快照" in text
 
 
 def test_account_management_does_not_offer_free_form_login_url_editing():

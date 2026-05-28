@@ -1129,8 +1129,10 @@ async def _collection_step_status_callback(
             task = result.scalar_one_or_none()
             if not task:
                 return
+            diagnostic_only = bool((details or {}).get("diagnostic_only"))
             task.progress = progress
-            task.current_step = message
+            if not diagnostic_only:
+                task.current_step = message
             if current_domain is not None:
                 task.current_domain = current_domain
             if details is not None:
@@ -1150,12 +1152,13 @@ async def _collection_step_status_callback(
                     message=message,
                     details=details,
                 )
-            await connection_manager.send_progress(
-                task_id,
-                progress,
-                message,
-                status=getattr(task, "status", None) or TASK_STATUS.RUNNING,
-            )
+            if not diagnostic_only:
+                await connection_manager.send_progress(
+                    task_id,
+                    progress,
+                    message,
+                    status=getattr(task, "status", None) or TASK_STATUS.RUNNING,
+                )
     except Exception as e:
         logger.error(f"Step status callback failed for task {task_id}: {e}")
 

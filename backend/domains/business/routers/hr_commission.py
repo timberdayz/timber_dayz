@@ -9,6 +9,7 @@ from sqlalchemy import select, func, and_, or_, text
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 from backend.models.database import get_async_db
 from backend.dependencies.auth import get_current_user
@@ -17,6 +18,7 @@ from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.profit_basis_service import ProfitBasisService
+from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
 
 logger = get_logger(__name__)
 from backend.schemas.hr import (
@@ -44,6 +46,89 @@ def year_month_to_first_day(year_month: str) -> date:
 
 def _shop_key(platform_code: str | None, shop_id: str | None) -> str:
     return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
+
+
+def _validate_shop_assignment_ratio_limit(
+    *,
+    existing_rows: List[Any],
+    employee_code: str,
+    commission_ratio: float | None,
+    current_assignment_id: int | None,
+) -> str | None:
+    next_ratio = float(commission_ratio or 0)
+    active_total = 0.0
+    normalized_employee_code = (employee_code or "").strip()
+
+    for row in existing_rows:
+        if getattr(row, "status", "active") != "active":
+            continue
+        if current_assignment_id is not None and getattr(row, "id", None) == current_assignment_id:
+            continue
+        active_total += float(getattr(row, "commission_ratio", 0) or 0)
+
+    if active_total + next_ratio > 1.0 + 1e-9:
+        return "该店铺该月份人员提成比例总和不能超过100%"
+
+    for row in existing_rows:
+        if getattr(row, "status", "active") != "active":
+            continue
+        if current_assignment_id is not None and getattr(row, "id", None) == current_assignment_id:
+            continue
+        if (getattr(row, "employee_code", None) or "").strip() == normalized_employee_code:
+            return "该员工在该店铺该月份已存在归属记录"
+
+    return None
+
+
+async def _ensure_dim_shop_exists(
+    db: AsyncSession,
+    *,
+    platform_code: str,
+    shop_id: str,
+):
+    normalized_platform_code = (platform_code or "").lower()
+    normalized_shop_id = str(shop_id or "")
+    if not normalized_platform_code or not normalized_shop_id:
+        return None
+
+    shop = (
+        await db.execute(
+            select(DimShop).where(
+                DimShop.platform_code == normalized_platform_code,
+                DimShop.shop_id == normalized_shop_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if shop:
+        return shop
+
+    shop_account = (
+        await db.execute(
+            select(ShopAccount).where(
+                func.lower(ShopAccount.platform) == normalized_platform_code,
+                ShopAccount.enabled == True,
+                or_(
+                    ShopAccount.platform_shop_id == normalized_shop_id,
+                    ShopAccount.shop_account_id == normalized_shop_id,
+                ),
+            )
+        )
+    ).scalar_one_or_none()
+    if not shop_account:
+        return None
+
+    return await sync_platform_account_to_dim_shop(
+        db,
+        SimpleNamespace(
+            platform=shop_account.platform,
+            shop_id=shop_account.platform_shop_id,
+            account_id=shop_account.shop_account_id,
+            store_name=shop_account.store_name,
+            account_alias=None,
+            shop_region=shop_account.shop_region,
+            currency="CNY",
+        ),
+    )
 
 
 async def _legacy_employee_performance_loader_unused(
@@ -548,13 +633,12 @@ async def create_employee_shop_assignment(
         emp_res = await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
         if not emp_res.scalar_one_or_none():
             return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
-        shop_res = await db.execute(
-            select(DimShop).where(
-                DimShop.platform_code == body.platform_code,
-                DimShop.shop_id == body.shop_id,
-            )
+        shop = await _ensure_dim_shop_exists(
+            db,
+            platform_code=body.platform_code,
+            shop_id=body.shop_id,
         )
-        if not shop_res.scalar_one_or_none():
+        if not shop:
             return error_response(
                 ErrorCode.DATA_NOT_FOUND,
                 "该店铺尚未同步至系统，请先在账号管理中同步",
@@ -571,18 +655,23 @@ async def create_employee_shop_assignment(
         )
         if dup.scalar_one_or_none():
             return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该员工在该月已关联该店铺", status_code=409)
-        if body.role == "supervisor":
-            supervisor_dup = await db.execute(
+        same_shop_rows = (
+            await db.execute(
                 select(EmployeeShopAssignment).where(
                     EmployeeShopAssignment.year_month == body.year_month,
                     EmployeeShopAssignment.platform_code == body.platform_code,
                     EmployeeShopAssignment.shop_id == body.shop_id,
-                    EmployeeShopAssignment.role == "supervisor",
-                    EmployeeShopAssignment.status == "active",
                 )
             )
-            if supervisor_dup.scalar_one_or_none():
-                return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该店铺该月份已存在主管责任人", status_code=409)
+        ).scalars().all()
+        validation_error = _validate_shop_assignment_ratio_limit(
+            existing_rows=same_shop_rows,
+            employee_code=body.employee_code,
+            commission_ratio=body.commission_ratio,
+            current_assignment_id=None,
+        )
+        if validation_error:
+            return error_response(ErrorCode.DATA_VALIDATION_FAILED, validation_error, status_code=400)
 
         rec = EmployeeShopAssignment(
             year_month=body.year_month,
@@ -621,20 +710,24 @@ async def update_employee_shop_assignment(
         rec = result.scalar_one_or_none()
         if not rec:
             return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
-        next_role = body.role if body.role is not None else rec.role
-        if next_role == "supervisor":
-            supervisor_dup = await db.execute(
+        same_shop_rows = (
+            await db.execute(
                 select(EmployeeShopAssignment).where(
                     EmployeeShopAssignment.year_month == rec.year_month,
                     EmployeeShopAssignment.platform_code == rec.platform_code,
                     EmployeeShopAssignment.shop_id == rec.shop_id,
-                    EmployeeShopAssignment.role == "supervisor",
-                    EmployeeShopAssignment.status == "active",
-                    EmployeeShopAssignment.id != id,
                 )
             )
-            if supervisor_dup.scalar_one_or_none():
-                return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该店铺该月份已存在主管责任人", status_code=409)
+        ).scalars().all()
+        next_commission_ratio = body.commission_ratio if body.commission_ratio is not None else rec.commission_ratio
+        validation_error = _validate_shop_assignment_ratio_limit(
+            existing_rows=same_shop_rows,
+            employee_code=rec.employee_code,
+            commission_ratio=next_commission_ratio,
+            current_assignment_id=id,
+        )
+        if validation_error:
+            return error_response(ErrorCode.DATA_VALIDATION_FAILED, validation_error, status_code=400)
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(rec, k, v)
         await db.commit()
@@ -722,10 +815,12 @@ async def put_shop_commission_config(
     try:
         pc = (platform_code or "").lower()
         sid = str(shop_id or "")
-        shop_res = await db.execute(
-            select(DimShop).where(DimShop.platform_code == pc, DimShop.shop_id == sid)
+        shop = await _ensure_dim_shop_exists(
+            db,
+            platform_code=pc,
+            shop_id=sid,
         )
-        if not shop_res.scalar_one_or_none():
+        if not shop:
             return error_response(ErrorCode.DATA_NOT_FOUND, "该店铺尚未同步至系统，请先在账号管理中同步", status_code=400)
         existing = await db.execute(
             select(ShopCommissionConfig).where(

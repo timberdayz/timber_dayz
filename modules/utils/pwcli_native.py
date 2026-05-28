@@ -215,13 +215,107 @@ def _write_raw_storage_state(path: Path, storage_state: dict[str, Any]) -> None:
     path.write_text(json.dumps(storage_state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def read_storage_state_for_pwcli(metadata: dict[str, Any], context, *, path: Path | None = None) -> dict[str, Any]:
+    platform = str(metadata.get("platform") or "").strip().lower()
+    kwargs: dict[str, Any] = {}
+    if platform == "tiktok":
+        kwargs["indexed_db"] = True
+    if path is not None:
+        kwargs["path"] = str(path)
+    try:
+        return context.storage_state(**kwargs)
+    except TypeError:
+        fallback_kwargs = dict(kwargs)
+        fallback_kwargs.pop("indexed_db", None)
+        return context.storage_state(**fallback_kwargs)
+
+
+def _capture_page_storage(page) -> dict[str, Any] | None:
+    try:
+        payload = page.evaluate(
+            """() => {
+              try {
+                const readStorage = (storage) => {
+                  const items = [];
+                  for (let i = 0; i < storage.length; i += 1) {
+                    const key = storage.key(i);
+                    items.push({ name: key, value: storage.getItem(key) });
+                  }
+                  return items;
+                };
+                return {
+                  origin: location.origin,
+                  localStorage: readStorage(window.localStorage),
+                  sessionStorage: readStorage(window.sessionStorage),
+                };
+              } catch (error) {
+                return null;
+              }
+            }"""
+        )
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _supplement_tiktok_storage_state_from_pages(context, storage_state: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(storage_state, dict):
+        storage_state = {}
+    merged = dict(storage_state)
+    existing_origins = merged.get("origins")
+    origin_map: dict[str, dict[str, Any]] = {}
+    if isinstance(existing_origins, list):
+        for origin in existing_origins:
+            if not isinstance(origin, dict):
+                continue
+            key = str(origin.get("origin") or "").strip()
+            if key:
+                origin_map[key] = {
+                    **origin,
+                    "localStorage": list(origin.get("localStorage") or []),
+                }
+
+    for page in list(getattr(context, "pages", []) or []):
+        payload = _capture_page_storage(page)
+        if not payload:
+            continue
+        origin = str(payload.get("origin") or "").strip()
+        if not origin or "tiktokshopglobalselling.com" not in origin:
+            continue
+        local_entries = payload.get("localStorage")
+        if not isinstance(local_entries, list) or not local_entries:
+            continue
+        existing = origin_map.get(origin, {"origin": origin, "localStorage": []})
+        local_map = {}
+        for item in list(existing.get("localStorage") or []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if name:
+                local_map[name] = item
+        for item in local_entries:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if name:
+                local_map[name] = {"name": name, "value": item.get("value")}
+        existing["localStorage"] = list(local_map.values())
+        origin_map[origin] = existing
+
+    if origin_map:
+        merged["origins"] = list(origin_map.values())
+    return merged
+
+
 def save_default_storage_state_from_context(metadata: dict[str, Any], context, session_metadata: dict[str, Any] | None = None) -> None:
     state_path = str(metadata.get("default_state_path") or "").strip()
     state_mode = str(metadata.get("default_state_mode") or "").strip().lower()
     if not state_path or not state_mode:
         return
 
-    storage_state = context.storage_state()
+    storage_state = read_storage_state_for_pwcli(metadata, context)
+    if str(metadata.get("platform") or "").strip().lower() == "tiktok":
+        storage_state = _supplement_tiktok_storage_state_from_pages(context, storage_state)
     if state_mode == "session_manager":
         from modules.utils.sessions.session_manager import SessionManager
 
@@ -797,7 +891,7 @@ def command_state_save(session: str, filename: str | None) -> int:
             target = Path(filename)
             if not target.is_absolute():
                 target = Path.cwd() / target
-            context.storage_state(path=str(target))
+            read_storage_state_for_pwcli(metadata, context, path=target)
             print(target)
         elif state_mode == "session_manager" and default_state_path:
             save_default_storage_state_from_context(
@@ -815,7 +909,7 @@ def command_state_save(session: str, filename: str | None) -> int:
             target = Path(default_state_path or "storage-state.json")
             if not target.is_absolute():
                 target = Path.cwd() / target
-            context.storage_state(path=str(target))
+            read_storage_state_for_pwcli(metadata, context, path=target)
             print(target)
         if not synced_default:
             save_default_storage_state_from_context(metadata, context)

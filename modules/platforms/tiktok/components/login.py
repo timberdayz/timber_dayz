@@ -12,7 +12,7 @@ from backend.services.platform_login_entry_service import get_platform_login_ent
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginComponent, LoginResult
 from modules.platforms.tiktok.archive.analytics_config import AnalyticsSelectors
-from modules.platforms.tiktok.components._navigation import page_looks_loading
+from modules.platforms.tiktok.components._navigation import page_looks_loading, wait_until_bootstrap_finishes
 
 
 class TiktokLogin(LoginComponent):
@@ -81,6 +81,61 @@ class TiktokLogin(LoginComponent):
                 await asyncio.sleep(poll_ms / 1000)
             waited += poll_ms
         return False
+
+    async def _wait_for_reused_session_bootstrap(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 30000,
+        poll_ms: int = 500,
+    ) -> str:
+        waited = 0
+        first_pass = True
+        while waited <= timeout_ms:
+            remaining = max(timeout_ms - waited, poll_ms)
+            settle_timeout = min(remaining, 30000 if first_pass else 4000)
+            stable_cycles = 4 if first_pass else 2
+            first_pass = False
+
+            try:
+                await wait_until_bootstrap_finishes(
+                    page,
+                    timeout_ms=settle_timeout,
+                    poll_ms=poll_ms,
+                    stable_cycles=stable_cycles,
+                )
+            except Exception:
+                pass
+
+            seller_error = await self._find_visible_text(page, self._seller_context_error_texts())
+            if seller_error:
+                self._log_info("tiktok_login reused_session_bootstrap seller_context_error=%s", seller_error)
+                return "login_error"
+
+            if await self._target_looks_ready(page):
+                self._log_url_event("reused_session_bootstrap_target_ready", getattr(page, "url", ""))
+                return "success"
+
+            if await self._is_otp_visible(page):
+                self._log_url_event("reused_session_bootstrap_otp_visible", getattr(page, "url", ""))
+                return "otp"
+
+            current_url = str(getattr(page, "url", "") or "").strip().lower()
+            if await self._session_shell_looks_ready(page):
+                waited += settle_timeout
+                continue
+
+            if "/account/login" not in current_url and self._login_looks_successful(current_url):
+                waited += settle_timeout
+                continue
+
+            if await page_looks_loading(page):
+                waited += settle_timeout
+                continue
+
+            return "needs_login"
+
+        return "needs_login"
 
     def _known_login_error_texts(self) -> tuple[str, ...]:
         return (
@@ -643,7 +698,7 @@ class TiktokLogin(LoginComponent):
         current_url = str(getattr(page, "url", "") or "")
         otp_value = str(params.get("captcha_code") or params.get("otp") or "").strip()
         manual_completed = bool(params.get("manual_completed"))
-        reused_session = bool(params.get("reused_session"))
+        reused_session = bool(params.get("reused_session") or config.get("reused_session"))
 
         if self._login_looks_successful(current_url):
             self._log_url_event("already_logged_in", current_url)
@@ -687,26 +742,34 @@ class TiktokLogin(LoginComponent):
             current_url = str(getattr(page, "url", "") or "").strip()
             if "/account/login" in current_url.lower():
                 self._log_url_event("login_surface_reuse", current_url)
-                await self._wait_for_login_surface_ready(page)
             else:
                 self._log_url_event("goto_login_before", current_url)
                 await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
                 self._log_url_event("goto_login_after", getattr(page, "url", ""))
                 await page.wait_for_timeout(800)
-                await self._wait_for_login_surface_ready(page)
 
             if reused_session:
                 redirected = await self._wait_for_reused_session_redirect(page)
                 if redirected:
-                    outcome = await self._wait_for_post_login_outcome(
+                    bootstrap_outcome = await self._wait_for_reused_session_bootstrap(
                         page,
-                        phase="post_otp_submit",
-                        timeout_ms=20000,
+                        timeout_ms=30000,
                         poll_ms=500,
                     )
-                    if outcome == "success":
+                    if bootstrap_outcome == "success":
                         await self._cleanup_after_login(page)
                         return LoginResult(success=True, message="ok")
+                    if bootstrap_outcome == "otp":
+                        await self._ensure_trust_device_checked(page)
+                        if not otp_value:
+                            await self._raise_otp_verification_required(page, config)
+                        return await self._submit_resumed_otp(page, otp_value)
+                    if bootstrap_outcome == "login_error":
+                        login_error = await self._find_visible_login_error(page)
+                        seller_error = await self._find_visible_text(page, self._seller_context_error_texts())
+                        return LoginResult(success=False, message=login_error or seller_error or "login failed")
+
+            await self._wait_for_login_surface_ready(page)
 
             if self._login_looks_successful(str(getattr(page, "url", "") or "")):
                 self._log_url_event("login_short_circuit_success", getattr(page, "url", ""))

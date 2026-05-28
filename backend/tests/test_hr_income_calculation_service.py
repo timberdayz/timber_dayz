@@ -268,7 +268,7 @@ def test_calculate_month_updates_existing_records_with_english_orm_path():
     assert result["commission_upserts"] == 1
     assert result["performance_upserts"] == 1
     assert existing_commission.commission_amount == pytest.approx(180.0)
-    assert existing_performance.performance_score == pytest.approx(70.0)
+    assert existing_performance.performance_score == pytest.approx(0.0)
     assert db.rollback.await_count == 0
     assert all("update c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
     assert all("insert into c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
@@ -500,6 +500,77 @@ def test_calculate_month_employee_performance_uses_store_total_score():
     assert perf.actual_sales == pytest.approx(1200.0)
     assert perf.achievement_rate == pytest.approx((60.0 * 1000.0 + 50.0 * 200.0) / 1200.0 / 100.0)
     assert perf.performance_score == pytest.approx(90.8)
+
+
+def test_calculate_month_employee_performance_does_not_fallback_to_achievement_rate_without_store_score():
+    db = AsyncMock()
+    added = []
+
+    assignments = [
+        SimpleNamespace(
+            employee_code="E150",
+            platform_code="Shopee",
+            shop_id="S1",
+            commission_ratio=0.1,
+            status="active",
+            year_month="2026-03",
+        ),
+    ]
+    cfg_rows = [
+        SimpleNamespace(
+            year_month="2026-03",
+            platform_code="Shopee",
+            shop_id="S1",
+            allocatable_profit_rate=1.0,
+        ),
+    ]
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=assignments)
+            if entity is ShopCommissionConfig:
+                return _MockResult(rows=cfg_rows)
+            if entity is ShopProfitBasis:
+                return _MockResult(rows=[])
+            if entity is PerformanceScore:
+                return _MockResult(rows=[])
+            if entity is AttendanceRecord:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformanceAdjustment:
+                return _MockResult(rows=[])
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=None)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+        return _MockResult(
+            mapping_rows=[
+                {
+                    "platform_code": "Shopee",
+                    "shop_id": "S1",
+                    "gmv": 1000.0,
+                    "profit": 300.0,
+                    "achievement_rate": 60.0,
+                }
+            ]
+        )
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+
+    service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|s1": {"profit_basis_amount": 1000.0}}
+    )
+
+    result = asyncio.run(service.calculate_month("2026-03"))
+
+    assert result["employee_count"] == 1
+    perf = next(x for x in added if isinstance(x, EmployeePerformance))
+    assert perf.achievement_rate == pytest.approx(0.6)
+    assert perf.performance_score == pytest.approx(0.0)
 
 
 def test_calculate_month_employee_performance_applies_attendance_penalties():

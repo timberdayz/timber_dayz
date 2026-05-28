@@ -282,7 +282,7 @@
           <el-input :value="addForShopRow.shop_name || addForShopRow.shop_id" disabled />
         </el-form-item>
         <el-form-item label="角色" required>
-          <el-select v-model="form.role" placeholder="选择角色" style="width: 100%;" :disabled="!!addForShopRow">
+          <el-select v-model="form.role" placeholder="选择角色" style="width: 100%;">
             <el-option label="主管" value="supervisor" />
             <el-option label="操作员" value="operator" />
           </el-select>
@@ -333,6 +333,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Setting, DataAnalysis, Calendar } from '@element-plus/icons-vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { exceedsCommissionRatioLimit, sumCommissionRatio } from './shopAssignmentRules'
 
 const activeTab = ref('config')
 const configMonth = ref(new Date().toISOString().slice(0, 7))  // YYYY-MM
@@ -431,6 +432,18 @@ function hasConfig(row) {
   return (assignments && assignments.length > 0) || (Number(row.allocatable_profit_rate) ?? 0) > 0
 }
 
+function validateShopAssignmentRatio(shop, nextAssignment = null, excludePredicate = null) {
+  const assignments = shop?.assignments || []
+  if (!nextAssignment) {
+    return sumCommissionRatio(assignments) <= 1 + 1e-9
+  }
+  return !exceedsCommissionRatioLimit(
+    assignments,
+    nextAssignment.commission_ratio ?? 0,
+    excludePredicate
+  )
+}
+
 function handleConfigMonthChange() {
   if (configMonth.value) loadConfigData()
 }
@@ -462,6 +475,10 @@ async function handleSaveRow(row) {
   const shop = row._shop || row
   if (!configMonth.value) {
     ElMessage.warning('请先选择配置月份')
+    return
+  }
+  if (!validateShopAssignmentRatio(shop)) {
+    ElMessage.warning('该店铺该月份人员提成比例总和不能超过100%')
     return
   }
   shop.saving = true
@@ -730,6 +747,10 @@ async function submitForm() {
     }
     if ((shop.assignments || []).some((x) => x.employee_code === p.employee_code && x.role === p.role)) {
       ElMessage.warning('该人员已添加')
+      return
+    }
+    if (!validateShopAssignmentRatio(shop, p)) {
+      ElMessage.warning('该店铺该月份人员提成比例总和不能超过100%')
       return
     }
     shop.assignments = [...(shop.assignments || []), p]

@@ -384,7 +384,7 @@
               {{ getRuntimeStrategyReasonLabel(detailTask.runtime_strategy_reason) }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.login_gate_ready !== null && detailTask.login_gate_ready !== undefined" label="登录态检查">
-              {{ detailTask.login_gate_ready ? '已命中复用会话' : '未命中复用会话' }}
+              {{ detailTask.login_gate_ready ? '已确认登录态可直接复用' : '未确认已登录，需继续观察或补登录' }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.login_gate_reason" label="登录态原因">
               {{ detailTask.login_gate_reason }}
@@ -703,17 +703,11 @@ const syncVerificationDialogFromTasks = (taskList) => {
       verificationDialogVisible.value = false
       return
     }
-
-    const reenteredVerification = verificationSubmitting.value
-      && ['verification_required', 'paused', 'manual_intervention_required'].includes(currentTaskFromList.status)
-    syncVerificationDialogState(currentTaskFromList, { resetInput: reenteredVerification })
-    if (currentTaskFromList.status === 'verification_submitted') {
-      verificationSubmitting.value = true
-    } else if (reenteredVerification) {
-      verificationSubmitting.value = false
-      ElMessage.warning('验证码未通过或页面再次要求验证，请根据最新截图重新输入')
+    if (isLegacyVerificationStatus(currentTaskFromList)
+      || (currentTaskFromList.status === 'manual_intervention_required' && currentTaskFromList.verification_type)) {
+      syncVerificationDialogState(currentTaskFromList)
+      return
     }
-    return
   }
 
   const verificationTask = (taskList || []).find(
@@ -874,13 +868,10 @@ const submitVerification = async (submitted) => {
   try {
     verificationSubmitting.value = true
     await collectionApi.resumeTask(currentTask.value.task_id, payload)
-    if (currentTask.value) {
-      currentTask.value.status = 'verification_submitted'
-      currentTask.value.current_step = '用户已提交验证码，等待执行器继续'
-      currentTask.value.verification_message = '用户已提交验证码，等待执行器继续'
-    }
-    ElMessage.success('验证码已提交，系统正在校验并尝试继续执行')
-    loadTasks()
+    verificationSubmitting.value = false
+    verificationDialogVisible.value = false
+    ElMessage.success('验证码已提交，任务继续执行')
+    await loadTasks()
   } catch (error) {
     verificationSubmitting.value = false
     ElMessage.error('提交失败: ' + (error.response?.data?.detail || error.message))
@@ -1060,7 +1051,7 @@ const getRuntimeSessionModeLabel = (mode) => {
 
 const getSessionSourceLabel = (source) => {
   const labels = {
-    storage_state: 'storage_state 快照',
+    storage_state: 'storage_state 会话快照',
     persistent_profile: '持久化浏览器档案',
     fresh_login: '本次重新登录'
   }
@@ -1069,16 +1060,17 @@ const getSessionSourceLabel = (source) => {
 
 const getSessionQualitySourceLabel = (source) => {
   const labels = {
-    manual: '????',
-    automatic: '????'
+    manual: '人工保存',
+    automatic: '自动生成'
   }
   return labels[source] || source || '-'
 }
 
 const getRuntimeStrategyReasonLabel = (reason) => {
   const labels = {
-    storage_state_available: '已找到可复用的 storage_state',
-    storage_state_missing: '未找到可复用的 storage_state，回退到 profile',
+    manual_storage_state_available: '已命中人工保存会话，优先按完整快照恢复',
+    storage_state_available: '已找到 storage_state，会先按快照恢复页面',
+    storage_state_missing: '未找到 storage_state，回退到 profile',
     fresh_login_required: '无可复用会话，需要重新登录',
     parallel_bootstrap: '并行模式先做主会话引导',
     persistent_profile: '固定使用持久化浏览器档案',

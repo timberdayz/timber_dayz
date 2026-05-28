@@ -87,3 +87,49 @@ def test_automatic_save_can_upgrade_existing_session_quality(tmp_path: Path) -> 
     cookie_names = {item["name"] for item in payload["storage_state"]["cookies"]}
     assert "sessionid" in cookie_names
     assert payload["metadata"]["quality_gate_passed"] is True
+
+
+def test_automatic_save_does_not_override_manual_seeded_session_even_if_new_state_is_higher_quality(
+    tmp_path: Path,
+) -> None:
+    manager = SessionManager(base_path=tmp_path / "sessions")
+    platform = "tiktok"
+    account_id = "acc-1"
+
+    manual_state = {
+        "cookies": [
+            {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+        ],
+        "origins": [],
+    }
+    auto_high_state = {
+        "cookies": [
+            {"name": "sessionid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "sid_tt", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "passport_csrf_token", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "user_oec_info", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "global_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "app_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "oec_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+            {"name": "i18next", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "ATLAS_LANG", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "msToken", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
+            {"name": "passport_auth_status", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+        ],
+        "origins": [{"origin": "https://seller.tiktokshopglobalselling.com", "localStorage": [{"name": "a", "value": "1"}]}],
+    }
+
+    assert manager.save_session(
+        platform,
+        account_id,
+        manual_state,
+        metadata={"quality_source": "manual", "manual_seeded": True, "protected": True},
+    )
+    assert manager.save_session(platform, account_id, auto_high_state, metadata={"quality_source": "automatic"})
+
+    payload = _read_session(manager.get_session_path(platform, account_id))
+    assert payload["storage_state"] == manual_state
+    assert payload["metadata"]["manual_seeded"] is True
+    assert payload["metadata"]["protected"] is True
+    assert payload["metadata"]["quality_source"] == "manual"

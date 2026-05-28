@@ -318,6 +318,7 @@ def _build_runtime_task_params(
             "date_from": normalized_date_range.get("date_from", ""),
             "date_to": normalized_date_range.get("date_to", ""),
             "granularity": granularity,
+            "reused_session": reused_session,
         },
         "task": {
             "id": task_id,
@@ -754,20 +755,24 @@ class CollectionExecutorV2:
         normalized_mode = str(session_runtime_mode or "storage_state_fanout").strip().lower()
         effective_storage_state = storage_state
 
+        session_candidate = runtime_session.RuntimeSessionCandidate(storage_state=effective_storage_state, metadata={})
+
         if normalized_mode == "auto":
             has_persistent_profile = bool(
                 session_owner_id and runtime_session.runtime_profile_exists(platform, session_owner_id)
             )
             if effective_storage_state is None and session_owner_id:
-                effective_storage_state = await runtime_session.load_or_bootstrap_runtime_storage_state(
+                session_candidate = await runtime_session.load_runtime_session_candidate(
                     platform=platform,
                     session_owner_id=session_owner_id,
                     account=runtime_account,
                 )
+                effective_storage_state = session_candidate.storage_state
             strategy = runtime_session.choose_runtime_strategy(
                 platform=platform,
                 session_owner_id=session_owner_id,
                 has_storage_state=bool(effective_storage_state),
+                has_manual_storage_state=session_candidate.manual_seeded,
                 has_persistent_profile=has_persistent_profile,
                 force_persistent_profile=False,
                 execution_kind="formal_collection",
@@ -801,13 +806,13 @@ class CollectionExecutorV2:
             return bundle
 
         if effective_storage_state is None and session_owner_id:
-            session_data = await _load_or_bootstrap_session_async(
-                platform,
-                session_owner_id,
-                runtime_account,
+            session_candidate = await runtime_session.load_runtime_session_candidate(
+                platform=platform,
+                session_owner_id=session_owner_id,
+                account=runtime_account,
             )
-            if session_data and isinstance(session_data.get("storage_state"), dict):
-                effective_storage_state = session_data["storage_state"]
+            if isinstance(session_candidate.storage_state, dict):
+                effective_storage_state = session_candidate.storage_state
 
         bundle = await runtime_session.open_storage_state_runtime_bundle(
             browser=browser,
@@ -821,8 +826,16 @@ class CollectionExecutorV2:
         self._annotate_runtime_bundle(
             bundle,
             strategy_reason=strategy.reason,
-            session_source="storage_state" if effective_storage_state else "fresh_login",
+            session_source=(
+                "manual_storage_state"
+                if session_candidate.manual_seeded and effective_storage_state
+                else ("storage_state" if effective_storage_state else "fresh_login")
+            ),
         )
+        try:
+            setattr(bundle, "session_metadata", dict(session_candidate.metadata or {}))
+        except Exception:
+            pass
         return bundle
 
     @staticmethod
@@ -873,7 +886,10 @@ class CollectionExecutorV2:
     ) -> Dict[str, Any]:
         session_owner_id = params.get("main_account_id")
         session_metadata: Dict[str, Any] = {}
-        if session_owner_id:
+        bundle_metadata = getattr(runtime_bundle, "session_metadata", None)
+        if isinstance(bundle_metadata, dict) and bundle_metadata:
+            session_metadata = bundle_metadata
+        elif session_owner_id:
             try:
                 from modules.utils.sessions.session_manager import SessionManager
 
@@ -927,55 +943,6 @@ class CollectionExecutorV2:
         await self._check_cancelled(task_id)
         if str(platform or "").strip().lower() != "tiktok":
             await self.popup_handler.close_popups(page, platform=platform)
-
-        runtime_mode = str(params.get("_runtime_session_mode") or "").strip().lower()
-        if runtime_mode in {"persistent_profile", "storage_state_fanout"}:
-            runtime_ready, gate_result = await runtime_session.probe_runtime_login_gate(
-                page=page,
-                platform=platform,
-                account=account,
-            )
-            await self._update_status(
-                task_id,
-                5,
-                "检查复用会话登录态",
-                details={
-                    "step_id": "login_gate_probe",
-                    **self._runtime_metadata_details(
-                        params=params,
-                        login_gate_ready=runtime_ready,
-                        login_gate_reason=gate_result.reason,
-                        login_gate_url=gate_result.current_url,
-                    ),
-                },
-            )
-            if runtime_ready:
-                if params.get("shop_account_id"):
-                    await self._update_status(
-                        task_id,
-                        12,
-                        MAIN_ACCOUNT_SESSION_STEP_MESSAGES["switching_target_shop"],
-                    )
-                await self._update_status(
-                    task_id,
-                    15,
-                    MAIN_ACCOUNT_SESSION_STEP_MESSAGES["target_shop_ready"],
-                    details={
-                        "step_id": "login_gate_result",
-                        **self._runtime_metadata_details(
-                            params=params,
-                            login_gate_ready=True,
-                            login_gate_reason=gate_result.reason,
-                            login_gate_url=gate_result.current_url,
-                        ),
-                    },
-                )
-                logger.info(
-                    "Task %s: [Python] Reused persistent profile session before login component",
-                    task_id,
-                )
-                context.current_component_index = 1
-                return play_context, page, None
 
         login_success = False
         while True:
@@ -4340,6 +4307,7 @@ class CollectionExecutorV2:
         payload = {
             "step_id": "browser_diagnostics",
             "component": "browser_diagnostics",
+            "diagnostic_only": True,
             **(details or {}),
         }
         await self._update_status(

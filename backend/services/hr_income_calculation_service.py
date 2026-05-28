@@ -493,15 +493,13 @@ class HRIncomeCalculationService:
             perf_rec["weighted_rate_num"] += achievement_rate * monthly_sales
             perf_rec["weighted_rate_den"] += monthly_sales
 
-            store_weight = self._to_float(score.get("sales_target"), 0.0)
-            if store_weight <= 0:
-                store_weight = monthly_sales if monthly_sales > 0 else 1.0
             if score:
+                store_weight = self._to_float(score.get("sales_target"), 0.0)
+                if store_weight <= 0:
+                    store_weight = monthly_sales if monthly_sales > 0 else 1.0
                 store_score = self._to_float(score.get("total_score"), 0.0)
-            else:
-                store_score = min(max(achievement_rate, 0.0), 1.0) * 100.0
-            perf_rec["weighted_score_num"] += store_score * store_weight
-            perf_rec["weighted_score_den"] += store_weight
+                perf_rec["weighted_score_num"] += store_score * store_weight
+                perf_rec["weighted_score_den"] += store_weight
 
             # Commission aggregation: still based on commission ratio.
             ratio = self._to_float(row.commission_ratio, 0.0)
@@ -602,7 +600,7 @@ class HRIncomeCalculationService:
                     rec["weighted_score_num"] / rec["weighted_score_den"]
                 )
             else:
-                performance_score = min(max(achievement_rate, 0.0), 1.0) * 100.0
+                performance_score = 0.0
             performance_score += self._to_float(
                 attendance_adjustment_by_employee.get(employee_code),
                 0.0,

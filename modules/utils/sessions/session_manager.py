@@ -406,7 +406,11 @@ class SessionManager:
             selected_gate = merged_gate
 
             if old_state is not None:
-                if old_protected and selected_score < old_score:
+                if old_protected and not incoming_manual:
+                    selected_state = old_state
+                    selected_score = old_score
+                    selected_gate = old_gate
+                elif old_protected and selected_score < old_score:
                     selected_state = old_state
                     selected_score = old_score
                     selected_gate = old_gate
