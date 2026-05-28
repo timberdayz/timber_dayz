@@ -27,3 +27,15 @@ def test_collection_tasks_refreshes_screenshot_url_with_cache_busting_timestamp(
 
     assert "const getVerificationScreenshotUrl = (taskId) =>" in text
     assert "collectionApi.getTaskScreenshotUrl(taskId, { ts: Date.now() })" in text
+
+
+def test_collection_tasks_closes_verification_dialog_when_task_reaches_terminal_status():
+    text = (
+        PROJECT_ROOT
+        / "frontend/src/domains/collection/views/collection/CollectionTasks.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'partial_success']" in text
+    assert "if (TERMINAL_STATUSES.includes(currentTaskFromList.status))" in text
+    assert "verificationDialogVisible.value = false" in text
+    assert "verificationSubmitting.value = false" in text

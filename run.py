@@ -506,7 +506,7 @@ def start_celery_worker():
         # 反引号转义 $ 避免父 PowerShell 展开 $env:PYTHONPATH 导致子窗口收到 "=路径" 报 CommandNotFoundException
         work_dir = str(project_root.resolve())
         work_dir_ps = work_dir.replace("'", "''")
-        celery_cmd = "`$env:PYTHONPATH='{}'; `$env:PROJECT_ROOT='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing,collection --pool=solo --concurrency=4".format(work_dir_ps, work_dir_ps)
+        celery_cmd = "`$env:PYTHONPATH='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --pool=solo --concurrency=4".format(work_dir_ps)
         cmd = (
             'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'
         ).format(celery_cmd.replace('"', '`"'), work_dir.replace('"', '`"'))
@@ -523,71 +523,11 @@ def start_celery_worker():
         # Unix: 直接启动
         process = subprocess.Popen(
             [sys.executable, "-m", "celery", "-A", "backend.celery_app", "worker",
-             "--loglevel=info", "--queues=data_sync,scheduled,data_processing,collection", "--concurrency=4"],
+             "--loglevel=info", "--queues=data_sync,scheduled,data_processing", "--concurrency=4"],
             cwd=project_root
         )
         safe_print("  [OK] Celery Worker已启动")
     
-    return process
-
-
-def start_collection_worker():
-    """启动本地采集 Celery worker（仅监听 collection 队列）。"""
-    safe_print("\n[启动] Collection Worker服务...")
-    safe_print("  队列: collection")
-
-    project_root = Path(__file__).parent
-    env = _apply_no_color_env(os.environ.copy())
-    env["PYTHONPATH"] = str(project_root.resolve())
-    env["PROJECT_ROOT"] = str(project_root.resolve())
-
-    if sys_platform.system() == "Windows":
-        logs_dir = project_root / "logs"
-        logs_dir.mkdir(exist_ok=True)
-        worker_out = (logs_dir / "collection-worker-local.out.log").open(
-            "w", encoding="utf-8", errors="ignore"
-        )
-        worker_err = (logs_dir / "collection-worker-local.err.log").open(
-            "w", encoding="utf-8", errors="ignore"
-        )
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "celery",
-                "-A",
-                "backend.celery_app",
-                "worker",
-                "--loglevel=info",
-                "--queues=collection",
-                "--pool=solo",
-                "--concurrency=1",
-            ],
-            cwd=project_root,
-            env=env,
-            stdout=worker_out,
-            stderr=worker_err,
-        )
-        _register_process_with_windows_job(process)
-        safe_print("  [OK] Collection Worker已启动（日志: logs/collection-worker-local.*.log）")
-        return process
-
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "celery",
-            "-A",
-            "backend.celery_app",
-            "worker",
-            "--loglevel=info",
-            "--queues=collection",
-            "--concurrency=1",
-        ],
-        cwd=project_root,
-        env=env,
-    )
-    safe_print("  [OK] Collection Worker已启动")
     return process
 
 def check_docker_container_running(container_name):
@@ -1815,11 +1755,6 @@ def main():
 
     if args.local:
         os.environ["ENVIRONMENT"] = "development"
-        os.environ["COLLECTION_EXECUTION_BACKEND"] = "celery"
-    elif not args.use_docker and not args.frontend_only and not args.no_celery and redis_available:
-        os.environ["COLLECTION_EXECUTION_BACKEND"] = "celery"
-    else:
-        os.environ.pop("COLLECTION_EXECUTION_BACKEND", None)
 
     backend_port = BACKEND_PORT
     if not args.frontend_only and not args.use_docker:
@@ -1889,12 +1824,6 @@ def main():
                 raise SystemExit(1)
 
         celery_process = None
-        collection_worker_process = None
-        if args.local and not args.frontend_only:
-            collection_worker_process = start_collection_worker()
-            processes.append(("collection-worker", collection_worker_process))
-            time.sleep(2)
-
         if not args.use_docker and not args.no_celery and not args.frontend_only:
             if redis_available:
                 celery_process = start_celery_worker()
@@ -1929,11 +1858,6 @@ def main():
             safe_print("       查看日志: docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f celery-worker")
         elif celery_process:
             safe_print("[任务] Celery Worker已启动（处理数据同步任务）")
-
-        if collection_worker_process:
-            safe_print("[任务] Collection Worker已启动（本机，处理采集任务）")
-        elif celery_process:
-            safe_print("[任务] Collection 队列已由本机 Celery Worker监听")
 
         if not args.backend_only:
             safe_print(f"[前端] 主界面:   http://localhost:{frontend_port}")

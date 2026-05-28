@@ -219,7 +219,6 @@ def test_start_backend_uses_loopback_host_on_windows(monkeypatch):
 def test_main_local_mode_disables_backend_reload(monkeypatch):
     run_module = _load_run_module()
     captured = {}
-    collection_worker_started = {"value": False}
 
     monkeypatch.setattr(
         run_module.argparse.ArgumentParser,
@@ -255,11 +254,6 @@ def test_main_local_mode_disables_backend_reload(monkeypatch):
         return SimpleNamespace()
 
     monkeypatch.setattr(run_module, "start_backend", _fake_start_backend)
-    monkeypatch.setattr(
-        run_module,
-        "start_collection_worker",
-        lambda: collection_worker_started.__setitem__("value", True) or SimpleNamespace(),
-    )
 
     monkeypatch.setattr(run_module, "wait_for_service", lambda port, name, max_wait=30: True)
 
@@ -276,8 +270,6 @@ def test_main_local_mode_disables_backend_reload(monkeypatch):
     assert captured["runtime_mode"] == "development"
     assert captured["windowed"] is False
     assert captured["enable_reload"] is False
-    assert collection_worker_started["value"] is True
-    assert run_module.os.environ["COLLECTION_EXECUTION_BACKEND"] == "celery"
 
 
 def test_choose_local_backend_port_falls_back_when_default_not_bindable(monkeypatch):

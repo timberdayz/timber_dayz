@@ -414,7 +414,7 @@ const payrollForm = reactive({
 const recentMonths = computed(() => {
   const months = []
   const now = new Date()
-  for (let i = 0; i < 12; i += 1) {
+  for (let i = -1; i < 11; i += 1) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }

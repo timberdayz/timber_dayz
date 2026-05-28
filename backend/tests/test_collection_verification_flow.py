@@ -359,3 +359,52 @@ async def test_get_task_screenshot_resolves_relative_path_from_project_root(tmp_
     )
 
     assert str(response.path) == str(screenshot_path)
+
+
+@pytest.mark.asyncio
+async def test_persist_collection_task_result_clears_verification_fields_on_terminal_status():
+    from backend.domains.collection.routers.collection_tasks import _persist_collection_task_result
+
+    task = _make_task(
+        status="verification_required",
+        verification_type="graphical_captcha",
+        verification_screenshot="temp/task.png",
+    )
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+
+    db_session = MagicMock()
+    db_session.execute = AsyncMock(return_value=result)
+    db_session.commit = AsyncMock()
+    db_session.rollback = AsyncMock()
+    db_session.refresh = AsyncMock()
+
+    class _DbSessionManager:
+        async def __aenter__(self):
+            return db_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    from backend.models import database as database_module
+
+    original_async_session_local = database_module.AsyncSessionLocal
+    database_module.AsyncSessionLocal = lambda: _DbSessionManager()
+    try:
+        final_result = SimpleNamespace(
+            status="completed",
+            files_collected=1,
+            error_message=None,
+            duration_seconds=12,
+            completed_domains=["orders"],
+            failed_domains=[],
+        )
+
+        persisted = await _persist_collection_task_result("task-1", final_result)
+    finally:
+        database_module.AsyncSessionLocal = original_async_session_local
+
+    assert persisted is task
+    assert task.verification_type is None
+    assert task.verification_screenshot is None

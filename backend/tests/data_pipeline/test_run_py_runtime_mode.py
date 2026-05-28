@@ -112,7 +112,7 @@ def test_start_backend_can_disable_reload_for_windows_headless_local(monkeypatch
     assert "--reload" not in captured["cmd"]
 
 
-def test_start_celery_worker_includes_collection_queue_on_windows(monkeypatch):
+def test_start_celery_worker_uses_default_queues_on_windows(monkeypatch):
     module = _load_run_module()
 
     monkeypatch.setattr(module.sys_platform, "system", lambda: "Windows")
@@ -134,34 +134,7 @@ def test_start_celery_worker_includes_collection_queue_on_windows(monkeypatch):
     process = module.start_celery_worker()
 
     assert process is not None
-    assert "data_sync,scheduled,data_processing,collection" in captured["cmd"][2]
-    assert "PROJECT_ROOT" in captured["cmd"][2]
-
-
-def test_start_collection_worker_sets_project_root_env(monkeypatch, tmp_path):
-    module = _load_run_module()
-    monkeypatch.setattr(module.sys_platform, "system", lambda: "Windows")
-    monkeypatch.setattr(module, "__file__", str(tmp_path / "run.py"))
-    monkeypatch.setattr(module, "safe_print", lambda *args, **kwargs: None)
-    monkeypatch.setattr(module, "_register_process_with_windows_job", lambda process: None)
-
-    captured = {}
-
-    class DummyProcess:
-        def poll(self):
-            return None
-
-    def fake_popen(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["kwargs"] = kwargs
-        return DummyProcess()
-
-    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
-
-    process = module.start_collection_worker()
-
-    assert process is not None
-    assert captured["kwargs"]["env"]["PROJECT_ROOT"] == str(tmp_path)
+    assert "data_sync,scheduled,data_processing" in captured["cmd"][2]
 
 
 def test_cleanup_local_processes_terminates_started_children():

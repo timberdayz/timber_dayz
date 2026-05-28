@@ -536,6 +536,7 @@ const verificationInputMode = ref('')
 const verificationSubmitting = ref(false)
 const verificationCode = ref('')
 const currentTask = ref(null)
+const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'partial_success']
 
 // WebSocket连接
 const wsConnections = ref({})
@@ -697,6 +698,12 @@ const syncVerificationDialogFromTasks = (taskList) => {
     : null
 
   if (verificationDialogVisible.value && currentTaskFromList) {
+    if (TERMINAL_STATUSES.includes(currentTaskFromList.status)) {
+      verificationSubmitting.value = false
+      verificationDialogVisible.value = false
+      return
+    }
+
     const reenteredVerification = verificationSubmitting.value
       && ['verification_required', 'paused', 'manual_intervention_required'].includes(currentTaskFromList.status)
     syncVerificationDialogState(currentTaskFromList, { resetInput: reenteredVerification })
@@ -808,7 +815,6 @@ const cancelTask = async (row) => {
 }
 
 // 终态状态（可删除记录）
-const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'partial_success']
 const isTerminalStatus = (status) => TERMINAL_STATUSES.includes(status)
 
 const deleteTask = async (row) => {
@@ -950,6 +956,10 @@ const connectTaskWebSocket = (taskId) => {
         task.status = message.status
         task.files_collected = message.files_collected
         task.progress = ['completed', 'partial_success'].includes(message.status) ? 100 : task.progress
+      }
+      if (currentTask.value?.task_id === taskId && TERMINAL_STATUSES.includes(message.status)) {
+        verificationSubmitting.value = false
+        verificationDialogVisible.value = false
       }
       
       if (message.status === 'completed') {
