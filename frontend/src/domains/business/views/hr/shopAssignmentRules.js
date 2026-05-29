@@ -13,3 +13,15 @@ export function exceedsCommissionRatioLimit(assignments = [], nextRatio = 0, exc
   const normalizedNextRatio = Number(nextRatio ?? 0)
   return total + (Number.isFinite(normalizedNextRatio) ? normalizedNextRatio : 0) > 1 + 1e-9
 }
+
+export function setShopAllocatableProfitRate(row, value) {
+  const nextValue = Number(value ?? 0) / 100
+  const normalizedValue = Number.isFinite(nextValue) ? nextValue : 0
+  if (row && typeof row === 'object') {
+    row.allocatable_profit_rate = normalizedValue
+    if (row._shop && typeof row._shop === 'object') {
+      row._shop.allocatable_profit_rate = normalizedValue
+    }
+  }
+  return normalizedValue
+}

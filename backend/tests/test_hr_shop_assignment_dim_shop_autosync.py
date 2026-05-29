@@ -85,3 +85,12 @@ def test_shop_assignment_dialog_role_is_not_disabled():
 
     assert 'v-model="form.role"' in source
     assert ':disabled="!!addForShopRow"' not in source
+
+
+def test_shop_assignment_allocatable_profit_rate_uses_sync_helper():
+    source = Path(
+        "frontend/src/domains/business/views/hr/ShopAssignment.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "setShopAllocatableProfitRate" in source
+    assert '@update:model-value="(v) => setShopAllocatableProfitRate(row, v)"' in source

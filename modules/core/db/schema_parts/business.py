@@ -1067,6 +1067,154 @@ class MonthlyProfitAdjustment(Base):
         {"schema": "finance"},
     )
 
+
+class MonthlyProfitShopBasisSnapshot(Base):
+    """月结批准时冻结的店铺利润基数快照"""
+
+    __tablename__ = "monthly_profit_shop_basis_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    settlement_id = Column(Integer, ForeignKey("finance.monthly_profit_settlements.id", ondelete="CASCADE"), nullable=False)
+    period_month = Column(String(16), nullable=False)
+    snapshot_version = Column(Integer, nullable=False, default=1)
+    snapshot_status = Column(String(32), nullable=False, default="active")
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(256), nullable=False)
+    shop_name = Column(String(256), nullable=True)
+    basis_version = Column(String(64), nullable=True)
+    orders_profit_amount = Column(Float, default=0.0, nullable=False)
+    a_class_cost_amount = Column(Float, default=0.0, nullable=False)
+    profit_basis_amount = Column(Float, default=0.0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_by = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "settlement_id",
+            "snapshot_version",
+            "platform_code",
+            "shop_id",
+            name="uq_monthly_profit_shop_basis_snapshots",
+        ),
+        Index("ix_monthly_profit_shop_basis_snapshots_settlement", "settlement_id", "snapshot_status"),
+        {"schema": "finance"},
+    )
+
+
+class MonthlyProfitEmployeeCommissionSnapshot(Base):
+    """月结批准时冻结的员工提成快照"""
+
+    __tablename__ = "monthly_profit_employee_commission_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    settlement_id = Column(Integer, ForeignKey("finance.monthly_profit_settlements.id", ondelete="CASCADE"), nullable=False)
+    period_month = Column(String(16), nullable=False)
+    snapshot_version = Column(Integer, nullable=False, default=1)
+    snapshot_status = Column(String(32), nullable=False, default="active")
+    employee_code = Column(String(64), nullable=False)
+    employee_name = Column(String(128), nullable=True)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(256), nullable=False)
+    shop_name = Column(String(256), nullable=True)
+    sales_amount = Column(Float, default=0.0, nullable=False)
+    commission_rate = Column(Float, default=0.0, nullable=False)
+    commission_amount = Column(Float, default=0.0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_by = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "settlement_id",
+            "snapshot_version",
+            "employee_code",
+            "platform_code",
+            "shop_id",
+            name="uq_monthly_profit_employee_commission_snapshots",
+        ),
+        Index("ix_monthly_profit_employee_commission_snapshots_settlement", "settlement_id", "snapshot_status"),
+        {"schema": "finance"},
+    )
+
+
+class MonthlyProfitEmployeePerformanceSnapshot(Base):
+    """月结批准时冻结的员工绩效快照"""
+
+    __tablename__ = "monthly_profit_employee_performance_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    settlement_id = Column(Integer, ForeignKey("finance.monthly_profit_settlements.id", ondelete="CASCADE"), nullable=False)
+    period_month = Column(String(16), nullable=False)
+    snapshot_version = Column(Integer, nullable=False, default=1)
+    snapshot_status = Column(String(32), nullable=False, default="active")
+    employee_code = Column(String(64), nullable=False)
+    employee_name = Column(String(128), nullable=True)
+    actual_sales = Column(Float, default=0.0, nullable=False)
+    achievement_rate = Column(Float, default=0.0, nullable=False)
+    performance_score = Column(Float, default=0.0, nullable=False)
+    attendance_adjustment_score = Column(Float, default=0.0, nullable=False)
+    manual_adjustment_score = Column(Float, default=0.0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_by = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "settlement_id",
+            "snapshot_version",
+            "employee_code",
+            name="uq_monthly_profit_employee_performance_snapshots",
+        ),
+        Index("ix_monthly_profit_employee_performance_snapshots_settlement", "settlement_id", "snapshot_status"),
+        {"schema": "finance"},
+    )
+
+
+class MonthlyProfitPayrollSnapshot(Base):
+    """月结批准时冻结的工资单快照"""
+
+    __tablename__ = "monthly_profit_payroll_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    settlement_id = Column(Integer, ForeignKey("finance.monthly_profit_settlements.id", ondelete="CASCADE"), nullable=False)
+    period_month = Column(String(16), nullable=False)
+    snapshot_version = Column(Integer, nullable=False, default=1)
+    snapshot_status = Column(String(32), nullable=False, default="active")
+    payroll_record_id = Column(BigInteger, nullable=True)
+    employee_code = Column(String(64), nullable=False)
+    employee_name = Column(String(128), nullable=True)
+    base_salary = Column(Numeric(15, 2), nullable=False, default=0.0)
+    position_salary = Column(Numeric(15, 2), nullable=False, default=0.0)
+    performance_salary = Column(Numeric(15, 2), nullable=False, default=0.0)
+    overtime_pay = Column(Numeric(15, 2), nullable=False, default=0.0)
+    commission = Column(Numeric(15, 2), nullable=False, default=0.0)
+    allowances = Column(Numeric(15, 2), nullable=False, default=0.0)
+    bonus = Column(Numeric(15, 2), nullable=False, default=0.0)
+    gross_salary = Column(Numeric(15, 2), nullable=False, default=0.0)
+    social_insurance_personal = Column(Numeric(15, 2), nullable=False, default=0.0)
+    housing_fund_personal = Column(Numeric(15, 2), nullable=False, default=0.0)
+    income_tax = Column(Numeric(15, 2), nullable=False, default=0.0)
+    other_deductions = Column(Numeric(15, 2), nullable=False, default=0.0)
+    total_deductions = Column(Numeric(15, 2), nullable=False, default=0.0)
+    net_salary = Column(Numeric(15, 2), nullable=False, default=0.0)
+    social_insurance_company = Column(Numeric(15, 2), nullable=False, default=0.0)
+    housing_fund_company = Column(Numeric(15, 2), nullable=False, default=0.0)
+    total_cost = Column(Numeric(15, 2), nullable=False, default=0.0)
+    payroll_status = Column(String(32), nullable=True)
+    pay_date = Column(Date, nullable=True)
+    remark = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_by = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "settlement_id",
+            "snapshot_version",
+            "employee_code",
+            name="uq_monthly_profit_payroll_snapshots",
+        ),
+        Index("ix_monthly_profit_payroll_snapshots_settlement", "settlement_id", "snapshot_status"),
+        {"schema": "finance"},
+    )
+
 class ReturnOrder(Base):
     """退货单表"""
     __tablename__ = "return_orders"

@@ -25,7 +25,7 @@ from backend.services.hr_income_calculation_service import HRIncomeCalculationSe
 from backend.services.base_service import provide_service
 from backend.utils.year_month_utils import year_month_to_first_day
 from modules.core.db import (
-    Employee, DimUser, PayrollRecord,
+    Employee, DimUser, MonthlyProfitPayrollSnapshot, MonthlyProfitSettlement, PayrollRecord,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
@@ -143,14 +143,33 @@ async def get_my_income(
     performance_score = None
     achievement_rate = None
     breakdown = {}
-    # 查询 payroll_records
-    pr_result = await db.execute(
-        select(PayrollRecord).where(
-            PayrollRecord.employee_code == employee_code,
-            PayrollRecord.year_month == period
+    settlement_result = await db.execute(
+        select(MonthlyProfitSettlement).where(
+            MonthlyProfitSettlement.period_month == period
         )
     )
-    pr = pr_result.scalar_one_or_none()
+    settlement = settlement_result.scalar_one_or_none()
+
+    pr = None
+    if settlement and getattr(settlement, "status", None) == "approved":
+        snapshot_result = await db.execute(
+            select(MonthlyProfitPayrollSnapshot).where(
+                MonthlyProfitPayrollSnapshot.settlement_id == getattr(settlement, "id", None),
+                MonthlyProfitPayrollSnapshot.employee_code == employee_code,
+                MonthlyProfitPayrollSnapshot.snapshot_status == "active",
+            )
+        )
+        snapshot_rows = snapshot_result.scalars().all()
+        pr = snapshot_rows[0] if snapshot_rows else None
+
+    if pr is None:
+        pr_result = await db.execute(
+            select(PayrollRecord).where(
+                PayrollRecord.employee_code == employee_code,
+                PayrollRecord.year_month == period
+            )
+        )
+        pr = pr_result.scalar_one_or_none()
     if not pr:
         await _log_me_income_access(request, current_user_id, period, "payroll_missing", db)
         return MyIncomeResponse(
@@ -181,7 +200,7 @@ async def get_my_income(
         "social_insurance_company": float(getattr(pr, "social_insurance_company", 0) or 0),
         "housing_fund_company": float(getattr(pr, "housing_fund_company", 0) or 0),
         "total_cost": float(getattr(pr, "total_cost", 0) or 0),
-        "status": getattr(pr, "status", None),
+        "status": getattr(pr, "status", None) or getattr(pr, "payroll_status", None),
         "pay_date": getattr(pr, "pay_date", None).isoformat() if getattr(pr, "pay_date", None) else None,
         "remark": getattr(pr, "remark", None),
     }

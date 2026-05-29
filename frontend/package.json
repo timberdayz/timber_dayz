@@ -16,7 +16,8 @@
     "smoke:playwright": "node scripts/playwrightFrontendSmoke.mjs",
     "smoke:template-management": "node scripts/dataSyncTemplateManagementPlaywrightSmoke.mjs",
     "test:smoke-shared": "node --test scripts/frontendSmokeShared.test.mjs",
-    "test:shop-assignment-rules": "node --test scripts/shopAssignmentRules.test.mjs"
+    "test:shop-assignment-rules": "node --test scripts/shopAssignmentRules.test.mjs",
+    "test:my-income-view-model": "node --test scripts/myIncomeViewModel.test.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.1.0",

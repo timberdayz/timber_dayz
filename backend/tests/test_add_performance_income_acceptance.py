@@ -1639,6 +1639,8 @@ def test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback(monkey
         if n == 1:
             return _ResultOne(employee)
         if n == 2:
+            return _ResultOne(None)
+        if n == 3:
             return _ResultOne(payroll)
         raise AssertionError(f"unexpected execute call #{n}")
 
@@ -1716,6 +1718,8 @@ def test_my_income_linked_without_payroll_returns_empty_income_state(monkeypatch
             return _ResultOne(employee)
         if n == 2:
             return _ResultOne(None)
+        if n == 3:
+            return _ResultOne(None)
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -1745,6 +1749,95 @@ def test_my_income_linked_without_payroll_returns_empty_income_state(monkeypatch
     assert resp.linked is True
     assert resp.total_income is None
     assert resp.breakdown is None
+    assert called["count"] == 1
+
+
+def test_my_income_prefers_payroll_snapshot_for_approved_month(monkeypatch):
+    class _ResultOne:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    class _ScalarRows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    db = AsyncMock()
+    employee = SimpleNamespace(employee_code="EMP011", employee_identity_type="employee")
+    settlement = SimpleNamespace(id=21, status="approved", period_month="2025-01")
+    payroll_snapshot = SimpleNamespace(
+        employee_code="EMP011",
+        base_salary=1100.0,
+        position_salary=300.0,
+        commission=250.0,
+        net_salary=1999.0,
+        performance_salary=220.0,
+        allowances=80.0,
+        total_deductions=21.0,
+        gross_salary=2020.0,
+        overtime_pay=40.0,
+        bonus=30.0,
+        social_insurance_personal=10.0,
+        housing_fund_personal=6.0,
+        income_tax=3.0,
+        other_deductions=2.0,
+        social_insurance_company=100.0,
+        housing_fund_company=60.0,
+        total_cost=2180.0,
+        payroll_status="approved",
+        pay_date=None,
+        remark="snapshot",
+    )
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt, _params=None):
+        execute_calls["n"] += 1
+        n = execute_calls["n"]
+        if n == 1:
+            return _ResultOne(employee)
+        if n == 2:
+            return _ResultOne(settlement)
+        if n == 3:
+            return _ScalarRows([payroll_snapshot])
+        raise AssertionError(f"unexpected execute call #{n}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    called = {"count": 0}
+
+    async def _fake_log(*args, **kwargs):
+        called["count"] += 1
+
+    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [],
+            "client": ("127.0.0.1", 8000),
+            "method": "GET",
+            "path": "/api/hr/me/income",
+        }
+    )
+    user = SimpleNamespace(user_id=1005)
+
+    resp = asyncio.run(
+        get_my_income(request=request, year_month="2025-01", current_user=user, db=db)
+    )
+
+    assert resp.linked is True
+    assert float(resp.total_income) == 1999.0
+    assert isinstance(resp.breakdown, MyIncomeBreakdown)
+    assert resp.breakdown.payroll.status == "approved"
+    assert resp.breakdown.payroll.remark == "snapshot"
     assert called["count"] == 1
 
 

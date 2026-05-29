@@ -91,7 +91,7 @@
               <span v-if="row._isFirst" class="allocatable-rate-wrap">
                 <el-input-number
                   :model-value="(row.allocatable_profit_rate ?? 0) * 100"
-                  @update:model-value="(v) => { row.allocatable_profit_rate = v != null ? Number(v) / 100 : 0 }"
+                  @update:model-value="(v) => setShopAllocatableProfitRate(row, v)"
                   :min="0"
                   :max="100"
                   :step="0.01"
@@ -333,7 +333,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Setting, DataAnalysis, Calendar } from '@element-plus/icons-vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { exceedsCommissionRatioLimit, sumCommissionRatio } from './shopAssignmentRules'
+import { exceedsCommissionRatioLimit, setShopAllocatableProfitRate, sumCommissionRatio } from './shopAssignmentRules'
 
 const activeTab = ref('config')
 const configMonth = ref(new Date().toISOString().slice(0, 7))  // YYYY-MM

@@ -364,3 +364,9 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 - 这套规则当前是财务结算中心页面的正式前端口径，主要用于联调和人工核对
 - 如果后续业务确认需要把“可月结 / 异常”上升为后端统一规则，应再同步到后端接口或月结聚合服务
 
+## 15. Snapshot Read Rules (2026-05-29)
+
+- 已批准月份的月结详情优先读取冻结 snapshot，不再直接回读运行态工资单或中间结果。
+- `reopen` 会使当前 active snapshot 失效；重新批准后会生成新的 snapshot 版本。
+- `draft` 继续读取运行态聚合结果；`approved` 一律优先看 snapshot。
+

@@ -1,4 +1,5 @@
 from importlib import import_module
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -178,7 +179,7 @@ async def test_get_monthly_profit_settlement_returns_existing_record(monkeypatch
     record = {
         "id": 12,
         "period_month": "2026-04",
-        "status": "approved",
+        "status": "draft",
         "net_profit_amount": 100000.0,
     }
 
@@ -190,8 +191,48 @@ async def test_get_monthly_profit_settlement_returns_existing_record(monkeypatch
     payload = await service.get_month("2026-04")
 
     assert payload["summary"]["id"] == 12
-    assert payload["summary"]["status"] == "approved"
+    assert payload["summary"]["status"] == "draft"
     assert payload["summary"]["period_month"] == "2026-04"
+
+
+@pytest.mark.asyncio
+async def test_get_monthly_profit_settlement_prefers_snapshot_view_for_approved_record(monkeypatch):
+    module = _load_service_module()
+    service = module.MonthlyProfitSettlementService(_make_db())
+
+    record = SimpleNamespace(
+        id=12,
+        period_month="2026-04",
+        status="approved",
+        net_profit_amount=100000.0,
+    )
+    snapshot_payload = {
+        "summary": {
+            "id": 12,
+            "period_month": "2026-04",
+            "status": "approved",
+            "net_profit_amount": 100000.0,
+        },
+        "personnel_details": [
+            {
+                "detail_type": "payroll_total_cost",
+                "employee_code": "EMP001",
+                "amount": 26000.0,
+                "source_module": "payroll_snapshot",
+            }
+        ],
+        "follow_details": [],
+        "adjustments": [],
+    }
+
+    monkeypatch.setattr(service, "_load_settlement_record", AsyncMock(return_value=record))
+    load_snapshot_settlement_view = AsyncMock(return_value=snapshot_payload)
+    monkeypatch.setattr(service, "load_snapshot_settlement_view", load_snapshot_settlement_view)
+
+    payload = await service.get_month("2026-04")
+
+    assert payload == snapshot_payload
+    load_snapshot_settlement_view.assert_awaited_once_with(record)
 
 
 @pytest.mark.asyncio
@@ -332,6 +373,64 @@ async def test_approve_rejects_when_difference_exceeds_threshold():
 
     with pytest.raises(ValueError, match="difference threshold exceeded"):
         await service.approve(12, "9")
+
+
+@pytest.mark.asyncio
+async def test_approve_builds_snapshots_before_marking_settlement_approved(monkeypatch):
+    module = _load_service_module()
+    db = _make_db()
+    service = module.MonthlyProfitSettlementService(db)
+    record = SimpleNamespace(
+        id=12,
+        period_month="2026-04",
+        status="draft",
+        difference_amount=0.0,
+        difference_ratio=0.0,
+        approved_by=None,
+        approved_at=None,
+        locked_at=None,
+    )
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: record))
+
+    get_next_snapshot_version = AsyncMock(return_value=1)
+    build_settlement_snapshots = AsyncMock()
+    monkeypatch.setattr(service, "get_next_snapshot_version", get_next_snapshot_version)
+    monkeypatch.setattr(service, "build_settlement_snapshots", build_settlement_snapshots)
+
+    payload = await service.approve(12, "9")
+
+    assert payload["status"] == "approved"
+    get_next_snapshot_version.assert_awaited_once_with(12)
+    build_settlement_snapshots.assert_awaited_once_with(
+        settlement_id=12,
+        period_month="2026-04",
+        snapshot_version=1,
+        created_by="9",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reopen_supersedes_active_snapshots_before_setting_draft(monkeypatch):
+    module = _load_service_module()
+    db = _make_db()
+    service = module.MonthlyProfitSettlementService(db)
+    record = SimpleNamespace(
+        id=12,
+        period_month="2026-04",
+        status="approved",
+        locked_at=datetime.now(timezone.utc),
+        approved_by="9",
+        approved_at=datetime.now(timezone.utc),
+    )
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: record))
+
+    mark_active_snapshots_superseded = AsyncMock()
+    monkeypatch.setattr(service, "mark_active_snapshots_superseded", mark_active_snapshots_superseded)
+
+    payload = await service.reopen(12)
+
+    assert payload["status"] == "draft"
+    mark_active_snapshots_superseded.assert_awaited_once_with(12)
 
 
 @pytest.mark.asyncio

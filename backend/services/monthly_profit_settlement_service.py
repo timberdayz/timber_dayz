@@ -7,11 +7,17 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
+    EmployeeCommission,
+    EmployeePerformance,
     FollowInvestmentDetail,
     FollowInvestmentSettlement,
     MonthlyProfitAdjustment,
+    MonthlyProfitEmployeeCommissionSnapshot,
+    MonthlyProfitEmployeePerformanceSnapshot,
     MonthlyProfitFollowDetail,
+    MonthlyProfitPayrollSnapshot,
     MonthlyProfitPersonnelDetail,
+    MonthlyProfitShopBasisSnapshot,
     MonthlyProfitSettlement,
     PayrollRecord,
     ShopProfitBasis,
@@ -237,6 +243,235 @@ class MonthlyProfitSettlementService:
             for row in rows
         ]
 
+    async def _load_active_snapshot_version(self, settlement_id: int) -> int | None:
+        row = (
+            await self.db.execute(
+                select(MonthlyProfitPayrollSnapshot.snapshot_version).where(
+                    MonthlyProfitPayrollSnapshot.settlement_id == settlement_id,
+                    MonthlyProfitPayrollSnapshot.snapshot_status == "active",
+                )
+            )
+        ).first()
+        if row is None:
+            return None
+        if hasattr(row, "__getitem__") and len(row) > 0:
+            return int(row[0])
+        return int(self._get_value(row, "snapshot_version", 0) or 0)
+
+    async def _load_snapshot_personnel_details(
+        self,
+        settlement_id: int,
+        snapshot_version: int,
+    ) -> list[dict[str, Any]]:
+        rows = (
+            await self.db.execute(
+                select(MonthlyProfitPayrollSnapshot).where(
+                    MonthlyProfitPayrollSnapshot.settlement_id == settlement_id,
+                    MonthlyProfitPayrollSnapshot.snapshot_version == snapshot_version,
+                    MonthlyProfitPayrollSnapshot.snapshot_status == "active",
+                )
+            )
+        ).scalars().all()
+        return [
+            {
+                "detail_type": "payroll_total_cost",
+                "amount": self._to_float(getattr(row, "total_cost", 0.0)),
+                "employee_code": getattr(row, "employee_code", None),
+                "platform_code": None,
+                "shop_id": None,
+                "source_module": "payroll_snapshot",
+                "source_record_id": str(getattr(row, "payroll_record_id", "") or ""),
+                "remark": getattr(row, "remark", None),
+            }
+            for row in rows
+        ]
+
+    async def load_snapshot_settlement_view(self, record: Any) -> dict[str, Any]:
+        settlement_id = int(self._get_value(record, "id"))
+        snapshot_version = await self._load_active_snapshot_version(settlement_id)
+        personnel_target_ratio = self._to_float(self._get_value(record, "personnel_target_ratio"))
+        follow_target_ratio = self._to_float(self._get_value(record, "follow_target_ratio"))
+        company_target_ratio = self._to_float(self._get_value(record, "company_target_ratio"))
+        if personnel_target_ratio == 0 and follow_target_ratio == 0 and company_target_ratio == 0:
+            company_target_ratio = 1.0
+        summary = self.build_summary(
+            period_month=self._get_value(record, "period_month"),
+            net_profit_amount=self._to_float(self._get_value(record, "net_profit_amount")),
+            personnel_actual_amount=self._to_float(self._get_value(record, "personnel_actual_amount")),
+            follow_actual_amount=self._to_float(self._get_value(record, "follow_actual_amount")),
+            adjustment_amount=self._to_float(self._get_value(record, "adjustment_amount")),
+            personnel_target_ratio=personnel_target_ratio,
+            follow_target_ratio=follow_target_ratio,
+            company_target_ratio=company_target_ratio,
+            status=self._get_value(record, "status", "approved"),
+            settlement_id=settlement_id,
+            approved_by=self._get_value(record, "approved_by"),
+            remark=self._get_value(record, "remark"),
+        )
+        personnel_details = (
+            await self._load_snapshot_personnel_details(settlement_id, snapshot_version)
+            if snapshot_version is not None
+            else []
+        )
+        return {
+            "summary": summary,
+            "personnel_details": personnel_details,
+            "follow_details": await self._load_follow_details(settlement_id),
+            "adjustments": await self._load_adjustments(settlement_id),
+        }
+
+    async def get_next_snapshot_version(self, settlement_id: int) -> int:
+        snapshot_rows = (
+            await self.db.execute(
+                select(MonthlyProfitPayrollSnapshot.snapshot_version).where(
+                    MonthlyProfitPayrollSnapshot.settlement_id == settlement_id
+                )
+            )
+        ).all()
+        max_version = 0
+        for row in snapshot_rows:
+            version = self._get_value(row, "snapshot_version", None)
+            if version is None and hasattr(row, "__getitem__") and len(row) > 0:
+                version = row[0]
+            max_version = max(max_version, int(version or 0))
+        return max_version + 1
+
+    async def mark_active_snapshots_superseded(self, settlement_id: int) -> None:
+        snapshot_models = (
+            MonthlyProfitShopBasisSnapshot,
+            MonthlyProfitEmployeeCommissionSnapshot,
+            MonthlyProfitEmployeePerformanceSnapshot,
+            MonthlyProfitPayrollSnapshot,
+        )
+        for model in snapshot_models:
+            rows = (
+                await self.db.execute(
+                    select(model).where(
+                        model.settlement_id == settlement_id,
+                        model.snapshot_status == "active",
+                    )
+                )
+            ).scalars().all()
+            for row in rows:
+                row.snapshot_status = "superseded"
+
+    async def build_settlement_snapshots(
+        self,
+        *,
+        settlement_id: int,
+        period_month: str,
+        snapshot_version: int,
+        created_by: str,
+    ) -> None:
+        shop_basis_rows = (
+            await self.db.execute(
+                select(ShopProfitBasis).where(ShopProfitBasis.period_month == period_month)
+            )
+        ).scalars().all()
+        for row in shop_basis_rows:
+            self.db.add(
+                MonthlyProfitShopBasisSnapshot(
+                    settlement_id=settlement_id,
+                    period_month=period_month,
+                    snapshot_version=snapshot_version,
+                    snapshot_status="active",
+                    platform_code=getattr(row, "platform_code", None),
+                    shop_id=getattr(row, "shop_id", None),
+                    shop_name=None,
+                    basis_version=getattr(row, "basis_version", None),
+                    orders_profit_amount=self._to_float(getattr(row, "orders_profit_amount", 0.0)),
+                    a_class_cost_amount=self._to_float(getattr(row, "a_class_cost_amount", 0.0)),
+                    profit_basis_amount=self._to_float(getattr(row, "profit_basis_amount", 0.0)),
+                    created_by=created_by,
+                )
+            )
+
+        commission_rows = (
+            await self.db.execute(
+                select(EmployeeCommission).where(EmployeeCommission.year_month == period_month)
+            )
+        ).scalars().all()
+        for row in commission_rows:
+            self.db.add(
+                MonthlyProfitEmployeeCommissionSnapshot(
+                    settlement_id=settlement_id,
+                    period_month=period_month,
+                    snapshot_version=snapshot_version,
+                    snapshot_status="active",
+                    employee_code=getattr(row, "employee_code", None),
+                    employee_name=None,
+                    platform_code="",
+                    shop_id="",
+                    shop_name=None,
+                    sales_amount=self._to_float(getattr(row, "sales_amount", 0.0)),
+                    commission_rate=self._to_float(getattr(row, "commission_rate", 0.0)),
+                    commission_amount=self._to_float(getattr(row, "commission_amount", 0.0)),
+                    created_by=created_by,
+                )
+            )
+
+        performance_rows = (
+            await self.db.execute(
+                select(EmployeePerformance).where(EmployeePerformance.year_month == period_month)
+            )
+        ).scalars().all()
+        for row in performance_rows:
+            self.db.add(
+                MonthlyProfitEmployeePerformanceSnapshot(
+                    settlement_id=settlement_id,
+                    period_month=period_month,
+                    snapshot_version=snapshot_version,
+                    snapshot_status="active",
+                    employee_code=getattr(row, "employee_code", None),
+                    employee_name=None,
+                    actual_sales=self._to_float(getattr(row, "actual_sales", 0.0)),
+                    achievement_rate=self._to_float(getattr(row, "achievement_rate", 0.0)),
+                    performance_score=self._to_float(getattr(row, "performance_score", 0.0)),
+                    attendance_adjustment_score=0.0,
+                    manual_adjustment_score=0.0,
+                    created_by=created_by,
+                )
+            )
+
+        payroll_rows = (
+            await self.db.execute(
+                select(PayrollRecord).where(PayrollRecord.year_month == period_month)
+            )
+        ).scalars().all()
+        for row in payroll_rows:
+            self.db.add(
+                MonthlyProfitPayrollSnapshot(
+                    settlement_id=settlement_id,
+                    period_month=period_month,
+                    snapshot_version=snapshot_version,
+                    snapshot_status="active",
+                    payroll_record_id=getattr(row, "id", None),
+                    employee_code=getattr(row, "employee_code", None),
+                    employee_name=None,
+                    base_salary=getattr(row, "base_salary", 0.0),
+                    position_salary=getattr(row, "position_salary", 0.0),
+                    performance_salary=getattr(row, "performance_salary", 0.0),
+                    overtime_pay=getattr(row, "overtime_pay", 0.0),
+                    commission=getattr(row, "commission", 0.0),
+                    allowances=getattr(row, "allowances", 0.0),
+                    bonus=getattr(row, "bonus", 0.0),
+                    gross_salary=getattr(row, "gross_salary", 0.0),
+                    social_insurance_personal=getattr(row, "social_insurance_personal", 0.0),
+                    housing_fund_personal=getattr(row, "housing_fund_personal", 0.0),
+                    income_tax=getattr(row, "income_tax", 0.0),
+                    other_deductions=getattr(row, "other_deductions", 0.0),
+                    total_deductions=getattr(row, "total_deductions", 0.0),
+                    net_salary=getattr(row, "net_salary", 0.0),
+                    social_insurance_company=getattr(row, "social_insurance_company", 0.0),
+                    housing_fund_company=getattr(row, "housing_fund_company", 0.0),
+                    total_cost=getattr(row, "total_cost", 0.0),
+                    payroll_status=getattr(row, "status", None),
+                    pay_date=getattr(row, "pay_date", None),
+                    remark=getattr(row, "remark", None),
+                    created_by=created_by,
+                )
+            )
+
     async def _upsert_settlement(self, period_month: str, payload: dict[str, Any]) -> dict[str, Any]:
         record = await self._load_settlement_record(period_month)
         if record is None:
@@ -386,6 +621,9 @@ class MonthlyProfitSettlementService:
                 "adjustments": [],
             }
 
+        if self._get_value(record, "status", "draft") == "approved":
+            return await self.load_snapshot_settlement_view(record)
+
         settlement_id = int(self._get_value(record, "id"))
         personnel_target_ratio = self._to_float(self._get_value(record, "personnel_target_ratio"))
         follow_target_ratio = self._to_float(self._get_value(record, "follow_target_ratio"))
@@ -480,6 +718,13 @@ class MonthlyProfitSettlementService:
             or abs(self._to_float(getattr(record, "difference_ratio", 0.0))) > self.APPROVAL_DIFFERENCE_RATIO_THRESHOLD
         ):
             raise MonthlyProfitSettlementConflictError("difference threshold exceeded")
+        snapshot_version = await self.get_next_snapshot_version(settlement_id)
+        await self.build_settlement_snapshots(
+            settlement_id=settlement_id,
+            period_month=str(getattr(record, "period_month", "")),
+            snapshot_version=snapshot_version,
+            created_by=approver,
+        )
         record.status = "approved"
         record.approved_by = approver
         record.approved_at = datetime.now(timezone.utc)
@@ -497,6 +742,7 @@ class MonthlyProfitSettlementService:
             raise MonthlyProfitSettlementNotFoundError("settlement not found")
         if record.status != "approved":
             raise MonthlyProfitSettlementConflictError("only approved settlement can be reopened")
+        await self.mark_active_snapshots_superseded(settlement_id)
         record.status = "draft"
         record.locked_at = None
         record.approved_by = None

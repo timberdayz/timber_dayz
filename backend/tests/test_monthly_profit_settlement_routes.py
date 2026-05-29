@@ -54,7 +54,7 @@ async def test_get_monthly_profit_settlement_route_returns_service_payload(monke
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.get(
@@ -66,6 +66,58 @@ async def test_get_monthly_profit_settlement_route_returns_service_payload(monke
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"]["summary"]["net_profit_amount"] == 100000.0
+
+
+@pytest.mark.asyncio
+async def test_get_monthly_profit_settlement_route_returns_approved_snapshot_payload(monkeypatch):
+    module = _load_router_module()
+
+    class _ServiceStub:
+        async def get_month(self, period_month):
+            return {
+                "summary": {
+                    "id": 21,
+                    "period_month": period_month,
+                    "net_profit_amount": 100000.0,
+                    "personnel_actual_amount": 26000.0,
+                    "follow_actual_amount": 18000.0,
+                    "company_actual_amount": 56000.0,
+                    "status": "approved",
+                },
+                "personnel_details": [
+                    {
+                        "detail_type": "payroll_total_cost",
+                        "employee_code": "EMP001",
+                        "amount": 26000.0,
+                        "source_module": "payroll_snapshot",
+                        "source_record_id": "88",
+                        "remark": "snapshot",
+                    }
+                ],
+                "follow_details": [],
+                "adjustments": [],
+            }
+
+    async def _override_db():
+        yield object()
+
+    app = FastAPI()
+    app.include_router(module.router)
+    app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
+    app.dependency_overrides[get_async_db] = _override_db
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get(
+            "/api/finance/monthly-profit-settlement",
+            params={"period_month": "2026-04"},
+        )
+
+    body = json.loads(response.content.decode("utf-8"))
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert body["data"]["summary"]["status"] == "approved"
+    assert body["data"]["personnel_details"][0]["source_module"] == "payroll_snapshot"
 
 
 @pytest.mark.asyncio
@@ -106,7 +158,7 @@ async def test_rebuild_monthly_profit_settlement_route_returns_service_payload(m
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
     monkeypatch.setattr(
         "backend.services.approval_center_service.submit_monthly_profit_settlement_approval",
         submit_mock,
@@ -160,7 +212,7 @@ async def test_rebuild_monthly_profit_settlement_route_returns_409_for_approved_
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post(
@@ -202,7 +254,7 @@ async def test_update_monthly_profit_settlement_targets_route_returns_service_pa
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
 
     payload = {
         "personnel_target_ratio": 0.25,
@@ -242,7 +294,7 @@ async def test_approve_monthly_profit_settlement_route_returns_service_payload(m
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance", user_id=9)
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
     monkeypatch.setattr(
         "backend.services.approval_center_service.sync_monthly_profit_settlement_approval_decision",
         sync_mock,
@@ -281,7 +333,7 @@ async def test_reopen_monthly_profit_settlement_route_returns_service_payload(mo
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance", user_id=9)
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post("/api/finance/monthly-profit-settlement/12/reopen")
@@ -307,7 +359,7 @@ async def test_update_monthly_profit_settlement_targets_route_returns_404_when_m
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.put(
@@ -339,7 +391,7 @@ async def test_approve_monthly_profit_settlement_route_returns_409_for_duplicate
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance", user_id=9)
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post("/api/finance/monthly-profit-settlement/12/approve")
@@ -362,7 +414,7 @@ async def test_reopen_monthly_profit_settlement_route_returns_409_for_draft_sett
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance", user_id=9)
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post("/api/finance/monthly-profit-settlement/12/reopen")
@@ -385,7 +437,7 @@ async def test_approve_monthly_profit_settlement_route_returns_409_when_differen
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance", user_id=9)
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.post("/api/finance/monthly-profit-settlement/12/approve")

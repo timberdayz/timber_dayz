@@ -36,6 +36,10 @@ MonthlyProfitSettlement = getattr(core_db, "MonthlyProfitSettlement", None)
 MonthlyProfitPersonnelDetail = getattr(core_db, "MonthlyProfitPersonnelDetail", None)
 MonthlyProfitFollowDetail = getattr(core_db, "MonthlyProfitFollowDetail", None)
 MonthlyProfitAdjustment = getattr(core_db, "MonthlyProfitAdjustment", None)
+MonthlyProfitShopBasisSnapshot = getattr(core_db, "MonthlyProfitShopBasisSnapshot", None)
+MonthlyProfitEmployeeCommissionSnapshot = getattr(core_db, "MonthlyProfitEmployeeCommissionSnapshot", None)
+MonthlyProfitEmployeePerformanceSnapshot = getattr(core_db, "MonthlyProfitEmployeePerformanceSnapshot", None)
+MonthlyProfitPayrollSnapshot = getattr(core_db, "MonthlyProfitPayrollSnapshot", None)
 
 
 @pytest.mark.parametrize(
@@ -85,6 +89,10 @@ def test_finance_tables_bind_explicitly_to_finance_schema(model, table_name):
         ("MonthlyProfitPersonnelDetail", MonthlyProfitPersonnelDetail, "monthly_profit_personnel_details"),
         ("MonthlyProfitFollowDetail", MonthlyProfitFollowDetail, "monthly_profit_follow_details"),
         ("MonthlyProfitAdjustment", MonthlyProfitAdjustment, "monthly_profit_adjustments"),
+        ("MonthlyProfitShopBasisSnapshot", MonthlyProfitShopBasisSnapshot, "monthly_profit_shop_basis_snapshots"),
+        ("MonthlyProfitEmployeeCommissionSnapshot", MonthlyProfitEmployeeCommissionSnapshot, "monthly_profit_employee_commission_snapshots"),
+        ("MonthlyProfitEmployeePerformanceSnapshot", MonthlyProfitEmployeePerformanceSnapshot, "monthly_profit_employee_performance_snapshots"),
+        ("MonthlyProfitPayrollSnapshot", MonthlyProfitPayrollSnapshot, "monthly_profit_payroll_snapshots"),
     ],
 )
 def test_monthly_profit_settlement_models_bind_explicitly_to_finance_schema(model_name, model, table_name):
@@ -110,9 +118,17 @@ def test_finance_internal_foreign_keys_target_finance_tables():
     assert MonthlyProfitPersonnelDetail is not None, "MonthlyProfitPersonnelDetail model is missing from modules.core.db"
     assert MonthlyProfitFollowDetail is not None, "MonthlyProfitFollowDetail model is missing from modules.core.db"
     assert MonthlyProfitAdjustment is not None, "MonthlyProfitAdjustment model is missing from modules.core.db"
+    assert MonthlyProfitShopBasisSnapshot is not None, "MonthlyProfitShopBasisSnapshot model is missing from modules.core.db"
+    assert MonthlyProfitEmployeeCommissionSnapshot is not None, "MonthlyProfitEmployeeCommissionSnapshot model is missing from modules.core.db"
+    assert MonthlyProfitEmployeePerformanceSnapshot is not None, "MonthlyProfitEmployeePerformanceSnapshot model is missing from modules.core.db"
+    assert MonthlyProfitPayrollSnapshot is not None, "MonthlyProfitPayrollSnapshot model is missing from modules.core.db"
     monthly_profit_personnel_detail_targets = {fk.target_fullname for fk in MonthlyProfitPersonnelDetail.__table__.foreign_keys}
     monthly_profit_follow_detail_targets = {fk.target_fullname for fk in MonthlyProfitFollowDetail.__table__.foreign_keys}
     monthly_profit_adjustment_targets = {fk.target_fullname for fk in MonthlyProfitAdjustment.__table__.foreign_keys}
+    monthly_profit_shop_basis_snapshot_targets = {fk.target_fullname for fk in MonthlyProfitShopBasisSnapshot.__table__.foreign_keys}
+    monthly_profit_employee_commission_snapshot_targets = {fk.target_fullname for fk in MonthlyProfitEmployeeCommissionSnapshot.__table__.foreign_keys}
+    monthly_profit_employee_performance_snapshot_targets = {fk.target_fullname for fk in MonthlyProfitEmployeePerformanceSnapshot.__table__.foreign_keys}
+    monthly_profit_payroll_snapshot_targets = {fk.target_fullname for fk in MonthlyProfitPayrollSnapshot.__table__.foreign_keys}
 
     assert "finance.po_headers.po_id" in po_line_targets
     assert "finance.po_headers.po_id" in grn_header_targets
@@ -133,6 +149,10 @@ def test_finance_internal_foreign_keys_target_finance_tables():
     assert "finance.monthly_profit_settlements.id" in monthly_profit_follow_detail_targets
     assert "finance.follow_investment_settlements.id" in monthly_profit_follow_detail_targets
     assert "finance.monthly_profit_settlements.id" in monthly_profit_adjustment_targets
+    assert "finance.monthly_profit_settlements.id" in monthly_profit_shop_basis_snapshot_targets
+    assert "finance.monthly_profit_settlements.id" in monthly_profit_employee_commission_snapshot_targets
+    assert "finance.monthly_profit_settlements.id" in monthly_profit_employee_performance_snapshot_targets
+    assert "finance.monthly_profit_settlements.id" in monthly_profit_payroll_snapshot_targets
 
 
 def test_finance_external_foreign_keys_keep_core_targets():

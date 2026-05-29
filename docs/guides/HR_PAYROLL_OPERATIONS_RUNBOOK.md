@@ -367,3 +367,10 @@
 - 个人加减项当前已纳入：
   - 考勤扣分
   - 月度个人绩效调整项（考试、培训检核、人工奖惩）
+
+## 12. My Income Snapshot Notes (2026-05-29)
+
+- “我的收入”继续以工资单为最终结果口径展示，不回退拼装 `salary_structures + employee_commissions + employee_performance`。
+- 当前顶部摘要同时展示：当月实发、固定薪资、绩效工资、提成。
+- 页面增加只读“收入说明”，解释提成来源、绩效工资来源、个人绩效得分来源。
+- 若该月份已有 `approved` 月结，`/api/hr/me/income` 优先读取 payroll snapshot；否则继续读取运行态 `a_class.payroll_records`。

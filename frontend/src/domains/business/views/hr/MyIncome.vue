@@ -61,27 +61,35 @@
 
       <template v-else>
         <el-row :gutter="20" style="margin-bottom: 20px;">
-          <el-col :span="8">
+          <el-col
+            v-for="card in summaryCards"
+            :key="card.key"
+            :span="6"
+          >
             <el-card shadow="hover">
-              <template #header>当月实发</template>
-              <div style="font-size: 24px; font-weight: bold; color: #409eff;">
-                {{ formatMoney(income.total_income) }}
+              <template #header>{{ card.title }}</template>
+              <div
+                :style="card.key === 'total_income'
+                  ? 'font-size: 24px; font-weight: bold; color: #409eff;'
+                  : 'font-size: 18px;'"
+              >
+                {{ formatMoney(card.value) }}
               </div>
             </el-card>
           </el-col>
-          <el-col :span="8">
-            <el-card shadow="hover">
-              <template #header>固定工资</template>
-              <div style="font-size: 18px;">{{ formatMoney(income.base_salary) }}</div>
-            </el-card>
-          </el-col>
-          <el-col :span="8">
-            <el-card shadow="hover">
-              <template #header>提成</template>
-              <div style="font-size: 18px;">{{ formatMoney(income.commission_amount) }}</div>
-            </el-card>
-          </el-col>
         </el-row>
+
+        <el-card shadow="never" class="income-explanation-card">
+          <template #header>收入说明</template>
+          <div
+            v-for="item in incomeExplanations"
+            :key="item.key"
+            class="income-explanation-item"
+          >
+            <div class="income-explanation-title">{{ item.title }}</div>
+            <div class="income-explanation-body">{{ item.body }}</div>
+          </div>
+        </el-card>
 
         <el-card v-if="income.breakdown?.payroll" shadow="hover">
           <template #header>
@@ -139,6 +147,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api'
+import { buildMyIncomeExplanations, buildMyIncomeSummaryCards } from './myIncomeViewModel'
 
 const router = useRouter()
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
@@ -162,6 +171,8 @@ const hasNoIncomeData = computed(() => {
 })
 
 const payrollDetails = computed(() => income.value.breakdown?.payroll ?? null)
+const summaryCards = computed(() => buildMyIncomeSummaryCards(income.value))
+const incomeExplanations = computed(() => buildMyIncomeExplanations())
 
 const payrollSections = computed(() => {
   const payroll = payrollDetails.value
@@ -269,6 +280,27 @@ onMounted(() => {
 .page-subtitle {
   margin: 8px 0 0;
   color: #909399;
+}
+
+.income-explanation-card {
+  margin-bottom: 16px;
+}
+
+.income-explanation-item + .income-explanation-item {
+  margin-top: 12px;
+}
+
+.income-explanation-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 4px;
+}
+
+.income-explanation-body {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.6;
 }
 
 .payroll-card-header {
