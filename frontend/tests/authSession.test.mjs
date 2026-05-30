@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildPersistedAuthState,
   hasAnyPersistedAuthArtifact,
   hasPersistedAuthSession,
   readPersistedAuthState,
@@ -22,22 +23,22 @@ function createStorage(initial = {}) {
   }
 }
 
-test('hasPersistedAuthSession requires both access token and auth user', () => {
-  const tokenOnlyState = {
-    accessToken: 'access-token',
+test('hasPersistedAuthSession only requires persisted auth user state', () => {
+  const userOnlyState = {
+    accessToken: '',
+    refreshToken: '',
+    authUser: { id: 1, username: 'admin' },
+    userInfo: { id: 1, username: 'admin' },
+  }
+  const emptyState = {
+    accessToken: '',
     refreshToken: '',
     authUser: null,
     userInfo: null,
   }
-  const fullState = {
-    accessToken: 'access-token',
-    refreshToken: 'refresh-token',
-    authUser: { id: 1, username: 'admin' },
-    userInfo: { id: 1, username: 'admin' },
-  }
 
-  assert.equal(hasPersistedAuthSession(tokenOnlyState), false)
-  assert.equal(hasPersistedAuthSession(fullState), true)
+  assert.equal(hasPersistedAuthSession(userOnlyState), true)
+  assert.equal(hasPersistedAuthSession(emptyState), false)
 })
 
 test('hasAnyPersistedAuthArtifact detects partial auth remnants', () => {
@@ -48,7 +49,7 @@ test('hasAnyPersistedAuthArtifact detects partial auth remnants', () => {
       authUser: null,
       userInfo: null,
     }),
-    true
+    false
   )
 
   assert.equal(
@@ -62,10 +63,27 @@ test('hasAnyPersistedAuthArtifact detects partial auth remnants', () => {
   )
 })
 
-test('readPersistedAuthState reconstructs a full persisted session', () => {
-  const storage = createStorage({
+test('buildPersistedAuthState omits sensitive token persistence', () => {
+  const entries = buildPersistedAuthState({
     access_token: 'access-token',
     refresh_token: 'refresh-token',
+    user_info: {
+      id: 7,
+      username: 'operator',
+      full_name: 'Operator',
+      email: 'operator@example.com',
+      roles: [],
+    },
+  })
+
+  assert.equal('access_token' in entries, false)
+  assert.equal('refresh_token' in entries, false)
+  assert.deepEqual(JSON.parse(entries.roles), [])
+  assert.equal(entries.activeRole, '')
+})
+
+test('readPersistedAuthState reconstructs a full persisted session without local tokens', () => {
+  const storage = createStorage({
     user_info: JSON.stringify({
       id: 7,
       username: 'operator',
@@ -80,8 +98,8 @@ test('readPersistedAuthState reconstructs a full persisted session', () => {
 
   const state = readPersistedAuthState(storage)
 
-  assert.equal(state.accessToken, 'access-token')
-  assert.equal(state.refreshToken, 'refresh-token')
+  assert.equal(state.accessToken, '')
+  assert.equal(state.refreshToken, '')
   assert.equal(state.authUser.username, 'operator')
   assert.equal(state.userInfo.username, 'operator')
   assert.deepEqual(state.roles, ['operator'])

@@ -6,10 +6,12 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const apiPath = path.resolve(__dirname, '../src/api/index.js')
+const authApiPath = path.resolve(__dirname, '../src/api/auth.js')
 const authSessionPath = path.resolve(__dirname, '../src/utils/authSession.js')
 const mainPath = path.resolve(__dirname, '../src/main.js')
 const appPath = path.resolve(__dirname, '../src/App.vue')
 const apiSource = fs.readFileSync(apiPath, 'utf8')
+const authApiSource = fs.readFileSync(authApiPath, 'utf8')
 const authSessionSource = fs.readFileSync(authSessionPath, 'utf8')
 const mainSource = fs.readFileSync(mainPath, 'utf8')
 const appSource = fs.readFileSync(appPath, 'utf8')
@@ -47,6 +49,24 @@ test('api layer short-circuits authenticated requests after auth recovery failur
     apiSource.includes('markAuthRecoveryFailed(localStorage)'),
     true,
     'api layer should mark auth recovery failure when refresh flow fails'
+  )
+  assert.equal(
+    apiSource.includes('localStorage.getItem(\'access_token\')'),
+    false,
+    'api layer should not read access tokens from localStorage in Cookie-only auth mode'
+  )
+})
+
+test('auth api refresh without explicit token does not send an empty JSON body', () => {
+  assert.equal(
+    authApiSource.includes("return await api._post('/auth/refresh')"),
+    true,
+    'auth refresh should rely on cookie-only POST when no refresh token argument is provided'
+  )
+  assert.equal(
+    authApiSource.includes("const payload = refreshToken ? { refresh_token: refreshToken } : {}"),
+    false,
+    'auth refresh should not send an empty object body that triggers backend validation'
   )
 })
 

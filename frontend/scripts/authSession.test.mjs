@@ -35,8 +35,8 @@ test('buildPersistedAuthState writes both auth and user store keys', () => {
     },
   })
 
-  assert.equal(entries.access_token, 'access-token')
-  assert.equal(entries.refresh_token, 'refresh-token')
+  assert.equal('access_token' in entries, false)
+  assert.equal('refresh_token' in entries, false)
   assert.equal(entries.activeRole, 'admin')
   assert.equal(entries.user_info.includes('"username":"xihong"'), true)
   assert.equal(entries.userInfo.includes('"username":"xihong"'), true)
@@ -46,7 +46,6 @@ test('buildPersistedAuthState writes both auth and user store keys', () => {
 
 test('readPersistedAuthState tolerates missing userInfo and rebuilds it from user_info', () => {
   const storage = createMemoryStorage()
-  storage.setItem('access_token', 'access-token')
   storage.setItem(
     'user_info',
     JSON.stringify({
@@ -61,7 +60,7 @@ test('readPersistedAuthState tolerates missing userInfo and rebuilds it from use
 
   const state = readPersistedAuthState(storage)
 
-  assert.equal(state.accessToken, 'access-token')
+  assert.equal(state.accessToken, '')
   assert.equal(state.userInfo.username, 'codex_admin')
   assert.deepEqual(state.roles, ['admin'])
   assert.equal(state.permissions.includes('data-sync'), true)
@@ -84,6 +83,8 @@ test('clearPersistedAuthState removes all auth-related keys', () => {
   )) {
     storage.setItem(key, value)
   }
+  storage.setItem('access_token', 'legacy-access-token')
+  storage.setItem('refresh_token', 'legacy-refresh-token')
 
   clearPersistedAuthState(storage)
 

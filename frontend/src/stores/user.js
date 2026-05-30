@@ -7,45 +7,15 @@ import {
   clearPersistedAuthState,
   hasPersistedAuthSession,
   readPersistedAuthState,
+  writePersistedAuthState,
 } from '@/utils/authSession'
 
 export const useUserStore = defineStore('user', () => {
-  const token = ref(localStorage.getItem('access_token') || localStorage.getItem('token') || '')
+  const token = ref('')
   const userInfo = ref(null)
   const permissions = ref([])
   const roles = ref([])
-  const isLoggedIn = computed(() => !!token.value)
-
-  const login = async (credentials) => {
-    try {
-      const mockResponse = {
-        token: 'mock-token-' + Date.now(),
-        user: {
-          id: 1,
-          username: credentials.username,
-          name: '管理员',
-          email: 'admin@example.com',
-          avatar: '',
-          role: 'admin',
-        },
-        permissions: [],
-        roles: ['admin'],
-      }
-
-      token.value = mockResponse.token
-      userInfo.value = mockResponse.user
-      permissions.value = mockResponse.permissions
-      roles.value = mockResponse.roles
-
-      localStorage.setItem('token', token.value)
-      localStorage.setItem('userInfo', JSON.stringify(userInfo.value))
-      localStorage.setItem('roles', JSON.stringify(roles.value))
-
-      return { success: true, data: mockResponse }
-    } catch (error) {
-      return { success: false, error: error.message }
-    }
-  }
+  const isLoggedIn = computed(() => !!userInfo.value)
 
   const logout = () => {
     token.value = ''
@@ -71,11 +41,10 @@ export const useUserStore = defineStore('user', () => {
 
   const hydrateFromStorage = () => {
     const state = readPersistedAuthState(localStorage)
-    if (!state.accessToken) {
+    if (!state.userInfo) {
       return false
     }
 
-    token.value = state.accessToken
     if (state.userInfo) {
       userInfo.value = state.userInfo
     }
@@ -96,47 +65,38 @@ export const useUserStore = defineStore('user', () => {
       return
     }
 
-    if (state.accessToken) {
-      hydrateFromStorage()
-      try {
-        const response = await authApi.getCurrentUser()
-        if (response && response.id) {
-          userInfo.value = {
-            id: response.id,
-            username: response.username,
-            name: response.full_name || response.username,
-            email: response.email,
-            avatar: '',
-            roles: response.roles || [],
-          }
-          roles.value = response.roles || []
-          localStorage.setItem('userInfo', JSON.stringify(userInfo.value))
-          localStorage.setItem('roles', JSON.stringify(roles.value))
-          return
+    hydrateFromStorage()
+
+    try {
+      const response = await authApi.getCurrentUser()
+      const payload = response.data || response
+      if (payload && payload.id) {
+        userInfo.value = {
+          id: payload.id,
+          username: payload.username,
+          name: payload.full_name || payload.username,
+          email: payload.email,
+          avatar: '',
+          roles: payload.roles || [],
         }
-      } catch (error) {
-        console.error('获取用户信息失败:', error)
-        if (error.response && error.response.status === 401) {
-          logout()
-          return
-        }
+        roles.value = payload.roles || []
+        writePersistedAuthState(localStorage, {
+          user_info: {
+            id: payload.id,
+            username: payload.username,
+            email: payload.email,
+            full_name: payload.full_name,
+            roles: payload.roles || [],
+          },
+        })
+        return
+      }
+    } catch (error) {
+      console.error('获取用户信息失败:', error)
+      if (error.response && error.response.status === 401) {
+        logout()
       }
     }
-
-    if (state.userInfo) {
-      hydrateFromStorage()
-      return
-    }
-
-    userInfo.value = {
-      id: 1,
-      username: 'admin',
-      name: '管理员',
-      email: 'admin@xihong-erp.com',
-      avatar: '',
-      role: 'admin',
-    }
-    roles.value = ['admin']
   }
 
   return {
@@ -145,7 +105,6 @@ export const useUserStore = defineStore('user', () => {
     permissions,
     roles,
     isLoggedIn,
-    login,
     logout,
     updateUserInfo,
     hasPermission,

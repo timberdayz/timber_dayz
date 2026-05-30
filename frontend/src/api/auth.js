@@ -27,8 +27,11 @@ export default {
    * @param {string} refreshToken - 刷新令牌
    * @returns {Promise} 新的访问令牌
    */
-  async refreshToken(refreshToken) {
-    return await api._post('/auth/refresh', { refresh_token: refreshToken })
+  async refreshToken(refreshToken = '') {
+    if (refreshToken) {
+      return await api._post('/auth/refresh', { refresh_token: refreshToken })
+    }
+    return await api._post('/auth/refresh')
   },
 
   /**

@@ -177,39 +177,10 @@ try {
       }, 30000) // 30秒超时
     } else if (event.data.type === 'refresh_completed') {
       // 其他标签页刷新完成，更新本地 token 并处理队列
-      const newToken = event.data.token
-      const newRefreshToken = event.data.refresh_token // ⭐ v6.0.0修复：同时更新 refresh_token
-
-      if (newToken) {
-        // ⭐ v6.0.0修复：更新本地 token 和 refreshToken（确保状态一致性）
-        try {
-          const store = getAuthStore()
-          store.token = newToken
-          localStorage.setItem('access_token', newToken)
-
-          // ⭐ v6.0.0修复：如果响应中包含 refresh_token，也同步更新
-          if (newRefreshToken) {
-            store.refreshToken = newRefreshToken
-            localStorage.setItem('refresh_token', newRefreshToken)
-          }
-        } catch (error) {
-          // 如果 authStore 未初始化，只更新 localStorage
-          console.warn(
-            '[Auth] authStore 未初始化，只更新 localStorage:',
-            error
-          )
-          localStorage.setItem('access_token', newToken)
-          if (newRefreshToken) {
-            localStorage.setItem('refresh_token', newRefreshToken)
-          }
-        }
-
-        // 处理队列中的请求
-        failedQueue.forEach(({ resolve }) => {
-          resolve(newToken)
-        })
-        failedQueue = []
-      }
+      failedQueue.forEach(({ resolve }) => {
+        resolve()
+      })
+      failedQueue = []
       isRefreshing = false
     } else if (event.data.type === 'refresh_failed') {
       // 其他标签页刷新失败，拒绝队列中的请求
@@ -232,6 +203,7 @@ const apiBaseURL = import.meta.env.VITE_API_BASE_URL || '/api'
 const api = axios.create({
   baseURL: apiBaseURL, // 使用环境变量或相对路径（通过Vite代理）
   timeout: TIMEOUTS.default,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -259,17 +231,11 @@ api.interceptors.request.use(
 
       let token = null
       try {
-        const store = getAuthStore()
-        token = store.token || localStorage.getItem('access_token')
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`
-        }
+        token = null
       } catch (error) {
         // 如果 authStore 未初始化，从 localStorage 读取
-        token = localStorage.getItem('access_token')
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`
-        }
+        token = null
+        token = null
       }
 
       // ⭐ v6.0.0新增：Token 刷新预检查（Phase 4: 优化 Token 过期时间）
@@ -298,11 +264,7 @@ api.interceptors.request.use(
               // 通知其他标签页刷新完成
               if (refreshChannel) {
                 try {
-                  refreshChannel.postMessage({
-                    type: 'refresh_completed',
-                    token: store.token,
-                    refresh_token: store.refreshToken
-                  })
+                  refreshChannel.postMessage({ type: 'refresh_completed' })
                 } catch (e) {
                   console.warn('[Auth] 无法通知其他标签页:', e)
                 }
@@ -483,8 +445,7 @@ api.interceptors.response.use(
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject })
         })
-          .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`
+          .then(() => {
             return api(originalRequest)
           })
           .catch((err) => {
@@ -508,22 +469,14 @@ api.interceptors.response.use(
         const refreshed = await store.refreshAccessToken()
 
         if (refreshed) {
-          const newToken = store.token || localStorage.getItem('access_token')
-
           failedQueue.forEach(({ resolve }) => {
-            resolve(newToken)
+            resolve()
           })
           failedQueue = []
 
           if (refreshChannel) {
             try {
-              const newRefreshToken =
-                store.refreshToken || localStorage.getItem('refresh_token')
-              refreshChannel.postMessage({
-                type: 'refresh_completed',
-                token: newToken,
-                refresh_token: newRefreshToken
-              })
+              refreshChannel.postMessage({ type: 'refresh_completed' })
             } catch (refreshCompleteError) {
               console.warn('[Auth] ????????????????????', refreshCompleteError)
             }
@@ -533,8 +486,6 @@ api.interceptors.response.use(
             clearTimeout(refreshTimeout)
             refreshTimeout = null
           }
-
-          originalRequest.headers.Authorization = `Bearer ${newToken}`
           return api(originalRequest)
         }
 

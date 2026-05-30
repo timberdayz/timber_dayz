@@ -27,6 +27,7 @@ export function createApiInstance(baseURL = API_BASE_URL, timeout = REQUEST_TIME
   const instance = axios.create({
     baseURL,
     timeout,
+    withCredentials: true,
     headers: {
       'Content-Type': 'application/json'
     }
@@ -35,12 +36,6 @@ export function createApiInstance(baseURL = API_BASE_URL, timeout = REQUEST_TIME
   // 请求拦截器
   instance.interceptors.request.use(
     config => {
-      // 添加认证token
-      const token = localStorage.getItem('auth_token')
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`
-      }
-
       // 添加请求时间戳（用于计算耗时）
       config.metadata = { startTime: new Date().getTime() }
 

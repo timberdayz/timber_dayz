@@ -2,7 +2,7 @@ import { ROLE_CONFIG, normalizeRoleCode } from '../config/rolePermissions.js'
 
 function normalizeRoles(inputRoles) {
   if (!Array.isArray(inputRoles) || inputRoles.length === 0) {
-    return ['admin']
+    return []
   }
   return inputRoles.map(normalizeRoleCode).filter(Boolean)
 }
@@ -10,12 +10,10 @@ function normalizeRoles(inputRoles) {
 export function buildPersistedAuthState(authPayload) {
   const userInfo = authPayload?.user_info || {}
   const roles = normalizeRoles(userInfo.roles)
-  const activeRole = roles.includes('admin') ? 'admin' : roles[0]
-  const permissions = ROLE_CONFIG[activeRole]?.permissions || []
+  const activeRole = roles.includes('admin') ? 'admin' : (roles[0] || '')
+  const permissions = activeRole ? (ROLE_CONFIG[activeRole]?.permissions || []) : []
 
   return {
-    access_token: authPayload?.access_token || '',
-    refresh_token: authPayload?.refresh_token || '',
     user_info: JSON.stringify(userInfo),
     userInfo: JSON.stringify({
       id: userInfo.id,
@@ -41,13 +39,13 @@ export function writePersistedAuthState(storage, authPayload) {
 }
 
 export function readPersistedAuthState(storage) {
-  const accessToken = storage.getItem('access_token') || storage.getItem('token') || ''
-  const refreshToken = storage.getItem('refresh_token') || ''
+  const accessToken = ''
+  const refreshToken = ''
   const userInfoRaw = storage.getItem('userInfo')
   const authUserRaw = storage.getItem('user_info')
   const rolesRaw = storage.getItem('roles')
   const permissionsRaw = storage.getItem('permissions')
-  const activeRole = storage.getItem('activeRole') || 'admin'
+  const activeRole = storage.getItem('activeRole') || ''
 
   let authUser = null
   let userInfo = null
@@ -82,6 +80,8 @@ export function readPersistedAuthState(storage) {
     roles = normalizeRoles(authUser.roles)
   }
 
+  const resolvedActiveRole = activeRole || (roles.includes('admin') ? 'admin' : (roles[0] || ''))
+
   if (!userInfo && authUser) {
     userInfo = {
       id: authUser.id,
@@ -90,12 +90,12 @@ export function readPersistedAuthState(storage) {
       email: authUser.email,
       avatar: '',
       roles,
-      activeRole,
+      activeRole: resolvedActiveRole,
     }
   }
 
-  if ((!permissions || permissions.length === 0) && activeRole) {
-    permissions = ROLE_CONFIG[activeRole]?.permissions || []
+  if ((!permissions || permissions.length === 0) && resolvedActiveRole) {
+    permissions = ROLE_CONFIG[resolvedActiveRole]?.permissions || []
   }
 
   return {
@@ -105,18 +105,16 @@ export function readPersistedAuthState(storage) {
     userInfo,
     roles,
     permissions,
-    activeRole,
+    activeRole: resolvedActiveRole,
   }
 }
 
 export function hasPersistedAuthSession(state) {
-  return Boolean(state?.accessToken && state?.authUser)
+  return Boolean(state?.authUser)
 }
 
 export function hasAnyPersistedAuthArtifact(state) {
-  return Boolean(
-    state?.accessToken || state?.refreshToken || state?.authUser || state?.userInfo
-  )
+  return Boolean(state?.authUser || state?.userInfo)
 }
 
 export function clearPersistedAuthState(storage) {

@@ -55,8 +55,8 @@ test('buildAuthStorageEntries produces the localStorage keys required by auth an
     }
   })
 
-  assert.equal(entries.access_token, 'access-token')
-  assert.equal(entries.refresh_token, 'refresh-token')
+  assert.equal('access_token' in entries, false)
+  assert.equal('refresh_token' in entries, false)
   assert.equal(entries.activeRole, 'admin')
   assert.equal(entries.user_info.includes('"username":"xihong"'), true)
   assert.equal(entries.userInfo.includes('"username":"xihong"'), true)

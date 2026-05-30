@@ -50,7 +50,7 @@ except ImportError:
 settings = get_settings()
 
 # SSOT: 认证依赖已迁移至 backend.dependencies.auth，此处 re-export 保持向后兼容
-from backend.dependencies.auth import get_current_user  # noqa: F401
+from backend.dependencies.auth import extract_access_token, get_current_user  # noqa: F401
 
 # [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
 @router.post("/register")
@@ -673,48 +673,25 @@ async def refresh_token(
         # [*] v6.0.0修复:refresh_token_pair 现在是异步方法(需要访问 Redis 黑名单)
         new_tokens = await auth_service.refresh_token_pair(refresh_token_value)
         
-        # [*] v4.19.0: 更新会话的 last_active_at(在单独的数据库会话中)
-        # 注意:这里不能使用当前的db依赖,因为refresh_token端点没有db参数
-        # 使用临时数据库连接更新会话
-        try:
+        if current_token:
             from datetime import datetime, timedelta
             import hashlib
-            from backend.models.database import AsyncSessionLocal
-            
-            # 获取新的access token的session_id
+
+            current_session_id = hashlib.sha256(current_token.encode()).hexdigest()
             new_session_id = hashlib.sha256(new_tokens["access_token"].encode()).hexdigest()
-            
-            # 从refresh token中获取user_id
-            payload = auth_service.verify_token(refresh_token_value, "refresh")
-            user_id = payload.get("user_id")
-            
-            if user_id:
-                async with AsyncSessionLocal() as temp_db:
-                    try:
-                        # 查找会话(可能使用新的session_id或旧的)
-                        session_result = await temp_db.execute(
-                            select(UserSession)
-                            .where(
-                                (UserSession.session_id == new_session_id) |
-                                (UserSession.user_id == user_id)
-                            )
-                            .order_by(UserSession.last_active_at.desc())
-                            .limit(1)
-                        )
-                        session = session_result.scalar_one_or_none()
-                        
-                        if session:
-                            # 更新会话信息
-                            session.session_id = new_session_id  # 更新为新的session_id(如果token轮换)
-                            session.last_active_at = datetime.now(timezone.utc)
-                            session.expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-                            session.is_active = True
-                            await temp_db.commit()
-                    except Exception as e:
-                        await temp_db.rollback()
-                        logger.warning(f"Failed to update session on token refresh: {e}")
-        except Exception as e:
-            logger.warning(f"Failed to update session on token refresh: {e}")
+            session_result = await db.execute(
+                select(UserSession).where(
+                    UserSession.session_id == current_session_id,
+                    UserSession.user_id == user_id,
+                )
+            )
+            session = session_result.scalar_one_or_none()
+            if session:
+                session.session_id = new_session_id
+                session.last_active_at = datetime.now(timezone.utc)
+                session.expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+                session.is_active = True
+                await db.commit()
         
         # [*] v6.0.0新增:创建响应对象,用于设置 Cookie
         from fastapi.responses import JSONResponse
@@ -774,7 +751,8 @@ async def refresh_token(
 @router.post("/logout")
 async def logout(
     request: Request,
-    current_user: DimUser = Depends(get_current_user)
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     用户登出
@@ -799,6 +777,34 @@ async def logout(
         ip_address=ip_address,  # [*] v6.0.0修复:使用真实IP(Vulnerability 27)
         user_agent=user_agent  # [*] v6.0.0修复:使用真实User-Agent(Vulnerability 27)
     )
+
+    access_token_value = extract_access_token(request, None)
+    if access_token_value:
+        import hashlib
+
+        session_id = hashlib.sha256(access_token_value.encode()).hexdigest()
+        session_result = await db.execute(
+            select(UserSession).where(
+                UserSession.session_id == session_id,
+                UserSession.user_id == current_user.user_id,
+            )
+        )
+        session = session_result.scalar_one_or_none()
+        if session:
+            session.is_active = False
+            session.revoked_at = datetime.now(timezone.utc)
+            session.revoked_reason = "logout"
+            await db.commit()
+
+    refresh_token_value = request.cookies.get("refresh_token")
+    if refresh_token_value:
+        try:
+            await auth_service.revoke_refresh_token(refresh_token_value)
+        except HTTPException as exc:
+            if exc.status_code not in {status.HTTP_401_UNAUTHORIZED, status.HTTP_503_SERVICE_UNAVAILABLE}:
+                raise
+            if exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+                raise
     
     # [*] v6.0.0修复:清除所有认证相关的 Cookie
     from fastapi.responses import JSONResponse

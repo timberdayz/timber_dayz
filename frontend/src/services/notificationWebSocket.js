@@ -11,7 +11,6 @@
 
 import { ref } from 'vue'
 import notificationsApi from '@/api/notifications'
-import { useAuthStore } from '@/stores/auth'
 
 // 连接状态：'disconnected' | 'connecting' | 'connected' | 'error'
 const connectionStatus = ref('disconnected')
@@ -40,22 +39,7 @@ function getWebSocketUrl() {
   const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = loc.host
 
-  // 优先从 authStore 获取 token，其次从 localStorage 回退
-  let token = ''
-  try {
-    const authStore = useAuthStore()
-    token = authStore.token || ''
-  } catch (e) {
-    // 可能在 Pinia 尚未初始化时调用，退回到 localStorage
-    token = localStorage.getItem('access_token') || ''
-  }
-
-  if (!token) {
-    return null
-  }
-
-  const encodedToken = encodeURIComponent(token)
-  return `${protocol}//${host}/api/notifications/ws?token=${encodedToken}`
+  return `${protocol}//${host}/api/notifications/ws`
 }
 
 function stopFallbackPolling() {

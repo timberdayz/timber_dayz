@@ -15,10 +15,10 @@ import {
 } from '@/utils/authSession'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem('access_token') || '')
-  const refreshToken = ref(localStorage.getItem('refresh_token') || '')
+  const token = ref('')
+  const refreshToken = ref('')
   const user = ref(null)
-  const isLoggedIn = computed(() => !!token.value && !!user.value)
+  const isLoggedIn = computed(() => !!user.value)
   const isLoading = ref(false)
 
   const clearLocalSession = () => {
@@ -40,24 +40,14 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       isLoading.value = true
       const response = await authApi.login(credentials)
-
-      const accessToken = response.access_token || response.data?.access_token
-      const refreshTokenValue = response.refresh_token || response.data?.refresh_token
       const userInfo = response.user_info || response.data?.user_info
 
-      if (!accessToken || !refreshTokenValue || !userInfo) {
+      if (!userInfo) {
         throw new Error('登录响应格式错误：缺少用户会话信息')
       }
 
-      token.value = accessToken
-      refreshToken.value = refreshTokenValue
       user.value = userInfo
-
-      writePersistedAuthState(localStorage, {
-        access_token: accessToken,
-        refresh_token: refreshTokenValue,
-        user_info: userInfo,
-      })
+      writePersistedAuthState(localStorage, { user_info: userInfo })
       resetAuthRecoveryState(localStorage)
 
       const userStore = useUserStore()
@@ -65,9 +55,11 @@ export const useAuthStore = defineStore('auth', () => {
 
       if (userInfo.roles) {
         const normalizedRoles = userInfo.roles.map(normalizeRoleCode).filter(Boolean)
-        const preferredRole = normalizedRoles.includes('admin') ? 'admin' : (normalizedRoles[0] || 'operator')
-        localStorage.setItem('activeRole', preferredRole)
-        applyRolePermissions(userStore, preferredRole)
+        const preferredRole = normalizedRoles.includes('admin') ? 'admin' : (normalizedRoles[0] || '')
+        if (preferredRole) {
+          localStorage.setItem('activeRole', preferredRole)
+          applyRolePermissions(userStore, preferredRole)
+        }
       }
 
       ElMessage.success('登录成功')
@@ -82,8 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const logout = async () => {
     const persistedState = readPersistedAuthState(localStorage)
-    const shouldRevokeSession =
-      hasAnyPersistedAuthArtifact(persistedState) || !!token.value || !!user.value
+    const shouldRevokeSession = hasAnyPersistedAuthArtifact(persistedState) || !!user.value
 
     try {
       if (shouldRevokeSession) {
@@ -100,30 +91,11 @@ export const useAuthStore = defineStore('auth', () => {
 
   const refreshAccessToken = async () => {
     try {
-      if (!refreshToken.value) {
-        console.warn('[Auth] localStorage 中没有 refreshToken，尝试从 Cookie 刷新')
-      }
-
-      const response = await authApi.refreshToken(refreshToken.value || '')
-      const accessToken = response?.access_token || response?.data?.access_token
-
-      if (!accessToken) {
-        throw new Error('Invalid refresh token response: missing access_token')
-      }
-
-      token.value = accessToken
-      localStorage.setItem('access_token', token.value)
+      await authApi.refreshToken()
       resetAuthRecoveryState(localStorage)
-
-      const newRefreshToken = response?.refresh_token || response?.data?.refresh_token
-      if (newRefreshToken) {
-        refreshToken.value = newRefreshToken
-        localStorage.setItem('refresh_token', refreshToken.value)
-      }
-
       return true
     } catch (error) {
-      console.error('[Auth] 刷新令牌失败:', error)
+      console.error('[Auth] 刷新认证失败:', error)
       clearLocalSession()
       return false
     }
@@ -132,9 +104,9 @@ export const useAuthStore = defineStore('auth', () => {
   const fetchCurrentUser = async () => {
     try {
       const response = await authApi.getCurrentUser()
-      user.value = response.data
-      localStorage.setItem('user_info', JSON.stringify(user.value))
-      return response.data
+      user.value = response.data || response
+      writePersistedAuthState(localStorage, { user_info: user.value })
+      return user.value
     } catch (error) {
       console.error('获取用户信息失败:', error)
       return null
@@ -145,7 +117,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const response = await authApi.updateCurrentUser(userData)
       user.value = response.data
-      localStorage.setItem('user_info', JSON.stringify(user.value))
+      writePersistedAuthState(localStorage, { user_info: user.value })
       ElMessage.success('用户信息更新成功')
       return response.data
     } catch (error) {
@@ -175,12 +147,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   const initAuth = () => {
     const state = readPersistedAuthState(localStorage)
-    if (!state.accessToken || !state.authUser) {
+    if (!state.authUser) {
       return
     }
 
-    token.value = state.accessToken
-    refreshToken.value = state.refreshToken
     user.value = state.authUser
 
     const userStore = useUserStore()
