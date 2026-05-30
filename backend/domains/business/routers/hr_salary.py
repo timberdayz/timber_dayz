@@ -30,6 +30,7 @@ from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.db import DimUser, Employee, EmployeeTarget, PayrollRecord, SalaryStructure
+from modules.core.db import EmployeeCommission, EmployeePerformance
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,6 +42,60 @@ def _payroll_success(record: PayrollRecord) -> Dict[str, Any]:
     return {
         "success": True,
         "data": PayrollRecordResponse.model_validate(record).model_dump(mode="json"),
+    }
+
+
+async def _compute_payroll_stale_flags(
+    *,
+    db: AsyncSession,
+    record: Any | None,
+) -> Dict[str, Any]:
+    if record is None:
+        return {
+            "is_locked": False,
+            "is_stale_against_latest_calc": False,
+            "latest_calculated_at": None,
+        }
+
+    payroll_status = getattr(record, "status", None)
+    is_locked = payroll_status in {"confirmed", "paid", "approved"}
+    if not is_locked:
+        return {
+            "is_locked": False,
+            "is_stale_against_latest_calc": False,
+            "latest_calculated_at": None,
+        }
+
+    employee_code = getattr(record, "employee_code", None)
+    year_month = getattr(record, "year_month", None)
+    if not employee_code or not year_month:
+        return {
+            "is_locked": True,
+            "is_stale_against_latest_calc": False,
+            "latest_calculated_at": None,
+        }
+
+    commission_result = await db.execute(
+        select(EmployeeCommission.calculated_at).where(
+            EmployeeCommission.employee_code == employee_code,
+            EmployeeCommission.year_month == year_month,
+        )
+    )
+    commission_times = [row[0] for row in commission_result.all() if row[0] is not None]
+    performance_result = await db.execute(
+        select(EmployeePerformance.calculated_at).where(
+            EmployeePerformance.employee_code == employee_code,
+            EmployeePerformance.year_month == year_month,
+        )
+    )
+    performance_times = [row[0] for row in performance_result.all() if row[0] is not None]
+    all_times = [*commission_times, *performance_times]
+    latest_dt = max(all_times) if all_times else None
+    payroll_updated_at = getattr(record, "updated_at", None) or getattr(record, "created_at", None)
+    return {
+        "is_locked": True,
+        "is_stale_against_latest_calc": bool(latest_dt and payroll_updated_at and latest_dt > payroll_updated_at),
+        "latest_calculated_at": latest_dt.isoformat() if latest_dt else None,
     }
 
 
@@ -255,6 +310,7 @@ async def refresh_payroll_record(
         if record is not None and result.get("payroll_upserts", 0) > 0:
             await db.commit()
             await db.refresh(record)
+        stale_flags = await _compute_payroll_stale_flags(db=db, record=record)
         return {
             "success": True,
             "employee_code": result.get("employee_code", employee_code),
@@ -262,6 +318,9 @@ async def refresh_payroll_record(
             "payroll_upserts": result.get("payroll_upserts", 0),
             "locked_conflicts": result.get("locked_conflicts", 0),
             "locked_conflict_details": result.get("locked_conflict_details", []),
+            "is_locked": stale_flags["is_locked"],
+            "is_stale_against_latest_calc": stale_flags["is_stale_against_latest_calc"],
+            "latest_calculated_at": stale_flags["latest_calculated_at"],
             "data": PayrollRecordResponse.model_validate(record).model_dump(mode="json") if record else None,
         }
     except Exception as e:
@@ -313,7 +372,10 @@ async def get_payroll_record_detail(
         record = result.scalar_one_or_none()
         if not record:
             return error_response(ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404)
-        return _payroll_success(record)
+        stale_flags = await _compute_payroll_stale_flags(db=db, record=record)
+        payload = PayrollRecordResponse.model_validate(record).model_dump(mode="json")
+        payload.update(stale_flags)
+        return {"success": True, "data": payload}
     except Exception as e:
         logger.error("获取工资单详情失败: %s", e, exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取工资单详情失败: {str(e)}", status_code=500)
@@ -453,6 +515,7 @@ async def list_employee_targets(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
 ):
+    """个人目标规划层查询接口，不直接参与个人绩效结果和工资单计算。"""
     try:
         query = select(EmployeeTarget)
         conditions = []
@@ -477,6 +540,7 @@ async def create_employee_target(
     target: EmployeeTargetCreate,
     db: AsyncSession = Depends(get_async_db),
 ):
+    """个人目标规划层创建接口，不直接参与个人绩效结果和工资单计算。"""
     try:
         employee = await db.execute(
             select(Employee).where(Employee.employee_code == target.employee_code)

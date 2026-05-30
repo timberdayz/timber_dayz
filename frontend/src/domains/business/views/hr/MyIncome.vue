@@ -4,7 +4,7 @@
       <div>
         <h1 class="page-title">我的收入</h1>
         <p class="page-subtitle">
-          当前页面仅展示工资单口径收入。绩效和提成会先沉淀到工资单，再在这里统一查看。
+          当前页面只展示工资单口径收入。绩效和提成会先沉淀到工资单，再在这里统一查看。
         </p>
       </div>
       <el-button plain @click="handleOpenPayrollRunbook">
@@ -60,6 +60,16 @@
       </template>
 
       <template v-else>
+        <el-alert
+          v-if="payrollDetails?.is_stale_against_latest_calc"
+          type="warning"
+          show-icon
+          :closable="false"
+          style="margin-bottom: 16px;"
+        >
+          当前展示的是已锁定工资单版本，尚未吸收最新一次绩效/提成重算结果。
+        </el-alert>
+
         <el-row :gutter="20" style="margin-bottom: 20px;">
           <el-col
             v-for="card in summaryCards"
@@ -247,7 +257,7 @@ async function loadIncome() {
       period: data.period ?? selectedMonth.value,
       loading: false
     }
-  } catch (e) {
+  } catch (_e) {
     income.value.loading = false
     loadError.value = true
   }

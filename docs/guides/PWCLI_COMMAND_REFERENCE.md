@@ -45,6 +45,17 @@ If these commands exist, prefer them in user-facing guidance over longer repo-lo
 - `Save-PwcliTiktokState`: save TikTok login/session state.
 - `Show-PwcliPaths`: show local helper paths and artifact locations.
 
+For manual shop inspection and account-session maintenance, use the same
+account-scoped session paths as formal collection. Always pass `-AccountId`
+when the goal is to create or refresh a reusable account session. Do not treat
+temporary no-account `pwcli` sessions as formal collection session sources.
+
+See:
+
+- `docs/guides/PWCLI_MANUAL_SHOP_INSPECTION.md`
+- `docs/generated/PWCLI_ACCOUNT_COMMANDS.md`
+- `docs/guides/COLLECTION_SESSION_AND_FINGERPRINT.md`
+
 Common `pwcli` action categories:
 
 - Open or attach to a browser session.
@@ -100,3 +111,5 @@ Do not replace the active `pwcli + playwright skill + agent` workflow with legac
 - `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`
 - `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`
 - `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`
+- `docs/guides/PWCLI_MANUAL_SHOP_INSPECTION.md`
+- `docs/generated/PWCLI_ACCOUNT_COMMANDS.md`

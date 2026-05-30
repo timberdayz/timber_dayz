@@ -48,6 +48,8 @@ Do not use full-repository search as the first step when one of these files cove
 
 - `docs/guides/COLLECTION_AUTHORING_RULES.md`: active collection authoring workflow
 - `docs/guides/PWCLI_COMMAND_REFERENCE.md`: active `pwcli` command reference
+- `docs/guides/PWCLI_MANUAL_SHOP_INSPECTION.md`: manual shop inspection and account-session maintenance guide
+- `docs/generated/PWCLI_ACCOUNT_COMMANDS.md`: generated copy-paste account command list for manual inspection
 - `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`: collection debugging workflow
 - `docs/guides/CANONICAL_COLLECTION_COMPONENTS.md`: canonical collection component reference
 - `docs/guides/ACTIVE_COLLECTION_COMPONENTS.md`: active component inventory

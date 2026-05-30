@@ -46,6 +46,7 @@ def test_generate_month_creates_draft_payroll_from_salary_commission_and_perform
         employee_code="EMP001",
         base_salary=Decimal("1000"),
         position_salary=Decimal("500"),
+        performance_package_amount=Decimal("300"),
         housing_allowance=Decimal("50"),
         transport_allowance=Decimal("20"),
         meal_allowance=Decimal("10"),
@@ -96,6 +97,56 @@ def test_generate_month_creates_draft_payroll_from_salary_commission_and_perform
     assert created.status == "draft"
 
 
+def test_generate_month_uses_performance_package_amount_and_normalized_score():
+    service_cls = _load_service_cls()
+    db = AsyncMock()
+    added = []
+
+    salary = SimpleNamespace(
+        employee_code="EMP001A",
+        base_salary=Decimal("5000"),
+        position_salary=Decimal("2000"),
+        performance_package_amount=Decimal("800"),
+        housing_allowance=Decimal("0"),
+        transport_allowance=Decimal("0"),
+        meal_allowance=Decimal("0"),
+        communication_allowance=Decimal("0"),
+        other_allowance=Decimal("0"),
+        performance_ratio=0.2,
+        status="active",
+    )
+    performance = SimpleNamespace(
+        employee_code="EMP001A",
+        year_month="2025-01",
+        performance_score=85.0,
+    )
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is SalaryStructure:
+                return _MockResult(rows=[salary])
+            if entity is EmployeeCommission:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformance:
+                return _MockResult(rows=[performance])
+            if entity is PayrollRecord:
+                return _MockResult(rows=[])
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+
+    service = service_cls(db=db)
+    result = asyncio.run(service.generate_month("2025-01"))
+
+    assert result["payroll_upserts"] == 1
+    created = next(x for x in added if isinstance(x, PayrollRecord))
+    assert float(created.performance_salary) == 680.0
+    assert float(created.base_salary) == 5000.0
+    assert float(created.position_salary) == 2000.0
+
+
 def test_generate_month_preserves_manual_fields_on_existing_draft():
     service_cls = _load_service_cls()
     db = AsyncMock()
@@ -104,6 +155,7 @@ def test_generate_month_preserves_manual_fields_on_existing_draft():
         employee_code="EMP002",
         base_salary=Decimal("1200"),
         position_salary=Decimal("300"),
+        performance_package_amount=Decimal("150"),
         housing_allowance=Decimal("0"),
         transport_allowance=Decimal("0"),
         meal_allowance=Decimal("0"),
@@ -175,6 +227,7 @@ def test_generate_month_reports_locked_conflict_for_confirmed_payroll():
         employee_code="EMP003",
         base_salary=Decimal("1000"),
         position_salary=Decimal("500"),
+        performance_package_amount=Decimal("300"),
         housing_allowance=Decimal("0"),
         transport_allowance=Decimal("0"),
         meal_allowance=Decimal("0"),
@@ -267,6 +320,7 @@ def test_generate_employee_month_updates_single_draft_record():
         employee_code="EMP010",
         base_salary=Decimal("2000"),
         position_salary=Decimal("500"),
+        performance_package_amount=Decimal("500"),
         housing_allowance=Decimal("50"),
         transport_allowance=Decimal("50"),
         meal_allowance=Decimal("0"),
@@ -339,6 +393,7 @@ def test_generate_employee_month_reports_locked_record():
         employee_code="EMP011",
         base_salary=Decimal("1000"),
         position_salary=Decimal("500"),
+        performance_package_amount=Decimal("300"),
         housing_allowance=Decimal("0"),
         transport_allowance=Decimal("0"),
         meal_allowance=Decimal("0"),
@@ -415,6 +470,7 @@ def test_generate_employee_month_reads_english_c_class_columns():
         employee_code="EMP020",
         base_salary=Decimal("2000"),
         position_salary=Decimal("500"),
+        performance_package_amount=Decimal("500"),
         housing_allowance=Decimal("50"),
         transport_allowance=Decimal("50"),
         meal_allowance=Decimal("0"),
@@ -473,6 +529,7 @@ def test_generate_month_reads_english_c_class_columns():
         employee_code="EMP021",
         base_salary=Decimal("1000"),
         position_salary=Decimal("500"),
+        performance_package_amount=Decimal("300"),
         housing_allowance=Decimal("50"),
         transport_allowance=Decimal("20"),
         meal_allowance=Decimal("10"),
@@ -529,6 +586,7 @@ def test_generate_employee_month_uses_latest_salary_version_effective_for_year_m
             employee_code="EMP030",
             base_salary=Decimal("3000"),
             position_salary=Decimal("1000"),
+            performance_package_amount=Decimal("600"),
             housing_allowance=Decimal("0"),
             transport_allowance=Decimal("0"),
             meal_allowance=Decimal("0"),
@@ -544,6 +602,7 @@ def test_generate_employee_month_uses_latest_salary_version_effective_for_year_m
             employee_code="EMP030",
             base_salary=Decimal("1000"),
             position_salary=Decimal("500"),
+            performance_package_amount=Decimal("150"),
             housing_allowance=Decimal("0"),
             transport_allowance=Decimal("0"),
             meal_allowance=Decimal("0"),
@@ -595,6 +654,7 @@ def test_generate_month_uses_salary_version_effective_for_target_month():
             employee_code="EMP031",
             base_salary=Decimal("4000"),
             position_salary=Decimal("1000"),
+            performance_package_amount=Decimal("500"),
             housing_allowance=Decimal("0"),
             transport_allowance=Decimal("0"),
             meal_allowance=Decimal("0"),
@@ -610,6 +670,7 @@ def test_generate_month_uses_salary_version_effective_for_target_month():
             employee_code="EMP031",
             base_salary=Decimal("2000"),
             position_salary=Decimal("500"),
+            performance_package_amount=Decimal("250"),
             housing_allowance=Decimal("0"),
             transport_allowance=Decimal("0"),
             meal_allowance=Decimal("0"),

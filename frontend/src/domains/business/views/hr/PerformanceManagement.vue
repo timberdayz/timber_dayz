@@ -1,7 +1,7 @@
 ﻿<template>
   <div class="performance-management erp-page-container">
-    <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">绩效管理</h1>
-    <p style="color: #909399; margin-bottom: 20px;">用于查看店铺/人员绩效、执行月度重算、维护绩效权重，以及录入个人绩效调整项。</p>
+    <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">{{ pageTitle }}</h1>
+    <p style="color: #909399; margin-bottom: 20px;">{{ pageSubtitle }}</p>
     
     <!-- 操作栏：月份、维度切换与功能按钮 -->
     <div class="action-bar" style="margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
@@ -15,7 +15,7 @@
         style="width: 180px;"
         @change="handlePeriodChange"
       />
-      <el-radio-group v-model="filters.groupBy" size="default" @change="handleGroupByChange">
+      <el-radio-group v-if="showGroupToggle" v-model="filters.groupBy" size="default" @change="handleGroupByChange">
         <el-radio-button value="shop">按店铺</el-radio-button>
         <el-radio-button value="person">按人员</el-radio-button>
       </el-radio-group>
@@ -195,6 +195,66 @@
     <el-card v-if="hasPermission('performance:config') && filters.groupBy === 'person'" style="margin-top: 20px;">
       <template #header>
         <div class="card-header">
+          <span>个人绩效输入项</span>
+          <div class="card-actions">
+            <el-button size="small" @click="loadInputList">刷新</el-button>
+            <el-button size="small" @click="openApplyTemplate">套用默认模板</el-button>
+            <el-button size="small" type="primary" @click="openCreateInput">新增输入项</el-button>
+          </div>
+        </div>
+      </template>
+      <el-table :data="inputList.data" stripe v-loading="inputList.loading" class="erp-table" border>
+        <el-table-column prop="employee_name" label="人员" width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.employee_name || row.employee_code || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="year_month" label="月份" width="100" />
+        <el-table-column prop="metric_name" label="指标名称" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.metric_name || row.metric_code || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="metric_direction" label="方向" width="90" align="center">
+          <template #default="{ row }">{{ row.metric_direction === 'down' || row.metric_direction === 'lower_better' ? '越低越好' : '越高越好' }}</template>
+        </el-table-column>
+        <el-table-column prop="target_value" label="目标值" width="100" align="right">
+          <template #default="{ row }">{{ formatCell(row.target_value) }}</template>
+        </el-table-column>
+        <el-table-column prop="achieved_value" label="实际值" width="100" align="right">
+          <template #default="{ row }">{{ formatCell(row.achieved_value) }}</template>
+        </el-table-column>
+        <el-table-column prop="max_score" label="满分" width="90" align="right">
+          <template #default="{ row }">{{ formatCell(row.max_score) }}</template>
+        </el-table-column>
+        <el-table-column label="人工评分" width="120" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.manual_score_enabled" type="warning" size="small">
+              {{ row.manual_score_value != null ? Number(row.manual_score_value).toFixed(1) : '启用' }}
+            </el-tag>
+            <span v-else>自动</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="source" label="来源" width="140" show-overflow-tooltip />
+        <el-table-column prop="reason" label="备注" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="status" label="状态" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
+              {{ row.status === 'active' ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" link @click="openEditInput(row)">编辑</el-button>
+            <el-button size="small" type="danger" link @click="handleDeleteInput(row)">停用</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="inputList.data.length === 0 && !inputList.loading" class="empty-state small">
+        当前月份暂无个人绩效输入项。
+      </div>
+    </el-card>
+
+    <el-card v-if="hasPermission('performance:config') && filters.groupBy === 'person'" style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
           <span>个人绩效调整项</span>
           <div class="card-actions">
             <el-button size="small" @click="loadAdjustmentList">刷新</el-button>
@@ -347,6 +407,77 @@
     </el-dialog>
 
     <el-dialog
+      v-model="templateDialogVisible"
+      title="套用个人绩效模板"
+      width="520px"
+    >
+      <el-form :model="templateForm" label-width="110px">
+        <el-form-item label="月份"><el-input v-model="templateForm.year_month" disabled /></el-form-item>
+        <el-form-item label="人员" required>
+          <el-select v-model="templateForm.employee_code" filterable placeholder="选择人员" style="width: 100%;" @change="loadTemplateOptions">
+            <el-option v-for="employee in adjustmentEmployeeOptions" :key="employee.employee_code" :label="`${employee.name} (${employee.employee_code})`" :value="employee.employee_code" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="模板">
+          <el-select v-model="templateForm.template_code" placeholder="选择模板" style="width: 100%;">
+            <el-option v-for="item in templateOptions" :key="item.template_code" :label="`${item.template_name}${item.recommended ? '（推荐）' : ''}`" :value="item.template_code" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="覆盖已有项">
+          <el-switch v-model="templateForm.overwrite" />
+        </el-form-item>
+      </el-form>
+      <el-alert
+        v-if="selectedTemplateSummary"
+        :title="selectedTemplateSummary"
+        type="info"
+        :closable="false"
+      />
+      <template #footer>
+        <el-button @click="templateDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="templateSubmitting" @click="handleApplyTemplate">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="inputDialogVisible"
+      :title="inputMode === 'create' ? '新增个人绩效输入项' : '编辑个人绩效输入项'"
+      width="560px"
+    >
+      <el-form :model="inputForm" label-width="110px">
+        <el-form-item label="月份"><el-input v-model="inputForm.year_month" disabled /></el-form-item>
+        <el-form-item label="人员" required>
+          <el-select v-model="inputForm.employee_code" filterable placeholder="选择人员" style="width: 100%;">
+            <el-option v-for="employee in adjustmentEmployeeOptions" :key="employee.employee_code" :label="`${employee.name} (${employee.employee_code})`" :value="employee.employee_code" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="指标编码" required><el-input v-model="inputForm.metric_code" placeholder="例如 sales_target / reply_rate" :disabled="inputMode === 'edit'" /></el-form-item>
+        <el-form-item label="指标名称" required><el-input v-model="inputForm.metric_name" placeholder="例如 销售目标 / 及时回复率" /></el-form-item>
+        <el-form-item label="指标方向" required>
+          <el-select v-model="inputForm.metric_direction" style="width: 100%;">
+            <el-option label="越高越好" value="up" />
+            <el-option label="越低越好" value="down" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="目标值"><el-input-number v-model="inputForm.target_value" :min="0" :precision="2" style="width: 100%;" /></el-form-item>
+        <el-form-item label="实际值"><el-input-number v-model="inputForm.achieved_value" :min="0" :precision="2" style="width: 100%;" /></el-form-item>
+        <el-form-item label="满分" required><el-input-number v-model="inputForm.max_score" :min="0" :max="100" :precision="1" style="width: 100%;" /></el-form-item>
+        <el-form-item label="人工评分">
+          <el-switch v-model="inputForm.manual_score_enabled" />
+        </el-form-item>
+        <el-form-item v-if="inputForm.manual_score_enabled" label="人工分值">
+          <el-input-number v-model="inputForm.manual_score_value" :min="0" :max="100" :precision="1" style="width: 100%;" />
+        </el-form-item>
+        <el-form-item label="来源"><el-input v-model="inputForm.source" placeholder="例如 manual_target / system_sync" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="inputForm.reason" type="textarea" :rows="3" placeholder="填写该绩效输入项说明" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="inputDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="inputSubmitting" @click="handleSubmitInput">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="adjustmentDialogVisible"
       :title="adjustmentMode === 'create' ? '新增个人绩效调整项' : '编辑个人绩效调整项'"
       width="520px"
@@ -380,16 +511,45 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Setting, Download } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { useRoute } from 'vue-router'
 import api from '@/api'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatNumber, formatPercent, formatInteger } from '@/utils/dataFormatter'
 import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
 
+const props = defineProps({
+  forcedGroupBy: {
+    type: String,
+    default: ''
+  }
+})
 const userStore = useUserStore()
+const route = useRoute()
+const showGroupToggle = computed(() => !props.forcedGroupBy)
+const pageTitle = computed(() => {
+  if (route.path.includes('/hr-performance-management/person')) return '个人绩效管理'
+  if (route.path.includes('/hr-performance-management/shop')) return '店铺绩效管理'
+  return '绩效管理'
+})
+const pageSubtitle = computed(() => {
+  if (props.forcedGroupBy === 'person') {
+    return '?????????????????????????????'
+  }
+  if (props.forcedGroupBy === 'shop') {
+    return '????????????????????????????'
+  }
+  if (route.path.includes('/hr-performance-management/person')) {
+    return '用于查看个人绩效结果、执行月度重算，并维护个人绩效调整项。'
+  }
+  if (route.path.includes('/hr-performance-management/shop')) {
+    return '用于查看店铺绩效结果、执行月度重算，并维护店铺绩效权重。'
+  }
+  return '用于查看店铺/人员绩效、执行月度重算、维护绩效权重，以及录入个人绩效调整项。'
+})
 
 // 角色编码规范化（中文角色 -> 英文角色）
 const normalizeRoleCode = (role) => {
@@ -428,11 +588,13 @@ const performanceList = reactive({
   loading: false
 })
 
+const resolveGroupBy = () => props.forcedGroupBy || (route.path.includes('/hr-performance-management/person') ? 'person' : 'shop')
+
 const filters = reactive({
   period: new Date().toISOString().slice(0, 7),
   platform: '',
   shopId: null,
-  groupBy: 'shop'
+  groupBy: resolveGroupBy()
 })
 
 // 绩效详情
@@ -450,10 +612,22 @@ const configVisible = ref(false)
 const configSubmitting = ref(false)
 const configFormRef = ref(null)
 const employeeDirectory = ref([])
+const templateDialogVisible = ref(false)
+const templateSubmitting = ref(false)
+const templateOptions = ref([])
+const inputDialogVisible = ref(false)
+const inputSubmitting = ref(false)
+const inputMode = ref('create')
 const adjustmentDialogVisible = ref(false)
 const adjustmentSubmitting = ref(false)
 // 新增/编辑模式
 const adjustmentMode = ref('create')
+
+const inputList = reactive({
+  data: [],
+  total: 0,
+  loading: false
+})
 
 const adjustmentList = reactive({
   data: [],
@@ -478,6 +652,27 @@ const weightConfig = reactive({
   key_product_weight: 25,
   operation_weight: 20
 })
+const inputForm = reactive({
+  id: null,
+  year_month: '',
+  employee_code: '',
+  metric_code: '',
+  metric_name: '',
+  metric_direction: 'up',
+  target_value: 0,
+  achieved_value: 0,
+  max_score: 20,
+  manual_score_enabled: false,
+  manual_score_value: null,
+  source: '',
+  reason: ''
+})
+const templateForm = reactive({
+  employee_code: '',
+  year_month: '',
+  template_code: '',
+  overwrite: false
+})
 const adjustmentForm = reactive({
   id: null,
   year_month: '',
@@ -495,21 +690,26 @@ const totalWeight = computed(() => {
 })
 const formulaText = computed(() => {
   if (filters.groupBy === 'person') {
-    return '店铺汇总绩效分 + 个人运营加减分(人工) + 考勤扣分(自动)，最终限制在 0-100'
+    return '个人绩效输入项得分 + 个人调整项 + 考勤扣分；无输入项时才回退至店铺汇总绩效'
   }
-  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 重点产品(${weightConfig.key_product_weight}%) + 店铺运营得分(${weightConfig.operation_weight}%)`
+  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 店铺运营得分(${weightConfig.operation_weight}%)`
 })
 
 const currentGroupPolicyText = computed(() => {
   if (filters.groupBy === 'person') {
-    return '人员绩效总分=挂店店铺绩效聚合 + 个人运营加减分(人工录入，未来可对接飞书) + 考勤扣分(自动)；最终限制在 0-100。'
+    return '人员绩效优先来源于个人绩效输入项；人工调整和考勤扣分继续叠加。若当月未配置个人输入项，系统才回退到挂店店铺绩效聚合。'
   }
-  return '店铺总分由销售、毛利、重点产品和运营四项组成；正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
+  return '店铺总分由销售、毛利和运营三项组成；重点产品当前不纳入正式口径。正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
 })
 
 // 表单验证规则
 const adjustmentEmployeeOptions = computed(() => {
   return (employeeDirectory.value || []).filter((item) => !item.status || item.status === 'active')
+})
+const selectedTemplateSummary = computed(() => {
+  const selected = (templateOptions.value || []).find((item) => item.template_code === templateForm.template_code)
+  if (!selected) return ''
+  return `${selected.template_name}：${(selected.metrics || []).map((item) => item.metric_name).join(' / ')}`
 })
 
 const configRules = {
@@ -628,16 +828,6 @@ const detailMetricCards = computed(() => {
       achievedType: 'currency',
     },
     {
-      key: 'key_product_score',
-      label: '重点产品得分',
-      weight: weightConfig.key_product_weight,
-      metric: data.key_product_score,
-      successThreshold: 22.5,
-      warningThreshold: 20,
-      targetType: 'text',
-      achievedType: 'text',
-    },
-    {
       key: 'operation_score',
       label: '店铺运营得分',
       weight: weightConfig.operation_weight,
@@ -729,9 +919,30 @@ const loadAdjustmentList = async () => {
   }
 }
 
+const loadInputList = async () => {
+  if (!hasPermission('performance:config')) return
+  inputList.loading = true
+  try {
+    const response = await api.getHrPerformanceInputs({
+      year_month: typeof filters.period === 'string' ? filters.period : undefined,
+      page: 1,
+      page_size: 100
+    })
+    inputList.data = response?.data?.items || response?.items || []
+    inputList.total = response?.data?.total || response?.total || 0
+  } catch (error) {
+    inputList.data = []
+    inputList.total = 0
+    handleApiError(error, { showMessage: true, logError: true })
+  } finally {
+    inputList.loading = false
+  }
+}
+
 const handleRefreshAll = async () => {
   await loadPerformanceList()
   if (filters.groupBy === 'person') {
+    await loadInputList()
     await loadAdjustmentList()
   }
 }
@@ -739,6 +950,7 @@ const handleRefreshAll = async () => {
 const handleGroupByChange = async () => {
   await loadPerformanceList()
   if (filters.groupBy === 'person') {
+    await loadInputList()
     await loadAdjustmentList()
   }
 }
@@ -755,6 +967,164 @@ const resetAdjustmentForm = () => {
   adjustmentForm.score_delta = 0
   adjustmentForm.source = ''
   adjustmentForm.reason = ''
+}
+
+const resetInputForm = () => {
+  inputForm.id = null
+  inputForm.year_month = typeof filters.period === 'string' ? filters.period : ''
+  inputForm.employee_code = ''
+  inputForm.metric_code = ''
+  inputForm.metric_name = ''
+  inputForm.metric_direction = 'up'
+  inputForm.target_value = 0
+  inputForm.achieved_value = 0
+  inputForm.max_score = 20
+  inputForm.manual_score_enabled = false
+  inputForm.manual_score_value = null
+  inputForm.source = ''
+  inputForm.reason = ''
+}
+
+const resetTemplateForm = () => {
+  templateForm.employee_code = ''
+  templateForm.year_month = typeof filters.period === 'string' ? filters.period : ''
+  templateForm.template_code = ''
+  templateForm.overwrite = false
+  templateOptions.value = []
+}
+
+const loadTemplateOptions = async () => {
+  if (!templateForm.employee_code) {
+    templateOptions.value = []
+    templateForm.template_code = ''
+    return
+  }
+  try {
+    const response = await api.getHrPerformanceInputTemplates({
+      employee_code: templateForm.employee_code
+    })
+    const items = response?.data?.items || response?.items || []
+    templateOptions.value = items
+    templateForm.template_code = response?.data?.recommended_template_code || items[0]?.template_code || ''
+  } catch (error) {
+    templateOptions.value = []
+    templateForm.template_code = ''
+    handleApiError(error, { showMessage: true, logError: true })
+  }
+}
+
+const openApplyTemplate = async () => {
+  resetTemplateForm()
+  templateDialogVisible.value = true
+}
+
+const handleApplyTemplate = async () => {
+  if (!templateForm.employee_code) {
+    ElMessage.warning('请选择人员')
+    return
+  }
+  templateSubmitting.value = true
+  try {
+    await api.applyHrPerformanceInputTemplate({
+      employee_code: templateForm.employee_code,
+      year_month: templateForm.year_month,
+      template_code: templateForm.template_code || undefined,
+      overwrite: Boolean(templateForm.overwrite)
+    })
+    ElMessage.success('个人绩效模板已套用')
+    templateDialogVisible.value = false
+    await loadInputList()
+    await loadPerformanceList()
+  } catch (error) {
+    handleApiError(error, { showMessage: true, logError: true })
+  } finally {
+    templateSubmitting.value = false
+  }
+}
+
+const openCreateInput = () => {
+  inputMode.value = 'create'
+  resetInputForm()
+  inputDialogVisible.value = true
+}
+
+const openEditInput = (row) => {
+  inputMode.value = 'edit'
+  inputForm.id = row.id
+  inputForm.year_month = row.year_month
+  inputForm.employee_code = row.employee_code
+  inputForm.metric_code = row.metric_code
+  inputForm.metric_name = row.metric_name || row.metric_code
+  inputForm.metric_direction = row.metric_direction || 'up'
+  inputForm.target_value = Number(row.target_value || 0)
+  inputForm.achieved_value = Number(row.achieved_value || 0)
+  inputForm.max_score = Number(row.max_score || 0)
+  inputForm.manual_score_enabled = Boolean(row.manual_score_enabled)
+  inputForm.manual_score_value = row.manual_score_value != null ? Number(row.manual_score_value) : null
+  inputForm.source = row.source || ''
+  inputForm.reason = row.reason || ''
+  inputDialogVisible.value = true
+}
+
+const handleSubmitInput = async () => {
+  if (!inputForm.year_month) {
+    ElMessage.warning('请选择月份')
+    return
+  }
+  if (!inputForm.employee_code) {
+    ElMessage.warning('请选择人员')
+    return
+  }
+  if (!inputForm.metric_code || !inputForm.metric_name) {
+    ElMessage.warning('请填写指标编码和指标名称')
+    return
+  }
+  inputSubmitting.value = true
+  try {
+    const payload = {
+      year_month: inputForm.year_month,
+      employee_code: inputForm.employee_code,
+      metric_code: inputForm.metric_code,
+      metric_name: inputForm.metric_name,
+      metric_direction: inputForm.metric_direction,
+      target_value: Number(inputForm.target_value || 0),
+      achieved_value: Number(inputForm.achieved_value || 0),
+      max_score: Number(inputForm.max_score || 0),
+      manual_score_enabled: Boolean(inputForm.manual_score_enabled),
+      manual_score_value: inputForm.manual_score_enabled ? Number(inputForm.manual_score_value || 0) : null,
+      source: inputForm.source || null,
+      reason: inputForm.reason || null
+    }
+    if (inputMode.value === 'create') {
+      await api.createHrPerformanceInput(payload)
+    } else {
+      await api.updateHrPerformanceInput(inputForm.id, payload)
+    }
+    ElMessage.success('个人绩效输入项保存成功')
+    inputDialogVisible.value = false
+    await loadInputList()
+  } catch (error) {
+    handleApiError(error, { showMessage: true, logError: true })
+  } finally {
+    inputSubmitting.value = false
+  }
+}
+
+const handleDeleteInput = async (row) => {
+  try {
+    await ElMessageBox.confirm('确认停用该个人绩效输入项吗？', '确认停用', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
+    await api.deleteHrPerformanceInput(row.id)
+    ElMessage.success('已停用该输入项')
+    await loadInputList()
+  } catch (error) {
+    if (error !== 'cancel') {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
+  }
 }
 
 const openCreateAdjustment = () => {
@@ -945,6 +1315,15 @@ const handleExport = () => {
 }
 
 // formatCurrency 已从 dataFormatter 导入，无需重复声明
+
+watch(() => route.path, () => {
+  filters.groupBy = resolveGroupBy()
+  if (typeof handleRefreshAll === 'function') {
+    handleRefreshAll()
+  } else {
+    loadPerformanceList()
+  }
+})
 
 onMounted(async () => {
   await loadWeightConfig()

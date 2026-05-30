@@ -13,6 +13,7 @@ from modules.core.db import (
     EmployeeCommission,
     EmployeePerformance,
     EmployeePerformanceAdjustment,
+    EmployeePerformanceInput,
     SalaryStructure,
     EmployeeShopAssignment,
     PerformanceScore,
@@ -840,3 +841,200 @@ def test_calculate_month_employee_performance_applies_manual_adjustments():
     assert result["employee_count"] == 1
     perf = next(x for x in added if isinstance(x, EmployeePerformance))
     assert perf.performance_score == pytest.approx(93.5)
+
+
+def test_calculate_month_employee_performance_prefers_employee_inputs_without_store_score():
+    db = AsyncMock()
+    added = []
+
+    assignments = [
+        SimpleNamespace(
+            employee_code="E301",
+            platform_code="Shopee",
+            shop_id="S1",
+            commission_ratio=0.1,
+            status="active",
+            year_month="2026-03",
+        ),
+    ]
+    cfg_rows = [
+        SimpleNamespace(
+            year_month="2026-03",
+            platform_code="Shopee",
+            shop_id="S1",
+            allocatable_profit_rate=1.0,
+        ),
+    ]
+    input_rows = [
+        SimpleNamespace(
+            employee_code="E301",
+            year_month="2026-03",
+            metric_code="sales_target",
+            metric_direction="up",
+            target_value=100.0,
+            achieved_value=80.0,
+            max_score=50.0,
+            manual_score_enabled=False,
+            manual_score_value=None,
+            status="active",
+        ),
+        SimpleNamespace(
+            employee_code="E301",
+            year_month="2026-03",
+            metric_code="reply_rate",
+            metric_direction="up",
+            target_value=100.0,
+            achieved_value=100.0,
+            max_score=20.0,
+            manual_score_enabled=False,
+            manual_score_value=None,
+            status="active",
+        ),
+        SimpleNamespace(
+            employee_code="E301",
+            year_month="2026-03",
+            metric_code="attendance_quality",
+            metric_direction="up",
+            target_value=0.0,
+            achieved_value=0.0,
+            max_score=20.0,
+            manual_score_enabled=True,
+            manual_score_value=18.0,
+            status="active",
+        ),
+    ]
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=assignments)
+            if entity is ShopCommissionConfig:
+                return _MockResult(rows=cfg_rows)
+            if entity is PerformanceScore:
+                return _MockResult(rows=[])
+            if entity is AttendanceRecord:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformanceAdjustment:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformanceInput:
+                return _MockResult(rows=input_rows)
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=None)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+        return _MockResult(
+            mapping_rows=[
+                {
+                    "platform_code": "Shopee",
+                    "shop_id": "S1",
+                    "gmv": 1000.0,
+                    "profit": 300.0,
+                    "achievement_rate": 60.0,
+                }
+            ]
+        )
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+
+    service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|s1": {"profit_basis_amount": 1000.0}}
+    )
+    result = asyncio.run(service.calculate_month("2026-03"))
+
+    assert result["employee_count"] == 1
+    perf = next(x for x in added if isinstance(x, EmployeePerformance))
+    assert perf.achievement_rate == pytest.approx(0.6)
+    assert perf.performance_score == pytest.approx(78.0)
+
+
+def test_calculate_month_employee_performance_applies_inputs_then_adjustments():
+    db = AsyncMock()
+    added = []
+
+    assignments = [
+        SimpleNamespace(
+            employee_code="E302",
+            platform_code="Shopee",
+            shop_id="S1",
+            commission_ratio=0.1,
+            status="active",
+            year_month="2026-03",
+        ),
+    ]
+    cfg_rows = [
+        SimpleNamespace(
+            year_month="2026-03",
+            platform_code="Shopee",
+            shop_id="S1",
+            allocatable_profit_rate=1.0,
+        ),
+    ]
+    input_rows = [
+        SimpleNamespace(
+            employee_code="E302",
+            year_month="2026-03",
+            metric_code="sales_target",
+            metric_direction="up",
+            target_value=100.0,
+            achieved_value=90.0,
+            max_score=60.0,
+            manual_score_enabled=False,
+            manual_score_value=None,
+            status="active",
+        ),
+    ]
+    attendance_rows = [
+        SimpleNamespace(employee_code="E302", attendance_date="2026-03-01", status="late"),
+    ]
+    adjustment_rows = [
+        SimpleNamespace(employee_code="E302", year_month="2026-03", score_delta=5.0, status="active"),
+    ]
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=assignments)
+            if entity is ShopCommissionConfig:
+                return _MockResult(rows=cfg_rows)
+            if entity is PerformanceScore:
+                return _MockResult(rows=[])
+            if entity is AttendanceRecord:
+                return _MockResult(rows=attendance_rows)
+            if entity is EmployeePerformanceAdjustment:
+                return _MockResult(rows=adjustment_rows)
+            if entity is EmployeePerformanceInput:
+                return _MockResult(rows=input_rows)
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=None)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+        return _MockResult(
+            mapping_rows=[
+                {
+                    "platform_code": "Shopee",
+                    "shop_id": "S1",
+                    "gmv": 1000.0,
+                    "profit": 300.0,
+                    "achievement_rate": 60.0,
+                }
+            ]
+        )
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+
+    service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|s1": {"profit_basis_amount": 1000.0}}
+    )
+    result = asyncio.run(service.calculate_month("2026-03"))
+
+    assert result["employee_count"] == 1
+    perf = next(x for x in added if isinstance(x, EmployeePerformance))
+    assert perf.performance_score == pytest.approx(58.0)

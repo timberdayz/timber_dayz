@@ -205,6 +205,8 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 审批后：
 
 - 状态变为 `approved`
+- 当月月结会冻结为 snapshot 版本
+- 后续月结详情优先读取 snapshot，而不是继续读运行时中间表
 - 再次重建会被拦截
 - 再次修改目标比例会被拦截
 
@@ -213,6 +215,7 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 如果审批后仍需修改：
 
 - 先执行“回退草稿”
+- 当前 active snapshot 会被标记为 `superseded`
 - 再去修正上游数据或调整月结参数
 - 最后重新审批
 

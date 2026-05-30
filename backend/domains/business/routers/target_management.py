@@ -66,6 +66,7 @@ router = APIRouter(prefix="/targets", tags=["目标管理"])
 def _validate_operation_target_payload(
     *,
     target_type: Optional[str],
+    scope_type: Optional[str],
     metric_code: Optional[str],
     metric_direction: Optional[str],
     target_value: Optional[float],
@@ -75,6 +76,15 @@ def _validate_operation_target_payload(
 ):
     if target_type != "operation":
         return None
+
+    if scope_type not in (None, "shop"):
+        return error_response(
+            code=ErrorCode.DATA_VALIDATION_FAILED,
+            message="运营目标当前仅支持店铺作用域(scope_type=shop)",
+            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+            recovery_suggestion="个人运营相关内容请改走个人绩效输入项(employee_performance_inputs)",
+            status_code=400,
+        )
 
     if not metric_code:
         return error_response(
@@ -391,9 +401,10 @@ async def _build_target_by_month_payload(
     query = (
         select(SalesTarget)
         .where(SalesTarget.target_type == target_type)
+        .where(SalesTarget.status == "active")
         .where(SalesTarget.period_start <= month_end)
         .where(SalesTarget.period_end >= month_start)
-        .order_by(SalesTarget.created_at.desc())
+        .order_by(SalesTarget.created_at.desc(), SalesTarget.id.desc())
         .limit(1)
     )
     target = (await db.execute(query)).scalar_one_or_none()
@@ -484,9 +495,10 @@ async def get_target_by_month(
         query = (
             select(SalesTarget)
             .where(SalesTarget.target_type == target_type)
+            .where(SalesTarget.status == "active")
             .where(SalesTarget.period_start <= month_end)
             .where(SalesTarget.period_end >= month_start)
-            .order_by(SalesTarget.created_at.desc())
+            .order_by(SalesTarget.created_at.desc(), SalesTarget.id.desc())
             .limit(1)
         )
         target = (await db.execute(query)).scalar_one_or_none()
@@ -626,6 +638,7 @@ async def create_target(
 
         operation_validation_error = _validate_operation_target_payload(
             target_type=request.target_type,
+            scope_type=(request.scope_type or "shop") if request.target_type == "operation" else request.scope_type,
             metric_code=request.metric_code,
             metric_direction=request.metric_direction,
             target_value=request.target_value,
@@ -640,6 +653,7 @@ async def create_target(
         target = SalesTarget(
             target_name=request.target_name,
             target_type=request.target_type,
+            scope_type=(request.scope_type or "shop") if request.target_type == "operation" else request.scope_type,
             period_start=request.period_start,
             period_end=request.period_end,
             target_amount=request.target_amount,
@@ -763,6 +777,11 @@ async def update_target(
 
         operation_validation_error = _validate_operation_target_payload(
             target_type=update_data.get("target_type", target.target_type),
+            scope_type=(
+                update_data.get("scope_type", getattr(target, "scope_type", None)) or "shop"
+                if update_data.get("target_type", target.target_type) == "operation"
+                else update_data.get("scope_type", getattr(target, "scope_type", None))
+            ),
             metric_code=update_data.get("metric_code", target.metric_code),
             metric_direction=update_data.get("metric_direction", target.metric_direction),
             target_value=update_data.get("target_value", target.target_value),
@@ -772,6 +791,9 @@ async def update_target(
         )
         if operation_validation_error is not None:
             return operation_validation_error
+
+        if update_data.get("target_type", target.target_type) == "operation":
+            update_data["scope_type"] = update_data.get("scope_type", getattr(target, "scope_type", None)) or "shop"
         
         for key, value in update_data.items():
             setattr(target, key, value)

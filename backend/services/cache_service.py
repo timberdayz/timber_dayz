@@ -386,7 +386,7 @@ class CacheService:
             return total_deleted
         except Exception as e:
             self.cache_stats["errors"] += 1
-            logger.warning(f"[Cache] 按模式删除缓存失败: {e}")
+            logger.debug(f"[Cache] delete_pattern skipped because cache backend is unavailable: {e}")
             return 0
     
     async def invalidate(

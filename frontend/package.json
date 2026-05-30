@@ -17,7 +17,10 @@
     "smoke:template-management": "node scripts/dataSyncTemplateManagementPlaywrightSmoke.mjs",
     "test:smoke-shared": "node --test scripts/frontendSmokeShared.test.mjs",
     "test:shop-assignment-rules": "node --test scripts/shopAssignmentRules.test.mjs",
-    "test:my-income-view-model": "node --test scripts/myIncomeViewModel.test.mjs"
+    "test:my-income-view-model": "node --test scripts/myIncomeViewModel.test.mjs",
+    "test:target-route-split": "node --test scripts/targetRouteSplit.test.mjs",
+    "test:operation-target-formula": "node --test scripts/operationTargetFormula.test.mjs",
+    "test:performance-route-split": "node --test scripts/performanceRouteSplit.test.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.1.0",

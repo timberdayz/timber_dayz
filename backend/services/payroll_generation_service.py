@@ -276,6 +276,18 @@ class PayrollGenerationService:
         return total.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
     @classmethod
+    def _normalize_performance_coefficient(cls, performance: Any | None) -> Decimal:
+        raw_value = getattr(performance, "performance_coefficient", None)
+        if raw_value is None:
+            raw_value = getattr(performance, "performance_score", 0)
+        coefficient = cls._to_decimal(raw_value)
+        if coefficient > Decimal("2"):
+            coefficient = coefficient / Decimal("100")
+        if coefficient < Decimal("0"):
+            coefficient = Decimal("0")
+        return coefficient
+
+    @classmethod
     def _recalculate_totals(cls, record: Any) -> None:
         gross_salary = cls._sum_money(
             getattr(record, "base_salary", 0),
@@ -331,15 +343,12 @@ class PayrollGenerationService:
         commission_amount = cls._to_money(
             getattr(commission, "commission_amount", 0)
         )
-        performance_ratio = cls._to_decimal(getattr(salary, "performance_ratio", 0))
-        performance_score = cls._to_decimal(
-            getattr(performance, "performance_score", 0)
+        performance_package_amount = cls._to_money(
+            getattr(salary, "performance_package_amount", 0)
         )
+        performance_coefficient = cls._normalize_performance_coefficient(performance)
         performance_salary = (
-            (base_salary + position_salary)
-            * performance_ratio
-            * performance_score
-            / Decimal("100")
+            performance_package_amount * performance_coefficient
         ).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
         payload: Dict[str, Any] = {

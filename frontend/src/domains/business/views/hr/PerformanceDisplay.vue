@@ -1,8 +1,8 @@
 ﻿<template>
   <div class="performance-display erp-page-container">
-    <h1 class="page-title">绩效公示</h1>
+    <h1 class="page-title">{{ pageTitle }}</h1>
     <p class="page-subtitle">
-      面向全员展示店铺或人员维度的绩效结果，并支持查看赛马池与预警状态。
+      {{ pageSubtitle }}
     </p>
 
     <div class="action-bar">
@@ -16,7 +16,7 @@
         style="width: 180px;"
         @change="loadPerformanceList"
       />
-      <el-radio-group v-model="filters.groupBy" size="default" @change="loadPerformanceList">
+      <el-radio-group v-if="showGroupToggle" v-model="filters.groupBy" size="default" @change="loadPerformanceList">
         <el-radio-button value="shop">按店铺</el-radio-button>
         <el-radio-button value="person">按人员</el-radio-button>
       </el-radio-group>
@@ -159,10 +159,39 @@
         <el-table-column v-if="filters.groupBy === 'person'" label="店铺汇总达成率" width="140" align="right">
           <template #default="{ row }">{{ formatPercent(row.sales_rate) }}</template>
         </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'person'" label="绩效来源" width="140" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.performance_source_type === 'personal_inputs' ? 'success' : 'warning'" size="small">
+              {{ row.performance_source_type === 'personal_inputs' ? '个人输入项' : '店铺回退' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'person'" label="输入项构成" min-width="220">
+          <template #default="{ row }">
+            <div v-if="row.personal_input_items?.length" class="input-summary">
+              <div class="input-summary-head">
+                <span>{{ row.personal_input_items.length }}项</span>
+                <span>合计 {{ formatScore(row.personal_input_score_total) }}</span>
+              </div>
+              <div class="input-summary-list">
+                {{ summarizeInputItems(row.personal_input_items) }}
+              </div>
+            </div>
+            <span v-else class="fallback-text">未配置个人输入项，回退至店铺绩效</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="filters.groupBy === 'person'" label="个人运营加减分(人工)" width="160" align="right">
           <template #default="{ row }">
             <el-tag v-if="row.personal_adjustment_total != null" :type="Number(row.personal_adjustment_total || 0) >= 0 ? 'success' : 'danger'" size="small">
               {{ Number(row.personal_adjustment_total || 0) > 0 ? '+' : '' }}{{ Number(row.personal_adjustment_total || 0).toFixed(1) }}
+            </el-tag>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'person'" label="个人输入项得分" width="130" align="right">
+          <template #default="{ row }">
+            <el-tag v-if="row.personal_input_score_total != null" type="warning" size="small">
+              {{ formatScore(row.personal_input_score_total) }}
             </el-tag>
             <span v-else>—</span>
           </template>
@@ -261,18 +290,45 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { useRoute } from 'vue-router'
 import api from '@/api'
 import employeeTasksApi from '@/api/employeeTasks.js'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatPercent } from '@/utils/dataFormatter'
 
+const props = defineProps({
+  forcedGroupBy: {
+    type: String,
+    default: ''
+  }
+})
 const userStore = useUserStore()
 const route = useRoute()
+const showGroupToggle = computed(() => !props.forcedGroupBy)
+const pageTitle = computed(() => {
+  if (route.path.includes('/hr-performance-display/person')) return '个人绩效公示'
+  if (route.path.includes('/hr-performance-display/shop')) return '店铺绩效公示'
+  return '绩效公示'
+})
+const pageSubtitle = computed(() => {
+  if (props.forcedGroupBy === 'person') {
+    return '????????????????????????????'
+  }
+  if (props.forcedGroupBy === 'shop') {
+    return '??????????????????????????????'
+  }
+  if (route.path.includes('/hr-performance-display/person')) {
+    return '面向全员展示个人维度的绩效结果，并支持查看个人绩效来源。'
+  }
+  if (route.path.includes('/hr-performance-display/shop')) {
+    return '面向全员展示店铺维度的绩效结果，并支持查看赛马池与预警状态。'
+  }
+  return '面向全员展示店铺或人员维度的绩效结果，并支持查看赛马池与预警状态。'
+})
 
 const performanceList = reactive({
   data: [],
@@ -294,11 +350,13 @@ const weightConfig = reactive({
   operation_weight: 20
 })
 
+const resolveGroupBy = () => props.forcedGroupBy || (route.path.includes('/hr-performance-display/person') ? 'person' : 'shop')
+
 const filters = reactive({
   period: new Date().toISOString().slice(0, 7),
   platform: '',
   shopId: null,
-  groupBy: 'shop'
+  groupBy: resolveGroupBy()
 })
 
 const taskContext = reactive({
@@ -314,16 +372,16 @@ const performanceDetail = reactive({
 
 const formulaText = computed(() => {
   if (filters.groupBy === 'person') {
-    return '店铺汇总绩效分 + 个人运营加减分(人工) + 考勤扣分(自动)，最终限制在 0-100'
+    return '优先取个人绩效输入项得分，再叠加个人调整项与考勤扣分；无输入项时才回退到店铺汇总绩效'
   }
-  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 重点产品(${weightConfig.key_product_weight}%) + 店铺运营得分(${weightConfig.operation_weight}%)`
+  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 店铺运营得分(${weightConfig.operation_weight}%)`
 })
 
 const currentGroupPolicyText = computed(() => {
   if (filters.groupBy === 'person') {
-    return '人员绩效总分=挂店店铺绩效聚合 + 个人运营加减分(人工录入，未来可对接飞书) + 考勤扣分(自动)；最终限制在 0-100。'
+    return '人员绩效优先由个人绩效输入项驱动；人工调整和考勤扣分继续叠加。只有未配置个人输入项时，系统才回退到挂店店铺绩效聚合。'
   }
-  return '店铺总分由销售、毛利、重点产品和运营四项组成；正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
+  return '店铺总分由销售、毛利和运营三项组成；重点产品当前不纳入正式口径。正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
 })
 
 const filteredPerformanceData = computed(() => {
@@ -370,16 +428,6 @@ const detailMetricCards = computed(() => {
       achievedType: 'currency'
     },
     {
-      key: 'key_product_score',
-      label: '重点产品得分',
-      weight: weightConfig.key_product_weight,
-      metric: data.key_product_score,
-      successThreshold: 22.5,
-      warningThreshold: 20,
-      targetType: 'text',
-      achievedType: 'text'
-    },
-    {
       key: 'operation_score',
       label: '店铺运营得分',
       weight: weightConfig.operation_weight,
@@ -408,6 +456,17 @@ function scoreText(value) {
 
 function coefficientText(value) {
   return value != null ? Number(value).toFixed(2) : '—'
+}
+
+function formatScore(value) {
+  return value != null ? Number(value).toFixed(1) : '—'
+}
+
+function summarizeInputItems(items) {
+  return (items || [])
+    .slice(0, 3)
+    .map((item) => `${item.metric_name || item.metric_code} ${formatScore(item.score)}`)
+    .join(' / ')
 }
 
 function scoreTagType(score) {
@@ -591,6 +650,11 @@ const handleViewDetail = async (row) => {
   }
 }
 
+watch(() => route.path, () => {
+  filters.groupBy = resolveGroupBy()
+  loadPerformanceList()
+})
+
 onMounted(() => {
   initTaskContext()
   loadWeightConfig()
@@ -658,6 +722,26 @@ onMounted(() => {
 
 .metric-title {
   font-weight: bold;
+}
+
+.input-summary-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.input-summary-list {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #303133;
+}
+
+.fallback-text {
+  font-size: 12px;
+  color: #909399;
 }
 
 .empty-state {

@@ -24,6 +24,7 @@ from modules.core.db import (
     EmployeeCommission,
     EmployeePerformance,
     EmployeePerformanceAdjustment,
+    EmployeePerformanceInput,
     EmployeeShopAssignment,
     PerformanceScore,
     SalaryStructure,
@@ -95,6 +96,45 @@ class HRIncomeCalculationService:
             if current is None:
                 return None
         return current
+
+    @staticmethod
+    def _normalize_metric_direction(direction: Any) -> str:
+        normalized = str(direction or "").strip().lower()
+        if normalized in {"up", "higher", "higher_better", "gte", "maximize", "max"}:
+            return "up"
+        if normalized in {"down", "lower", "lower_better", "lte", "minimize", "min"}:
+            return "down"
+        return "up"
+
+    @classmethod
+    def _calculate_input_metric_score(cls, row: Any) -> float:
+        max_score = cls._to_float(getattr(row, "max_score", None), 0.0)
+        if max_score <= 0:
+            return 0.0
+
+        manual_enabled = bool(getattr(row, "manual_score_enabled", False))
+        manual_score_value = getattr(row, "manual_score_value", None)
+        if manual_enabled and manual_score_value is not None:
+            return min(max(cls._to_float(manual_score_value, 0.0), 0.0), max_score)
+
+        target_value = cls._to_float(getattr(row, "target_value", None), 0.0)
+        achieved_value = cls._to_float(getattr(row, "achieved_value", None), 0.0)
+        direction = cls._normalize_metric_direction(
+            getattr(row, "metric_direction", None)
+        )
+
+        if direction == "down":
+            if achieved_value <= 0:
+                return max_score
+            if target_value <= 0:
+                return 0.0
+            ratio = min(target_value / achieved_value, 1.0)
+            return max(ratio * max_score, 0.0)
+
+        if target_value <= 0:
+            return 0.0
+        ratio = min(achieved_value / target_value, 1.0)
+        return max(ratio * max_score, 0.0)
 
     async def _load_shop_metrics(self, year_month: str) -> Dict[str, Dict[str, float]]:
         metrics_by_shop = await load_shop_monthly_metrics(self.db, year_month)
@@ -342,6 +382,42 @@ class HRIncomeCalculationService:
             adjustment_by_employee[employee_code] = adjustment_by_employee.get(employee_code, 0.0) + delta
         return adjustment_by_employee
 
+    async def _load_employee_performance_input_score_by_employee(
+        self,
+        year_month: str,
+        assignments: list[Any],
+    ) -> Dict[str, float]:
+        employee_codes = sorted(
+            {
+                (row.employee_code or "").strip()
+                for row in assignments
+                if (row.employee_code or "").strip()
+            }
+        )
+        if not employee_codes:
+            return {}
+
+        rows = (
+            await self.db.execute(
+                select(EmployeePerformanceInput).where(
+                    EmployeePerformanceInput.year_month == year_month,
+                    EmployeePerformanceInput.status == "active",
+                    EmployeePerformanceInput.employee_code.in_(employee_codes),
+                )
+            )
+        ).scalars().all()
+
+        score_by_employee: Dict[str, float] = {}
+        for row in rows:
+            employee_code = (getattr(row, "employee_code", None) or "").strip()
+            if not employee_code:
+                continue
+            score_by_employee[employee_code] = score_by_employee.get(employee_code, 0.0) + self._calculate_input_metric_score(row)
+        return {
+            employee_code: min(max(score, 0.0), 100.0)
+            for employee_code, score in score_by_employee.items()
+        }
+
     async def _load_default_commission_ratio_by_employee(
         self,
         year_month: str,
@@ -450,6 +526,9 @@ class HRIncomeCalculationService:
             year_month, assignments
         )
         manual_adjustment_by_employee = await self._load_manual_adjustment_by_employee(
+            year_month, assignments
+        )
+        input_score_by_employee = await self._load_employee_performance_input_score_by_employee(
             year_month, assignments
         )
         default_commission_ratio_by_employee = await self._load_default_commission_ratio_by_employee(
@@ -595,7 +674,9 @@ class HRIncomeCalculationService:
                 achievement_rate = rec["weighted_rate_num"] / rec["weighted_rate_den"]
             else:
                 achievement_rate = 0.0
-            if rec["weighted_score_den"] > 0:
+            if employee_code in input_score_by_employee:
+                performance_score = input_score_by_employee[employee_code]
+            elif rec["weighted_score_den"] > 0:
                 performance_score = (
                     rec["weighted_score_num"] / rec["weighted_score_den"]
                 )
@@ -644,6 +725,6 @@ class HRIncomeCalculationService:
             "employee_count": len(performance_agg),
             "commission_upserts": commission_upserts,
             "performance_upserts": performance_upserts,
-            "source": "employee_shop_assignments + performance_scores + shop_profit_basis",
+            "source": "employee_shop_assignments + employee_performance_inputs + performance_scores + shop_profit_basis",
         }
 

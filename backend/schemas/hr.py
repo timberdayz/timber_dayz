@@ -43,6 +43,10 @@ class PayrollIncomeBreakdown(BaseModel):
     status: Optional[str] = None
     pay_date: Optional[str] = None
     remark: Optional[str] = None
+    data_source: Optional[str] = None
+    is_locked: bool = False
+    is_stale_against_latest_calc: bool = False
+    latest_calculated_at: Optional[str] = None
 
 
 class MyIncomeBreakdown(BaseModel):
@@ -542,20 +546,21 @@ class OvertimeRecordResponse(BaseModel):
 
 
 class SalaryStructureCreate(BaseModel):
-    employee_code: str = Field(..., description="员工编号", min_length=1, max_length=64)
-    base_salary: Decimal = Field(..., ge=0, description="基本工资")
-    position_salary: Decimal = Field(0, ge=0, description="岗位工资")
-    housing_allowance: Decimal = Field(0, ge=0, description="住房补贴")
-    transport_allowance: Decimal = Field(0, ge=0, description="交通补贴")
-    meal_allowance: Decimal = Field(0, ge=0, description="餐饮补贴")
-    communication_allowance: Decimal = Field(0, ge=0, description="通讯补贴")
-    other_allowance: Decimal = Field(0, ge=0, description="其他补贴")
-    performance_ratio: float = Field(0, ge=0, le=1, description="绩效工资比例")
-    commission_ratio: float = Field(0, ge=0, le=1, description="提成比例")
-    social_insurance_base: Optional[Decimal] = Field(None, ge=0, description="社保基数")
-    housing_fund_base: Optional[Decimal] = Field(None, ge=0, description="公积金基数")
-    effective_date: date = Field(..., description="生效日期")
-    status: str = Field("active", description="状态")
+    employee_code: str = Field(..., description="????", min_length=1, max_length=64)
+    base_salary: Decimal = Field(..., ge=0, description="????")
+    position_salary: Decimal = Field(0, ge=0, description="????")
+    housing_allowance: Decimal = Field(0, ge=0, description="????")
+    transport_allowance: Decimal = Field(0, ge=0, description="????")
+    meal_allowance: Decimal = Field(0, ge=0, description="????")
+    communication_allowance: Decimal = Field(0, ge=0, description="????")
+    other_allowance: Decimal = Field(0, ge=0, description="????")
+    performance_package_amount: Decimal = Field(0, ge=0, description="???????")
+    performance_ratio: float = Field(0, ge=0, le=1, description="??????")
+    commission_ratio: float = Field(0, ge=0, le=1, description="????")
+    social_insurance_base: Optional[Decimal] = Field(None, ge=0, description="????")
+    housing_fund_base: Optional[Decimal] = Field(None, ge=0, description="?????")
+    effective_date: date = Field(..., description="????")
+    status: str = Field("active", description="??")
 
 
 class SalaryStructureResponse(BaseModel):
@@ -568,6 +573,7 @@ class SalaryStructureResponse(BaseModel):
     meal_allowance: Decimal
     communication_allowance: Decimal
     other_allowance: Decimal
+    performance_package_amount: Decimal
     performance_ratio: float
     commission_ratio: float
     social_insurance_base: Optional[Decimal]
@@ -582,19 +588,20 @@ class SalaryStructureResponse(BaseModel):
 
 
 class SalaryStructureUpdate(BaseModel):
-    base_salary: Optional[Decimal] = Field(None, ge=0, description="基本工资")
-    position_salary: Optional[Decimal] = Field(None, ge=0, description="岗位工资")
-    housing_allowance: Optional[Decimal] = Field(None, ge=0, description="住房补贴")
-    transport_allowance: Optional[Decimal] = Field(None, ge=0, description="交通补贴")
-    meal_allowance: Optional[Decimal] = Field(None, ge=0, description="餐饮补贴")
-    communication_allowance: Optional[Decimal] = Field(None, ge=0, description="通讯补贴")
-    other_allowance: Optional[Decimal] = Field(None, ge=0, description="其他补贴")
-    performance_ratio: Optional[float] = Field(None, ge=0, le=1, description="绩效工资比例")
-    commission_ratio: Optional[float] = Field(None, ge=0, le=1, description="提成比例")
-    social_insurance_base: Optional[Decimal] = Field(None, ge=0, description="社保基数")
-    housing_fund_base: Optional[Decimal] = Field(None, ge=0, description="公积金基数")
-    effective_date: Optional[date] = Field(None, description="生效日期")
-    status: Optional[str] = Field(None, description="状态")
+    base_salary: Optional[Decimal] = Field(None, ge=0, description="????")
+    position_salary: Optional[Decimal] = Field(None, ge=0, description="????")
+    housing_allowance: Optional[Decimal] = Field(None, ge=0, description="????")
+    transport_allowance: Optional[Decimal] = Field(None, ge=0, description="????")
+    meal_allowance: Optional[Decimal] = Field(None, ge=0, description="????")
+    communication_allowance: Optional[Decimal] = Field(None, ge=0, description="????")
+    other_allowance: Optional[Decimal] = Field(None, ge=0, description="????")
+    performance_package_amount: Optional[Decimal] = Field(None, ge=0, description="???????")
+    performance_ratio: Optional[float] = Field(None, ge=0, le=1, description="??????")
+    commission_ratio: Optional[float] = Field(None, ge=0, le=1, description="????")
+    social_insurance_base: Optional[Decimal] = Field(None, ge=0, description="????")
+    housing_fund_base: Optional[Decimal] = Field(None, ge=0, description="?????")
+    effective_date: Optional[date] = Field(None, description="????")
+    status: Optional[str] = Field(None, description="??")
 
 
 class PayrollRecordResponse(BaseModel):
@@ -647,6 +654,8 @@ class PayrollRecordManualUpdate(BaseModel):
 
 
 class EmployeeTargetCreate(BaseModel):
+    """个人目标规划层输入，不直接参与工资单和个人绩效结果计算。"""
+
     employee_code: str = Field(..., description="员工编号", min_length=1, max_length=64)
     year_month: str = Field(
         ..., description="目标月份(YYYY-MM)", pattern=r"^\d{4}-\d{2}$"
@@ -658,10 +667,14 @@ class EmployeeTargetCreate(BaseModel):
 
 
 class EmployeeTargetUpdate(BaseModel):
+    """个人目标规划层更新，不直接参与工资单和个人绩效结果计算。"""
+
     target_value: Optional[Decimal] = Field(None, ge=0)
 
 
 class EmployeeTargetResponse(BaseModel):
+    """个人目标规划层响应，不直接参与工资单和个人绩效结果计算。"""
+
     id: int
     employee_code: str
     year_month: str
@@ -856,3 +869,81 @@ class EmployeePerformanceAdjustmentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class EmployeePerformanceInputCreate(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM")
+    employee_code: str = Field(..., min_length=1, max_length=64)
+    metric_code: str = Field(..., min_length=1, max_length=64)
+    metric_name: Optional[str] = Field(None, max_length=128)
+    metric_direction: str = Field(..., pattern="^(up|down|higher_better|lower_better)$")
+    target_value: float = Field(0, ge=0)
+    achieved_value: float = Field(0, ge=0)
+    max_score: float = Field(..., ge=0, le=100)
+    manual_score_enabled: bool = False
+    manual_score_value: Optional[float] = Field(None, ge=0, le=100)
+    source: Optional[str] = Field(None, max_length=64)
+    reason: Optional[str] = Field(None, max_length=512)
+
+
+class EmployeePerformanceInputUpdate(BaseModel):
+    metric_name: Optional[str] = Field(None, max_length=128)
+    metric_direction: Optional[str] = Field(None, pattern="^(up|down|higher_better|lower_better)$")
+    target_value: Optional[float] = Field(None, ge=0)
+    achieved_value: Optional[float] = Field(None, ge=0)
+    max_score: Optional[float] = Field(None, ge=0, le=100)
+    manual_score_enabled: Optional[bool] = None
+    manual_score_value: Optional[float] = Field(None, ge=0, le=100)
+    source: Optional[str] = Field(None, max_length=64)
+    reason: Optional[str] = Field(None, max_length=512)
+    status: Optional[str] = Field(None, pattern="^(active|inactive)$")
+
+
+class EmployeePerformanceInputResponse(BaseModel):
+    id: int
+    employee_code: str
+    employee_name: Optional[str] = None
+    year_month: str
+    metric_code: str
+    metric_name: Optional[str] = None
+    metric_direction: str
+    target_value: float
+    achieved_value: float
+    max_score: float
+    manual_score_enabled: bool
+    manual_score_value: Optional[float] = None
+    source: Optional[str] = None
+    reason: Optional[str] = None
+    status: str
+    created_by: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EmployeePerformanceTemplateMetric(BaseModel):
+    metric_code: str
+    metric_name: str
+    metric_direction: str
+    target_value: float
+    achieved_value: float
+    max_score: float
+    manual_score_enabled: bool = False
+    manual_score_value: Optional[float] = None
+
+
+class EmployeePerformanceTemplateResponse(BaseModel):
+    template_code: str
+    template_name: str
+    position_name: Optional[str] = None
+    recommended: bool = False
+    metrics: List[EmployeePerformanceTemplateMetric]
+
+
+class EmployeePerformanceTemplateApplyRequest(BaseModel):
+    employee_code: str = Field(..., min_length=1, max_length=64)
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    template_code: Optional[str] = Field(None, min_length=1, max_length=64)
+    overwrite: bool = False

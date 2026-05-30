@@ -511,13 +511,39 @@ const routes = [
   },
   {
     path: '/target-management',
-    name: 'TargetManagement',
+    redirect: '/target-management/shop'
+  },
+  {
+    path: '/target-management/shop',
+    name: 'TargetManagementShop',
     component: () => import('@/domains/business/views/target/TargetManagement.vue'),
     meta: {
-      title: '目标管理',
+      title: '??????',
       icon: 'Aim',
       permission: 'target:read',
-      roles: ['admin']  // ✅ 仅管理员可访问
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/target-management/person',
+    name: 'TargetManagementPerson',
+    component: () => import('@/domains/business/views/target/TargetPersonManagement.vue'),
+    meta: {
+      title: '??????',
+      icon: 'Aim',
+      permission: 'target:read',
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/target-management/operation',
+    name: 'TargetManagementOperation',
+    component: () => import('@/domains/business/views/target/TargetOperationManagement.vue'),
+    meta: {
+      title: '??????',
+      icon: 'Aim',
+      permission: 'target:read',
+      roles: ['admin']
     }
   },
   // ============================================================================
@@ -883,25 +909,66 @@ const routes = [
     }
   },
   {
-    path: '/hr-performance-management',
-    name: 'HRPerformanceManagement',
-    component: () => import('@/domains/business/views/hr/PerformanceManagement.vue'),
+    path: '/hr-income-audit',
+    name: 'HRIncomeAudit',
+    component: () => import('@/domains/business/views/hr/IncomeAudit.vue'),
     meta: {
-      title: '绩效管理',
+      title: '员工收入审计',
+      icon: 'Document',
+      permission: 'human-resources',
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/hr-performance-management',
+    redirect: '/hr-performance-management/shop'
+  },
+  {
+    path: '/hr-performance-management/shop',
+    name: 'HRPerformanceManagementShop',
+    component: () => import('@/domains/business/views/hr/PerformanceManagementShop.vue'),
+    meta: {
+      title: '??????',
       icon: 'Medal',
       permission: 'performance:config',
-      roles: ['admin']  // 仅管理员可见，用于配置权重和参数
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/hr-performance-management/person',
+    name: 'HRPerformanceManagementPerson',
+    component: () => import('@/domains/business/views/hr/PerformanceManagementPerson.vue'),
+    meta: {
+      title: '??????',
+      icon: 'Medal',
+      permission: 'performance:config',
+      roles: ['admin']
     }
   },
   {
     path: '/hr-performance-display',
-    name: 'HRPerformanceDisplay',
-    component: () => import('@/domains/business/views/hr/PerformanceDisplay.vue'),
+    redirect: '/hr-performance-display/shop'
+  },
+  {
+    path: '/hr-performance-display/shop',
+    name: 'HRPerformanceDisplayShop',
+    component: () => import('@/domains/business/views/hr/PerformanceDisplayShop.vue'),
     meta: {
-      title: '绩效公示',
+      title: '??????',
       icon: 'View',
       permission: 'performance:read',
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']  // 全员可见
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
+    }
+  },
+  {
+    path: '/hr-performance-display/person',
+    name: 'HRPerformanceDisplayPerson',
+    component: () => import('@/domains/business/views/hr/PerformanceDisplayPerson.vue'),
+    meta: {
+      title: '??????',
+      icon: 'View',
+      permission: 'performance:read',
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   {

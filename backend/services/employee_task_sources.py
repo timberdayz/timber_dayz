@@ -95,6 +95,9 @@ async def sync_performance_confirmation_task(
     validate_task_target_permission("performance_confirmation", owner_permissions or {"performance:read"})
     service = EmployeeTaskService(db)
     task_id = f"performance-confirmation:{year_month}:{employee_code}"
+    existing = await service.repository.get_task_by_task_id(task_id)
+    if existing is not None:
+        return await service.get_task_detail(task_id)
     return await service.create_task(
         task_id=task_id,
         task_type="performance_confirmation",

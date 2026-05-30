@@ -41,6 +41,7 @@ from modules.core.db import (
     Employee,
 	EmployeePerformance,
 	EmployeePerformanceAdjustment,
+    EmployeePerformanceInput,
     # [DELETED] v4.19.0: FactOrder 已删除
     FactProductMetric,
     DimShop,
@@ -851,6 +852,45 @@ async def invalidate_performance_related_caches(cache_service) -> None:
     await cache_service.invalidate("hr_annual_profit_statistics")
 
 
+async def _load_effective_target_for_month(
+    db: AsyncSession,
+    *,
+    year_month: str,
+    target_type: str,
+    scope_type: Optional[str] = None,
+):
+    period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+    if period_start.month == 12:
+        period_end = period_start.replace(year=period_start.year + 1, month=1, day=1) - timedelta(days=1)
+    else:
+        period_end = period_start.replace(month=period_start.month + 1, day=1) - timedelta(days=1)
+
+    query = (
+        select(SalesTarget)
+        .where(SalesTarget.target_type == target_type)
+        .where(SalesTarget.status == "active")
+        .where(SalesTarget.period_start <= period_end)
+        .where(SalesTarget.period_end >= period_start)
+    )
+    if scope_type is not None:
+        query = query.where(
+            or_(
+                SalesTarget.scope_type == scope_type,
+                SalesTarget.scope_type.is_(None),
+            )
+        )
+    query = query.order_by(SalesTarget.created_at.desc(), SalesTarget.id.desc()).limit(1)
+    result = await db.execute(query)
+    scalar_one_or_none = getattr(result, "scalar_one_or_none", None)
+    if callable(scalar_one_or_none):
+        return scalar_one_or_none()
+    scalars = getattr(result, "scalars", None)
+    if callable(scalars):
+        rows = scalars().all()
+        return rows[0] if rows else None
+    return None
+
+
 @router.get("/scores", response_model=Dict[str, Any])
 async def list_performance_scores(
     request: Request,
@@ -1022,6 +1062,67 @@ async def list_performance_scores(
                 except Exception as adj_err:
                     logger.warning("employee performance adjustment aggregation failed: %s", adj_err)
 
+            input_items_by_code: Dict[str, List[Dict[str, Any]]] = {}
+            input_score_total_by_code: Dict[str, float] = {}
+            if period and codes:
+                try:
+                    input_rows = (
+                        await db.execute(
+                            select(EmployeePerformanceInput).where(
+                                EmployeePerformanceInput.year_month == period,
+                                EmployeePerformanceInput.status == "active",
+                                EmployeePerformanceInput.employee_code.in_(codes),
+                            )
+                        )
+                    ).scalars().all()
+                    for item in input_rows:
+                        ec = (getattr(item, "employee_code", None) or "").strip()
+                        if not ec:
+                            continue
+                        metric_name = getattr(item, "metric_name", None) or getattr(item, "metric_code", None)
+                        metric_direction = getattr(item, "metric_direction", None) or "up"
+                        target_value = getattr(item, "target_value", None)
+                        achieved_value = getattr(item, "achieved_value", None)
+                        max_score = float(getattr(item, "max_score", 0) or 0.0)
+                        manual_score_enabled = bool(getattr(item, "manual_score_enabled", False))
+                        manual_score_value = getattr(item, "manual_score_value", None)
+
+                        item_score = 0.0
+                        if manual_score_enabled and manual_score_value is not None:
+                            item_score = min(max(float(manual_score_value or 0.0), 0.0), max_score)
+                        else:
+                            target_num = float(target_value or 0.0)
+                            achieved_num = float(achieved_value or 0.0)
+                            normalized_direction = str(metric_direction).strip().lower()
+                            is_lower_better = normalized_direction in {"down", "lower_better"}
+                            if is_lower_better:
+                                if achieved_num <= 0:
+                                    item_score = max_score
+                                elif target_num > 0:
+                                    item_score = min(target_num / achieved_num, 1.0) * max_score
+                            else:
+                                if target_num > 0:
+                                    item_score = min(achieved_num / target_num, 1.0) * max_score
+
+                        input_items_by_code.setdefault(ec, []).append(
+                            {
+                                "metric_code": getattr(item, "metric_code", None),
+                                "metric_name": metric_name,
+                                "metric_direction": metric_direction,
+                                "target_value": target_value,
+                                "achieved_value": achieved_value,
+                                "max_score": max_score,
+                                "manual_score_enabled": manual_score_enabled,
+                                "manual_score_value": manual_score_value,
+                                "score": round(item_score, 2),
+                                "source": getattr(item, "source", None),
+                                "reason": getattr(item, "reason", None),
+                            }
+                        )
+                        input_score_total_by_code[ec] = input_score_total_by_code.get(ec, 0.0) + item_score
+                except Exception as input_err:
+                    logger.warning("employee performance input aggregation failed: %s", input_err)
+
             # 计算排名
             sorted_ep = sorted(
                 all_ep,
@@ -1061,6 +1162,11 @@ async def list_performance_scores(
                     "key_product_achieved": None,
                     "key_product_rate": None,
                     "operation_score": None,
+                    "personal_input_items": input_items_by_code.get(ec, []),
+                    "personal_input_score_total": round(input_score_total_by_code.get(ec, 0.0), 2)
+                    if ec in input_score_total_by_code
+                    else None,
+                    "performance_source_type": "personal_inputs" if input_items_by_code.get(ec) else "shop_inherited",
                     "personal_adjustment_total": adjustment_total_by_code.get(ec),
                     "total_score": scr,
                     "rank": rank_by_code.get(ec),
@@ -1328,23 +1434,41 @@ async def calculate_performance_scores(
             safe_rate = max(0.0, min(1.0, float(rate or 0.0)))
             return round(float(max_score) * safe_rate, 4)
 
-        # 1) 优先从 target_breakdown 聚合店铺维度达成
+        # 1) 优先从当月唯一有效店铺目标的 target_breakdown 聚合店铺维度达成
         source_rows = {}
-        tb_query = select(TargetBreakdown).where(
-            TargetBreakdown.breakdown_type.in_(["shop", "shop_time"]),
-            TargetBreakdown.platform_code.is_not(None),
-            TargetBreakdown.shop_id.is_not(None),
-            or_(
-                and_(
-                    TargetBreakdown.period_start.is_not(None),
-                    TargetBreakdown.period_end.is_not(None),
-                    TargetBreakdown.period_start <= period_end,
-                    TargetBreakdown.period_end >= period_start,
-                ),
-                TargetBreakdown.period_label == period,
-            ),
+        effective_shop_target = await _load_effective_target_for_month(
+            db,
+            year_month=period,
+            target_type="shop",
         )
-        tb_rows = (await db.execute(tb_query)).scalars().all()
+        tb_rows = []
+        if effective_shop_target is not None:
+            tb_query = select(TargetBreakdown).where(
+                TargetBreakdown.target_id == getattr(effective_shop_target, "id", None),
+                TargetBreakdown.breakdown_type.in_(["shop", "shop_time"]),
+                TargetBreakdown.platform_code.is_not(None),
+                TargetBreakdown.shop_id.is_not(None),
+            )
+            tb_rows = (await db.execute(tb_query)).scalars().all()
+        target_ids = sorted(
+            {
+                getattr(row, "target_id", None)
+                for row in tb_rows
+                if getattr(row, "target_id", None) is not None
+            }
+        )
+        parent_target_by_id: Dict[int, Any] = {}
+        if target_ids:
+            parent_targets = (
+                await db.execute(
+                    select(SalesTarget).where(SalesTarget.id.in_(target_ids))
+                )
+            ).scalars().all()
+            parent_target_by_id = {
+                getattr(target, "id", None): target
+                for target in parent_targets
+                if getattr(target, "id", None) is not None
+            }
         for row in tb_rows:
             key = f"{(row.platform_code or '').lower()}|{row.shop_id or ''}"
             rec = source_rows.setdefault(
@@ -1360,7 +1484,15 @@ async def calculate_performance_scores(
             )
             rec["target"] += float(row.target_amount or 0)
             rec["achieved"] += float(row.achieved_amount or 0)
-            rec["target_profit_amount"] += float(getattr(row, "target_profit_amount", 0) or 0)
+            row_target_profit_amount = float(getattr(row, "target_profit_amount", 0) or 0)
+            if row_target_profit_amount <= 0:
+                parent_target = parent_target_by_id.get(getattr(row, "target_id", None))
+                parent_profit_target = float(getattr(parent_target, "target_profit_amount", 0) or 0)
+                parent_sales_target = float(getattr(parent_target, "target_amount", 0) or 0)
+                row_sales_target = float(getattr(row, "target_amount", 0) or 0)
+                if parent_profit_target > 0 and parent_sales_target > 0 and row_sales_target > 0:
+                    row_target_profit_amount = parent_profit_target * (row_sales_target / parent_sales_target)
+            rec["target_profit_amount"] += row_target_profit_amount
             rec["achieved_profit_amount"] += float(getattr(row, "achieved_profit_amount", 0) or 0)
 
         # 2) 若目标分解为空，回退 PostgreSQL 店铺赛马模块
@@ -1387,67 +1519,12 @@ async def calculate_performance_scores(
         except Exception as e:
             logger.warning("缁╂晥璁＄畻 PostgreSQL 搴楅摵鏈堝害鎸囨爣鍔犺浇澶辫触: %s", e)
 
-        operation_target_query = (
-            select(SalesTarget)
-            .where(SalesTarget.target_type == "operation")
-            .where(SalesTarget.period_start <= period_end)
-            .where(SalesTarget.period_end >= period_start)
-            .order_by(SalesTarget.created_at.desc())
-            .limit(1)
+        operation_target = await _load_effective_target_for_month(
+            db,
+            year_month=period,
+            target_type="operation",
+            scope_type="shop",
         )
-        operation_target = (await db.execute(operation_target_query)).scalar_one_or_none()
-        product_target_query = (
-            select(SalesTarget)
-            .where(SalesTarget.target_type == "product")
-            .where(SalesTarget.period_start <= period_end)
-            .where(SalesTarget.period_end >= period_start)
-            .order_by(SalesTarget.created_at.desc())
-        )
-        product_targets = (await db.execute(product_target_query)).scalars().all()
-        product_metrics_by_shop = {}
-        try:
-            product_metrics_by_shop = await _load_shop_monthly_product_metrics(db, period)
-        except Exception as e:
-            logger.warning("Product monthly metrics load failed: %s", e)
-
-        product_target_by_shop: Dict[str, Dict[str, Any]] = {}
-        for product_target in product_targets:
-            if not getattr(product_target, "platform_sku", None) and getattr(product_target, "product_id", None) is None:
-                continue
-            breakdown_rows = (
-                await db.execute(
-                    select(TargetBreakdown).where(
-                        TargetBreakdown.target_id == product_target.id,
-                        TargetBreakdown.breakdown_type.in_(["shop", "shop_time"]),
-                    )
-                )
-            ).scalars().all()
-            for breakdown_row in breakdown_rows:
-                shop_key = f"{(breakdown_row.platform_code or '').lower()}|{breakdown_row.shop_id or ''}"
-                product_key = None
-                if getattr(product_target, "platform_sku", None):
-                    product_key = f"{shop_key}|sku:{product_target.platform_sku}"
-                elif getattr(product_target, "product_id", None) is not None:
-                    product_key = f"{shop_key}|pid:{product_target.product_id}"
-                metrics = product_metrics_by_shop.get(product_key or "", {})
-                rec = product_target_by_shop.setdefault(
-                    shop_key,
-                    {"target_amount": 0.0, "achieved_amount": 0.0, "products": []},
-                )
-                target_amount = float(getattr(breakdown_row, "target_amount", 0) or 0)
-                achieved_amount = float(metrics.get("sales_amount", 0.0))
-                rec["target_amount"] += target_amount
-                rec["achieved_amount"] += achieved_amount
-                rec["products"].append(
-                    {
-                        "product_id": getattr(product_target, "product_id", None),
-                        "platform_sku": getattr(product_target, "platform_sku", None),
-                        "company_sku": getattr(product_target, "company_sku", None),
-                        "target_amount": target_amount,
-                        "achieved_amount": achieved_amount,
-                    }
-                )
-
         valid_shop_keys = await _load_valid_performance_shop_keys(db, source_rows)
         calc_list = []
         for rec in source_rows.values():
@@ -1482,11 +1559,11 @@ async def calculate_performance_scores(
             profit_rate_fraction = (profit_achieved / target_profit) if target_profit > 0 else None
             profit_rate = _normalize_rate_percent(profit_rate_fraction)
             profit_score = _score_by_rate(config.profit_max_score, profit_rate_fraction) if target_profit > 0 else 0.0
-            key_product_target = float(product_target_by_shop.get(key, {}).get("target_amount", 0.0))
-            key_product_achieved = float(product_target_by_shop.get(key, {}).get("achieved_amount", 0.0))
-            key_product_rate_fraction = (key_product_achieved / key_product_target) if key_product_target > 0 else None
-            key_product_rate = _normalize_rate_percent(key_product_rate_fraction)
-            key_product_score = _score_by_rate(config.key_product_max_score, key_product_rate_fraction) if key_product_target > 0 else 0.0
+            key_product_target = 0.0
+            key_product_achieved = 0.0
+            key_product_rate_fraction = None
+            key_product_rate = None
+            key_product_score = 0.0
             operation_score, operation_details = _calculate_operation_metric_score(operation_target) if operation_target else (
                 0.0,
                 {
@@ -1508,7 +1585,7 @@ async def calculate_performance_scores(
                     "profit_score": profit_score,
                     "key_product_score": key_product_score,
                     "operation_score": operation_score,
-                    "total_score": round(sales_score + profit_score + key_product_score + operation_score, 4),
+                    "total_score": round(sales_score + profit_score + operation_score, 4),
                     "rank": None,
                     "performance_coefficient": None,
                     "score_details": {
@@ -1530,13 +1607,13 @@ async def calculate_performance_scores(
                             "message": None if target_profit > 0 else "Profit target pipeline is not ready.",
                         },
                         "key_product": {
-                            "status": "calculated" if key_product_target > 0 else "pending_design",
-                            "source": "target_management + mart.product_day_kpi" if key_product_target > 0 else None,
-                            "target": key_product_target if key_product_target > 0 else None,
-                            "achieved": key_product_achieved if key_product_target > 0 else None,
-                            "rate": key_product_rate if key_product_target > 0 else None,
-                            "calculation": f"min(rate {key_product_rate or 0:.2f}%, 100%) * key product max {config.key_product_max_score}" if key_product_target > 0 else None,
-                            "message": None if key_product_target > 0 else "Key product target pipeline is not ready.",
+                            "status": "not_in_scope",
+                            "source": None,
+                            "target": None,
+                            "achieved": None,
+                            "rate": None,
+                            "calculation": None,
+                            "message": "Key product is not in current formal scope.",
                         },
                         "operation": {
                             "status": operation_details["status"],
@@ -1548,13 +1625,12 @@ async def calculate_performance_scores(
                             "message": operation_details["message"],
                         },
                         "summary": {
-                            "status": "complete" if (target_profit > 0 and key_product_target > 0 and operation_details["status"] == "calculated") else "partial",
+                            "status": "complete" if (target_profit > 0 and operation_details["status"] == "calculated") else "partial",
                             "ready_dimensions": [
                                 dimension
                                 for dimension, ready in [
                                     ("sales", True),
                                     ("profit", target_profit > 0),
-                                    ("key_product", key_product_target > 0),
                                     ("operation", operation_details["status"] == "calculated"),
                                 ]
                                 if ready
@@ -1563,12 +1639,11 @@ async def calculate_performance_scores(
                                 dimension
                                 for dimension, ready in [
                                     ("profit", target_profit > 0),
-                                    ("key_product", key_product_target > 0),
                                     ("operation", operation_details["status"] == "calculated"),
                                 ]
                                 if not ready
                             ],
-                            "message": "Sales, profit, key product, and operation dimensions are independently calculated." if (target_profit > 0 and key_product_target > 0 and operation_details["status"] == "calculated") else "Partial dimensions are independently calculated.",
+                            "message": "Sales, profit, and operation dimensions are independently calculated. Key product is not in current formal scope." if (target_profit > 0 and operation_details["status"] == "calculated") else "Current formal scope is partially calculated; key product is not in current formal scope.",
                         },
                     },
                 }
@@ -1633,6 +1708,7 @@ async def calculate_performance_scores(
             upserts += 1
         await _sync_performance_alerts(db, calc_list, alerts_by_shop)
         await db.flush()
+        await db.commit()
         income_service = HRIncomeCalculationService(db=db)
         income_result = await income_service.calculate_month(period, commit=False)
         payroll_result: Dict[str, Any] = {

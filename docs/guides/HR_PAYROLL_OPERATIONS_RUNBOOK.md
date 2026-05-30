@@ -1,16 +1,15 @@
 # HR Payroll Operations Runbook
 
-> 最新绩效赛马、观察池、预警、挂店人继承与提成奖惩口径，请优先参见 `docs/guides/PERFORMANCE_RACING_POLICY.md`。
+> 相关文档：
+> - `docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md`
+> - `docs/guides/HR_INCOME_CHAIN_FINAL_AUDIT_2026-05-30.md`
+> - `docs/guides/HR_PAYROLL_PERFORMANCE_ACCEPTANCE_SUMMARY_2026-05-29.md`
 
-> 关联文档：月结总账与经营汇总流程请同时参考 `docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md`。
-
-## 1. Scope
+## 1. 目的
 
 本文档面向 HR、管理员和维护人员，说明当前系统中“绩效重算 -> 工资单生成 -> 我的收入展示 -> 工资单流转”的实际运行方式、页面入口、排障步骤和审计定位方法。
 
-当前手册基于仓库中的现行实现，而不是历史设计草案。
-
-## 2. Current Source Of Truth
+## 2. 当前真源
 
 员工最终收入口径统一以 `a_class.payroll_records` 为准。
 
@@ -35,9 +34,9 @@
 - “我的收入”页面只读取工资单。
 - 提成表和个人绩效表保留为计算中间结果，不再作为员工最终收入展示口径。
 
-## 3. Main Entry Points
+## 3. 主要入口
 
-### Backend routes
+### 后端接口
 
 - `POST /performance/scores/calculate`
   - 重算店铺绩效、个人提成、个人绩效，并继续生成/更新工资单
@@ -55,24 +54,25 @@
   - 将已确认工资单退回草稿
 - `POST /api/hr/payroll-records/{record_id}/pay`
   - 将已确认工资单标记为已发放
-  - 当前只允许管理员执行
+- `GET /api/hr/income-audit/{employee_code}/{year_month}`
+  - 查看员工月度收入审计视图
 
-### Frontend pages
+### 前端页面
 
 - `frontend/src/domains/business/views/hr/PerformanceManagement.vue`
   - 发起月度绩效重算
-  - 接收并展示工资单锁定冲突
+  - 查看个人绩效输入项、模板、调整项
 - `frontend/src/domains/business/views/hr/EmployeeSalary.vue`
   - 维护固定薪资
-  - 录入月度奖金、扣款等人工字段
+  - 录入奖金、扣款等人工字段
   - 刷新、确认、退回、发放工资单
-- `frontend/src/domains/business/views/HumanResources.vue`
-  - 继续承担员工、部门、职位、考勤等基础人力管理
+  - 查看工资单 stale / 锁定提示
 - `frontend/src/domains/business/views/hr/MyIncome.vue`
-  - 只展示工资单口径的完整工资单明细
-  - 不承担任何录入职责
+  - 只展示工资单口径收入
+- `frontend/src/domains/business/views/hr/IncomeAudit.vue`
+  - 查看员工从店铺归属到我的收入的完整链路
 
-## 4. Monthly Operation Flow
+## 4. 月度操作流程
 
 ### Step 1. 发起绩效重算
 
@@ -90,29 +90,25 @@
 
 ### Step 2. 查看工资单锁定冲突
 
-如果当月存在 `confirmed` 或 `paid` 状态的工资单，并且上游重算结果会改变自动字段：
+如果当月存在 `confirmed` 或 `paid` 状态的工资单，且上游重算会改变自动字段：
 
 - 系统不会覆盖该工资单
-- 接口返回：
+- 接口会返回：
   - `payroll_locked_conflicts`
   - `payroll_locked_conflict_details`
-- 前端绩效管理页会弹出“工资单锁定冲突”提示
-
-当前前端展示的是 HR 可读文案，例如：
-
-- `EMP001（已确认）: 基本工资、实发工资、公司总成本`
+- 前端会弹出“工资单锁定冲突”提示
 
 ### Step 3. 处理冲突工资单
 
 推荐处理方式：
 
-1. 在“员工薪资”页中找到冲突员工并切到对应月份
-2. 如果需要接受最新重算结果：
+1. 在“员工薪资”页找到对应员工和月份
+2. 如果要接受最新重算结果：
    - 先执行“退回草稿”
-   - 再次发起绩效重算
-3. 如果要保留当前已确认版本：
-   - 不做操作
-   - 保持工资单锁定
+   - 再重新发起绩效重算
+3. 如果保留当前已确认版本：
+   - 不操作
+   - 继续保持工资单锁定
 
 ### Step 4. 审核草稿工资单
 
@@ -128,22 +124,8 @@
   - 生效日期
 
 - 月度录入区域维护：
-  - 奖金
+  - 月度奖金
   - 加班费
-  - 个人社保
-  - 个人公积金
-  - 个税
-  - 其他扣款
-  - 公司社保
-  - 公司公积金
-  - 发薪日期
-  - 备注
-
-草稿工资单允许：
-
-- 编辑人工字段
-  - 加班费
-  - 奖金
   - 个人社保
   - 个人公积金
   - 个税
@@ -166,14 +148,14 @@
 
 - 状态从 `draft` -> `confirmed`
 - 后续月度重算不再自动覆盖该工资单
-- 如需再次接受重算，只能先退回草稿
+- 若要重新吸收重算结果，必须先退回草稿
 
 ### Step 6. 标记已发放
 
 执行“已发放”后：
 
 - 状态从 `confirmed` -> `paid`
-- 系统自动填写 `pay_date`，如果此前为空
+- 系统自动填写 `pay_date`（如果此前为空）
 - 当前工资单进入只读状态
 - 后端写入审计日志
 
@@ -182,7 +164,7 @@
 - 只有管理员可以调用 `pay` 路由
 - 前端也只对管理员显示“已发放”按钮
 
-## 5. Payroll Status Semantics
+## 5. 工资单状态语义
 
 ### `draft`
 
@@ -200,14 +182,9 @@
 - 只读
 - 不允许自动覆盖
 - 不允许退回 `draft`
-- 若已发放后发现差额，统一在下个月工资单中处理，不回改历史已发放工资单
-- 少发：
-  - 在下个月通过 `bonus` / 月度奖金补发
-- 多发：
-  - 在下个月通过 `other_deductions` / 其他扣款抵扣
-- 建议在 `remark` 中写明“补发上月差额”或“抵扣上月多发”
+- 若已发放后发现差额，统一在下月工资单中处理
 
-## 6. My Income Behavior
+## 6. 我的收入行为
 
 “我的收入”页面当前行为：
 
@@ -216,18 +193,24 @@
 - 若已关联员工但当月工资单不存在：
   - 返回空态
 - 若当月工资单存在：
-  - 顶部金额显示 `net_salary`
-  - 明细展示完整工资单字段，分为：
+  - 顶部摘要显示：
+    - 当月实发
+    - 固定薪资
+    - 绩效工资
+    - 提成
+  - 明细展示完整工资单字段：
     - 应发项
     - 扣除项
     - 公司成本
 
-说明：
+补充说明：
 
-- 当前实现不再回退拼装 `salary_structures + employee_commissions + employee_performance`
-- 最终展示严格走工资单
+- approved 月份且存在 snapshot 时，优先读取 payroll snapshot
+- draft/runtime 月份继续读取 `a_class.payroll_records`
+- 页面展示坚持 payroll-first，不回退拼装 `salary_structures + employee_commissions + employee_performance`
+- 若工资单已锁定且落后于最新重算结果，页面会显示 stale warning
 
-## 7. Audit And Traceability
+## 7. 审计与追踪
 
 ### 我的收入访问审计
 
@@ -251,126 +234,86 @@
 - `details.year_month`
 - `details.pay_date`
 
-### 审计排查建议
+### 收入审计视图
 
-如果要追某个员工某月工资单：
+`GET /api/hr/income-audit/{employee_code}/{year_month}` 会聚合返回：
 
-1. 先查 `a_class.payroll_records`
-2. 再查 `c_class.employee_commissions`
-3. 再查 `c_class.employee_performance`
-4. 最后看审计日志：
-   - 是否有人执行过 `pay`
-   - 是否有人访问过 `/me/income`
+- 员工基础信息
+- 月结状态
+- 店铺归属与店铺绩效
+- 个人绩效输入项
+- 个人绩效调整项
+- 个人绩效结果
+- 提成结果
+- 工资单结果
+- “我的收入”投影结果
 
-## 8. Troubleshooting
+## 8. 常见排障
 
 ### 场景 A：重算后工资单没有变化
 
-先检查：
+检查：
 
-1. 该工资单是否为 `confirmed` 或 `paid`
-2. 接口响应里的 `payroll_locked_conflicts`
-3. `payroll_locked_conflict_details` 中是否出现该员工
+1. 工资单是否为 `confirmed` 或 `paid`
+2. `payroll_locked_conflicts`
+3. `payroll_locked_conflict_details`
 
 处理：
 
-- 若是锁定导致：
+- 若因锁定导致：
   - 退回草稿
-  - 重新发起绩效重算
+  - 再发起重算
 
-### 场景 B：我的收入页面显示空态
+### 场景 B：我的收入为空
 
-先检查：
+检查：
 
 1. 当前账号是否已关联员工档案
-2. 当月 `payroll_records` 是否存在
+2. `payroll_records` 是否存在
 3. 是否已执行当月绩效重算
 
-处理：
-
-- 无员工档案：
-  - 联系管理员关联账号与员工
-- 无工资单：
-  - 发起 `POST /performance/scores/calculate?period=YYYY-MM`
-
-### 场景 C：看不到“已发放”按钮
-
-先检查：
-
-1. 当前工资单状态是否为 `confirmed`
-2. 当前登录用户是否为管理员
+### 场景 C：工资单显示“结果已过期”
 
 说明：
 
-- 非管理员即使能看到工资单，也不会看到“已发放”按钮
-- 即使前端异常显示，后端仍会做管理员权限校验
+- 当前工资单已锁定
+- 上游绩效或提成已重算出更新结果
+- 需要先退回草稿，再刷新工资单
 
-### 场景 D：标记已发放失败
-
-先检查：
-
-1. 当前工资单是否为 `confirmed`
-2. 当前用户是否为管理员
-3. 是否有数据库提交失败
+### 场景 D：员工收入链路不清楚
 
 处理：
 
-- 若返回 403：
-  - 检查当前用户角色
-- 若返回 409：
-  - 检查工资单当前状态
+- 直接打开“员工月度收入审计”页
+- 或调用 `/api/hr/income-audit/{employee_code}/{year_month}`
 
-## 9. Operational Checklist
+## 9. 当前正式口径
 
-月度操作建议按这个顺序执行：
+当前正式店铺绩效维度：
 
-1. 选择月份，发起绩效重算
-2. 记录 `shop_performance_upserts / commission_upserts / employee_performance_upserts / payroll_upserts`
-3. 检查是否存在 `payroll_locked_conflicts`
-4. 若有冲突，逐个处理并决定是否退回草稿
-5. 在“员工薪资”页维护固定薪资并审核草稿工资单的人工字段
-6. 确认工资单
-7. 由管理员标记已发放
-8. 抽查“我的收入”页面是否显示正确的 `net_salary`
+- `sales`
+- `profit`
+- `operation`
 
-## 10. Current Boundaries
+当前不纳入正式口径：
+
+- `key_product`
+
+## 10. 当前边界
 
 当前已闭环：
 
 - 绩效重算
+- 提成生成
+- 个人绩效生成
 - 工资单生成
-- 工资单编辑/确认/退回/已发放
+- 工资单编辑 / 确认 / 退回 / 已发放
 - 我的收入工资单口径展示
-- 锁定冲突明细展示
-- 已发放审计
+- stale 提示
+- 收入审计视图
 
-当前仍属后续扩展：
+当前仍属于后续扩展：
 
 - `paid` 与外部支付/财务系统联动
 - 更细粒度的工资单权限模型
-- 专门的工资单冲突列表页
-
-## 11. Performance Racing Supplement (2026-04-11)
-
-- 公司所有正式经营店铺进入同一个月度赛马池。
-- 店铺经营天数少于 15 天时进入观察池，不参与正式赛马奖惩。
-- 正式赛马店铺先按公司总榜排名分档，再叠加绝对分数底线封顶：
-  - 前 20%：1.2
-  - 20% ~ 50%：1.0
-  - 50% ~ 80%：0.9
-  - 后 20%：0.8
-  - 但当月绩效分 70~79.99 时最高只能到 1.0
-  - 当月绩效分 60~69.99 时最高只能到 0.8
-  - 当月绩效分低于 60 时直接为 0.5
-- 挂店人提成不再单独按个人分数档位取系数，而是按挂店销售权重继承店铺赛马系数。
-- 员工绩效分仍然保留“店铺承接绩效 + 个人加减项”口径，用于评价责任贡献；提成奖惩则依赖店铺赛马系数。
-- 个人加减项当前已纳入：
-  - 考勤扣分
-  - 月度个人绩效调整项（考试、培训检核、人工奖惩）
-
-## 12. My Income Snapshot Notes (2026-05-29)
-
-- “我的收入”继续以工资单为最终结果口径展示，不回退拼装 `salary_structures + employee_commissions + employee_performance`。
-- 当前顶部摘要同时展示：当月实发、固定薪资、绩效工资、提成。
-- 页面增加只读“收入说明”，解释提成来源、绩效工资来源、个人绩效得分来源。
-- 若该月份已有 `approved` 月结，`/api/hr/me/income` 优先读取 payroll snapshot；否则继续读取运行态 `a_class.payroll_records`。
+- 重点商品维度设计与接入

@@ -1366,6 +1366,7 @@ class SalesTarget(Base):
     achievement_rate = Column(Float, nullable=False, default=0.0, comment="达成率(百分比)")
 
     # 运营目标字段
+    scope_type = Column(String(32), nullable=True, comment="作用域类型:shop/employee")
     metric_code = Column(String(64), nullable=True, comment="运营指标编码")
     metric_name = Column(String(128), nullable=True, comment="运营指标名称")
     metric_direction = Column(String(32), nullable=True, comment="指标方向:higher_better/lower_better/manual_score")
@@ -1601,6 +1602,7 @@ class PerformanceScore(Base):
     performance_coefficient = Column(Float, nullable=False, default=1.0, comment="绩效系数")
     
     # 审计字段
+    calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
@@ -2383,6 +2385,48 @@ class EmployeePerformanceAdjustment(Base):
         {"schema": "a_class"},
     )
 
+
+class EmployeePerformanceInput(Base):
+    """
+    A类数据表:个人绩效输入项
+
+    用于承接员工维度的月度绩效目标与结果输入，避免完全依赖店铺总分继承。
+    """
+
+    __tablename__ = "employee_performance_inputs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)
+    year_month = Column(String(7), nullable=False)
+    metric_code = Column(String(64), nullable=False)
+    metric_name = Column(String(128), nullable=True)
+    metric_direction = Column(String(32), nullable=False)
+    target_value = Column(Float, nullable=False, default=0.0)
+    achieved_value = Column(Float, nullable=False, default=0.0)
+    max_score = Column(Float, nullable=False, default=0.0)
+    manual_score_enabled = Column(Boolean, nullable=False, default=False)
+    manual_score_value = Column(Float, nullable=True)
+    source = Column(String(64), nullable=True)
+    reason = Column(String(512), nullable=True)
+    status = Column(String(32), nullable=False, default="active")
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_code",
+            "year_month",
+            "metric_code",
+            name="uq_employee_performance_inputs_a",
+        ),
+        Index("ix_employee_performance_inputs_a_employee", "employee_code"),
+        Index("ix_employee_performance_inputs_a_month", "year_month"),
+        Index("ix_employee_performance_inputs_a_metric", "metric_code"),
+        Index("ix_employee_performance_inputs_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
 class WorkShift(Base):
     """
     A类数据表:排班班次配置
@@ -2568,6 +2612,7 @@ class SalaryStructure(Base):
     other_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 其他补贴
     
     # === 绩效相关 ===
+    performance_package_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 独立绩效包
     performance_ratio = Column(Float, nullable=False, default=0.0)  # 绩效工资比例(0-1)
     commission_ratio = Column(Float, nullable=False, default=0.0)  # 提成比例(0-1)
     
@@ -2577,7 +2622,8 @@ class SalaryStructure(Base):
     
     effective_date = Column(Date, nullable=False)  # 生效日期
     status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
-    
+    remark = Column(Text, nullable=True)  # 备注
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     

@@ -90,7 +90,7 @@ export const menuGroups = [
     items: [
       '/sales-dashboard-v3',        // 销售看板（v3版本）
       '/sales-campaign-management',  // 销售战役管理（A类数据）
-      '/target-management',          // 目标管理（A类数据）
+      '/target-management/shop',     // 目标管理（店铺目标）
       '/customer-management',        // 客户管理
       '/order-management'            // 订单管理
       // 废弃路由（功能已合并到销售看板）：
@@ -149,10 +149,11 @@ export const menuGroups = [
       '/human-resources',            // 人力管理（含员工/部门/职位/考勤/薪资 Tab）
       '/employee-management',        // 我的档案
       '/employee-salary',            // 员工薪资（固定薪资 + 月度录入 + 工资单状态）
+      '/hr-income-audit',            // 员工收入审计
       '/my-income',              // 我的收入
       '/my-follow-investment-income', // 我的跟投收益
-      '/hr-performance-management',  // 绩效管理（仅管理员）
-      '/hr-performance-display',     // 绩效公示（全员可见）
+      '/hr-performance-management/shop',  // 店铺绩效管理（仅管理员）
+      '/hr-performance-display/shop',     // 店铺绩效公示（全员可见）
       '/hr-shop-assignment'          // 人员店铺归属和提成比
     ]
   },
@@ -256,9 +257,16 @@ export const routeDisplayNames = {
   '/sales-campaign-management': '销售战役管理',
   '/my-income': '我的收入',
   '/hr-performance-management': '绩效管理',
+  '/hr-performance-management/shop': '店铺绩效管理',
+  '/hr-performance-management/person': '个人绩效管理',
   '/hr-performance-display': '绩效公示',
+  '/hr-performance-display/shop': '店铺绩效公示',
+  '/hr-performance-display/person': '个人绩效公示',
   '/hr-shop-assignment': '人员店铺归属和提成比',
   '/target-management': '目标管理',
+  '/target-management/shop': '店铺目标管理',
+  '/target-management/person': '个人目标管理',
+  '/target-management/operation': '运营目标管理',
   '/inventory-overview': '库存总览',
   '/inventory/opening-balances': '期初余额',
   '/inventory/aging': '库存库龄',

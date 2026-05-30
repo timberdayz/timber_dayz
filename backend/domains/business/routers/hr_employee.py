@@ -11,7 +11,7 @@ from datetime import datetime, date, timezone
 from decimal import Decimal
 
 from backend.models.database import get_async_db
-from backend.dependencies.auth import get_current_user
+from backend.dependencies.auth import get_current_user, is_admin_user
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
@@ -26,6 +26,8 @@ from backend.services.base_service import provide_service
 from backend.utils.year_month_utils import year_month_to_first_day
 from modules.core.db import (
     Employee, DimUser, MonthlyProfitPayrollSnapshot, MonthlyProfitSettlement, PayrollRecord,
+    EmployeeCommission, EmployeePerformance, EmployeePerformanceInput, EmployeePerformanceAdjustment,
+    EmployeeShopAssignment, ShopCommissionConfig, PerformanceScore, ShopProfitBasis,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
@@ -151,6 +153,7 @@ async def get_my_income(
     settlement = settlement_result.scalar_one_or_none()
 
     pr = None
+    payroll_data_source = "payroll_record"
     if settlement and getattr(settlement, "status", None) == "approved":
         snapshot_result = await db.execute(
             select(MonthlyProfitPayrollSnapshot).where(
@@ -161,6 +164,8 @@ async def get_my_income(
         )
         snapshot_rows = snapshot_result.scalars().all()
         pr = snapshot_rows[0] if snapshot_rows else None
+        if pr is not None:
+            payroll_data_source = "payroll_snapshot"
 
     if pr is None:
         pr_result = await db.execute(
@@ -182,6 +187,34 @@ async def get_my_income(
     fixed_salary = float((getattr(pr, "base_salary", 0) or 0) + (getattr(pr, "position_salary", 0) or 0))
     commission_amount = float(getattr(pr, "commission", 0) or 0)
     net_salary = float(getattr(pr, "net_salary", 0) or 0)
+    payroll_status = getattr(pr, "status", None) or getattr(pr, "payroll_status", None)
+    is_locked = payroll_status in {"confirmed", "paid", "approved"}
+    latest_calculated_at = None
+    is_stale_against_latest_calc = False
+
+    if payroll_data_source == "payroll_record" and is_locked:
+        commission_result = await db.execute(
+            select(EmployeeCommission.calculated_at).where(
+                EmployeeCommission.employee_code == employee_code,
+                EmployeeCommission.year_month == period,
+            )
+        )
+        commission_times = [row[0] for row in commission_result.all() if row[0] is not None]
+        performance_result = await db.execute(
+            select(EmployeePerformance.calculated_at).where(
+                EmployeePerformance.employee_code == employee_code,
+                EmployeePerformance.year_month == period,
+            )
+        )
+        performance_times = [row[0] for row in performance_result.all() if row[0] is not None]
+        all_times = [*commission_times, *performance_times]
+        if all_times:
+            latest_dt = max(all_times)
+            latest_calculated_at = latest_dt.isoformat() if hasattr(latest_dt, "isoformat") else str(latest_dt)
+            payroll_updated_at = getattr(pr, "updated_at", None) or getattr(pr, "created_at", None)
+            if is_locked and payroll_updated_at is not None and latest_dt > payroll_updated_at:
+                is_stale_against_latest_calc = True
+
     payroll_breakdown = {
         "base_salary": float(getattr(pr, "base_salary", 0) or 0),
         "position_salary": float(getattr(pr, "position_salary", 0) or 0),
@@ -200,9 +233,13 @@ async def get_my_income(
         "social_insurance_company": float(getattr(pr, "social_insurance_company", 0) or 0),
         "housing_fund_company": float(getattr(pr, "housing_fund_company", 0) or 0),
         "total_cost": float(getattr(pr, "total_cost", 0) or 0),
-        "status": getattr(pr, "status", None) or getattr(pr, "payroll_status", None),
+        "status": payroll_status,
         "pay_date": getattr(pr, "pay_date", None).isoformat() if getattr(pr, "pay_date", None) else None,
         "remark": getattr(pr, "remark", None),
+        "data_source": payroll_data_source,
+        "is_locked": is_locked,
+        "is_stale_against_latest_calc": is_stale_against_latest_calc,
+        "latest_calculated_at": latest_calculated_at,
     }
     await _log_me_income_access(request, current_user_id, period, "success", db)
     return MyIncomeResponse(
@@ -220,6 +257,232 @@ async def get_my_income(
 
 
 hr_income_service_dep = provide_service(HRIncomeCalculationService)
+
+
+async def _build_employee_income_audit(
+    *,
+    employee_code: str,
+    year_month: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    employee = (
+        await db.execute(select(Employee).where(Employee.employee_code == employee_code))
+    ).scalar_one_or_none()
+    if not employee:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
+
+    settlement = (
+        await db.execute(
+            select(MonthlyProfitSettlement).where(MonthlyProfitSettlement.period_month == year_month)
+        )
+    ).scalar_one_or_none()
+
+    assignments = (
+        await db.execute(
+            select(EmployeeShopAssignment).where(
+                EmployeeShopAssignment.employee_code == employee_code,
+                EmployeeShopAssignment.year_month == year_month,
+                EmployeeShopAssignment.status == "active",
+            )
+        )
+    ).scalars().all()
+
+    shop_rows = []
+    for assignment in assignments:
+        platform_code = getattr(assignment, "platform_code", None)
+        shop_id = getattr(assignment, "shop_id", None)
+        alloc_cfg = (
+            await db.execute(
+                select(ShopCommissionConfig).where(
+                    ShopCommissionConfig.year_month == year_month,
+                    ShopCommissionConfig.platform_code == platform_code,
+                    ShopCommissionConfig.shop_id == shop_id,
+                )
+            )
+        ).scalar_one_or_none()
+        perf = (
+            await db.execute(
+                select(PerformanceScore).where(
+                    PerformanceScore.period == year_month,
+                    PerformanceScore.platform_code == platform_code,
+                    PerformanceScore.shop_id == shop_id,
+                )
+            )
+        ).scalar_one_or_none()
+        profit_basis = (
+            await db.execute(
+                select(ShopProfitBasis).where(
+                    ShopProfitBasis.period_month == year_month,
+                    ShopProfitBasis.platform_code == platform_code,
+                    ShopProfitBasis.shop_id == shop_id,
+                    ShopProfitBasis.basis_version == "A_ONLY_V1",
+                )
+            )
+        ).scalar_one_or_none()
+        shop_rows.append(
+            {
+                "platform_code": platform_code,
+                "shop_id": shop_id,
+                "commission_ratio": float(getattr(assignment, "commission_ratio", 0) or 0),
+                "role": getattr(assignment, "role", None),
+                "allocatable_profit_rate": float(getattr(alloc_cfg, "allocatable_profit_rate", 0) or 0) if alloc_cfg else None,
+                "profit_basis_amount": float(getattr(profit_basis, "profit_basis_amount", 0) or 0) if profit_basis else None,
+                "shop_performance_score": float(getattr(perf, "total_score", 0) or 0) if perf else None,
+                "shop_performance_coefficient": float(getattr(perf, "performance_coefficient", 0) or 0) if perf else None,
+                "shop_performance_status": ((getattr(perf, "score_details", None) or {}).get("summary") or {}).get("status") if perf else None,
+                "shop_performance_ready_dimensions": ((getattr(perf, "score_details", None) or {}).get("summary") or {}).get("ready_dimensions") if perf else None,
+                "shop_performance_pending_dimensions": ((getattr(perf, "score_details", None) or {}).get("summary") or {}).get("pending_dimensions") if perf else None,
+            }
+        )
+
+    perf_inputs = (
+        await db.execute(
+            select(EmployeePerformanceInput).where(
+                EmployeePerformanceInput.employee_code == employee_code,
+                EmployeePerformanceInput.year_month == year_month,
+                EmployeePerformanceInput.status == "active",
+            )
+        )
+    ).scalars().all()
+    adjustments = (
+        await db.execute(
+            select(EmployeePerformanceAdjustment).where(
+                EmployeePerformanceAdjustment.employee_code == employee_code,
+                EmployeePerformanceAdjustment.year_month == year_month,
+                EmployeePerformanceAdjustment.status == "active",
+            )
+        )
+    ).scalars().all()
+    employee_performance = (
+        await db.execute(
+            select(EmployeePerformance).where(
+                EmployeePerformance.employee_code == employee_code,
+                EmployeePerformance.year_month == year_month,
+            )
+        )
+    ).scalar_one_or_none()
+    employee_commission = (
+        await db.execute(
+            select(EmployeeCommission).where(
+                EmployeeCommission.employee_code == employee_code,
+                EmployeeCommission.year_month == year_month,
+            )
+        )
+    ).scalar_one_or_none()
+    payroll = (
+        await db.execute(
+            select(PayrollRecord).where(
+                PayrollRecord.employee_code == employee_code,
+                PayrollRecord.year_month == year_month,
+            )
+        )
+    ).scalar_one_or_none()
+
+    my_income_like = None
+    if payroll:
+        payroll_status = getattr(payroll, "status", None)
+        is_locked = payroll_status in {"confirmed", "paid", "approved"}
+        latest_calc_times = []
+        if employee_commission and getattr(employee_commission, "calculated_at", None):
+            latest_calc_times.append(getattr(employee_commission, "calculated_at"))
+        if employee_performance and getattr(employee_performance, "calculated_at", None):
+            latest_calc_times.append(getattr(employee_performance, "calculated_at"))
+        latest_dt = max(latest_calc_times) if latest_calc_times else None
+        payroll_updated_at = getattr(payroll, "updated_at", None) or getattr(payroll, "created_at", None)
+        my_income_like = {
+            "fixed_salary": float((getattr(payroll, "base_salary", 0) or 0) + (getattr(payroll, "position_salary", 0) or 0)),
+            "performance_salary": float(getattr(payroll, "performance_salary", 0) or 0),
+            "commission": float(getattr(payroll, "commission", 0) or 0),
+            "net_salary": float(getattr(payroll, "net_salary", 0) or 0),
+            "payroll_status": payroll_status,
+            "is_locked": is_locked,
+            "is_stale_against_latest_calc": bool(is_locked and latest_dt and payroll_updated_at and latest_dt > payroll_updated_at),
+            "latest_calculated_at": latest_dt.isoformat() if latest_dt else None,
+            "data_source": "payroll_snapshot" if settlement and getattr(settlement, "status", None) == "approved" else "payroll_record",
+        }
+
+    return {
+        "success": True,
+        "data": {
+            "employee": {
+                "employee_code": employee.employee_code,
+                "name": getattr(employee, "name", None),
+                "user_id": getattr(employee, "user_id", None),
+                "position_id": getattr(employee, "position_id", None),
+                "department_id": getattr(employee, "department_id", None),
+                "status": getattr(employee, "status", None),
+                "employee_identity_type": getattr(employee, "employee_identity_type", None),
+            },
+            "year_month": year_month,
+            "settlement_status": getattr(settlement, "status", None) if settlement else None,
+            "my_income_projection": my_income_like,
+            "shop_assignments": shop_rows,
+            "performance_inputs": [
+                {
+                    "metric_code": row.metric_code,
+                    "metric_name": row.metric_name,
+                    "metric_direction": row.metric_direction,
+                    "target_value": float(row.target_value or 0),
+                    "achieved_value": float(row.achieved_value or 0),
+                    "max_score": float(row.max_score or 0),
+                    "manual_score_enabled": bool(row.manual_score_enabled),
+                    "manual_score_value": float(row.manual_score_value) if row.manual_score_value is not None else None,
+                    "source": row.source,
+                    "reason": row.reason,
+                }
+                for row in perf_inputs
+            ],
+            "performance_adjustments": [
+                {
+                    "adjustment_type": row.adjustment_type,
+                    "score_delta": float(row.score_delta or 0),
+                    "source": row.source,
+                    "reason": row.reason,
+                }
+                for row in adjustments
+            ],
+            "employee_performance": (
+                {
+                    "actual_sales": float(getattr(employee_performance, "actual_sales", 0) or 0),
+                    "achievement_rate": float(getattr(employee_performance, "achievement_rate", 0) or 0),
+                    "performance_score": float(getattr(employee_performance, "performance_score", 0) or 0),
+                    "calculated_at": getattr(employee_performance, "calculated_at", None).isoformat() if getattr(employee_performance, "calculated_at", None) else None,
+                }
+                if employee_performance
+                else None
+            ),
+            "employee_commission": (
+                {
+                    "sales_amount": float(getattr(employee_commission, "sales_amount", 0) or 0),
+                    "commission_rate": float(getattr(employee_commission, "commission_rate", 0) or 0),
+                    "commission_amount": float(getattr(employee_commission, "commission_amount", 0) or 0),
+                    "calculated_at": getattr(employee_commission, "calculated_at", None).isoformat() if getattr(employee_commission, "calculated_at", None) else None,
+                }
+                if employee_commission
+                else None
+            ),
+            "payroll_record": (
+                {
+                    "id": getattr(payroll, "id", None),
+                    "base_salary": float(getattr(payroll, "base_salary", 0) or 0),
+                    "position_salary": float(getattr(payroll, "position_salary", 0) or 0),
+                    "performance_salary": float(getattr(payroll, "performance_salary", 0) or 0),
+                    "commission": float(getattr(payroll, "commission", 0) or 0),
+                    "allowances": float(getattr(payroll, "allowances", 0) or 0),
+                    "bonus": float(getattr(payroll, "bonus", 0) or 0),
+                    "overtime_pay": float(getattr(payroll, "overtime_pay", 0) or 0),
+                    "gross_salary": float(getattr(payroll, "gross_salary", 0) or 0),
+                    "total_deductions": float(getattr(payroll, "total_deductions", 0) or 0),
+                    "net_salary": float(getattr(payroll, "net_salary", 0) or 0),
+                    "total_cost": float(getattr(payroll, "total_cost", 0) or 0),
+                    "status": getattr(payroll, "status", None),
+                    "updated_at": getattr(payroll, "updated_at", None).isoformat() if getattr(payroll, "updated_at", None) else None,
+                }
+                if payroll
+                else None
+            ),
+        },
+    }
 
 
 @router.post("/income/calculate", response_model=IncomeCalculationResponse)
@@ -245,6 +508,34 @@ async def calculate_income_c_class(
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"重算员工收入C类数据失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.get("/income-audit/{employee_code}/{year_month}")
+async def get_employee_income_audit(
+    employee_code: str,
+    year_month: str,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    if not is_admin_user(current_user):
+        return error_response(
+            ErrorCode.PERMISSION_DENIED,
+            "需要管理员权限才能查看员工收入审计视图",
+            status_code=403,
+        )
+    try:
+        return await _build_employee_income_audit(
+            employee_code=employee_code,
+            year_month=year_month,
+            db=db,
+        )
+    except Exception as e:
+        logger.error(f"获取员工收入审计视图失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取员工收入审计视图失败: {str(e)}",
             status_code=500,
         )
 

@@ -8,6 +8,41 @@
 
 **Tech Stack:** FastAPI, SQLAlchemy async ORM, Pydantic, PostgreSQL/Alembic, Vue 3, Element Plus, Node built-in test runner, pytest
 
+## Execution Status
+
+Status: Core functionality completed on 2026-05-29 session; plan-governance items partially backfilled afterwards.
+
+- Completed:
+  - Task 1 snapshot ORM models
+  - Task 2 snapshot lifecycle methods in settlement service
+  - Task 3 snapshot-aware monthly settlement routes and readers
+  - Task 4 migration for snapshot tables
+  - Task 5 `/api/hr/me/income` snapshot-aware payroll-first read
+  - Task 6 My Income summary cards + explanation view model
+  - Task 8 practical integration verification covered by targeted tests
+- Backfilled after initial implementation:
+  - Dedicated test filenames for snapshot schema / snapshot service / my income route
+- Partially completed:
+  - Task 7 documentation updates were completed only in the main runbooks actually used by the current workflow
+- Not completed from plan-governance perspective:
+  - Per-task commit steps were not executed
+  - Original checklist boxes were not maintained in real time
+
+## Final Closeout
+
+Closeout date: 2026-05-30
+
+Final outcome:
+
+- Monthly settlement snapshot tables, lifecycle, and snapshot-aware reads completed
+- My Income payroll-first summary, explanation layer, snapshot-aware behavior, and stale-version hints completed
+- Employee monthly income audit flow completed
+
+Remaining items are no longer blocking this plan and have been reclassified as follow-up governance work:
+
+- historical documentation expansion outside core runbooks
+- longer-term data governance for upstream target data
+
 ---
 
 ### Task 1: Add Failing Backend Schema Contract Tests For Snapshot Tables

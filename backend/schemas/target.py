@@ -1,5 +1,5 @@
 """
-目标管理 API 合约
+目标管理 API 契约。
 """
 
 from datetime import date, datetime
@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 class TargetCreateRequest(BaseModel):
     target_name: str = Field(..., description="目标名称")
     target_type: str = Field(..., description="目标类型: shop/product/campaign/operation")
+    scope_type: Optional[str] = Field(None, description="作用域类型: shop/employee")
     period_start: date = Field(..., description="开始日期")
     period_end: date = Field(..., description="结束日期")
     target_amount: float = Field(0.0, ge=0, description="目标销售额(CNY)")
@@ -41,6 +42,7 @@ class TargetCreateRequest(BaseModel):
 class TargetUpdateRequest(BaseModel):
     target_name: Optional[str] = None
     target_type: Optional[str] = None
+    scope_type: Optional[str] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     target_amount: Optional[float] = Field(None, ge=0)
@@ -101,6 +103,7 @@ class TargetResponse(BaseModel):
     id: int
     target_name: str
     target_type: str
+    scope_type: Optional[str] = None
     period_start: date
     period_end: date
     target_amount: float

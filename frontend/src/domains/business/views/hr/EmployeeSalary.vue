@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">员工薪资</h1>
-        <p class="page-subtitle">统一维护固定薪资、月度录入和工资单结果</p>
+        <p class="page-subtitle">统一维护固定薪资、月度录入和工资单结果。</p>
       </div>
       <el-button type="primary" @click="refreshCurrentView" :loading="pageLoading">
         刷新
@@ -233,8 +233,16 @@
 
             <el-alert
               v-if="payrollRecord?.status === 'paid'"
-              title="当前工资单已发放，已进入只读状态。若发现差额，请在下个月通过“月度奖金”补发或通过“其他扣款”抵扣。"
+              title="当前工资单已发放，已进入只读状态。如发现差额，请在下个月通过“月度奖金”补发或通过“其他扣款”抵扣。"
               type="info"
+              :closable="false"
+              style="margin-bottom: 16px;"
+            />
+
+            <el-alert
+              v-if="payrollRecord?.is_stale_against_latest_calc"
+              title="当前工资单已落后于最新绩效/提成重算结果；如需吸收最新结果，请先退回草稿再刷新。"
+              type="warning"
               :closable="false"
               style="margin-bottom: 16px;"
             />
@@ -320,6 +328,7 @@
                 <span>工资单结果</span>
                 <div class="section-actions">
                   <el-tag :type="payrollStatusTagType">{{ payrollRecord?.status || 'draft' }}</el-tag>
+                  <el-tag v-if="payrollRecord?.is_stale_against_latest_calc" type="warning">结果已过期</el-tag>
                   <el-button size="small" type="success" @click="confirmPayroll" :disabled="!payrollRecord || payrollRecord.status !== 'draft'">
                     确认工资单
                   </el-button>
@@ -783,7 +792,7 @@ const markPayrollPaid = async () => {
   if (!payrollRecord.value?.id) return
   try {
     await ElMessageBox.confirm(
-      '标记已发放后工资单将只读，不能再直接修改或退回草稿。若后续发现差额，请在下个月通过“月度奖金”补发或通过“其他扣款”抵扣。是否继续？',
+      '标记已发放后工资单将只读，不能再直接修改或退回草稿。如后续发现差额，请在下个月通过“月度奖金”补发或通过“其他扣款”抵扣。是否继续？',
       '标记已发放',
       { type: 'warning' }
     )

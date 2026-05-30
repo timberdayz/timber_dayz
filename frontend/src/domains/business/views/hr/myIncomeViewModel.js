@@ -1,6 +1,10 @@
 export function buildMyIncomeSummaryCards(income = {}) {
   const payroll = income?.breakdown?.payroll ?? null
-  const fixedSalary = income?.base_salary ?? (payroll ? Number(payroll.base_salary || 0) + Number(payroll.position_salary || 0) : null)
+  const fixedSalary =
+    income?.base_salary ??
+    (payroll
+      ? Number(payroll.base_salary || 0) + Number(payroll.position_salary || 0)
+      : null)
 
   return [
     {
@@ -31,17 +35,17 @@ export function buildMyIncomeExplanations() {
     {
       key: 'commission_source',
       title: '提成来源',
-      body: '提成来自店铺利润分配结果，当前口径已包含店铺绩效系数影响。'
+      body: '提成来自店铺利润分配结果，口径为店铺利润基数 × 可分配利润率 × 个人提成比例 × 店铺绩效系数。'
     },
     {
       key: 'performance_salary_source',
       title: '绩效工资来源',
-      body: '绩效工资按固定薪资基座乘以绩效比例和个人绩效得分计算。'
+      body: '绩效工资来自独立绩效包 × 个人绩效系数，不再使用底薪或岗位工资去参与绩效乘法。'
     },
     {
       key: 'performance_score_source',
-      title: '绩效得分来源',
-      body: '个人绩效得分当前来自店铺绩效继承结果，再叠加考勤和人工调整项。'
+      title: '个人绩效来源',
+      body: '个人绩效优先由个人绩效输入项驱动，再叠加考勤和人工调整；未配置输入项时才回退到店铺绩效聚合。'
     }
   ]
 }

@@ -1902,6 +1902,9 @@ export default {
   async markHrPayrollRecordPaid(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/pay`)
   },
+  async getHrIncomeAudit(employeeCode, yearMonth) {
+    return await this._get(`/hr/income-audit/${employeeCode}/${yearMonth}`)
+  },
 
   // === 员工目标 ===
   async getHrEmployeeTargets(params = {}) {
@@ -1926,6 +1929,24 @@ export default {
   },
   async deleteHrPerformanceAdjustment(adjustmentId) {
     return await this._delete(`/hr/performance-adjustments/${adjustmentId}`)
+  },
+  async getHrPerformanceInputs(params = {}) {
+    return await this._get('/hr/performance-inputs', { params })
+  },
+  async createHrPerformanceInput(data) {
+    return await this._post('/hr/performance-inputs', data)
+  },
+  async updateHrPerformanceInput(inputId, data) {
+    return await this._put(`/hr/performance-inputs/${inputId}`, data)
+  },
+  async deleteHrPerformanceInput(inputId) {
+    return await this._delete(`/hr/performance-inputs/${inputId}`)
+  },
+  async getHrPerformanceInputTemplates(params = {}) {
+    return await this._get('/hr/performance-input-templates', { params })
+  },
+  async applyHrPerformanceInputTemplate(data) {
+    return await this._post('/hr/performance-input-templates/apply', data)
   },
 
   // === 提成查询（只读） ===

@@ -26,18 +26,43 @@ from backend.schemas.hr import (
     EmployeeCommissionResponse,
     ShopCommissionResponse,
     EmployeePerformanceAdjustmentCreate, EmployeePerformanceAdjustmentResponse, EmployeePerformanceAdjustmentUpdate,
+    EmployeePerformanceInputCreate, EmployeePerformanceInputResponse, EmployeePerformanceInputUpdate,
+    EmployeePerformanceTemplateApplyRequest, EmployeePerformanceTemplateMetric, EmployeePerformanceTemplateResponse,
     EmployeeShopAssignmentCreate, EmployeeShopAssignmentResponse, EmployeeShopAssignmentUpdate,
     ShopCommissionConfigUpdate,
     CopyFromPrevMonthBody,
 )
 from modules.core.db import (
-    ShopAccount, Employee, DimShop, DimUser,
+    ShopAccount, Employee, DimShop, DimUser, Position,
     EmployeePerformance, EmployeeCommission, ShopCommission,
-    EmployeePerformanceAdjustment,
+    EmployeePerformanceAdjustment, EmployeePerformanceInput,
     EmployeeShopAssignment, ShopCommissionConfig, EmployeeTarget, ShopProfitBasis,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-绩效提成"])
+
+DEFAULT_PERFORMANCE_TEMPLATES = {
+    "general_operator": {
+        "template_name": "通用运营模板",
+        "match_keywords": ["运营", "operator", "操作员"],
+        "metrics": [
+            {"metric_code": "sales_execution", "metric_name": "销售执行", "metric_direction": "up", "target_value": 100.0, "achieved_value": 0.0, "max_score": 40.0, "manual_score_enabled": False, "manual_score_value": None},
+            {"metric_code": "service_timeliness", "metric_name": "服务时效", "metric_direction": "up", "target_value": 100.0, "achieved_value": 0.0, "max_score": 20.0, "manual_score_enabled": False, "manual_score_value": None},
+            {"metric_code": "training_check", "metric_name": "培训检核", "metric_direction": "up", "target_value": 0.0, "achieved_value": 0.0, "max_score": 20.0, "manual_score_enabled": True, "manual_score_value": None},
+            {"metric_code": "attendance_quality", "metric_name": "出勤质量", "metric_direction": "up", "target_value": 0.0, "achieved_value": 0.0, "max_score": 20.0, "manual_score_enabled": True, "manual_score_value": None},
+        ],
+    },
+    "general_sales": {
+        "template_name": "通用销售模板",
+        "match_keywords": ["销售", "sale"],
+        "metrics": [
+            {"metric_code": "personal_sales_execution", "metric_name": "个人销售执行", "metric_direction": "up", "target_value": 100.0, "achieved_value": 0.0, "max_score": 50.0, "manual_score_enabled": False, "manual_score_value": None},
+            {"metric_code": "customer_follow_up", "metric_name": "客户跟进", "metric_direction": "up", "target_value": 100.0, "achieved_value": 0.0, "max_score": 20.0, "manual_score_enabled": False, "manual_score_value": None},
+            {"metric_code": "training_check", "metric_name": "培训检核", "metric_direction": "up", "target_value": 0.0, "achieved_value": 0.0, "max_score": 15.0, "manual_score_enabled": True, "manual_score_value": None},
+            {"metric_code": "attendance_quality", "metric_name": "出勤质量", "metric_direction": "up", "target_value": 0.0, "achieved_value": 0.0, "max_score": 15.0, "manual_score_enabled": True, "manual_score_value": None},
+        ],
+    },
+}
 
 
 def year_month_to_first_day(year_month: str) -> date:
@@ -322,6 +347,332 @@ async def _delete_employee_performance_adjustment(
     return {"success": True, "data": {"id": adjustment_id, "status": "inactive"}}
 
 
+async def _list_employee_performance_inputs(
+    *,
+    year_month: Optional[str],
+    employee_code: Optional[str],
+    status: Optional[str],
+    page: int,
+    page_size: int,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    query = select(EmployeePerformanceInput)
+    conditions = []
+    if year_month:
+        conditions.append(EmployeePerformanceInput.year_month == year_month)
+    if employee_code:
+        conditions.append(EmployeePerformanceInput.employee_code == employee_code)
+    if status:
+        conditions.append(EmployeePerformanceInput.status == status)
+    if conditions:
+        query = query.where(and_(*conditions))
+
+    total = (
+        await db.execute(
+            select(func.count()).select_from(query.subquery())
+        )
+    ).scalar() or 0
+
+    rows = (
+        await db.execute(
+            query.order_by(
+                EmployeePerformanceInput.year_month.desc(),
+                EmployeePerformanceInput.employee_code,
+                EmployeePerformanceInput.metric_code,
+                EmployeePerformanceInput.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+
+    employee_codes = sorted({row.employee_code for row in rows if getattr(row, "employee_code", None)})
+    name_map: Dict[str, str] = {}
+    if employee_codes:
+        name_rows = (
+            await db.execute(
+                select(Employee.employee_code, Employee.name).where(Employee.employee_code.in_(employee_codes))
+            )
+        ).all()
+        name_map = {row[0]: row[1] or row[0] for row in name_rows}
+
+    items = []
+    for row in rows:
+        payload = EmployeePerformanceInputResponse.model_validate(row)
+        payload.employee_name = name_map.get(row.employee_code, row.employee_code)
+        items.append(payload)
+    return {"success": True, "data": {"items": items, "total": total}}
+
+
+async def _create_employee_performance_input(
+    *,
+    body: EmployeePerformanceInputCreate,
+    db: AsyncSession,
+    current_user,
+) -> Dict[str, Any]:
+    employee = (
+        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+    ).scalar_one_or_none()
+    if not employee:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+
+    existing = (
+        await db.execute(
+            select(EmployeePerformanceInput).where(
+                EmployeePerformanceInput.employee_code == body.employee_code,
+                EmployeePerformanceInput.year_month == body.year_month,
+                EmployeePerformanceInput.metric_code == body.metric_code,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return error_response(
+            ErrorCode.DATA_ALREADY_EXISTS,
+            f"个人绩效输入项已存在: {body.employee_code} - {body.year_month} - {body.metric_code}",
+            status_code=400,
+        )
+
+    record = EmployeePerformanceInput(
+        employee_code=body.employee_code,
+        year_month=body.year_month,
+        metric_code=body.metric_code,
+        metric_name=body.metric_name,
+        metric_direction=body.metric_direction,
+        target_value=body.target_value,
+        achieved_value=body.achieved_value,
+        max_score=body.max_score,
+        manual_score_enabled=body.manual_score_enabled,
+        manual_score_value=body.manual_score_value,
+        source=body.source,
+        reason=body.reason,
+        status="active",
+        created_by=str(getattr(current_user, "username", None) or getattr(current_user, "user_id", None) or "system"),
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    payload = EmployeePerformanceInputResponse.model_validate(record)
+    payload.employee_name = getattr(employee, "name", None) or record.employee_code
+    return {"success": True, "data": payload}
+
+
+async def _update_employee_performance_input(
+    *,
+    input_id: int,
+    body: EmployeePerformanceInputUpdate,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    record = (
+        await db.execute(
+            select(EmployeePerformanceInput).where(EmployeePerformanceInput.id == input_id)
+        )
+    ).scalar_one_or_none()
+    if not record:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"个人绩效输入项不存在: {input_id}", status_code=404)
+
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(record, key, value)
+    record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(record)
+    employee_name = (
+        await db.execute(select(Employee.name).where(Employee.employee_code == record.employee_code))
+    ).scalar_one_or_none()
+    payload = EmployeePerformanceInputResponse.model_validate(record)
+    payload.employee_name = employee_name or record.employee_code
+    return {"success": True, "data": payload}
+
+
+async def _delete_employee_performance_input(
+    *,
+    input_id: int,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    record = (
+        await db.execute(
+            select(EmployeePerformanceInput).where(EmployeePerformanceInput.id == input_id)
+        )
+    ).scalar_one_or_none()
+    if not record:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"个人绩效输入项不存在: {input_id}", status_code=404)
+
+    record.status = "inactive"
+    record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"success": True, "data": {"id": input_id, "status": "inactive"}}
+
+
+def _select_performance_template_code(position_name: Optional[str]) -> str:
+    normalized = (position_name or "").strip().lower()
+    for template_code, config in DEFAULT_PERFORMANCE_TEMPLATES.items():
+        keywords = config.get("match_keywords") or []
+        if any(keyword.lower() in normalized for keyword in keywords):
+            return template_code
+    return "general_operator"
+
+
+async def _build_employee_performance_templates(
+    *,
+    db: AsyncSession,
+    employee_code: Optional[str],
+) -> Dict[str, Any]:
+    position_name = None
+    recommended_code = "general_operator"
+    if employee_code:
+        employee = (
+            await db.execute(select(Employee).where(Employee.employee_code == employee_code))
+        ).scalar_one_or_none()
+        if employee and getattr(employee, "position_id", None):
+            position_name = (
+                await db.execute(select(Position.position_name).where(Position.id == employee.position_id))
+            ).scalar_one_or_none()
+        recommended_code = _select_performance_template_code(position_name)
+
+    items = []
+    for template_code, config in DEFAULT_PERFORMANCE_TEMPLATES.items():
+        items.append(
+            EmployeePerformanceTemplateResponse(
+                template_code=template_code,
+                template_name=config["template_name"],
+                position_name=position_name if template_code == recommended_code else None,
+                recommended=(template_code == recommended_code),
+                metrics=[EmployeePerformanceTemplateMetric(**metric) for metric in config["metrics"]],
+            )
+        )
+    return {
+        "success": True,
+        "data": {
+            "recommended_template_code": recommended_code,
+            "items": items,
+        },
+    }
+
+
+async def _apply_employee_performance_template(
+    *,
+    body: EmployeePerformanceTemplateApplyRequest,
+    db: AsyncSession,
+    current_user,
+) -> Dict[str, Any]:
+    employee = (
+        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+    ).scalar_one_or_none()
+    if not employee:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+
+    position_name = None
+    if employee and getattr(employee, "position_id", None):
+        position_name = (
+            await db.execute(select(Position.position_name).where(Position.id == employee.position_id))
+        ).scalar_one_or_none()
+
+    template_code = body.template_code or _select_performance_template_code(position_name)
+    template = DEFAULT_PERFORMANCE_TEMPLATES.get(template_code)
+    if not template:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效模板不存在: {template_code}", status_code=404)
+
+    existing_rows = (
+        await db.execute(
+            select(EmployeePerformanceInput).where(
+                EmployeePerformanceInput.employee_code == body.employee_code,
+                EmployeePerformanceInput.year_month == body.year_month,
+                EmployeePerformanceInput.status == "active",
+            )
+        )
+    ).scalars().all()
+    existing_by_metric = {row.metric_code: row for row in existing_rows}
+
+    created_count = 0
+    updated_count = 0
+    skipped_count = 0
+    created_by = str(getattr(current_user, "username", None) or getattr(current_user, "user_id", None) or "system")
+
+    for metric in template["metrics"]:
+        existing = existing_by_metric.get(metric["metric_code"])
+        if existing and not body.overwrite:
+            skipped_count += 1
+            continue
+        if existing:
+            existing.metric_name = metric["metric_name"]
+            existing.metric_direction = metric["metric_direction"]
+            existing.target_value = metric["target_value"]
+            existing.achieved_value = metric["achieved_value"]
+            existing.max_score = metric["max_score"]
+            existing.manual_score_enabled = metric["manual_score_enabled"]
+            existing.manual_score_value = metric["manual_score_value"]
+            existing.source = "default_template"
+            existing.reason = f"模板套用: {template_code}"
+            existing.updated_at = datetime.now(timezone.utc)
+            updated_count += 1
+        else:
+            db.add(
+                EmployeePerformanceInput(
+                    employee_code=body.employee_code,
+                    year_month=body.year_month,
+                    metric_code=metric["metric_code"],
+                    metric_name=metric["metric_name"],
+                    metric_direction=metric["metric_direction"],
+                    target_value=metric["target_value"],
+                    achieved_value=metric["achieved_value"],
+                    max_score=metric["max_score"],
+                    manual_score_enabled=metric["manual_score_enabled"],
+                    manual_score_value=metric["manual_score_value"],
+                    source="default_template",
+                    reason=f"模板套用: {template_code}",
+                    status="active",
+                    created_by=created_by,
+                )
+            )
+            created_count += 1
+
+    await db.commit()
+    return {
+        "success": True,
+        "data": {
+            "employee_code": body.employee_code,
+            "year_month": body.year_month,
+            "template_code": template_code,
+            "created_count": created_count,
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+        },
+    }
+
+
+@router.get("/performance-input-templates")
+async def list_employee_performance_templates(
+    employee_code: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _build_employee_performance_templates(
+            db=db,
+            employee_code=employee_code,
+        )
+    except Exception as e:
+        logger.error(f"获取个人绩效模板失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人绩效模板失败: {str(e)}", status_code=500)
+
+
+@router.post("/performance-input-templates/apply")
+async def apply_employee_performance_template(
+    body: EmployeePerformanceTemplateApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _apply_employee_performance_template(
+            body=body,
+            db=db,
+            current_user=current_user,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"套用个人绩效模板失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"套用个人绩效模板失败: {str(e)}", status_code=500)
+
+
 async def _load_profit_basis_map(
     db: AsyncSession,
     year_month: str,
@@ -477,6 +828,118 @@ async def delete_employee_performance_adjustment(
         await db.rollback()
         logger.error(f"停用个人绩效调整项失败: {e}", exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"停用个人绩效调整项失败: {str(e)}", status_code=500)
+
+
+@router.get("/performance-inputs")
+async def list_employee_performance_inputs(
+    year_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    employee_code: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _list_employee_performance_inputs(
+            year_month=year_month,
+            employee_code=employee_code,
+            status=status,
+            page=page,
+            page_size=page_size,
+            db=db,
+        )
+    except Exception as e:
+        logger.error(f"获取个人绩效输入项列表失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人绩效输入项列表失败: {str(e)}", status_code=500)
+
+
+@router.post("/performance-inputs")
+async def create_employee_performance_input(
+    body: EmployeePerformanceInputCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _create_employee_performance_input(
+            body=body,
+            db=db,
+            current_user=current_user,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"创建个人绩效输入项失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建个人绩效输入项失败: {str(e)}", status_code=500)
+
+
+@router.put("/performance-inputs/{input_id}")
+async def update_employee_performance_input(
+    input_id: int,
+    body: EmployeePerformanceInputUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _update_employee_performance_input(
+            input_id=input_id,
+            body=body,
+            db=db,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"更新个人绩效输入项失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新个人绩效输入项失败: {str(e)}", status_code=500)
+
+
+@router.delete("/performance-inputs/{input_id}")
+async def delete_employee_performance_input(
+    input_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _delete_employee_performance_input(
+            input_id=input_id,
+            db=db,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"停用个人绩效输入项失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"停用个人绩效输入项失败: {str(e)}", status_code=500)
+
+
+@router.get("/performance-input-templates")
+async def list_employee_performance_templates(
+    employee_code: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _build_employee_performance_templates(
+            db=db,
+            employee_code=employee_code,
+        )
+    except Exception as e:
+        logger.error(f"获取个人绩效模板失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人绩效模板失败: {str(e)}", status_code=500)
+
+
+@router.post("/performance-input-templates/apply")
+async def apply_employee_performance_template(
+    body: EmployeePerformanceTemplateApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        return await _apply_employee_performance_template(
+            body=body,
+            db=db,
+            current_user=current_user,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"套用个人绩效模板失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"套用个人绩效模板失败: {str(e)}", status_code=500)
 
 
 @router.get("/commissions/employee", response_model=List[EmployeeCommissionResponse])

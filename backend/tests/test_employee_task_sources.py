@@ -194,6 +194,29 @@ async def test_sync_performance_confirmation_task_targets_employee_user(employee
 
 
 @pytest.mark.asyncio
+async def test_sync_performance_confirmation_task_reuses_existing_task(employee_task_source_session):
+    from backend.services.employee_task_sources import sync_performance_confirmation_task
+
+    first = await sync_performance_confirmation_task(
+        employee_task_source_session,
+        year_month="2026-04",
+        employee_code="EMP002",
+        created_by=1,
+    )
+    second = await sync_performance_confirmation_task(
+        employee_task_source_session,
+        year_month="2026-04",
+        employee_code="EMP002",
+        created_by=1,
+    )
+
+    rows = await employee_task_source_session.execute(select(EmployeeTask))
+    tasks = rows.scalars().all()
+    assert len(tasks) == 1
+    assert first["task_id"] == second["task_id"] == "performance-confirmation:2026-04:EMP002"
+
+
+@pytest.mark.asyncio
 async def test_sync_monthly_cost_entry_task_rejects_owner_without_required_permission(employee_task_source_session):
     from backend.services.employee_task_sources import sync_monthly_cost_entry_task
 

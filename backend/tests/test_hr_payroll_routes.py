@@ -50,6 +50,7 @@ def test_get_salary_structure_returns_current_effective_version():
         meal_allowance=0.0,
         communication_allowance=0.0,
         other_allowance=0.0,
+        performance_package_amount=0.0,
         performance_ratio=0.2,
         commission_ratio=0.05,
         social_insurance_base=1500.0,
@@ -81,6 +82,7 @@ def test_list_salary_structure_history_returns_versions_desc():
             meal_allowance=0.0,
             communication_allowance=0.0,
             other_allowance=0.0,
+            performance_package_amount=0.0,
             performance_ratio=0.15,
             commission_ratio=0.03,
             social_insurance_base=1800.0,
@@ -100,6 +102,7 @@ def test_list_salary_structure_history_returns_versions_desc():
             meal_allowance=0.0,
             communication_allowance=0.0,
             other_allowance=0.0,
+            performance_package_amount=0.0,
             performance_ratio=0.1,
             commission_ratio=0.02,
             social_insurance_base=1600.0,
@@ -196,6 +199,7 @@ def test_update_salary_structure_updates_selected_version():
         meal_allowance=0.0,
         communication_allowance=0.0,
         other_allowance=0.0,
+        performance_package_amount=0.0,
         performance_ratio=0.1,
         commission_ratio=0.05,
         social_insurance_base=1200.0,
@@ -444,6 +448,8 @@ def test_refresh_payroll_record_returns_latest_payload():
     assert resp["success"] is True
     assert resp["data"]["employee_code"] == "EMP200"
     assert resp["locked_conflicts"] == 0
+    assert "is_stale_against_latest_calc" in resp
+    assert "latest_calculated_at" in resp
 
 
 def test_refresh_payroll_record_returns_locked_conflicts():

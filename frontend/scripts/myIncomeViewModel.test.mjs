@@ -32,5 +32,7 @@ test('buildMyIncomeExplanations describes the three income source narratives', (
   assert.equal(explanations.length, 3)
   assert.equal(explanations[0].title, '提成来源')
   assert.equal(explanations[1].title, '绩效工资来源')
-  assert.equal(explanations[2].title, '绩效得分来源')
+  assert.equal(explanations[2].title, '个人绩效来源')
+  assert.match(explanations[1].body, /独立绩效包/)
+  assert.match(explanations[2].body, /个人绩效输入项/)
 })
