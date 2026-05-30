@@ -34,7 +34,7 @@ PLATFORM_HELPERS = {
         "open": "Open-PwcliMiaoshou",
         "save": "Save-PwcliMiaoshouState",
         "show": "Show-PwcliPaths -Platform miaoshou",
-        "title": "妙手",
+        "title": "\u5999\u624b",
     },
     "shopee": {
         "open": "Open-PwcliShopee",
@@ -51,42 +51,49 @@ PLATFORM_HELPERS = {
 }
 
 
-def _database_url() -> str:
-    return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+def database_url() -> str:
+    return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL).strip()
 
 
-def _slugify(value: str) -> str:
-    text = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip().lower())
-    text = re.sub(r"-{2,}", "-", text).strip("-")
-    return text or "account"
+def slugify(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip().lower())
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
+    return cleaned or "account"
 
 
-def _work_tag(platform: str, account_id: str) -> str:
-    return f"{_slugify(platform)}-{_slugify(account_id)}-inspect"
+def work_tag(platform: str, account_id: str) -> str:
+    return f"{slugify(platform)}-{slugify(account_id)}-inspect"
 
 
-def _display_name(row: MainAccountRow) -> str:
-    name = (row.main_account_name or "").strip()
-    username = (row.username or "").strip()
-    account_id = (row.main_account_id or "").strip()
-    if name and name != account_id:
-        return name
+def quote_ps(value: str) -> str:
+    return str(value or "").replace("'", "''")
+
+
+def display_name(row: MainAccountRow) -> str:
+    account_id = row.main_account_id.strip()
+    main_name = row.main_account_name.strip()
+    username = row.username.strip()
+    if main_name and main_name != account_id:
+        return main_name
     if username and username != account_id:
         return f"{account_id} ({username})"
     return account_id
 
 
-def _load_accounts() -> list[MainAccountRow]:
-    engine = sa.create_engine(_database_url())
+def load_accounts() -> list[MainAccountRow]:
     query = sa.text(
         """
-        select platform, main_account_id, coalesce(main_account_name, '') as main_account_name,
-               coalesce(username, '') as username
+        select
+            platform,
+            main_account_id,
+            coalesce(main_account_name, '') as main_account_name,
+            coalesce(username, '') as username
         from core.main_accounts
         where enabled = true
         order by platform, main_account_id
         """
     )
+    engine = sa.create_engine(database_url())
     with engine.connect() as conn:
         return [
             MainAccountRow(
@@ -99,116 +106,140 @@ def _load_accounts() -> list[MainAccountRow]:
         ]
 
 
-def _render_account_block(row: MainAccountRow) -> str:
+def render_account_block(row: MainAccountRow) -> str:
     helpers = PLATFORM_HELPERS[row.platform]
-    work_tag = _work_tag(row.platform, row.main_account_id)
-    account_id = row.main_account_id.replace("'", "''")
-    return f"""### {_display_name(row)}
+    account_id = quote_ps(row.main_account_id)
+    tag = work_tag(row.platform, row.main_account_id)
+    return "\n".join(
+        [
+            f"### {display_name(row)}",
+            "",
+            "\u6253\u5f00:",
+            "",
+            "```powershell",
+            f"{helpers['open']} -WorkTag {tag} -AccountId '{account_id}'",
+            "```",
+            "",
+            "\u4fdd\u5b58:",
+            "",
+            "```powershell",
+            f"{helpers['save']} -AccountId '{account_id}'",
+            "```",
+            "",
+            "\u68c0\u67e5:",
+            "",
+            "```powershell",
+            f"{helpers['show']} -AccountId '{account_id}' -WorkTag {tag}",
+            "```",
+        ]
+    )
 
-打开:
 
-```powershell
-{helpers["open"]} -WorkTag {work_tag} -AccountId '{account_id}'
-```
+def render_summary_table(rows: list[MainAccountRow]) -> list[str]:
+    lines = [
+        "## \u8d26\u53f7\u603b\u8868",
+        "",
+        "| \u5e73\u53f0 | \u663e\u793a\u540d | AccountId | WorkTag |",
+        "| --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            "| {platform} | {name} | `{account_id}` | `{tag}` |".format(
+                platform=PLATFORM_HELPERS[row.platform]["title"],
+                name=display_name(row).replace("|", "\\|"),
+                account_id=row.main_account_id,
+                tag=work_tag(row.platform, row.main_account_id),
+            )
+        )
+    return lines
 
-保存:
 
-```powershell
-{helpers["save"]} -AccountId '{account_id}'
-```
-
-检查:
-
-```powershell
-{helpers["show"]} -AccountId '{account_id}' -WorkTag {work_tag}
-```"""
-
-
-def _render(accounts: list[MainAccountRow]) -> str:
+def render_document(rows: list[MainAccountRow]) -> str:
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines: list[str] = [
-        "# PWCLI 账号命令清单",
+        "# PWCLI \u8d26\u53f7\u547d\u4ee4\u6e05\u5355",
         "",
-        "> 自动生成文件，请勿手工修改。",
-        "> 刷新命令: `python scripts/generate_pwcli_account_commands.py`",
-        f"> 生成时间: `{generated_at}`",
-        f"> 数据来源: `{_database_url()}` 中的 `core.main_accounts where enabled = true`",
+        "> \u81ea\u52a8\u751f\u6210\u6587\u4ef6\uff0c\u8bf7\u52ff\u624b\u5de5\u4fee\u6539\u3002",
+        "> \u5237\u65b0\u547d\u4ee4: `python scripts/generate_pwcli_account_commands.py`",
+        f"> \u751f\u6210\u65f6\u95f4: `{generated_at}`",
+        f"> \u6570\u636e\u6765\u6e90: `{database_url()}` \u4e2d\u7684 `core.main_accounts where enabled = true`",
         "",
-        "本文档提供给业务同事直接复制使用。",
+        "\u672c\u6587\u6863\u63d0\u4f9b\u7ed9\u4e1a\u52a1\u540c\u4e8b\u76f4\u63a5\u590d\u5236\u4f7f\u7528\u3002",
         "",
-        "规则:",
+        "\u89c4\u5219:",
         "",
-        "1. 先执行“打开命令”。",
-        "2. 在打开的浏览器里人工巡店、人工操作。",
-        "3. 操作结束后执行“保存命令”。",
-        "4. 如需确认路径是否正确，可执行“检查命令”。",
+        "1. \u5148\u6267\u884c\u201c\u6253\u5f00\u547d\u4ee4\u201d",
+        "2. \u5728\u6253\u5f00\u7684\u6d4f\u89c8\u5668\u91cc\u4eba\u5de5\u5de1\u5e97\u3001\u4eba\u5de5\u64cd\u4f5c",
+        "3. \u64cd\u4f5c\u7ed3\u675f\u540e\u6267\u884c\u201c\u4fdd\u5b58\u547d\u4ee4\u201d",
+        "4. \u5982\u9700\u786e\u8ba4\u8def\u5f84\u662f\u5426\u6b63\u786e\uff0c\u53ef\u6267\u884c\u201c\u68c0\u67e5\u547d\u4ee4\u201d",
         "",
-        "注意:",
+        "\u6ce8\u610f:",
         "",
-        "1. 同一平台下，不同账号不能使用同一个 `WorkTag`。",
-        "2. 本清单已为每个账号分配固定 `WorkTag`，直接复制即可。",
-        "3. 必须使用这里的正式 `AccountId`，不要改成旧店铺名、旧别名或历史用户名。",
+        "1. \u540c\u4e00\u5e73\u53f0\u4e0b\uff0c\u4e0d\u540c\u8d26\u53f7\u4e0d\u80fd\u4f7f\u7528\u540c\u4e00\u4e2a `WorkTag`",
+        "2. \u672c\u6e05\u5355\u5df2\u4e3a\u6bcf\u4e2a\u8d26\u53f7\u5206\u914d\u56fa\u5b9a `WorkTag`\uff0c\u76f4\u63a5\u590d\u5236\u5373\u53ef",
+        "3. \u5fc5\u987b\u4f7f\u7528\u8fd9\u91cc\u7684\u6b63\u5f0f `AccountId`\uff0c\u4e0d\u8981\u6539\u6210\u65e7\u5e97\u94fa\u540d\u3001\u65e7\u522b\u540d\u6216\u5386\u53f2\u7528\u6237\u540d",
         "",
-        "## 通用模板",
+        "## \u901a\u7528\u6a21\u677f",
         "",
         "Shopee:",
         "",
         "```powershell",
-        "Open-PwcliShopee -WorkTag <固定-worktag> -AccountId '<main-account-id>'",
+        "Open-PwcliShopee -WorkTag <fixed-worktag> -AccountId '<main-account-id>'",
         "Save-PwcliShopeeState -AccountId '<main-account-id>'",
-        "Show-PwcliPaths -Platform shopee -AccountId '<main-account-id>' -WorkTag <固定-worktag>",
+        "Show-PwcliPaths -Platform shopee -AccountId '<main-account-id>' -WorkTag <fixed-worktag>",
         "```",
         "",
         "TikTok:",
         "",
         "```powershell",
-        "Open-PwcliTiktok -WorkTag <固定-worktag> -AccountId '<main-account-id>'",
+        "Open-PwcliTiktok -WorkTag <fixed-worktag> -AccountId '<main-account-id>'",
         "Save-PwcliTiktokState -AccountId '<main-account-id>'",
-        "Show-PwcliPaths -Platform tiktok -AccountId '<main-account-id>' -WorkTag <固定-worktag>",
+        "Show-PwcliPaths -Platform tiktok -AccountId '<main-account-id>' -WorkTag <fixed-worktag>",
         "```",
         "",
-        "妙手:",
+        "\u5999\u624b:",
         "",
         "```powershell",
-        "Open-PwcliMiaoshou -WorkTag <固定-worktag> -AccountId '<main-account-id>'",
+        "Open-PwcliMiaoshou -WorkTag <fixed-worktag> -AccountId '<main-account-id>'",
         "Save-PwcliMiaoshouState -AccountId '<main-account-id>'",
-        "Show-PwcliPaths -Platform miaoshou -AccountId '<main-account-id>' -WorkTag <固定-worktag>",
+        "Show-PwcliPaths -Platform miaoshou -AccountId '<main-account-id>' -WorkTag <fixed-worktag>",
         "```",
         "",
     ]
 
+    lines.extend(render_summary_table(rows))
+
     for platform in ("miaoshou", "shopee", "tiktok"):
-        platform_rows = [row for row in accounts if row.platform == platform]
+        platform_rows = [row for row in rows if row.platform == platform]
         if not platform_rows:
             continue
-        lines.append(f"## {PLATFORM_HELPERS[platform]['title']}")
-        lines.append("")
+        lines.extend(["", f"## {PLATFORM_HELPERS[platform]['title']}"])
         for row in platform_rows:
-            lines.append(_render_account_block(row))
-            lines.append("")
+            lines.extend(["", render_account_block(row)])
 
     lines.extend(
         [
-            "## 保存时机",
             "",
-            "只有在以下场景才建议保存:",
+            "## \u4fdd\u5b58\u65f6\u673a",
             "",
-            "1. 已经稳定进入后台首页。",
-            "2. 已经完成验证码或二次验证。",
-            "3. 当前页面不是登录页、报错页、验证页。",
+            "\u53ea\u6709\u5728\u4ee5\u4e0b\u573a\u666f\u624d\u5efa\u8bae\u4fdd\u5b58:",
             "",
-            "不要在以下场景保存:",
+            "1. \u5df2\u7ecf\u7a33\u5b9a\u8fdb\u5165\u540e\u53f0\u9996\u9875",
+            "2. \u5df2\u7ecf\u5b8c\u6210\u9a8c\u8bc1\u7801\u6216\u4e8c\u6b21\u9a8c\u8bc1",
+            "3. \u5f53\u524d\u9875\u9762\u4e0d\u662f\u767b\u5f55\u9875\u3001\u62a5\u9519\u9875\u3001\u9a8c\u8bc1\u9875",
             "",
-            "1. 刚打开还在跳转。",
-            "2. 停留在登录页。",
-            "3. 停留在验证码页。",
-            "4. 页面明显异常。",
+            "\u4e0d\u8981\u5728\u4ee5\u4e0b\u573a\u666f\u4fdd\u5b58:",
             "",
-            "## 更新方式",
+            "1. \u521a\u6253\u5f00\u8fd8\u5728\u8df3\u8f6c",
+            "2. \u505c\u7559\u5728\u767b\u5f55\u9875",
+            "3. \u505c\u7559\u5728\u9a8c\u8bc1\u7801\u9875",
+            "4. \u9875\u9762\u660e\u663e\u5f02\u5e38",
             "",
-            "本清单基于账号管理中的当前启用主账号自动生成。",
+            "## \u66f4\u65b0\u65b9\u5f0f",
             "",
-            "当 `core.main_accounts` 中启用账号有新增、停用或重命名时，执行以下命令刷新:",
+            "\u672c\u6e05\u5355\u57fa\u4e8e\u8d26\u53f7\u7ba1\u7406\u4e2d\u7684\u5f53\u524d\u542f\u7528\u4e3b\u8d26\u53f7\u81ea\u52a8\u751f\u6210\u3002",
+            "",
+            "\u5f53 `core.main_accounts` \u4e2d\u542f\u7528\u8d26\u53f7\u6709\u65b0\u589e\u3001\u505c\u7528\u6216\u91cd\u547d\u540d\u65f6\uff0c\u8bf7\u6267\u884c:",
             "",
             "```powershell",
             "python scripts/generate_pwcli_account_commands.py",
@@ -219,11 +250,11 @@ def _render(accounts: list[MainAccountRow]) -> str:
 
 
 def main() -> int:
-    accounts = _load_accounts()
+    rows = load_accounts()
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(_render(accounts), encoding="utf-8")
+    OUTPUT_PATH.write_text(render_document(rows), encoding="utf-8")
     print(f"[PASS] Generated {OUTPUT_PATH}")
-    print(f"[INFO] Enabled main accounts: {len(accounts)}")
+    print(f"[INFO] Active main accounts: {len(rows)}")
     return 0
 
 
