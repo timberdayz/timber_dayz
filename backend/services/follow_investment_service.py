@@ -7,7 +7,6 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.profit_basis_service import ProfitBasisService
 from modules.core.db import ApprovalLog, DimUser, FollowInvestment, FollowInvestmentDetail, FollowInvestmentSettlement, ShopProfitBasis
 
 
@@ -106,6 +105,38 @@ class FollowInvestmentService:
             }
             for row in rows
         ]
+
+    async def _load_profit_basis_snapshot(
+        self,
+        year_month: str,
+        platform_code: str,
+        shop_id: str,
+        basis_version: str = "A_ONLY_V1",
+    ) -> dict[str, Any] | None:
+        if self.db is None:
+            return None
+        result = await self.db.execute(
+            select(ShopProfitBasis).where(
+                ShopProfitBasis.period_month == year_month,
+                ShopProfitBasis.platform_code == platform_code.lower(),
+                ShopProfitBasis.shop_id == shop_id,
+                ShopProfitBasis.basis_version == basis_version,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "period_month": getattr(row, "period_month", year_month),
+            "platform_code": getattr(row, "platform_code", platform_code.lower()),
+            "shop_id": getattr(row, "shop_id", shop_id),
+            "orders_profit_amount": float(getattr(row, "orders_profit_amount", 0.0) or 0.0),
+            "a_class_cost_amount": float(getattr(row, "a_class_cost_amount", 0.0) or 0.0),
+            "b_class_cost_amount": float(getattr(row, "b_class_cost_amount", 0.0) or 0.0),
+            "profit_basis_amount": float(getattr(row, "profit_basis_amount", 0.0) or 0.0),
+            "basis_version": getattr(row, "basis_version", basis_version),
+            "id": getattr(row, "id", None),
+        }
 
     async def list_investments(
         self,
@@ -236,16 +267,17 @@ class FollowInvestmentService:
         shop_id: str,
         distribution_ratio: float,
     ) -> dict[str, Any]:
-        basis_service = ProfitBasisService(self.db)
-        basis = await basis_service.build_profit_basis(
+        basis = await self._load_profit_basis_snapshot(
             year_month=year_month,
             platform_code=platform_code,
             shop_id=shop_id,
         )
-        distributable_amount = basis_service.calculate_distributable_amount(
-            profit_basis_amount=basis["profit_basis_amount"],
-            distribution_ratio=distribution_ratio,
-        )
+        if basis is None:
+            raise ValueError("profit basis snapshot not found")
+
+        distributable_amount = 0.0
+        if basis["profit_basis_amount"] > 0:
+            distributable_amount = round(basis["profit_basis_amount"] * distribution_ratio, 2)
         investments = await self._load_active_investments(platform_code, shop_id)
         details = self.build_settlement_details(
             year_month=year_month,
@@ -261,35 +293,6 @@ class FollowInvestmentService:
             "distributable_amount": distributable_amount,
         }
         if self.db is not None:
-            basis_row = (
-                await self.db.execute(
-                    select(ShopProfitBasis).where(
-                        ShopProfitBasis.period_month == year_month,
-                        ShopProfitBasis.platform_code == platform_code.lower(),
-                        ShopProfitBasis.shop_id == shop_id,
-                        ShopProfitBasis.basis_version == basis["basis_version"],
-                    )
-                )
-            ).scalar_one_or_none()
-            if basis_row is None:
-                basis_row = ShopProfitBasis(
-                    period_month=year_month,
-                    platform_code=platform_code.lower(),
-                    shop_id=shop_id,
-                    orders_profit_amount=basis["orders_profit_amount"],
-                    a_class_cost_amount=basis["a_class_cost_amount"],
-                    b_class_cost_amount=basis["b_class_cost_amount"],
-                    profit_basis_amount=basis["profit_basis_amount"],
-                    basis_version=basis["basis_version"],
-                )
-                self.db.add(basis_row)
-                await self.db.flush()
-            else:
-                basis_row.orders_profit_amount = basis["orders_profit_amount"]
-                basis_row.a_class_cost_amount = basis["a_class_cost_amount"]
-                basis_row.b_class_cost_amount = basis["b_class_cost_amount"]
-                basis_row.profit_basis_amount = basis["profit_basis_amount"]
-
             existing = (
                 await self.db.execute(
                     select(FollowInvestmentSettlement).where(
@@ -304,7 +307,7 @@ class FollowInvestmentService:
 
             if existing is None:
                 existing = FollowInvestmentSettlement(
-                    profit_basis_id=basis_row.id,
+                    profit_basis_id=basis["id"],
                     period_month=year_month,
                     platform_code=platform_code.lower(),
                     shop_id=shop_id,
@@ -312,7 +315,7 @@ class FollowInvestmentService:
                 self.db.add(existing)
                 await self.db.flush()
 
-            existing.profit_basis_id = basis_row.id
+            existing.profit_basis_id = basis["id"]
             existing.profit_basis_amount = basis["profit_basis_amount"]
             existing.distribution_ratio = distribution_ratio
             existing.distributable_amount = distributable_amount
@@ -348,10 +351,14 @@ class FollowInvestmentService:
         settlement = (
             await self.db.execute(
                 select(FollowInvestmentSettlement).where(FollowInvestmentSettlement.id == settlement_id)
-            )
+        )
         ).scalar_one_or_none()
         if not settlement:
             raise ValueError("settlement not found")
+        if settlement.status == "approved":
+            raise ValueError("settlement already approved")
+        if settlement.status not in {"calculated"}:
+            raise ValueError("only calculated settlement can be approved")
         settlement.status = "approved"
         settlement.approved_by = approver
         settlement.approved_at = datetime.now(timezone.utc)
@@ -369,6 +376,7 @@ class FollowInvestmentService:
                 approver=approver,
                 status="approved",
                 comment="approved via finance follow investment workflow",
+                approved_at=datetime.now(timezone.utc),
             )
         )
         await self.db.commit()
@@ -384,11 +392,13 @@ class FollowInvestmentService:
         settlement = (
             await self.db.execute(
                 select(FollowInvestmentSettlement).where(FollowInvestmentSettlement.id == settlement_id)
-            )
+        )
         ).scalar_one_or_none()
         if not settlement:
             raise ValueError("settlement not found")
-        settlement.status = "draft"
+        if settlement.status != "approved":
+            raise ValueError("only approved settlement can be reopened")
+        settlement.status = "reopened"
         settlement.approved_by = None
         settlement.approved_at = None
         details = (

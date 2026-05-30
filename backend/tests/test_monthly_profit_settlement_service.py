@@ -236,6 +236,45 @@ async def test_get_monthly_profit_settlement_prefers_snapshot_view_for_approved_
 
 
 @pytest.mark.asyncio
+async def test_snapshot_view_rebuilds_personnel_actual_from_snapshot_rows(monkeypatch):
+    module = _load_service_module()
+    service = module.MonthlyProfitSettlementService(_make_db())
+
+    record = SimpleNamespace(
+        id=12,
+        period_month="2026-04",
+        status="approved",
+        net_profit_amount=100000.0,
+        personnel_actual_amount=0.0,
+        follow_actual_amount=6000.0,
+        adjustment_amount=0.0,
+        personnel_target_ratio=0.3,
+        follow_target_ratio=0.2,
+        company_target_ratio=0.5,
+        approved_by="9",
+        remark=None,
+    )
+
+    monkeypatch.setattr(service, "_load_active_snapshot_version", AsyncMock(return_value=2))
+    monkeypatch.setattr(
+        service,
+        "_load_snapshot_personnel_details",
+        AsyncMock(return_value=[
+            {"detail_type": "payroll_total_cost", "amount": 26000.0, "employee_code": "EMP001", "source_module": "payroll_snapshot"},
+            {"detail_type": "payroll_total_cost", "amount": 6000.0, "employee_code": "EMP002", "source_module": "payroll_snapshot"},
+        ]),
+    )
+    monkeypatch.setattr(service, "_load_follow_details", AsyncMock(return_value=[]))
+    monkeypatch.setattr(service, "_load_adjustments", AsyncMock(return_value=[]))
+
+    payload = await service.load_snapshot_settlement_view(record)
+
+    assert payload["summary"]["personnel_actual_amount"] == pytest.approx(32000.0)
+    assert payload["summary"]["company_actual_amount"] == pytest.approx(68000.0)
+    assert payload["personnel_details"][0]["source_module"] == "payroll_snapshot"
+
+
+@pytest.mark.asyncio
 async def test_load_follow_payload_expands_investor_level_details():
     module = _load_service_module()
     db = _make_db()
@@ -383,6 +422,14 @@ async def test_approve_builds_snapshots_before_marking_settlement_approved(monke
     record = SimpleNamespace(
         id=12,
         period_month="2026-04",
+        net_profit_amount=100000.0,
+        personnel_target_ratio=0.3,
+        follow_target_ratio=0.2,
+        company_target_ratio=0.5,
+        personnel_actual_amount=0.0,
+        follow_actual_amount=18000.0,
+        company_actual_amount=82000.0,
+        adjustment_amount=0.0,
         status="draft",
         difference_amount=0.0,
         difference_ratio=0.0,
@@ -394,8 +441,37 @@ async def test_approve_builds_snapshots_before_marking_settlement_approved(monke
 
     get_next_snapshot_version = AsyncMock(return_value=1)
     build_settlement_snapshots = AsyncMock()
+    load_snapshot_settlement_view = AsyncMock(return_value={
+        "summary": {
+            "id": 12,
+            "period_month": "2026-04",
+            "net_profit_amount": 100000.0,
+            "personnel_target_ratio": 0.3,
+            "follow_target_ratio": 0.2,
+            "company_target_ratio": 0.5,
+            "personnel_target_amount": 30000.0,
+            "follow_target_amount": 20000.0,
+            "company_target_amount": 50000.0,
+            "personnel_actual_amount": 32000.0,
+            "follow_actual_amount": 18000.0,
+            "company_actual_amount": 50000.0,
+            "personnel_actual_ratio": 0.32,
+            "follow_actual_ratio": 0.18,
+            "company_actual_ratio": 0.5,
+            "adjustment_amount": 0.0,
+            "difference_amount": 0.0,
+            "difference_ratio": 0.0,
+            "status": "approved",
+            "approved_by": "9",
+            "remark": None,
+        },
+        "personnel_details": [],
+        "follow_details": [],
+        "adjustments": [],
+    })
     monkeypatch.setattr(service, "get_next_snapshot_version", get_next_snapshot_version)
     monkeypatch.setattr(service, "build_settlement_snapshots", build_settlement_snapshots)
+    monkeypatch.setattr(service, "load_snapshot_settlement_view", load_snapshot_settlement_view)
 
     payload = await service.approve(12, "9")
 
@@ -407,6 +483,8 @@ async def test_approve_builds_snapshots_before_marking_settlement_approved(monke
         snapshot_version=1,
         created_by="9",
     )
+    load_snapshot_settlement_view.assert_awaited_once_with(record)
+    assert record.personnel_actual_amount == pytest.approx(32000.0)
 
 
 @pytest.mark.asyncio

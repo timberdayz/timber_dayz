@@ -10,9 +10,9 @@ const routerPath = path.join(frontendRoot, 'src/router/index.js')
 
 const EXPECTED_ROUTE_WRAPPER_COUNT = 0
 const EXPECTED_UNIQUE_WRAPPER_COUNT = 0
-const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 100
+const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 105
 const EXPECTED_DIRECT_DOMAIN_COUNTS = {
-  business: 47,
+  business: 52,
   collection: 6,
   data_platform: 9,
   platform: 38,
@@ -63,6 +63,8 @@ const EXPECTED_ROUTE_SPECIFIERS = [
   '@/domains/platform/views/RoleManagement.vue',
   '@/domains/platform/views/PermissionManagement.vue',
   '@/domains/business/views/target/TargetManagement.vue',
+  '@/domains/business/views/target/TargetPersonManagement.vue',
+  '@/domains/business/views/target/TargetOperationManagement.vue',
   '@/domains/business/views/config/SalesTargetManagement.vue',
   '@/domains/platform/views/Debug.vue',
   '@/domains/business/views/Test.vue',
@@ -94,8 +96,11 @@ const EXPECTED_ROUTE_SPECIFIERS = [
   '@/domains/business/views/hr/MyIncome.vue',
   '@/domains/business/views/hr/MyFollowInvestmentIncome.vue',
   '@/domains/business/views/hr/EmployeeSalary.vue',
-  '@/domains/business/views/hr/PerformanceManagement.vue',
-  '@/domains/business/views/hr/PerformanceDisplay.vue',
+  '@/domains/business/views/hr/IncomeAudit.vue',
+  '@/domains/business/views/hr/PerformanceManagementShop.vue',
+  '@/domains/business/views/hr/PerformanceManagementPerson.vue',
+  '@/domains/business/views/hr/PerformanceDisplayShop.vue',
+  '@/domains/business/views/hr/PerformanceDisplayPerson.vue',
   '@/domains/business/views/hr/ShopAssignment.vue',
   '@/domains/platform/views/approval/MyTasks.vue',
   '@/domains/platform/views/training/TrainingOverview.vue',

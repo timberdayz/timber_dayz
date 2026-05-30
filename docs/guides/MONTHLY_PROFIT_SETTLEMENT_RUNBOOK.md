@@ -67,6 +67,16 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
   - `finance.follow_investment_settlements`
   - `finance.follow_investment_details`
 
+### 3.1 冻结事实源
+
+当前结算链路中，以下对象视为冻结事实源，结算模块只能读取，不能反向改写：
+
+- `PayrollRecord`
+- `MonthlyProfitPayrollSnapshot`
+- `EmployeeCommission`
+- `EmployeePerformance`
+- `ShopProfitBasis`
+
 ## 4. 当前 Phase 1 范围
 
 本阶段已经实现：
@@ -99,6 +109,13 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 对应页面：
 
 - `frontend/src/domains/business/views/FinancialManagement.vue`
+
+当前前端结构：
+
+- 编排层：`FinancialManagement.vue`
+- 公司月结面板：`MonthlySettlementPanel.vue`
+- 店铺工作区面板：`SettlementWorkspacePanel.vue`
+- 结算专用状态：`frontend/src/stores/financeSettlement.js`
 
 后端接口：
 
@@ -218,6 +235,17 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 - 当前 active snapshot 会被标记为 `superseded`
 - 再去修正上游数据或调整月结参数
 - 最后重新审批
+
+## 6.1 当前页面内的推荐操作顺序
+
+当前财务结算中心页面已经显式提示推荐顺序：
+
+1. 先查或重算利润口径
+2. 再处理跟投记录和跟投试算
+3. 再查看或审批结算台账
+4. 最后回到公司月结核对总账
+
+如果店铺台账已经 `approved`，页面会提示必须先回退审批，再重新试算或重建。
 
 ## 7. 当前人员成本组成
 
@@ -372,4 +400,22 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 - 已批准月份的月结详情优先读取冻结 snapshot，不再直接回读运行态工资单或中间结果。
 - `reopen` 会使当前 active snapshot 失效；重新批准后会生成新的 snapshot 版本。
 - `draft` 继续读取运行态聚合结果；`approved` 一律优先看 snapshot。
+
+## 16. 标准真实回归样例（2026-05-30）
+
+当前推荐的标准真实回归样例如下：
+
+- 员工：李四
+- 员工编码：`EMP260004`
+- 用户名：`lisi`
+- 月份：`2026-03`
+- 跟投样例店铺：`shopee / 1308200825`
+
+当前已验证结论：
+
+- 李四 `我的收入` 为 `5946.53`
+- 李四 `我的跟投收益` approved 值为 `938.5`
+- 月结 `approved` 后，`/api/hr/me/income` 读取 `payroll_snapshot`
+- 月结 `reopen` 后，`/api/hr/me/income` 回退为 `payroll_record`
+- 再次 `rebuild -> approve` 后，会生成新的 active snapshot，并保留 superseded 历史版本
 

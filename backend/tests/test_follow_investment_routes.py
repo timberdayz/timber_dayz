@@ -20,7 +20,8 @@ def _make_user(role_code: str = "finance", user_id: int = 1) -> SimpleNamespace:
 
 @pytest.mark.asyncio
 async def test_follow_investment_settlement_calculate_route_returns_service_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
+
     submit_mock = AsyncMock()
 
     class _ServiceStub:
@@ -34,10 +35,34 @@ async def test_follow_investment_settlement_calculate_route_returns_service_payl
                     "distribution_ratio": distribution_ratio,
                     "profit_basis_amount": 80000,
                     "distributable_amount": 32000,
+                    "status": "calculated",
+                    "approved_by": None,
+                    "approved_by_name": None,
+                    "approved_at": None,
                 },
                 "details": [
-                    {"investor_user_id": 101, "estimated_income": 24432},
-                    {"investor_user_id": 102, "estimated_income": 7568},
+                    {
+                        "investor_user_id": 101,
+                        "investor_name": "张三",
+                        "contribution_amount_snapshot": 50000,
+                        "occupied_days": 31,
+                        "weighted_capital": 1550000,
+                        "share_ratio": 0.7635,
+                        "estimated_income": 24432,
+                        "approved_income": 0,
+                        "paid_income": 0,
+                    },
+                    {
+                        "investor_user_id": 102,
+                        "investor_name": "李四",
+                        "contribution_amount_snapshot": 15000,
+                        "occupied_days": 31,
+                        "weighted_capital": 465000,
+                        "share_ratio": 0.2365,
+                        "estimated_income": 7568,
+                        "approved_income": 0,
+                        "paid_income": 0,
+                    },
                 ],
             }
 
@@ -51,7 +76,7 @@ async def test_follow_investment_settlement_calculate_route_returns_service_payl
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
     monkeypatch.setattr(
@@ -73,6 +98,7 @@ async def test_follow_investment_settlement_calculate_route_returns_service_payl
     body = json.loads(response.content.decode("utf-8"))
     assert response.status_code == 200
     assert body["success"] is True
+    assert body["data"]["settlement"]["status"] == "calculated"
     assert body["data"]["settlement"]["distributable_amount"] == 32000
     assert len(body["data"]["details"]) == 2
     submit_mock.assert_awaited_once()
@@ -88,10 +114,10 @@ async def test_follow_investment_settlement_calculate_route_returns_service_payl
 
 @pytest.mark.asyncio
 async def test_follow_investment_list_route_returns_service_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     class _ServiceStub:
-        async def list_investments(self, platform_code=None, shop_id=None, status=None):
+        async def list_investments(self, platform_code=None, shop_id=None, status=None, period_month=None):
             return [
                 {
                     "id": 1,
@@ -100,7 +126,11 @@ async def test_follow_investment_list_route_returns_service_payload(monkeypatch)
                     "platform_code": "shopee",
                     "shop_id": "shop-1",
                     "contribution_amount": 50000,
+                    "contribution_date": "2026-03-01",
+                    "withdraw_date": None,
+                    "capital_type": "working_capital",
                     "status": "active",
+                    "remark": None,
                 }
             ]
 
@@ -112,7 +142,7 @@ async def test_follow_investment_list_route_returns_service_payload(monkeypatch)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
 
@@ -131,7 +161,7 @@ async def test_follow_investment_list_route_returns_service_payload(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_follow_investment_create_route_returns_service_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     class _ServiceStub:
         async def create_investment(self, payload):
@@ -142,7 +172,11 @@ async def test_follow_investment_create_route_returns_service_payload(monkeypatc
                 "platform_code": payload["platform_code"],
                 "shop_id": payload["shop_id"],
                 "contribution_amount": payload["contribution_amount"],
+                "contribution_date": payload["contribution_date"],
+                "withdraw_date": None,
+                "capital_type": payload.get("capital_type") or "working_capital",
                 "status": "active",
+                "remark": payload.get("remark"),
             }
 
     async def _override_db():
@@ -153,7 +187,7 @@ async def test_follow_investment_create_route_returns_service_payload(monkeypatc
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
 
@@ -179,11 +213,11 @@ async def test_follow_investment_create_route_returns_service_payload(monkeypatc
 
 @pytest.mark.asyncio
 async def test_follow_investment_archive_route_returns_service_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     class _ServiceStub:
         async def archive_investment(self, investment_id):
-            return {"id": investment_id, "status": "inactive"}
+            return {"id": investment_id, "status": "inactive", "approved_by": None, "approved_by_name": None}
 
     async def _override_db():
         yield object()
@@ -193,7 +227,7 @@ async def test_follow_investment_archive_route_returns_service_payload(monkeypat
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
 
@@ -208,7 +242,8 @@ async def test_follow_investment_archive_route_returns_service_payload(monkeypat
 
 @pytest.mark.asyncio
 async def test_follow_investment_approve_route_returns_service_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
+
     sync_mock = AsyncMock()
 
     class _ServiceStub:
@@ -230,7 +265,7 @@ async def test_follow_investment_approve_route_returns_service_payload(monkeypat
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance", user_id=9)
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
     monkeypatch.setattr(
@@ -258,13 +293,15 @@ async def test_follow_investment_approve_route_returns_service_payload(monkeypat
 
 @pytest.mark.asyncio
 async def test_follow_investment_reopen_route_returns_service_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     class _ServiceStub:
         async def reopen_settlement(self, settlement_id):
             return {
                 "id": settlement_id,
-                "status": "draft",
+                "status": "reopened",
+                "approved_by": None,
+                "approved_by_name": None,
             }
 
     async def _override_db():
@@ -275,7 +312,7 @@ async def test_follow_investment_reopen_route_returns_service_payload(monkeypatc
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance", user_id=9)
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
 
@@ -285,12 +322,12 @@ async def test_follow_investment_reopen_route_returns_service_payload(monkeypatc
     body = json.loads(response.content.decode("utf-8"))
     assert response.status_code == 200
     assert body["success"] is True
-    assert body["data"]["status"] == "draft"
+    assert body["data"]["status"] == "reopened"
 
 
 @pytest.mark.asyncio
 async def test_follow_investment_settlements_list_route_returns_service_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     class _ServiceStub:
         async def list_settlements(self, period_month=None, platform_code=None, shop_id=None, status=None):
@@ -304,6 +341,7 @@ async def test_follow_investment_settlements_list_route_returns_service_payload(
                     "distribution_ratio": 0.4,
                     "distributable_amount": 32000,
                     "status": "approved",
+                    "approved_by": "9",
                     "approved_by_name": "财务经理",
                     "approved_at": "2026-04-06T15:00:00+00:00",
                 }
@@ -317,7 +355,7 @@ async def test_follow_investment_settlements_list_route_returns_service_payload(
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
 
@@ -336,7 +374,7 @@ async def test_follow_investment_settlements_list_route_returns_service_payload(
 
 @pytest.mark.asyncio
 async def test_follow_investment_settlement_details_route_returns_service_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     class _ServiceStub:
         async def get_settlement_details(self, settlement_id):
@@ -362,7 +400,7 @@ async def test_follow_investment_settlement_details_route_returns_service_payloa
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
 
@@ -379,7 +417,7 @@ async def test_follow_investment_settlement_details_route_returns_service_payloa
 
 @pytest.mark.asyncio
 async def test_follow_investment_settlement_calculate_route_requires_finance_role():
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     async def _override_db():
         yield object()
@@ -405,7 +443,7 @@ async def test_follow_investment_settlement_calculate_route_requires_finance_rol
 
 @pytest.mark.asyncio
 async def test_follow_investment_create_route_requires_finance_role():
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     async def _override_db():
         yield object()
@@ -432,7 +470,7 @@ async def test_follow_investment_create_route_requires_finance_role():
 
 @pytest.mark.asyncio
 async def test_follow_investment_my_income_route_returns_current_user_payload(monkeypatch):
-    from backend.routers import follow_investment as follow_investment_router
+    from backend.domains.business.routers import follow_investment as follow_investment_router
 
     class _ServiceStub:
         async def get_my_income(self, user_id, period_month=None):
@@ -454,6 +492,7 @@ async def test_follow_investment_my_income_route_returns_current_user_payload(mo
                         "estimated_income": 24432,
                         "approved_income": 24432,
                         "paid_income": 18000,
+                        "approved_at": "2026-04-06T15:00:00+00:00",
                         "status": "approved",
                     }
                 ],
@@ -467,7 +506,7 @@ async def test_follow_investment_my_income_route_returns_current_user_payload(mo
     app.dependency_overrides[get_current_user] = lambda: _make_user("operator", user_id=101)
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.follow_investment.FollowInvestmentService",
+        "backend.domains.business.routers.follow_investment.FollowInvestmentService",
         lambda db: _ServiceStub(),
     )
 

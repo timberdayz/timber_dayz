@@ -7,7 +7,14 @@ from backend.dependencies.auth import get_current_user
 from backend.models.database import get_async_db
 from backend.schemas.follow_investment import (
     FollowInvestmentCreateRequest,
+    FollowInvestmentEnvelopeResponse,
+    FollowInvestmentListEnvelopeResponse,
+    FollowInvestmentMyIncomeEnvelopeResponse,
     FollowInvestmentSettlementCalculateRequest,
+    FollowInvestmentSettlementCalculateEnvelopeResponse,
+    FollowInvestmentSettlementDetailsEnvelopeResponse,
+    FollowInvestmentSettlementListEnvelopeResponse,
+    FollowInvestmentSettlementStatusEnvelopeResponse,
     FollowInvestmentUpdateRequest,
 )
 from backend.services.follow_investment_service import FollowInvestmentService
@@ -39,7 +46,7 @@ def _require_finance_role(current_user=Depends(get_current_user)):
     raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 
-@router.post("/settlements/calculate")
+@router.post("/settlements/calculate", response_model=FollowInvestmentSettlementCalculateEnvelopeResponse)
 async def calculate_follow_investment_settlement(
     body: FollowInvestmentSettlementCalculateRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -75,7 +82,7 @@ async def calculate_follow_investment_settlement(
     return success_response(data=payload)
 
 
-@router.get("")
+@router.get("", response_model=FollowInvestmentListEnvelopeResponse)
 async def list_follow_investments(
     platform_code: str | None = Query(None),
     shop_id: str | None = Query(None),
@@ -92,7 +99,7 @@ async def list_follow_investments(
     return success_response(data=payload)
 
 
-@router.post("")
+@router.post("", response_model=FollowInvestmentEnvelopeResponse)
 async def create_follow_investment(
     body: FollowInvestmentCreateRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -103,7 +110,7 @@ async def create_follow_investment(
     return success_response(data=payload)
 
 
-@router.put("/{investment_id}")
+@router.put("/{investment_id}", response_model=FollowInvestmentEnvelopeResponse)
 async def update_follow_investment(
     investment_id: int,
     body: FollowInvestmentUpdateRequest,
@@ -118,7 +125,7 @@ async def update_follow_investment(
     return success_response(data=payload)
 
 
-@router.post("/{investment_id}/archive")
+@router.post("/{investment_id}/archive", response_model=FollowInvestmentSettlementStatusEnvelopeResponse)
 async def archive_follow_investment(
     investment_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -132,7 +139,7 @@ async def archive_follow_investment(
     return success_response(data=payload)
 
 
-@router.post("/settlements/{settlement_id}/approve")
+@router.post("/settlements/{settlement_id}/approve", response_model=FollowInvestmentSettlementStatusEnvelopeResponse)
 async def approve_follow_investment_settlement(
     settlement_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -162,7 +169,7 @@ async def approve_follow_investment_settlement(
     return success_response(data=payload)
 
 
-@router.post("/settlements/{settlement_id}/reopen")
+@router.post("/settlements/{settlement_id}/reopen", response_model=FollowInvestmentSettlementStatusEnvelopeResponse)
 async def reopen_follow_investment_settlement(
     settlement_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -176,7 +183,7 @@ async def reopen_follow_investment_settlement(
     return success_response(data=payload)
 
 
-@router.get("/settlements")
+@router.get("/settlements", response_model=FollowInvestmentSettlementListEnvelopeResponse)
 async def list_follow_investment_settlements(
     period_month: str | None = Query(None),
     platform_code: str | None = Query(None),
@@ -195,7 +202,7 @@ async def list_follow_investment_settlements(
     return success_response(data=payload)
 
 
-@router.get("/settlements/{settlement_id}/details")
+@router.get("/settlements/{settlement_id}/details", response_model=FollowInvestmentSettlementDetailsEnvelopeResponse)
 async def get_follow_investment_settlement_details(
     settlement_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -206,7 +213,7 @@ async def get_follow_investment_settlement_details(
     return success_response(data=payload)
 
 
-@router.get("/my-income")
+@router.get("/my-income", response_model=FollowInvestmentMyIncomeEnvelopeResponse)
 async def get_my_follow_investment_income(
     period_month: str | None = Query(None, description="month in YYYY-MM"),
     db: AsyncSession = Depends(get_async_db),

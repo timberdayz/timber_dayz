@@ -289,6 +289,16 @@ class MonthlyProfitSettlementService:
     async def load_snapshot_settlement_view(self, record: Any) -> dict[str, Any]:
         settlement_id = int(self._get_value(record, "id"))
         snapshot_version = await self._load_active_snapshot_version(settlement_id)
+        personnel_details = (
+            await self._load_snapshot_personnel_details(settlement_id, snapshot_version)
+            if snapshot_version is not None
+            else []
+        )
+        follow_details = await self._load_follow_details(settlement_id)
+        adjustments = await self._load_adjustments(settlement_id)
+        personnel_actual_amount = sum(self._to_float(detail.get("amount")) for detail in personnel_details)
+        follow_actual_amount = sum(self._to_float(detail.get("amount")) for detail in follow_details)
+        adjustment_amount = sum(self._to_float(detail.get("amount")) for detail in adjustments)
         personnel_target_ratio = self._to_float(self._get_value(record, "personnel_target_ratio"))
         follow_target_ratio = self._to_float(self._get_value(record, "follow_target_ratio"))
         company_target_ratio = self._to_float(self._get_value(record, "company_target_ratio"))
@@ -297,9 +307,9 @@ class MonthlyProfitSettlementService:
         summary = self.build_summary(
             period_month=self._get_value(record, "period_month"),
             net_profit_amount=self._to_float(self._get_value(record, "net_profit_amount")),
-            personnel_actual_amount=self._to_float(self._get_value(record, "personnel_actual_amount")),
-            follow_actual_amount=self._to_float(self._get_value(record, "follow_actual_amount")),
-            adjustment_amount=self._to_float(self._get_value(record, "adjustment_amount")),
+            personnel_actual_amount=personnel_actual_amount,
+            follow_actual_amount=follow_actual_amount,
+            adjustment_amount=adjustment_amount,
             personnel_target_ratio=personnel_target_ratio,
             follow_target_ratio=follow_target_ratio,
             company_target_ratio=company_target_ratio,
@@ -308,16 +318,11 @@ class MonthlyProfitSettlementService:
             approved_by=self._get_value(record, "approved_by"),
             remark=self._get_value(record, "remark"),
         )
-        personnel_details = (
-            await self._load_snapshot_personnel_details(settlement_id, snapshot_version)
-            if snapshot_version is not None
-            else []
-        )
         return {
             "summary": summary,
             "personnel_details": personnel_details,
-            "follow_details": await self._load_follow_details(settlement_id),
-            "adjustments": await self._load_adjustments(settlement_id),
+            "follow_details": follow_details,
+            "adjustments": adjustments,
         }
 
     async def get_next_snapshot_version(self, settlement_id: int) -> int:
@@ -729,6 +734,25 @@ class MonthlyProfitSettlementService:
         record.approved_by = approver
         record.approved_at = datetime.now(timezone.utc)
         record.locked_at = datetime.now(timezone.utc)
+        snapshot_payload = await self.load_snapshot_settlement_view(record)
+        snapshot_summary = snapshot_payload["summary"]
+        for field in [
+            "net_profit_amount",
+            "personnel_target_ratio",
+            "follow_target_ratio",
+            "company_target_ratio",
+            "personnel_target_amount",
+            "follow_target_amount",
+            "company_target_amount",
+            "personnel_actual_amount",
+            "follow_actual_amount",
+            "company_actual_amount",
+            "adjustment_amount",
+            "difference_amount",
+            "difference_ratio",
+            "remark",
+        ]:
+            setattr(record, field, snapshot_summary[field])
         await self.db.commit()
         return {"id": settlement_id, "status": "approved", "approved_by": approver}
 

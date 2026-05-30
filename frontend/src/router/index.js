@@ -894,7 +894,7 @@ const routes = [
       title: '我的跟投收益',
       icon: 'Money',
       permission: 'my-follow-investment-income',
-      roles: ['admin', 'investor']
+      roles: ['admin', 'manager', 'operator', 'finance', 'investor']
     }
   },
   {
