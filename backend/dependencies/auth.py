@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from backend.models.database import get_async_db
+from backend.services.rbac_service import normalize_role_code
 from backend.services.auth_service import auth_service
 from modules.core.db import DimUser, UserSession
 from modules.core.logger import get_logger
@@ -37,14 +38,18 @@ def extract_role_codes(current_user: DimUser) -> set[str]:
 
     for role in getattr(current_user, "roles", []) or []:
         if isinstance(role, str):
-            role_codes.add(role.strip().lower())
+            normalized = normalize_role_code(role)
+            if normalized:
+                role_codes.add(normalized)
             continue
         role_code = getattr(role, "role_code", None)
         role_name = getattr(role, "role_name", None)
-        if role_code:
-            role_codes.add(str(role_code).strip().lower())
-        elif role_name:
-            role_codes.add(str(role_name).strip().lower())
+        normalized_code = normalize_role_code(role_code)
+        normalized_name = normalize_role_code(role_name)
+        if normalized_code:
+            role_codes.add(normalized_code)
+        if normalized_name:
+            role_codes.add(normalized_name)
     return role_codes
 
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from modules.core.db import CollectionConfig, CollectionConfigRun
 from modules.core.logger import get_logger
@@ -26,7 +27,7 @@ from backend.schemas.common import SuccessResponse
 
 logger = get_logger(__name__)
 
-router = APIRouter(tags=["数据采集-调度"])
+router = APIRouter(tags=["数据采集-调度"], dependencies=[Depends(require_admin)])
 
 
 # ============================================================

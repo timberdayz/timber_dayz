@@ -7,11 +7,18 @@ function normalizeRoles(inputRoles) {
   return inputRoles.map(normalizeRoleCode).filter(Boolean)
 }
 
+function resolvePermissions(userInfo = {}, roles = [], activeRole = '') {
+  if (Array.isArray(userInfo.permissions) && userInfo.permissions.length > 0) {
+    return userInfo.permissions
+  }
+  return activeRole ? (ROLE_CONFIG[activeRole]?.permissions || []) : []
+}
+
 export function buildPersistedAuthState(authPayload) {
   const userInfo = authPayload?.user_info || {}
   const roles = normalizeRoles(userInfo.roles)
   const activeRole = roles.includes('admin') ? 'admin' : (roles[0] || '')
-  const permissions = activeRole ? (ROLE_CONFIG[activeRole]?.permissions || []) : []
+  const permissions = resolvePermissions(userInfo, roles, activeRole)
 
   return {
     user_info: JSON.stringify(userInfo),
@@ -22,6 +29,8 @@ export function buildPersistedAuthState(authPayload) {
       email: userInfo.email,
       avatar: '',
       roles,
+      permissions,
+      is_admin: Boolean(userInfo.is_admin),
       activeRole,
     }),
     roles: JSON.stringify(roles),
@@ -94,8 +103,8 @@ export function readPersistedAuthState(storage) {
     }
   }
 
-  if ((!permissions || permissions.length === 0) && resolvedActiveRole) {
-    permissions = ROLE_CONFIG[resolvedActiveRole]?.permissions || []
+  if (!permissions || permissions.length === 0) {
+    permissions = resolvePermissions(authUser || userInfo || {}, roles, resolvedActiveRole)
   }
 
   return {

@@ -40,8 +40,8 @@ export const useUsersStore = defineStore('users', () => {
   const fetchUser = async (userId) => {
     try {
       const response = await usersApi.getUser(userId)
-      currentUser.value = response.data
-      return response.data
+      currentUser.value = response?.data || response
+      return currentUser.value
     } catch (error) {
       ElMessage.error('获取用户详情失败: ' + (error.response?.data?.detail || error.message))
       throw error
@@ -53,7 +53,7 @@ export const useUsersStore = defineStore('users', () => {
     try {
       const response = await usersApi.createUser(userData)
       ElMessage.success('用户创建成功')
-      return response.data
+      return response?.data || response
     } catch (error) {
       ElMessage.error('创建用户失败: ' + (error.response?.data?.detail || error.message))
       throw error
@@ -65,7 +65,7 @@ export const useUsersStore = defineStore('users', () => {
     try {
       const response = await usersApi.updateUser(userId, userData)
       ElMessage.success('用户更新成功')
-      return response.data
+      return response?.data || response
     } catch (error) {
       ElMessage.error('更新用户失败: ' + (error.response?.data?.detail || error.message))
       throw error

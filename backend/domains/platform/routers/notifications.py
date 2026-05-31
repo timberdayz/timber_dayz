@@ -30,7 +30,7 @@ from backend.schemas.notification import (
     NotificationGroupItem,
     NotificationGroupListResponse,
 )
-from backend.dependencies.auth import get_current_user
+from backend.dependencies.auth import get_current_user, is_admin_user
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.logger import get_logger
@@ -48,11 +48,7 @@ def generate_notification_actions(notification_type: str, related_user_id: Optio
     v4.19.0 P0安全要求:只有管理员才能看到审批操作
     """
     # 检查用户是否是管理员
-    is_admin = current_user.is_superuser or any(
-        (hasattr(role, "role_code") and role.role_code == "admin") or
-        (hasattr(role, "role_name") and role.role_name == "admin")
-        for role in current_user.roles
-    )
+    is_admin = is_admin_user(current_user)
     
     if notification_type == "user_registered" and related_user_id and is_admin:
         # 新用户注册通知 - 管理员可以快速批准/拒绝
@@ -536,11 +532,7 @@ async def execute_notification_action(
         raise HTTPException(status_code=400, detail=f"Unsupported action type: {action_type}")
     
     # 4. 验证权限 - 只有管理员可以执行审批操作
-    is_admin = current_user.is_superuser or any(
-        (hasattr(role, "role_code") and role.role_code == "admin") or
-        (hasattr(role, "role_name") and role.role_name == "admin")
-        for role in current_user.roles
-    )
+    is_admin = is_admin_user(current_user)
     
     if action_type in ["approve_user", "reject_user"] and not is_admin:
         raise HTTPException(status_code=403, detail="Admin permission required")

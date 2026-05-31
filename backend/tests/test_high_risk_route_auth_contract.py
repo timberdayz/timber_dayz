@@ -109,6 +109,20 @@ async def auth_contract_client():
                 "account_id": "acc-1",
             },
         ),
+        ("get", "/api/collection/tasks", None),
+        ("get", "/api/collection/config-runs", None),
+        (
+            "post",
+            "/api/collection/configs/1/schedule",
+            {
+                "schedule_enabled": False,
+                "schedule_cron": None,
+            },
+        ),
+        ("get", "/api/data-sync/files", None),
+        ("get", "/api/data-sync/tasks", None),
+        ("get", "/api/data-sync/governance/stats", None),
+        ("post", "/api/data-sync/batch-all", None),
     ],
 )
 async def test_high_risk_admin_routes_require_authentication(
@@ -193,6 +207,20 @@ async def test_high_risk_admin_routes_require_authentication(
                 "account_id": "acc-1",
             },
         ),
+        ("get", "/api/collection/tasks", None),
+        ("get", "/api/collection/config-runs", None),
+        (
+            "post",
+            "/api/collection/configs/1/schedule",
+            {
+                "schedule_enabled": False,
+                "schedule_cron": None,
+            },
+        ),
+        ("get", "/api/data-sync/files", None),
+        ("get", "/api/data-sync/tasks", None),
+        ("get", "/api/data-sync/governance/stats", None),
+        ("post", "/api/data-sync/batch-all", None),
     ],
 )
 async def test_high_risk_admin_routes_reject_non_admin_users(

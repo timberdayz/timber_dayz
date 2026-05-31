@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from backend.models.database import get_async_db
-from backend.routers import permission, permissions, roles
+from backend.domains.platform.routers import rbac_admin
 
 
 def _make_user(role: str = "operator", *, is_superuser: bool = False):
@@ -41,9 +41,7 @@ async def admin_read_auth_client(monkeypatch: pytest.MonkeyPatch):
     from backend.dependencies.auth import get_current_user
 
     test_app = FastAPI()
-    test_app.include_router(roles.router, prefix="/api")
-    test_app.include_router(permission.router)
-    test_app.include_router(permissions.router)
+    test_app.include_router(rbac_admin.router)
 
     async def override_get_async_db():
         db = SimpleNamespace()
@@ -51,18 +49,6 @@ async def admin_read_auth_client(monkeypatch: pytest.MonkeyPatch):
         yield db
 
     test_app.dependency_overrides[get_async_db] = override_get_async_db
-
-    monkeypatch.setattr(
-        "backend.routers.permission.get_permission_service",
-        lambda: SimpleNamespace(
-            get_permissions_by_category=lambda category=None: [],
-            build_permission_tree=lambda: [],
-        ),
-    )
-    monkeypatch.setattr(
-        "backend.routers.permissions.get_permission_service",
-        lambda: SimpleNamespace(build_permission_tree=lambda: []),
-    )
 
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:
@@ -73,12 +59,11 @@ async def admin_read_auth_client(monkeypatch: pytest.MonkeyPatch):
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/roles/",
-        "/api/roles/1",
-        "/api/roles/permissions/available",
-        "/api/system/permissions",
-        "/api/system/permissions/tree",
-        "/api/permissions/tree",
+        "/api/admin/roles",
+        "/api/admin/roles/1",
+        "/api/admin/permissions",
+        "/api/admin/permissions/tree",
+        "/api/admin/rbac/assignable-roles",
     ],
 )
 async def test_admin_read_routes_require_authentication(
@@ -96,12 +81,11 @@ async def test_admin_read_routes_require_authentication(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/roles/",
-        "/api/roles/1",
-        "/api/roles/permissions/available",
-        "/api/system/permissions",
-        "/api/system/permissions/tree",
-        "/api/permissions/tree",
+        "/api/admin/roles",
+        "/api/admin/roles/1",
+        "/api/admin/permissions",
+        "/api/admin/permissions/tree",
+        "/api/admin/rbac/assignable-roles",
     ],
 )
 async def test_admin_read_routes_reject_non_admin_users(

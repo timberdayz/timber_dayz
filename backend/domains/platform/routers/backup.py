@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import os
 
 from backend.models.database import get_async_db
-from backend.dependencies.auth import require_admin
+from backend.dependencies.auth import is_admin_user, require_admin
 from backend.schemas.backup import (
     BackupCreateRequest,
     BackupResponse,
@@ -337,7 +337,7 @@ async def restore_backup(
                 .options(selectinload(DimUser.roles))
             )
             user = result.scalar_one()
-            if not any(role.role_name == "admin" for role in user.roles):
+            if not is_admin_user(user):
                 return error_response(
                     code=ErrorCode.PERMISSION_DENIED,
                     message=f"用户ID {user_id} 不是管理员",

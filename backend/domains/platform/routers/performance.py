@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.models.database import get_db
 from backend.services.performance_monitor import performance_monitor
-from backend.dependencies.auth import get_current_user
+from backend.dependencies.auth import require_admin
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import DimUser  # v4.12.0 SSOT迁移
@@ -21,15 +21,6 @@ import time
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/system/performance", tags=["系统性能监控"])
-
-async def require_admin(current_user: DimUser = Depends(get_current_user)):
-    """要求管理员权限"""
-    if not any(role.name == "admin" for role in current_user.roles):
-        raise HTTPException(
-            status_code=403,
-            detail="Insufficient permissions"
-        )
-    return current_user
 
 @router.post("/monitor/start")
 async def start_monitoring(

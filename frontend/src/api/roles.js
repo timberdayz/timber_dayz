@@ -17,7 +17,7 @@ export default {
    * @returns {Promise} 创建的角色信息
    */
   async createRole(roleData) {
-    return await api._post('/roles/', roleData)
+    return await api._post('/admin/roles', roleData)
   },
 
   /**
@@ -25,7 +25,7 @@ export default {
    * @returns {Promise} 角色列表
    */
   async getRoles() {
-    return await api._get('/roles/')
+    return await api._get('/admin/roles')
   },
 
   /**
@@ -34,7 +34,7 @@ export default {
    * @returns {Promise} 角色详情
    */
   async getRole(roleId) {
-    return await api._get(`/roles/${roleId}`)
+    return await api._get(`/admin/roles/${roleId}`)
   },
 
   /**
@@ -44,7 +44,7 @@ export default {
    * @returns {Promise} 更新后的角色信息
    */
   async updateRole(roleId, roleData) {
-    return await api._put(`/roles/${roleId}`, roleData)
+    return await api._put(`/admin/roles/${roleId}`, roleData)
   },
 
   /**
@@ -53,7 +53,7 @@ export default {
    * @returns {Promise} 删除结果
    */
   async deleteRole(roleId) {
-    return await api._delete(`/roles/${roleId}`)
+    return await api._delete(`/admin/roles/${roleId}`)
   },
 
   /**
@@ -61,6 +61,10 @@ export default {
    * @returns {Promise} 权限列表
    */
   async getAvailablePermissions() {
-    return await api._get('/roles/permissions/available')
+    return await api._get('/admin/permissions')
+  },
+
+  async getAssignableRoles() {
+    return await api._get('/admin/rbac/assignable-roles')
   }
 }

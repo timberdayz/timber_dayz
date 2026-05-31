@@ -271,15 +271,23 @@ export const deleteAlertRule = async (ruleId) => {
 // 获取权限列表
 export const getPermissions = async (category = null) => {
   const params = category ? { category } : {}
-  return api.get('/system/permissions', { params })
+  return api.get('/admin/permissions', { params })
 }
 
 // 获取权限树
 export const getPermissionTree = async () => {
-  return api.get('/system/permissions/tree')
+  return api.get('/admin/permissions/tree')
 }
 
 // 获取权限树（另一个端点）
 export const getPermissionTreeAlt = async () => {
   return api.get('/permissions/tree')
+}
+
+export const getPermissionUsage = async (permissionId) => {
+  return api.get('/admin/rbac/permission-usage', { params: { permission_id: permissionId } })
+}
+
+export const checkPermissionAssignment = async (payload) => {
+  return api.post('/admin/rbac/check-permission', payload)
 }

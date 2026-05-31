@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -107,7 +107,11 @@ async def create_user(
     await db.flush()
 
     for role_name in user_data.roles:
-        result = await db.execute(select(DimRole).where(DimRole.role_name == role_name))
+        result = await db.execute(
+            select(DimRole).where(
+                or_(DimRole.role_name == role_name, DimRole.role_code == role_name)
+            )
+        )
         role = result.scalar_one_or_none()
         if role:
             user.roles.append(role)
@@ -382,7 +386,9 @@ async def update_user(
         user.roles.clear()
         for role_name in user_update.roles:
             result = await db.execute(
-                select(DimRole).where(DimRole.role_name == role_name)
+                select(DimRole).where(
+                    or_(DimRole.role_name == role_name, DimRole.role_code == role_name)
+                )
             )
             role = result.scalar_one_or_none()
             if role:

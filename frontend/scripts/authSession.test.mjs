@@ -96,3 +96,19 @@ test('clearPersistedAuthState removes all auth-related keys', () => {
   assert.equal(storage.getItem('permissions'), null)
   assert.equal(storage.getItem('activeRole'), null)
 })
+
+test('backend supplied permissions override static role-derived permissions', () => {
+  const entries = buildPersistedAuthState({
+    user_info: {
+      id: 8,
+      username: 'rbac_admin',
+      email: 'rbac_admin@example.com',
+      full_name: 'RBAC Admin',
+      roles: ['admin'],
+      permissions: ['user-management', 'permission-management'],
+      is_admin: true,
+    },
+  })
+
+  assert.deepEqual(JSON.parse(entries.permissions), ['user-management', 'permission-management'])
+})

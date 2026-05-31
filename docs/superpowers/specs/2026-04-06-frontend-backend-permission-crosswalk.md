@@ -65,8 +65,8 @@ It is intended as the maintenance reference after the permission-unification wor
 
 | Frontend Page | Route | Frontend API | Backend Route Group | Auth Mode | Notes |
 |---|---|---|---|---|---|
-| 角色管理 | `/role-management` | [roles.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/roles.js) | [roles.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/roles.py) | Admin | Read and write now aligned to admin |
-| 权限管理 | `/permission-management` | [system.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/system.js) and [roles.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/roles.js) | [permission.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/permission.py), [permissions.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/permissions.py), [roles.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/routers/roles.py) | Admin | Low-risk admin-read alignment completed |
+| 角色管理 | `/role-management` | [roles.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/roles.js) | [rbac_admin.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/platform/routers/rbac_admin.py) | Admin | Canonical role CRUD moved to `/api/admin/roles` |
+| 权限管理 | `/permission-management` | [system.js](F:/Vscode/python_programme/AI_code/xihong_erp/frontend/src/api/system.js) | [rbac_admin.py](F:/Vscode/python_programme/AI_code/xihong_erp/backend/domains/platform/routers/rbac_admin.py) | Admin | Canonical permission catalog and checks moved to `/api/admin/permissions*` and `/api/admin/rbac/*` |
 
 ## 6. System Management
 
@@ -109,7 +109,7 @@ Examples:
 
 - **Frontend page classification:** completed
 - **High-risk backend admin route alignment:** completed
-- **Low-risk admin-read backend alignment:** completed
+- **Canonical admin RBAC API cutover:** completed
 - **Personal-page backend self-scope alignment:** largely aligned
 
 ## 10. Remaining Gaps
@@ -118,5 +118,5 @@ These are not blockers for the current permission model, but are follow-up quali
 
 - Some pages still use the generic `@/api` aggregator rather than a clearly scoped domain API module.
 - Some placeholder pages do not yet have a stable backend contract worth documenting per-endpoint.
-- The crosswalk is maintained at route-group level for some domains instead of enumerating every individual endpoint, because the page implementation is still evolving.
+- Historical docs and archives may still mention `/api/roles/*` and `/api/system/permissions*`; runtime truth is now `/api/admin/*`.
 

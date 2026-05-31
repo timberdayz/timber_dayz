@@ -94,7 +94,7 @@ from backend.services.catalog_file_delete_service import (
 )
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 def _is_governance_excluded_sample_file(catalog_file: CatalogFile | None) -> bool:

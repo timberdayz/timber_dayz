@@ -123,7 +123,7 @@ class StabilityTester:
             "/api/dashboard/overview",
             "/api/inventory/",
             "/api/finance/accounts-receivable",
-            "/api/roles/",
+            "/api/admin/roles",
             "/api/users/"
         ]
         

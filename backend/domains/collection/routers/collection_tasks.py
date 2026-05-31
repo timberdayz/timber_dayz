@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import desc, select
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from modules.core.db import (
     CollectionConfig,
@@ -54,7 +55,7 @@ from backend.services.collection_task_status import STATUS as TASK_STATUS, TERMI
 
 logger = get_logger(__name__)
 
-router = APIRouter(tags=["数据采集-任务"])
+router = APIRouter(tags=["数据采集-任务"], dependencies=[Depends(require_admin)])
 
 CAPTCHA_REDIS_KEY_PREFIX = "collection:captcha:"
 

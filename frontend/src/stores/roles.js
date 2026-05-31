@@ -35,8 +35,8 @@ export const useRolesStore = defineStore('roles', () => {
   const fetchRole = async (roleId) => {
     try {
       const response = await rolesApi.getRole(roleId)
-      currentRole.value = response.data
-      return response.data
+      currentRole.value = response?.data || response
+      return currentRole.value
     } catch (error) {
       ElMessage.error('获取角色详情失败: ' + (error.response?.data?.detail || error.message))
       throw error
@@ -48,7 +48,7 @@ export const useRolesStore = defineStore('roles', () => {
     try {
       const response = await rolesApi.createRole(roleData)
       ElMessage.success('角色创建成功')
-      return response.data
+      return response?.data || response
     } catch (error) {
       ElMessage.error('创建角色失败: ' + (error.response?.data?.detail || error.message))
       throw error
@@ -60,7 +60,7 @@ export const useRolesStore = defineStore('roles', () => {
     try {
       const response = await rolesApi.updateRole(roleId, roleData)
       ElMessage.success('角色更新成功')
-      return response.data
+      return response?.data || response
     } catch (error) {
       ElMessage.error('更新角色失败: ' + (error.response?.data?.detail || error.message))
       throw error
@@ -97,6 +97,17 @@ export const useRolesStore = defineStore('roles', () => {
     }
   }
 
+  const fetchAssignableRoles = async () => {
+    try {
+      const response = await rolesApi.getAssignableRoles()
+      const rolesList = Array.isArray(response) ? response : (response.data || [])
+      return rolesList
+    } catch (error) {
+      ElMessage.error('获取可分配角色失败: ' + (error.response?.data?.detail || error.message))
+      throw error
+    }
+  }
+
   return {
     // 状态
     roles,
@@ -110,6 +121,7 @@ export const useRolesStore = defineStore('roles', () => {
     createRole,
     updateRole,
     deleteRole,
-    fetchPermissions
+    fetchPermissions,
+    fetchAssignableRoles
   }
 })

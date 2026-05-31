@@ -4,8 +4,8 @@ import { ElMessage } from 'element-plus'
 
 import authApi from '@/api/auth'
 import { useUserStore } from '@/stores/user'
-import { normalizeRoleCode, applyRolePermissions } from '@/config/rolePermissions'
-import { hasAnyRole, hasPermissionForRoles } from '@/utils/authRoles'
+import { normalizeRoleCode } from '@/config/rolePermissions'
+import { hasAnyRole } from '@/utils/authRoles'
 import {
   clearPersistedAuthState,
   resetAuthRecoveryState,
@@ -58,7 +58,6 @@ export const useAuthStore = defineStore('auth', () => {
         const preferredRole = normalizedRoles.includes('admin') ? 'admin' : (normalizedRoles[0] || '')
         if (preferredRole) {
           localStorage.setItem('activeRole', preferredRole)
-          applyRolePermissions(userStore, preferredRole)
         }
       }
 
@@ -138,7 +137,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const hasPermission = (permission) => {
-    return hasPermissionForRoles(user.value?.roles, permission)
+    if (!permission) return true
+    if (hasAnyRole(user.value?.roles, ['admin'])) return true
+    return Boolean(user.value?.permissions?.includes(permission))
   }
 
   const hasRole = (roles) => {

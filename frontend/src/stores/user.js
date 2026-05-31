@@ -33,9 +33,17 @@ export const useUserStore = defineStore('user', () => {
       roles.value = newUserInfo.roles
       localStorage.setItem('roles', JSON.stringify(roles.value))
     }
+    if (newUserInfo && Array.isArray(newUserInfo.permissions)) {
+      permissions.value = newUserInfo.permissions
+      localStorage.setItem('permissions', JSON.stringify(permissions.value))
+    }
   }
 
-  const hasPermission = (permission) => hasPermissionForRoles(roles.value, permission)
+  const hasPermission = (permission) => {
+    if (!permission) return true
+    if (hasAnyRole(roles.value, ['admin'])) return true
+    return permissions.value.includes(permission)
+  }
 
   const hasRole = (requiredRoles) => hasAnyRole(roles.value, requiredRoles)
 
@@ -78,8 +86,11 @@ export const useUserStore = defineStore('user', () => {
           email: payload.email,
           avatar: '',
           roles: payload.roles || [],
+          permissions: payload.permissions || [],
+          is_admin: payload.is_admin || false,
         }
         roles.value = payload.roles || []
+        permissions.value = payload.permissions || []
         writePersistedAuthState(localStorage, {
           user_info: {
             id: payload.id,
@@ -87,6 +98,8 @@ export const useUserStore = defineStore('user', () => {
             email: payload.email,
             full_name: payload.full_name,
             roles: payload.roles || [],
+            permissions: payload.permissions || [],
+            is_admin: payload.is_admin || false,
           },
         })
         return

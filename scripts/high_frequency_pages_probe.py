@@ -31,21 +31,21 @@ PAGE_SCENARIOS = [
         "name": "user_management",
         "requests": [
             {"path": "/api/users/", "params": {"page": 1, "page_size": 20}},
-            {"path": "/api/roles/"},
+            {"path": "/api/admin/rbac/assignable-roles"},
         ],
     },
     {
         "name": "user_approval",
         "requests": [
             {"path": "/api/users/pending", "params": {"page": 1, "page_size": 20}},
-            {"path": "/api/roles/"},
+            {"path": "/api/admin/rbac/assignable-roles"},
         ],
     },
     {
         "name": "role_management",
         "requests": [
-            {"path": "/api/roles/"},
-            {"path": "/api/roles/permissions/available"},
+            {"path": "/api/admin/roles"},
+            {"path": "/api/admin/permissions"},
         ],
     },
     {
@@ -165,8 +165,8 @@ PAGE_SCENARIOS = [
     {
         "name": "permission_management",
         "requests": [
-            {"path": "/api/system/permissions"},
-            {"path": "/api/roles/"},
+            {"path": "/api/admin/permissions"},
+            {"path": "/api/admin/roles"},
             {"path": "/api/users/", "params": {"page": 1, "page_size": 20}},
         ],
     },

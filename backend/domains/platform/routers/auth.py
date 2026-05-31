@@ -19,6 +19,7 @@ from backend.schemas.auth import (
 )
 from modules.core.db import DimUser, DimRole, FactAuditLog, UserSession  # v4.12.0 SSOT迁移, v4.19.0会话管理
 from backend.services.audit_service import audit_service
+from backend.services.rbac_service import get_rbac_service
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from backend.utils.config import get_settings  # [*] v6.0.0修复:导入 settings(Vulnerability 24)
@@ -50,7 +51,9 @@ except ImportError:
 settings = get_settings()
 
 # SSOT: 认证依赖已迁移至 backend.dependencies.auth，此处 re-export 保持向后兼容
-from backend.dependencies.auth import extract_access_token, get_current_user  # noqa: F401
+from backend.dependencies.auth import extract_access_token, get_current_user, require_admin  # noqa: F401
+
+rbac_service = get_rbac_service()
 
 # [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
 @router.post("/register")
@@ -500,6 +503,7 @@ async def login(
     
     # [*] v6.0.0新增:创建响应对象,用于设置 Cookie
     from fastapi.responses import JSONResponse
+    auth_payload = rbac_service.build_auth_payload(user)
     response_data = {
         "access_token": tokens["access_token"],
         "refresh_token": tokens["refresh_token"],
@@ -510,7 +514,9 @@ async def login(
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
-            "roles": user_roles
+            "roles": auth_payload["roles"],
+            "permissions": auth_payload["permissions"],
+            "is_admin": auth_payload["is_admin"],
         }
     }
     
@@ -751,7 +757,7 @@ async def refresh_token(
 @router.post("/logout")
 async def logout(
     request: Request,
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
@@ -842,16 +848,15 @@ async def logout(
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: DimUser = Depends(get_current_user)):
     """获取当前用户信息"""
+    auth_payload = rbac_service.build_auth_payload(current_user)
     return UserResponse(
         id=current_user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         username=current_user.username,
         email=current_user.email,
         full_name=current_user.full_name,
-        roles=[
-            (getattr(role, "role_code", None) or getattr(role, "role_name", None))
-            for role in current_user.roles
-            if (getattr(role, "role_code", None) or getattr(role, "role_name", None))
-        ],
+        roles=auth_payload["roles"],
+        permissions=auth_payload["permissions"],
+        is_admin=auth_payload["is_admin"],
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
@@ -895,16 +900,15 @@ async def update_current_user(
         details=user_update.dict(exclude_unset=True)
     )
     
+    auth_payload = rbac_service.build_auth_payload(current_user)
     return UserResponse(
         id=current_user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         username=current_user.username,
         email=current_user.email,
         full_name=current_user.full_name,
-        roles=[
-            (getattr(role, "role_code", None) or getattr(role, "role_name", None))
-            for role in current_user.roles
-            if (getattr(role, "role_code", None) or getattr(role, "role_name", None))
-        ],
+        roles=auth_payload["roles"],
+        permissions=auth_payload["permissions"],
+        is_admin=auth_payload["is_admin"],
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
@@ -1001,16 +1005,6 @@ async def get_audit_logs(
     需要管理员权限
     v4.20.0: 增强筛选功能
     """
-    # 检查权限(使用require_admin依赖更简洁,但保持向后兼容)
-    if not any(role.role_name == "admin" for role in current_user.roles):
-        return error_response(
-            code=ErrorCode.PERMISSION_DENIED,
-            message="Insufficient permissions",
-            error_type=get_error_type(ErrorCode.PERMISSION_DENIED),
-            recovery_suggestion="需要管理员权限才能执行此操作",
-            status_code=403
-        )
-    
     try:
         # 构建查询条件
         conditions = []
@@ -1078,7 +1072,7 @@ async def get_audit_logs(
 @router.get("/audit-logs/{log_id}", response_model=AuditLogDetailResponse)
 async def get_audit_log_detail(
     log_id: int,
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -1087,16 +1081,6 @@ async def get_audit_log_detail(
     需要管理员权限
     v4.20.0: 新增端点
     """
-    # 检查权限
-    if not any(role.role_name == "admin" for role in current_user.roles):
-        return error_response(
-            code=ErrorCode.PERMISSION_DENIED,
-            message="Insufficient permissions",
-            error_type=get_error_type(ErrorCode.PERMISSION_DENIED),
-            recovery_suggestion="需要管理员权限才能执行此操作",
-            status_code=403
-        )
-    
     try:
         result = await db.execute(
             select(FactAuditLog).where(FactAuditLog.id == log_id)
@@ -1149,7 +1133,7 @@ async def get_audit_log_detail(
 @router.post("/audit-logs/export")
 async def export_audit_logs(
     request: AuditLogExportRequest,
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -1159,16 +1143,6 @@ async def export_audit_logs(
     限流:防止大量导出导致性能问题
     v4.20.0: 新增端点
     """
-    # 检查权限
-    if not any(role.role_name == "admin" for role in current_user.roles):
-        return error_response(
-            code=ErrorCode.PERMISSION_DENIED,
-            message="Insufficient permissions",
-            error_type=get_error_type(ErrorCode.PERMISSION_DENIED),
-            recovery_suggestion="需要管理员权限才能执行此操作",
-            status_code=403
-        )
-    
     # 限流配置
     if role_based_rate_limit:
         @role_based_rate_limit(requests_per_minute=5, requests_per_hour=20)

@@ -121,7 +121,7 @@ class ConcurrentTester:
             ("GET", "/api/dashboard/overview"),
             ("GET", "/api/inventory/"),
             ("GET", "/api/finance/accounts-receivable"),
-            ("GET", "/api/roles/"),
+            ("GET", "/api/admin/roles"),
             ("POST", "/api/auth/login", {"json": {"username": "test", "password": "test"}})
         ]
         
@@ -190,7 +190,7 @@ class ConcurrentTester:
                     task = self.make_request("GET", "/api/users/")
                 else:
                     # 角色列表查询
-                    task = self.make_request("GET", "/api/roles/")
+                    task = self.make_request("GET", "/api/admin/roles")
                 
                 tasks.append(task)
         

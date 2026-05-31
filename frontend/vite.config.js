@@ -49,6 +49,7 @@ export default defineConfig({
       '/api': {
         target: devProxyTarget,
         changeOrigin: true,
+        ws: true,
         rewrite: (path) => path.replace(/^\/api/, '/api')
       }
     }

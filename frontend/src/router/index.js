@@ -505,7 +505,7 @@ const routes = [
     meta: {
       title: '权限管理',
       icon: 'Lock',
-      permission: 'role-management',
+      permission: 'permission-management',
       roles: ['admin']
     }
   },

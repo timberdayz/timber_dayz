@@ -1,39 +1,42 @@
 """
-认证相关的Pydantic模型
+认证相关 Pydantic 模型。
 """
 
-from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
-from typing import List, Optional
-from datetime import datetime
+from __future__ import annotations
+
 import re
+from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
 
 class LoginRequest(BaseModel):
-    """登录请求"""
     username: str
     password: str
     remember_me: bool = False
 
+
 class LoginResponse(BaseModel):
-    """登录响应"""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
     user_info: dict
 
+
 class RefreshTokenRequest(BaseModel):
-    """刷新令牌请求"""
     refresh_token: str
 
+
 class RefreshTokenResponse(BaseModel):
-    """刷新令牌响应"""
     access_token: str
-    refresh_token: Optional[str] = None  # [*] v6.0.0修复:可选字段,支持 Refresh Token 轮换
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     expires_in: int
 
+
 class UserCreate(BaseModel):
-    """创建用户请求"""
     username: str
     email: EmailStr
     password: str
@@ -41,61 +44,62 @@ class UserCreate(BaseModel):
     roles: List[str] = []
     is_active: bool = True
 
+
 class UserUpdate(BaseModel):
-    """更新用户请求"""
     email: Optional[EmailStr] = None
     full_name: Optional[str] = None
     roles: Optional[List[str]] = None
     is_active: Optional[bool] = None
-    employee_id: Optional[int] = None  # 关联 a_class.employees.id；传 null 或省略表示解除关联
+    employee_id: Optional[int] = None
 
 
 class UserResponse(BaseModel):
-    """用户响应"""
     id: int
     username: str
     email: str
-    # DimUser.full_name 在数据库中允许为空;前端展示时可为空字符串/空值
     full_name: Optional[str] = None
     roles: List[str]
+    permissions: List[str] = []
+    is_admin: bool = False
     is_active: bool
     created_at: datetime
-    last_login_at: Optional[datetime] = None  # [*] v6.0.0修复:映射到数据库字段 last_login(Vulnerability 29)
-    # 注意:数据库字段名是 last_login,但 API 响应使用 last_login_at 保持一致性
-    employee_id: Optional[int] = None  # 关联员工 a_class.employees.id（有则展示，供编辑回显）
-    employee_code: Optional[str] = None  # 关联员工编号（有则展示）
-    employee_name: Optional[str] = None  # 关联员工姓名（有则展示）
+    last_login_at: Optional[datetime] = None
+    employee_id: Optional[int] = None
+    employee_code: Optional[str] = None
+    employee_name: Optional[str] = None
+
 
 class RoleCreate(BaseModel):
-    """创建角色请求"""
     name: str
+    role_code: Optional[str] = None
     description: str
     permissions: List[str] = []
 
+
 class RoleUpdate(BaseModel):
-    """更新角色请求"""
+    role_code: Optional[str] = None
     description: Optional[str] = None
     permissions: Optional[List[str]] = None
 
+
 class RoleResponse(BaseModel):
-    """角色响应"""
     id: int
     name: str
-    # DimRole.description 在数据库中允许为空
+    role_code: Optional[str] = None
+    role_name: Optional[str] = None
     description: Optional[str] = None
     permissions: List[str]
     created_at: datetime
+    is_system: bool = False
+    is_active: bool = True
 
-# 注意:PermissionResponse已迁移到backend/schemas/permission.py(v4.20.0)
-# 如需使用,请从backend.schemas.permission导入
 
 class ChangePasswordRequest(BaseModel):
-    """修改密码请求"""
     old_password: str
     new_password: str
 
+
 class AuditLogResponse(BaseModel):
-    """审计日志响应"""
     id: int
     user_id: int
     username: str
@@ -109,40 +113,38 @@ class AuditLogResponse(BaseModel):
 
 
 class AuditLogFilterRequest(BaseModel):
-    """审计日志筛选请求"""
-    action: Optional[str] = Field(None, description="操作类型(支持模糊匹配)")
-    resource: Optional[str] = Field(None, description="资源类型(支持模糊匹配)")
-    user_id: Optional[int] = Field(None, description="用户ID")
-    username: Optional[str] = Field(None, description="用户名(支持模糊匹配)")
-    ip_address: Optional[str] = Field(None, description="IP地址(支持模糊匹配)")
+    action: Optional[str] = Field(None, description="操作类型，支持模糊匹配")
+    resource: Optional[str] = Field(None, description="资源类型，支持模糊匹配")
+    user_id: Optional[int] = Field(None, description="用户 ID")
+    username: Optional[str] = Field(None, description="用户名，支持模糊匹配")
+    ip_address: Optional[str] = Field(None, description="IP 地址，支持模糊匹配")
     start_time: Optional[datetime] = Field(None, description="开始时间")
     end_time: Optional[datetime] = Field(None, description="结束时间")
     page: int = Field(1, ge=1, description="页码(1-based)")
-    page_size: int = Field(20, ge=1, le=100, description="每页条数(最大100)")
+    page_size: int = Field(20, ge=1, le=100, description="每页条数")
 
 
 class AuditLogExportRequest(BaseModel):
-    """审计日志导出请求"""
-    action: Optional[str] = Field(None, description="操作类型(支持模糊匹配)")
-    resource: Optional[str] = Field(None, description="资源类型(支持模糊匹配)")
-    user_id: Optional[int] = Field(None, description="用户ID")
-    username: Optional[str] = Field(None, description="用户名(支持模糊匹配)")
-    ip_address: Optional[str] = Field(None, description="IP地址(支持模糊匹配)")
+    action: Optional[str] = Field(None, description="操作类型，支持模糊匹配")
+    resource: Optional[str] = Field(None, description="资源类型，支持模糊匹配")
+    user_id: Optional[int] = Field(None, description="用户 ID")
+    username: Optional[str] = Field(None, description="用户名，支持模糊匹配")
+    ip_address: Optional[str] = Field(None, description="IP 地址，支持模糊匹配")
     start_time: Optional[datetime] = Field(None, description="开始时间")
     end_time: Optional[datetime] = Field(None, description="结束时间")
-    format: str = Field("excel", description="导出格式(excel 或 csv)")
-    max_records: int = Field(10000, ge=1, le=50000, description="最大导出记录数(防止导出过多数据)")
-    
-    @field_validator('format')
+    format: str = Field("excel", description="导出格式：excel 或 csv")
+    max_records: int = Field(10000, ge=1, le=50000, description="最大导出记录数")
+
+    @field_validator("format")
     @classmethod
-    def validate_format(cls, v):
-        if v.lower() not in ['excel', 'csv']:
-            raise ValueError('导出格式必须是 excel 或 csv')
-        return v.lower()
+    def validate_format(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in ["excel", "csv"]:
+            raise ValueError("导出格式必须是 excel 或 csv")
+        return normalized
 
 
 class AuditLogDetailResponse(BaseModel):
-    """审计日志详情响应(包含变更前后对比)"""
     id: int
     user_id: int
     username: str
@@ -153,75 +155,58 @@ class AuditLogDetailResponse(BaseModel):
     user_agent: str
     created_at: datetime
     details: Optional[dict] = None
-    before_data: Optional[dict] = Field(None, description="变更前的数据(如果details中包含)")
-    after_data: Optional[dict] = Field(None, description="变更后的数据(如果details中包含)")
-    
+    before_data: Optional[dict] = Field(None, description="变更前数据")
+    after_data: Optional[dict] = Field(None, description="变更后数据")
+
     model_config = ConfigDict(from_attributes=True)
 
+
 class RegisterRequest(BaseModel):
-    """用户注册请求"""
     username: str = Field(
         ...,
         min_length=3,
         max_length=50,
-        pattern="^[a-zA-Z0-9_]+$",
-        description="用户名(3-50字符,字母数字下划线)"
+        pattern=r"^[a-zA-Z0-9_]+$",
+        description="用户名，3-50 个字符，仅支持字母数字下划线",
     )
     email: EmailStr = Field(..., description="邮箱地址")
-    password: str = Field(
-        ...,
-        min_length=8,
-        description="密码(至少8位,包含字母和数字)"
-    )
+    password: str = Field(..., min_length=8, description="密码，至少 8 位")
     full_name: Optional[str] = Field(None, max_length=200, description="姓名")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
     department: Optional[str] = Field(None, max_length=100, description="部门")
 
-    @field_validator('password')
+    @field_validator("password")
     @classmethod
-    def password_strength(cls, v):
-        if len(v) < 8:
-            raise ValueError('密码长度至少8位')
-        if not re.search(r'[A-Za-z]', v):
-            raise ValueError('密码必须包含字母')
-        if not re.search(r'[0-9]', v):
-            raise ValueError('密码必须包含数字')
-        return v
+    def password_strength(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("密码长度至少 8 位")
+        if not re.search(r"[A-Za-z]", value):
+            raise ValueError("密码必须包含字母")
+        if not re.search(r"[0-9]", value):
+            raise ValueError("密码必须包含数字")
+        return value
+
 
 class RegisterResponse(BaseModel):
-    """用户注册响应"""
     user_id: int
     username: str
     email: str
-    status: str  # "pending"
+    status: str
     message: str
 
+
 class ApproveUserRequest(BaseModel):
-    """用户审批请求"""
-    role_ids: List[int] = Field(
-        default_factory=list,
-        max_length=10,  # v4.19.0 P1安全要求:最多10个角色
-        description="角色ID列表(可选,默认operator,最多10个)"
-    )
-    notes: Optional[str] = Field(
-        None,
-        max_length=500,  # v4.19.0 P1安全要求:最多500字符
-        description="审批备注(最多500字符)"
-    )
+    role_ids: List[int] = Field(default_factory=list, max_length=10, description="审批分配的角色 ID 列表")
+    notes: Optional[str] = Field(None, max_length=500, description="审批备注")
+
 
 class RejectUserRequest(BaseModel):
-    """用户拒绝请求"""
-    reason: Optional[str] = Field(
-        None,
-        max_length=500,  # v4.19.0 P1安全要求:最多500字符
-        description="拒绝原因(可选,0-500字符)"
-    )
+    reason: Optional[str] = Field(None, max_length=500, description="拒绝原因")
 
 
 class UserIdBatchRequest(BaseModel):
-    """用户批量操作请求"""
-    user_ids: List[int] = Field(..., min_length=1, max_length=200, description="用户ID列表")
-    reason: Optional[str] = Field(None, max_length=500, description="原因/备注(可选,0-500字符)")
+    user_ids: List[int] = Field(..., min_length=1, max_length=200, description="用户 ID 列表")
+    reason: Optional[str] = Field(None, max_length=500, description="原因或备注")
 
 
 class BatchItemResult(BaseModel):
@@ -240,41 +225,34 @@ class BatchUserActionResponse(BaseModel):
     summary: BatchSummary
     results: List[BatchItemResult]
 
+
 class PendingUserResponse(BaseModel):
-    """待审批用户响应"""
     user_id: int
     username: str
     email: str
     full_name: Optional[str]
     department: Optional[str]
-    status: str  # v4.19.0 P2隐私要求:添加status字段
+    status: str
     created_at: datetime
 
+
 class ResetPasswordRequest(BaseModel):
-    """重置密码请求(管理员)"""
-    new_password: Optional[str] = Field(
-        None,
-        min_length=8,
-        description="新密码(可选,如果不提供则生成临时密码)"
-    )
-    generate_temp_password: bool = Field(
-        False,
-        description="是否生成临时密码(如果为True,忽略new_password)"
-    )
+    new_password: Optional[str] = Field(None, min_length=8, description="新密码，留空则生成临时密码")
+    generate_temp_password: bool = Field(False, description="是否生成临时密码")
+
 
 class ResetPasswordResponse(BaseModel):
-    """重置密码响应"""
     user_id: int
     username: str
-    temp_password: Optional[str] = Field(None, description="临时密码(仅生成临时密码时返回)")
+    temp_password: Optional[str] = Field(None, description="临时密码，仅生成临时密码时返回")
     message: str
 
+
 class UnlockAccountRequest(BaseModel):
-    """解锁账户请求"""
-    reason: Optional[str] = Field(None, max_length=200, description="解锁原因(可选)")
+    reason: Optional[str] = Field(None, max_length=200, description="解锁原因")
+
 
 class UserSessionResponse(BaseModel):
-    """用户会话响应"""
     session_id: str
     device_info: Optional[str]
     ip_address: Optional[str]
@@ -284,6 +262,6 @@ class UserSessionResponse(BaseModel):
     last_active_at: datetime
     is_active: bool
     is_current: bool = Field(False, description="是否为当前会话")
-    
+
     class Config:
         from_attributes = True
