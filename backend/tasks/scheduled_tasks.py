@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -22,6 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 AUTO_INGEST_MAX_FILES_PER_RUN = 50
+AUTO_INGEST_MAX_CONCURRENT = max(1, int(os.getenv("AUTO_INGEST_MAX_CONCURRENT", "2")))
 
 
 @celery_app.task(name="backend.tasks.scheduled_tasks.refresh_sales_materialized_views")
@@ -189,31 +191,49 @@ def check_overdue_accounts_receivable():
     
     try:
         logger.info("[ALERT] Checking overdue accounts receivable...")
+
+        def _is_missing_runtime_asset(exc: Exception) -> bool:
+            message = str(exc)
+            return "does not exist" in message or "UndefinedTable" in message
         
         # 更新逾期状态
-        db.execute(text("""
-            UPDATE fact_accounts_receivable
-            SET 
-                is_overdue = TRUE,
-                overdue_days = CURRENT_DATE - due_date,
-                ar_status = 'overdue'
-            WHERE due_date < CURRENT_DATE
-            AND outstanding_amount_cny > 0
-            AND ar_status != 'paid'
-        """))
+        try:
+            db.execute(text("""
+                UPDATE fact_accounts_receivable
+                SET 
+                    is_overdue = TRUE,
+                    overdue_days = CURRENT_DATE - due_date,
+                    ar_status = 'overdue'
+                WHERE due_date < CURRENT_DATE
+                AND outstanding_amount_cny > 0
+                AND ar_status != 'paid'
+            """))
+        except Exception as query_err:
+            if _is_missing_runtime_asset(query_err):
+                logger.warning(f"[ALERT] accounts receivable asset not available, skipped: {query_err}")
+                db.rollback()
+                return {"status": "skipped", "reason": "accounts_receivable_asset_missing"}
+            raise
         db.commit()
         
         # 查询逾期账款
-        result = db.execute(text("""
-            SELECT
-                platform_code,
-                shop_id,
-                COUNT(*) as overdue_count,
-                SUM(outstanding_amount_cny) as total_overdue_amount
-            FROM fact_accounts_receivable
-            WHERE is_overdue = TRUE
-            GROUP BY platform_code, shop_id
-        """))
+        try:
+            result = db.execute(text("""
+                SELECT
+                    platform_code,
+                    shop_id,
+                    COUNT(*) as overdue_count,
+                    SUM(outstanding_amount_cny) as total_overdue_amount
+                FROM fact_accounts_receivable
+                WHERE is_overdue = TRUE
+                GROUP BY platform_code, shop_id
+            """))
+        except Exception as query_err:
+            if _is_missing_runtime_asset(query_err):
+                logger.warning(f"[ALERT] accounts receivable summary asset not available, skipped: {query_err}")
+                db.rollback()
+                return {"status": "skipped", "reason": "accounts_receivable_asset_missing"}
+            raise
         
         overdue_summary = []
         for row in result:
@@ -268,8 +288,8 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
         # v4.18.2优化:使用并发处理(类似手动同步)
         from backend.services.data_sync_service import DataSyncService
         
-        # 动态调整并发数:5-20之间,根据文件数量
-        max_concurrent = min(20, max(5, len(pending_ids) // 10 + 1))
+        # 预发布阶段优先稳定性，限制 auto-ingest 并发，避免 worker 被 OOM/SIGKILL。
+        max_concurrent = min(AUTO_INGEST_MAX_CONCURRENT, max(1, len(pending_ids) // 10 + 1))
         
         async def _process_ids_concurrent(ids: List[int]) -> List[Dict[str, Any]]:
             """并发处理文件(使用信号量控制并发数)
@@ -593,3 +613,9 @@ def trigger_system_backup():
     except Exception as e:
         logger.error(f"[ERROR] System backup task failed: {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}
+
+
+@celery_app.task(name="backend.tasks.scheduled_tasks.backup_database")
+def backup_database():
+    """Backward-compatible alias for historical beat entries."""
+    return trigger_system_backup()

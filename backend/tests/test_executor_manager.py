@@ -261,6 +261,17 @@ class TestExecutorManagerConfiguration:
         assert max_workers >= 1
         assert max_workers <= 50  # 合理上限
 
+    def test_daemon_process_uses_thread_fallback_for_cpu_executor(self, monkeypatch):
+        class _FakeProcess:
+            daemon = True
+
+        monkeypatch.setattr("backend.services.executor_manager.multiprocessing.current_process", lambda: _FakeProcess())
+
+        executor_manager = get_executor_manager()
+
+        assert executor_manager.cpu_executor_mode == "thread_fallback"
+        assert executor_manager.cpu_executor is executor_manager.io_executor
+
 
 class TestExecutorManagerConcurrency:
     """测试并发执行"""

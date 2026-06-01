@@ -13,9 +13,18 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import asyncio
 import os
 import time
+import multiprocessing
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _is_daemon_process() -> bool:
+    try:
+        current_process = multiprocessing.current_process()
+    except Exception:
+        return False
+    return bool(getattr(current_process, "daemon", False))
 
 
 # [*] 模块级函数(可被pickle序列化到进程池)
@@ -92,21 +101,31 @@ class ExecutorManager:
                 io_workers = min(cpu_cores * 5, 20)
             
             # CPU密集型操作:使用进程池
-            self.cpu_executor = ProcessPoolExecutor(
-                max_workers=cpu_workers
-            )
+            self.cpu_executor = None
             
             # I/O密集型操作:使用线程池
             self.io_executor = ThreadPoolExecutor(
                 max_workers=io_workers
             )
+            if _is_daemon_process():
+                self.cpu_executor = self.io_executor
+                self.cpu_executor_mode = "thread_fallback"
+                logger.info("[ExecutorManager] daemon process detected, CPU executor downgraded to thread pool")
+            else:
+                self.cpu_executor = ProcessPoolExecutor(
+                    max_workers=cpu_workers
+                )
+                self.cpu_executor_mode = "process_pool"
             
             # 存储配置值(用于监控API,避免访问私有属性)
             self.cpu_max_workers = cpu_workers
             self.io_max_workers = io_workers
             
             ExecutorManager._initialized = True
-            logger.info(f"[ExecutorManager] 初始化完成 - CPU进程池: {cpu_workers}个, I/O线程池: {io_workers}个")
+            logger.info(
+                f"[ExecutorManager] 初始化完成 - CPU执行器: {self.cpu_executor_mode}({cpu_workers}), "
+                f"I/O线程池: {io_workers}个"
+            )
     
     async def run_cpu_intensive(self, func, *args, **kwargs):
         """
@@ -118,22 +137,11 @@ class ExecutorManager:
         - 后端 API 仍使用进程池,保持最佳性能
         """
         import pickle
-        import multiprocessing
         from functools import partial
         
-        # [*] v4.19.8修复:检测是否在守护进程中运行
-        # Celery Worker 等守护进程不允许创建子进程
-        try:
-            current_process = multiprocessing.current_process()
-            is_daemon = getattr(current_process, 'daemon', False)
-            
-            if is_daemon:
-                # 在守护进程中,降级使用线程池
-                logger.debug(f"[ExecutorManager] 守护进程环境,使用线程池执行: {func.__name__}")
-                return await self.run_io_intensive(func, *args, **kwargs)
-        except Exception as e:
-            # 如果检测失败,继续尝试进程池(可能会抛出AssertionError)
-            logger.debug(f"[ExecutorManager] 守护进程检测失败,继续尝试进程池: {e}")
+        if self.cpu_executor_mode != "process_pool" or _is_daemon_process():
+            logger.debug(f"[ExecutorManager] 守护进程/降级模式,使用线程池执行: {func.__name__}")
+            return await self.run_io_intensive(func, *args, **kwargs)
         
         try:
             loop = asyncio.get_running_loop()

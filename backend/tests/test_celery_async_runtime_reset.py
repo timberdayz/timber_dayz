@@ -145,3 +145,66 @@ def test_auto_ingest_pending_files_skips_template_update_required(monkeypatch):
     assert result["status"] == "success"
     assert result["summary"]["skipped"] == 1
     assert result["summary"]["skipped_template_update"] == 1
+
+
+def test_auto_ingest_pending_files_respects_global_concurrency_cap(monkeypatch):
+    from backend.tasks import scheduled_tasks as scheduled_module
+    original_asyncio_run = asyncio.run
+
+    class _FakeScalarResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return list(range(10))
+
+    class _FakeSession:
+        def execute(self, _stmt):
+            return _FakeScalarResult()
+
+        def close(self):
+            return None
+
+    class _FakeAsyncSession:
+        async def rollback(self):
+            return None
+
+        async def close(self):
+            return None
+
+    observed = {"max_active": 0, "active": 0}
+
+    class _FakeDataSyncService:
+        def __init__(self, db):
+            self.db = db
+
+        async def get_file_sync_readiness(self, file_id, use_template_header_row=True):
+            observed["active"] += 1
+            observed["max_active"] = max(observed["max_active"], observed["active"])
+            await asyncio.sleep(0)
+            observed["active"] -= 1
+            return {
+                "ready": False,
+                "file_id": file_id,
+                "file_name": f"sample-{file_id}.xlsx",
+                "template_status": "missing",
+                "should_auto_sync": False,
+                "message": "no template",
+            }
+
+    monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
+    monkeypatch.setattr(scheduled_module, "AUTO_INGEST_MAX_CONCURRENT", 2, raising=False)
+    monkeypatch.setattr(
+        scheduled_module,
+        "reset_async_engine_pool_for_new_loop",
+        lambda: None,
+        raising=False,
+    )
+    monkeypatch.setattr("backend.services.data_sync_service.DataSyncService", _FakeDataSyncService)
+    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
+    monkeypatch.setattr(scheduled_module.asyncio, "run", lambda coro: original_asyncio_run(coro))
+
+    result = scheduled_module.auto_ingest_pending_files(max_files=10)
+
+    assert result["status"] == "success"
+    assert observed["max_active"] <= 2
