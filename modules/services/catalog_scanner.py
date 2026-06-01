@@ -254,10 +254,21 @@ def _resolve_catalog_dimensions(
         raw_sub_domain = file_metadata.get("sub_domain", "")
     sub_domain = str(raw_sub_domain or "").strip().lower()
 
-    if data_domain == "orders":
+    collection_platform = normalize_platform(collection_info.get("collection_platform") or "")
+
+    # Miaoshou order exports can carry Shopee/TikTok business orders.
+    # In that case platform_code should follow the business platform and
+    # source_platform should preserve miaoshou as the collection source.
+    if (
+        collection_platform == "miaoshou"
+        and data_domain == "orders"
+        and sub_domain in {"shopee", "tiktok"}
+    ):
+        platform_code = sub_domain
+        sub_domain = ""
+    elif data_domain == "orders":
         sub_domain = ""
 
-    collection_platform = normalize_platform(collection_info.get("collection_platform") or "")
     source_platform = collection_platform or platform_code
 
     return {

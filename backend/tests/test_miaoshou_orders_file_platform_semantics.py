@@ -86,6 +86,63 @@ def test_register_single_file_uses_business_platform_and_preserves_miaoshou_sour
     assert record.sub_domain in (None, "")
 
 
+def test_register_single_file_repairs_legacy_miaoshou_orders_filename_using_meta_collection_platform(
+    tmp_path,
+    monkeypatch,
+):
+    import backend.services.platform_table_manager as platform_table_manager_module
+    from modules.services import catalog_scanner as catalog_scanner_module
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog-legacy.db'}", future=True)
+    CatalogFile.__table__.create(engine)
+    monkeypatch.setattr(catalog_scanner_module, "_get_engine", lambda: engine)
+    monkeypatch.setattr(
+        platform_table_manager_module,
+        "get_platform_table_manager",
+        lambda _session: type(
+            "_NoopTableManager",
+            (),
+            {"ensure_table_exists": staticmethod(lambda **_kwargs: "fact_tiktok_orders_weekly")},
+        )(),
+    )
+
+    raw_dir = tmp_path / "data" / "raw" / "2026"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = raw_dir / "miaoshou_orders_tiktok_weekly_20260331_140511.xls"
+    file_path.write_text("demo", encoding="utf-8")
+
+    MetadataManager.create_meta_file(
+        file_path,
+        business_metadata={
+            "source_platform": "miaoshou",
+            "data_domain": "orders",
+            "sub_domain": "tiktok",
+            "date_from": "2026-03-08",
+            "date_to": "2026-03-14",
+        },
+        collection_info={
+            "method": "python_component",
+            "collection_platform": "miaoshou",
+            "account": "acc",
+            "shop_id": "shop",
+            "original_path": r"temp\downloads\task-1\miaoshou\acc\shop\orders\tiktok\manual\export.xls",
+            "collected_at": datetime.now().isoformat(),
+        },
+    )
+
+    file_id = register_single_file(str(file_path))
+    assert file_id is not None
+
+    with Session(engine) as session:
+        record = session.execute(select(CatalogFile).where(CatalogFile.id == file_id)).scalar_one()
+
+    assert record.platform_code == "tiktok"
+    assert record.source_platform == "miaoshou"
+    assert record.data_domain == "orders"
+    assert record.sub_domain in (None, "")
+
+
 @pytest.fixture
 async def catalog_async_client(tmp_path):
     from backend.main import app

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from backend.services.component_name_utils import DATA_DOMAIN_SUB_TYPES
 
@@ -25,11 +26,27 @@ def validate_file_semantics(
     data_domain: str | None,
     granularity: str | None,
     sub_domain: str | None,
+    file_name: str | None = None,
+    platform_code: str | None = None,
 ) -> SemanticValidationResult:
     platform = str(source_platform or "").strip().lower()
+    business_platform = str(platform_code or "").strip().lower()
     domain = str(data_domain or "").strip().lower()
     _ = str(granularity or "").strip().lower()
     normalized_sub_domain = str(sub_domain or "").strip().lower()
+    normalized_file_name = str(file_name or "").strip().lower()
+
+    if (
+        domain == "orders"
+        and (platform == "miaoshou" or business_platform == "miaoshou")
+        and re.search(r"(^|[_-])miaoshou_orders_(tiktok|shopee)([_-]|$)", normalized_file_name)
+    ):
+        return SemanticValidationResult(
+            is_valid=False,
+            normalized_platform=platform,
+            normalized_sub_domain=normalized_sub_domain,
+            reason="miaoshou_orders_business_platform_collapsed",
+        )
 
     if domain == "services":
         if not normalized_sub_domain or normalized_sub_domain in _SERVICE_ALLOWED_SUBDOMAINS:
@@ -71,8 +88,10 @@ def validate_file_semantics(
 def is_catalog_file_semantically_valid(catalog_file) -> bool:
     result = validate_file_semantics(
         source_platform=getattr(catalog_file, "source_platform", None) or getattr(catalog_file, "platform_code", None),
+        platform_code=getattr(catalog_file, "platform_code", None),
         data_domain=getattr(catalog_file, "data_domain", None),
         granularity=getattr(catalog_file, "granularity", None),
         sub_domain=getattr(catalog_file, "sub_domain", None),
+        file_name=getattr(catalog_file, "file_name", None),
     )
     return result.is_valid

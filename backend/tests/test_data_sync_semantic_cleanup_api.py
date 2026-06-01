@@ -172,3 +172,90 @@ async def test_cleanup_semantic_anomalies_requires_admin_user(semantic_cleanup_c
     response = await client.post("/api/data-sync/cleanup-semantic-anomalies")
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_cleanup_semantic_anomalies_removes_miaoshou_orders_with_collapsed_business_platform(
+    semantic_cleanup_client,
+    tmp_path,
+):
+    client, session_factory, _app, _get_current_user = semantic_cleanup_client
+
+    bad_file = tmp_path / "miaoshou_orders_tiktok_weekly_20260331_140511.xls"
+    bad_meta = tmp_path / "miaoshou_orders_tiktok_weekly_20260331_140511.meta.json"
+    bad_file.write_text("demo", encoding="utf-8")
+    bad_meta.write_text("{}", encoding="utf-8")
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        session.add(
+            CatalogFile(
+                file_path=str(bad_file),
+                file_name=bad_file.name,
+                source="data/raw",
+                platform_code="miaoshou",
+                source_platform="miaoshou",
+                data_domain="orders",
+                granularity="weekly",
+                sub_domain=None,
+                status="pending",
+                meta_file_path=str(bad_meta),
+                first_seen_at=now,
+            )
+        )
+        await session.commit()
+
+    response = await client.post("/api/data-sync/cleanup-semantic-anomalies")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["matched_count"] == 1
+    assert payload["data"]["deleted_catalog_count"] == 1
+    assert payload["data"]["deleted_file_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_repair_miaoshou_orders_platform_semantics_updates_pending_catalog_record(
+    semantic_cleanup_client,
+    tmp_path,
+):
+    client, session_factory, _app, _get_current_user = semantic_cleanup_client
+
+    target_file = tmp_path / "miaoshou_orders_tiktok_weekly_20260331_140511.xls"
+    target_file.write_text("demo", encoding="utf-8")
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        session.add(
+            CatalogFile(
+                file_path=str(target_file),
+                file_name=target_file.name,
+                source="data/raw",
+                platform_code="miaoshou",
+                source_platform="miaoshou",
+                data_domain="orders",
+                granularity="weekly",
+                sub_domain=None,
+                status="pending",
+                file_hash="legacy-hash",
+                first_seen_at=now,
+                file_metadata={},
+            )
+        )
+        await session.commit()
+
+    response = await client.post("/api/data-sync/repair-miaoshou-orders-platform-semantics")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["repaired_count"] == 1
+    assert payload["data"]["repaired_rows"][0]["new_platform_code"] == "tiktok"
+
+    async with session_factory() as session:
+        row = (await session.execute(select(CatalogFile))).scalar_one()
+
+    assert row.platform_code == "tiktok"
+    assert row.source_platform == "miaoshou"
+    assert row.sub_domain is None

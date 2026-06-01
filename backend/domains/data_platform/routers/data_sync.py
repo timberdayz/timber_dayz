@@ -65,8 +65,11 @@ from backend.services.field_mapping_validator import validate_field_mapping, cal
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import CatalogFile
+from modules.core.file_naming import StandardFileName
 from modules.core.logger import get_logger
 from modules.core.path_manager import to_absolute_path
+from modules.services.catalog_scanner import _compute_sha256
+from modules.services.metadata_manager import MetadataManager
 from modules.services.file_semantics import is_catalog_file_semantically_valid, validate_file_semantics
 from sqlalchemy import select, func, and_, distinct, case
 
@@ -116,11 +119,87 @@ def _is_governance_excluded_sample_file(catalog_file: CatalogFile | None) -> boo
 def _semantic_anomaly_reason(catalog_file: CatalogFile | None) -> str:
     result = validate_file_semantics(
         source_platform=getattr(catalog_file, "source_platform", None) or getattr(catalog_file, "platform_code", None),
+        platform_code=getattr(catalog_file, "platform_code", None),
         data_domain=getattr(catalog_file, "data_domain", None),
         granularity=getattr(catalog_file, "granularity", None),
         sub_domain=getattr(catalog_file, "sub_domain", None),
+        file_name=getattr(catalog_file, "file_name", None),
     )
     return result.reason
+
+
+def _resolve_miaoshou_orders_business_platform(catalog_file: CatalogFile) -> str | None:
+    file_name = str(getattr(catalog_file, "file_name", "") or "")
+    try:
+        parsed = StandardFileName.parse(file_name)
+        if (
+            str(parsed.get("source_platform", "")).strip().lower() == "miaoshou"
+            and str(parsed.get("data_domain", "")).strip().lower() == "orders"
+        ):
+            candidate = str(parsed.get("sub_domain", "")).strip().lower()
+            if candidate in {"tiktok", "shopee"}:
+                return candidate
+    except Exception:
+        pass
+
+    meta_path = getattr(catalog_file, "meta_file_path", None)
+    if meta_path:
+        try:
+            meta_content = MetadataManager.read_meta_file(to_absolute_path(str(meta_path)))
+            business_metadata = meta_content.get("business_metadata", {}) or {}
+            candidate = str(business_metadata.get("sub_domain", "")).strip().lower()
+            if candidate in {"tiktok", "shopee"}:
+                return candidate
+
+            original_path = str((meta_content.get("collection_info", {}) or {}).get("original_path", "")).lower()
+            if "/orders/tiktok/" in original_path.replace("\\", "/"):
+                return "tiktok"
+            if "/orders/shopee/" in original_path.replace("\\", "/"):
+                return "shopee"
+        except Exception:
+            pass
+
+    normalized_file_name = file_name.lower()
+    if "miaoshou_orders_tiktok_" in normalized_file_name:
+        return "tiktok"
+    if "miaoshou_orders_shopee_" in normalized_file_name:
+        return "shopee"
+    return None
+
+
+def _infer_miaoshou_orders_business_platform(catalog_file: CatalogFile) -> str | None:
+    file_name = str(getattr(catalog_file, "file_name", "") or "")
+    try:
+        parsed = StandardFileName.parse(file_name)
+        if (
+            parsed.get("source_platform") == "miaoshou"
+            and parsed.get("data_domain") == "orders"
+            and parsed.get("sub_domain") in {"tiktok", "shopee"}
+        ):
+            return parsed["sub_domain"]
+    except Exception:
+        pass
+
+    meta_path = getattr(catalog_file, "meta_file_path", None)
+    if meta_path:
+        try:
+            meta = MetadataManager.read_meta_file(to_absolute_path(str(meta_path)))
+            business = meta.get("business_metadata", {}) or {}
+            collection = meta.get("collection_info", {}) or {}
+            source_platform = str(business.get("source_platform", "")).strip().lower()
+            if source_platform in {"tiktok", "shopee"}:
+                return source_platform
+            sub_domain = str(business.get("sub_domain", "")).strip().lower()
+            if sub_domain in {"tiktok", "shopee"}:
+                return sub_domain
+            original_path = str(collection.get("original_path", "")).replace("\\", "/").lower()
+            matched = re.search(r"/orders/(tiktok|shopee)/", original_path)
+            if matched:
+                return matched.group(1)
+        except Exception:
+            pass
+
+    return None
 
 
 # ==================== 数据同步API ====================
@@ -2519,6 +2598,181 @@ async def cleanup_semantic_anomalies(
             status_code=500
         )
 
+@router.post("/data-sync/repair-miaoshou-orders-platform-semantics")
+async def repair_miaoshou_orders_platform_semantics(
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        result = await db.execute(
+            select(CatalogFile).where(
+                CatalogFile.status == "pending",
+                CatalogFile.data_domain == "orders",
+                CatalogFile.platform_code == "miaoshou",
+            )
+        )
+        pending_records = result.scalars().all()
+
+        repaired_count = 0
+        repaired_rows: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+
+        for file_record in pending_records:
+            target_platform = _resolve_miaoshou_orders_business_platform(file_record)
+            if target_platform not in {"tiktok", "shopee"}:
+                continue
+
+            old_hash = file_record.file_hash
+            try:
+                file_path = to_absolute_path(str(file_record.file_path))
+                if file_path.exists():
+                    file_record.file_hash = _compute_sha256(
+                        file_path,
+                        shop_id=getattr(file_record, "shop_id", None),
+                        platform_code=target_platform,
+                    )
+                file_record.platform_code = target_platform
+                file_record.source_platform = "miaoshou"
+                file_record.sub_domain = None
+                if isinstance(file_record.file_metadata, dict):
+                    file_record.file_metadata = {
+                        **file_record.file_metadata,
+                        "semantic_repair": {
+                            "reason": "miaoshou_orders_business_platform_collapsed",
+                            "repaired_at": datetime.now(timezone.utc).isoformat(),
+                            "old_platform_code": "miaoshou",
+                            "new_platform_code": target_platform,
+                        },
+                    }
+                repaired_count += 1
+                repaired_rows.append(
+                    {
+                        "file_id": file_record.id,
+                        "file_name": file_record.file_name,
+                        "old_platform_code": "miaoshou",
+                        "new_platform_code": target_platform,
+                        "file_hash_changed": old_hash != file_record.file_hash,
+                    }
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "file_id": file_record.id,
+                        "file_name": file_record.file_name,
+                        "error": str(exc),
+                    }
+                )
+
+        await db.commit()
+
+        return success_response(
+            data={
+                "matched_count": len(pending_records),
+                "repaired_count": repaired_count,
+                "repaired_rows": repaired_rows,
+                "failures": failures,
+            },
+            message=f"妙手订单平台语义修复完成，修复 {repaired_count} 条记录",
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[DataSync SemanticRepair] 修复妙手订单平台语义失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="修复妙手订单平台语义失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接或联系系统管理员",
+            status_code=500,
+        )
+
+
+@router.post("/data-sync/repair-miaoshou-orders-platform-semantics")
+async def repair_miaoshou_orders_platform_semantics(
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        result = await db.execute(
+            select(CatalogFile).where(
+                CatalogFile.status == "pending",
+                CatalogFile.data_domain == "orders",
+                CatalogFile.platform_code == "miaoshou",
+            )
+        )
+        pending_records = result.scalars().all()
+
+        repaired_count = 0
+        repaired_rows: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+
+        for file_record in pending_records:
+            target_platform = _resolve_miaoshou_orders_business_platform(file_record)
+            if target_platform not in {"tiktok", "shopee"}:
+                continue
+            old_hash = file_record.file_hash
+            try:
+                file_path = to_absolute_path(str(file_record.file_path))
+                if file_path.exists():
+                    file_record.file_hash = _compute_sha256(
+                        file_path,
+                        shop_id=getattr(file_record, "shop_id", None),
+                        platform_code=target_platform,
+                    )
+                file_record.platform_code = target_platform
+                file_record.source_platform = "miaoshou"
+                file_record.sub_domain = None
+                if isinstance(file_record.file_metadata, dict):
+                    file_record.file_metadata = {
+                        **file_record.file_metadata,
+                        "semantic_repair": {
+                            "reason": "miaoshou_orders_business_platform_collapsed",
+                            "repaired_at": datetime.now(timezone.utc).isoformat(),
+                            "old_platform_code": "miaoshou",
+                            "new_platform_code": target_platform,
+                        },
+                    }
+                repaired_count += 1
+                repaired_rows.append(
+                    {
+                        "file_id": file_record.id,
+                        "file_name": file_record.file_name,
+                        "old_platform_code": "miaoshou",
+                        "new_platform_code": target_platform,
+                        "file_hash_changed": old_hash != file_record.file_hash,
+                    }
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "file_id": file_record.id,
+                        "file_name": file_record.file_name,
+                        "error": str(exc),
+                    }
+                )
+
+        await db.commit()
+        return success_response(
+            data={
+                "matched_count": len(pending_records),
+                "repaired_count": repaired_count,
+                "repaired_rows": repaired_rows,
+                "failures": failures,
+            },
+            message=f"妙手订单平台语义修复完成，修复 {repaired_count} 条记录",
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[DataSync SemanticRepair] 修复妙手订单平台语义失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="修复妙手订单平台语义失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接或联系系统管理员",
+            status_code=500,
+        )
+
 
 @router.post("/data-sync/batch-all")
 @role_based_rate_limit(endpoint_type="data_sync")  # [*] v4.19.4: 基于角色的动态限流
@@ -2664,6 +2918,93 @@ async def sync_all_with_template(
             detail=str(e),
             recovery_suggestion="请检查系统状态,或联系系统管理员",
             status_code=500
+        )
+
+
+@router.post("/data-sync/repair-miaoshou-orders-platform-semantics")
+async def repair_miaoshou_orders_platform_semantics(
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        result = await db.execute(
+            select(CatalogFile).where(
+                CatalogFile.status == "pending",
+                CatalogFile.data_domain == "orders",
+                CatalogFile.platform_code == "miaoshou",
+            )
+        )
+        pending_records = result.scalars().all()
+
+        repaired_count = 0
+        repaired_rows: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+
+        for file_record in pending_records:
+            target_platform = _resolve_miaoshou_orders_business_platform(file_record)
+            if target_platform not in {"tiktok", "shopee"}:
+                continue
+            old_hash = file_record.file_hash
+            try:
+                file_path = to_absolute_path(str(file_record.file_path))
+                if file_path.exists():
+                    file_record.file_hash = _compute_sha256(
+                        file_path,
+                        shop_id=getattr(file_record, "shop_id", None),
+                        platform_code=target_platform,
+                    )
+                file_record.platform_code = target_platform
+                file_record.source_platform = "miaoshou"
+                file_record.sub_domain = None
+                if isinstance(file_record.file_metadata, dict):
+                    file_record.file_metadata = {
+                        **file_record.file_metadata,
+                        "semantic_repair": {
+                            "reason": "miaoshou_orders_business_platform_collapsed",
+                            "repaired_at": datetime.now(timezone.utc).isoformat(),
+                            "old_platform_code": "miaoshou",
+                            "new_platform_code": target_platform,
+                        },
+                    }
+                repaired_count += 1
+                repaired_rows.append(
+                    {
+                        "file_id": file_record.id,
+                        "file_name": file_record.file_name,
+                        "old_platform_code": "miaoshou",
+                        "new_platform_code": target_platform,
+                        "file_hash_changed": old_hash != file_record.file_hash,
+                    }
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "file_id": file_record.id,
+                        "file_name": file_record.file_name,
+                        "error": str(exc),
+                    }
+                )
+
+        await db.commit()
+        return success_response(
+            data={
+                "matched_count": len(pending_records),
+                "repaired_count": repaired_count,
+                "repaired_rows": repaired_rows,
+                "failures": failures,
+            },
+            message=f"妙手订单平台语义修复完成，修复 {repaired_count} 条记录",
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[DataSync SemanticRepair] 修复妙手订单平台语义失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="修复妙手订单平台语义失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接或联系系统管理员",
+            status_code=500,
         )
 
 

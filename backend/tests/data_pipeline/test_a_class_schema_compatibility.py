@@ -1,29 +1,23 @@
 from pathlib import Path
 
 
-def test_annual_summary_shop_month_uses_current_operating_cost_columns():
-    for path_str in (
-        "sql/mart/annual_summary_shop_month.sql",
-        "sql/api_modules/business_overview_operational_metrics_module.sql",
-    ):
-        text = Path(path_str).read_text(
-            encoding="utf-8",
-            errors="replace",
-        )
+def test_operational_metrics_sql_uses_current_operating_cost_contract():
+    text = Path("sql/api_modules/business_overview_operational_metrics_module.sql").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
 
-        assert "information_schema.columns" in text
-        assert "year_month" in text
-        assert '"年月"' in text
-        assert "shop_id" in text
-        assert '"店铺ID"' in text
-        assert "rent" in text
-        assert '"租金"' in text
-        # Backward-compatible: legacy schemas may still use "工资" but the expense module now
-        # standardizes on "营销费用" and prefers "成本合计" when available.
-        assert ('"营销费用"' in text) or ('"工资"' in text)
-        assert '"水电费"' in text
-        assert '"其他成本"' in text
-        assert ('"成本合计"' in text) or ("SUM(" in text and "total_cost" in text)
+    assert "platform_code" in text
+    assert '"\u5e74\u6708"' in text
+    assert '"\u5e97\u94faID"' in text
+    assert '"\u79df\u91d1"' in text
+    assert '"\u8425\u9500\u8d39\u7528"' in text
+    assert '"\u6c34\u7535\u8d39"' in text
+    assert '"AI Token\u8d39\u7528"' in text
+    assert '"\u5176\u4ed6\u6210\u672c"' in text
+    assert '"\u6210\u672c\u5408\u8ba1"' in text
+    assert '"\u5220\u9664\u65f6\u95f4"' in text
+    assert "information_schema.columns" not in text
 
 
 def test_target_completion_service_prefers_current_sales_target_columns():
@@ -39,14 +33,11 @@ def test_target_completion_service_prefers_current_sales_target_columns():
     assert "target_sales_amount" in service_text
     assert "target_quantity" in service_text
     assert "year_month" in service_text
-    assert '"年月"' in service_text
-    assert '"目标销售额"' in service_text
-    assert '"目标订单数"' in service_text
-    assert '"目标单量"' in service_text
-    assert "information_schema.columns" in sql_text
-    assert "target_sales_amount" in sql_text
-    assert "target_quantity" in sql_text
-    assert "year_month" in sql_text
-    assert '"年月"' in sql_text
-    assert '"目标销售额"' in sql_text
-    assert '"目标订单数"' in sql_text
+    assert '"\u5e74\u6708"' in service_text
+    assert '"\u76ee\u6807\u9500\u552e\u989d"' in service_text
+    assert '"\u76ee\u6807\u8ba2\u5355\u6570"' in service_text
+    assert '"\u76ee\u6807\u5355\u91cf"' in service_text
+    assert '"\u5e74\u6708"' in sql_text
+    assert '"\u76ee\u6807\u9500\u552e\u989d"' in sql_text
+    assert '"\u76ee\u6807\u8ba2\u5355\u6570"' in sql_text
+    assert "mart.shop_month_kpi" in sql_text

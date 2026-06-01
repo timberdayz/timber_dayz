@@ -46,14 +46,16 @@ def test_health_check_includes_data_sync_critical_columns():
             self.columns = {
                 ("a_class", "operating_costs"): [
                     "id",
-                    "搴楅摵ID",
-                    "骞存湀",
-                    "绉熼噾",
-                    "宸ヨ祫",
-                    "姘寸數璐?",
-                    "鍏朵粬鎴愭湰",
-                    "鍒涘缓鏃堕棿",
-                    "鏇存柊鏃堕棿",
+                    "店铺ID",
+                    "年月",
+                    "租金",
+                    "营销费用",
+                    "水电费",
+                    "AI Token费用",
+                    "其他成本",
+                    "成本合计",
+                    "创建时间",
+                    "更新时间",
                 ],
                 ("a_class", "sales_targets"): ["id", "target_name", "target_type", "period_start", "period_end"],
                 ("a_class", "sales_targets_a"): [],
@@ -76,3 +78,4 @@ def test_health_check_includes_data_sync_critical_columns():
     assert any("core.staging_orders" in issue and "file_id" in issue for issue in issues)
     assert any("core.staging_product_metrics" in issue and "file_id" in issue for issue in issues)
     assert any("core.staging_inventory" in issue and "file_id" in issue for issue in issues)
+    assert not any("a_class.operating_costs" in issue for issue in issues)

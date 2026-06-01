@@ -29,16 +29,13 @@ jobs:
         run: mkdir -p temp
 
       - name: Validate API Contracts
-        run: |
-          python scripts/validate_api_contracts.py || echo "API contract validation completed with warnings"
+        run: python scripts/validate_api_contracts.py
 
       - name: Validate Frontend API Methods
-        run: |
-          python scripts/validate_frontend_api_methods.py || echo "Frontend API validation completed with warnings"
+        run: python scripts/validate_frontend_api_methods.py
 
       - name: Validate Database Fields
-        run: |
-          python scripts/validate_database_fields.py || echo "Database fields validation completed with warnings"
+        run: python scripts/validate_database_fields.py
 
       - name: Generate Code Review Checklist
         run: |
