@@ -1175,7 +1175,7 @@ class RawDataImporter:
             
             # [*] 添加行数验证:检测显著数据丢失
             expected_inserted = len(insert_data)
-            if expected_inserted > 0:
+            if expected_inserted > 0 and not is_upsert:
                 loss_rate = (expected_inserted - actual_inserted) / expected_inserted
                 if loss_rate > 0.05:  # 超过5%的数据丢失
                     logger.warning(

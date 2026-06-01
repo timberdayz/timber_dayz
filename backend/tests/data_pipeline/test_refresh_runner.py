@@ -53,6 +53,31 @@ def test_split_sql_statements_handles_tagged_dollar_quotes():
     ]
 
 
+def test_split_sql_statements_ignores_semicolons_inside_comments():
+    from backend.services.data_pipeline.sql_loader import split_sql_statements
+
+    statements = split_sql_statements(
+        """
+        CREATE SCHEMA IF NOT EXISTS mart;
+
+        -- Use Alembic for schema evolution; keep bootstrap SQL idempotent.
+        CREATE TABLE IF NOT EXISTS mart.inventory_age_history (
+            id BIGINT PRIMARY KEY
+        );
+
+        /* block comment with ; semicolon */
+        CREATE VIEW mart.inventory_age_history_v AS
+        SELECT id FROM mart.inventory_age_history;
+        """
+    )
+
+    assert statements == [
+        "CREATE SCHEMA IF NOT EXISTS mart",
+        "-- Use Alembic for schema evolution; keep bootstrap SQL idempotent.\n        CREATE TABLE IF NOT EXISTS mart.inventory_age_history (\n            id BIGINT PRIMARY KEY\n        )",
+        "/* block comment with ; semicolon */\n        CREATE VIEW mart.inventory_age_history_v AS\n        SELECT id FROM mart.inventory_age_history",
+    ]
+
+
 def test_refresh_registry_exposes_dependency_order():
     from backend.services.data_pipeline.refresh_registry import (
         PIPELINE_DEPENDENCIES,

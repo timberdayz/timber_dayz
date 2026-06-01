@@ -31,12 +31,46 @@ def split_sql_statements(sql_text: str) -> list[str]:
     in_single_quote = False
     in_double_quote = False
     in_dollar_quote = False
+    in_line_comment = False
+    in_block_comment = False
     dollar_tag = "$$"
 
     i = 0
     length = len(sql_text)
     while i < length:
         char = sql_text[i]
+        next_char = sql_text[i + 1] if i + 1 < length else ""
+
+        if in_line_comment:
+            current.append(char)
+            i += 1
+            if char == "\n":
+                in_line_comment = False
+            continue
+
+        if in_block_comment:
+            current.append(char)
+            i += 1
+            if char == "*" and i < length and sql_text[i] == "/":
+                current.append("/")
+                i += 1
+                in_block_comment = False
+            continue
+
+        if not in_single_quote and not in_double_quote and not in_dollar_quote:
+            if char == "-" and next_char == "-":
+                current.append(char)
+                current.append(next_char)
+                i += 2
+                in_line_comment = True
+                continue
+            if char == "/" and next_char == "*":
+                current.append(char)
+                current.append(next_char)
+                i += 2
+                in_block_comment = True
+                continue
+
         if not in_single_quote and not in_double_quote:
             matched_dollar_tag = _match_dollar_quote(sql_text, i)
             if matched_dollar_tag:
