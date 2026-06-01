@@ -29,7 +29,7 @@ services:
           memory: 128M
 
   # FastAPI后端 - 资源优化
-  backend:
+  backend-api:
     deploy:
       resources:
         limits:

@@ -1084,7 +1084,7 @@ class RawDataImporter:
                         normalized_col = dynamic_column_manager.normalize_column_name(original_col)
                         # 只映射那些确实存在于表中的列(排除系统字段)
                         if normalized_col in existing_columns and normalized_col not in system_fields:
-                            column_mapping[original_col] = normalized_col
+                            column_mapping.setdefault(normalized_col, []).append(original_col)
                     
                     if column_mapping:
                         # 构建UPDATE语句更新动态列
@@ -1126,10 +1126,23 @@ class RawDataImporter:
                             
                             # 构建SET子句(从原始row数据获取值)
                             set_clauses = []
-                            for original_col, normalized_col in column_mapping.items():
-                                if original_col in row:
+                            for normalized_col, original_columns in column_mapping.items():
+                                chosen_value = None
+                                for original_col in original_columns:
+                                    if original_col not in row:
+                                        continue
+                                    raw_value = row[original_col]
+                                    if raw_value is None:
+                                        continue
+                                    candidate_value = str(raw_value)
+                                    if chosen_value is None or chosen_value == '':
+                                        chosen_value = candidate_value
+                                    if candidate_value != '':
+                                        break
+
+                                if chosen_value is not None:
                                     set_clauses.append(f'"{normalized_col}" = :{normalized_col}')
-                                    where_params[normalized_col] = str(row[original_col]) if row[original_col] is not None else None
+                                    where_params[normalized_col] = chosen_value
                             
                             if set_clauses:
                                 update_sql = text(f"""

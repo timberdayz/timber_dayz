@@ -62,6 +62,11 @@ assert.match(
 )
 assert.match(
   viewText,
+  /normalizeTemplateActionRow|template\.data_domain\s*\|\|\s*template\.domain/,
+  'manual update save path should normalize governance rows that only carry domain'
+)
+assert.match(
+  viewText,
   /Manual Update/,
   'template list should expose a Manual Update action'
 )

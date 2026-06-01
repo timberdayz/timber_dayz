@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.celery_app import celery_app
 from backend.services.task_center_service import TaskCenterService
 from backend.utils.data_formatter import format_datetime
 from modules.core.logger import get_logger
@@ -127,6 +128,7 @@ class SyncProgressTracker:
                 task = await self.task_center.get_task(task_id)
                 if not task:
                     return None
+                task = await self._reconcile_runner_state(task)
                 return self._task_to_dict(task)
             except Exception as query_error:
                 error_str = str(query_error)
@@ -266,7 +268,14 @@ class SyncProgressTracker:
                 status=self._legacy_status_to_task_center(status) if status else None,
                 limit=limit,
             )
-            return [self._task_to_dict(row) for row in rows]
+            normalized_rows: list[dict[str, Any]] = []
+            for row in rows:
+                normalized = await self._reconcile_runner_state(row)
+                legacy_status = self._task_center_status_to_legacy(normalized.get("status"))
+                if status and legacy_status != status:
+                    continue
+                normalized_rows.append(self._task_to_dict(normalized))
+            return normalized_rows
         except Exception as e:
             logger.error("[SyncProgress] Failed to list tasks: %s", e, exc_info=True)
             return []
@@ -412,3 +421,98 @@ class SyncProgressTracker:
         if isinstance(last_error, str):
             return last_error
         return str(last_error)
+
+    async def _reconcile_runner_state(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        if not task:
+            return task
+
+        runner_kind = str(task.get("runner_kind") or "").strip().lower()
+        external_runner_id = str(task.get("external_runner_id") or "").strip()
+        current_status = str(task.get("status") or "").strip().lower()
+        if runner_kind != "celery" or not external_runner_id:
+            return task
+        if current_status not in {"pending", "submitted", "queued", "running"}:
+            return task
+
+        try:
+            async_result = celery_app.AsyncResult(external_runner_id)
+            celery_state = str(async_result.state or "").upper()
+        except Exception as exc:
+            logger.debug(
+                "[SyncProgress] Failed to inspect celery task %s for %s: %s",
+                external_runner_id,
+                task.get("task_id"),
+                exc,
+            )
+            return task
+
+        update_payload: Dict[str, Any] = {}
+        details = self._details_from_task_center(task)
+
+        if celery_state in {"STARTED", "RETRY"} and current_status != "running":
+            update_payload["status"] = "running"
+        elif celery_state == "FAILURE":
+            update_payload["status"] = "failed"
+            update_payload["finished_at"] = datetime.now(timezone.utc)
+            error_message = str(async_result.result)
+            update_payload["error_summary"] = error_message
+            details["message"] = error_message
+            errors = list(details.get("errors", []))
+            errors.append(
+                {
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "message": error_message,
+                }
+            )
+            details["errors"] = errors
+            update_payload["details_json"] = details
+        elif celery_state == "SUCCESS":
+            result_payload = async_result.result
+            task_details = dict(details.get("task_details", {}))
+            if isinstance(result_payload, dict):
+                payload_status = str(result_payload.get("status") or "").strip().lower()
+                payload_success = bool(result_payload.get("success", payload_status not in {"failed", "error"}))
+                update_payload["status"] = "completed" if payload_success else "failed"
+                update_payload["finished_at"] = datetime.now(timezone.utc)
+                task_details.update(
+                    {
+                        "success_files": result_payload.get("success_files", task_details.get("success_files", 0)),
+                        "failed_files": result_payload.get("failed_files", task_details.get("failed_files", 0)),
+                        "skipped_files": result_payload.get("skipped_files", task_details.get("skipped_files", 0)),
+                    }
+                )
+                if "processed_files" in result_payload:
+                    update_payload["processed_items"] = result_payload.get("processed_files") or 0
+                if "message" in result_payload and result_payload.get("message"):
+                    details["message"] = result_payload.get("message")
+                if not payload_success:
+                    error_message = str(result_payload.get("message") or "Celery task returned failed result")
+                    update_payload["error_summary"] = error_message
+                    details["message"] = error_message
+                    errors = list(details.get("errors", []))
+                    errors.append(
+                        {
+                            "time": datetime.now(timezone.utc).isoformat(),
+                            "message": error_message,
+                        }
+                    )
+                    details["errors"] = errors
+                details["task_details"] = task_details
+                update_payload["details_json"] = details
+            elif current_status != "completed":
+                update_payload["status"] = "completed"
+                update_payload["finished_at"] = datetime.now(timezone.utc)
+
+        if not update_payload:
+            return task
+
+        try:
+            return await self.task_center.update_task(task["task_id"], **update_payload)
+        except Exception as exc:
+            logger.warning(
+                "[SyncProgress] Failed to reconcile celery state for task %s: %s",
+                task.get("task_id"),
+                exc,
+                exc_info=True,
+            )
+            return task

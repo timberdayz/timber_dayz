@@ -78,3 +78,58 @@ async def test_data_sync_progress_endpoint_keeps_legacy_shape(
     assert payload["task_id"] == "sync-route-1"
     assert "file_progress" in payload
     assert "success_files" in payload
+
+
+@pytest.mark.asyncio
+async def test_sync_progress_tracker_reconciles_successful_celery_result(task_center_sqlite_session, monkeypatch):
+    tracker = SyncProgressTracker(task_center_sqlite_session)
+    await tracker.create_task(task_id="sync-celery-success", total_files=1, task_type="single_file")
+    await tracker.set_runner(
+        "sync-celery-success",
+        runner_kind="celery",
+        external_runner_id="celery-success-1",
+    )
+
+    class _Result:
+        state = "SUCCESS"
+        result = {
+            "success": False,
+            "status": "failed",
+            "message": "worker import failed",
+            "processed_files": 1,
+            "success_files": 0,
+            "failed_files": 1,
+            "skipped_files": 0,
+        }
+
+    monkeypatch.setattr("backend.services.sync_progress_tracker.celery_app.AsyncResult", lambda _id: _Result())
+
+    payload = await tracker.get_task("sync-celery-success")
+
+    assert payload is not None
+    assert payload["status"] == "failed"
+    assert payload["processed_files"] == 1
+    assert payload["failed_files"] == 1
+    assert payload["message"] == "worker import failed"
+
+
+@pytest.mark.asyncio
+async def test_sync_progress_tracker_reconciles_started_celery_result(task_center_sqlite_session, monkeypatch):
+    tracker = SyncProgressTracker(task_center_sqlite_session)
+    await tracker.create_task(task_id="sync-celery-running", total_files=1, task_type="single_file")
+    await tracker.set_runner(
+        "sync-celery-running",
+        runner_kind="celery",
+        external_runner_id="celery-running-1",
+    )
+
+    class _Result:
+        state = "STARTED"
+        result = None
+
+    monkeypatch.setattr("backend.services.sync_progress_tracker.celery_app.AsyncResult", lambda _id: _Result())
+
+    payload = await tracker.get_task("sync-celery-running")
+
+    assert payload is not None
+    assert payload["status"] == "processing"

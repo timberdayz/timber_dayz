@@ -57,7 +57,6 @@ def sync_single_file_task(
     """
     async def _async_task():
         """内部异步函数,执行实际的同步逻辑"""
-        from backend.services.data_sync_service import DataSyncService
         from backend.services.sync_progress_tracker import SyncProgressTracker
         from backend.models.database import AsyncSessionLocal
         
@@ -80,6 +79,7 @@ def sync_single_file_task(
             await progress_tracker.update_task(task_id, {"status": "processing"})
             
             # 执行同步
+            from backend.services.data_sync_service import DataSyncService
             sync_service = DataSyncService(db)
             result = await sync_service.sync_single_file(
                 file_id=file_id,
@@ -213,7 +213,6 @@ def sync_batch_task(
     """
     async def _async_task():
         """内部异步函数,执行实际的批量同步逻辑"""
-        from backend.services.data_sync_service import DataSyncService
         from backend.services.sync_progress_tracker import SyncProgressTracker
         from backend.models.database import AsyncSessionLocal
         from datetime import datetime, timezone
@@ -243,6 +242,7 @@ def sync_batch_task(
             await progress_tracker.update_task(task_id, {"status": "processing"})
             
             # 并发控制(使用信号量限制并发数)
+            from backend.services.data_sync_service import DataSyncService
             semaphore = asyncio.Semaphore(max_concurrent)
             
             async def sync_file_with_semaphore(fid: int):

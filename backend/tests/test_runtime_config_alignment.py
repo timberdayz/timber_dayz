@@ -216,6 +216,15 @@ def test_prod_compose_declares_explicit_backend_api_and_collector_services():
     assert services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
 
 
+def test_cloud_overlays_target_backend_api_not_legacy_backend_service():
+    for compose_name in ("docker-compose.cloud.yml", "docker-compose.cloud-4c8g.yml"):
+        compose = _read_yaml(compose_name)
+        services = compose["services"]
+
+        assert "backend-api" in services
+        assert "backend" not in services
+
+
 def test_prod_celery_healthcheck_uses_worker_readiness():
     compose = _read_yaml("docker-compose.prod.yml")
     health_test = compose["services"]["celery-worker"]["healthcheck"]["test"]
@@ -267,7 +276,7 @@ def test_cloud_overlay_increases_celery_beat_memory_limit():
 def test_cloud_4c8g_overlay_sets_balanced_backend_and_worker_memory_limits():
     compose = _read_yaml("docker-compose.cloud-4c8g.yml")
 
-    backend_limits = compose["services"]["backend"]["deploy"]["resources"]["limits"]
+    backend_limits = compose["services"]["backend-api"]["deploy"]["resources"]["limits"]
     worker_limits = compose["services"]["celery-worker"]["deploy"]["resources"]["limits"]
 
     assert backend_limits["memory"] == "1.5G"

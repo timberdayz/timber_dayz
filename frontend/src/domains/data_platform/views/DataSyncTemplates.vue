@@ -455,6 +455,18 @@ const buildManualUpdateRow = (family, variant = null) => {
   }
 }
 
+const normalizeTemplateActionRow = (row) => {
+  if (!row) {
+    return row
+  }
+  const normalizedDomain = row.data_domain || row.domain || null
+  return {
+    ...row,
+    data_domain: normalizedDomain,
+    domain: normalizedDomain,
+  }
+}
+
 const canManualUpdateFamily = (family) => {
   const row = buildManualUpdateRow(family)
   if (row.governance_status === 'missing_variant') {
@@ -508,6 +520,7 @@ const closeVariantWorkbench = () => {
 }
 
 const handleManualUpdate = (row) => {
+  row = normalizeTemplateActionRow(row)
   if (row?.governance_status === 'missing_variant') {
     handleCreateVariantForFamily(row)
     return
@@ -517,6 +530,7 @@ const handleManualUpdate = (row) => {
 }
 
 const handleCreateVariantForFamily = async (row) => {
+  row = normalizeTemplateActionRow(row)
   if (!row?.sample_file_id) {
     ElMessage.warning('当前缺少样本文件上下文，请先到文件列表选择一个具体文件再创建变体')
     return
@@ -557,6 +571,7 @@ const chooseManualUpdateMode = async (mode) => {
 }
 
 const openTemplateUpdateWorkbench = async (row, mode = 'with-sample') => {
+  row = normalizeTemplateActionRow(row)
   const templateId = row.template_id || row.id || null
   if (!templateId) {
     ElMessage.error('缺少可更新的模板 ID')
@@ -702,9 +717,12 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
       headerColumns: context.current_header_columns,
       sampleData: context.sample_data || {},
     })
+    const templatePlatform = template.platform || context?.template?.platform || null
+    const templateDataDomain =
+      template.data_domain || template.domain || context?.template?.data_domain || context?.template?.domain || null
     const result = await api.saveTemplate({
-      platform: template.platform,
-      dataDomain: template.data_domain,
+      platform: templatePlatform,
+      dataDomain: templateDataDomain,
       subDomain: template.sub_domain,
       granularity: template.granularity,
       saveMode: 'new_version',

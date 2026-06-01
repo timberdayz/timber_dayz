@@ -20,11 +20,15 @@ from celery import Celery
 from celery.schedules import crontab
 import os
 
+_redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+_celery_broker_url = os.getenv("CELERY_BROKER_URL", _redis_url)
+_celery_result_backend = os.getenv("CELERY_RESULT_BACKEND", _redis_url)
+
 # Celery应用配置
 celery_app = Celery(
     "xihong_erp",
-    broker=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
-    backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
+    broker=_celery_broker_url,
+    backend=_celery_result_backend,
     include=[
         "backend.tasks.data_processing",
         "backend.tasks.scheduled_tasks",

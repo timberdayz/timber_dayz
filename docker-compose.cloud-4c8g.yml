@@ -7,7 +7,7 @@
 # =====================================================
 
 services:
-  backend:
+  backend-api:
     environment:
       DB_POOL_SIZE: "30"
       DB_MAX_OVERFLOW: "30"
