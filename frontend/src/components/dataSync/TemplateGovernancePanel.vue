@@ -2,7 +2,7 @@
   <el-card class="governance-card" style="margin-bottom: 20px;">
     <template #header>
       <div class="governance-card__header">
-        <span>📊 模板数据治理看板</span>
+        <span>模板数据治理看板</span>
         <el-button size="small" :loading="loading" @click="$emit('refresh')">
           <el-icon><Refresh /></el-icon>
           刷新统计
@@ -16,7 +16,7 @@
           <el-icon><Document /></el-icon>
         </div>
         <div class="stat-content">
-          <div class="stat-label">模板覆盖度</div>
+          <div class="stat-label">模板覆盖率</div>
           <div class="stat-value">{{ summary.coverage_percentage || 0 }}%</div>
         </div>
       </div>
@@ -47,6 +47,15 @@
           <div class="stat-value">{{ summary.needs_update_count || 0 }}</div>
         </div>
       </div>
+      <div class="stat-item">
+        <div class="stat-icon" style="background: #909399;">
+          <el-icon><Warning /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-label">缺少变体</div>
+          <div class="stat-value">{{ summary.missing_variant_count || 0 }}</div>
+        </div>
+      </div>
     </div>
 
     <el-tabs :model-value="activeTab" style="margin-top: 20px;" @update:model-value="$emit('update:active-tab', $event)">
@@ -65,9 +74,17 @@
           <el-table-column prop="file_count" label="文件数" width="100" align="center" />
           <el-table-column label="状态" width="120">
             <template #default="{ row }">
-              <el-tag v-if="row.needs_update" type="warning" size="small">
+              <el-tag v-if="row.governance_status === 'breaking_drift'" type="warning" size="small">
                 <el-icon><Refresh /></el-icon>
-                需要更新
+                需新版本
+              </el-tag>
+              <el-tag v-else-if="row.governance_status === 'non_breaking_drift'" type="info" size="small">
+                <el-icon><Refresh /></el-icon>
+                轻微漂移
+              </el-tag>
+              <el-tag v-else-if="row.governance_status === 'missing_variant'" type="danger" size="small">
+                <el-icon><Warning /></el-icon>
+                缺少变体
               </el-tag>
               <el-tag v-else type="success" size="small">
                 <el-icon><Check /></el-icon>
@@ -96,6 +113,7 @@
           <el-table-column prop="domain" label="数据域" width="100" />
           <el-table-column prop="sub_domain" label="子类型" width="120" />
           <el-table-column prop="granularity" label="粒度" width="100" />
+          <el-table-column prop="governance_status" label="治理状态" width="120" />
           <el-table-column prop="file_count" label="待同步文件数" width="120" align="center" />
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
@@ -128,20 +146,20 @@ import TemplateNeedsUpdateTable from './TemplateNeedsUpdateTable.vue'
 const props = defineProps({
   detailedCoverage: {
     type: Object,
-    default: () => ({}),
+    default: () => ({})
   },
   loading: {
     type: Boolean,
-    default: false,
+    default: false
   },
   activeTab: {
     type: String,
-    default: 'covered',
+    default: 'covered'
   },
   getPlatformLabel: {
     type: Function,
-    default: value => value ?? '',
-  },
+    default: (value) => value ?? ''
+  }
 })
 
 defineEmits(['refresh', 'create-missing', 'update-template', 'manual-update', 'update:active-tab'])

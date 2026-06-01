@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, desc, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.deduplication_fields_config import get_default_deduplication_fields
@@ -123,6 +124,15 @@ class FieldMappingTemplateService:
             self.db.add(template)
             await self.db.commit()
             await self.db.refresh(template)
+            from backend.services.template_family_service import get_template_family_service
+
+            try:
+                await get_template_family_service(self.db).project_legacy_templates(
+                    platform=platform,
+                    data_domain=data_domain,
+                )
+            except OperationalError as exc:
+                logger.warning(f"[Template] skip family projection because new tables are unavailable: {exc}")
 
             logger.info(
                 f"[Template] 保存成功: {template.template_name} (ID={template.id}, {len(header_columns)}个字段)"

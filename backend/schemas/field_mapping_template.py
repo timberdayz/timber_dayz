@@ -200,6 +200,121 @@ class TemplateListResponse(BaseModel):
     data: TemplateListData
 
 
+class TemplateFamilyActiveVersionSummary(BaseModel):
+    id: int
+    version_no: int
+    status: str
+    template_name: Optional[str] = None
+
+
+class TemplateFamilyListItem(BaseModel):
+    id: int
+    platform: str
+    data_domain: str
+    granularity: Optional[str] = None
+    account: Optional[str] = None
+    sub_domain: Optional[str] = None
+    display_name: Optional[str] = None
+    governance_status: str = "ready"
+    variant_count: int = 0
+    file_count: int = 0
+    active_template_id: Optional[int] = None
+    active_version: Optional[TemplateFamilyActiveVersionSummary] = None
+
+
+class TemplateFamilyListData(BaseModel):
+    families: List[TemplateFamilyListItem]
+    count: int
+
+
+class TemplateFamilyListResponse(BaseModel):
+    success: bool = True
+    data: TemplateFamilyListData
+
+
+class TemplateVersionListItem(BaseModel):
+    id: int
+    family_id: int
+    version_no: int
+    status: str
+    template_name: Optional[str] = None
+    deduplication_fields: List[str] = Field(default_factory=list)
+    header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    notes: Optional[str] = None
+    variant_count: int = 0
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    legacy_template_ids: List[int] = Field(default_factory=list)
+
+
+class TemplateFamilyVersionsData(BaseModel):
+    family: TemplateFamilyListItem
+    versions: List[TemplateVersionListItem]
+
+
+class TemplateFamilyVersionsResponse(BaseModel):
+    success: bool = True
+    data: TemplateFamilyVersionsData
+
+
+class TemplateVariantListItem(BaseModel):
+    id: int
+    template_version_id: int
+    variant_key: str
+    match_priority: int = 100
+    header_row: int = 0
+    sheet_name_pattern: Optional[str] = None
+    required_headers: List[str] = Field(default_factory=list)
+    parse_profile: Dict[str, Any] = Field(default_factory=dict)
+    field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
+    source_legacy_template_id: Optional[int] = None
+    template_name: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class TemplateVersionVariantsData(BaseModel):
+    version: TemplateVersionListItem
+    variants: List[TemplateVariantListItem]
+
+
+class TemplateVersionVariantsResponse(BaseModel):
+    success: bool = True
+    data: TemplateVersionVariantsData
+
+
+class TemplateResolveRequest(BaseModel):
+    platform: str
+    data_domain: str
+    granularity: Optional[str] = None
+    sub_domain: Optional[str] = None
+    account: Optional[str] = None
+    header_row: Optional[int] = None
+    sheet_name: Optional[str] = None
+    header_columns: List[str] = Field(default_factory=list)
+    sample_rows: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class TemplateResolveShadowCompare(BaseModel):
+    legacy_template_id: Optional[int] = None
+    legacy_template_name: Optional[str] = None
+    projected_variant_legacy_template_id: Optional[int] = None
+    is_consistent: bool = False
+
+
+class TemplateResolveData(BaseModel):
+    matched: bool
+    governance_status: str
+    family: Optional[TemplateFamilyListItem] = None
+    active_version: Optional[TemplateVersionListItem] = None
+    variant: Optional[TemplateVariantListItem] = None
+    shadow_compare: TemplateResolveShadowCompare
+
+
+class TemplateResolveResponse(BaseModel):
+    success: bool = True
+    data: TemplateResolveData
+
+
 class TemplateDeleteData(BaseModel):
     template_id: int
 

@@ -1048,6 +1048,32 @@ export default {
     )
   },
 
+  async getTemplateFamilies({ platform, dataDomain } = {}) {
+    const params = {}
+    if (platform) {
+      params.platform = platform
+    }
+    if (dataDomain) {
+      params.data_domain = dataDomain
+    }
+    const queryString = new URLSearchParams(params).toString()
+    return await this._get(
+      `/field-mapping/template-families${queryString ? '?' + queryString : ''}`
+    )
+  },
+
+  async getTemplateFamilyVersions(familyId) {
+    return await this._get(`/field-mapping/template-families/${familyId}/versions`)
+  },
+
+  async getTemplateVersionVariants(versionId) {
+    return await this._get(`/field-mapping/template-versions/${versionId}/variants`)
+  },
+
+  async resolveTemplateCandidate(payload) {
+    return await this._post('/field-mapping/template-resolve', payload)
+  },
+
   /**
    * 删除模板
    * @param {number} templateId - 模板ID

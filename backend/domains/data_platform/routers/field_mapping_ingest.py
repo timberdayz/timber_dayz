@@ -32,6 +32,7 @@ from backend.services.data_standardizer import standardize_rows
 from backend.services.currency_extractor import get_currency_extractor
 from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 from backend.services.excel_parser import ExcelParser
+from backend.services.template_family_service import get_template_resolver
 from modules.services.smart_date_parser import parse_date_by_declared_format
 from modules.core.db import FieldMappingTemplate
 from modules.core.logger import get_logger
@@ -91,6 +92,35 @@ async def _load_field_parse_rules_for_file(
     if not file_record:
         return []
 
+    safe_path = _safe_resolve_path(file_record.file_path)
+    sample_rows: list[dict[str, Any]] = []
+    header_columns: list[str] = []
+    try:
+        df = ExcelParser.read_excel(safe_path, header=0, nrows=5)
+        df.columns = [str(col).strip() for col in df.columns]
+        df = df.dropna(how="all").fillna("")
+        sample_rows = df.to_dict("records")
+        header_columns = df.columns.tolist()
+    except Exception:
+        sample_rows = []
+        header_columns = []
+
+    try:
+        resolve_result = await get_template_resolver(db).resolve(
+            platform=(file_record.platform_code or "").strip(),
+            data_domain=(domain or "").strip(),
+            granularity=(granularity or "").strip(),
+            sub_domain=getattr(file_record, "sub_domain", None),
+            header_columns=header_columns,
+            sample_rows=sample_rows,
+        )
+        variant = resolve_result.get("variant") or {}
+        variant_rules = list(variant.get("field_parse_rules") or [])
+        if variant_rules:
+            return variant_rules
+    except Exception:
+        pass
+
     template_result = await db.execute(
         select(FieldMappingTemplate).where(
             FieldMappingTemplate.platform == (file_record.platform_code or "").strip(),
@@ -111,7 +141,6 @@ async def _load_field_parse_rules_for_file(
     if len(templates_with_rules) == 1:
         return list(templates_with_rules[0].field_parse_rules or [])
 
-    safe_path = _safe_resolve_path(file_record.file_path)
     sample_cache: dict[int, list[dict[str, Any]]] = {}
     matched_templates: list[FieldMappingTemplate] = []
     for template in templates_with_rules:

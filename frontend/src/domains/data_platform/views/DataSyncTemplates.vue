@@ -1,15 +1,8 @@
-<!--
-数据同步 - 模板管理页面（增强版）
-v4.6.0新增：独立的数据同步系统
-包含：模板数据治理看板、文件选择、文件详情、数据预览、原始表头字段列表、模板列表
--->
-
 <template>
   <div class="data-sync-templates erp-page-container">
-    <!-- 页面标题 -->
     <div class="page-header">
-      <h1>📚 数据同步 - 模板管理</h1>
-      <p>管理表头模板，支持编辑、删除、查看详情</p>
+      <h1>数据同步 - 模板管理</h1>
+      <p>以模板族、版本、变体三层视图管理同步模板，并保留兼容的 Manual Update 入口。</p>
     </div>
 
     <TemplateGovernancePanel
@@ -26,14 +19,14 @@ v4.6.0新增：独立的数据同步系统
 
     <el-card class="template-builder-card" style="margin-bottom: 20px;">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="card-header-inline">
           <span>模板工作区</span>
           <el-button text type="primary" @click="showTemplateBuilder = !showTemplateBuilder">
             {{ showTemplateBuilder ? '收起工作区' : '展开工作区' }}
           </el-button>
         </div>
       </template>
-      <p style="margin: 0; color: #606266; font-size: 13px;">
+      <p class="muted-text">
         用于缺少模板时创建模板，或在需要时进入旧版手动预览与保存路径。
       </p>
     </el-card>
@@ -68,7 +61,6 @@ v4.6.0新增：独立的数据同步系统
       @update:headerRow="headerRow = $event"
     />
 
-    <!-- 筛选器 -->
     <el-card class="filter-card" style="margin-bottom: 20px;">
       <el-form :inline="true" :model="filters">
         <el-form-item label="平台">
@@ -85,7 +77,7 @@ v4.6.0新增：独立的数据同步系统
           <el-select v-model="filters.domain" placeholder="全部数据域" clearable style="width: 150px;">
             <el-option label="订单" value="orders" />
             <el-option label="产品" value="products" />
-            <el-option label="流量" value="analytics" />
+            <el-option label="分析" value="analytics" />
             <el-option label="服务" value="services" />
             <el-option label="库存" value="inventory" />
           </el-select>
@@ -110,11 +102,10 @@ v4.6.0新增：独立的数据同步系统
       </el-form>
     </el-card>
 
-    <!-- 模板列表 -->
     <el-card>
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>模板列表（共 {{ templates.length }} 个）</span>
+        <div class="card-header-inline">
+          <span>模板族列表（共 {{ templates.length }} 个）</span>
           <el-button @click="loadTemplates" :loading="loading">
             <el-icon><Refresh /></el-icon>
             刷新
@@ -122,13 +113,54 @@ v4.6.0新增：独立的数据同步系统
         </div>
       </template>
 
-      <el-table
-        :data="templates"
-        v-loading="loading"
-        stripe
-        style="width: 100%"
-      >
-        <el-table-column prop="template_name" label="模板名称" min-width="200" />
+      <el-table :data="templates" v-loading="loading" stripe style="width: 100%">
+        <el-table-column type="expand" width="56">
+          <template #default="{ row }">
+            <div class="family-expand">
+              <div class="family-section-title">版本</div>
+              <el-table :data="row.versions || []" size="small" border style="width: 100%; margin-bottom: 16px;">
+                <el-table-column prop="version_no" label="版本" width="90" />
+                <el-table-column prop="status" label="状态" width="100" />
+                <el-table-column prop="template_name" label="版本模板名" min-width="220" />
+                <el-table-column label="核心字段" width="120">
+                  <template #default="{ row: versionRow }">
+                    {{ versionRow.deduplication_fields?.length || 0 }} 个
+                  </template>
+                </el-table-column>
+                <el-table-column label="变体数" width="100">
+                  <template #default="{ row: versionRow }">
+                    {{ versionRow.variant_count || 0 }}
+                  </template>
+                </el-table-column>
+              </el-table>
+
+              <div class="family-section-title">变体</div>
+              <el-table :data="flattenVariants(row)" size="small" border style="width: 100%;">
+                <el-table-column prop="variant_key" label="变体 Key" min-width="180" />
+                <el-table-column prop="header_row" label="表头行" width="90" />
+                <el-table-column label="日期格式" min-width="180">
+                  <template #default="{ row: variantRow }">
+                    {{ formatVariantDateFormats(variantRow.parse_profile) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="匹配字段数" width="100">
+                  <template #default="{ row: variantRow }">
+                    {{ variantRow.required_headers?.length || 0 }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="template_name" label="来源模板" min-width="220" />
+                <el-table-column label="操作" width="180" fixed="right">
+                  <template #default="{ row: variantRow }">
+                    <el-button size="small" type="primary" @click="handleManualUpdate(buildManualUpdateRow(row, variantRow))">
+                      Manual Update
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="display_name" label="模板族" min-width="240" />
         <el-table-column prop="platform" label="平台" width="100">
           <template #default="{ row }">
             {{ getPlatformLabel(row.platform) }}
@@ -137,47 +169,46 @@ v4.6.0新增：独立的数据同步系统
         <el-table-column prop="data_domain" label="数据域" width="100" />
         <el-table-column prop="granularity" label="粒度" width="100" />
         <el-table-column prop="sub_domain" label="子类型" width="120" />
-        <el-table-column label="表头行" width="100">
+        <el-table-column label="激活版本" width="100">
           <template #default="{ row }">
-            {{ row.header_row }} (Excel第{{ row.header_row + 1 }}行)
+            v{{ row.active_version?.version_no || '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="字段数量" width="100">
+        <el-table-column label="变体数" width="90">
           <template #default="{ row }">
-            {{ row.header_columns?.length || row.field_count || 0 }}
+            {{ row.variant_count || 0 }}
           </template>
         </el-table-column>
         <el-table-column label="核心字段" width="120">
           <template #default="{ row }">
-            <el-tooltip v-if="row.deduplication_fields && row.deduplication_fields.length > 0" placement="top">
+            <el-tooltip v-if="row.activeVersionDetail?.deduplication_fields?.length > 0" placement="top">
               <template #content>
                 <div style="max-width: 300px;">
                   <div style="font-weight: bold; margin-bottom: 5px;">核心字段列表：</div>
-                  <div v-for="field in row.deduplication_fields" :key="field" style="margin: 2px 0;">
-                    • {{ field }}
+                  <div v-for="field in row.activeVersionDetail.deduplication_fields" :key="field" style="margin: 2px 0;">
+                    - {{ field }}
                   </div>
                 </div>
               </template>
               <el-tag type="primary" size="small">
-                {{ row.deduplication_fields.length }}个字段
+                {{ row.activeVersionDetail.deduplication_fields.length }} 个字段
               </el-tag>
             </el-tooltip>
-            <el-tag v-else type="info" size="small">
-              未配置
-            </el-tag>
+            <el-tag v-else type="info" size="small">未配置</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column prop="governance_status" label="治理状态" width="120" />
+        <el-table-column prop="file_count" label="文件数" width="90" />
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" @click="handleManualUpdate(row)">
+            <el-button size="small" type="primary" @click="handleManualUpdate(buildManualUpdateRow(row))">
               Manual Update
             </el-button>
             <el-button size="small" @click="viewTemplateDetail(row.id)">
               <el-icon><View /></el-icon>
               查看详情
             </el-button>
-            <el-button size="small" type="danger" @click="deleteTemplate(row.id)">
+            <el-button size="small" type="danger" :disabled="!row.active_template_id" @click="deleteTemplate(row.active_template_id)">
               <el-icon><Delete /></el-icon>
               删除
             </el-button>
@@ -236,9 +267,10 @@ v4.6.0新增：独立的数据同步系统
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { View, Refresh, Search, Delete, Check, Warning, Document } from '@element-plus/icons-vue'
+import { Delete, Refresh, Search, View } from '@element-plus/icons-vue'
+
 import api from '@/api'
 import TemplateBuilderWorkspace from '@/components/dataSync/TemplateBuilderWorkspace.vue'
 import TemplateCreateWorkbenchDrawer from '@/components/dataSync/TemplateCreateWorkbenchDrawer.vue'
@@ -248,7 +280,6 @@ import TemplateUpdateWorkbenchDrawer from '@/components/dataSync/TemplateUpdateW
 import { inferHeaderBindings } from '@/domains/data_platform/utils/headerBindings'
 import { buildTemplateUpdateFieldParseRulesPayload } from '@/domains/data_platform/utils/templateUpdateFieldParseRules'
 
-// 状态
 const loading = ref(false)
 const loadingPreview = ref(false)
 const savingTemplate = ref(false)
@@ -269,7 +300,6 @@ const filters = ref({
   granularity: null
 })
 
-// 文件选择相关
 const fileFilters = ref({
   platform: null,
   domain: null,
@@ -283,16 +313,10 @@ const headerRow = ref(0)
 const previewData = ref([])
 const headerColumns = ref([])
 const sampleData = ref({})
-const deduplicationFields = ref([])  // v4.14.0新增：核心字段列表
-const deduplicationFieldsValid = ref(false)  // v4.14.0新增：核心字段验证状态
+const deduplicationFields = ref([])
+const deduplicationFieldsValid = ref(false)
 const fieldParseRules = ref([])
 
-// 数据治理统计
-const governanceStats = ref({
-  template_coverage: 0,
-  missing_templates_count: 0
-})
-const missingTemplates = ref([])
 const detailedCoverage = ref({
   summary: {
     total_combinations: 0,
@@ -307,18 +331,16 @@ const detailedCoverage = ref({
 })
 const activeTab = ref('covered')
 
-// 平台标签映射
 const getPlatformLabel = (platform) => {
   const labels = {
-    'shopee': 'Shopee',
-    'tiktok': 'TikTok',
-    'amazon': 'Amazon',
-    'miaoshou': '妙手ERP'
+    shopee: 'Shopee',
+    tiktok: 'TikTok',
+    amazon: 'Amazon',
+    miaoshou: '妙手ERP'
   }
   return labels[platform] || platform
 }
 
-// 子类型选项（根据数据域动态变化）
 const availableSubDomains = computed(() => {
   const domain = fileFilters.value.domain
   if (domain === 'services') {
@@ -326,7 +348,8 @@ const availableSubDomains = computed(() => {
       { label: 'AI服务数据', value: 'ai_assistant' },
       { label: '人工服务数据', value: 'agent' }
     ]
-  } else if (domain === 'inventory') {
+  }
+  if (domain === 'inventory') {
     return [
       { label: '全量库存数据', value: 'full_inventory' },
       { label: '店铺库存数据', value: 'shop_inventory' }
@@ -335,19 +358,50 @@ const availableSubDomains = computed(() => {
   return []
 })
 
-// 计算属性
 const headerColumnsWithSamples = computed(() => {
-  return headerColumns.value.map(field => ({
+  return headerColumns.value.map((field) => ({
     field,
     sample: sampleData.value[field] || null
   }))
 })
 
-// 加载可用平台列表
+const flattenVariants = (family) => {
+  return (family.versions || []).flatMap((version) =>
+    (version.variants || []).map((variant) => ({
+      ...variant,
+      version_no: version.version_no
+    }))
+  )
+}
+
+const formatVariantDateFormats = (parseProfile) => {
+  const formats = parseProfile?.date_formats || []
+  return formats.length > 0 ? formats.join(', ') : '未声明'
+}
+
+const buildManualUpdateRow = (family, variant = null) => {
+  const activeVersion = family.activeVersionDetail || family.versions?.find((item) => item.status === 'active') || null
+  const fallbackTemplateId = variant?.source_legacy_template_id || family.active_template_id || activeVersion?.legacy_template_ids?.[0] || null
+  return {
+    id: fallbackTemplateId,
+    template_id: fallbackTemplateId,
+    template_name: variant?.template_name || activeVersion?.template_name || family.display_name,
+    platform: family.platform,
+    data_domain: family.data_domain,
+    domain: family.data_domain,
+    granularity: family.granularity,
+    sub_domain: family.sub_domain,
+    sample_file_id: family.sample_file_id || null,
+    variant_key: variant?.variant_key || null,
+    field_parse_rules: variant?.field_parse_rules || activeVersion?.field_parse_rules || [],
+    header_bindings: activeVersion?.header_bindings || []
+  }
+}
+
 const loadAvailablePlatforms = async () => {
   try {
     const data = await api.getAvailablePlatforms()
-    if (data && data.platforms) {
+    if (data?.platforms) {
       availablePlatforms.value = data.platforms
     }
   } catch (error) {
@@ -355,38 +409,21 @@ const loadAvailablePlatforms = async () => {
   }
 }
 
-// 加载数据治理统计
 const loadGovernanceStats = async () => {
   governanceLoading.value = true
   try {
-    // 加载详细覆盖统计
     const detailedData = await api.getDetailedTemplateCoverage()
     if (detailedData) {
       detailedCoverage.value = detailedData
     }
-    
-    // 兼容旧API（保留）
-    const coverageData = await api.getTemplateCoverage()
-    if (coverageData) {
-      governanceStats.value = {
-        template_coverage: coverageData.template_coverage || 0,
-        missing_templates_count: coverageData.missing_templates_count || 0
-      }
-    }
-    
-    const missingData = await api.getMissingTemplates()
-    if (missingData && Array.isArray(missingData)) {
-      missingTemplates.value = missingData
-    }
   } catch (error) {
-    console.error('加载数据治理统计失败:', error)
-    ElMessage.error(error.message || '加载数据治理统计失败')
+    console.error('加载治理统计失败:', error)
+    ElMessage.error(error.message || '加载治理统计失败')
   } finally {
     governanceLoading.value = false
   }
 }
 
-// 为缺少模板的组合创建模板
 const closeTemplateUpdateWorkbench = () => {
   isWorkbenchVisible.value = false
   updateWorkbenchContext.value = null
@@ -404,28 +441,25 @@ const handleManualUpdate = (row) => {
 const chooseManualUpdateMode = async (mode) => {
   manualUpdateMode.value = mode
   manualUpdateModeDialogVisible.value = false
-
   if (!pendingManualUpdateTemplate.value) {
     return
   }
-
   if (mode === 'with-sample' && !pendingManualUpdateTemplate.value.sample_file_id) {
     ElMessage.warning('当前模板没有可直接使用的样本文件，建议先使用 Core Fields Only')
     return
   }
-
   await openTemplateUpdateWorkbench(pendingManualUpdateTemplate.value, mode)
 }
 
 const openTemplateUpdateWorkbench = async (row, mode = 'with-sample') => {
   const templateId = row.template_id || row.id || null
-  const template = templates.value.find(item => item.id === templateId) || row
+  const template = row
   updateWorkbenchContext.value = {
     template,
     row,
     context: {
       update_mode: mode,
-      header_source: mode === 'core-only' ? 'template' : 'sample-file',
+      header_source: mode === 'core-only' ? 'template' : 'sample-file'
     }
   }
 
@@ -433,7 +467,7 @@ const openTemplateUpdateWorkbench = async (row, mode = 'with-sample') => {
     try {
       const context = await api.getTemplateUpdateContext(templateId, {
         mode,
-        fileId: row.sample_file_id || null,
+        fileId: row.sample_file_id || null
       })
       updateWorkbenchContext.value = {
         ...updateWorkbenchContext.value,
@@ -451,71 +485,31 @@ const handleCreateTemplateForMissing = (row) => {
   showTemplateBuilder.value = true
   createWorkbenchContext.value = row
   isCreateWorkbenchVisible.value = true
-  // 设置文件筛选条件
   fileFilters.value.platform = row.platform
   fileFilters.value.domain = row.domain
   fileFilters.value.sub_domain = row.sub_domain === 'N/A' ? null : row.sub_domain
   fileFilters.value.granularity = row.granularity
-  
-  // 加载文件列表
   loadAvailableFiles()
-  
-  // 滚动到文件选择区域
-  setTimeout(() => {
-    const fileSelectionCard = document.querySelector('.file-selection-card')
-    if (fileSelectionCard) {
-      fileSelectionCard.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }, 100)
-  
   ElMessage.info('已设置筛选条件，请选择文件并创建模板')
 }
 
-// 更新需要更新的模板
 const handleUpdateTemplate = (row) => {
   handleManualUpdate(row)
-  // 设置文件筛选条件
   fileFilters.value.platform = row.platform
   fileFilters.value.domain = row.domain
   fileFilters.value.sub_domain = row.sub_domain === 'N/A' ? null : row.sub_domain
   fileFilters.value.granularity = row.granularity
-  
-  // 加载文件列表
   loadAvailableFiles()
-  
-  // 滚动到文件选择区域
-  setTimeout(() => {
-    const fileSelectionCard = document.querySelector('.file-selection-card')
-    if (fileSelectionCard) {
-      fileSelectionCard.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }, 100)
-  
   ElMessage.info('已设置筛选条件，请选择文件并更新模板')
 }
 
-// 加载文件列表（优化：默认显示全部，逐步筛选）
 const loadAvailableFiles = async () => {
   try {
-    const params = {
-      status: 'pending',
-      limit: 1000  // 增加限制以显示更多文件
-    }
-    
-    // 逐步添加筛选条件
-    if (fileFilters.value.platform) {
-      params.platform = fileFilters.value.platform
-    }
-    if (fileFilters.value.domain) {
-      params.domain = fileFilters.value.domain
-    }
-    if (fileFilters.value.granularity) {
-      params.granularity = fileFilters.value.granularity
-    }
-    if (fileFilters.value.sub_domain) {
-      params.sub_domain = fileFilters.value.sub_domain
-    }
-    
+    const params = { status: 'pending', limit: 1000 }
+    if (fileFilters.value.platform) params.platform = fileFilters.value.platform
+    if (fileFilters.value.domain) params.domain = fileFilters.value.domain
+    if (fileFilters.value.granularity) params.granularity = fileFilters.value.granularity
+    if (fileFilters.value.sub_domain) params.sub_domain = fileFilters.value.sub_domain
     const data = await api.getDataSyncFiles(params)
     availableFiles.value = data.files || []
   } catch (error) {
@@ -524,7 +518,6 @@ const loadAvailableFiles = async () => {
   }
 }
 
-// 平台变化
 const handlePlatformChange = () => {
   fileFilters.value.domain = null
   fileFilters.value.sub_domain = null
@@ -533,7 +526,6 @@ const handlePlatformChange = () => {
   loadAvailableFiles()
 }
 
-// 数据域变化
 const handleDomainChange = () => {
   fileFilters.value.sub_domain = null
   fileFilters.value.granularity = null
@@ -541,7 +533,6 @@ const handleDomainChange = () => {
   loadAvailableFiles()
 }
 
-// 文件变化
 const handleFileChange = async (fileId) => {
   if (!fileId) {
     fileInfo.value = {}
@@ -550,32 +541,25 @@ const handleFileChange = async (fileId) => {
     fieldParseRules.value = []
     return
   }
-
-  const file = availableFiles.value.find(f => f.id === fileId)
+  const file = availableFiles.value.find((item) => item.id === fileId)
   if (file) {
     fileInfo.value = file
     fieldParseRules.value = []
-    // 如果有模板，使用模板的表头行
-    if (file.has_template && file.template_header_row !== undefined && file.template_header_row !== null) {
-      headerRow.value = file.template_header_row
-    } else {
-      headerRow.value = 0
-    }
+    headerRow.value = file.has_template && file.template_header_row !== undefined && file.template_header_row !== null
+      ? file.template_header_row
+      : 0
   }
 }
 
-// 监听筛选条件变化
 watch([() => fileFilters.value.sub_domain, () => fileFilters.value.granularity], () => {
   loadAvailableFiles()
 })
 
-// 预览数据
 const handlePreview = async () => {
   if (!selectedFileId.value) {
     ElMessage.warning('请先选择文件')
     return
   }
-
   loadingPreview.value = true
   try {
     const data = await api.previewFileWithHeaderRow(selectedFileId.value, headerRow.value)
@@ -593,21 +577,17 @@ const handlePreview = async () => {
   }
 }
 
-// 重新预览
 const handleRepreview = () => {
   handlePreview()
 }
 
-// 保存模板
 const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, headerRow: selectedHeaderRow }) => {
   const context = updateWorkbenchContext.value?.context
   const template = context?.template
-
   if (!template || !context?.current_header_columns?.length) {
     ElMessage.warning('当前缺少模板或表头上下文，无法保存')
     return
   }
-
   savingTemplate.value = true
   try {
     const { rules: nextFieldParseRules, droppedRules } = buildTemplateUpdateFieldParseRulesPayload({
@@ -634,12 +614,11 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
       sampleData: context.sample_data || {},
       fieldParseRules: nextFieldParseRules
     })
-
     if (result && (result.success || result.template_id)) {
       ElMessage.success(result.message || '模板更新成功')
       if (droppedRules.length > 0) {
         const droppedSummary = droppedRules
-          .map(rule => `${rule.target_field} <- ${rule.source_column}`)
+          .map((rule) => `${rule.target_field} <- ${rule.source_column}`)
           .join(', ')
         ElMessage.warning(`已自动移除失效日期规则: ${droppedSummary}`)
       }
@@ -663,15 +642,12 @@ const handleSaveTemplate = async () => {
     ElMessage.warning('请先预览文件数据')
     return
   }
-
   if (!fileFilters.value.platform || !fileFilters.value.domain) {
     ElMessage.warning('请先选择平台和数据域')
     return
   }
-
-  // v4.14.0新增：验证核心字段必填
   if (!deduplicationFields.value || deduplicationFields.value.length === 0) {
-    ElMessage.warning('请至少选择1个核心字段用于数据去重')
+    ElMessage.warning('请至少选择 1 个核心字段用于数据去重')
     return
   }
 
@@ -683,54 +659,33 @@ const handleSaveTemplate = async () => {
     })
     const result = await api.saveTemplate({
       platform: fileFilters.value.platform,
-      dataDomain: fileFilters.value.domain,  // 使用dataDomain参数名
+      dataDomain: fileFilters.value.domain,
       subDomain: fileFilters.value.sub_domain,
       granularity: fileFilters.value.granularity,
       saveMode: 'create',
       headerRow: headerRow.value,
       headerColumns: headerColumns.value,
-      deduplicationFields: deduplicationFields.value,  // v4.14.0新增：核心字段列表（必填）
+      deduplicationFields: deduplicationFields.value,
       headerBindings,
       sampleData: sampleData.value,
       fieldParseRules: fieldParseRules.value
     })
-
-    // 检查响应结果
     if (result && (result.success || result.template_id)) {
       ElMessage.success(result.message || '模板保存成功')
-      // 刷新模板列表
       await loadTemplates()
-      // 刷新数据治理统计
       await loadGovernanceStats()
-      // 刷新文件列表以更新模板状态
       await loadAvailableFiles()
-      // 重新加载文件信息以更新"可用模板"状态
-      if (selectedFileId.value) {
-        // 重新查找文件并更新fileInfo
-        const file = availableFiles.value.find(f => f.id === selectedFileId.value)
-        if (file) {
-          fileInfo.value = file
-          // 检查模板状态
-          if (file.has_template) {
-            fileInfo.value.has_template = true
-            fileInfo.value.template_name = file.template_name
-          }
-        }
-      }
     } else {
-      ElMessage.error(result?.message || '模板保存失败：未知错误')
+      ElMessage.error(result?.message || '模板保存失败')
     }
   } catch (error) {
     console.error('保存模板失败:', error)
-    // 显示详细错误信息
-    const errorMessage = error.message || error.detail || '保存模板失败'
-    ElMessage.error(`模板保存失败: ${errorMessage}`)
+    ElMessage.error(`模板保存失败: ${error.message || error.detail || '未知错误'}`)
   } finally {
     savingTemplate.value = false
   }
 }
 
-// v4.14.0新增：处理核心字段变化
 const handleDeduplicationFieldsChange = (fields) => {
   deduplicationFields.value = fields
 }
@@ -739,53 +694,66 @@ const handleFieldParseRulesChange = (rules) => {
   fieldParseRules.value = Array.isArray(rules) ? rules : []
 }
 
-// v4.14.0新增：处理验证状态变化
 const handleValidationChange = (isValid) => {
   deduplicationFieldsValid.value = isValid
 }
 
-// 加载模板列表（优化：全部为空时查询全部）
 const loadTemplates = async () => {
   loading.value = true
   try {
     const params = {}
-    
-    // 只有设置了筛选条件才传递参数（避免传递undefined）
-    if (filters.value.platform) {
-      params.platform = filters.value.platform
+    if (filters.value.platform) params.platform = filters.value.platform
+    if (filters.value.domain) params.dataDomain = filters.value.domain
+
+    const familyData = await api.getTemplateFamilies(params)
+    let families = familyData?.families || familyData?.data?.families || []
+    if (filters.value.granularity) {
+      families = families.filter((item) => item.granularity === filters.value.granularity)
     }
-    if (filters.value.domain) {
-      params.dataDomain = filters.value.domain
-    }
-    
-    const data = await api.getTemplatesList(params)
-    if (data && data.templates) {
-      // 如果设置了粒度筛选，在前端过滤
-      let filteredTemplates = data.templates
-      if (filters.value.granularity) {
-        filteredTemplates = filteredTemplates.filter(t => t.granularity === filters.value.granularity)
-      }
-      templates.value = filteredTemplates
-    } else if (Array.isArray(data)) {
-      // 兼容直接返回数组的情况
-      let filteredTemplates = data
-      if (filters.value.granularity) {
-        filteredTemplates = filteredTemplates.filter(t => t.granularity === filters.value.granularity)
-      }
-      templates.value = filteredTemplates
-    } else {
-      templates.value = []
-    }
+
+    const hydratedFamilies = await Promise.all(
+      families.map(async (family) => {
+        try {
+          const versionPayload = await api.getTemplateFamilyVersions(family.id)
+          const versions = versionPayload?.versions || versionPayload?.data?.versions || []
+          const hydratedVersions = await Promise.all(
+            versions.map(async (version) => {
+              const variantPayload = await api.getTemplateVersionVariants(version.id)
+              const variants = variantPayload?.variants || variantPayload?.data?.variants || []
+              return {
+                ...version,
+                variants
+              }
+            })
+          )
+          const activeVersionDetail =
+            hydratedVersions.find((item) => item.status === 'active') || hydratedVersions[0] || null
+          return {
+            ...family,
+            versions: hydratedVersions,
+            activeVersionDetail
+          }
+        } catch (error) {
+          console.error('加载模板族明细失败:', family.id, error)
+          return {
+            ...family,
+            versions: [],
+            activeVersionDetail: null
+          }
+        }
+      })
+    )
+
+    templates.value = hydratedFamilies
   } catch (error) {
-    console.error('加载模板列表失败:', error)
-    ElMessage.error(error.message || '加载模板列表失败')
+    console.error('加载模板族列表失败:', error)
+    ElMessage.error(error.message || '加载模板族列表失败')
     templates.value = []
   } finally {
     loading.value = false
   }
 }
 
-// 重置筛选器
 const resetFilters = () => {
   filters.value = {
     platform: null,
@@ -795,40 +763,34 @@ const resetFilters = () => {
   loadTemplates()
 }
 
-// 查看模板详情
-const viewTemplateDetail = (templateId) => {
-  const template = templates.value.find(t => t.id === templateId)
-  if (template) {
-    // v4.14.0新增：显示核心字段信息
-    let detailText = `模板名称: ${template.template_name}\n平台: ${getPlatformLabel(template.platform)}\n数据域: ${template.data_domain}\n粒度: ${template.granularity}\n子类型: ${template.sub_domain || 'N/A'}\n表头行: ${template.header_row}\n字段数量: ${template.field_count || template.header_columns?.length || 0}`
-    
-    // 添加核心字段信息
-    if (template.deduplication_fields && template.deduplication_fields.length > 0) {
-      detailText += `\n\n核心字段（${template.deduplication_fields.length}个）:`
-      template.deduplication_fields.forEach((field, index) => {
-        detailText += `\n  ${index + 1}. ${field}`
-      })
-      detailText += '\n\n说明: 核心字段用于数据去重，确保每行数据唯一'
-    } else {
-      detailText += '\n\n核心字段: 未配置（将使用默认配置）'
-    }
-    
-    ElMessageBox.alert(
-      detailText,
-      '模板详情',
-      {
-        confirmButtonText: '确定',
-        dangerouslyUseHTMLString: false
-      }
-    )
+const viewTemplateDetail = (familyId) => {
+  const family = templates.value.find((item) => item.id === familyId)
+  if (!family) {
+    return
   }
+
+  const activeVersion = family.activeVersionDetail
+  const versionText = activeVersion
+    ? `激活版本: v${activeVersion.version_no}\n变体数: ${activeVersion.variant_count || 0}`
+    : '激活版本: 无'
+  const dedupText = activeVersion?.deduplication_fields?.length
+    ? activeVersion.deduplication_fields.map((field, index) => `  ${index + 1}. ${field}`).join('\n')
+    : '  未配置'
+
+  ElMessageBox.alert(
+    `模板族: ${family.display_name}\n平台: ${getPlatformLabel(family.platform)}\n数据域: ${family.data_domain}\n粒度: ${family.granularity}\n子类型: ${family.sub_domain || 'N/A'}\n${versionText}\n治理状态: ${family.governance_status}\n\n核心字段:\n${dedupText}`,
+    '模板族详情',
+    {
+      confirmButtonText: '确定',
+      dangerouslyUseHTMLString: false
+    }
+  )
 }
 
-// 删除模板
 const deleteTemplate = async (templateId) => {
   try {
     await ElMessageBox.confirm(
-      '确定要删除这个模板吗？删除后无法恢复。',
+      '确定要删除这个兼容模板记录吗？删除后无法恢复。',
       '确认删除',
       {
         confirmButtonText: '确定',
@@ -836,7 +798,6 @@ const deleteTemplate = async (templateId) => {
         type: 'warning'
       }
     )
-    
     const result = await api.deleteTemplate(templateId)
     if (result && result.success !== false) {
       ElMessage.success('模板已删除')
@@ -853,7 +814,6 @@ const deleteTemplate = async (templateId) => {
   }
 }
 
-// 初始化
 onMounted(() => {
   loadAvailablePlatforms()
   loadTemplates()
@@ -883,135 +843,26 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.governance-stats {
+.card-header-inline {
   display: flex;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.stat-item {
-  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 15px;
-  padding: 15px;
-  background: #f5f7fa;
-  border-radius: 8px;
-  flex: 1;
-  min-width: 200px;
 }
 
-.stat-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 24px;
+.muted-text {
+  margin: 0;
+  color: #606266;
+  font-size: 13px;
 }
 
-.stat-content {
-  flex: 1;
+.family-expand {
+  padding: 4px 0 8px;
 }
 
-.stat-label {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 5px;
-}
-
-.stat-value {
-  font-size: 24px;
+.family-section-title {
+  font-size: 13px;
   font-weight: 600;
+  margin-bottom: 8px;
   color: #303133;
-}
-
-/* ⭐ v4.16.0优化：确保页面容器不会超出视口宽度 */
-.data-sync-templates {
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-/* ⭐ v4.16.0优化：确保预览卡片不会超出页面宽度 */
-.preview-card {
-  max-width: 100%;
-  width: 100%;
-  overflow: visible; /* 允许子元素显示滚动条 */
-}
-
-.preview-card :deep(.el-card__body) {
-  max-width: 100%;
-  width: 100%;
-  overflow: visible; /* 允许子元素显示滚动条 */
-  padding: 20px;
-  box-sizing: border-box;
-}
-
-/* 数据预览表格容器 - 固定宽度，防止页面过宽 */
-.preview-table-container {
-  width: 100%;
-  max-width: 100%;
-  height: 500px;
-  overflow-x: auto; /* 横向滚动 */
-  overflow-y: auto; /* 纵向滚动 */
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
-  box-sizing: border-box;
-  /* ⭐ v4.16.0优化：确保容器不会超出页面宽度 */
-  position: relative;
-  /* 优化滚动条样式 */
-  scrollbar-width: thin;
-  scrollbar-color: #c1c1c1 #f1f1f1;
-}
-
-/* Webkit浏览器滚动条样式 */
-.preview-table-container::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.preview-table-container::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 4px;
-}
-
-.preview-table-container::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 4px;
-}
-
-.preview-table-container::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-}
-
-.preview-table-container .el-table {
-  width: max-content !important;
-  min-width: 100%;
-  /* ⭐ v4.16.0优化：确保表格在容器内正确显示 */
-  table-layout: auto;
-}
-
-/* 确保表格容器内的表格能够正确显示横向滚动 */
-.preview-table-container :deep(.el-table__body-wrapper) {
-  overflow-x: auto;
-  overflow-y: auto;
-}
-
-/* 兼容旧类名 */
-.table-scroll-container-wrapper {
-  width: 100%;
-  max-width: 100%;
-  height: 500px;
-  overflow-x: auto;
-  overflow-y: auto;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
-  box-sizing: border-box;
-}
-
-.table-scroll-container {
-  width: max-content;
-  min-width: 100%;
 }
 </style>

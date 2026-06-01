@@ -31,9 +31,10 @@ import asyncio
 
 from pathlib import Path
 import os
-from modules.core.db import CatalogFile
+from modules.core.db import CatalogFile, FieldMappingTemplate
 from modules.core.logger import get_logger
 from backend.services.template_matcher import get_template_matcher
+from backend.services.template_family_service import get_template_resolver
 from backend.services.excel_parser import ExcelParser
 from backend.services.data_ingestion_service import DataIngestionService
 from backend.services.c_class_data_validator import get_c_class_data_validator
@@ -68,6 +69,7 @@ class DataSyncService:
         """
         self.db = db
         self.template_matcher = get_template_matcher(db)
+        self.template_resolver = get_template_resolver(db)
         self.ingestion_service = DataIngestionService(db)
         self.template_status_service = DataSyncTemplateStatusService(db)
     
@@ -227,6 +229,23 @@ class DataSyncService:
             return False
         return True
 
+    @staticmethod
+    def _normalize_governance_status(status: Dict[str, Any]) -> Dict[str, Any]:
+        if status.get("governance_status"):
+            return status
+        template_status = status.get("template_status")
+        mapped = {
+            "ready": "ready",
+            "alias_only": "non_breaking_drift",
+            "update_required": "breaking_drift",
+            "missing_variant": "missing_variant",
+            "missing": "missing_family",
+            "file_missing": "file_missing",
+            "parse_failed": "parse_failed",
+        }.get(template_status, template_status or "unknown")
+        status["governance_status"] = mapped
+        return status
+
     async def evaluate_catalog_file_template_status(
         self,
         catalog_file: CatalogFile,
@@ -235,6 +254,25 @@ class DataSyncService:
         use_template_header_row: bool = True,
     ) -> Dict[str, Any]:
         normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
+        resolver_result = None
+        try:
+            resolver_result = await self.template_resolver.resolve(
+                platform=catalog_file.platform_code,
+                data_domain=catalog_file.data_domain,
+                granularity=catalog_file.granularity,
+                sub_domain=normalized_sub_domain,
+                header_columns=[],
+                sample_rows=[],
+            )
+        except Exception:
+            resolver_result = None
+
+        if template is None and resolver_result:
+            variant = resolver_result.get("variant") or {}
+            legacy_template_id = variant.get("source_legacy_template_id")
+            if legacy_template_id:
+                template = await self.db.get(FieldMappingTemplate, legacy_template_id)
+
         template = template or await self.template_matcher.find_best_template(
             platform=catalog_file.platform_code,
             data_domain=catalog_file.data_domain,
@@ -243,14 +281,23 @@ class DataSyncService:
         )
 
         if not template:
-            return await self.template_status_service.evaluate_catalog_file(
+            status = await self.template_status_service.evaluate_catalog_file(
                 catalog_file,
                 template=None,
             )
+            status = self._normalize_governance_status(status)
+            if resolver_result:
+                status["shadow_compare"] = resolver_result.get("shadow_compare")
+                status["governance_status"] = resolver_result.get(
+                    "governance_status",
+                    status.get("governance_status", "missing_family"),
+                )
+            return status
 
         if not getattr(template, "header_columns", None):
             return {
                 "template_status": "ready",
+                "governance_status": "ready",
                 "has_template": True,
                 "template_name": template.template_name,
                 "template_header_row": getattr(template, "header_row", None),
@@ -260,6 +307,7 @@ class DataSyncService:
                 "should_auto_sync": True,
                 "exact_match": True,
                 "semantic_match": True,
+                "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
             }
 
         parse_error: Optional[Exception] = None
@@ -280,14 +328,20 @@ class DataSyncService:
                 ExcelParser.read_excel,
                 file_path,
                 header=header_row,
-                nrows=1,
+                nrows=5,
             )
             current_columns = df.columns.tolist()
+            if hasattr(df, "head") and hasattr(df, "to_dict"):
+                sample_rows = df.head(3).fillna("").to_dict("records")
+            else:
+                sample_rows = []
             status = await self.template_status_service.evaluate_catalog_file(
                 catalog_file,
                 template=template,
                 current_columns=current_columns,
+                sample_rows=sample_rows,
             )
+            status = self._normalize_governance_status(status)
             if status.get("template_status") == "update_required":
                 status["update_reason"] = self._format_header_change_reason(status.get("header_changes", {}))
                 return status
@@ -303,6 +357,7 @@ class DataSyncService:
 
         return {
             "template_status": "file_missing" if missing_file else "parse_failed",
+            "governance_status": "parse_failed",
             "has_template": True,
             "template_name": template.template_name,
             "template_header_row": getattr(template, "header_row", None),
@@ -314,6 +369,7 @@ class DataSyncService:
             "should_auto_sync": False,
             "exact_match": False,
             "semantic_match": False,
+            "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
         }
 
     async def get_file_sync_readiness(
@@ -426,7 +482,27 @@ class DataSyncService:
             
             # 3. 查找模板([*] v4.18.2:异步调用)
             normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
-            template = await self.template_matcher.find_best_template(
+            resolve_result = None
+            try:
+                resolve_result = await self.template_resolver.resolve(
+                    platform=catalog_file.platform_code,
+                    data_domain=catalog_file.data_domain,
+                    granularity=catalog_file.granularity,
+                    sub_domain=normalized_sub_domain,
+                    header_columns=[],
+                    sample_rows=[],
+                )
+            except Exception:
+                resolve_result = None
+
+            template = None
+            if resolve_result:
+                variant = resolve_result.get("variant") or {}
+                legacy_template_id = variant.get("source_legacy_template_id")
+                if legacy_template_id:
+                    template = await self.db.get(FieldMappingTemplate, legacy_template_id)
+
+            template = template or await self.template_matcher.find_best_template(
                 platform=catalog_file.platform_code,
                 data_domain=catalog_file.data_domain,
                 granularity=catalog_file.granularity,

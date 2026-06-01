@@ -21,6 +21,7 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 @pytest_asyncio.fixture
 async def data_sync_client(tmp_path, monkeypatch):
     from backend.main import app
+    from backend.dependencies.auth import get_current_user
     from backend.models.database import get_async_db
 
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
@@ -35,11 +36,21 @@ async def data_sync_client(tmp_path, monkeypatch):
         async with session_factory() as session:
             yield session
 
+    class _MockUser:
+        id = 1
+        username = "test_admin"
+        is_active = True
+        is_superuser = True
+        role_id = 1
+
+    async def override_current_user():
+        return _MockUser()
+
     class _ExecutorManagerStub:
         async def run_cpu_intensive(self, _fn, *_args, **_kwargs):
             return pd.DataFrame(columns=["订单编号", "金额"])
 
-    async def _fake_status(self, catalog_file, *, template=None, current_columns=None):
+    async def _fake_status(self, catalog_file, *, template=None, current_columns=None, sample_rows=None):
         if "alias" in catalog_file.file_name:
             return {
                 "template_status": "alias_only",
@@ -111,6 +122,7 @@ async def data_sync_client(tmp_path, monkeypatch):
     )
 
     app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:
         yield client, session_factory, tmp_path
@@ -193,8 +205,10 @@ async def test_file_list_and_governance_share_alias_only_and_update_required_sta
     file_payload = file_response.json()["data"]["files"]
     by_name = {row["file_name"]: row for row in file_payload}
     assert by_name["tiktok_orders_alias.xlsx"]["template_status"] == "alias_only"
+    assert by_name["tiktok_orders_alias.xlsx"]["governance_status"] == "non_breaking_drift"
     assert by_name["tiktok_orders_alias.xlsx"]["template_update_required"] is False
     assert by_name["tiktok_orders_drift.xlsx"]["template_status"] == "update_required"
+    assert by_name["tiktok_orders_drift.xlsx"]["governance_status"] == "breaking_drift"
     assert by_name["tiktok_orders_drift.xlsx"]["template_update_required"] is True
 
     coverage_response = await client.get("/api/data-sync/governance/detailed-coverage")
@@ -202,6 +216,8 @@ async def test_file_list_and_governance_share_alias_only_and_update_required_sta
     coverage = coverage_response.json()["data"]
 
     assert coverage["summary"]["needs_update_count"] == 1
+    assert coverage["summary"]["breaking_drift_count"] == 1
+    assert coverage["summary"]["non_breaking_drift_count"] == 1
     assert len(coverage["needs_update"]) == 1
     assert coverage["needs_update"][0]["sample_file_name"] == "tiktok_orders_drift.xlsx"
     assert coverage["covered"][0]["template_status"] in {"alias_only", "update_required"}

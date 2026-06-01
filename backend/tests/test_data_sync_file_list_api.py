@@ -20,6 +20,7 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 @pytest_asyncio.fixture
 async def file_list_client():
     from backend.main import app
+    from backend.dependencies.auth import get_current_user
     from backend.models.database import get_async_db
 
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
@@ -34,7 +35,18 @@ async def file_list_client():
         async with session_factory() as session:
             yield session
 
+    class _MockUser:
+        id = 1
+        username = "test_admin"
+        is_active = True
+        is_superuser = True
+        role_id = 1
+
+    async def override_current_user():
+        return _MockUser()
+
     app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:

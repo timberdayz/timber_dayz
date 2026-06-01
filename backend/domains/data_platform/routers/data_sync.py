@@ -272,6 +272,7 @@ async def list_files(
     v4.18.2: 迁移到异步会话(AsyncSession)
     """
     try:
+        from backend.services.template_family_service import get_template_resolver
         from backend.services.template_matcher import get_template_matcher
         
         # 1. 构建查询条件
@@ -339,6 +340,7 @@ async def list_files(
         
         # 3. 检查模板匹配状态
         template_matcher = get_template_matcher(db)
+        template_resolver = get_template_resolver(db)
         data_sync_service = DataSyncService(db)
         file_list = []
         
@@ -416,10 +418,12 @@ async def list_files(
                 "collected_at": file_record.first_seen_at.isoformat() if file_record.first_seen_at else None,
                 "has_template": template_status_info["has_template"],
                 "template_status": template_status_info["template_status"],
+                "governance_status": template_status_info.get("governance_status", template_status_info["template_status"]),
                 "template_update_required": template_status_info["template_update_required"],
                 "update_reason": template_status_info["update_reason"],
                 "template_name": template_status_info["template_name"],
                 "template_header_row": template_status_info["template_header_row"],
+                "shadow_compare": template_status_info.get("shadow_compare"),
                 "status": file_record.status
             })
         
@@ -1999,9 +2003,11 @@ async def get_detailed_template_coverage(
     v4.18.2: 迁移到异步会话(AsyncSession)
     """
     try:
+        from backend.services.template_family_service import get_template_resolver
         from backend.services.template_matcher import get_template_matcher
         
         template_matcher = get_template_matcher(db)
+        template_resolver = get_template_resolver(db)
         
         # [*] v4.15.0修复:基于所有模板统计,而不是只基于待同步文件
         # 1. 查询所有模板(published状态)([*] v4.18.2:使用 await)
@@ -2080,6 +2086,20 @@ async def get_detailed_template_coverage(
                 continue
             
             # 查找模板([*] v4.18.2:添加 await)
+            try:
+                resolve_result = await template_resolver.resolve(
+                    platform=platform,
+                    data_domain=domain,
+                    granularity=granularity,
+                    sub_domain=sub_domain,
+                    header_columns=[],
+                    sample_rows=[],
+                )
+            except Exception:
+                resolve_result = {
+                    "governance_status": "missing_family",
+                    "shadow_compare": None,
+                }
             template = await template_matcher.find_best_template(
                 platform=platform,
                 data_domain=domain,
@@ -2104,7 +2124,8 @@ async def get_detailed_template_coverage(
                 'domain': domain,
                 'sub_domain': sub_domain or 'N/A',
                 'granularity': granularity,
-                'file_count': file_count
+                'file_count': file_count,
+                'governance_status': resolve_result.get('governance_status', 'missing_family')
             }
             
             if template:
@@ -2145,6 +2166,7 @@ async def get_detailed_template_coverage(
                     'sample_file_id': sample_file.id if sample_file else None,
                     'sample_file_name': sample_file.file_name if sample_file else None,
                 }
+                shadow_compare = resolve_result.get('shadow_compare')
                 
                 if sample_file:
                     try:
@@ -2157,7 +2179,7 @@ async def get_detailed_template_coverage(
                             ExcelParser.read_excel,
                             sample_file.file_path,
                             template.header_row or 0,
-                            1  # nrows=1
+                            5  # nrows=5
                         )
                         current_columns = df.columns.tolist()
 
@@ -2165,9 +2187,21 @@ async def get_detailed_template_coverage(
                             sample_file,
                             template=template,
                             current_columns=current_columns,
+                            sample_rows=df.head(3).fillna("").to_dict("records"),
                         )
                         template_status = status_info.get("template_status", "ready")
+                        combo_info["governance_status"] = status_info.get(
+                            "governance_status",
+                            {
+                                "ready": "ready",
+                                "alias_only": "non_breaking_drift",
+                                "update_required": "breaking_drift",
+                                "missing_variant": "missing_variant",
+                                "missing": "missing_family",
+                            }.get(template_status, combo_info["governance_status"]),
+                        )
                         semantic_match = status_info.get("semantic_match", False)
+                        shadow_compare = status_info.get("shadow_compare") or shadow_compare
 
                         if template_status == "update_required":
                             needs_update = True
@@ -2197,6 +2231,7 @@ async def get_detailed_template_coverage(
                     'needs_update': needs_update,
                     'update_reason': update_reason,
                     'semantic_match': semantic_match,
+                    'shadow_compare': shadow_compare,
                 })
                 
                 if needs_update:
@@ -2205,10 +2240,14 @@ async def get_detailed_template_coverage(
                         **sample_file_info,
                         'template_id': template.id,
                         'template_name': template.template_name,
-                        'update_reason': update_reason
+                        'update_reason': update_reason,
+                        'shadow_compare': shadow_compare,
                     })
             else:
-                missing_list.append(combo_info)
+                missing_list.append({
+                    **combo_info,
+                    'shadow_compare': resolve_result.get('shadow_compare'),
+                })
         
         # 3. 计算统计
         # [*] v4.15.0修复:覆盖率应该基于所有模板,而不是基于文件组合
@@ -2217,6 +2256,15 @@ async def get_detailed_template_coverage(
         covered_count = len(covered_list)
         missing_count = len(missing_list)
         needs_update_count = len(needs_update_list)
+        missing_variant_count = sum(
+            1 for item in missing_list if item.get("governance_status") == "missing_variant"
+        )
+        breaking_drift_count = sum(
+            1 for item in covered_list if item.get("governance_status") == "breaking_drift"
+        )
+        non_breaking_drift_count = sum(
+            1 for item in covered_list if item.get("governance_status") == "non_breaking_drift"
+        )
         
         # [*] v4.15.0修复:覆盖率 = 有模板的组合数 / 总组合数
         # 总组合数 = 所有模板数(已覆盖)+ 缺少模板的文件组合数(未覆盖)
@@ -2241,6 +2289,9 @@ async def get_detailed_template_coverage(
                     'covered_count': covered_count,
                     'missing_count': missing_count,
                     'needs_update_count': needs_update_count,
+                    'missing_variant_count': missing_variant_count,
+                    'breaking_drift_count': breaking_drift_count,
+                    'non_breaking_drift_count': non_breaking_drift_count,
                     'coverage_percentage': round(coverage_percentage, 1)
                 },
                 'covered': covered_list,

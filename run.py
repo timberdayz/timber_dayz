@@ -29,6 +29,7 @@ import time
 import webbrowser
 import argparse
 import shutil
+from datetime import datetime
 from pathlib import Path
 import platform as sys_platform
 import os
@@ -63,6 +64,13 @@ def safe_print(text):
             # 降级到ASCII
             safe_text = text.encode('ascii', errors='ignore').decode('ascii')
             print(safe_text, flush=True)
+
+
+def _build_frontend_log_paths(logs_dir: Path, port: int) -> tuple[Path, Path]:
+    """为前端 dev server 生成唯一日志文件名，避免旧进程占用固定文件。"""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    base_name = f"frontend-local-{port}-{timestamp}"
+    return logs_dir / f"{base_name}.out.log", logs_dir / f"{base_name}.err.log"
 
 def print_banner():
     """打印系统横幅"""
@@ -1473,8 +1481,9 @@ def start_frontend():
         env["VITE_DEV_PROXY_TARGET"] = f"http://127.0.0.1:{ACTIVE_BACKEND_PORT}"
         logs_dir = Path(__file__).parent / "logs"
         logs_dir.mkdir(exist_ok=True)
-        frontend_out = (logs_dir / "frontend-local.out.log").open("w", encoding="utf-8", errors="ignore")
-        frontend_err = (logs_dir / "frontend-local.err.log").open("w", encoding="utf-8", errors="ignore")
+        frontend_out_path, frontend_err_path = _build_frontend_log_paths(logs_dir, picked_port)
+        frontend_out = frontend_out_path.open("w", encoding="utf-8", errors="ignore")
+        frontend_err = frontend_err_path.open("w", encoding="utf-8", errors="ignore")
         process = subprocess.Popen(
             [npm_exe, "run", "dev", "--", "--port", str(picked_port), "--strictPort"],
             cwd=frontend_path,
@@ -1484,7 +1493,10 @@ def start_frontend():
             stderr=frontend_err,
         )
         _register_process_with_windows_job(process)
-        safe_print("  [OK] 前端服务已启动（日志: logs/frontend-local.*.log）")
+        safe_print(
+            "  [OK] 前端服务已启动"
+            f"（stdout: logs/{frontend_out_path.name}, stderr: logs/{frontend_err_path.name}）"
+        )
         safe_print(f"  [INFO] Vite 使用 strictPort=true，固定监听 {picked_port}")
         return process, picked_port
 

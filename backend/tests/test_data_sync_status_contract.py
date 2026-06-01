@@ -79,6 +79,23 @@ class _ExecutorManagerStub:
         return func(*args, **kwargs)
 
 
+class _TemplateResolverStub:
+    def __init__(self, template_id):
+        self.template_id = template_id
+
+    async def resolve(self, **_kwargs):
+        return {
+            "matched": True,
+            "governance_status": "ready",
+            "family": None,
+            "active_version": None,
+            "variant": {
+                "source_legacy_template_id": self.template_id,
+            },
+            "shadow_compare": {"is_consistent": True},
+        }
+
+
 async def _failed_ingest_stub(**_kwargs):
     return {
         "success": False,
@@ -203,3 +220,79 @@ async def test_successful_sync_clears_stale_error_and_updates_last_processed_at(
     assert file_record.status == "ingested"
     assert file_record.error_message is None
     assert file_record.last_processed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_sync_single_file_prefers_resolver_selected_legacy_template(monkeypatch, tmp_path):
+    file_path = tmp_path / "orders.xlsx"
+    file_path.write_bytes(b"test")
+
+    file_record = SimpleNamespace(
+        id=2393,
+        file_path=str(file_path),
+        file_name="orders.xlsx",
+        status="pending",
+        error_message=None,
+        file_metadata=None,
+        data_domain="orders",
+        platform_code="shopee",
+        source_platform="shopee",
+        shop_id="shop-1",
+        granularity="daily",
+        sub_domain=None,
+        last_processed_at=None,
+    )
+    fake_db = _FakeDb(file_record)
+    service = DataSyncService(fake_db)
+
+    chosen_template = SimpleNamespace(
+        id=888,
+        template_name="resolver_selected_template",
+        header_row=0,
+        header_columns=["订单编号", "金额"],
+        deduplication_fields=["订单编号"],
+        sub_domain=None,
+    )
+
+    async def _fake_db_get(model, value):
+        assert value == 888
+        return chosen_template
+
+    captured = {}
+
+    async def _capture_ingest(**kwargs):
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "message": "入库成功",
+            "status": "success",
+            "imported": 1,
+            "quarantined": 0,
+            "import_stats": {"inserted": 1, "updated": 0, "skipped": 0},
+        }
+
+    monkeypatch.setattr(service, "_safe_resolve_path", lambda _path: str(file_path))
+    monkeypatch.setattr(service, "template_matcher", _TemplateMatcherStub())
+    monkeypatch.setattr(service, "template_status_service", _TemplateStatusServiceStub())
+    monkeypatch.setattr(service, "template_resolver", _TemplateResolverStub(888))
+    monkeypatch.setattr(service.db, "get", _fake_db_get, raising=False)
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.get_executor_manager",
+        lambda: _ExecutorManagerStub(),
+    )
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.ExcelParser.read_excel",
+        lambda *_args, **_kwargs: pd.DataFrame([{"订单编号": "A001", "金额": "10"}]),
+    )
+    monkeypatch.setattr(service.ingestion_service, "ingest_data", _capture_ingest)
+
+    result = await service.sync_single_file(
+        file_id=2393,
+        only_with_template=True,
+        allow_quarantine=True,
+        task_id="single_file_2393_contract",
+        use_template_header_row=True,
+    )
+
+    assert result["success"] is True
+    assert captured["template_id"] == 888

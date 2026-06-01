@@ -434,6 +434,99 @@ class FieldMappingTemplate(Base):
         {"schema": "core"},
     )
 
+class FieldMappingTemplateFamily(Base):
+    """逻辑模板族。"""
+    __tablename__ = "field_mapping_template_families"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform = Column(String(32), nullable=False)
+    data_domain = Column(String(64), nullable=False)
+    granularity = Column(String(32), nullable=True)
+    account = Column(String(128), nullable=True)
+    sub_domain = Column(String(64), nullable=True)
+    governance_status = Column(String(32), nullable=False, server_default=text("'ready'"))
+    display_name = Column(String(256), nullable=True)
+    active_version_id = Column(Integer, nullable=True)
+    source_mode = Column(String(32), nullable=False, server_default=text("'legacy_projection'"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "platform",
+            "data_domain",
+            "sub_domain",
+            "granularity",
+            "account",
+            name="uq_template_family_dimension",
+        ),
+        Index(
+            "ix_template_family_dimension",
+            "platform",
+            "data_domain",
+            "sub_domain",
+            "granularity",
+            "account",
+        ),
+        {"schema": "core"},
+    )
+
+
+class FieldMappingTemplateVersion(Base):
+    """模板族下的不可变版本。"""
+    __tablename__ = "field_mapping_template_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    family_id = Column(Integer, nullable=False)
+    version_no = Column(Integer, nullable=False, default=1)
+    status = Column(String(32), nullable=False, server_default=text("'active'"))
+    template_name = Column(String(256), nullable=True)
+    deduplication_fields = Column(JSONB, nullable=True)
+    header_bindings = Column(JSONB, nullable=True)
+    notes = Column(Text, nullable=True)
+    legacy_template_ids = Column(JSONB, nullable=True)
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("family_id", "version_no", name="uq_template_version_family_version_no"),
+        Index("ix_template_version_family_status", "family_id", "status"),
+        {"schema": "core"},
+    )
+
+
+class FieldMappingTemplateVariant(Base):
+    """模板版本下的文件格式变体。"""
+    __tablename__ = "field_mapping_template_variants"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    template_version_id = Column(Integer, nullable=False)
+    variant_key = Column(String(128), nullable=False)
+    match_priority = Column(Integer, nullable=False, default=100)
+    header_row = Column(Integer, default=0, nullable=False)
+    sheet_name_pattern = Column(String(128), nullable=True)
+    required_headers = Column(JSONB, nullable=True)
+    parse_profile = Column(JSONB, nullable=True)
+    field_parse_rules = Column(JSONB, nullable=True)
+    source_legacy_template_id = Column(Integer, nullable=True)
+    template_name = Column(String(256), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "template_version_id",
+            "variant_key",
+            name="uq_template_variant_version_key",
+        ),
+        Index("ix_template_variant_version_priority", "template_version_id", "match_priority"),
+        Index("ix_template_variant_source_legacy_id", "source_legacy_template_id"),
+        CheckConstraint('header_row >= 0 AND header_row <= 100', name='ck_template_variant_header_row_range'),
+        {"schema": "core"},
+    )
+
+
 class FieldMappingTemplateItem(Base):
     """
     字段映射模板明细表

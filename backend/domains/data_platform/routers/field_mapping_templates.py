@@ -27,12 +27,25 @@ from backend.schemas.field_mapping_template import (
     TemplateContextSummary,
     TemplateDeleteData,
     TemplateDeleteResponse,
+    TemplateFamilyListData,
+    TemplateFamilyListResponse,
+    TemplateFamilyVersionsData,
+    TemplateFamilyVersionsResponse,
     TemplateListData,
     TemplateListResponse,
+    TemplateResolveData,
+    TemplateResolveRequest,
+    TemplateResolveResponse,
     TemplateSaveRequest,
     TemplateSaveResponse,
     TemplateUpdateContextData,
     TemplateUpdateContextResponse,
+    TemplateVersionVariantsData,
+    TemplateVersionVariantsResponse,
+)
+from backend.services.template_family_service import (
+    get_template_family_service,
+    get_template_resolver,
 )
 from backend.services.field_mapping_template_service import get_template_service
 from backend.utils.api_response import error_response
@@ -705,6 +718,133 @@ async def get_template_update_context(
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(exc),
             recovery_suggestion="请检查数据库连接或候选文件状态",
+            status_code=500,
+        )
+
+
+@router.get("/template-families", response_model=TemplateFamilyListResponse)
+async def list_template_families(
+    platform: Optional[str] = Query(None, description="平台代码"),
+    data_domain: Optional[str] = Query(None, description="数据域"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        families = await get_template_family_service(db).list_families(
+            platform=platform or None,
+            data_domain=data_domain or None,
+        )
+        return TemplateFamilyListResponse(
+            success=True,
+            data=TemplateFamilyListData(families=families, count=len(families)),
+        )
+    except Exception as exc:
+        logger.error(f"列出模板族失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="列出模板族失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查数据库连接",
+            status_code=500,
+        )
+
+
+@router.get(
+    "/template-families/{family_id}/versions",
+    response_model=TemplateFamilyVersionsResponse,
+)
+async def list_template_family_versions(
+    family_id: int,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        family, versions = await get_template_family_service(db).get_family_versions(family_id)
+        return TemplateFamilyVersionsResponse(
+            success=True,
+            data=TemplateFamilyVersionsData(family=family, versions=versions),
+        )
+    except ValueError as exc:
+        return error_response(
+            code=ErrorCode.NOT_FOUND,
+            message="模板族不存在",
+            error_type=get_error_type(ErrorCode.NOT_FOUND),
+            detail=str(exc),
+            recovery_suggestion="请检查模板族 ID",
+            status_code=404,
+        )
+    except Exception as exc:
+        logger.error(f"列出模板族版本失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="列出模板族版本失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查数据库连接",
+            status_code=500,
+        )
+
+
+@router.get(
+    "/template-versions/{version_id}/variants",
+    response_model=TemplateVersionVariantsResponse,
+)
+async def list_template_version_variants(
+    version_id: int,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        version, variants = await get_template_family_service(db).get_version_variants(version_id)
+        return TemplateVersionVariantsResponse(
+            success=True,
+            data=TemplateVersionVariantsData(version=version, variants=variants),
+        )
+    except ValueError as exc:
+        return error_response(
+            code=ErrorCode.NOT_FOUND,
+            message="模板版本不存在",
+            error_type=get_error_type(ErrorCode.NOT_FOUND),
+            detail=str(exc),
+            recovery_suggestion="请检查模板版本 ID",
+            status_code=404,
+        )
+    except Exception as exc:
+        logger.error(f"列出模板变体失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="列出模板变体失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查数据库连接",
+            status_code=500,
+        )
+
+
+@router.post("/template-resolve", response_model=TemplateResolveResponse)
+async def resolve_template_candidate(
+    request: TemplateResolveRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        data = await get_template_resolver(db).resolve(
+            platform=request.platform,
+            data_domain=request.data_domain,
+            granularity=request.granularity,
+            sub_domain=request.sub_domain,
+            account=request.account,
+            header_row=request.header_row,
+            sheet_name=request.sheet_name,
+            header_columns=request.header_columns,
+            sample_rows=request.sample_rows,
+        )
+        return TemplateResolveResponse(success=True, data=TemplateResolveData(**data))
+    except Exception as exc:
+        logger.error(f"解析模板候选失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="解析模板候选失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查请求参数和数据库连接",
             status_code=500,
         )
 
