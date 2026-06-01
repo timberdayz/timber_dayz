@@ -373,3 +373,18 @@ class TemplateApplyResponse(BaseModel):
     template_version: Optional[int] = None
     header_columns: List[str] = Field(default_factory=list)
     header_changes: HeaderChangesPayload
+
+
+# Explicitly rebuild models with forward references so older Pydantic/FastAPI
+# combinations used in CI can resolve response models during router import.
+for _model in (
+    TemplateVariantCreateContextData,
+    TemplateVariantCreateContextResponse,
+    TemplateFamilyVersionsData,
+    TemplateFamilyVersionsResponse,
+    TemplateVersionVariantsData,
+    TemplateVersionVariantsResponse,
+    TemplateResolveData,
+    TemplateResolveResponse,
+):
+    _model.model_rebuild()
