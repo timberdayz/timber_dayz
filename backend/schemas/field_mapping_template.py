@@ -140,6 +140,7 @@ class DefaultDeduplicationFieldsResponse(BaseModel):
 
 
 class TemplateUpdateContextData(BaseModel):
+    resolved_object_type: str = "template_update"
     template: TemplateContextSummary
     template_header_columns: List[str]
     current_file: Optional[TemplateCurrentFileSummary] = None
@@ -164,6 +165,27 @@ class TemplateUpdateContextData(BaseModel):
 class TemplateUpdateContextResponse(BaseModel):
     success: bool = True
     data: TemplateUpdateContextData
+    message: str
+
+
+class TemplateVariantCreateContextData(BaseModel):
+    resolved_object_type: str = "variant_create"
+    family: TemplateFamilyListItem
+    active_version: Optional[TemplateVersionListItem] = None
+    existing_variants: List[TemplateVariantListItem] = Field(default_factory=list)
+    current_file: TemplateCurrentFileSummary
+    current_header_columns: List[str] = Field(default_factory=list)
+    current_header_row: int = 0
+    sample_data: Dict[str, Any] = Field(default_factory=dict)
+    preview_data: List[Dict[str, Any]] = Field(default_factory=list)
+    current_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    recommended_variant_key: str = ""
+    recommended_parse_profile: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TemplateVariantCreateContextResponse(BaseModel):
+    success: bool = True
+    data: TemplateVariantCreateContextData
     message: str
 
 
@@ -219,6 +241,8 @@ class TemplateFamilyListItem(BaseModel):
     variant_count: int = 0
     file_count: int = 0
     active_template_id: Optional[int] = None
+    sample_file_id: Optional[int] = None
+    sample_file_name: Optional[str] = None
     active_version: Optional[TemplateFamilyActiveVersionSummary] = None
 
 

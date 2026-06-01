@@ -66,6 +66,8 @@ from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import CatalogFile
 from modules.core.logger import get_logger
+from modules.core.path_manager import to_absolute_path
+from modules.services.file_semantics import is_catalog_file_semantically_valid, validate_file_semantics
 from sqlalchemy import select, func, and_, distinct, case
 
 # v4.18.0: 导入schemas(Contract-First架构)
@@ -109,6 +111,16 @@ def _is_governance_excluded_sample_file(catalog_file: CatalogFile | None) -> boo
     if "_case" in file_name and "products" in file_name:
         return True
     return False
+
+
+def _semantic_anomaly_reason(catalog_file: CatalogFile | None) -> str:
+    result = validate_file_semantics(
+        source_platform=getattr(catalog_file, "source_platform", None) or getattr(catalog_file, "platform_code", None),
+        data_domain=getattr(catalog_file, "data_domain", None),
+        granularity=getattr(catalog_file, "granularity", None),
+        sub_domain=getattr(catalog_file, "sub_domain", None),
+    )
+    return result.reason
 
 
 # ==================== 数据同步API ====================
@@ -293,26 +305,23 @@ async def list_files(
         if conditions:
             query = query.where(*conditions)
         
-        # v4.18.0: 计算总数(用于分页)
-        # [*] v4.18.2:使用 await 进行异步查询
-        count_query = select(func.count(CatalogFile.id))
-        if conditions:
-            count_query = count_query.where(*conditions)
-        count_result = await db.execute(count_query)
-        total_count = count_result.scalar() or 0
-        
-        # v4.18.0: 分页逻辑(兼容旧的limit参数)
-        if limit is not None:
-            # 兼容旧版本:如果提供了limit,使用limit
-            query = query.order_by(CatalogFile.first_seen_at.desc()).limit(limit)
-        else:
-            # 新版本:使用page和page_size
-            offset = (page - 1) * page_size
-            query = query.order_by(CatalogFile.first_seen_at.desc()).offset(offset).limit(page_size)
-        
+        query = query.order_by(CatalogFile.first_seen_at.desc())
+
         # 2. 查询文件列表([*] v4.18.2:使用 await)
         result = await db.execute(query)
-        files = result.scalars().all()
+        all_files = result.scalars().all()
+        valid_files = [
+            file_record
+            for file_record in all_files
+            if is_catalog_file_semantically_valid(file_record)
+        ]
+        total_count = len(valid_files)
+
+        if limit is not None:
+            files = valid_files[:limit]
+        else:
+            offset = (page - 1) * page_size
+            files = valid_files[offset: offset + page_size]
         
         # [*] v4.19.5 优化:预加载所有已发布模板,减少重复查询
         from modules.core.db import FieldMappingTemplate
@@ -2339,23 +2348,32 @@ async def get_governance_stats(
         
         # [*] v4.18.2:使用 await 进行异步查询
         # 统计待同步文件(status='pending')
-        pending_result = await db.execute(
-            select(func.count(CatalogFile.id)).where(CatalogFile.status == 'pending')
-        )
-        pending_count = pending_result.scalar() or 0
-
         pending_files_result = await db.execute(
-            select(CatalogFile.id).where(CatalogFile.status == 'pending')
+            select(CatalogFile).where(CatalogFile.status == 'pending')
         )
-        pending_file_ids = pending_files_result.scalars().all()
+        pending_files = [
+            file_record
+            for file_record in pending_files_result.scalars().all()
+            if is_catalog_file_semantically_valid(file_record)
+        ]
+        pending_count = len(pending_files)
         ready_to_sync_count = 0
         template_update_required_count = 0
         missing_template_count = 0
+        semantic_anomaly_count = 0
         data_sync_service = DataSyncService(db)
 
-        for file_id in pending_file_ids:
+        all_pending_files_result = await db.execute(
+            select(CatalogFile).where(CatalogFile.status == 'pending')
+        )
+        all_pending_files = all_pending_files_result.scalars().all()
+        semantic_anomaly_count = sum(
+            1 for file_record in all_pending_files if not is_catalog_file_semantically_valid(file_record)
+        )
+
+        for file_record in pending_files:
             readiness = await data_sync_service.get_file_sync_readiness(
-                file_id,
+                file_record.id,
                 use_template_header_row=True,
             )
             template_status = readiness.get("template_status")
@@ -2402,6 +2420,7 @@ async def get_governance_stats(
                 "ready_to_sync_count": ready_to_sync_count,
                 "template_update_required_count": template_update_required_count,
                 "missing_template_count": missing_template_count,
+                "semantic_anomaly_count": semantic_anomaly_count,
             },
             message="数据治理统计查询成功"
         )
@@ -2414,6 +2433,89 @@ async def get_governance_stats(
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
             recovery_suggestion="请检查数据库连接,或联系系统管理员",
+            status_code=500
+        )
+
+
+@router.post("/data-sync/cleanup-semantic-anomalies")
+async def cleanup_semantic_anomalies(
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        result = await db.execute(
+            select(CatalogFile).where(CatalogFile.status == 'pending')
+        )
+        pending_files = result.scalars().all()
+        semantic_anomalies = [
+            file_record
+            for file_record in pending_files
+            if not is_catalog_file_semantically_valid(file_record)
+        ]
+
+        deleted_file_count = 0
+        deleted_meta_count = 0
+        deleted_catalog_count = 0
+        failures: list[dict[str, Any]] = []
+
+        for file_record in semantic_anomalies:
+            file_path = getattr(file_record, "file_path", None)
+            meta_file_path = getattr(file_record, "meta_file_path", None)
+
+            try:
+                if file_path:
+                    absolute_file_path = to_absolute_path(str(file_path))
+                    if absolute_file_path.exists():
+                        absolute_file_path.unlink()
+                        deleted_file_count += 1
+            except Exception as exc:
+                failures.append({
+                    "file_id": file_record.id,
+                    "file_name": file_record.file_name,
+                    "stage": "file",
+                    "reason": _semantic_anomaly_reason(file_record),
+                    "error": str(exc),
+                })
+
+            try:
+                if meta_file_path:
+                    absolute_meta_path = to_absolute_path(str(meta_file_path))
+                    if absolute_meta_path.exists():
+                        absolute_meta_path.unlink()
+                        deleted_meta_count += 1
+            except Exception as exc:
+                failures.append({
+                    "file_id": file_record.id,
+                    "file_name": file_record.file_name,
+                    "stage": "meta",
+                    "reason": _semantic_anomaly_reason(file_record),
+                    "error": str(exc),
+                })
+
+            await db.delete(file_record)
+            deleted_catalog_count += 1
+
+        await db.commit()
+
+        return success_response(
+            data={
+                "matched_count": len(semantic_anomalies),
+                "deleted_catalog_count": deleted_catalog_count,
+                "deleted_file_count": deleted_file_count,
+                "deleted_meta_count": deleted_meta_count,
+                "failures": failures,
+            },
+            message=f"语义异常待同步文件清理完成，共匹配 {len(semantic_anomalies)} 个文件",
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[DataSync SemanticCleanup] 清理语义异常待同步文件失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="清理语义异常待同步文件失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接和文件权限，或联系系统管理员",
             status_code=500
         )
 

@@ -47,6 +47,7 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_export_complete,
     evaluate_login_ready,
 )
+from modules.services.file_semantics import validate_file_semantics
 from backend.services.collection_contracts import (
     count_collection_targets,
     normalize_collection_date_range,
@@ -4091,15 +4092,64 @@ class CollectionExecutorV2:
                     task_granularity=granularity,
                 )
 
-                # 1. 生成标准文件名
-                ext = source_path.suffix.lstrip('.') or 'xlsx'
-                standard_filename = StandardFileName.generate(
+                semantic_result = validate_file_semantics(
                     source_platform=landing_semantics["business_platform"],
                     data_domain=data_domain,
                     granularity=resolved_granularity,
                     sub_domain=landing_semantics["landing_sub_domain"],
+                )
+                if not semantic_result.is_valid:
+                    rejected_dir = source_path.parent / "_semantic_rejected"
+                    rejected_dir.mkdir(parents=True, exist_ok=True)
+                    rejected_path = rejected_dir / source_path.name
+                    if rejected_path.exists():
+                        rejected_path = rejected_dir / f"{source_path.stem}_{uuid.uuid4().hex[:8]}{source_path.suffix}"
+                    shutil.move(str(source_path), str(rejected_path))
+                    logger.warning(
+                        "[SemanticGuard] Reject landing file before raw promotion: source=%s platform=%s domain=%s sub_domain=%s normalized_platform=%s normalized_sub_domain=%s reason=%s rejected_path=%s",
+                        file_path,
+                        platform,
+                        data_domain,
+                        sub_domain,
+                        semantic_result.normalized_platform,
+                        semantic_result.normalized_sub_domain,
+                        semantic_result.reason,
+                        rejected_path,
+                    )
+                    continue
+
+                # 1. 生成标准文件名
+                ext = source_path.suffix.lstrip('.') or 'xlsx'
+                standard_filename = StandardFileName.generate(
+                    source_platform=semantic_result.normalized_platform,
+                    data_domain=data_domain,
+                    granularity=resolved_granularity,
+                    sub_domain=semantic_result.normalized_sub_domain,
                     ext=ext
                 )
+
+                parsed_standard = StandardFileName.parse(standard_filename)
+                parsed_semantic_result = validate_file_semantics(
+                    source_platform=parsed_standard.get("source_platform"),
+                    data_domain=parsed_standard.get("data_domain"),
+                    granularity=parsed_standard.get("granularity"),
+                    sub_domain=parsed_standard.get("sub_domain"),
+                )
+                if not parsed_semantic_result.is_valid:
+                    rejected_dir = source_path.parent / "_semantic_rejected"
+                    rejected_dir.mkdir(parents=True, exist_ok=True)
+                    rejected_path = rejected_dir / source_path.name
+                    if rejected_path.exists():
+                        rejected_path = rejected_dir / f"{source_path.stem}_{uuid.uuid4().hex[:8]}{source_path.suffix}"
+                    shutil.move(str(source_path), str(rejected_path))
+                    logger.warning(
+                        "[SemanticGuard] Reject generated raw filename: source=%s generated=%s reason=%s rejected_path=%s",
+                        file_path,
+                        standard_filename,
+                        parsed_semantic_result.reason,
+                        rejected_path,
+                    )
+                    continue
                 
                 # 2. 准备目标目录(data/raw/YYYY/)
                 year = datetime.now().strftime("%Y")
@@ -4123,9 +4173,9 @@ class CollectionExecutorV2:
                 # 4. 生成 .meta.json 伴生文件
                 try:
                     business_metadata = {
-                        "source_platform": landing_semantics["business_platform"],
+                        "source_platform": semantic_result.normalized_platform,
                         "data_domain": data_domain,
-                        "sub_domain": landing_semantics["landing_sub_domain"],
+                        "sub_domain": semantic_result.normalized_sub_domain,
                         "granularity": resolved_granularity,
                         "date_from": date_from,
                         "date_to": date_to,

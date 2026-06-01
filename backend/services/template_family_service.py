@@ -303,8 +303,10 @@ class TemplateFamilyService:
                 select(FieldMappingTemplateVariant).where(
                     FieldMappingTemplateVariant.template_version_id == (version.id if version else -1)
                 )
+                .order_by(FieldMappingTemplateVariant.match_priority.asc(), FieldMappingTemplateVariant.id.asc())
             )
             variants = list(variants_result.scalars().all())
+            primary_variant = variants[0] if variants else None
             file_count_result = await self.db.execute(
                 select(func.count(CatalogFile.id)).where(
                     and_(
@@ -316,6 +318,18 @@ class TemplateFamilyService:
                 )
             )
             file_count = int(file_count_result.scalar() or 0)
+            sample_file_result = await self.db.execute(
+                select(CatalogFile).where(
+                    and_(
+                        CatalogFile.platform_code == family.platform,
+                        CatalogFile.data_domain == family.data_domain,
+                        CatalogFile.sub_domain == family.sub_domain,
+                        CatalogFile.granularity == family.granularity,
+                        CatalogFile.status.in_(["pending", "failed", "ingested"]),
+                    )
+                ).order_by(CatalogFile.first_seen_at.desc(), CatalogFile.id.desc()).limit(1)
+            )
+            sample_file = sample_file_result.scalar_one_or_none()
             legacy_template_ids = list(getattr(version, "legacy_template_ids", None) or [])
             payload.append(
                 {
@@ -329,7 +343,13 @@ class TemplateFamilyService:
                     "governance_status": family.governance_status or "ready",
                     "variant_count": len(variants),
                     "file_count": file_count,
-                    "active_template_id": legacy_template_ids[0] if legacy_template_ids else None,
+                    "active_template_id": (
+                        primary_variant.source_legacy_template_id
+                        if primary_variant and primary_variant.source_legacy_template_id
+                        else legacy_template_ids[0] if legacy_template_ids else None
+                    ),
+                    "sample_file_id": sample_file.id if sample_file else None,
+                    "sample_file_name": sample_file.file_name if sample_file else None,
                     "active_version": (
                         {
                             "id": version.id,

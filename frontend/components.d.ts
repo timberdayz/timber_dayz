@@ -91,6 +91,7 @@ declare module 'vue' {
     TemplateRawPreviewPanel: typeof import('./src/components/dataSync/TemplateRawPreviewPanel.vue')['default']
     TemplateUpdateWorkbenchDrawer: typeof import('./src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue')['default']
     UnderDevelopment: typeof import('./src/components/common/UnderDevelopment.vue')['default']
+    VariantCreateWorkbenchDrawer: typeof import('./src/components/dataSync/VariantCreateWorkbenchDrawer.vue')['default']
     VerificationResumeDialog: typeof import('./src/components/verification/VerificationResumeDialog.vue')['default']
   }
   export interface ComponentCustomProperties {

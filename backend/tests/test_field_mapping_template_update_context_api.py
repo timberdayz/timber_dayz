@@ -9,7 +9,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 
-from modules.core.db import CatalogFile, FieldMappingTemplate
+from modules.core.db import (
+    CatalogFile,
+    FieldMappingTemplate,
+    FieldMappingTemplateFamily,
+    FieldMappingTemplateVariant,
+    FieldMappingTemplateVersion,
+)
 
 
 @compiles(JSONB, "sqlite")
@@ -49,6 +55,9 @@ async def template_update_context_client():
         await conn.execute(text("ATTACH DATABASE ':memory:' AS core"))
         await conn.run_sync(CatalogFile.__table__.create)
         await conn.run_sync(FieldMappingTemplate.__table__.create)
+        await conn.run_sync(FieldMappingTemplateFamily.__table__.create)
+        await conn.run_sync(FieldMappingTemplateVersion.__table__.create)
+        await conn.run_sync(FieldMappingTemplateVariant.__table__.create)
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -238,6 +247,188 @@ async def test_template_update_context_core_only_uses_template_headers_as_field_
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["missing_field"]
     assert data["recommended_deduplication_fields"] == ["order_id", "shop_id"]
+
+
+@pytest.mark.asyncio
+async def test_template_update_context_with_sample_requires_file_id(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=1,
+            header_columns=["order_id", "amount"],
+            deduplication_fields=["order_id"],
+            template_name="shopee_orders_daily_v1",
+            version=1,
+            status="published",
+            field_count=2,
+            created_by="test",
+        )
+        session.add(template)
+        await session.commit()
+        await session.refresh(template)
+
+    response = await client.get(
+        f"/api/field-mapping/templates/{template.id}/update-context",
+        params={"mode": "with-sample"},
+    )
+
+    assert response.status_code == 400
+    assert "file_id" in response.text
+
+
+@pytest.mark.asyncio
+async def test_template_update_context_with_sample_requires_file_id(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=1,
+            header_columns=["order_id", "amount"],
+            deduplication_fields=["order_id"],
+            template_name="shopee_orders_daily_v1",
+            version=1,
+            status="published",
+            field_count=2,
+            created_by="test",
+        )
+        session.add(template)
+        await session.commit()
+        await session.refresh(template)
+
+    response = await client.get(
+        f"/api/field-mapping/templates/{template.id}/update-context",
+        params={"mode": "with-sample"},
+    )
+
+    assert response.status_code == 400
+    assert "file_id" in response.text
+
+
+@pytest.mark.asyncio
+async def test_variant_create_context_returns_active_version_and_sample_preview(
+    template_update_context_client,
+    monkeypatch,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        legacy_template = FieldMappingTemplate(
+            id=801,
+            platform="shopee",
+            data_domain="analytics",
+            granularity="monthly",
+            sub_domain=None,
+            header_row=3,
+            header_columns=["日期", "浏览量"],
+            deduplication_fields=["日期"],
+            template_name="shopee_analytics__monthly_slash_v3",
+            version=3,
+            status="published",
+            field_count=2,
+            created_by="test",
+        )
+        family = FieldMappingTemplateFamily(
+            id=901,
+            platform="shopee",
+            data_domain="analytics",
+            granularity="monthly",
+            sub_domain=None,
+            display_name="shopee / analytics / default / monthly",
+            governance_status="missing_variant",
+        )
+        version = FieldMappingTemplateVersion(
+            id=902,
+            family_id=901,
+            version_no=3,
+            status="active",
+            template_name="shopee_analytics__monthly_slash_v3",
+            deduplication_fields=["日期"],
+            legacy_template_ids=[801],
+            created_by="test",
+        )
+        variant = FieldMappingTemplateVariant(
+            id=903,
+            template_version_id=902,
+            variant_key="monthly_slash",
+            match_priority=1,
+            header_row=3,
+            required_headers=["日期", "浏览量"],
+            parse_profile={"date_formats": ["dd/mm/yyyy"]},
+            field_parse_rules=[
+                {
+                    "target_field": "metric_date",
+                    "source_column": "日期",
+                    "value_kind": "single_date",
+                    "date_format": "dd/mm/yyyy",
+                    "strict": True,
+                }
+            ],
+            source_legacy_template_id=801,
+            template_name="shopee_analytics__monthly_slash_v3",
+        )
+        family.active_version_id = 902
+        file_record = CatalogFile(
+            id=904,
+            file_path="data/raw/shopee/analytics/monthly_demo.xlsx",
+            file_name="monthly_demo.xlsx",
+            source="data/raw",
+            platform_code="shopee",
+            source_platform="shopee",
+            data_domain="analytics",
+            granularity="monthly",
+            status="pending",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        session.add_all([legacy_template, family, version, variant, file_record])
+        await session.commit()
+
+    from backend.domains.data_platform.routers import field_mapping_templates as router_module
+
+    async def fake_load_file_update_preview(db, file_id, header_row):
+        assert file_id == 904
+        assert header_row == 3
+        return {
+            "file": {
+                "id": 904,
+                "file_name": "monthly_demo.xlsx",
+                "platform": "shopee",
+                "domain": "analytics",
+                "granularity": "monthly",
+                "sub_domain": None,
+            },
+            "header_columns": ["日期", "浏览量"],
+            "header_bindings": [],
+            "sample_data": {"日期": "01/03/2026", "浏览量": "100"},
+            "preview_data": [{"日期": "01/03/2026", "浏览量": "100"}],
+        }
+
+    monkeypatch.setattr(router_module, "_load_file_update_preview", fake_load_file_update_preview, raising=False)
+
+    response = await client.get(
+        "/api/field-mapping/template-families/901/variant-create-context",
+        params={"file_id": 904},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["resolved_object_type"] == "variant_create"
+    assert payload["data"]["family"]["id"] == 901
+    assert payload["data"]["active_version"]["id"] == 902
+    assert payload["data"]["existing_variants"][0]["variant_key"] == "monthly_slash"
+    assert payload["data"]["current_file"]["id"] == 904
 
 
 @pytest.mark.asyncio

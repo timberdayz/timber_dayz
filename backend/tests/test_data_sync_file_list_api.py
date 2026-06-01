@@ -321,3 +321,51 @@ async def test_list_files_marks_missing_file_as_file_missing_when_catalog_path_d
     assert file_row["template_status"] == "file_missing"
     assert file_row["template_update_required"] is False
     assert "文件不存在" in file_row["update_reason"]
+
+
+@pytest.mark.asyncio
+async def test_list_files_excludes_semantic_anomaly_pending_file(file_list_client):
+    client, session_factory = file_list_client
+
+    async with session_factory() as session:
+        session.add_all(
+            [
+                CatalogFile(
+                    file_path="data/raw/2026/tiktok_products_monthly_20260517_221824.xlsx",
+                    file_name="tiktok_products_monthly_20260517_221824.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="products",
+                    granularity="monthly",
+                    status="pending",
+                    first_seen_at=datetime.now(timezone.utc),
+                ),
+                CatalogFile(
+                    file_path="data/raw/2026/tiktok_products_tiktok_monthly_20260407_123005.xlsx",
+                    file_name="tiktok_products_tiktok_monthly_20260407_123005.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="products",
+                    granularity="monthly",
+                    sub_domain="tiktok",
+                    status="pending",
+                    first_seen_at=datetime.now(timezone.utc),
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await client.get(
+        "/api/data-sync/files",
+        params={"platform": "tiktok", "domain": "products", "granularity": "monthly", "status": "pending"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["total"] == 1
+    assert [row["file_name"] for row in payload["data"]["files"]] == [
+        "tiktok_products_monthly_20260517_221824.xlsx"
+    ]

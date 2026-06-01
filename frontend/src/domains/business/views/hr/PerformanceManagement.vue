@@ -1,10 +1,13 @@
 ﻿<template>
   <div class="performance-management erp-page-container">
-    <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">{{ pageTitle }}</h1>
-    <p style="color: #909399; margin-bottom: 20px;">{{ pageSubtitle }}</p>
+    <PageHeader
+      :title="pageTitle"
+      :subtitle="pageSubtitle"
+      family="admin"
+    />
     
     <!-- 操作栏：月份、维度切换与功能按钮 -->
-    <div class="action-bar" style="margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+    <div class="action-bar">
       <el-date-picker
         v-model="filters.period"
         type="month"
@@ -514,6 +517,7 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Setting, Download } from '@element-plus/icons-vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 import { useUserStore } from '@/stores/user'
 import { useRoute } from 'vue-router'
 import api from '@/api'
@@ -537,10 +541,10 @@ const pageTitle = computed(() => {
 })
 const pageSubtitle = computed(() => {
   if (props.forcedGroupBy === 'person') {
-    return '?????????????????????????????'
+    return '用于查看个人绩效结果、执行月度重算，并维护个人绩效输入项和调整项。'
   }
   if (props.forcedGroupBy === 'shop') {
-    return '????????????????????????????'
+    return '用于查看各店铺的绩效结果、赛马池状态与预警信息，并完成店铺维度绩效重算。'
   }
   if (route.path.includes('/hr-performance-management/person')) {
     return '用于查看个人绩效结果、执行月度重算，并维护个人绩效调整项。'
@@ -1335,15 +1339,33 @@ onMounted(async () => {
 <style scoped>
 .performance-management {
   padding: 20px;
+  --perf-text-primary: #1d1d1f;
+  --perf-text-secondary: #6e6e73;
+  --perf-surface: #ffffff;
+  --perf-surface-muted: #f5f5f7;
+  --perf-border: #d2d2d7;
+  --perf-shadow: 0 12px 32px rgba(15, 23, 42, 0.05);
 }
 
 .action-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--perf-border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 245, 247, 0.96) 100%);
+  box-shadow: var(--perf-shadow);
 }
 
 .policy-card {
   margin-bottom: 20px;
+  border-color: var(--perf-border);
+  border-radius: 18px;
+  background: var(--perf-surface);
+  box-shadow: var(--perf-shadow);
 }
 
 .policy-grid {
@@ -1353,23 +1375,27 @@ onMounted(async () => {
 }
 
 .policy-item {
-  padding: 12px 14px;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  background: #fafafa;
+  padding: 14px 16px;
+  border: 1px solid var(--perf-border);
+  border-radius: 14px;
+  background: var(--perf-surface-muted);
 }
 
 .policy-label {
   margin-bottom: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
+  color: var(--perf-text-primary);
 }
 
 .policy-text {
   font-size: 13px;
   line-height: 1.6;
-  color: #606266;
+  color: var(--perf-text-secondary);
+}
+
+.card-header span {
+  color: var(--perf-text-primary);
 }
 
 /* 浼佷笟绾ц〃鏍兼牱寮?*/

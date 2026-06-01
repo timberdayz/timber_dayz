@@ -35,6 +35,7 @@ from modules.core.db.schema import CatalogFile
 from modules.core.file_naming import StandardFileName
 from modules.services.metadata_manager import MetadataManager
 from modules.services.shop_resolver import get_shop_resolver
+from modules.services.file_semantics import validate_file_semantics
 from modules.core.logger import get_logger
 from modules.core.path_manager import to_relative_path  # v4.18.0: 统一路径存储格式
 from modules.core.validators import (
@@ -616,6 +617,24 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         initial_shop_id = 'none'
                         initial_status = 'pending'
                         logger.info(f"[{file_path.name}] .meta.json无shop_id,设为'none'")
+
+                    semantic_result = validate_file_semantics(
+                        source_platform=norm_source_platform,
+                        data_domain=norm_domain,
+                        granularity=norm_granularity,
+                        sub_domain=norm_sub_domain,
+                    )
+                    if not semantic_result.is_valid:
+                        logger.warning(
+                            "[CatalogScanner] 跳过语义异常文件: %s (platform=%s, domain=%s, sub_domain=%s, reason=%s)",
+                            file_path.name,
+                            norm_source_platform,
+                            norm_domain,
+                            norm_sub_domain,
+                            semantic_result.reason,
+                        )
+                        skipped += 1
+                        continue
                     
                     # 3.5. [*] v4.17.3修复:计算文件哈希(包含shop_id和platform_code)
                     # 这样可以区分不同店铺/平台的相同内容文件
@@ -988,6 +1007,23 @@ def register_single_file(file_path: str) -> Optional[int]:
             initial_shop_id = 'none'
             initial_status = 'pending'
             logger.info(f"[{file_path_obj.name}] .meta.json无shop_id,设为'none'")
+
+        semantic_result = validate_file_semantics(
+            source_platform=norm_source_platform,
+            data_domain=norm_domain,
+            granularity=norm_granularity,
+            sub_domain=norm_sub_domain,
+        )
+        if not semantic_result.is_valid:
+            logger.warning(
+                "[AutoRegister] 跳过语义异常文件: %s (platform=%s, domain=%s, sub_domain=%s, reason=%s)",
+                file_path_obj.name,
+                norm_source_platform,
+                norm_domain,
+                norm_sub_domain,
+                semantic_result.reason,
+            )
+            return None
         
         # 5. [*] v4.17.3修复:计算文件哈希(包含shop_id和platform_code)
         # 这样可以区分不同店铺/平台的相同内容文件

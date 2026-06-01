@@ -2460,6 +2460,24 @@ export default {
       '/component-versions/batch-register-python',
       params
     )
+  },
+
+  async getTemplateVariantCreateContext(familyId, { fileId, headerRow } = {}) {
+    if (!familyId) {
+      throw new Error('familyId为必填项')
+    }
+    if (!fileId) {
+      throw new Error('fileId为必填项')
+    }
+    return await this._get(
+      `/field-mapping/template-families/${familyId}/variant-create-context`,
+      {
+        params: {
+          file_id: fileId,
+          header_row: headerRow === undefined ? null : headerRow
+        }
+      }
+    )
   }
 }
 

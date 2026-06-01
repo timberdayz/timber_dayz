@@ -40,6 +40,8 @@ from backend.schemas.field_mapping_template import (
     TemplateSaveResponse,
     TemplateUpdateContextData,
     TemplateUpdateContextResponse,
+    TemplateVariantCreateContextData,
+    TemplateVariantCreateContextResponse,
     TemplateVersionVariantsData,
     TemplateVersionVariantsResponse,
 )
@@ -574,6 +576,7 @@ async def get_template_update_context(
         template_deduplication_fields = template.deduplication_fields or []
         effective_header_row = header_row if header_row is not None else (template.header_row or 0)
         response_data: Dict[str, Any] = {
+            "resolved_object_type": "template_update",
             "template": TemplateContextSummary(
                 id=template.id,
                 platform=template.platform,
@@ -625,6 +628,9 @@ async def get_template_update_context(
             template.data_domain,
             template.sub_domain,
         )
+
+        if mode == "with-sample" and file_id is None:
+            raise ValueError("file_id is required when mode is with-sample")
 
         if mode == "core-only":
             available_fields, missing_fields = _split_existing_deduplication_fields(
@@ -718,6 +724,100 @@ async def get_template_update_context(
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(exc),
             recovery_suggestion="请检查数据库连接或候选文件状态",
+            status_code=500,
+        )
+
+@router.get(
+    "/template-families/{family_id}/variant-create-context",
+    response_model=TemplateVariantCreateContextResponse,
+)
+async def get_template_variant_create_context(
+    family_id: int,
+    file_id: int = Query(..., description="候选样本文件 ID"),
+    header_row: Optional[int] = Query(None, description="可选覆盖表头行"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        family_service = get_template_family_service(db)
+        family, versions = await family_service.get_family_versions(family_id)
+        active_version = next((item for item in versions if item["status"] == "active"), None)
+        if active_version is None:
+            raise ValueError(f"template family {family_id} has no active version")
+
+        _version_payload, variants = await family_service.get_version_variants(active_version["id"])
+        legacy_template_ids = list(active_version.get("legacy_template_ids") or [])
+        if not legacy_template_ids:
+            raise ValueError(f"template family {family_id} has no compatible legacy template")
+
+        template_result = await db.execute(
+            select(FieldMappingTemplate).where(FieldMappingTemplate.id == legacy_template_ids[0])
+        )
+        template = template_result.scalar_one_or_none()
+        if not template:
+            raise ValueError(f"legacy template {legacy_template_ids[0]} not found")
+
+        effective_header_row = header_row if header_row is not None else (template.header_row or 0)
+        file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
+        current_header_columns = file_preview["header_columns"]
+        current_header_bindings = file_preview.get("header_bindings", [])
+
+        resolver = get_template_resolver(db)
+        resolve_data = await resolver.resolve(
+            platform=family["platform"],
+            data_domain=family["data_domain"],
+            granularity=family["granularity"],
+            sub_domain=family["sub_domain"],
+            header_row=effective_header_row,
+            header_columns=current_header_columns,
+            sample_rows=file_preview.get("preview_data", [])[:3],
+        )
+        recommended_variant = resolve_data.get("variant")
+        recommended_variant_key = (
+            recommended_variant.get("variant_key")
+            if recommended_variant
+            else f"{family['granularity'] or 'generic'}_custom"
+        )
+        recommended_parse_profile = (
+            dict(recommended_variant.get("parse_profile") or {})
+            if recommended_variant
+            else {}
+        )
+
+        return TemplateVariantCreateContextResponse(
+            success=True,
+            data=TemplateVariantCreateContextData(
+                family=family,
+                active_version=active_version,
+                existing_variants=variants,
+                current_file=file_preview["file"],
+                current_header_columns=current_header_columns,
+                current_header_row=effective_header_row,
+                sample_data=file_preview.get("sample_data", {}),
+                preview_data=file_preview.get("preview_data", []),
+                current_header_bindings=current_header_bindings,
+                recommended_variant_key=recommended_variant_key,
+                recommended_parse_profile=recommended_parse_profile,
+            ),
+            message="获取变体创建上下文成功",
+        )
+    except ValueError as exc:
+        logger.error(f"获取变体创建上下文失败(参数错误): {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATA_VALIDATION_FAILED,
+            message="获取变体创建上下文失败",
+            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+            detail=str(exc),
+            recovery_suggestion="请检查模板族和样本文件是否存在",
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"获取变体创建上下文失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="获取变体创建上下文失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查数据库连接或样本文件状态",
             status_code=500,
         )
 

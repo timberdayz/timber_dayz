@@ -928,7 +928,7 @@ const routes = [
     name: 'HRPerformanceManagementShop',
     component: () => import('@/domains/business/views/hr/PerformanceManagementShop.vue'),
     meta: {
-      title: '??????',
+      title: '店铺绩效管理',
       icon: 'Medal',
       permission: 'performance:config',
       roles: ['admin']
@@ -939,7 +939,7 @@ const routes = [
     name: 'HRPerformanceManagementPerson',
     component: () => import('@/domains/business/views/hr/PerformanceManagementPerson.vue'),
     meta: {
-      title: '??????',
+      title: '个人绩效管理',
       icon: 'Medal',
       permission: 'performance:config',
       roles: ['admin']
@@ -954,7 +954,7 @@ const routes = [
     name: 'HRPerformanceDisplayShop',
     component: () => import('@/domains/business/views/hr/PerformanceDisplayShop.vue'),
     meta: {
-      title: '??????',
+      title: '店铺绩效公示',
       icon: 'View',
       permission: 'performance:read',
       roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
@@ -965,7 +965,7 @@ const routes = [
     name: 'HRPerformanceDisplayPerson',
     component: () => import('@/domains/business/views/hr/PerformanceDisplayPerson.vue'),
     meta: {
-      title: '??????',
+      title: '个人绩效公示',
       icon: 'View',
       permission: 'performance:read',
       roles: ['admin', 'manager', 'operator', 'finance', 'tourist']

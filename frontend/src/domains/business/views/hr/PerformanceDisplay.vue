@@ -1,9 +1,10 @@
 ﻿<template>
   <div class="performance-display erp-page-container">
-    <h1 class="page-title">{{ pageTitle }}</h1>
-    <p class="page-subtitle">
-      {{ pageSubtitle }}
-    </p>
+    <PageHeader
+      :title="pageTitle"
+      :subtitle="pageSubtitle"
+      family="dashboard"
+    />
 
     <div class="action-bar">
       <el-date-picker
@@ -293,6 +294,7 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 import { useUserStore } from '@/stores/user'
 import { useRoute } from 'vue-router'
 import api from '@/api'
@@ -316,10 +318,10 @@ const pageTitle = computed(() => {
 })
 const pageSubtitle = computed(() => {
   if (props.forcedGroupBy === 'person') {
-    return '????????????????????????????'
+    return '面向全员展示个人维度的绩效结果，并支持查看个人绩效来源。'
   }
   if (props.forcedGroupBy === 'shop') {
-    return '??????????????????????????????'
+    return '面向全员展示店铺维度的绩效结果，并支持查看赛马池状态、预警和绩效口径。'
   }
   if (route.path.includes('/hr-performance-display/person')) {
     return '面向全员展示个人维度的绩效结果，并支持查看个人绩效来源。'
@@ -665,15 +667,33 @@ onMounted(() => {
 <style scoped>
 .performance-display {
   padding: 20px;
+  --perf-text-primary: #1d1d1f;
+  --perf-text-secondary: #6e6e73;
+  --perf-text-muted: #8a8a8f;
+  --perf-surface: #ffffff;
+  --perf-surface-muted: #f5f5f7;
+  --perf-border: #d2d2d7;
 }
 
 .action-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--perf-border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 245, 247, 0.96) 100%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
 }
 
 .policy-card {
   margin-bottom: 20px;
+  border-color: var(--perf-border);
+  border-radius: 18px;
+  background: var(--perf-surface);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
 }
 
 .policy-grid {
@@ -683,23 +703,23 @@ onMounted(() => {
 }
 
 .policy-item {
-  padding: 12px 14px;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  background: #fafafa;
+  padding: 14px 16px;
+  border: 1px solid var(--perf-border);
+  border-radius: 14px;
+  background: var(--perf-surface-muted);
 }
 
 .policy-label {
   margin-bottom: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
+  color: var(--perf-text-primary);
 }
 
 .policy-text {
   font-size: 13px;
   line-height: 1.6;
-  color: #606266;
+  color: var(--perf-text-secondary);
 }
 
 .card-header {
@@ -710,7 +730,7 @@ onMounted(() => {
 
 .card-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--perf-text-muted);
 }
 
 .metric-header {
@@ -722,6 +742,7 @@ onMounted(() => {
 
 .metric-title {
   font-weight: bold;
+  color: var(--perf-text-primary);
 }
 
 .input-summary-head {
@@ -729,25 +750,25 @@ onMounted(() => {
   justify-content: space-between;
   gap: 8px;
   font-size: 12px;
-  color: #606266;
+  color: var(--perf-text-secondary);
 }
 
 .input-summary-list {
   margin-top: 4px;
   font-size: 12px;
   line-height: 1.5;
-  color: #303133;
+  color: var(--perf-text-primary);
 }
 
 .fallback-text {
   font-size: 12px;
-  color: #909399;
+  color: var(--perf-text-muted);
 }
 
 .empty-state {
   padding: 40px;
   text-align: center;
-  color: #909399;
+  color: var(--perf-text-muted);
 }
 
 .pager {

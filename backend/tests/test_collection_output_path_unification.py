@@ -164,6 +164,48 @@ def test_executor_does_not_infer_orders_sub_domain_from_platform_segment_for_non
 
 
 @pytest.mark.asyncio
+async def test_executor_process_files_rejects_invalid_services_platform_sub_domain(tmp_path, monkeypatch):
+    raw_dir = tmp_path / "custom-raw-root"
+    download_root = tmp_path / "temp" / "downloads" / "task-1" / "tiktok" / "acc" / "shop" / "services" / "monthly"
+    download_root.mkdir(parents=True, exist_ok=True)
+    download_file = download_root / "service_export.xlsx"
+    download_file.write_text("demo", encoding="utf-8")
+
+    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+
+    import modules.services.catalog_scanner as catalog_scanner_module
+    from modules.services.metadata_manager import MetadataManager
+
+    registered = []
+    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: registered.append(file_path))
+    monkeypatch.setattr(
+        MetadataManager,
+        "create_meta_file",
+        staticmethod(lambda file_path, business_metadata, collection_info: Path(str(file_path) + ".meta.json")),
+    )
+
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: "services"
+    executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: "tiktok"
+
+    processed = await CollectionExecutorV2._process_files(
+        executor,
+        [str(download_file)],
+        platform="tiktok",
+        data_domains=["services"],
+        granularity="monthly",
+        account={"label": "acc", "shop_id": "shop"},
+        date_range={"start_date": "2026-04-12", "end_date": "2026-04-12"},
+    )
+
+    assert processed == []
+    assert registered == []
+    assert not any(raw_dir.rglob("*.xlsx"))
+    rejected_files = list((tmp_path / "temp").rglob("service_export.xlsx"))
+    assert rejected_files
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("platform", "data_domain", "download_relative_path", "expected_prefix"),
     [

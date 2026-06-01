@@ -19,6 +19,7 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 @pytest_asyncio.fixture
 async def governance_client(monkeypatch):
     from backend.main import app
+    from backend.dependencies.auth import get_current_user
     from backend.models.database import get_async_db
     from backend.services import template_matcher as template_matcher_module
 
@@ -33,6 +34,20 @@ async def governance_client(monkeypatch):
     async def override_get_async_db():
         async with session_factory() as session:
             yield session
+
+    async def override_current_user():
+        return type(
+            "_AdminUser",
+            (),
+            {
+                "user_id": 1,
+                "username": "admin",
+                "is_active": True,
+                "status": "active",
+                "is_superuser": True,
+                "roles": [],
+            },
+        )()
 
     class FakeTemplateMatcher:
         async def get_template_coverage(self, platform=None):
@@ -53,6 +68,7 @@ async def governance_client(monkeypatch):
     )
 
     app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:
@@ -244,3 +260,63 @@ async def test_data_sync_governance_stats_reports_ready_update_required_and_miss
     assert payload["data"]["ready_to_sync_count"] == 1
     assert payload["data"]["template_update_required_count"] == 1
     assert payload["data"]["missing_template_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_data_sync_governance_stats_excludes_semantic_anomaly_pending_files(governance_client, monkeypatch):
+    client, session_factory = governance_client
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        session.add_all(
+            [
+                CatalogFile(
+                    file_path="data/raw/2026/tiktok_products_monthly_20260517_221824.xlsx",
+                    file_name="tiktok_products_monthly_20260517_221824.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="products",
+                    granularity="monthly",
+                    status="pending",
+                    first_seen_at=now,
+                ),
+                CatalogFile(
+                    file_path="data/raw/2026/tiktok_products_tiktok_monthly_20260407_123005.xlsx",
+                    file_name="tiktok_products_tiktok_monthly_20260407_123005.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="products",
+                    granularity="monthly",
+                    sub_domain="tiktok",
+                    status="pending",
+                    first_seen_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    async def _fake_readiness(self, file_id, use_template_header_row=True):
+        return {
+            "file_id": file_id,
+            "file_name": f"file-{file_id}.xlsx",
+            "template_update_required": False,
+            "update_reason": None,
+            "ready": True,
+            "template_status": "ready",
+            "should_auto_sync": True,
+        }
+
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.DataSyncService.get_file_sync_readiness",
+        _fake_readiness,
+    )
+
+    response = await client.get("/api/data-sync/governance/stats")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["pending_count"] == 1
+    assert payload["data"]["ready_to_sync_count"] == 1
