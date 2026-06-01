@@ -35,14 +35,20 @@ require_env "IMAGE_NAME_BACKEND"
 require_env "IMAGE_NAME_FRONTEND"
 require_env "IMAGE_TAG"
 
-# CNB 全配置：优先仅用 CNB 拉取，不先连 GHCR，避免国内服务器访问 ghcr.io 超时（方案 A）
+# Prefer CNB when fully configured, and only fall back to GHCR if CNB pull fails.
 CNB_FULLY_CONFIGURED=0
 if [ -n "${CNB_REGISTRY:-}" ] && [ -n "${CNB_TOKEN:-}" ] && [ -n "${CNB_IMAGE_NAME_BACKEND:-}" ] && [ -n "${CNB_IMAGE_NAME_FRONTEND:-}" ]; then
   CNB_FULLY_CONFIGURED=1
 fi
 
+REQUESTED_IMAGE_TAG="$(echo "${IMAGE_TAG}" | tr -d '\r\n\t' | xargs)"
+if [ -z "${REQUESTED_IMAGE_TAG}" ]; then
+  echo "[FAIL] IMAGE_TAG is empty after normalization"
+  exit 1
+fi
+
 echo "[INFO] Working directory: $(pwd)"
-echo "[INFO] Requested image tag: ${IMAGE_TAG}"
+echo "[INFO] Requested image tag: ${REQUESTED_IMAGE_TAG}"
 
 if [ -f ".env" ]; then
   echo "[INFO] Loading environment variables from .env ..."
@@ -53,10 +59,16 @@ if [ -f ".env" ]; then
     exit 1
   fi
   set +a
+  if [ "${IMAGE_TAG:-}" != "${REQUESTED_IMAGE_TAG}" ]; then
+    echo "[WARN] .env attempted to override IMAGE_TAG (${IMAGE_TAG:-<empty>}); restoring requested tag ${REQUESTED_IMAGE_TAG}"
+  fi
   echo "[INFO] .env loaded: POSTGRES_USER=${POSTGRES_USER:-erp_user}, POSTGRES_DB=${POSTGRES_DB:-xihong_erp}, REDIS_PASSWORD=${REDIS_PASSWORD:+***set}"
 else
   echo "[WARN] .env not found; using defaults where applicable"
 fi
+
+IMAGE_TAG="${REQUESTED_IMAGE_TAG}"
+export IMAGE_TAG
 
 # Normalize variables that are frequently affected by CRLF/whitespace.
 POSTGRES_USER_VAL="${POSTGRES_USER:-erp_user}"
@@ -66,7 +78,7 @@ POSTGRES_USER_VAL="$(echo "${POSTGRES_USER_VAL}" | tr -d '\r' | tr -d '\n' | xar
 POSTGRES_DB_VAL="$(echo "${POSTGRES_DB_VAL}" | tr -d '\r' | tr -d '\n' | xargs)"
 REDIS_PASSWORD_VAL="$(echo "${REDIS_PASSWORD_VAL}" | tr -d '\r' | tr -d '\n')"
 
-# [方案 A] CNB 全配置时跳过 GHCR 登录，避免国内访问 ghcr.io 超时；仅在回退到 GHCR 拉取时再登录
+# Delay GHCR login until fallback is actually needed.
 if [ "${CNB_FULLY_CONFIGURED}" -eq 1 ]; then
   echo "[INFO] CNB fully configured: skipping GHCR login (will login to GHCR only if CNB pull fails)"
   echo "[INFO] CNB_REGISTRY=${CNB_REGISTRY}, CNB_IMAGE_NAME_BACKEND=${CNB_IMAGE_NAME_BACKEND}, CNB_IMAGE_NAME_FRONTEND=${CNB_IMAGE_NAME_FRONTEND}"
