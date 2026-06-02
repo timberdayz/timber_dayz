@@ -18,6 +18,8 @@ def test_production_mode_exposes_dashboard_but_not_collection(monkeypatch):
     paths = _paths_for(module)
 
     assert "/api/dashboard/business-overview/kpi" in paths
+    assert "/api/reference/shop-directory" in paths
+    assert "/api/shop-accounts" in paths
     assert "/api/collection/configs" not in paths
 
 

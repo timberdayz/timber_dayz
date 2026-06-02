@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const repoRoot = resolve(process.cwd())
+const repoRoot = resolve(process.cwd(), 'frontend')
 const viewSource = readFileSync(resolve(repoRoot, 'src/domains/business/views/BusinessOverview.vue'), 'utf8')
 const apiSource = readFileSync(resolve(repoRoot, 'src/api/index.js'), 'utf8')
 
@@ -14,13 +14,13 @@ test('BusinessOverview exposes KPI granularity controls and forwards granularity
   assert.equal(viewSource.includes('<el-radio-button label="monthly">月</el-radio-button>'), true)
   assert.equal(viewSource.includes('api.getBusinessOverviewKPI({'), true)
   assert.equal(viewSource.includes('granularity: kpiGranularity.value'), true)
-  assert.equal(viewSource.includes('date: kpiDateStr'), true)
+  assert.equal(viewSource.includes('period_key: kpiDateStr'), true)
 })
 
 test('BusinessOverview operational metrics use month semantics in UI and API', () => {
   assert.equal(viewSource.includes('v-model="operationalDate"'), true)
   assert.equal(viewSource.includes('type="month"'), true)
-  assert.equal(viewSource.includes('month: operationalDate.value || undefined'), true)
+  assert.equal(viewSource.includes('period_key: operationalDate.value || undefined'), true)
 })
 
 test('BusinessOverview API helper serializes KPI granularity/date', () => {
@@ -82,9 +82,8 @@ test('BusinessOverview shop racing maps API fields to table fields', () => {
   assert.equal(viewSource.includes('Number(row.achievement_rate) > 1'), true)
 })
 
-test('BusinessOverview shop racing uses account dimension and unmatched alias inspector', () => {
+test('BusinessOverview shop racing keeps account dimension and unmatched shop warning styling', () => {
   assert.equal(viewSource.includes('<el-radio-button label="account">账号</el-radio-button>'), true)
-  assert.equal(viewSource.includes('accountsApi.getUnmatchedShopAliases()'), true)
-  assert.equal(viewSource.includes('showUnmatchedAliasDialog'), true)
+  assert.equal(viewSource.includes('shop-display-cell--unmatched'), true)
   assert.equal(viewSource.includes('未匹配店铺'), true)
 })

@@ -4,7 +4,7 @@ from pathlib import Path
 def test_account_alignment_view_uses_current_alias_workflow():
     text = (
         Path(__file__).resolve().parents[2]
-        / "frontend/src/views/AccountAlignment.vue"
+        / "frontend/src/domains/business/views/AccountAlignment.vue"
     ).read_text(encoding="utf-8")
 
     assert "accountsApi.getUnmatchedShopAliases()" in text
@@ -16,7 +16,7 @@ def test_account_alignment_view_uses_current_alias_workflow():
 def test_account_alignment_view_no_longer_depends_on_legacy_account_alignment_endpoints():
     text = (
         Path(__file__).resolve().parents[2]
-        / "frontend/src/views/AccountAlignment.vue"
+        / "frontend/src/domains/business/views/AccountAlignment.vue"
     ).read_text(encoding="utf-8")
 
     assert "/account-alignment/distinct-raw-stores" not in text
@@ -27,7 +27,7 @@ def test_account_alignment_view_no_longer_depends_on_legacy_account_alignment_en
 def test_account_alignment_view_filters_claim_dropdown_by_active_primary_alias():
     text = (
         Path(__file__).resolve().parents[2]
-        / "frontend/src/views/AccountAlignment.vue"
+        / "frontend/src/domains/business/views/AccountAlignment.vue"
     ).read_text(encoding="utf-8")
 
     assert "occupiedPrimaryShopAccountIds" in text

@@ -11,9 +11,13 @@ test('ExpenseManagement uses shared shop display helpers', () => {
   assert.equal(expenseSource.includes("from '@/utils/shopDisplay'"), true)
   assert.equal(expenseSource.includes('resolveShopDisplay('), true)
   assert.equal(expenseSource.includes('Promise.allSettled(['), true)
+  assert.equal(expenseSource.includes('api.getShopDirectory({ enabled: true })'), true)
+  assert.equal(expenseSource.includes("from '@/api/accounts'"), false)
 })
 
 test('BusinessOverview uses shared shop display helpers', () => {
   assert.equal(overviewSource.includes("from '@/utils/shopDisplay'"), true)
   assert.equal(overviewSource.includes('resolveShopDisplay('), true)
+  assert.equal(overviewSource.includes('api.getShopDirectory({ enabled: true })'), true)
+  assert.equal(overviewSource.includes("from '@/api/accounts'"), false)
 })

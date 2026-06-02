@@ -52,6 +52,8 @@ def test_platform_domain_registration_exposes_platform_routes():
     paths = _paths_for(app)
     assert "/api/users/" in paths
     assert "/api/auth/login" in paths
+    assert "/api/reference/shop-directory" in paths
+    assert "/api/shop-accounts" in paths
 
 
 def test_development_support_registration_exposes_diagnostic_routes():

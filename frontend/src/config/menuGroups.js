@@ -86,8 +86,7 @@ export const menuGroups = [
     items: [
       '/store-management',       // 店铺管理
       '/store-analytics',        // 店铺分析
-      '/account-management',     // 账号管理
-      '/account-alignment'       // 账号对齐
+      '/account-management'      // 账号管理
     ]
   },
   {

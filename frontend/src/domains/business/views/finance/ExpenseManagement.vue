@@ -729,7 +729,6 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Calendar, Shop } from '@element-plus/icons-vue'
 import api from '@/api'
-import accountsApi from '@/api/accounts'
 import PageHeader from '@/components/common/PageHeader.vue'
 import employeeTasksApi from '@/api/employeeTasks.js'
 import { buildShopAccountLookup, resolveShopDisplay } from '@/utils/shopDisplay'
@@ -873,11 +872,16 @@ const tryCompleteTaskFromExpenseRow = async (row, yearMonthOverride = '') => {
 // 加载店铺列表
 const loadShops = async () => {
   try {
-    const [expenseShops, shopAccounts] = await Promise.all([
+    const [expenseShopsResult, shopDirectoryResult] = await Promise.allSettled([
       api.get('/expenses/shops'),
-      accountsApi.listShopAccounts({ enabled: true })
+      api.getShopDirectory({ enabled: true })
     ])
-    shopAccountLookup = buildShopAccountLookup(Array.isArray(shopAccounts) ? shopAccounts : [])
+    if (expenseShopsResult.status !== 'fulfilled') {
+      throw expenseShopsResult.reason
+    }
+    const shopDirectory = shopDirectoryResult.status === 'fulfilled' ? shopDirectoryResult.value : []
+    shopAccountLookup = buildShopAccountLookup(Array.isArray(shopDirectory) ? shopDirectory : [])
+    const expenseShops = expenseShopsResult.value
     const rawShops = Array.isArray(expenseShops)
       ? expenseShops
       : (expenseShops?.data ?? expenseShops ?? [])
