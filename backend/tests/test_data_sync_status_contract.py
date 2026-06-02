@@ -96,6 +96,39 @@ class _TemplateResolverStub:
         }
 
 
+class _TwoPhaseTemplateResolverStub:
+    def __init__(self, template_id, semantic_bindings, deduplication_fields):
+        self.template_id = template_id
+        self.semantic_bindings = semantic_bindings
+        self.deduplication_fields = deduplication_fields
+        self.calls = []
+
+    async def resolve(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            return {
+                "matched": False,
+                "governance_status": "missing_variant",
+                "family": None,
+                "active_version": None,
+                "variant": None,
+                "semantic_bindings": [],
+                "shadow_compare": {"is_consistent": False},
+            }
+        return {
+            "matched": True,
+            "governance_status": "ready",
+            "family": {"id": 15},
+            "active_version": {"id": 8, "deduplication_fields": self.deduplication_fields},
+            "variant": {
+                "id": 3,
+                "source_legacy_template_id": self.template_id,
+            },
+            "semantic_bindings": self.semantic_bindings,
+            "shadow_compare": {"is_consistent": True},
+        }
+
+
 async def _failed_ingest_stub(**_kwargs):
     return {
         "success": False,
@@ -296,3 +329,118 @@ async def test_sync_single_file_prefers_resolver_selected_legacy_template(monkey
 
     assert result["success"] is True
     assert captured["template_id"] == 888
+
+
+@pytest.mark.asyncio
+async def test_sync_single_file_re_resolves_after_preview_and_uses_semantic_payload(
+    monkeypatch,
+    tmp_path,
+):
+    file_path = tmp_path / "orders.xlsx"
+    file_path.write_bytes(b"test")
+
+    file_record = SimpleNamespace(
+        id=2394,
+        file_path=str(file_path),
+        file_name="orders.xlsx",
+        status="pending",
+        error_message=None,
+        file_metadata=None,
+        data_domain="orders",
+        platform_code="shopee",
+        source_platform="shopee",
+        shop_id="shop-1",
+        granularity="daily",
+        sub_domain=None,
+        last_processed_at=None,
+    )
+    fake_db = _FakeDb(file_record)
+    service = DataSyncService(fake_db)
+
+    matcher_template = SimpleNamespace(
+        id=777,
+        template_name="matcher_template",
+        header_row=0,
+        header_columns=["订单号", "金额"],
+        header_bindings=[{"raw_name": "订单号", "semantic_key": "order_id"}],
+        deduplication_fields=["订单号"],
+        sub_domain=None,
+    )
+    resolver_template = SimpleNamespace(
+        id=889,
+        template_name="resolver_template",
+        header_row=0,
+        header_columns=["订单编号", "金额"],
+        header_bindings=[{"raw_name": "订单编号", "semantic_key": "order_id"}],
+        deduplication_fields=["order_id"],
+        sub_domain=None,
+    )
+    resolver_bindings = [
+        {
+            "raw_name": "订单编号",
+            "display_name": "订单编号",
+            "semantic_key": "order_id",
+            "required": True,
+            "hash_participates": True,
+        }
+    ]
+    resolver = _TwoPhaseTemplateResolverStub(
+        889,
+        resolver_bindings,
+        ["order_id"],
+    )
+
+    async def _fake_db_get(model, value):
+        assert value == 889
+        return resolver_template
+
+    captured = {}
+
+    async def _capture_ingest(**kwargs):
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "message": "入库成功",
+            "status": "success",
+            "imported": 1,
+            "quarantined": 0,
+            "import_stats": {"inserted": 0, "updated": 1, "skipped": 0},
+        }
+
+    matcher = _TemplateMatcherStub()
+
+    async def _matcher_find_best_template(**_kwargs):
+        return matcher_template
+
+    matcher.find_best_template = _matcher_find_best_template
+
+    monkeypatch.setattr(service, "_safe_resolve_path", lambda _path: str(file_path))
+    monkeypatch.setattr(service, "template_matcher", matcher)
+    monkeypatch.setattr(service, "template_status_service", _TemplateStatusServiceStub())
+    monkeypatch.setattr(service, "template_resolver", resolver)
+    monkeypatch.setattr(service.db, "get", _fake_db_get, raising=False)
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.get_executor_manager",
+        lambda: _ExecutorManagerStub(),
+    )
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.ExcelParser.read_excel",
+        lambda *_args, **_kwargs: pd.DataFrame([{"订单编号": "A001", "金额": "10"}]),
+    )
+    monkeypatch.setattr(service.ingestion_service, "ingest_data", _capture_ingest)
+
+    result = await service.sync_single_file(
+        file_id=2394,
+        only_with_template=True,
+        allow_quarantine=True,
+        task_id="single_file_2394_contract",
+        use_template_header_row=True,
+    )
+
+    assert result["success"] is True
+    assert captured["template_id"] == 889
+    assert captured["deduplication_fields"] == ["order_id"]
+    assert captured["header_bindings"] == resolver_bindings
+    assert len(resolver.calls) == 2
+    assert resolver.calls[1]["header_columns"] == ["订单编号", "金额"]
+    assert resolver.calls[1]["sample_rows"] == [{"订单编号": "A001", "金额": "10"}]

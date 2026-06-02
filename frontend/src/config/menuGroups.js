@@ -43,8 +43,6 @@ export const menuGroups = [
       '/data-sync/templates',    // 数据同步 - 模板管理
       '/data-sync/refresh-queue', // 数据同步 - 刷新队列
       '/data-quarantine',        // 数据隔离区
-      // ⚠️ v4.12.0移除：数据浏览器功能已移除
-      // '/data-browser',           // 数据浏览器
       '/data-consistency'        // v4.11.5: 数据一致性验证
     ]
   },
@@ -275,8 +273,6 @@ export const routeDisplayNames = {
   '/inventory/grns': '入库单管理',
   '/inventory/alerts': '库存预警',
   '/inventory/reconciliation': '库存对账',
-  // ⚠️ v4.12.0移除：数据浏览器功能已移除
-  // '/data-browser': '数据浏览器',
   '/financial-management': '财务结算中心',
   '/my-follow-investment-income': '我的跟投收益',
   // ⭐ v4.6.0新增：数据同步路由显示名称

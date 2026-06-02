@@ -432,7 +432,7 @@ v4.6.0新增：独立的数据同步系统
               size="small"
               @click="syncSingle(row.id)"
               :loading="syncingFiles.includes(row.id)"
-              :disabled="row.status === 'ingested'"
+              :disabled="row.status === 'ingested' || !isRowSyncable(row)"
             >
               <el-icon><Upload /></el-icon>
               同步
@@ -1109,6 +1109,21 @@ const handleSelectionChange = (selection) => {
 const clearSelectedFiles = () => {
   selectedFiles.value = []
   filesTableRef.value?.clearSelection?.()
+}
+
+const isRowSyncable = (row) => {
+  const templateStatus = row?.template_status
+  const governanceStatus = row?.governance_status
+
+  if (!row?.has_template) return false
+  if (row?.status === 'ingested') return false
+  if (templateStatus === 'update_required' || templateStatus === 'parse_failed' || templateStatus === 'file_missing') {
+    return false
+  }
+  if (governanceStatus === 'missing_variant' || governanceStatus === 'missing_family' || governanceStatus === 'breaking_drift') {
+    return false
+  }
+  return true
 }
 
 // 查看详情

@@ -11,6 +11,11 @@
 
 import { ref } from 'vue'
 import notificationsApi from '@/api/notifications'
+import { useAuthStore } from '@/stores/auth'
+import {
+  buildNotificationWebSocketUrl,
+  isNotificationWebSocketRetryableCloseCode,
+} from './notificationWebSocket.helpers.js'
 
 // 连接状态：'disconnected' | 'connecting' | 'connected' | 'error'
 const connectionStatus = ref('disconnected')
@@ -21,6 +26,7 @@ const recentNotifications = ref([]) // NotificationMessage[]
 
 let ws = null
 let reconnectAttempts = 0
+let reconnectTimer = null
 const MAX_RECONNECT_ATTEMPTS = 10
 const MAX_RECONNECT_DELAY = 30000 // 30s
 
@@ -32,14 +38,31 @@ const listeners = new Set()
 
 const isWebSocketSupported = typeof window !== 'undefined' && 'WebSocket' in window
 
+export { buildNotificationWebSocketUrl, isNotificationWebSocketRetryableCloseCode }
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+}
+
+function getAccessToken() {
+  try {
+    const authStore = useAuthStore()
+    return authStore.token || ''
+  } catch (_error) {
+    return ''
+  }
+}
+
 function getWebSocketUrl() {
   if (typeof window === 'undefined') return null
-
-  const loc = window.location
-  const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = loc.host
-
-  return `${protocol}//${host}/api/notifications/ws`
+  return buildNotificationWebSocketUrl({
+    protocol: window.location.protocol,
+    host: window.location.host,
+    accessToken: getAccessToken(),
+  })
 }
 
 function stopFallbackPolling() {
@@ -121,7 +144,9 @@ function scheduleReconnect() {
   reconnectAttempts += 1
   const delay = Math.min(1000 * 2 ** (reconnectAttempts - 1), MAX_RECONNECT_DELAY)
   console.info(`[NotificationWS] Schedule reconnect in ${delay}ms (attempt ${reconnectAttempts})`)
-  setTimeout(() => {
+  clearReconnectTimer()
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
     connect()
   }, delay)
 }
@@ -141,7 +166,7 @@ function connect() {
   const url = getWebSocketUrl()
   if (!url) {
     // 未登录或没有 token，使用轮询（如果有必要）
-    console.info('[NotificationWS] No token, skip WebSocket connection')
+    console.info('[NotificationWS] No WebSocket URL, skip WebSocket connection')
     connectionStatus.value = 'disconnected'
     stopFallbackPolling()
     return
@@ -149,12 +174,14 @@ function connect() {
 
   try {
     connectionStatus.value = 'connecting'
+    clearReconnectTimer()
     ws = new WebSocket(url)
 
     ws.onopen = () => {
       console.info('[NotificationWS] WebSocket connected')
       connectionStatus.value = 'connected'
       reconnectAttempts = 0
+      clearReconnectTimer()
       stopFallbackPolling()
       // 连接成功后，同步一次未读数量，确保前后端一致
       void fallbackFetchUnreadCountOnce()
@@ -204,7 +231,7 @@ function connect() {
 
       // 根据 close code 判断是否需要重连
       // 4005: token 过期 / 无效，4006/4007/4008: 限制/安全问题，直接降级为轮询
-      if ([4005, 4006, 4007, 4008].includes(event.code)) {
+      if (!isNotificationWebSocketRetryableCloseCode(event.code)) {
         connectionStatus.value = 'error'
         startFallbackPolling()
         return
@@ -228,6 +255,7 @@ function connect() {
 }
 
 function disconnect() {
+  clearReconnectTimer()
   if (ws) {
     try {
       ws.close(1000, 'Client disconnect')

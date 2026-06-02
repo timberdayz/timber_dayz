@@ -34,6 +34,7 @@
         :preview-data="previewData"
         :header-columns="headerColumns"
         :header-columns-with-samples="headerColumnsWithSamples"
+        :header-bindings="headerBindings"
         :loading-preview="loadingPreview"
         :saving-template="savingTemplate"
         :deduplication-fields="deduplicationFields"
@@ -46,6 +47,7 @@
         @save-template="$emit('save-template')"
         @deduplication-fields-change="$emit('deduplication-fields-change', $event)"
         @field-parse-rules-change="$emit('field-parse-rules-change', $event)"
+        @header-bindings-change="$emit('header-bindings-change', $event)"
         @validation-change="$emit('validation-change', $event)"
         @update:selectedFileId="$emit('update:selectedFileId', $event)"
         @update:headerRow="$emit('update:headerRow', $event)"
@@ -71,6 +73,7 @@ defineProps({
   previewData: { type: Array, default: () => [] },
   headerColumns: { type: Array, default: () => [] },
   headerColumnsWithSamples: { type: Array, default: () => [] },
+  headerBindings: { type: Array, default: () => [] },
   loadingPreview: { type: Boolean, default: false },
   savingTemplate: { type: Boolean, default: false },
   deduplicationFields: { type: Array, default: () => [] },
@@ -87,6 +90,7 @@ const emit = defineEmits([
   'save-template',
   'deduplication-fields-change',
   'field-parse-rules-change',
+  'header-bindings-change',
   'validation-change',
   'update:selectedFileId',
   'update:headerRow',

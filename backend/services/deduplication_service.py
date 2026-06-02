@@ -26,7 +26,12 @@ import pandas as pd
 
 from modules.core.db import CatalogFile
 from modules.core.logger import get_logger
-
+from backend.services.semantic_field_registry import (
+    get_semantic_requirements,
+    is_canonical_semantic_key,
+    normalize_semantic_key,
+    resolve_semantic_value,
+)
 logger = get_logger(__name__)
 
 
@@ -107,7 +112,8 @@ class DeduplicationService:
         self,
         row: Dict[str, Any],
         exclude_fields: Optional[List[str]] = None,
-        deduplication_fields: Optional[List[str]] = None
+        deduplication_fields: Optional[List[str]] = None,
+        header_bindings: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """
         计算单行数据的哈希值
@@ -128,7 +134,18 @@ class DeduplicationService:
             # 只使用核心字段
             business_data = {}
             missing_fields = []
+            missing_required_fields = []
             for field in deduplication_fields:
+                semantic_key = normalize_semantic_key(field) if is_canonical_semantic_key(field) else None
+                if semantic_key:
+                    semantic_value, matched_key = resolve_semantic_value(
+                        row,
+                        semantic_key,
+                        header_bindings=header_bindings,
+                    )
+                    if semantic_value is not None:
+                        business_data[semantic_key] = semantic_value
+                        continue
                 # 支持中英文字段名匹配(模糊匹配)
                 matched = False
                 matched_key = None
@@ -149,6 +166,8 @@ class DeduplicationService:
                 # 如果未找到匹配字段,记录警告(但不影响计算)
                 if not matched:
                     missing_fields.append(field)
+                    if semantic_key and get_semantic_requirements(semantic_key).get("required"):
+                        missing_required_fields.append(field)
                     logger.debug(
                         f"[Dedup] 核心字段 {field} 在数据行中未找到,跳过(可用字段: {list(row.keys())[:5]}...)"
                     )
@@ -159,9 +178,14 @@ class DeduplicationService:
                     f"[Dedup] [WARN] 所有核心字段都未找到: {deduplication_fields},"
                     f"将使用空字典计算hash(可能导致所有行产生相同的hash)"
                 )
-            elif missing_fields:
+            elif missing_required_fields:
                 logger.info(
-                    f"[Dedup] 部分核心字段未找到: {missing_fields},"
+                    f"[Dedup] 部分核心字段未找到: {missing_required_fields},"
+                    f"已找到的字段: {list(business_data.keys())}"
+                )
+            elif missing_fields:
+                logger.debug(
+                    f"[Dedup] 可选核心字段未找到: {missing_fields},"
                     f"已找到的字段: {list(business_data.keys())}"
                 )
         else:
@@ -199,7 +223,8 @@ class DeduplicationService:
         self,
         rows: List[Dict[str, Any]],
         exclude_fields: Optional[List[str]] = None,
-        deduplication_fields: Optional[List[str]] = None
+        deduplication_fields: Optional[List[str]] = None,
+        header_bindings: Optional[List[Dict[str, Any]]] = None,
     ) -> List[str]:
         """
         批量计算数据哈希(使用pandas向量化)
@@ -224,7 +249,7 @@ class DeduplicationService:
             # 重置日志计数器
             self._hash_log_count = 0
             hashes = [
-                self.calculate_data_hash(row, exclude_fields, deduplication_fields)
+                self.calculate_data_hash(row, exclude_fields, deduplication_fields, header_bindings)
                 for row in rows
             ]
             # 验证hash唯一性(前10行)
@@ -263,7 +288,7 @@ class DeduplicationService:
             logger.error(f"[Dedup] 批量计算哈希失败,回退到逐行计算: {e}")
             # 回退到逐行计算
             return [
-                self.calculate_data_hash(row, exclude_fields, deduplication_fields)
+                self.calculate_data_hash(row, exclude_fields, deduplication_fields, header_bindings)
                 for row in rows
             ]
     
@@ -480,4 +505,3 @@ def get_deduplication_service(db: AsyncSession) -> DeduplicationService:
     [*] v4.19.0更新:移除同步/异步双模式支持,统一为异步架构
     """
     return DeduplicationService(db)
-

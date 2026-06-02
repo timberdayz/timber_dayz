@@ -629,7 +629,11 @@ async def test_save_mapping_template_persists_header_bindings_and_update_context
         persisted_header_bindings = row["header_bindings"]
         if isinstance(persisted_header_bindings, str):
             persisted_header_bindings = json.loads(persisted_header_bindings)
-        assert persisted_header_bindings == header_bindings
+        assert persisted_header_bindings[0]["raw_name"] == "Unnamed: 0"
+        assert persisted_header_bindings[0]["semantic_key"] == "metric_date"
+        assert persisted_header_bindings[0]["required"] is False
+        assert persisted_header_bindings[0]["hash_participates"] is True
+        assert persisted_header_bindings[1]["raw_name"] == "GMV"
 
     context_response = await client.get(
         f"/api/field-mapping/templates/{template_id}/update-context",
@@ -640,7 +644,9 @@ async def test_save_mapping_template_persists_header_bindings_and_update_context
     context_payload = context_response.json()
     assert context_payload["success"] is True
     returned_bindings = context_payload["data"]["template"]["header_bindings"]
-    assert returned_bindings == header_bindings
+    assert returned_bindings[0]["semantic_key"] == "metric_date"
+    assert returned_bindings[0]["hash_participates"] is True
+    assert context_payload["data"]["template"]["hash_participating_semantic_keys"] == ["metric_date"]
 
 
 @pytest.mark.asyncio

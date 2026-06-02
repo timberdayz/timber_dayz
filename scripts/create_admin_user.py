@@ -8,6 +8,7 @@
 
 import sys
 import asyncio
+import json
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
@@ -20,6 +21,7 @@ from sqlalchemy.orm import selectinload
 from backend.models.database import AsyncSessionLocal
 from modules.core.db import DimUser, DimRole
 from backend.services.auth_service import auth_service
+from backend.services.system_role_service import DEFAULT_SYSTEM_ROLES
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,6 +34,7 @@ async def create_admin_user(
     full_name="系统管理员"
 ):
     """创建管理员用户"""
+    admin_permissions = json.dumps(DEFAULT_SYSTEM_ROLES["admin"]["permissions"], ensure_ascii=False)
     async with AsyncSessionLocal() as db:
         try:
             # 检查用户是否已存在
@@ -66,7 +69,8 @@ async def create_admin_user(
                         role_code="admin",
                         role_name="管理员",
                         description="系统管理员",
-                        permissions="[]",
+                        permissions=admin_permissions,
+                        data_scope=DEFAULT_SYSTEM_ROLES["admin"]["data_scope"],
                         is_active=True,
                         is_system=True
                     )
@@ -134,7 +138,8 @@ async def create_admin_user(
                         role_code="admin",
                         role_name="管理员",
                         description="系统管理员",
-                        permissions="[]",
+                        permissions=admin_permissions,
+                        data_scope=DEFAULT_SYSTEM_ROLES["admin"]["data_scope"],
                         is_active=True,
                         is_system=True
                     )

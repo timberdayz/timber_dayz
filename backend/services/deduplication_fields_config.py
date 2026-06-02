@@ -12,8 +12,9 @@ v4.14.0新增:
 - 支持模板配置覆盖默认配置
 """
 
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from modules.core.logger import get_logger
+from backend.services.semantic_field_registry import is_canonical_semantic_key, normalize_semantic_key
 
 logger = get_logger(__name__)
 
@@ -132,7 +133,8 @@ def get_default_deduplication_fields(
 def get_deduplication_fields(
     data_domain: str,
     template_fields: Optional[List[str]] = None,
-    sub_domain: Optional[str] = None
+    sub_domain: Optional[str] = None,
+    header_bindings: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """
     获取核心字段(优先级:模板配置 > 默认配置 > 所有字段)
@@ -147,11 +149,20 @@ def get_deduplication_fields(
     """
     # 1. 优先使用模板配置
     if template_fields:
-        merged_fields = _append_required_identity_fields(
-            template_fields,
-            data_domain=data_domain,
-            sub_domain=sub_domain,
-        )
+        normalized_template_fields: List[str] = []
+        for field in template_fields:
+            if is_canonical_semantic_key(field):
+                normalized_template_fields.append(normalize_semantic_key(field) or str(field).strip())
+            else:
+                normalized_template_fields.append(str(field).strip())
+        if data_domain == "services":
+            merged_fields = _append_required_identity_fields(
+                normalized_template_fields,
+                data_domain=data_domain,
+                sub_domain=sub_domain,
+            )
+        else:
+            merged_fields = normalized_template_fields
         logger.debug(
             f"[DedupFields] 使用模板配置的核心字段: {merged_fields}"
         )

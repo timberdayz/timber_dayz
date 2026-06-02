@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict
 from typing import Any, Dict, Iterable, Optional
@@ -7,6 +8,7 @@ from typing import Any, Dict, Iterable, Optional
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.semantic_field_registry import is_canonical_semantic_key, normalize_semantic_key
 from modules.core.db import (
     CatalogFile,
     FieldMappingTemplate,
@@ -19,10 +21,43 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _extract_semantic_key_sets(
+    deduplication_fields: list[str] | None,
+    header_bindings: list[dict[str, Any]] | None,
+) -> tuple[list[str], list[str]]:
+    required_keys: list[str] = []
+    hash_keys: list[str] = []
+    seen_required: set[str] = set()
+    seen_hash: set[str] = set()
+
+    for field in deduplication_fields or []:
+        semantic_key = normalize_semantic_key(field)
+        if semantic_key and is_canonical_semantic_key(semantic_key) and semantic_key not in seen_hash:
+            seen_hash.add(semantic_key)
+            hash_keys.append(semantic_key)
+
+    for binding in header_bindings or []:
+        semantic_key = normalize_semantic_key(
+            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+        )
+        if not semantic_key:
+            continue
+        if binding.get("required") and semantic_key not in seen_required:
+            seen_required.add(semantic_key)
+            required_keys.append(semantic_key)
+        if binding.get("hash_participates") and semantic_key not in seen_hash:
+            seen_hash.add(semantic_key)
+            hash_keys.append(semantic_key)
+
+    return required_keys, hash_keys
+
+
 def _normalize_dimension(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     text = str(value).strip()
+    if text.lower() in {"n/a", "na", "none", "null"}:
+        return None
     return text or None
 
 
@@ -59,8 +94,45 @@ def infer_variant_key_from_legacy_template(template: FieldMappingTemplate) -> st
 
     header_row = getattr(template, "header_row", None)
     if header_row not in (None, 0):
-        return f"{template.granularity or 'generic'}_header_{header_row}"
+        signature = _header_signature(template.header_columns or [])
+        return f"{template.granularity or 'generic'}_header_{header_row}_{signature}"
     return f"{template.granularity or 'generic'}_default"
+
+
+def _header_signature(columns: Iterable[str]) -> str:
+    normalized = [str(column).strip().lower() for column in columns if str(column).strip()]
+    joined = "|".join(normalized)
+    if not joined:
+        return "empty"
+    return hashlib.md5(joined.encode("utf-8")).hexdigest()[:8]
+
+
+def build_projection_variant_key(
+    template: FieldMappingTemplate,
+    *,
+    existing_keys: set[str],
+) -> str:
+    variant_key = infer_variant_key_from_legacy_template(template)
+    if variant_key not in existing_keys:
+        return variant_key
+    template_id = getattr(template, "id", None)
+    if template_id is not None:
+        return f"{variant_key}_{template_id}"
+    return f"{variant_key}_{_header_signature(template.header_columns or [])}"
+
+
+def build_projection_variant_key(
+    template: FieldMappingTemplate,
+    *,
+    existing_keys: set[str],
+) -> str:
+    variant_key = infer_variant_key_from_legacy_template(template)
+    if variant_key not in existing_keys:
+        return variant_key
+    template_id = getattr(template, "id", None)
+    if template_id is not None:
+        return f"{variant_key}_{template_id}"
+    return f"{variant_key}_{abs(hash(template.template_name or 'variant')) % 100000}"
 
 
 def _build_parse_profile(template: FieldMappingTemplate) -> dict[str, Any]:
@@ -123,6 +195,30 @@ def _variant_matches_sample_rows(
 class TemplateFamilyService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _family_dimension_key(
+        family: FieldMappingTemplateFamily,
+    ) -> tuple[str, str, Optional[str], Optional[str], Optional[str]]:
+        return _dimension_key(
+            family.platform,
+            family.data_domain,
+            family.sub_domain,
+            family.granularity,
+            family.account,
+        )
+
+    @staticmethod
+    def _prefer_family_record(
+        families: list[FieldMappingTemplateFamily],
+    ) -> FieldMappingTemplateFamily:
+        return sorted(
+            families,
+            key=lambda item: (
+                item.active_version_id is None,
+                -(item.id or 0),
+            ),
+        )[0]
 
     async def project_legacy_templates(
         self,
@@ -211,10 +307,23 @@ class TemplateFamilyService:
             variant.variant_key: variant for variant in existing_variants_result.scalars().all()
         }
 
-        for index, template in enumerate(
-            sorted(group, key=lambda item: (item.version or 0, item.id or 0), reverse=True)
-        ):
-            variant_key = infer_variant_key_from_legacy_template(template)
+        sorted_group = sorted(group, key=lambda item: (item.version or 0, item.id or 0), reverse=True)
+        desired_variant_keys: set[str] = set()
+        desired_variants: list[tuple[str, int, FieldMappingTemplate]] = []
+        for index, template in enumerate(sorted_group):
+            variant_key = build_projection_variant_key(
+                template,
+                existing_keys=desired_variant_keys,
+            )
+            desired_variant_keys.add(variant_key)
+            desired_variants.append((variant_key, index, template))
+
+        for variant_key, variant in list(existing_variants.items()):
+            if variant_key not in desired_variant_keys:
+                await self.db.delete(variant)
+                existing_variants.pop(variant_key, None)
+
+        for variant_key, index, template in desired_variants:
             variant = existing_variants.get(variant_key)
             if variant is None:
                 variant = FieldMappingTemplateVariant(
@@ -251,7 +360,16 @@ class TemplateFamilyService:
                 )
             )
         )
-        return result.scalar_one_or_none()
+        families = list(result.scalars().all())
+        if not families:
+            return None
+        if len(families) > 1:
+            logger.warning(
+                "[TemplateFamily] duplicate family rows detected for key=%s count=%s",
+                key,
+                len(families),
+            )
+        return self._prefer_family_record(families)
 
     async def _get_active_version(self, family_id: int) -> Optional[FieldMappingTemplateVersion]:
         result = await self.db.execute(
@@ -262,7 +380,20 @@ class TemplateFamilyService:
                 )
             )
         )
-        return result.scalar_one_or_none()
+        versions = list(result.scalars().all())
+        if not versions:
+            return None
+        if len(versions) > 1:
+            logger.warning(
+                "[TemplateFamily] multiple active versions detected for family_id=%s count=%s",
+                family_id,
+                len(versions),
+            )
+        return sorted(
+            versions,
+            key=lambda item: (item.version_no or 0, item.id or 0),
+            reverse=True,
+        )[0]
 
     async def ensure_projected_family(
         self,
@@ -295,7 +426,17 @@ class TemplateFamilyService:
         if data_domain:
             stmt = stmt.where(FieldMappingTemplateFamily.data_domain == data_domain)
         result = await self.db.execute(stmt)
-        families = list(result.scalars().all())
+        raw_families = list(result.scalars().all())
+        grouped_families: dict[
+            tuple[str, str, Optional[str], Optional[str], Optional[str]],
+            list[FieldMappingTemplateFamily],
+        ] = defaultdict(list)
+        for family in raw_families:
+            grouped_families[self._family_dimension_key(family)].append(family)
+        families = [
+            self._prefer_family_record(items)
+            for items in grouped_families.values()
+        ]
         payload: list[dict[str, Any]] = []
         for family in families:
             version = await self._get_active_version(family.id)
@@ -318,6 +459,30 @@ class TemplateFamilyService:
                 )
             )
             file_count = int(file_count_result.scalar() or 0)
+            current_file_count_result = await self.db.execute(
+                select(func.count(CatalogFile.id)).where(
+                    and_(
+                        CatalogFile.platform_code == family.platform,
+                        CatalogFile.data_domain == family.data_domain,
+                        CatalogFile.sub_domain == family.sub_domain,
+                        CatalogFile.granularity == family.granularity,
+                        CatalogFile.status.in_(["pending", "failed"]),
+                    )
+                )
+            )
+            current_file_count = int(current_file_count_result.scalar() or 0)
+            pending_file_count_result = await self.db.execute(
+                select(func.count(CatalogFile.id)).where(
+                    and_(
+                        CatalogFile.platform_code == family.platform,
+                        CatalogFile.data_domain == family.data_domain,
+                        CatalogFile.sub_domain == family.sub_domain,
+                        CatalogFile.granularity == family.granularity,
+                        CatalogFile.status == "pending",
+                    )
+                )
+            )
+            pending_file_count = int(pending_file_count_result.scalar() or 0)
             sample_file_result = await self.db.execute(
                 select(CatalogFile).where(
                     and_(
@@ -341,8 +506,12 @@ class TemplateFamilyService:
                     "sub_domain": family.sub_domain,
                     "display_name": family.display_name,
                     "governance_status": family.governance_status or "ready",
+                    "display_governance_status": family.governance_status or "ready",
                     "variant_count": len(variants),
-                    "file_count": file_count,
+                    "file_count": current_file_count or pending_file_count or file_count,
+                    "current_file_count": current_file_count,
+                    "pending_file_count": pending_file_count,
+                    "historical_file_count": file_count,
                     "active_template_id": (
                         primary_variant.source_legacy_template_id
                         if primary_variant and primary_variant.source_legacy_template_id
@@ -386,6 +555,10 @@ class TemplateFamilyService:
                 )
             )
             variants = list(variants_result.scalars().all())
+            required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
+                list(version.deduplication_fields or []),
+                list(version.header_bindings or []),
+            )
             payload.append(
                 {
                     "id": version.id,
@@ -394,6 +567,8 @@ class TemplateFamilyService:
                     "status": version.status,
                     "template_name": version.template_name,
                     "deduplication_fields": list(version.deduplication_fields or []),
+                    "required_semantic_keys": required_semantic_keys,
+                    "hash_participating_semantic_keys": hash_participating_semantic_keys,
                     "header_bindings": list(version.header_bindings or []),
                     "notes": version.notes,
                     "variant_count": len(variants),
@@ -489,6 +664,9 @@ class TemplateResolver:
                 "family": None,
                 "active_version": None,
                 "variant": None,
+                "semantic_bindings": [],
+                "required_semantic_keys": [],
+                "hash_participating_semantic_keys": [],
                 "shadow_compare": await self._legacy_shadow_compare(
                     platform=platform,
                     data_domain=data_domain,
@@ -509,6 +687,9 @@ class TemplateResolver:
                 "family": family_payload,
                 "active_version": None,
                 "variant": None,
+                "semantic_bindings": [],
+                "required_semantic_keys": [],
+                "hash_participating_semantic_keys": [],
                 "shadow_compare": await self._legacy_shadow_compare(
                     platform=platform,
                     data_domain=data_domain,
@@ -538,12 +719,20 @@ class TemplateResolver:
             sample_rows=sample_rows or [],
             selected_variant=selected_variant,
         )
+        semantic_bindings = list(active_version.get("header_bindings") or [])
+        required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
+            list(active_version.get("deduplication_fields") or []),
+            semantic_bindings,
+        )
         return {
             "matched": selected_variant is not None,
             "governance_status": governance_status,
             "family": family_payload,
             "active_version": active_version,
             "variant": selected_variant,
+            "semantic_bindings": semantic_bindings,
+            "required_semantic_keys": required_semantic_keys,
+            "hash_participating_semantic_keys": hash_participating_semantic_keys,
             "shadow_compare": shadow_compare,
         }
 

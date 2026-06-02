@@ -246,7 +246,7 @@ async def list_inventory_opening_balances(
         platform_sku=platform_sku,
         limit=limit,
     )
-    return [InventoryOpeningBalanceResponse.model_validate(item) for item in records]
+    return records
 
 
 @router.post(

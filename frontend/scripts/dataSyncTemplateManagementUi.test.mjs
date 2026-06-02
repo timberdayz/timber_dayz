@@ -93,6 +93,11 @@ assert.match(governancePanelText, /el-tabs|covered|missing|needs_update/, 'gover
 assert.match(governancePanelText, /update-template|create-missing/, 'governance panel should emit row actions')
 assert.match(needsUpdateTableText, /el-table|sample_file_name|update_reason/, 'needs-update table should render the actual update queue')
 assert.match(needsUpdateTableText, /update-template/, 'needs-update table should emit update actions')
+assert.match(
+  needsUpdateTableText,
+  /isActionDisabled|sample_file_id|family_id|等待样本|上下文缺失/,
+  'needs-update table should guard variant/update actions when required context is missing'
+)
 assert.match(createWorkbenchDrawerText, /TemplateBuilderWorkspace/, 'create workbench should embed the shared builder workspace')
 assert.match(createWorkbenchDrawerText, /model-value|visible/, 'create workbench should expose drawer visibility state')
 assert.match(variantWorkbenchDrawerText, /TemplateBuilderWorkspace/, 'variant create workbench should embed the shared builder workspace')

@@ -75,7 +75,7 @@ async def test_template_recognized_columns_are_passed_through_to_raw_importer(mo
         def __init__(self, _db):
             pass
 
-        def batch_calculate_data_hash(self, rows, deduplication_fields=None):
+        def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None):
             return [f"hash-{index}" for index, _ in enumerate(rows)]
 
     captured = {}
@@ -182,7 +182,7 @@ async def test_ingest_data_passes_file_date_range_to_raw_importer(monkeypatch, t
         def __init__(self, _db):
             pass
 
-        def batch_calculate_data_hash(self, rows, deduplication_fields=None):
+        def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None):
             return [f"hash-{index}" for index, _ in enumerate(rows)]
 
     captured = {}

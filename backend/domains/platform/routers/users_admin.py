@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -149,6 +149,8 @@ async def create_user(
 async def get_users(
     page: int = 1,
     page_size: int = 20,
+    keyword: Optional[str] = None,
+    active_only: bool = False,
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -157,15 +159,28 @@ async def get_users(
 
     offset = (page - 1) * page_size
 
+    conditions = [DimUser.status != "deleted"]
+    if active_only:
+        conditions.extend([DimUser.status == "active", DimUser.is_active.is_(True)])
+    if keyword and keyword.strip():
+        pattern = f"%{keyword.strip()}%"
+        conditions.append(
+            or_(
+                DimUser.username.ilike(pattern),
+                DimUser.email.ilike(pattern),
+                DimUser.full_name.ilike(pattern),
+            )
+        )
+
     count_result = await db.execute(
-        select(func.count(DimUser.user_id)).where(DimUser.status != "deleted")
+        select(func.count(DimUser.user_id)).where(and_(*conditions))
     )
     total = count_result.scalar() or 0
 
     result = await db.execute(
         select(DimUser)
         .options(selectinload(DimUser.roles))
-        .where(DimUser.status != "deleted")
+        .where(and_(*conditions))
         .offset(offset)
         .limit(page_size)
         .order_by(DimUser.created_at.desc())

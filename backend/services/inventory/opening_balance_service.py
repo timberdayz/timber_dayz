@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas.inventory import (
@@ -24,7 +25,7 @@ class InventoryOpeningBalanceService:
         shop_id: Optional[str] = None,
         platform_sku: Optional[str] = None,
         limit: int = 200,
-    ) -> list[OpeningBalance]:
+    ) -> list[InventoryOpeningBalanceResponse]:
         stmt = select(OpeningBalance).order_by(
             OpeningBalance.period.desc(),
             OpeningBalance.platform_code.asc(),
@@ -40,7 +41,53 @@ class InventoryOpeningBalanceService:
         if platform_sku:
             stmt = stmt.where(OpeningBalance.platform_sku == platform_sku)
         stmt = stmt.limit(limit)
-        return (await self.db.execute(stmt)).scalars().all()
+        try:
+            rows = (await self.db.execute(stmt)).scalars().all()
+            return [InventoryOpeningBalanceResponse.model_validate(row) for row in rows]
+        except ProgrammingError as exc:
+            if "opening_balances.received_date does not exist" not in str(exc):
+                raise
+
+            fallback_stmt = text(
+                """
+                SELECT
+                    balance_id,
+                    period,
+                    platform_code,
+                    shop_id,
+                    platform_sku,
+                    NULL AS received_date,
+                    opening_age_days,
+                    opening_qty,
+                    opening_cost,
+                    opening_value,
+                    source,
+                    migration_batch_id,
+                    created_by,
+                    created_at
+                FROM finance.opening_balances
+                WHERE (:period IS NULL OR period = :period)
+                  AND (:platform IS NULL OR platform_code = :platform)
+                  AND (:shop_id IS NULL OR shop_id = :shop_id)
+                  AND (:platform_sku IS NULL OR platform_sku = :platform_sku)
+                ORDER BY period DESC, platform_code ASC, shop_id ASC, platform_sku ASC
+                LIMIT :limit
+                """
+            )
+            result = await self.db.execute(
+                fallback_stmt,
+                {
+                    "period": period,
+                    "platform": platform,
+                    "shop_id": shop_id,
+                    "platform_sku": platform_sku,
+                    "limit": limit,
+                },
+            )
+            return [
+                InventoryOpeningBalanceResponse.model_validate(row)
+                for row in result.mappings().all()
+            ]
 
     async def create_opening_balance(
         self,

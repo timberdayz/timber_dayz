@@ -138,6 +138,9 @@ async def test_template_family_endpoints_group_legacy_templates_into_variants(
     assert family["variant_count"] == 2
     assert family["active_version"]["version_no"] == 3
     assert family["governance_status"] == "ready"
+    assert family["current_file_count"] == 1
+    assert family["pending_file_count"] == 1
+    assert family["historical_file_count"] == 1
 
     version_response = await client.get(
         f"/api/field-mapping/template-families/{family['id']}/versions"
@@ -249,3 +252,126 @@ async def test_template_resolve_endpoint_matches_variant_and_reports_shadow_comp
     assert payload["data"]["active_version"]["version_no"] == 3
     assert payload["data"]["shadow_compare"]["legacy_template_name"] == "shopee_analytics__monthly_slash_v3"
     assert payload["data"]["shadow_compare"]["is_consistent"] is True
+
+
+@pytest.mark.asyncio
+async def test_template_family_projection_keeps_distinct_variants_with_same_header_row(
+    template_family_client,
+):
+    client, session_factory = template_family_client
+    now = datetime.now(timezone.utc)
+
+    async with session_factory() as session:
+        session.add_all(
+            [
+                FieldMappingTemplate(
+                    id=1,
+                    platform="tiktok",
+                    data_domain="analytics",
+                    granularity="daily",
+                    sub_domain=None,
+                    header_row=7,
+                    template_name="tiktok_analytics__daily_v7",
+                    version=7,
+                    status="published",
+                    field_count=28,
+                    header_columns=[
+                        "Unnamed: 0", "GMV", "订单数", "客户数", "商品成交件数", "已退款的商品件数",
+                        "SKU 订单数", "总成交额", "页面浏览次数", "商品访客数", "转化率", "商品曝光次数",
+                        "去重商品曝光次数", "商品点击量", "去重点击次数", "平均订单金额", "达人直播归因 GMV",
+                    ],
+                    deduplication_fields=["metric_date"],
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplate(
+                    id=2,
+                    platform="tiktok",
+                    data_domain="analytics",
+                    granularity="daily",
+                    sub_domain="N/A",
+                    header_row=7,
+                    template_name="tiktok_analytics_N/A_daily_v2",
+                    version=2,
+                    status="published",
+                    field_count=16,
+                    header_columns=[
+                        "Unnamed: 0", "GMV", "订单数", "客户数", "商品成交件数", "已退款的商品件数",
+                        "SKU 订单数", "总成交额", "页面浏览次数", "商品访客数", "转化率", "商品曝光次数",
+                        "去重商品曝光次数", "商品点击量", "去重点击次数", "平均订单金额",
+                    ],
+                    deduplication_fields=["metric_date"],
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await client.get("/api/field-mapping/template-families")
+    assert response.status_code == 200
+    payload = response.json()
+    families = payload["data"]["families"]
+    family = next(
+        item
+        for item in families
+        if item["platform"] == "tiktok" and item["data_domain"] == "analytics" and item["granularity"] == "daily"
+    )
+
+    version_response = await client.get(
+        f"/api/field-mapping/template-families/{family['id']}/versions"
+    )
+    version_id = version_response.json()["data"]["versions"][0]["id"]
+
+    variant_response = await client.get(
+        f"/api/field-mapping/template-versions/{version_id}/variants"
+    )
+    assert variant_response.status_code == 200
+    variants = variant_response.json()["data"]["variants"]
+    assert len(variants) == 2
+    assert len({item["variant_key"] for item in variants}) == 2
+    assert {item["source_legacy_template_id"] for item in variants} == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_template_family_list_tolerates_duplicate_family_rows(template_family_client):
+    client, session_factory = template_family_client
+    now = datetime.now(timezone.utc)
+
+    async with session_factory() as session:
+        session.add_all(
+            [
+                FieldMappingTemplateFamily(
+                    id=101,
+                    platform="shopee",
+                    data_domain="analytics",
+                    granularity="monthly",
+                    sub_domain=None,
+                    account=None,
+                    governance_status="ready",
+                    display_name="duplicate-a",
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplateFamily(
+                    id=102,
+                    platform="shopee",
+                    data_domain="analytics",
+                    granularity="monthly",
+                    sub_domain=None,
+                    account=None,
+                    governance_status="ready",
+                    display_name="duplicate-b",
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await client.get("/api/field-mapping/template-families")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["count"] == 1

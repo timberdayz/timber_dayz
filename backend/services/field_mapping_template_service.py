@@ -15,6 +15,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.deduplication_fields_config import get_default_deduplication_fields
+from backend.services.template_family_service import _normalize_dimension
 from modules.core.db import FieldMappingTemplate
 from modules.core.logger import get_logger
 
@@ -48,6 +49,9 @@ class FieldMappingTemplateService:
         base_template_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         try:
+            sub_domain = _normalize_dimension(sub_domain)
+            account = _normalize_dimension(account)
+            granularity = _normalize_dimension(granularity)
             if not (0 <= header_row <= 100):
                 raise ValueError(f"header_row必须在0-100之间, 当前值: {header_row}")
 

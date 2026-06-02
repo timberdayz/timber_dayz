@@ -26,8 +26,11 @@ export default {
    * @param {number} pageSize - 每页条数（默认20）
    * @returns {Promise} 用户列表
    */
-  async getUsers(page = 1, pageSize = 20) {
-    return await api._get('/users/', { params: { page, page_size: pageSize } })
+  async getUsers(page = 1, pageSize = 20, extraParams = {}) {
+    return await api.get('/users/', {
+      params: { page, page_size: pageSize, ...extraParams },
+      returnRawResponse: true
+    })
   },
 
   /**
@@ -37,7 +40,10 @@ export default {
    * @returns {Promise} 已删除用户列表
    */
   async getDeletedUsers(page = 1, pageSize = 20) {
-    return await api._get('/users/deleted', { params: { page, page_size: pageSize } })
+    return await api.get('/users/deleted', {
+      params: { page, page_size: pageSize },
+      returnRawResponse: true
+    })
   },
 
   /**

@@ -50,8 +50,8 @@
       <template #header>
         <div class="card-header">
           <span>用户列表</span>
-          <el-tag v-if="activeTab === 'active'">共 {{ filteredUsers.length }} 个活跃用户</el-tag>
-          <el-tag v-else type="info">共 {{ filteredDeletedUsers.length }} 个已删除用户</el-tag>
+          <el-tag v-if="activeTab === 'active'">共 {{ usersStore.total }} 个活跃用户</el-tag>
+          <el-tag v-else type="info">共 {{ usersStore.deletedTotal }} 个已删除用户</el-tag>
         </div>
       </template>
 
@@ -338,7 +338,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useUsersStore } from '@/stores/users'
@@ -405,6 +405,11 @@ const selectedActiveUserIds = computed(() => (selectedActiveRows.value || []).ma
 const filteredUsers = computed(() => filterUsers(usersStore.users))
 const filteredDeletedUsers = computed(() => filterUsers(usersStore.deletedUsers))
 
+const buildActiveUserQuery = () => ({
+  keyword: searchKeyword.value.trim() || undefined,
+  active_only: true,
+})
+
 const createRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
@@ -453,7 +458,7 @@ const resetRules = {
 
 const initData = async () => {
   try {
-    await usersStore.fetchUsers(currentPage.value, pageSize.value)
+    await usersStore.fetchUsers(currentPage.value, pageSize.value, buildActiveUserQuery())
   } catch (error) {
     ElMessage.error(`初始化失败: ${error.message}`)
     return
@@ -494,7 +499,7 @@ const handleTabChange = async (tabName) => {
 
 const refreshUsers = async () => {
   try {
-    await usersStore.fetchUsers(currentPage.value, pageSize.value)
+    await usersStore.fetchUsers(currentPage.value, pageSize.value, buildActiveUserQuery())
     ElMessage.success('用户列表已刷新')
   } catch (error) {
     ElMessage.error(`刷新失败: ${error.message}`)
@@ -503,13 +508,13 @@ const refreshUsers = async () => {
 
 const handlePageChange = (page) => {
   currentPage.value = page
-  usersStore.fetchUsers(page, pageSize.value)
+  usersStore.fetchUsers(page, pageSize.value, buildActiveUserQuery())
 }
 
 const handleSizeChange = (size) => {
   pageSize.value = size
   currentPage.value = 1
-  usersStore.fetchUsers(1, size)
+  usersStore.fetchUsers(1, size, buildActiveUserQuery())
 }
 
 const handleDeletedPageChange = (page) => {
@@ -739,6 +744,13 @@ const getRoleText = (role) => {
 
 onMounted(() => {
   initData()
+})
+
+watch(searchKeyword, () => {
+  currentPage.value = 1
+  if (activeTab.value === 'active') {
+    usersStore.fetchUsers(1, pageSize.value, buildActiveUserQuery())
+  }
 })
 </script>
 

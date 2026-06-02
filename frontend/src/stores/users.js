@@ -18,14 +18,12 @@ export const useUsersStore = defineStore('users', () => {
   const deletedTotal = ref(0)
 
   // 获取用户列表
-  const fetchUsers = async (page = 1, pageSize = 20) => {
+  const fetchUsers = async (page = 1, pageSize = 20, extraParams = {}) => {
     try {
       isLoading.value = true
-      const response = await usersApi.getUsers(page, pageSize)
-      // 处理响应格式：可能是数组（直接返回）或对象（包含data和pagination字段）
+      const response = await usersApi.getUsers(page, pageSize, extraParams)
       const usersList = Array.isArray(response) ? response : (response.data || [])
       users.value = usersList
-      // 支持分页响应格式：response.pagination.total 或 response.total
       total.value = response.pagination?.total || response.total || usersList.length
       return usersList
     } catch (error) {

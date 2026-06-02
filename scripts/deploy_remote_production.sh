@@ -825,6 +825,14 @@ if [ $? -ne 0 ]; then
 fi
 echo "[OK] Bootstrap completed successfully"
 
+echo "[INFO] Phase 2.5a: Verifying system role integrity..."
+"${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 /app/scripts/verify_system_role_integrity.py --repair
+if [ $? -ne 0 ]; then
+  echo "[FAIL] System role integrity verification failed, deployment blocked"
+  exit 1
+fi
+echo "[OK] System role integrity verified"
+
 echo "[INFO] Phase 2.6: Bootstrapping PostgreSQL Dashboard assets (single-run)..."
 DEPLOY_LOG_DIR="${PRODUCTION_PATH}/deploy-logs"
 mkdir -p "${DEPLOY_LOG_DIR}" || true

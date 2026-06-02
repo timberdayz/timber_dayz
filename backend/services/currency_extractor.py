@@ -106,6 +106,26 @@ class CurrencyExtractor:
         # 保留向后兼容(使用第一个ISO代码模式)
         self.CURRENCY_PATTERN = self.ISO_CODE_PATTERNS[0]
         self.CURRENCY_PATTERNS = self.ISO_CODE_PATTERNS  # 向后兼容
+        self.NON_CURRENCY_FIELD_MARKERS = (
+            "sku",
+            "sku id",
+            "platform_sku",
+            "product_sku",
+            "order_id",
+            "订单号",
+            "订单编号",
+            "平台sku",
+            "商品sku",
+            "产品sku",
+            "货号",
+        )
+
+    def _looks_like_identifier_field(self, field_name: str) -> bool:
+        normalized = str(field_name or "").strip().lower()
+        if not normalized:
+            return False
+        normalized = normalized.replace("_", " ").replace("-", " ")
+        return any(marker in normalized for marker in self.NON_CURRENCY_FIELD_MARKERS)
     
     def extract_currency_code(self, field_name: str) -> Optional[str]:
         """
@@ -123,6 +143,9 @@ class CurrencyExtractor:
             货币代码(如 "BRL")或 None(如果未找到或无效)
         """
         if not field_name:
+            return None
+
+        if self._looks_like_identifier_field(field_name):
             return None
         
         # 1. 优先尝试ISO代码格式(最常见)

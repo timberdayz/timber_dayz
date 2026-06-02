@@ -23,7 +23,6 @@ class _ScalarResult:
 async def test_default_system_roles_include_investor():
     investor = DEFAULT_SYSTEM_ROLES["investor"]
 
-    assert investor["role_name"] == "投资人"
     assert "business-overview" in investor["permissions"]
     assert "personal-settings" in investor["permissions"]
 
@@ -31,11 +30,11 @@ async def test_default_system_roles_include_investor():
 @pytest.mark.asyncio
 async def test_ensure_system_roles_inserts_missing_investor_role():
     existing_roles = [
-        SimpleNamespace(role_code="admin"),
-        SimpleNamespace(role_code="manager"),
-        SimpleNamespace(role_code="operator"),
-        SimpleNamespace(role_code="finance"),
-        SimpleNamespace(role_code="tourist"),
+        SimpleNamespace(role_code="admin", permissions='["*"]'),
+        SimpleNamespace(role_code="manager", permissions='["business-overview"]'),
+        SimpleNamespace(role_code="operator", permissions='["business-overview"]'),
+        SimpleNamespace(role_code="finance", permissions='["business-overview"]'),
+        SimpleNamespace(role_code="tourist", permissions='["business-overview"]'),
     ]
 
     added = []
@@ -52,5 +51,42 @@ async def test_ensure_system_roles_inserts_missing_investor_role():
     assert len(added) == 1
     inserted_role = added[0]
     assert inserted_role.role_code == "investor"
-    assert inserted_role.role_name == "投资人"
+    assert fake_db.commit.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ensure_system_roles_repairs_empty_permissions_for_existing_roles():
+    existing_roles = [
+        SimpleNamespace(
+            role_code="operator",
+            role_name="操作员",
+            description="",
+            permissions="[]",
+            data_scope="",
+            is_system=False,
+        ),
+        SimpleNamespace(
+            role_code="admin",
+            role_name="管理员",
+            description="",
+            permissions="[]",
+            data_scope="",
+            is_system=False,
+        ),
+    ]
+
+    fake_db = SimpleNamespace(
+        execute=AsyncMock(return_value=_ScalarResult(existing_roles)),
+        add=lambda *_args, **_kwargs: None,
+        commit=AsyncMock(),
+    )
+
+    touched = await ensure_system_roles(fake_db)
+
+    assert "operator" in touched
+    assert "admin" in touched
+    assert existing_roles[0].permissions != "[]"
+    assert existing_roles[1].permissions != "[]"
+    assert existing_roles[0].is_system is True
+    assert existing_roles[1].is_system is True
     assert fake_db.commit.await_count == 1

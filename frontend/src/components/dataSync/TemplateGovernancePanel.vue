@@ -60,7 +60,7 @@
 
     <el-tabs :model-value="activeTab" style="margin-top: 20px;" @update:model-value="$emit('update:active-tab', $event)">
       <el-tab-pane label="已覆盖模板" name="covered">
-        <el-table :data="detailedCoverage.covered || []" stripe border max-height="400">
+        <el-table :data="coveredRows" stripe border max-height="400">
           <el-table-column prop="platform" label="平台" width="100">
             <template #default="{ row }">
               {{ getPlatformLabel(row.platform) }}
@@ -104,7 +104,7 @@
       </el-tab-pane>
 
       <el-tab-pane label="缺少模板" name="missing">
-        <el-table :data="detailedCoverage.missing || []" stripe border max-height="400">
+        <el-table :data="missingRows" stripe border max-height="400">
           <el-table-column prop="platform" label="平台" width="100">
             <template #default="{ row }">
               {{ getPlatformLabel(row.platform) }}
@@ -128,7 +128,7 @@
 
       <el-tab-pane label="需要更新" name="needs_update">
         <TemplateNeedsUpdateTable
-          :rows="detailedCoverage.needs_update || []"
+          :rows="needsUpdateRows"
           :get-platform-label="getPlatformLabel"
           @update-template="$emit('update-template', $event)"
         />
@@ -165,6 +165,9 @@ const props = defineProps({
 defineEmits(['refresh', 'create-missing', 'update-template', 'manual-update', 'update:active-tab'])
 
 const summary = computed(() => props.detailedCoverage?.summary ?? {})
+const coveredRows = computed(() => props.detailedCoverage?.current_covered ?? props.detailedCoverage?.covered ?? [])
+const missingRows = computed(() => props.detailedCoverage?.current_missing ?? props.detailedCoverage?.missing ?? [])
+const needsUpdateRows = computed(() => props.detailedCoverage?.current_needs_update ?? props.detailedCoverage?.needs_update ?? [])
 </script>
 
 <style scoped>

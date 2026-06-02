@@ -50,6 +50,13 @@ from backend.services.template_family_service import (
     get_template_resolver,
 )
 from backend.services.field_mapping_template_service import get_template_service
+from backend.services.semantic_field_registry import (
+    get_semantic_aliases,
+    get_semantic_requirements,
+    infer_semantic_key,
+    is_canonical_semantic_key,
+    normalize_semantic_key,
+)
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import FieldMappingTemplate
@@ -115,13 +122,21 @@ async def _load_file_update_preview(
 def _split_existing_deduplication_fields(
     existing_fields: list[str],
     current_header_columns: list[str],
+    current_header_bindings: list[dict[str, Any]] | None = None,
 ) -> tuple[list[str], list[str]]:
     current_lookup = {str(field).lower(): field for field in current_header_columns}
+    binding_semantic_keys = {
+        normalize_semantic_key(
+            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+        )
+        for binding in (current_header_bindings or [])
+    }
     available: list[str] = []
     missing: list[str] = []
 
     for field in existing_fields:
-        if str(field).lower() in current_lookup:
+        normalized_semantic_key = normalize_semantic_key(field)
+        if str(field).lower() in current_lookup or normalized_semantic_key in binding_semantic_keys:
             available.append(field)
         else:
             missing.append(field)
@@ -229,29 +244,135 @@ def _normalize_header_bindings(
                 confidence = confidence if confidence is not None else 0.5
 
         display_name = str(requested.get("display_name", "")).strip() or raw_name
+        semantic_key = requested.get("semantic_key")
         semantic_role = requested.get("semantic_role")
         aliases = [str(alias).strip() for alias in requested.get("aliases", []) if str(alias).strip()]
+        inferred_semantic_key = infer_semantic_key(
+            semantic_key,
+            semantic_role,
+            display_name,
+            raw_name,
+            *aliases,
+        )
+        semantic_requirements = get_semantic_requirements(inferred_semantic_key)
         if _looks_like_unnamed_header(raw_name) and sample_type == "date":
             if display_name == raw_name:
                 display_name = "日期"
             if not semantic_role:
                 semantic_role = "metric_date"
-            aliases = list(dict.fromkeys([display_name, "日期", "统计日期", *aliases]))
+            inferred_semantic_key = inferred_semantic_key or "metric_date"
+            semantic_requirements = get_semantic_requirements(inferred_semantic_key)
+            aliases = list(dict.fromkeys([display_name, "日期", "统计日期", *aliases, *get_semantic_aliases(inferred_semantic_key)]))
         elif display_name != raw_name:
-            aliases = list(dict.fromkeys([display_name, *aliases]))
+            aliases = list(dict.fromkeys([display_name, *aliases, *get_semantic_aliases(inferred_semantic_key)]))
+        elif inferred_semantic_key:
+            aliases = list(dict.fromkeys([*aliases, *get_semantic_aliases(inferred_semantic_key)]))
 
         normalized.append(
             {
                 "raw_name": raw_name,
                 "display_name": display_name,
+                "semantic_key": inferred_semantic_key,
                 "semantic_role": semantic_role,
                 "aliases": aliases,
+                "required": bool(requested.get("required", semantic_requirements["required"])),
+                "hash_participates": bool(requested.get("hash_participates", semantic_requirements["hash_participates"])),
                 "position": requested.get("position", position),
                 "sample_type": sample_type,
                 "confidence": confidence,
             }
         )
     return normalized
+
+
+def _extract_semantic_key_sets(
+    deduplication_fields: list[str] | None,
+    header_bindings: list[dict[str, Any]] | None,
+) -> tuple[list[str], list[str]]:
+    required_keys: list[str] = []
+    hash_keys: list[str] = []
+    seen_required: set[str] = set()
+    seen_hash: set[str] = set()
+
+    for field in deduplication_fields or []:
+        semantic_key = normalize_semantic_key(field)
+        if semantic_key and is_canonical_semantic_key(semantic_key) and semantic_key not in seen_hash:
+            seen_hash.add(semantic_key)
+            hash_keys.append(semantic_key)
+
+    for binding in header_bindings or []:
+        semantic_key = normalize_semantic_key(
+            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+        )
+        if not semantic_key:
+            continue
+        if binding.get("required") and semantic_key not in seen_required:
+            seen_required.add(semantic_key)
+            required_keys.append(semantic_key)
+        if binding.get("hash_participates") and semantic_key not in seen_hash:
+            seen_hash.add(semantic_key)
+            hash_keys.append(semantic_key)
+
+    return required_keys, hash_keys
+
+
+def _normalize_deduplication_fields_for_template(
+    deduplication_fields: list[str] | None,
+    header_bindings: list[dict[str, Any]] | None,
+) -> list[str]:
+    normalized_fields: list[str] = []
+    binding_by_raw = {
+        str(binding.get("raw_name", "")).strip().lower(): binding
+        for binding in (header_bindings or [])
+        if str(binding.get("raw_name", "")).strip()
+    }
+    seen = set()
+
+    for field in deduplication_fields or []:
+        if is_canonical_semantic_key(field):
+            normalized_field = normalize_semantic_key(field) or str(field).strip()
+        else:
+            normalized_field = str(field).strip()
+        binding = binding_by_raw.get(str(field).strip().lower())
+        if binding:
+            candidate_semantic_key = normalize_semantic_key(
+                binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+            )
+            if is_canonical_semantic_key(candidate_semantic_key):
+                normalized_field = candidate_semantic_key or normalized_field
+        lowered = normalized_field.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized_fields.append(normalized_field)
+    return normalized_fields
+
+
+def _recommended_deduplication_fields(
+    default_fields: list[str],
+    header_columns: list[str],
+    header_bindings: list[dict[str, Any]] | None,
+) -> list[str]:
+    current_lookup = {str(field).lower() for field in header_columns}
+    binding_semantic_keys = {
+        normalize_semantic_key(
+            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+        )
+        for binding in (header_bindings or [])
+    }
+
+    recommended: list[str] = []
+    seen: set[str] = set()
+    for field in default_fields:
+        semantic_key = normalize_semantic_key(field)
+        if not semantic_key:
+            continue
+        if semantic_key in binding_semantic_keys or str(field).lower() in current_lookup:
+            if semantic_key in seen:
+                continue
+            seen.add(semantic_key)
+            recommended.append(semantic_key)
+    return recommended
 
 
 def _enrich_field_parse_rules(
@@ -405,11 +526,26 @@ async def save_mapping_template(
             raise ValueError("deduplication_fields不能为空列表, 至少需要选择1个核心字段")
         elif not all(isinstance(field, str) for field in deduplication_fields):
             raise ValueError("deduplication_fields列表中的元素必须是字符串")
+        deduplication_fields = _normalize_deduplication_fields_for_template(
+            deduplication_fields,
+            header_bindings,
+        )
 
         if header_columns:
             missing_fields = []
             for field in deduplication_fields:
                 found = False
+                normalized_field = normalize_semantic_key(field)
+                if normalized_field:
+                    found = any(
+                        normalize_semantic_key(
+                            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+                        )
+                        == normalized_field
+                        for binding in header_bindings
+                    )
+                    if found:
+                        continue
                 for col in header_columns:
                     if col == field or col.lower() == field.lower():
                         found = True
@@ -575,6 +711,15 @@ async def get_template_update_context(
         template_header_columns = template.header_columns or []
         template_deduplication_fields = template.deduplication_fields or []
         effective_header_row = header_row if header_row is not None else (template.header_row or 0)
+        normalized_template_bindings = _normalize_header_bindings(
+            template.header_bindings,
+            template_header_columns,
+            {},
+        )
+        required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
+            template_deduplication_fields,
+            normalized_template_bindings,
+        )
         response_data: Dict[str, Any] = {
             "resolved_object_type": "template_update",
             "template": TemplateContextSummary(
@@ -589,11 +734,9 @@ async def get_template_update_context(
                 status=template.status,
                 field_count=template.field_count or len(template_header_columns),
                 deduplication_fields=template_deduplication_fields,
-                header_bindings=_normalize_header_bindings(
-                    template.header_bindings,
-                    template_header_columns,
-                    {},
-                ),
+                required_semantic_keys=required_semantic_keys,
+                hash_participating_semantic_keys=hash_participating_semantic_keys,
+                header_bindings=normalized_template_bindings,
                 field_parse_rules=template.field_parse_rules or [],
             ).model_dump(),
             "template_header_columns": template_header_columns,
@@ -620,6 +763,8 @@ async def get_template_update_context(
             "existing_deduplication_fields_available": [],
             "existing_deduplication_fields_missing": [],
             "recommended_deduplication_fields": [],
+            "required_semantic_keys": required_semantic_keys,
+            "hash_participating_semantic_keys": hash_participating_semantic_keys,
             "update_semantics": "new_version",
             "recommended_save_mode": "new_version",
         }
@@ -636,20 +781,17 @@ async def get_template_update_context(
             available_fields, missing_fields = _split_existing_deduplication_fields(
                 template_deduplication_fields,
                 template_header_columns,
+                normalized_template_bindings,
             )
-            recommended_fields = [
-                field
-                for field in default_fields
-                if any(str(field).lower() == str(col).lower() for col in template_header_columns)
-            ]
+            recommended_fields = _recommended_deduplication_fields(
+                default_fields,
+                template_header_columns,
+                normalized_template_bindings,
+            )
             response_data.update(
                 {
                     "current_header_columns": template_header_columns,
-                    "current_header_bindings": _normalize_header_bindings(
-                        template.header_bindings,
-                        template_header_columns,
-                        {},
-                    ),
+                    "current_header_bindings": normalized_template_bindings,
                     "header_changes": {
                         "detected": False,
                         "added_fields": [],
@@ -679,10 +821,13 @@ async def get_template_update_context(
             available_fields, missing_fields = _split_existing_deduplication_fields(
                 template_deduplication_fields,
                 current_header_columns,
+                current_header_bindings,
             )
-            recommended_fields = [
-                field for field in default_fields if str(field).lower() in current_lookup
-            ]
+            recommended_fields = _recommended_deduplication_fields(
+                default_fields,
+                current_header_columns,
+                current_header_bindings,
+            )
             response_data.update(
                 {
                     "current_file": file_preview["file"],
@@ -760,6 +905,10 @@ async def get_template_variant_create_context(
         file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
         current_header_columns = file_preview["header_columns"]
         current_header_bindings = file_preview.get("header_bindings", [])
+        required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
+            list(active_version.get("deduplication_fields") or []),
+            current_header_bindings,
+        )
 
         resolver = get_template_resolver(db)
         resolve_data = await resolver.resolve(
@@ -795,6 +944,8 @@ async def get_template_variant_create_context(
                 sample_data=file_preview.get("sample_data", {}),
                 preview_data=file_preview.get("preview_data", []),
                 current_header_bindings=current_header_bindings,
+                required_semantic_keys=required_semantic_keys,
+                hash_participating_semantic_keys=hash_participating_semantic_keys,
                 recommended_variant_key=recommended_variant_key,
                 recommended_parse_profile=recommended_parse_profile,
             ),

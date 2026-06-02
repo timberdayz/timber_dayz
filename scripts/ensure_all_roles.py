@@ -14,6 +14,7 @@
 """
 
 import sys
+import json
 from pathlib import Path
 
 # 添加项目根目录到路径
@@ -22,6 +23,7 @@ sys.path.insert(0, str(project_root))
 
 from sqlalchemy import create_engine, text
 from backend.utils.config import get_settings
+from backend.services.system_role_service import DEFAULT_SYSTEM_ROLES
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -89,7 +91,7 @@ def ensure_all_roles():
                 for role_def in REQUIRED_ROLES:
                     # 检查角色是否存在（按role_code）
                     result = conn.execute(text("""
-                        SELECT role_id, role_name, role_code, description, is_system
+                        SELECT role_id, role_name, role_code, description, is_system, permissions, data_scope
                         FROM dim_roles 
                         WHERE role_code = :role_code
                     """), {"role_code": role_def['role_code']})
@@ -97,10 +99,11 @@ def ensure_all_roles():
                     
                     if existing_role:
                         # 角色已存在，检查是否需要更新
-                        role_id, role_name, role_code, description, is_system = existing_role
+                        role_id, role_name, role_code, description, is_system, permissions, data_scope = existing_role
                         needs_update = False
                         update_fields = []
                         update_params = {}
+                        spec = DEFAULT_SYSTEM_ROLES.get(role_code)
                         
                         # 检查角色名称是否需要更新
                         if role_name != role_def['role_name']:
@@ -120,6 +123,16 @@ def ensure_all_roles():
                         # 检查is_system是否需要更新
                         if is_system != role_def['is_system']:
                             update_fields.append(f"is_system = {role_def['is_system']}")
+                            needs_update = True
+
+                        if permissions in ("", "[]", "null", None) and spec:
+                            update_fields.append("permissions = :permissions")
+                            update_params["permissions"] = json.dumps(spec["permissions"], ensure_ascii=False)
+                            needs_update = True
+
+                        if (not data_scope or str(data_scope).strip() == "") and spec:
+                            update_fields.append("data_scope = :data_scope")
+                            update_params["data_scope"] = spec["data_scope"]
                             needs_update = True
                         
                         if needs_update:
@@ -141,11 +154,13 @@ def ensure_all_roles():
                         # 角色不存在，创建它
                         conn.execute(text("""
                             INSERT INTO dim_roles (role_code, role_name, description, is_active, permissions, data_scope, is_system)
-                            VALUES (:role_code, :role_name, :description, true, '[]', 'all', :is_system)
+                            VALUES (:role_code, :role_name, :description, true, :permissions, :data_scope, :is_system)
                         """), {
                             "role_code": role_def['role_code'],
                             "role_name": role_def['role_name'],
                             "description": role_def['description'],
+                            "permissions": json.dumps(DEFAULT_SYSTEM_ROLES.get(role_def['role_code'], {}).get('permissions', []), ensure_ascii=False),
+                            "data_scope": DEFAULT_SYSTEM_ROLES.get(role_def['role_code'], {}).get('data_scope', 'all'),
                             "is_system": role_def['is_system']
                         })
                         created_count += 1

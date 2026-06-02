@@ -16,3 +16,6 @@ router = APIRouter()
 router.include_router(files_router)
 router.include_router(ingest_router)
 router.include_router(status_router)
+
+_RETIRED_ROUTE_PATHS = {"/save-template", "/apply-template"}
+router.routes[:] = [route for route in router.routes if route.path not in _RETIRED_ROUTE_PATHS]

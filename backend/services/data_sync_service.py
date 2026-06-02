@@ -220,6 +220,27 @@ class DataSyncService:
         return f"{value:.1f}%"
 
     @staticmethod
+    def _build_sample_rows(df, limit: int = 3) -> List[Dict[str, Any]]:
+        try:
+            if df is None or getattr(df, "empty", True):
+                return []
+            return df.head(limit).to_dict("records")
+        except Exception:
+            return []
+
+    async def _resolve_template_from_resolver_result(
+        self,
+        resolve_result: Optional[Dict[str, Any]],
+    ) -> Optional[FieldMappingTemplate]:
+        if not resolve_result:
+            return None
+        variant = resolve_result.get("variant") or {}
+        legacy_template_id = variant.get("source_legacy_template_id")
+        if not legacy_template_id:
+            return None
+        return await self.db.get(FieldMappingTemplate, legacy_template_id)
+
+    @staticmethod
     def _is_blocking_header_change(header_changes: Dict[str, Any]) -> bool:
         if not header_changes.get("detected"):
             return False
@@ -495,12 +516,7 @@ class DataSyncService:
             except Exception:
                 resolve_result = None
 
-            template = None
-            if resolve_result:
-                variant = resolve_result.get("variant") or {}
-                legacy_template_id = variant.get("source_legacy_template_id")
-                if legacy_template_id:
-                    template = await self.db.get(FieldMappingTemplate, legacy_template_id)
+            template = await self._resolve_template_from_resolver_result(resolve_result)
 
             template = template or await self.template_matcher.find_best_template(
                 platform=catalog_file.platform_code,
@@ -613,6 +629,39 @@ class DataSyncService:
             
             # 6. [*] v4.14.0安全版本:检测表头变化,任何变化都阻止同步
             # 如果有模板,检测表头是否完全匹配;否则使用从文件读取的columns
+            sample_rows = self._build_sample_rows(df)
+            resolved_deduplication_fields = list(
+                ((resolve_result or {}).get("active_version") or {}).get("deduplication_fields") or []
+            )
+            resolved_header_bindings = list((resolve_result or {}).get("semantic_bindings") or [])
+            try:
+                preview_resolve_result = await self.template_resolver.resolve(
+                    platform=catalog_file.platform_code,
+                    data_domain=catalog_file.data_domain,
+                    granularity=catalog_file.granularity,
+                    sub_domain=normalized_sub_domain,
+                    header_row=header_row,
+                    header_columns=columns,
+                    sample_rows=sample_rows,
+                )
+            except Exception:
+                preview_resolve_result = None
+
+            preview_template = await self._resolve_template_from_resolver_result(preview_resolve_result)
+            if preview_template is not None:
+                if not template or preview_template.id != template.id:
+                    logger.info(
+                        "[DataSync] resolver在预览后纠正模板: %s -> %s",
+                        getattr(template, "template_name", None) or "None",
+                        preview_template.template_name,
+                    )
+                template = preview_template
+                resolve_result = preview_resolve_result
+                resolved_deduplication_fields = list(
+                    ((resolve_result or {}).get("active_version") or {}).get("deduplication_fields") or []
+                )
+                resolved_header_bindings = list((resolve_result or {}).get("semantic_bindings") or [])
+
             if template and hasattr(template, 'header_columns') and template.header_columns:
                 template_header_columns = template.header_columns
                 file_header_columns = columns  # 使用文件实际的列名
@@ -689,8 +738,8 @@ class DataSyncService:
             
             # [*] v4.14.0新增:从模板读取核心去重字段(deduplication_fields)
             deduplication_fields = None
-            if template and hasattr(template, 'deduplication_fields') and template.deduplication_fields:
-                deduplication_fields = template.deduplication_fields
+            if resolved_deduplication_fields:
+                deduplication_fields = resolved_deduplication_fields
                 logger.info(f"[DataSync] [v4.14.0] 使用模板的核心去重字段: {deduplication_fields}")
             else:
                 # [*] v4.17.0修复:如果没有模板或模板没有配置核心字段,使用默认配置
@@ -771,6 +820,7 @@ class DataSyncService:
                     task_id=ingest_task_id,
                     extract_images=True,
                     deduplication_fields=deduplication_fields,  # [*] v4.14.0新增:传递核心去重字段
+                    header_bindings=resolved_header_bindings or (getattr(template, "header_bindings", None) if template else None),
                     sub_domain=sub_domain_value,  # [*] v4.16.0修复:优先从catalog_file获取
                     template_id=getattr(template, "id", None),
                 )

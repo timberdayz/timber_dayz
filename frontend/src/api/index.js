@@ -340,6 +340,10 @@ api.interceptors.response.use(
   (response) => {
     const data = response.data
 
+    if (response.config?.returnRawResponse) {
+      return data
+    }
+
     // 首先判断success字段（统一响应格式）
     if (data && typeof data === 'object' && 'success' in data) {
       if (data.success === true) {
@@ -664,16 +668,6 @@ export default {
    * @param {Object} params - 参数
    * @returns {Promise} 响应
    */
-  async applyTemplate({ columns, platform, domain, granularity, sheetName }) {
-    // ⚠️ 旧版API，仅为兼容性保留
-    return await this._post('/field-mapping/apply-template', {
-      columns,
-      platform,
-      domain,
-      granularity,
-      sheet_name: sheetName
-    })
-  },
 
   // 获取默认核心字段推荐
   async getDefaultDeduplicationFields({ dataDomain, subDomain }) {
@@ -797,28 +791,6 @@ export default {
     return await this._get('/field-mapping/catalog-status')
   },
 
-  // ========== 数据库浏览器API（v4.7.0企业级增强） ==========
-
-  // ⚠️ v4.12.0移除：数据浏览器API已移除
-  // // 获取所有数据表列表
-  // async getTables() {
-  //   return await this._get('/data-browser/tables')
-  // },
-  //
-  // // 查询数据表数据（企业级增强版）
-  // async queryData(params) {
-  //   // 如果filters是对象，转换为JSON字符串
-  //   const queryParams = { ...params }
-  //   if (queryParams.filters && typeof queryParams.filters === 'object') {
-  //     queryParams.filters = JSON.stringify(queryParams.filters)
-  //   }
-  //   return await this._get('/data-browser/query', { params: queryParams })
-  // },
-  //
-  // // 获取表的统计信息（企业级增强版）
-  // async getTableStats(table) {
-  //   return await this._get('/data-browser/stats', { params: { table } })
-  // },
 
   // ========== 主视图API（v4.12.0新增） ==========
 
@@ -1327,22 +1299,6 @@ export default {
     }
   },
 
-  /**
-   * 获取任务日志详情（v4.11.4新增）
-   * @param {string} taskId - 任务ID
-   * @param {number} limit - 返回数量限制
-   * @returns {Promise} {success, task_id, logs, total}
-   */
-  // [Deprecated] Legacy auto-ingest task logs compatibility helper.
-
-  /**
-   * 通过文件ID获取任务日志（v4.11.5新增）
-   * @param {number} fileId - 文件ID
-   * @param {number} limit - 返回数量限制
-   * @returns {Promise} {success, file_id, logs, total}
-   */
-  // [Deprecated] Legacy auto-ingest file logs compatibility helper.
-
   // 原始数据层查看API（v4.11.5新增）
   /**
    * 查看原始Excel数据
@@ -1611,13 +1567,6 @@ export default {
       confirm
     })
   },
-
-  /**
-   * 单文件自动入库
-   * @param {number} fileId - 文件ID
-   * @returns {Promise} {success, file_id, status, message}
-   */
-  // [Deprecated] Compatibility alias for startSingleAutoIngest().
 
   // ========== 物化视图管理API（v4.9.0完整版）==========
 

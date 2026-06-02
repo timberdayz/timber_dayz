@@ -21,7 +21,6 @@ SYSTEM_PERMISSIONS = [
     {"id": "collection-history", "name": "采集历史", "description": "查看数据采集历史", "resource": "collection", "action": "read", "category": "数据采集与管理"},
     {"id": "data-sync", "name": "数据同步", "description": "管理数据同步任务", "resource": "data", "action": "all", "category": "数据采集与管理"},
     {"id": "data-quarantine", "name": "数据隔离", "description": "管理数据隔离区", "resource": "data", "action": "all", "category": "数据采集与管理"},
-    {"id": "data-browser", "name": "数据浏览", "description": "浏览原始数据", "resource": "data", "action": "read", "category": "数据采集与管理"},
     
     # 产品与库存
     {"id": "product-management", "name": "产品管理", "description": "管理产品信息", "resource": "product", "action": "all", "category": "产品与库存"},

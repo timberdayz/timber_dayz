@@ -387,18 +387,6 @@ const routes = [
       roles: ['admin']
     }
   },
-  // ⚠️ v4.12.0移除：数据浏览器功能已移除
-  // {
-  //   path: '/data-browser',
-  //   name: 'DataBrowser',
-  //   component: () => import('../views/DataBrowser.vue'),
-  //   meta: {
-  //     title: '数据库浏览器',
-  //     icon: 'Search',
-  //     permission: 'data-governance',
-  //     roles: ['admin']  // 🔒 仅管理员（可查看原始数据库）
-  //   }
-  // },
   {
     path: '/data-consistency',
     name: 'DataConsistency',

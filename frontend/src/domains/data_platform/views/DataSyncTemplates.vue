@@ -42,6 +42,7 @@
       :preview-data="previewData"
       :header-columns="headerColumns"
       :header-columns-with-samples="headerColumnsWithSamples"
+      :header-bindings="headerBindings"
       :loading-preview="loadingPreview"
       :saving-template="savingTemplate"
       :deduplication-fields="deduplicationFields"
@@ -54,6 +55,7 @@
       @save-template="handleSaveTemplate"
       @deduplication-fields-change="handleDeduplicationFieldsChange"
       @field-parse-rules-change="handleFieldParseRulesChange"
+      @header-bindings-change="handleHeaderBindingsChange"
       @validation-change="handleValidationChange"
       @update:selectedFileId="selectedFileId = $event"
       @update:headerRow="headerRow = $event"
@@ -175,8 +177,16 @@
         <el-table-column label="变体数" width="80">
           <template #default="{ row }">{{ row.variant_count || 0 }}</template>
         </el-table-column>
-        <el-table-column prop="governance_status" label="治理状态" width="120" />
-        <el-table-column prop="file_count" label="文件数" width="80" />
+        <el-table-column label="治理状态" width="120">
+          <template #default="{ row }">
+            {{ row.display_governance_status || row.governance_status }}
+          </template>
+        </el-table-column>
+        <el-table-column label="文件数" width="80">
+          <template #default="{ row }">
+            {{ row.current_file_count ?? row.file_count ?? 0 }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button
@@ -227,6 +237,7 @@
       :preview-data="previewData"
       :header-columns="headerColumns"
       :header-columns-with-samples="headerColumnsWithSamples"
+      :header-bindings="headerBindings"
       :loading-preview="loadingPreview"
       :saving-template="savingTemplate"
       :deduplication-fields="deduplicationFields"
@@ -239,6 +250,7 @@
       @save-template="handleSaveVariant"
       @deduplication-fields-change="handleDeduplicationFieldsChange"
       @field-parse-rules-change="handleFieldParseRulesChange"
+      @header-bindings-change="handleHeaderBindingsChange"
       @validation-change="handleValidationChange"
       @update:selectedFileId="selectedFileId = $event"
       @update:headerRow="headerRow = $event"
@@ -266,6 +278,7 @@
       :preview-data="previewData"
       :header-columns="headerColumns"
       :header-columns-with-samples="headerColumnsWithSamples"
+      :header-bindings="headerBindings"
       :loading-preview="loadingPreview"
       :saving-template="savingTemplate"
       :deduplication-fields="deduplicationFields"
@@ -278,6 +291,7 @@
       @save-template="handleSaveTemplate"
       @deduplication-fields-change="handleDeduplicationFieldsChange"
       @field-parse-rules-change="handleFieldParseRulesChange"
+      @header-bindings-change="handleHeaderBindingsChange"
       @validation-change="handleValidationChange"
       @update:selectedFileId="selectedFileId = $event"
       @update:headerRow="headerRow = $event"
@@ -339,6 +353,7 @@ const headerRow = ref(0)
 const previewData = ref([])
 const headerColumns = ref([])
 const sampleData = ref({})
+const headerBindings = ref([])
 const deduplicationFields = ref([])
 const deduplicationFieldsValid = ref(false)
 const fieldParseRules = ref([])
@@ -406,9 +421,9 @@ const formatVariantDateFormats = (parseProfile) => {
 
 const findGovernanceRowForFamily = (family) => {
   const rows = [
-    ...(detailedCoverage.value?.needs_update || []),
-    ...(detailedCoverage.value?.covered || []),
-    ...(detailedCoverage.value?.missing || []),
+    ...(detailedCoverage.value?.current_needs_update || detailedCoverage.value?.needs_update || []),
+    ...(detailedCoverage.value?.current_covered || detailedCoverage.value?.covered || []),
+    ...(detailedCoverage.value?.current_missing || detailedCoverage.value?.missing || []),
   ]
   return (
     rows.find(
@@ -477,7 +492,9 @@ const canManualUpdateFamily = (family) => {
 
 const getCurrentWorkbenchSampleFileId = () => updateWorkbenchContext.value?.row?.sample_file_id || null
 const isSampleStillInNeedsUpdate = (sampleFileId) =>
-  (detailedCoverage.value?.needs_update || []).some((row) => row.sample_file_id === sampleFileId)
+  (detailedCoverage.value?.current_needs_update || detailedCoverage.value?.needs_update || []).some(
+    (row) => row.sample_file_id === sampleFileId
+  )
 
 const loadAvailablePlatforms = async () => {
   try {
@@ -544,11 +561,13 @@ const handleCreateVariantForFamily = async (row) => {
   selectedFileId.value = row.sample_file_id
 
   try {
-    const context = await api.getTemplateVariantCreateContext(row.id, {
+    const familyId = row.family_id || row.id
+    const context = await api.getTemplateVariantCreateContext(familyId, {
       fileId: row.sample_file_id,
       headerRow: headerRow.value,
     })
     variantCreateContext.value = context?.data || context
+    headerBindings.value = variantCreateContext.value?.current_header_bindings || []
     isVariantWorkbenchVisible.value = true
     ElMessage.info('当前缺少变体，请基于样本文件预览结果创建新变体')
   } catch (error) {
@@ -588,6 +607,7 @@ const openTemplateUpdateWorkbench = async (row, mode = 'with-sample') => {
       row,
       context: context?.data || context,
     }
+    headerBindings.value = updateWorkbenchContext.value?.context?.current_header_bindings || []
     isWorkbenchVisible.value = true
   } catch (error) {
     console.error('加载模板更新上下文失败:', error)
@@ -600,6 +620,7 @@ const handleCreateTemplateForMissing = (row) => {
   showTemplateBuilder.value = true
   createWorkbenchContext.value = row
   isCreateWorkbenchVisible.value = true
+  headerBindings.value = []
   fileFilters.value.platform = row.platform
   fileFilters.value.domain = row.domain
   fileFilters.value.sub_domain = row.sub_domain === 'N/A' ? null : row.sub_domain
@@ -652,6 +673,7 @@ const handleFileChange = async (fileId) => {
     fileInfo.value = {}
     previewData.value = []
     headerColumns.value = []
+    headerBindings.value = []
     fieldParseRules.value = []
     return
   }
@@ -683,6 +705,10 @@ const handlePreview = async () => {
       previewData.value = data.preview_data || []
       headerColumns.value = data.header_columns || []
       sampleData.value = data.sample_data || {}
+      headerBindings.value = data.header_bindings || inferHeaderBindings({
+        headerColumns: data.header_columns || [],
+        sampleData: data.sample_data || {},
+      })
       ElMessage.success('预览成功')
     }
   } catch (error) {
@@ -697,7 +723,7 @@ const handleRepreview = () => {
   handlePreview()
 }
 
-const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, headerRow: selectedHeaderRow }) => {
+const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, headerRow: selectedHeaderRow, headerBindings: selectedHeaderBindings }) => {
   const context = updateWorkbenchContext.value?.context
   const template = updateWorkbenchContext.value?.template
   if (!template || !context?.current_header_columns?.length) {
@@ -713,10 +739,6 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
       templateHeaderBindings: template.header_bindings || [],
       existingRules: template.field_parse_rules || [],
     })
-    const headerBindings = inferHeaderBindings({
-      headerColumns: context.current_header_columns,
-      sampleData: context.sample_data || {},
-    })
     const templatePlatform = template.platform || context?.template?.platform || null
     const templateDataDomain =
       template.data_domain || template.domain || context?.template?.data_domain || context?.template?.domain || null
@@ -730,7 +752,15 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
       headerRow: selectedHeaderRow ?? context?.current_header_row ?? template.header_row ?? 0,
       headerColumns: context.current_header_columns,
       deduplicationFields: selectedFields,
-      headerBindings,
+      headerBindings:
+        Array.isArray(selectedHeaderBindings) && selectedHeaderBindings.length > 0
+          ? selectedHeaderBindings
+          : headerBindings.value.length > 0
+          ? headerBindings.value
+          : inferHeaderBindings({
+              headerColumns: context.current_header_columns,
+              sampleData: context.sample_data || {},
+            }),
       sampleData: context.sample_data || {},
       fieldParseRules: nextFieldParseRules,
     })
@@ -779,10 +809,6 @@ const handleSaveVariant = async () => {
 
   savingTemplate.value = true
   try {
-    const headerBindings = inferHeaderBindings({
-      headerColumns: headerColumns.value,
-      sampleData: sampleData.value,
-    })
     const family = context.family
     const activeVersion = context.active_version
     const templateName =
@@ -799,7 +825,13 @@ const handleSaveVariant = async () => {
       headerRow: headerRow.value,
       headerColumns: headerColumns.value,
       deduplicationFields: deduplicationFields.value,
-      headerBindings,
+      headerBindings:
+        headerBindings.value.length > 0
+          ? headerBindings.value
+          : inferHeaderBindings({
+              headerColumns: headerColumns.value,
+              sampleData: sampleData.value,
+            }),
       sampleData: sampleData.value,
       fieldParseRules: fieldParseRules.value,
     })
@@ -838,10 +870,6 @@ const handleSaveTemplate = async () => {
 
   savingTemplate.value = true
   try {
-    const headerBindings = inferHeaderBindings({
-      headerColumns: headerColumns.value,
-      sampleData: sampleData.value,
-    })
     const result = await api.saveTemplate({
       platform: fileFilters.value.platform,
       dataDomain: fileFilters.value.domain,
@@ -851,7 +879,13 @@ const handleSaveTemplate = async () => {
       headerRow: headerRow.value,
       headerColumns: headerColumns.value,
       deduplicationFields: deduplicationFields.value,
-      headerBindings,
+      headerBindings:
+        headerBindings.value.length > 0
+          ? headerBindings.value
+          : inferHeaderBindings({
+              headerColumns: headerColumns.value,
+              sampleData: sampleData.value,
+            }),
       sampleData: sampleData.value,
       fieldParseRules: fieldParseRules.value,
     })
@@ -877,6 +911,10 @@ const handleDeduplicationFieldsChange = (fields) => {
 
 const handleFieldParseRulesChange = (rules) => {
   fieldParseRules.value = Array.isArray(rules) ? rules : []
+}
+
+const handleHeaderBindingsChange = (bindings) => {
+  headerBindings.value = Array.isArray(bindings) ? bindings : []
 }
 
 const handleValidationChange = (isValid) => {

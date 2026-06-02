@@ -20,6 +20,7 @@ REQUIRED_LITERALS = [
     'run --rm --no-deps backend-api alembic history',
     'run --rm --no-deps backend-api alembic upgrade heads',
     'run --rm --no-deps backend-api python3 /app/scripts/bootstrap_production.py',
+    'run --rm --no-deps backend-api python3 /app/scripts/verify_system_role_integrity.py --repair',
     'run --rm --no-deps backend-api python3 /app/scripts/bootstrap_postgresql_dashboard.py',
     'up -d --no-build backend-api celery-worker celery-beat',
     'up -d --no-build frontend',
@@ -28,6 +29,7 @@ REQUIRED_LITERALS = [
 
 REQUIRED_BACKEND_IMAGE_FILES = [
     "scripts/bootstrap_production.py",
+    "scripts/verify_system_role_integrity.py",
     "scripts/bootstrap_postgresql_dashboard.py",
 ]
 

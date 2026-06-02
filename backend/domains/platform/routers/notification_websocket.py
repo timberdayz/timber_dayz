@@ -405,11 +405,12 @@ async def verify_websocket_token(websocket: WebSocket, token: Optional[str]) -> 
     Returns:
         tuple: (user_id, error_message)
     """
-    if not token:
+    resolved_token = token or websocket.cookies.get("access_token")
+    if not resolved_token:
         return None, "Token required"
     
     try:
-        payload = auth_service.verify_token(token)
+        payload = auth_service.verify_token(resolved_token)
         user_id = payload.get("user_id")
         
         if not user_id:
@@ -427,7 +428,7 @@ async def verify_websocket_token(websocket: WebSocket, token: Optional[str]) -> 
 @router.websocket("/ws")
 async def websocket_notifications(
     websocket: WebSocket,
-    token: str = Query(..., description="JWT认证Token")
+    token: Optional[str] = Query(None, description="JWT认证Token")
 ):
     """
     通知 WebSocket 端点
@@ -443,12 +444,17 @@ async def websocket_notifications(
     # v4.19.0 P0安全要求:Origin 验证
     origin = websocket.headers.get("origin")
     if not validate_origin(origin):
-        logger.warning(f"[WS] Invalid origin rejected: {origin}")
+        logger.warning(
+            f"[WS] Invalid origin rejected: origin={origin}, ip={websocket.client.host if websocket.client else 'unknown'}"
+        )
         await websocket.close(code=WS_CLOSE_INVALID_ORIGIN, reason="Invalid origin")
         return
     
     # v4.19.0 P0安全要求:WSS 强制要求(生产环境)
     if not require_wss(websocket):
+        logger.warning(
+            f"[WS] Non-WSS connection rejected: origin={origin}, ip={websocket.client.host if websocket.client else 'unknown'}"
+        )
         await websocket.close(code=1008, reason="WSS required in production")
         return
     
@@ -456,6 +462,14 @@ async def websocket_notifications(
     user_id, error_msg = await verify_websocket_token(websocket, token)
     if not user_id:
         close_code = WS_CLOSE_TOKEN_EXPIRED if "expired" in error_msg.lower() else WS_ERROR_INVALID_TOKEN
+        logger.warning(
+            "[WS] Auth rejected: user_id=%s ip=%s origin=%s close_code=%s reason=%s",
+            None,
+            websocket.client.host if websocket.client else "unknown",
+            origin,
+            close_code,
+            error_msg,
+        )
         await websocket.close(code=close_code, reason=error_msg)
         return
     
@@ -466,6 +480,14 @@ async def websocket_notifications(
     success, error_msg = await connection_manager.connect(websocket, user_id, ip_address)
     if not success:
         close_code = WS_CLOSE_RATE_LIMIT if "Rate limit" in error_msg else WS_CLOSE_CONNECTION_LIMIT
+        logger.warning(
+            "[WS] Connection rejected: user_id=%s ip=%s origin=%s close_code=%s reason=%s",
+            user_id,
+            ip_address,
+            origin,
+            close_code,
+            error_msg,
+        )
         await websocket.close(code=close_code, reason=error_msg)
         return
     
@@ -523,6 +545,12 @@ async def websocket_notifications(
                 break
     
     finally:
+        logger.info(
+            "[WS] Connection closed: user_id=%s ip=%s origin=%s",
+            user_id,
+            ip_address,
+            origin,
+        )
         connection_manager.disconnect(websocket, user_id)
 
 
@@ -606,4 +634,3 @@ def init_websocket_cleanup():
     """
     # 这个函数保留用于向后兼容,但实际启动应该在 lifespan 中
     logger.debug("[WS] init_websocket_cleanup called (should be called from lifespan)")
-

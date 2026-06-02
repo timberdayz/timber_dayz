@@ -46,6 +46,8 @@ export const useAuthStore = defineStore('auth', () => {
         throw new Error('登录响应格式错误：缺少用户会话信息')
       }
 
+      token.value = response.access_token || ''
+      refreshToken.value = response.refresh_token || ''
       user.value = userInfo
       writePersistedAuthState(localStorage, { user_info: userInfo })
       resetAuthRecoveryState(localStorage)
@@ -90,7 +92,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   const refreshAccessToken = async () => {
     try {
-      await authApi.refreshToken()
+      const response = await authApi.refreshToken()
+      token.value = response.access_token || token.value
+      refreshToken.value = response.refresh_token || refreshToken.value
       resetAuthRecoveryState(localStorage)
       return true
     } catch (error) {
@@ -152,6 +156,8 @@ export const useAuthStore = defineStore('auth', () => {
       return
     }
 
+    token.value = ''
+    refreshToken.value = ''
     user.value = state.authUser
 
     const userStore = useUserStore()

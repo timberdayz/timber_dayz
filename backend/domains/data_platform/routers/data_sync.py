@@ -2165,12 +2165,67 @@ async def get_detailed_template_coverage(
         covered_list = []
         missing_list = []
         needs_update_list = []
+        archived_compatibility_list = []
         template_status_service = DataSyncTemplateStatusService(db)
         detailed_coverage_missing_files: list[str] = []
         detailed_coverage_error_types: dict[str, int] = {}
         
         for platform, domain, sub_domain, granularity in all_combinations:
             if not platform or not domain or not granularity:
+                continue
+            from modules.core.path_manager import to_absolute_path
+
+            current_combo_file_result = await db.execute(
+                select(CatalogFile).where(
+                    CatalogFile.platform_code == platform,
+                    CatalogFile.data_domain == domain,
+                    CatalogFile.granularity == granularity,
+                    CatalogFile.sub_domain == sub_domain,
+                    CatalogFile.status.in_(['pending', 'failed'])
+                ).order_by(
+                    case(
+                        (CatalogFile.status == 'pending', 0),
+                        (CatalogFile.status == 'failed', 1),
+                        else_=2,
+                    ),
+                    CatalogFile.first_seen_at.desc()
+                ).limit(20)
+            )
+            current_combo_files = current_combo_file_result.scalars().all()
+            valid_current_combo_files = [
+                candidate
+                for candidate in current_combo_files
+                if is_catalog_file_semantically_valid(candidate)
+                and to_absolute_path(candidate.file_path).exists()
+            ]
+            valid_pending_combo_files = [
+                candidate for candidate in valid_current_combo_files if candidate.status == 'pending'
+            ]
+
+            combo_file_candidates_result = await db.execute(
+                select(CatalogFile).where(
+                    CatalogFile.platform_code == platform,
+                    CatalogFile.data_domain == domain,
+                    CatalogFile.granularity == granularity,
+                    CatalogFile.sub_domain == sub_domain,
+                    CatalogFile.status.in_(['pending', 'failed', 'ingested'])
+                ).order_by(
+                    case(
+                        (CatalogFile.status == 'pending', 0),
+                        (CatalogFile.status == 'failed', 1),
+                        else_=2,
+                    ),
+                    CatalogFile.first_seen_at.desc()
+                ).limit(20)
+            )
+            combo_file_candidates = combo_file_candidates_result.scalars().all()
+            valid_combo_file_candidates = [
+                candidate
+                for candidate in combo_file_candidates
+                if is_catalog_file_semantically_valid(candidate)
+                and to_absolute_path(candidate.file_path).exists()
+            ]
+            if combo_file_candidates and not valid_combo_file_candidates:
                 continue
             
             # 查找模板([*] v4.18.2:添加 await)
@@ -2206,13 +2261,19 @@ async def get_detailed_template_coverage(
             )
             file_count_result = await db.execute(file_count_stmt)
             file_count = file_count_result.scalar() or 0
+            current_file_count = len(valid_current_combo_files)
+            pending_file_count = len(valid_pending_combo_files)
             
             combo_info = {
+                'family_id': ((resolve_result.get('family') or {}).get('id') if resolve_result else None),
                 'platform': platform,
                 'domain': domain,
                 'sub_domain': sub_domain or 'N/A',
                 'granularity': granularity,
                 'file_count': file_count,
+                'historical_file_count': file_count,
+                'current_file_count': current_file_count,
+                'pending_file_count': pending_file_count,
                 'governance_status': resolve_result.get('governance_status', 'missing_family')
             }
             
@@ -2225,23 +2286,19 @@ async def get_detailed_template_coverage(
                 
                 # [*] 获取该组合的一个示例文件(优先pending,其次failed,最后ingested)
                 # [*] v4.18.2:使用 await
-                sample_file_result = await db.execute(
-                    select(CatalogFile).where(
-                        CatalogFile.platform_code == platform,
-                        CatalogFile.data_domain == domain,
-                        CatalogFile.granularity == granularity,
-                        CatalogFile.sub_domain == sub_domain,
-                        CatalogFile.status.in_(['pending', 'failed', 'ingested'])  # [*] 包括失败待修复的文件
-                    ).order_by(
-                        case(
-                            (CatalogFile.status == 'pending', 0),
-                            (CatalogFile.status == 'failed', 1),
-                            else_=2,
-                        ),
-                        CatalogFile.first_seen_at.desc()
-                    ).limit(20)
-                )
-                sample_file_candidates = sample_file_result.scalars().all()
+                sample_file_candidates = [
+                    *valid_current_combo_files,
+                    *[
+                        candidate
+                        for candidate in valid_combo_file_candidates
+                        if candidate not in valid_current_combo_files
+                    ],
+                    *[
+                        candidate
+                        for candidate in combo_file_candidates
+                        if candidate not in valid_combo_file_candidates
+                    ],
+                ]
                 sample_file = next(
                     (
                         candidate
@@ -2250,6 +2307,13 @@ async def get_detailed_template_coverage(
                     ),
                     None,
                 )
+                if sample_file:
+                    from modules.core.path_manager import to_absolute_path
+
+                    sample_path = to_absolute_path(sample_file.file_path)
+                    if not sample_path.exists():
+                        detailed_coverage_missing_files.append(str(getattr(sample_file, "file_path", "")))
+                        sample_file = None
                 sample_file_info = {
                     'sample_file_id': sample_file.id if sample_file else None,
                     'sample_file_name': sample_file.file_name if sample_file else None,
@@ -2309,7 +2373,7 @@ async def get_detailed_template_coverage(
                                 detailed_coverage_error_types.get(error_type, 0) + 1
                             )
                 
-                covered_list.append({
+                covered_row = {
                     **combo_info,
                     **sample_file_info,
                     'template_id': template.id,
@@ -2320,7 +2384,13 @@ async def get_detailed_template_coverage(
                     'update_reason': update_reason,
                     'semantic_match': semantic_match,
                     'shadow_compare': shadow_compare,
-                })
+                }
+
+                if combo_info['current_file_count'] == 0:
+                    archived_compatibility_list.append(covered_row)
+                    continue
+
+                covered_list.append(covered_row)
                 
                 if needs_update:
                     needs_update_list.append({
@@ -2332,6 +2402,12 @@ async def get_detailed_template_coverage(
                         'shadow_compare': shadow_compare,
                     })
             else:
+                if combo_info['current_file_count'] == 0:
+                    archived_compatibility_list.append({
+                        **combo_info,
+                        'shadow_compare': resolve_result.get('shadow_compare'),
+                    })
+                    continue
                 missing_list.append({
                     **combo_info,
                     'shadow_compare': resolve_result.get('shadow_compare'),
@@ -2341,22 +2417,52 @@ async def get_detailed_template_coverage(
         # [*] v4.15.0修复:覆盖率应该基于所有模板,而不是基于文件组合
         # total_combinations = 所有模板数 + 缺少模板的文件组合数
         total_combinations = len(template_combinations) + len(missing_list)
-        covered_count = len(covered_list)
-        missing_count = len(missing_list)
-        needs_update_count = len(needs_update_list)
-        missing_variant_count = sum(
-            1 for item in missing_list if item.get("governance_status") == "missing_variant"
-        )
+        archived_compatibility_list = locals().get('archived_compatibility_list', [])
+        current_covered_list = [
+            item for item in covered_list
+            if item.get("governance_status") in {"ready", "non_breaking_drift"}
+        ]
+        current_missing_list = [
+            item for item in missing_list
+            if item.get("governance_status") == "missing_family"
+        ]
+        missing_variant_rows = [
+            {
+                **item,
+                "update_reason": item.get("update_reason") or "缺少当前有效变体",
+            }
+            for item in covered_list
+            if item.get("governance_status") == "missing_variant"
+            and (item.get("current_file_count") or 0) > 0
+            and item.get("sample_file_id")
+        ]
+        breaking_drift_rows = [
+            item for item in needs_update_list
+            if item.get("governance_status") == "breaking_drift"
+        ]
+        current_needs_update_list = [*breaking_drift_rows, *missing_variant_rows]
+        archived_compatibility_list = [
+            *archived_compatibility_list,
+            *[
+                item for item in covered_list
+                if item.get("governance_status") not in {"ready", "non_breaking_drift", "missing_variant", "breaking_drift"}
+            ],
+        ]
+
+        covered_count = len(current_covered_list)
+        missing_count = len(current_missing_list)
+        needs_update_count = len(breaking_drift_rows)
+        missing_variant_count = len(missing_variant_rows)
         breaking_drift_count = sum(
-            1 for item in covered_list if item.get("governance_status") == "breaking_drift"
+            1 for item in current_needs_update_list if item.get("governance_status") == "breaking_drift"
         )
         non_breaking_drift_count = sum(
-            1 for item in covered_list if item.get("governance_status") == "non_breaking_drift"
+            1 for item in current_covered_list if item.get("governance_status") == "non_breaking_drift"
         )
         
         # [*] v4.15.0修复:覆盖率 = 有模板的组合数 / 总组合数
         # 总组合数 = 所有模板数(已覆盖)+ 缺少模板的文件组合数(未覆盖)
-        coverage_percentage = (len(template_combinations) / total_combinations * 100) if total_combinations > 0 else 0
+        coverage_percentage = (covered_count / total_combinations * 100) if total_combinations > 0 else 0
         
         if detailed_coverage_missing_files:
             preview = ", ".join(detailed_coverage_missing_files[:3])
@@ -2382,6 +2488,10 @@ async def get_detailed_template_coverage(
                     'non_breaking_drift_count': non_breaking_drift_count,
                     'coverage_percentage': round(coverage_percentage, 1)
                 },
+                'current_covered': current_covered_list,
+                'current_missing': current_missing_list,
+                'current_needs_update': current_needs_update_list,
+                'archived_compatibility': archived_compatibility_list,
                 'covered': covered_list,
                 'missing': missing_list,
                 'needs_update': needs_update_list

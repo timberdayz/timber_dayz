@@ -2,10 +2,10 @@
   <div class="template-builder-workspace">
     <el-card class="file-selection-card" style="margin-bottom: 20px;">
       <template #header>
-        <span>📁 文件选择</span>
+        <span>文件选择</span>
       </template>
       <el-form :inline="true" :model="fileFilters">
-        <el-form-item label="选择平台">
+        <el-form-item label="平台">
           <el-select v-model="fileFilters.platform" placeholder="全部平台" clearable style="width: 150px;" @change="$emit('platform-change')">
             <el-option
               v-for="platform in availablePlatforms"
@@ -15,7 +15,7 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="选择数据域">
+        <el-form-item label="数据域">
           <el-select v-model="fileFilters.domain" placeholder="全部数据域" clearable style="width: 150px;" @change="$emit('domain-change')">
             <el-option label="订单" value="orders" />
             <el-option label="产品" value="products" />
@@ -24,26 +24,27 @@
             <el-option label="库存" value="inventory" />
           </el-select>
         </el-form-item>
-        <el-form-item label="选择子类型" v-if="availableSubDomains.length > 0">
+        <el-form-item v-if="availableSubDomains.length > 0" label="子类型">
           <el-select v-model="fileFilters.sub_domain" placeholder="全部子类型" clearable style="width: 200px;">
             <el-option v-for="sub in availableSubDomains" :key="sub.value" :label="sub.label" :value="sub.value" />
           </el-select>
-          <el-tooltip content="子类型用于区分相同数据域下的不同数据来源" placement="top">
-            <el-icon style="margin-left: 5px; color: #909399;"><QuestionFilled /></el-icon>
-          </el-tooltip>
         </el-form-item>
-        <el-form-item label="选择粒度">
+        <el-form-item label="粒度">
           <el-select v-model="fileFilters.granularity" placeholder="全部粒度" clearable style="width: 150px;">
             <el-option label="日度" value="daily" />
             <el-option label="周度" value="weekly" />
             <el-option label="月度" value="monthly" />
           </el-select>
-          <el-tooltip content="时序数据:需要数据中包含日期字段" placement="top">
-            <el-icon style="margin-left: 5px; color: #909399;"><QuestionFilled /></el-icon>
-          </el-tooltip>
         </el-form-item>
-        <el-form-item label="选择文件">
-          <el-select v-model="selectedFileIdModel" placeholder="请选择文件" clearable filterable style="width: 400px;" @change="$emit('file-change', $event)">
+        <el-form-item label="文件">
+          <el-select
+            v-model="selectedFileIdModel"
+            placeholder="请选择文件"
+            clearable
+            filterable
+            style="width: 420px;"
+            @change="$emit('file-change', $event)"
+          >
             <el-option
               v-for="file in availableFiles"
               :key="file.id"
@@ -57,7 +58,7 @@
 
     <el-card v-if="selectedFileId" class="file-info-card" style="margin-bottom: 20px;">
       <template #header>
-        <span>📋 文件详情</span>
+        <span>文件详情</span>
       </template>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="文件名">
@@ -75,52 +76,34 @@
         <el-descriptions-item label="子类型">
           {{ fileInfo.sub_domain || 'N/A' }}
         </el-descriptions-item>
-        <el-descriptions-item label="可用模板">
-          <el-tag v-if="fileInfo.has_template" type="success" size="small">
-            <el-icon><Check /></el-icon>
-            有模板 ({{ fileInfo.template_name }})
-          </el-tag>
-          <el-tag v-else type="warning" size="small">
-            <el-icon><Warning /></el-icon>
-            无可用模板
-          </el-tag>
+        <el-descriptions-item label="模板状态">
+          <el-tag v-if="fileInfo.has_template" type="success" size="small">有模板</el-tag>
+          <el-tag v-else type="warning" size="small">无可用模板</el-tag>
         </el-descriptions-item>
       </el-descriptions>
     </el-card>
 
     <el-card v-if="selectedFileId" class="preview-card" style="margin-bottom: 20px;">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>📊 数据预览 ({{ previewData.length }} 行 × {{ headerColumns.length }} 列)</span>
-          <div>
+        <div class="template-builder-workspace__header">
+          <span>数据预览 ({{ previewData.length }} 行 × {{ headerColumns.length }} 列)</span>
+          <div class="template-builder-workspace__actions">
             <el-input-number
               v-model="headerRowModel"
               :min="0"
               :max="10"
               :step="1"
               controls-position="right"
-              style="width: 150px; margin-right: 10px;"
+              style="width: 150px;"
             />
-            <span style="margin-right: 10px;">表头行 (0=Excel第1行)</span>
-            <el-button type="primary" @click="$emit('preview')" :loading="loadingPreview">
-              <el-icon><View /></el-icon>
-              预览数据
-            </el-button>
-            <el-button v-if="previewData.length > 0" @click="$emit('repreview')" :loading="loadingPreview">
-              <el-icon><Refresh /></el-icon>
-              重新预览
-            </el-button>
+            <span class="template-builder-workspace__hint">表头行 (0 = Excel 第 1 行)</span>
+            <el-button type="primary" :loading="loadingPreview" @click="$emit('preview')">预览数据</el-button>
+            <el-button v-if="previewData.length > 0" :loading="loadingPreview" @click="$emit('repreview')">重新预览</el-button>
           </div>
         </div>
       </template>
       <div v-if="previewData.length > 0" class="preview-table-container">
-        <el-table
-          :data="previewData"
-          stripe
-          border
-          size="small"
-          style="width: max-content; min-width: 100%"
-        >
+        <el-table :data="previewData" stripe border size="small" style="width: max-content; min-width: 100%">
           <el-table-column
             v-for="(column, index) in headerColumns"
             :key="index"
@@ -138,27 +121,102 @@
 
     <el-card v-if="headerColumns.length > 0" class="header-columns-card" style="margin-bottom: 20px;">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>📋 原始表头字段列表 ({{ headerColumns.length }} 个字段)</span>
-          <el-button type="primary" @click="$emit('save-template')" :loading="savingTemplate" :disabled="headerColumns.length === 0 || deduplicationFields.length === 0">
-            <el-icon><Document /></el-icon>
+        <div class="template-builder-workspace__header">
+          <span>原始表头字段列表 ({{ headerColumns.length }} 个字段)</span>
+          <el-button
+            type="primary"
+            :loading="savingTemplate"
+            :disabled="headerColumns.length === 0 || deduplicationFields.length === 0"
+            @click="$emit('save-template')"
+          >
             保存为模板
           </el-button>
         </div>
       </template>
       <el-table :data="headerColumnsWithSamples" stripe border>
         <el-table-column label="序号" type="index" width="60" align="center" />
-        <el-table-column label="原始表头字段" min-width="200">
+        <el-table-column label="原始表头字段" min-width="220">
           <template #default="{ row }">
-            <div style="font-weight: bold; color: #303133;">{{ row.field }}</div>
+            <div class="template-builder-workspace__field-name">{{ row.field }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="示例数据" min-width="200">
+        <el-table-column label="示例数据" min-width="220">
           <template #default="{ row }">
-            <div v-if="row.sample" style="font-size: 12px; color: #909399; font-style: italic; padding: 4px 8px; background: #f5f7fa; border-radius: 4px;">
-              {{ row.sample }}
+            <div v-if="row.sample" class="template-builder-workspace__sample">{{ row.sample }}</div>
+            <span v-else class="template-builder-workspace__muted">暂无数据</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card v-if="headerColumns.length > 0" class="semantic-bindings-card" style="margin-bottom: 20px;">
+      <template #header>
+        <div class="template-builder-workspace__header">
+          <span>语义核心字段确认</span>
+          <span class="template-builder-workspace__muted">
+            系统会先自动推断语义字段；如判断不准，请在这里手工修正。
+          </span>
+        </div>
+      </template>
+
+      <div class="semantic-summary">
+        <el-alert type="info" :closable="false" show-icon>
+          <template #title>
+            核心字段决定去重逻辑。建议优先确认 `order_id / product_id / platform_sku / sku_id / shop_id` 是否映射正确。
+          </template>
+        </el-alert>
+      </div>
+
+      <el-table :data="semanticBindingRows" stripe border>
+        <el-table-column label="源字段" min-width="180">
+          <template #default="{ row }">
+            <div class="template-builder-workspace__field-name">{{ row.raw_name }}</div>
+            <div v-if="row.sample" class="template-builder-workspace__sample">{{ row.sample }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="语义字段" min-width="240">
+          <template #default="{ row }">
+            <el-select
+              :model-value="row.semantic_key"
+              clearable
+              filterable
+              placeholder="请选择语义字段"
+              style="width: 100%;"
+              @change="handleSemanticKeyChange(row.raw_name, $event)"
+            >
+              <el-option
+                v-for="option in semanticFieldOptions"
+                :key="option.value || '__none__'"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="中文说明" min-width="260">
+          <template #default="{ row }">
+            <div class="template-builder-workspace__field-name">
+              {{ row.meta?.label || '非语义核心字段' }}
             </div>
-            <span v-else style="color: #c0c4cc;">暂无数据</span>
+            <div class="template-builder-workspace__description">
+              {{ row.meta?.description || '该字段仅保留原始值，不参与语义去重。' }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="常见源字段示例" min-width="260">
+          <template #default="{ row }">
+            <div v-if="row.meta?.aliases?.length" class="template-builder-workspace__tags">
+              <el-tag v-for="alias in row.meta.aliases" :key="alias" size="small">{{ alias }}</el-tag>
+            </div>
+            <span v-else class="template-builder-workspace__muted">无</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="规则" width="150">
+          <template #default="{ row }">
+            <div class="template-builder-workspace__rules">
+              <el-tag v-if="row.required" size="small" type="danger">必需</el-tag>
+              <el-tag v-if="row.hash_participates" size="small" type="success">参与去重</el-tag>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -166,14 +224,14 @@
 
     <el-card v-if="headerColumns.length > 0" class="field-parse-rules-card" style="margin-bottom: 20px;">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="template-builder-workspace__header">
           <span>日期解析规则（可选但建议配置）</span>
           <el-button size="small" @click="addFieldParseRule">新增规则</el-button>
         </div>
       </template>
       <el-empty
         v-if="localFieldParseRules.length === 0"
-        description="如模板需要 metric_date，请在这里声明来源列和日期格式"
+        description="如模板需要 metric_date，请在这里声明来源列和日期格式。"
         :image-size="80"
       />
       <div v-else class="field-parse-rules-list">
@@ -243,71 +301,33 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Check, Document, QuestionFilled, Refresh, View, Warning } from '@element-plus/icons-vue'
+import { Check, Document, Refresh, View, Warning } from '@element-plus/icons-vue'
 
 import DeduplicationFieldsSelector from '@/components/DeduplicationFieldsSelector.vue'
+import {
+  SEMANTIC_FIELD_OPTIONS,
+  getSemanticFieldMeta,
+  inferHeaderBindings,
+  updateHeaderBindingSemantic,
+} from '@/domains/data_platform/utils/headerBindings'
 
 const props = defineProps({
-  fileFilters: {
-    type: Object,
-    required: true,
-  },
-  availablePlatforms: {
-    type: Array,
-    default: () => [],
-  },
-  availableSubDomains: {
-    type: Array,
-    default: () => [],
-  },
-  getPlatformLabel: {
-    type: Function,
-    default: value => value ?? '',
-  },
-  availableFiles: {
-    type: Array,
-    default: () => [],
-  },
-  selectedFileId: {
-    type: [Number, String, null],
-    default: null,
-  },
-  fileInfo: {
-    type: Object,
-    default: () => ({}),
-  },
-  headerRow: {
-    type: Number,
-    default: 0,
-  },
-  previewData: {
-    type: Array,
-    default: () => [],
-  },
-  headerColumns: {
-    type: Array,
-    default: () => [],
-  },
-  headerColumnsWithSamples: {
-    type: Array,
-    default: () => [],
-  },
-  loadingPreview: {
-    type: Boolean,
-    default: false,
-  },
-  savingTemplate: {
-    type: Boolean,
-    default: false,
-  },
-  deduplicationFields: {
-    type: Array,
-    default: () => [],
-  },
-  fieldParseRules: {
-    type: Array,
-    default: () => [],
-  },
+  fileFilters: { type: Object, required: true },
+  availablePlatforms: { type: Array, default: () => [] },
+  availableSubDomains: { type: Array, default: () => [] },
+  getPlatformLabel: { type: Function, default: value => value ?? '' },
+  availableFiles: { type: Array, default: () => [] },
+  selectedFileId: { type: [Number, String, null], default: null },
+  fileInfo: { type: Object, default: () => ({}) },
+  headerRow: { type: Number, default: 0 },
+  previewData: { type: Array, default: () => [] },
+  headerColumns: { type: Array, default: () => [] },
+  headerColumnsWithSamples: { type: Array, default: () => [] },
+  loadingPreview: { type: Boolean, default: false },
+  savingTemplate: { type: Boolean, default: false },
+  deduplicationFields: { type: Array, default: () => [] },
+  fieldParseRules: { type: Array, default: () => [] },
+  headerBindings: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
@@ -319,6 +339,7 @@ const emit = defineEmits([
   'save-template',
   'deduplication-fields-change',
   'field-parse-rules-change',
+  'header-bindings-change',
   'validation-change',
   'update:selectedFileId',
   'update:headerRow',
@@ -335,16 +356,58 @@ const headerRowModel = computed({
 })
 
 const localFieldParseRules = ref([])
+const localHeaderBindings = ref([])
+
+const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
+
+const sampleDataLookup = computed(() =>
+  Object.fromEntries((props.headerColumnsWithSamples || []).map(item => [item.field, item.sample || null]))
+)
+
+const semanticBindingRows = computed(() =>
+  localHeaderBindings.value.map((binding) => ({
+    ...binding,
+    meta: getSemanticFieldMeta(binding.semantic_key),
+    sample: sampleDataLookup.value[binding.raw_name] || null,
+  }))
+)
 
 watch(
   () => props.fieldParseRules,
-  value => {
+  (value) => {
     localFieldParseRules.value = Array.isArray(value)
       ? value.map(rule => ({ strict: true, ...rule }))
       : []
   },
   { immediate: true, deep: true }
 )
+
+watch(
+  [() => props.headerBindings, () => props.headerColumns, sampleDataLookup],
+  ([bindings, headerColumns, sampleLookup]) => {
+    if (Array.isArray(bindings) && bindings.length > 0) {
+      localHeaderBindings.value = bindings.map(item => ({ ...item }))
+      return
+    }
+    localHeaderBindings.value = inferHeaderBindings({
+      headerColumns,
+      sampleData: sampleLookup,
+    })
+  },
+  { immediate: true, deep: true }
+)
+
+watch(
+  localHeaderBindings,
+  (value) => {
+    emit('header-bindings-change', value.map(item => ({ ...item })))
+  },
+  { deep: true }
+)
+
+function handleSemanticKeyChange(rawName, semanticKey) {
+  localHeaderBindings.value = updateHeaderBindingSemantic(localHeaderBindings.value, rawName, semanticKey)
+}
 
 function emitFieldParseRulesChange() {
   emit(
@@ -378,6 +441,54 @@ function removeFieldParseRule(index) {
 </script>
 
 <style scoped>
+.template-builder-workspace__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.template-builder-workspace__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.template-builder-workspace__hint,
+.template-builder-workspace__muted,
+.template-builder-workspace__description {
+  color: #909399;
+  font-size: 12px;
+}
+
+.template-builder-workspace__field-name {
+  font-weight: 600;
+  color: #303133;
+}
+
+.template-builder-workspace__sample {
+  font-size: 12px;
+  color: #606266;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.template-builder-workspace__tags,
+.template-builder-workspace__rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.semantic-summary {
+  margin-bottom: 16px;
+}
+
 .field-parse-rules-list {
   display: flex;
   flex-direction: column;

@@ -218,9 +218,10 @@ async def test_file_list_and_governance_share_alias_only_and_update_required_sta
     assert coverage["summary"]["needs_update_count"] == 1
     assert coverage["summary"]["breaking_drift_count"] == 1
     assert coverage["summary"]["non_breaking_drift_count"] == 1
-    assert len(coverage["needs_update"]) == 1
-    assert coverage["needs_update"][0]["sample_file_name"] == "tiktok_orders_drift.xlsx"
-    assert coverage["covered"][0]["template_status"] in {"alias_only", "update_required"}
+    assert len(coverage["current_needs_update"]) == 1
+    assert coverage["current_needs_update"][0]["sample_file_name"] == "tiktok_orders_drift.xlsx"
+    assert all(item["governance_status"] != "breaking_drift" for item in coverage["current_covered"])
+    assert {item["sample_file_name"] for item in coverage["current_covered"]} == {"tiktok_orders_alias.xlsx"}
 
 
 @pytest.mark.asyncio

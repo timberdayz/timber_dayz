@@ -15,8 +15,11 @@ TemplateFieldParseRuleRangePick = Literal["start", "end"]
 class TemplateHeaderBinding(BaseModel):
     raw_name: str = Field(..., description="Physical source column name")
     display_name: Optional[str] = Field(None, description="Human-readable semantic label")
+    semantic_key: Optional[str] = Field(None, description="Stable semantic identity key such as order_id")
     semantic_role: Optional[str] = Field(None, description="Semantic role such as metric_date")
     aliases: List[str] = Field(default_factory=list, description="Alternative labels for matching")
+    required: Optional[bool] = Field(None, description="Whether this semantic binding is required for sync")
+    hash_participates: Optional[bool] = Field(None, description="Whether this binding participates in data_hash")
     position: Optional[int] = Field(None, description="0-based column position")
     sample_type: Optional[str] = Field(None, description="Sample-inferred type")
     confidence: Optional[float] = Field(None, description="Inference confidence")
@@ -98,6 +101,8 @@ class TemplateContextSummary(BaseModel):
     status: Optional[str] = None
     field_count: int
     deduplication_fields: List[str] = Field(default_factory=list)
+    required_semantic_keys: List[str] = Field(default_factory=list)
+    hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
 
@@ -158,6 +163,8 @@ class TemplateUpdateContextData(BaseModel):
     existing_deduplication_fields_available: List[str] = Field(default_factory=list)
     existing_deduplication_fields_missing: List[str] = Field(default_factory=list)
     recommended_deduplication_fields: List[str] = Field(default_factory=list)
+    required_semantic_keys: List[str] = Field(default_factory=list)
+    hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     update_semantics: TemplateSaveOperation = "new_version"
     recommended_save_mode: TemplateSaveMode = "new_version"
 
@@ -179,6 +186,8 @@ class TemplateVariantCreateContextData(BaseModel):
     sample_data: Dict[str, Any] = Field(default_factory=dict)
     preview_data: List[Dict[str, Any]] = Field(default_factory=list)
     current_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    required_semantic_keys: List[str] = Field(default_factory=list)
+    hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     recommended_variant_key: str = ""
     recommended_parse_profile: Dict[str, Any] = Field(default_factory=dict)
 
@@ -238,8 +247,12 @@ class TemplateFamilyListItem(BaseModel):
     sub_domain: Optional[str] = None
     display_name: Optional[str] = None
     governance_status: str = "ready"
+    display_governance_status: str = "ready"
     variant_count: int = 0
     file_count: int = 0
+    current_file_count: int = 0
+    pending_file_count: int = 0
+    historical_file_count: int = 0
     active_template_id: Optional[int] = None
     sample_file_id: Optional[int] = None
     sample_file_name: Optional[str] = None
@@ -263,6 +276,8 @@ class TemplateVersionListItem(BaseModel):
     status: str
     template_name: Optional[str] = None
     deduplication_fields: List[str] = Field(default_factory=list)
+    required_semantic_keys: List[str] = Field(default_factory=list)
+    hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     notes: Optional[str] = None
     variant_count: int = 0
@@ -331,6 +346,9 @@ class TemplateResolveData(BaseModel):
     family: Optional[TemplateFamilyListItem] = None
     active_version: Optional[TemplateVersionListItem] = None
     variant: Optional[TemplateVariantListItem] = None
+    semantic_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    required_semantic_keys: List[str] = Field(default_factory=list)
+    hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     shadow_compare: TemplateResolveShadowCompare
 
 

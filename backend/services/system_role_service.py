@@ -79,31 +79,43 @@ DEFAULT_SYSTEM_ROLES = {
 
 async def ensure_system_roles(db: AsyncSession) -> list[str]:
     result = await db.execute(select(DimRole))
-    existing_codes = {
-        role.role_code
-        for role in result.scalars().all()
-        if getattr(role, "role_code", None)
-    }
+    existing_roles = [
+        role for role in result.scalars().all() if getattr(role, "role_code", None)
+    ]
+    existing_by_code = {role.role_code: role for role in existing_roles}
 
-    created_codes: list[str] = []
+    touched_codes: list[str] = []
     for role_code, spec in DEFAULT_SYSTEM_ROLES.items():
-        if role_code in existing_codes:
+        existing_role = existing_by_code.get(role_code)
+        if existing_role is None:
+            db.add(
+                DimRole(
+                    role_name=spec["role_name"],
+                    role_code=role_code,
+                    description=spec["description"],
+                    permissions=json.dumps(spec["permissions"], ensure_ascii=False),
+                    data_scope=spec["data_scope"],
+                    is_active=True,
+                    is_system=True,
+                )
+            )
+            touched_codes.append(role_code)
             continue
 
-        db.add(
-            DimRole(
-                role_name=spec["role_name"],
-                role_code=role_code,
-                description=spec["description"],
-                permissions=json.dumps(spec["permissions"], ensure_ascii=False),
-                data_scope=spec["data_scope"],
-                is_active=True,
-                is_system=True,
-            )
-        )
-        created_codes.append(role_code)
+        current_permissions = getattr(existing_role, "permissions", None) or ""
+        needs_permission_repair = current_permissions in ("", "[]", "null", "None", None)
+        if needs_permission_repair:
+            existing_role.permissions = json.dumps(spec["permissions"], ensure_ascii=False)
+            if not getattr(existing_role, "role_name", None):
+                existing_role.role_name = spec["role_name"]
+            if not getattr(existing_role, "description", None):
+                existing_role.description = spec["description"]
+            if not getattr(existing_role, "data_scope", None):
+                existing_role.data_scope = spec["data_scope"]
+            existing_role.is_system = True
+            touched_codes.append(role_code)
 
-    if created_codes:
+    if touched_codes:
         await db.commit()
 
-    return created_codes
+    return touched_codes

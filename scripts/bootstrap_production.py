@@ -17,6 +17,7 @@
 import sys
 import os
 import asyncio
+import json
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
@@ -28,6 +29,7 @@ from sqlalchemy import select, or_, text
 from backend.models.database import AsyncSessionLocal
 from modules.core.db import DimUser, DimRole
 from backend.services.auth_service import auth_service
+from backend.services.system_role_service import DEFAULT_SYSTEM_ROLES
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -191,16 +193,28 @@ async def create_baseline_roles(db: AsyncSession):
         existing_role = result.scalar_one_or_none()
         
         if existing_role:
+            current_permissions = getattr(existing_role, "permissions", None) or ""
+            if current_permissions in ("", "[]", "null", "None"):
+                spec = DEFAULT_SYSTEM_ROLES.get(role_code)
+                if spec:
+                    existing_role.permissions = json.dumps(spec["permissions"], ensure_ascii=False)
+                    existing_role.data_scope = spec["data_scope"]
+                    existing_role.is_system = spec.get("is_system", existing_role.is_system)
+                    logger.info(f"[INFO] Repaired empty permissions for role '{role_code}'")
+                    created_count += 1
+                    continue
             logger.info(f"[INFO] Role '{role_code}' already exists, skipping")
             skipped_count += 1
             continue
         
         # 创建新角色
+        spec = DEFAULT_SYSTEM_ROLES.get(role_code)
         new_role = DimRole(
             role_code=role_code,
             role_name=role_data["role_name"],
             description=role_data["description"],
-            permissions="[]",  # 默认空权限列表
+            permissions=json.dumps((spec or {}).get("permissions", []), ensure_ascii=False),
+            data_scope=(spec or {}).get("data_scope", "all"),
             is_active=True,
             is_system=role_data["is_system"]
         )

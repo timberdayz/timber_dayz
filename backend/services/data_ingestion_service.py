@@ -304,6 +304,7 @@ class DataIngestionService:
         extract_images: bool = True,
         header_columns: Optional[List[str]] = None,  # [*] v4.6.0 DSS架构:原始表头字段列表
         deduplication_fields: Optional[List[str]] = None,  # [*] v4.14.0新增:核心去重字段列表
+        header_bindings: Optional[List[Dict[str, Any]]] = None,
         sub_domain: Optional[str] = None,  # [*] v4.14.0新增:子类型
         template_id: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -529,6 +530,7 @@ class DataIngestionService:
                     if file_record:
                         setattr(raw_importer, "file_date_from", getattr(file_record, "date_from", None))
                         setattr(raw_importer, "file_date_to", getattr(file_record, "date_to", None))
+                    setattr(raw_importer, "header_bindings", header_bindings or [])
                     
                     # 获取granularity(从file_record或默认daily)
                     granularity = getattr(file_record, 'granularity', None) or "daily"
@@ -538,7 +540,8 @@ class DataIngestionService:
                     final_deduplication_fields = get_deduplication_fields(
                         data_domain=domain,
                         template_fields=deduplication_fields,
-                        sub_domain=sub_domain
+                        sub_domain=sub_domain,
+                        header_bindings=getattr(raw_importer, "header_bindings", None),
                     )
                     
                     if final_deduplication_fields:
@@ -556,7 +559,8 @@ class DataIngestionService:
                     logger.info(f"[Ingest] [DSS] 开始计算data_hash: {len(valid_rows)}行")
                     data_hashes = dedup_service.batch_calculate_data_hash(
                         valid_rows,
-                        deduplication_fields=final_deduplication_fields
+                        deduplication_fields=final_deduplication_fields,
+                        header_bindings=getattr(raw_importer, "header_bindings", None),
                     )
                     logger.info(f"[Ingest] [DSS] data_hash计算完成: {len(data_hashes)}个哈希")
                     

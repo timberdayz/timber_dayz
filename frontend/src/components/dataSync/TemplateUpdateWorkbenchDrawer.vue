@@ -50,6 +50,53 @@
       <TemplateRawPreviewPanel v-if="updateMode !== 'core-only' && previewData.length > 0" :preview-data="previewData" />
 
       <div class="template-update-workbench-drawer__section">
+        <div class="template-update-workbench-drawer__section-title">语义核心字段确认</div>
+        <div class="template-update-workbench-drawer__muted">
+          系统会自动推荐语义字段；如当前样本和主模板的字段别名不同，请在这里人工修正。
+        </div>
+        <el-table :data="semanticBindingRows" stripe border style="margin-top: 12px;">
+          <el-table-column prop="raw_name" label="源字段" min-width="180" />
+          <el-table-column label="语义字段" min-width="240">
+            <template #default="{ row }">
+              <el-select
+                :model-value="row.semantic_key"
+                clearable
+                filterable
+                placeholder="请选择语义字段"
+                style="width: 100%;"
+                @change="handleSemanticKeyChange(row.raw_name, $event)"
+              >
+                <el-option
+                  v-for="option in semanticFieldOptions"
+                  :key="option.value || '__none__'"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="中文说明" min-width="260">
+            <template #default="{ row }">
+              <div class="template-update-workbench-drawer__binding-title">
+                {{ row.meta?.label || '非语义核心字段' }}
+              </div>
+              <div class="template-update-workbench-drawer__muted">
+                {{ row.meta?.description || '该字段仅保留原始值，不参与语义去重。' }}
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="规则" width="150">
+            <template #default="{ row }">
+              <div class="template-update-workbench-drawer__tags">
+                <el-tag v-if="row.required" size="small" type="danger">必需</el-tag>
+                <el-tag v-if="row.hash_participates" size="small" type="success">参与去重</el-tag>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <div class="template-update-workbench-drawer__section">
         <div class="template-update-workbench-drawer__section-title">Selected Deduplication Fields</div>
         <div v-if="selectedDeduplicationFields.length > 0" class="template-update-workbench-drawer__tags">
           <el-tag
@@ -87,7 +134,12 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import api from '@/api'
-import { formatHeaderBindingLabel } from '@/domains/data_platform/utils/headerBindings'
+import {
+  formatHeaderBindingLabel,
+  getSemanticFieldMeta,
+  SEMANTIC_FIELD_OPTIONS,
+  updateHeaderBindingSemantic,
+} from '@/domains/data_platform/utils/headerBindings'
 
 import HeaderDiffViewer from './HeaderDiffViewer.vue'
 import TemplateChangeSummaryCard from './TemplateChangeSummaryCard.vue'
@@ -131,6 +183,8 @@ const headerSource = computed(() => workbenchContext.value?.header_source ?? 'sa
 const selectedDeduplicationFields = ref([])
 const selectedHeaderRow = ref(0)
 const reloadingContext = ref(false)
+const localHeaderBindings = ref([])
+const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
 
 const fallbackFileId = computed(() => props.context?.row?.sample_file_id ?? null)
 const currentFileId = computed(() => workbenchContext.value?.current_file?.id ?? fallbackFileId.value)
@@ -148,6 +202,9 @@ watch(
   workbenchContext,
   (next) => {
     selectedHeaderRow.value = next?.current_header_row ?? next?.template?.header_row ?? 0
+    localHeaderBindings.value = Array.isArray(next?.current_header_bindings)
+      ? next.current_header_bindings.map(item => ({ ...item }))
+      : []
   },
   { immediate: true },
 )
@@ -182,12 +239,24 @@ function handleSave() {
   emit('save', {
     deduplicationFields: [...selectedDeduplicationFields.value],
     headerRow: selectedHeaderRow.value,
+    headerBindings: localHeaderBindings.value.map(item => ({ ...item })),
   })
 }
 
 function formatFieldLabel(field) {
   return formatHeaderBindingLabel(field, currentHeaderBindings.value)
 }
+
+function handleSemanticKeyChange(rawName, semanticKey) {
+  localHeaderBindings.value = updateHeaderBindingSemantic(localHeaderBindings.value, rawName, semanticKey)
+}
+
+const semanticBindingRows = computed(() =>
+  localHeaderBindings.value.map((binding) => ({
+    ...binding,
+    meta: getSemanticFieldMeta(binding.semantic_key),
+  }))
+)
 
 async function reloadContext() {
   const templateId = templateContext.value?.id
@@ -252,6 +321,12 @@ function handleClose() {
 .template-update-workbench-drawer__section-title {
   margin-bottom: 12px;
   font-weight: 600;
+}
+
+.template-update-workbench-drawer__binding-title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 4px;
 }
 
 .template-update-workbench-drawer__tags {
