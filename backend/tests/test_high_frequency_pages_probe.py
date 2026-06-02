@@ -46,7 +46,6 @@ def test_probe_covers_expected_pages():
     assert "system_logs" in page_names
     assert "data_backup" in page_names
     assert "system_maintenance" in page_names
-    assert "account_alignment" in page_names
     assert "notification_config" in page_names
     assert "permission_management" in page_names
     assert "data_sync_templates" in page_names

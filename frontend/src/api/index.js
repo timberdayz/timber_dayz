@@ -2164,6 +2164,16 @@ export default {
     )
   },
 
+  async getShopDirectory(params = {}) {
+    const queryParams = new URLSearchParams()
+    if (params.platform_code) queryParams.append('platform_code', params.platform_code)
+    if (params.enabled !== undefined && params.enabled !== null) {
+      queryParams.append('enabled', String(params.enabled))
+    }
+    const queryString = queryParams.toString()
+    return await this._get(`/reference/shop-directory${queryString ? `?${queryString}` : ''}`)
+  },
+
   // ========== 数据同步 - 数据治理（v4.6.0新增）==========
 
   /**

@@ -147,14 +147,6 @@ PAGE_SCENARIOS = [
         ],
     },
     {
-        "name": "account_alignment",
-        "requests": [
-            {"path": "/api/account-alignment/stats"},
-            {"path": "/api/account-alignment/distinct-raw-stores"},
-            {"path": "/api/account-alignment/list-aliases"},
-        ],
-    },
-    {
         "name": "notification_config",
         "requests": [
             {"path": "/api/system/notification/smtp-config"},

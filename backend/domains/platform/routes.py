@@ -4,6 +4,7 @@ from backend.domains.platform.routers import (
     maintenance,
     notification_config,
     notifications,
+    reference,
     rbac_admin,
     rate_limit,
     rate_limit_config,
@@ -14,12 +15,25 @@ from backend.domains.platform.routers import (
     tiktokshop_oauth,
     users,
 )
+from backend.domains.collection.routers import (
+    main_accounts,
+    platform_shop_discoveries,
+    shop_account_aliases,
+    shop_accounts,
+)
 
 
 def register_platform_routes(app) -> None:
     app.include_router(system_monitoring.router, prefix="/api", tags=["系统监控"])
     app.include_router(auth.router, prefix="/api", tags=["认证管理"])
     app.include_router(users.router, prefix="/api", tags=["用户管理"])
+    app.include_router(reference.router, prefix="/api", tags=["参考目录"])
+    app.include_router(main_accounts.router, prefix="/api", tags=["主账号管理"])
+    app.include_router(shop_accounts.router, prefix="/api", tags=["店铺账号管理"])
+    app.include_router(shop_account_aliases.router, prefix="/api", tags=["店铺别名管理"])
+    app.include_router(
+        platform_shop_discoveries.router, prefix="/api", tags=["平台店铺ID发现"]
+    )
     app.include_router(rbac_admin.router, tags=["RBAC 管理"])
     app.include_router(notifications.router, prefix="/api", tags=["通知管理"])
     app.include_router(system.router, tags=["系统配置"])

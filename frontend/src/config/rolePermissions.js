@@ -22,7 +22,7 @@ export const ROLE_CONFIG = {
       'target:read', 'config:sales-targets',
       'financial-management', 'expense-management', 'finance-reports', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
-      'store-management', 'store-analytics', 'account-management', 'account-alignment',
+      'store-management', 'store-analytics', 'account-management',
       'human-resources', 'employee-management', 'my-income', 'my-follow-investment-income',
       'attendance-management', 'performance:read', 'performance:config', 'performance:export',
       'my-tasks', 'my-requests', 'approval-history', 'workflow-config',

@@ -45,7 +45,7 @@ test('no duplicate route path definitions remain', () => {
   assert.deepEqual(duplicates, [])
 })
 
-test('inventory view pages are open to admin manager operator', () => {
+test('legacy inventory routes are absent from the active router', () => {
   for (const routePath of [
     '/inventory-management',
     '/inventory-overview',
@@ -54,32 +54,29 @@ test('inventory view pages are open to admin manager operator', () => {
     '/inventory/alerts',
     '/inventory/reconciliation',
   ]) {
-    const route = findRoute(routePath)
-    assert.deepEqual(route.roles, ['admin', 'manager', 'operator'])
-    assert.equal(route.permission, 'inventory:view')
+    const route = routes.find((item) => item.path === routePath)
+    assert.equal(route, undefined)
   }
 })
 
-test('inventory dashboard pages are open to admin manager operator', () => {
+test('legacy inventory dashboard routes are absent from the active router', () => {
   for (const routePath of [
     '/inventory-health',
     '/product-quality',
   ]) {
-    const route = findRoute(routePath)
-    assert.deepEqual(route.roles, ['admin', 'manager', 'operator'])
-    assert.equal(route.permission, 'inventory-dashboard:view')
+    const route = routes.find((item) => item.path === routePath)
+    assert.equal(route, undefined)
   }
 })
 
-test('inventory operation pages remain admin only', () => {
+test('legacy inventory operation routes are absent from the active router', () => {
   for (const routePath of [
     '/inventory/adjustments',
     '/inventory/grns',
     '/inventory/opening-balances',
   ]) {
-    const route = findRoute(routePath)
-    assert.deepEqual(route.roles, ['admin'])
-    assert.equal(route.permission, 'inventory:manage')
+    const route = routes.find((item) => item.path === routePath)
+    assert.equal(route, undefined)
   }
 })
 
@@ -124,17 +121,15 @@ test('sales and store view pages remain broadly visible to operations roles', ()
   assert.deepEqual(storeAnalytics.roles, ['admin', 'manager', 'operator'])
 })
 
-test('report pages follow view-vs-operation classification', () => {
-  for (const routePath of ['/sales-reports', '/inventory-reports', '/vendor-reports']) {
-    const route = findRoute(routePath)
-    assert.deepEqual(route.roles, ['admin', 'manager', 'operator'])
+test('legacy report center routes are absent and finance reports use current route', () => {
+  for (const routePath of ['/sales-reports', '/inventory-reports', '/vendor-reports', '/finance-reports-detail', '/custom-reports']) {
+    const route = routes.find((item) => item.path === routePath)
+    assert.equal(route, undefined)
   }
 
-  const financeDetail = findRoute('/finance-reports-detail')
-  assert.deepEqual(financeDetail.roles, ['admin', 'finance'])
-
-  const customReports = findRoute('/custom-reports')
-  assert.deepEqual(customReports.roles, ['admin'])
+  const financeReports = findRoute('/finance-reports')
+  assert.deepEqual(financeReports.roles, ['admin', 'manager', 'finance'])
+  assert.equal(financeReports.permission, 'finance-reports')
 })
 
 test('hr approval and messaging pages follow personal view operation classification', () => {
