@@ -47,39 +47,6 @@ export const menuGroups = [
     ]
   },
   {
-    id: 'product-inventory',
-    title: '产品与库存',
-    icon: 'Box',
-    order: 3,
-    defaultExpanded: true,
-    items: [
-      '/inventory-management',   // 真实库存管理
-      '/inventory/opening-balances',
-      '/inventory/aging',
-      '/inventory/ledger',
-      '/inventory/adjustments',
-      '/inventory/grns',
-      '/inventory/alerts',
-      '/inventory/reconciliation',
-      '/inventory-overview',     // 库存总览
-      '/inventory-health',       // v4.9.0: 库存健康仪表盘
-      '/product-quality'         // v4.9.0: 产品质量仪表盘
-    ]
-  },
-  {
-    id: 'procurement',
-    title: '采购管理',
-    icon: 'ShoppingCart',
-    order: 4,
-    defaultExpanded: false,
-    items: [
-      '/purchase-orders',        // 采购订单（PO）
-      '/grn-management',         // 入库单（GRN）
-      '/vendor-management',      // 供应商管理
-      '/invoice-management'      // 发票管理
-    ]
-  },
-  {
     id: 'sales-analytics',
     title: '销售与分析',
     icon: 'TrendCharts',
@@ -90,7 +57,7 @@ export const menuGroups = [
       '/sales-campaign-management',  // 销售战役管理（A类数据）
       '/target-management/shop',     // 目标管理（店铺目标）
       '/customer-management',        // 客户管理
-      '/order-management'            // 订单管理
+      '/sales/order-management'      // 订单管理
       // 废弃路由（功能已合并到销售看板）：
       // '/sales-analysis', '/top-products', '/sales-trend'
     ]
@@ -121,20 +88,6 @@ export const menuGroups = [
       '/store-analytics',        // 店铺分析
       '/account-management',     // 账号管理
       '/account-alignment'       // 账号对齐
-    ]
-  },
-  {
-    id: 'reports',
-    title: '报表中心',
-    icon: 'Document',
-    order: 8,
-    defaultExpanded: false,
-    items: [
-      '/sales-reports',          // 销售报表
-      '/inventory-reports',      // 库存报表
-      '/finance-reports-detail', // 财务报表（P&L）
-      '/vendor-reports',         // 供应商报表
-      '/custom-reports'          // 自定义报表
     ]
   },
   {

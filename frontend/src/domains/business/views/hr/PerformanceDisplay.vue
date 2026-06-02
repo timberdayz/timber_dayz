@@ -301,6 +301,7 @@ import api from '@/api'
 import employeeTasksApi from '@/api/employeeTasks.js'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatPercent } from '@/utils/dataFormatter'
+import { hasScopedActionPermission } from '@/utils/actionPermissions'
 
 const props = defineProps({
   forcedGroupBy: {
@@ -442,7 +443,12 @@ const detailMetricCards = computed(() => {
   ]
 })
 
-const hasPermission = (permission) => userStore.hasPermission(permission)
+const hasPermission = (permission) =>
+  hasScopedActionPermission({
+    roles: userStore.roles || [],
+    activeRole: localStorage.getItem('activeRole') || '',
+    permission,
+  })
 
 function formatCell(v) {
   if (v == null || v === '') return '—'

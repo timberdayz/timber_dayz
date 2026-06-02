@@ -125,6 +125,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUserStore } from '@/stores/user'
+import { ROLE_CONFIG, normalizeRoleCode } from '@/config/rolePermissions'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -211,14 +212,8 @@ const accountRules = {
 
 // 方法
 const getRoleName = (role) => {
-  const roleMap = {
-    'admin': '管理员',
-    'manager': '经理',
-    'operator': '操作员',
-    'finance': '财务',
-    'inventory': '库存'
-  }
-  return roleMap[role] || '未知角色'
+  const normalizedRole = normalizeRoleCode(role)
+  return ROLE_CONFIG[normalizedRole]?.name || '未知角色'
 }
 
 const handleCommand = (command) => {
@@ -260,31 +255,9 @@ const switchAccount = (account) => {
     }
     
     // 根据角色设置权限
-    const rolePermissions = {
-      'admin': [
-        'business-overview', 'sales-analysis', 'inventory:view', 'inventory:manage', 'inventory-dashboard:view',
-        'human-resources', 'financial-management', 'store-management',
-        'system-settings', 'account-management', 'personal-settings', 'field-mapping'
-      ],
-      'manager': [
-        'business-overview', 'sales-analysis', 'inventory:view', 'inventory-dashboard:view',
-        'human-resources', 'financial-management', 'store-management',
-        'personal-settings'
-      ],
-      'operator': [
-        'business-overview', 'sales-analysis', 'inventory:view', 'inventory-dashboard:view',
-        'personal-settings'
-      ],
-      'finance': [
-        'business-overview', 'financial-management', 'personal-settings'
-      ],
-      'inventory': [
-        'business-overview', 'inventory:view', 'inventory:manage', 'inventory-dashboard:view', 'personal-settings'
-      ]
-    }
-    
-    userStore.permissions = rolePermissions[account.role] || []
-    userStore.roles = [account.role]
+    const normalizedRole = normalizeRoleCode(account.role)
+    userStore.permissions = ROLE_CONFIG[normalizedRole]?.permissions || []
+    userStore.roles = [normalizedRole]
     
     // 保存到本地存储
     localStorage.setItem('userInfo', JSON.stringify(userStore.userInfo))

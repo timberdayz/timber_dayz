@@ -524,6 +524,7 @@ import api from '@/api'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatNumber, formatPercent, formatInteger } from '@/utils/dataFormatter'
 import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
+import { hasScopedActionPermission } from '@/utils/actionPermissions'
 
 const props = defineProps({
   forcedGroupBy: {
@@ -555,33 +556,12 @@ const pageSubtitle = computed(() => {
   return '用于查看店铺/人员绩效、执行月度重算、维护绩效权重，以及录入个人绩效调整项。'
 })
 
-// 角色编码规范化（中文角色 -> 英文角色）
-const normalizeRoleCode = (role) => {
-  if (!role) return ''
-  const map = { 管理员: 'admin', 主管: 'manager', 经理: 'manager', 操作员: 'operator', 运营: 'operator', 财务: 'finance' }
-  return map[role] || role
-}
-
-// 权限检查：优先基于当前激活角色，其次回退到用户全部角色
-const hasPermission = (permission) => {
-  // 获取当前激活角色（与 SimpleAccountSwitcher 保持一致）
-  const activeRole = normalizeRoleCode(localStorage.getItem('activeRole'))
-  
-  // 管理员拥有全部绩效权限
-  if (activeRole === 'admin') return true
-  
-  // 检查用户是否具备管理员角色，即使当前未激活
-  const userRoles = (userStore.roles || []).map(normalizeRoleCode)
-  if (userRoles.includes('admin')) return true
-  
-  // 主管只能查看和导出
-  if (activeRole === 'manager') {
-    return ['performance:read', 'performance:export'].includes(permission)
-  }
-  
-  // 其他角色只保留只读权限
-  return permission === 'performance:read'
-}
+const hasPermission = (permission) =>
+  hasScopedActionPermission({
+    roles: userStore.roles || [],
+    activeRole: localStorage.getItem('activeRole') || '',
+    permission,
+  })
 
 // 绩效列表数据
 const performanceList = reactive({

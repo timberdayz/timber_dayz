@@ -170,9 +170,12 @@
                 <el-option
                   v-for="shop in availableShops"
                   :key="shop.shop_id"
-                  :label="shop.shop_name"
+                  :label="shop.option_label || shop.shop_name"
                   :value="shop.shop_id"
-                />
+                >
+                  <div>{{ shop.shop_name }}</div>
+                  <div v-if="shop.secondary_name" class="shop-option-secondary">{{ shop.secondary_name }}</div>
+                </el-option>
               </el-select>
             </template>
           </el-table-column>
@@ -418,9 +421,12 @@
           <el-option
             v-for="shop in availableShops"
             :key="shop.shop_id"
-            :label="shop.shop_name"
+            :label="shop.option_label || shop.shop_name"
             :value="shop.shop_id"
-          />
+          >
+            <div>{{ shop.shop_name }}</div>
+            <div v-if="shop.secondary_name" class="shop-option-secondary">{{ shop.secondary_name }}</div>
+          </el-option>
         </el-select>
         <el-date-picker
           v-model="selectedYear"
@@ -723,10 +729,13 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Calendar, Shop } from '@element-plus/icons-vue'
 import api from '@/api'
+import accountsApi from '@/api/accounts'
 import PageHeader from '@/components/common/PageHeader.vue'
 import employeeTasksApi from '@/api/employeeTasks.js'
+import { buildShopAccountLookup, resolveShopDisplay } from '@/utils/shopDisplay'
 
 const route = useRoute()
+let shopAccountLookup = new Map()
 
 // ==================== 公共状态 ====================
 const viewMode = ref('monthly') // monthly | shop
@@ -802,13 +811,19 @@ const formatNumber = (num) => {
 const normalizeExpenseRow = (item = {}) => {
   const marketingFee = Number(item.marketing_fee) || 0
   const aiTokenCost = Number(item.ai_token_cost) || 0
+  const displayMeta = resolveShopDisplay(item, shopAccountLookup)
   return {
     ...item,
     platform_code: item.platform_code ?? null,
     marketing_fee: marketingFee,
     ai_token_cost: aiTokenCost,
     note: item.note ?? '',
-    total_cost: Number(item.total_cost ?? item.total) || 0
+    total_cost: Number(item.total_cost ?? item.total) || 0,
+    shop_name: displayMeta.display_name,
+    secondary_name: displayMeta.secondary_name,
+    canonical_shop_name: displayMeta.canonical_name,
+    option_label: displayMeta.option_label,
+    search_text: displayMeta.search_text
   }
 }
 
@@ -858,10 +873,25 @@ const tryCompleteTaskFromExpenseRow = async (row, yearMonthOverride = '') => {
 // 加载店铺列表
 const loadShops = async () => {
   try {
-    const data = await api.get('/expenses/shops')
-    availableShops.value = Array.isArray(data)
-      ? data
-      : (data?.data ?? data ?? [])
+    const [expenseShops, shopAccounts] = await Promise.all([
+      api.get('/expenses/shops'),
+      accountsApi.listShopAccounts({ enabled: true })
+    ])
+    shopAccountLookup = buildShopAccountLookup(Array.isArray(shopAccounts) ? shopAccounts : [])
+    const rawShops = Array.isArray(expenseShops)
+      ? expenseShops
+      : (expenseShops?.data ?? expenseShops ?? [])
+    availableShops.value = rawShops.map((shop) => {
+      const displayMeta = resolveShopDisplay(shop, shopAccountLookup)
+      return {
+        ...shop,
+        shop_name: displayMeta.display_name,
+        secondary_name: displayMeta.secondary_name,
+        canonical_shop_name: displayMeta.canonical_name,
+        option_label: displayMeta.option_label,
+        search_text: displayMeta.search_text
+      }
+    })
   } catch (error) {
     console.error('加载店铺列表失败:', error)
     ElMessage.error(error.message || '加载店铺列表失败')
@@ -1542,5 +1572,11 @@ onMounted(() => {
 
 .quick-split-form {
   margin-top: 16px;
+}
+
+.shop-option-secondary {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
 }
 </style>

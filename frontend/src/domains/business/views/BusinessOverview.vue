@@ -497,7 +497,10 @@
                     >
                       {{ row.name }}
                     </el-button>
-                    <span v-else>{{ row.name }}</span>
+                    <div v-else class="shop-display-cell">
+                      <div>{{ row.name }}</div>
+                      <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
+                    </div>
                   </template>
                 </el-table-column>
                 <el-table-column prop="target" label="目标" width="80">
@@ -655,7 +658,10 @@
               >
                 {{ row.name }}
               </el-button>
-              <span v-else>{{ row.name }}</span>
+              <div v-else class="shop-display-cell">
+                <div>{{ row.name }}</div>
+                <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
+              </div>
             </template>
           </el-table-column>
           <el-table-column
@@ -1219,6 +1225,7 @@ import {
   getDashboardAssetUnavailableInfo
 } from '@/utils/errorHandler'
 import { normalizeClearanceRankingResponse } from '@/utils/businessOverviewData'
+import { buildShopAccountLookup, resolveShopDisplay } from '@/utils/shopDisplay'
 import PageHeader from '@/components/common/PageHeader.vue'
 
 // 响应式数据
@@ -1227,6 +1234,7 @@ const dashboardAssetNotice = ref(null)
 const loadingKPI = ref(false)
 const loadingComparison = ref(false)
 const loadingInventory = ref(false)
+let shopAccountLookup = new Map()
 
 // 全局日期（页面级主控）
 const globalGranularity = ref('monthly')
@@ -2526,17 +2534,22 @@ const loadShopRacingData = async () => {
 
     // 后端已转为 { name, target, achieved, achievement_rate, rank } 数组
     if (response && Array.isArray(response)) {
-      shopRacingData.value = response.map((row) => ({
-        ...row,
-        target: row.target_amount ?? null,
-        achieved: row.gmv ?? null,
-        achievement_rate:
-          row.achievement_rate == null
-            ? 0
-            : Number(row.achievement_rate) > 1
-              ? Number(row.achievement_rate) / 100
-              : Number(row.achievement_rate)
-      }))
+      shopRacingData.value = response.map((row) => {
+        const displayMeta = resolveShopDisplay(row, shopAccountLookup)
+        return {
+          ...row,
+          name: displayMeta.display_name,
+          secondary_name: displayMeta.secondary_name,
+          target: row.target_amount ?? null,
+          achieved: row.gmv ?? null,
+          achievement_rate:
+            row.achievement_rate == null
+              ? 0
+              : Number(row.achievement_rate) > 1
+                ? Number(row.achievement_rate) / 100
+                : Number(row.achievement_rate)
+        }
+      })
     } else {
       shopRacingData.value = []
     }
@@ -2572,6 +2585,16 @@ async function showUnmatchedAliasDialog(row) {
     unmatchedAliasRows.value = []
   } finally {
     unmatchedAliasDialogLoading.value = false
+  }
+}
+
+async function loadShopDisplayLookup() {
+  try {
+    const response = await accountsApi.listShopAccounts({ enabled: true })
+    shopAccountLookup = buildShopAccountLookup(Array.isArray(response) ? response : [])
+  } catch (error) {
+    console.error('加载店铺显示映射失败:', error)
+    shopAccountLookup = new Map()
   }
 }
 
@@ -2660,22 +2683,26 @@ const loadTrafficRanking = async () => {
     // 响应拦截器已处理 success 字段，后端已转英文 key；兜底映射兼容中文列名
     const raw = response || []
     const rows = Array.isArray(raw) ? raw : (raw.data || [])
-    trafficRankingData.value = rows.map((row, index) => ({
-      rank: row.rank ?? row['排名'] ?? index + 1,
-      name: row.name ?? row['名称'] ?? row.platform_code ?? row['平台'] ?? '平台汇总',
-      platform_code: row.platform_code ?? row['平台'],
-      shop_id: row.shop_id ?? null,
-      shop_account_id: row.shop_account_id ?? null,
-      main_account_id: row.main_account_id ?? null,
-      main_account_name: row.main_account_name ?? null,
-      is_unmatched: Boolean(row.is_unmatched),
-      visitor_count: row.visitor_count ?? row.unique_visitors ?? row['访客数'] ?? 0,
-      page_views: row.page_views ?? row['浏览量'] ?? 0,
-      uv_change_rate: row.uv_change_rate ?? null,
-      pv_change_rate: row.pv_change_rate ?? null,
-      compare_visitor_count: row.compare_visitor_count ?? row.compare_unique_visitors ?? null,
-      compare_page_views: row.compare_page_views ?? null
-    }))
+    trafficRankingData.value = rows.map((row, index) => {
+      const displayMeta = resolveShopDisplay(row, shopAccountLookup)
+      return {
+        rank: row.rank ?? row['排名'] ?? index + 1,
+        name: displayMeta.display_name,
+        secondary_name: displayMeta.secondary_name,
+        platform_code: row.platform_code ?? row['平台'],
+        shop_id: row.shop_id ?? null,
+        shop_account_id: row.shop_account_id ?? null,
+        main_account_id: row.main_account_id ?? null,
+        main_account_name: row.main_account_name ?? null,
+        is_unmatched: Boolean(row.is_unmatched),
+        visitor_count: row.visitor_count ?? row.unique_visitors ?? row['访客数'] ?? 0,
+        page_views: row.page_views ?? row['浏览量'] ?? 0,
+        uv_change_rate: row.uv_change_rate ?? null,
+        pv_change_rate: row.pv_change_rate ?? null,
+        compare_visitor_count: row.compare_visitor_count ?? row.compare_unique_visitors ?? null,
+        compare_page_views: row.compare_page_views ?? null
+      }
+    })
   } catch (error) {
     console.error('加载流量排名失败:', error)
     if (!consumeDashboardAssetError(error, 'business_overview')) {
@@ -2912,7 +2939,9 @@ onMounted(() => {
   updateComparisonTable()
   applyGlobalToModules()
   _globalAutoRefreshReady.value = true
-  refreshData()
+  loadShopDisplayLookup().finally(() => {
+    refreshData()
+  })
 })
 
 watch(
@@ -3242,6 +3271,15 @@ watch(
 .racing-container {
   max-height: 400px;
   overflow-y: auto;
+}
+
+.shop-display-cell {
+  line-height: 1.4;
+}
+
+.shop-display-secondary {
+  font-size: 12px;
+  color: #909399;
 }
 
 .operational-metrics-section {

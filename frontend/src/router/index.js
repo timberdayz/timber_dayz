@@ -100,105 +100,6 @@ const routes = [
     }
   },
   {
-    path: '/inventory-management',
-    name: 'InventoryManagement',
-    component: () => import('@/domains/business/views/inventory/InventoryBalances.vue'),
-    meta: {
-      title: '库存管理',
-      icon: 'Box',
-      permission: 'inventory:view',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/inventory-overview',
-    name: 'InventoryOverview',
-    component: () => import('@/domains/business/views/InventoryOverview.vue'),
-    meta: {
-      title: '库存总览',
-      icon: 'DataBoard',
-      permission: 'inventory:view',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/inventory/ledger',
-    name: 'InventoryLedger',
-    component: () => import('@/domains/business/views/inventory/InventoryLedger.vue'),
-    meta: {
-      title: '库存流水',
-      icon: 'List',
-      permission: 'inventory:view',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/inventory/adjustments',
-    name: 'InventoryAdjustments',
-    component: () => import('@/domains/business/views/inventory/InventoryAdjustments.vue'),
-    meta: {
-      title: '库存调整',
-      icon: 'Edit',
-      permission: 'inventory:manage',
-      roles: ['admin']
-    }
-  },
-  {
-    path: '/inventory/grns',
-    name: 'InventoryGrns',
-    component: () => import('@/domains/business/views/inventory/InventoryGrns.vue'),
-    meta: {
-      title: '入库单管理',
-      icon: 'Tickets',
-      permission: 'inventory:manage',
-      roles: ['admin']
-    }
-  },
-  {
-    path: '/inventory/alerts',
-    name: 'InventoryAlerts',
-    component: () => import('@/domains/business/views/inventory/InventoryAlerts.vue'),
-    meta: {
-      title: '库存预警',
-      icon: 'Warning',
-      permission: 'inventory:view',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/inventory/reconciliation',
-    name: 'InventoryReconciliation',
-    component: () => import('@/domains/business/views/inventory/InventoryReconciliation.vue'),
-    meta: {
-      title: '库存对账',
-      icon: 'Switch',
-      permission: 'inventory:view',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/inventory/aging',
-    name: 'InventoryAging',
-    component: () => import('@/domains/business/views/inventory/InventoryAging.vue'),
-    meta: {
-      title: '搴撳瓨搴撻緞',
-      icon: 'Clock',
-      permission: 'inventory:view',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/inventory/opening-balances',
-    name: 'InventoryOpeningBalances',
-    component: () => import('@/domains/business/views/inventory/InventoryOpeningBalances.vue'),
-    meta: {
-      title: '期初余额',
-      icon: 'Document',
-      permission: 'inventory:manage',
-      roles: ['admin']
-    }
-  },
-  {
     path: '/human-resources',
     name: 'HumanResources',
     component: () => import('@/domains/business/views/HumanResources.vue'),
@@ -396,28 +297,6 @@ const routes = [
       icon: 'DocumentChecked',
       permission: 'data-governance',
       roles: ['admin']  // 🔒 仅管理员（数据质量敏感操作）
-    }
-  },
-  {
-    path: '/inventory-health',
-    name: 'InventoryHealth',
-    component: () => import('@/domains/business/views/InventoryHealthDashboard.vue'),  // v4.9.0: 库存健康
-    meta: {
-      title: '库存健康仪表盘',
-      icon: 'Box',
-      permission: 'inventory-dashboard:view',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/product-quality',
-    name: 'ProductQuality',
-    component: () => import('@/domains/business/views/ProductQualityDashboard.vue'),  // v4.9.0: 产品质量
-    meta: {
-      title: '产品质量仪表盘',
-      icon: 'Medal',
-      permission: 'inventory-dashboard:view',
-      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -640,50 +519,6 @@ const routes = [
   },
   
   // ==================== 采购管理 ====================
-  {
-    path: '/purchase-orders',
-    name: 'PurchaseOrders',
-    component: () => import('@/domains/business/views/procurement/PurchaseOrders.vue'),
-    meta: {
-      title: '采购订单',
-      icon: 'Document',
-      permission: 'purchase-orders',
-      roles: ['admin', 'manager', 'finance']
-    }
-  },
-  {
-    path: '/grn-management',
-    name: 'GRNManagement',
-    component: () => import('@/domains/business/views/procurement/GRNManagement.vue'),
-    meta: {
-      title: '入库单',
-      icon: 'Box',
-      permission: 'grn-management',
-      roles: ['admin', 'manager', 'finance']
-    }
-  },
-  {
-    path: '/vendor-management',
-    name: 'VendorManagement',
-    component: () => import('@/domains/business/views/procurement/VendorManagement.vue'),
-    meta: {
-      title: '供应商管理',
-      icon: 'OfficeBuilding',
-      permission: 'vendor-management',
-      roles: ['admin', 'manager', 'finance']
-    }
-  },
-  {
-    path: '/invoice-management',
-    name: 'InvoiceManagement',
-    component: () => import('@/domains/business/views/procurement/InvoiceManagement.vue'),
-    meta: {
-      title: '发票管理',
-      icon: 'Document',
-      permission: 'invoice-management',
-      roles: ['admin', 'manager', 'finance']
-    }
-  },
   
   // ==================== 销售扩展 ====================
   {
@@ -791,61 +626,6 @@ const routes = [
   },
   
   // ==================== 报表中心 ====================
-  {
-    path: '/sales-reports',
-    name: 'SalesReports',
-    component: () => import('@/domains/business/views/reports/SalesReports.vue'),
-    meta: {
-      title: '销售报表',
-      icon: 'Document',
-      permission: 'sales-reports',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/inventory-reports',
-    name: 'InventoryReports',
-    component: () => import('@/domains/business/views/reports/InventoryReports.vue'),
-    meta: {
-      title: '库存报表',
-      icon: 'Document',
-      permission: 'inventory-reports',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/finance-reports-detail',
-    name: 'FinanceReportsDetail',
-    component: () => import('@/domains/business/views/reports/FinanceReportsDetail.vue'),
-    meta: {
-      title: '财务报表详情',
-      icon: 'Document',
-      permission: 'finance-reports-detail',
-      roles: ['admin', 'finance']
-    }
-  },
-  {
-    path: '/vendor-reports',
-    name: 'VendorReports',
-    component: () => import('@/domains/business/views/reports/VendorReports.vue'),
-    meta: {
-      title: '供应商报表',
-      icon: 'Document',
-      permission: 'vendor-reports',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  {
-    path: '/custom-reports',
-    name: 'CustomReports',
-    component: () => import('@/domains/business/views/reports/CustomReports.vue'),
-    meta: {
-      title: '自定义报表',
-      icon: 'Document',
-      permission: 'custom-reports',
-      roles: ['admin']
-    }
-  },
   
   // ==================== 人力资源扩展 ====================
   {

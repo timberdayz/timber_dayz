@@ -24,7 +24,34 @@ async def test_default_system_roles_include_investor():
     investor = DEFAULT_SYSTEM_ROLES["investor"]
 
     assert "business-overview" in investor["permissions"]
-    assert "personal-settings" in investor["permissions"]
+    assert "my-follow-investment-income" in investor["permissions"]
+    assert "personal-settings" not in investor["permissions"]
+
+
+@pytest.mark.asyncio
+async def test_default_system_roles_do_not_keep_retired_frontend_page_permissions():
+    manager_permissions = set(DEFAULT_SYSTEM_ROLES["manager"]["permissions"])
+    operator_permissions = set(DEFAULT_SYSTEM_ROLES["operator"]["permissions"])
+    finance_permissions = set(DEFAULT_SYSTEM_ROLES["finance"]["permissions"])
+
+    for retired_permission in {
+        "sales-analysis",
+        "sales-detail",
+        "customer-management",
+        "store-management",
+        "purchase-orders",
+        "grn-management",
+        "vendor-management",
+        "invoice-management",
+        "sales-reports",
+        "inventory-reports",
+        "vendor-reports",
+        "finance-reports-detail",
+        "sales-dashboard-v3",
+    }:
+        assert retired_permission not in manager_permissions
+        assert retired_permission not in operator_permissions
+        assert retired_permission not in finance_permissions
 
 
 @pytest.mark.asyncio

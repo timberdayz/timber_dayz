@@ -1,7 +1,11 @@
 /**
- * 角色权限配置（RBAC）
- * 用于登录时预置权限、SimpleAccountSwitcher 角色切换、路由守卫等
- * 根据 2026-01-08 讨论的权限矩阵
+ * Frontend RBAC config.
+ *
+ * Page access uses router meta as the SSOT.
+ * This file keeps:
+ * - role display metadata
+ * - persisted fallback permissions for auth/session recovery
+ * - a small set of non-route action permissions still used inside pages
  */
 
 export const ROLE_CONFIG = {
@@ -12,125 +16,114 @@ export const ROLE_CONFIG = {
       'business-overview',
       'collection-config', 'collection-coverage-audit', 'collection-tasks', 'collection-history',
       'component-recorder', 'component-versions',
-      'data-sync', 'data-quarantine', 'field-mapping',
-      'product-management', 'inventory-management', 'inventory-dashboard-v3', 'inventory:view', 'inventory:manage', 'inventory-dashboard:view',
-      'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
-      'sales-dashboard-v3', 'sales-analysis', 'sales-detail', 'customer-management', 'order-management',
+      'data-sync', 'data-quarantine', 'data-governance', 'field-mapping',
+      'sales-dashboard', 'sales-detail', 'customer-management', 'order-management',
+      'campaign:read', 'campaign:create', 'campaign:update', 'campaign:delete',
       'target:read', 'config:sales-targets',
       'financial-management', 'expense-management', 'finance-reports', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
       'store-management', 'store-analytics', 'account-management', 'account-alignment',
-      'sales-reports', 'inventory-reports', 'finance-reports-detail',
-      'vendor-reports', 'custom-reports',
-      'human-resources', 'employee-management', 'my-income', 'my-follow-investment-income', 'attendance-management', 'performance:read', 'performance:config',
+      'human-resources', 'employee-management', 'my-income', 'my-follow-investment-income',
+      'attendance-management', 'performance:read', 'performance:config', 'performance:export',
       'my-tasks', 'my-requests', 'approval-history', 'workflow-config',
-      'system-notifications', 'alerts', 'message-settings',
+      'notifications', 'alerts', 'message-settings',
       'training-management', 'training-integration', 'my-training',
       'user-management', 'role-management', 'permission-management',
       'system-settings', 'system-logs', 'data-backup', 'system-maintenance', 'notification-config',
       'personal-settings',
-      'user-guide', 'video-tutorials', 'faq',
-      'data-governance', 'sales-dashboard', 'data-collection', 'procurement',
-      'report-center', 'approval-center', 'message-center', 'help-center',
-      'notifications', 'product-category', 'inventory-alert'
-    ]
+    ],
   },
   manager: {
     name: '主管',
     icon: 'Briefcase',
     permissions: [
       'business-overview',
-      'sales-dashboard-v3', 'sales-analysis', 'sales-detail', 'customer-management', 'order-management',
-      'inventory-management', 'inventory-dashboard-v3', 'inventory:view', 'inventory-dashboard:view',
-      'store-management', 'store-analytics',
-      'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
+      'sales-dashboard', 'order-management',
       'financial-management', 'expense-management', 'finance-reports', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
-      'sales-reports', 'inventory-reports', 'vendor-reports',
-      'employee-management', 'my-income', 'my-follow-investment-income', 'attendance-management', 'performance:read',
+      'store-analytics',
+      'employee-management', 'my-income', 'my-follow-investment-income',
+      'attendance-management', 'performance:read',
       'my-tasks', 'my-requests', 'approval-history',
-      'system-notifications', 'alerts', 'message-settings',
+      'notifications', 'alerts', 'message-settings',
       'training-management', 'my-training',
       'personal-settings',
-      'sales-dashboard', 'procurement', 'report-center', 'approval-center',
-      'message-center', 'notifications'
-    ]
+    ],
   },
   operator: {
     name: '操作员',
     icon: 'User',
     permissions: [
       'business-overview',
-      'sales-dashboard-v3', 'sales-analysis', 'sales-detail', 'customer-management', 'order-management',
-      'store-management', 'store-analytics',
-      'employee-management', 'my-income', 'my-follow-investment-income', 'performance:read', 'inventory:view', 'inventory-dashboard:view',
+      'sales-dashboard', 'order-management',
+      'store-analytics',
+      'employee-management', 'my-income', 'my-follow-investment-income', 'performance:read',
       'my-tasks', 'my-requests', 'approval-history',
-      'system-notifications', 'alerts', 'message-settings',
+      'notifications', 'alerts', 'message-settings',
       'my-training',
       'personal-settings',
-      'sales-dashboard', 'sales-reports', 'inventory-reports', 'vendor-reports', 'message-center', 'notifications'
-    ]
+    ],
   },
   finance: {
     name: '财务',
     icon: 'Money',
     permissions: [
       'business-overview',
-      'sales-analysis', 'sales-detail', 'sales-dashboard-v3', 'order-management',
-      'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
-      'financial-management', 'expense-management', 'finance-reports', 'finance-reports-detail', 'b-cost-analysis',
+      'sales-dashboard', 'order-management',
+      'financial-management', 'expense-management', 'finance-reports', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
       'employee-management', 'my-income', 'my-follow-investment-income', 'performance:read',
       'my-tasks', 'my-requests', 'approval-history',
-      'system-notifications', 'alerts', 'message-settings',
+      'notifications', 'alerts', 'message-settings',
       'my-training',
       'personal-settings',
-      'sales-dashboard', 'report-center', 'message-center', 'notifications'
-    ]
+    ],
   },
   investor: {
     name: '投资人',
     icon: 'Wallet',
     permissions: [
       'business-overview',
-      'personal-settings',
-      'user-guide',
-      'video-tutorials',
-      'faq',
-      'my-follow-investment-income'
-    ]
+      'my-follow-investment-income',
+    ],
   },
   tourist: {
     name: '游客',
     icon: 'View',
-    permissions: ['business-overview', 'performance:read']
-  }
+    permissions: [
+      'business-overview',
+      'performance:read',
+    ],
+  },
 }
 
-/** 规范化角色代码（兼容后端 role_name/role_code） */
+/** Normalize role identifiers from backend role_code / role_name payloads. */
 export function normalizeRoleCode(roleCode) {
   if (!roleCode) return ''
-  const v = String(roleCode).trim()
-  if (ROLE_CONFIG[v]) return v
-  const map = {
-    '管理员': 'admin',
-    '主管': 'manager',
-    '经理': 'manager',
-    '操作员': 'operator',
-    '运营': 'operator',
-    '财务': 'finance',
-    '投资人': 'investor',
-    '游客': 'tourist'
+
+  const value = String(roleCode).trim()
+  if (ROLE_CONFIG[value]) return value
+
+  const nameMap = {
+    管理员: 'admin',
+    主管: 'manager',
+    经理: 'manager',
+    操作员: 'operator',
+    运营: 'operator',
+    财务: 'finance',
+    投资人: 'investor',
+    游客: 'tourist',
   }
-  if (map[v]) return map[v]
-  const lower = v.toLowerCase()
+
+  if (nameMap[value]) return nameMap[value]
+
+  const lower = value.toLowerCase()
   if (ROLE_CONFIG[lower]) return lower
-  return v
+  return value
 }
 
 /**
- * 根据角色代码应用权限到 userStore
- * 用于登录成功后预置权限（登录页未挂载 SimpleAccountSwitcher）
+ * Apply fallback permissions to the user store when backend permissions are absent.
  */
 export function applyRolePermissions(userStore, roleCode) {
   const roleConfig = ROLE_CONFIG[roleCode]

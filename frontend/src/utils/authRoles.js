@@ -21,3 +21,15 @@ export function hasPermissionForRoles(roles, permission) {
   if (normalizedRoles.includes('admin')) return true
   return normalizedRoles.some((role) => ROLE_CONFIG[role]?.permissions?.includes(permission))
 }
+
+export function hasPermissionForRoleScope(roles, permission, activeRole = '') {
+  const normalizedRoles = extractNormalizedRoles(roles)
+  if (normalizedRoles.includes('admin')) return true
+
+  const normalizedActiveRole = normalizeRoleCode(activeRole)
+  if (normalizedActiveRole && normalizedRoles.includes(normalizedActiveRole)) {
+    return Boolean(ROLE_CONFIG[normalizedActiveRole]?.permissions?.includes(permission))
+  }
+
+  return hasPermissionForRoles(roles, permission)
+}

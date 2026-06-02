@@ -34,15 +34,20 @@ test('hasPermissionForRoles grants all permissions to admin', () => {
   assert.equal(hasPermissionForRoles(['admin'], 'anything'), true)
 })
 
-test('operator gets inventory read permissions but not inventory manage permissions', () => {
-  assert.equal(hasPermissionForRoles(['operator'], 'inventory:view'), true)
-  assert.equal(hasPermissionForRoles(['operator'], 'inventory-dashboard:view'), true)
+test('operator keeps current sales and hr page permissions, but not removed inventory pages', () => {
+  assert.equal(hasPermissionForRoles(['operator'], 'sales-dashboard'), true)
+  assert.equal(hasPermissionForRoles(['operator'], 'employee-management'), true)
+  assert.equal(hasPermissionForRoles(['operator'], 'inventory:view'), false)
+  assert.equal(hasPermissionForRoles(['operator'], 'inventory-dashboard:view'), false)
   assert.equal(hasPermissionForRoles(['operator'], 'inventory:manage'), false)
 })
 
-test('manager gets inventory read permissions but not inventory manage permissions', () => {
-  assert.equal(hasPermissionForRoles(['manager'], 'inventory:view'), true)
-  assert.equal(hasPermissionForRoles(['manager'], 'inventory-dashboard:view'), true)
+test('manager keeps current finance and training page permissions, but not admin-only sales detail', () => {
+  assert.equal(hasPermissionForRoles(['manager'], 'b-cost-analysis'), true)
+  assert.equal(hasPermissionForRoles(['manager'], 'training-management'), true)
+  assert.equal(hasPermissionForRoles(['manager'], 'sales-detail'), false)
+  assert.equal(hasPermissionForRoles(['manager'], 'inventory:view'), false)
+  assert.equal(hasPermissionForRoles(['manager'], 'inventory-dashboard:view'), false)
   assert.equal(hasPermissionForRoles(['manager'], 'inventory:manage'), false)
 })
 
@@ -52,15 +57,20 @@ test('collection management remains admin only', () => {
   assert.equal(hasPermissionForRoles(['operator'], 'collection-config'), false)
 })
 
-test('sales analysis and sales detail view permissions match approved roles', () => {
-  assert.equal(hasPermissionForRoles(['operator'], 'sales-analysis'), true)
-  assert.equal(hasPermissionForRoles(['manager'], 'sales-detail'), true)
-  assert.equal(hasPermissionForRoles(['operator'], 'sales-detail'), true)
-  assert.equal(hasPermissionForRoles(['finance'], 'sales-detail'), true)
+test('sales detail stays admin only while shared order pages stay available', () => {
+  assert.equal(hasPermissionForRoles(['manager'], 'order-management'), true)
+  assert.equal(hasPermissionForRoles(['operator'], 'order-management'), true)
+  assert.equal(hasPermissionForRoles(['finance'], 'order-management'), true)
+  assert.equal(hasPermissionForRoles(['manager'], 'sales-detail'), false)
+  assert.equal(hasPermissionForRoles(['operator'], 'sales-detail'), false)
+  assert.equal(hasPermissionForRoles(['finance'], 'sales-detail'), false)
 })
 
-test('finance domain view and document pages match approved roles', () => {
-  assert.equal(hasPermissionForRoles(['manager'], 'invoice-management'), true)
+test('removed procurement and report pages are no longer granted to non-admin roles', () => {
+  assert.equal(hasPermissionForRoles(['manager'], 'purchase-orders'), false)
+  assert.equal(hasPermissionForRoles(['manager'], 'vendor-reports'), false)
+  assert.equal(hasPermissionForRoles(['finance'], 'purchase-orders'), false)
+  assert.equal(hasPermissionForRoles(['operator'], 'sales-reports'), false)
   assert.equal(hasPermissionForRoles(['manager'], 'b-cost-analysis'), true)
   assert.equal(hasPermissionForRoles(['finance'], 'b-cost-analysis'), true)
 })
