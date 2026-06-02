@@ -10,6 +10,7 @@ const overviewSource = readFileSync(resolve(repoRoot, 'src/domains/business/view
 test('ExpenseManagement uses shared shop display helpers', () => {
   assert.equal(expenseSource.includes("from '@/utils/shopDisplay'"), true)
   assert.equal(expenseSource.includes('resolveShopDisplay('), true)
+  assert.equal(expenseSource.includes('Promise.allSettled(['), true)
 })
 
 test('BusinessOverview uses shared shop display helpers', () => {
