@@ -20,6 +20,21 @@ python run.py --frontend-only
 
 Legacy or specialized launchers may exist in the repository. Do not present them as the default path unless the task specifically requires them.
 
+### Dashboard Asset Check
+
+Before manually validating Business Overview or other PostgreSQL dashboard pages locally, verify dashboard assets first:
+
+```bash
+python scripts/bootstrap_postgresql_dashboard.py --module business_overview --check --json
+```
+
+If `ready=false`, bootstrap the module and re-check:
+
+```bash
+python scripts/bootstrap_postgresql_dashboard.py --module business_overview
+python scripts/bootstrap_postgresql_dashboard.py --module business_overview --check --json
+```
+
 ## Database
 
 ```bash
