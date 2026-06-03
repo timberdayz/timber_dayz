@@ -80,10 +80,23 @@ def test_orders_monthly_atomic_mv_sql_asset():
         "sql/semantic/orders_monthly_atomic_mv.sql",
         "CREATE MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv AS",
         (
+            "mapped_monthly_orders AS MATERIALIZED",
+            "normalized_monthly_orders AS MATERIALIZED",
+            "resolved_monthly_orders AS MATERIALIZED",
+            "deduplicated_monthly_orders AS",
             "b_class.fact_shopee_orders_monthly",
             "b_class.fact_tiktok_orders_monthly",
             "b_class.fact_miaoshou_orders_monthly",
             "semantic.shop_identity_resolution_candidates",
+            "order_time_raw",
+            "paid_amount_raw",
+            "profit_raw",
+            "product_quantity_raw",
+            "normalized_source_shop_id",
+            "normalized_store_label_raw",
+            "normalized_source_platform_shop_id",
+            "normalized_source_shop_account_id",
+            "normalized_identity_candidates",
             "paid_amount",
             "product_quantity",
             "profit",
@@ -93,6 +106,8 @@ def test_orders_monthly_atomic_mv_sql_asset():
     sql_text = Path("sql/semantic/orders_monthly_atomic_mv.sql").read_text(encoding="utf-8")
     assert "DROP VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv" not in sql_text
     assert "DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv CASCADE" in sql_text
+    assert "REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.source_shop_id, '')))" not in sql_text
+    assert "REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.store_label_raw, '')))" not in sql_text
 
 
 def test_analytics_monthly_atomic_sql_asset():
@@ -117,9 +132,20 @@ def test_analytics_monthly_atomic_mv_sql_asset():
         "sql/semantic/analytics_monthly_atomic_mv.sql",
         "CREATE MATERIALIZED VIEW semantic.fact_analytics_monthly_atomic_mv AS",
         (
+            "mapped_monthly_traffic AS MATERIALIZED",
+            "normalized_monthly_traffic AS MATERIALIZED",
+            "resolved_monthly_traffic AS MATERIALIZED",
             "b_class.fact_shopee_analytics_monthly",
             "b_class.fact_tiktok_analytics_monthly",
             "b_class.fact_miaoshou_analytics_monthly",
+            "visitor_count_raw",
+            "product_visitor_count_raw",
+            "page_views_raw",
+            "order_count_raw",
+            "sku_order_count_raw",
+            "gmv_raw",
+            "total_transaction_amount_raw",
+            "normalized_identity_candidates",
             "ix_fact_analytics_monthly_atomic_mv_period_platform_shop",
         ),
     )

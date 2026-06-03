@@ -97,8 +97,7 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
-            await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic")
+            await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic", resolve_dependencies=True)
             await session.commit()
             row = (
                 await session.execute(
@@ -116,5 +115,124 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
         assert row["shop_id"] == "1227491331"
         assert float(row["visitor_count"]) == 123.0
         assert float(row["page_views"]) == 321.0
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics():
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS b_class"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS semantic"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE core.shop_accounts (
+                        id SERIAL PRIMARY KEY,
+                        platform VARCHAR(50) NOT NULL,
+                        shop_account_id VARCHAR(100) NOT NULL,
+                        store_name VARCHAR(200) NOT NULL,
+                        platform_shop_id VARCHAR(256)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE core.shop_account_aliases (
+                        id SERIAL PRIMARY KEY,
+                        shop_account_id INTEGER NOT NULL,
+                        platform VARCHAR(50) NOT NULL,
+                        alias_value VARCHAR(200) NOT NULL,
+                        alias_normalized VARCHAR(200) NOT NULL,
+                        is_primary BOOLEAN DEFAULT FALSE,
+                        is_active BOOLEAN DEFAULT TRUE
+                    )
+                    """
+                )
+            )
+            for table_name in (
+                "b_class.fact_shopee_analytics_monthly",
+                "b_class.fact_tiktok_analytics_monthly",
+                "b_class.fact_miaoshou_analytics_monthly",
+            ):
+                await session.execute(
+                    text(
+                        f"""
+                        CREATE TABLE {table_name} (
+                            platform_code VARCHAR(32),
+                            shop_id VARCHAR(256),
+                            metric_date DATE,
+                            raw_data JSONB,
+                            data_hash VARCHAR(128),
+                            ingest_timestamp TIMESTAMP
+                        )
+                        """
+                    )
+                )
+
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_analytics_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    ) VALUES (
+                        'shopee', 'shop-a', DATE '2026-03-01',
+                        '{
+                          "visitor_count":"-",
+                          "product_visitor_count":"-",
+                          "page_views":"-",
+                          "order_count":"-",
+                          "sku_order_count":"-",
+                          "gmv":"-",
+                          "sales_amount":"-"
+                        }'::jsonb,
+                        'analytics-dash-placeholder-1', TIMESTAMP '2026-03-02 10:00:00'
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic", resolve_dependencies=True)
+            await session.commit()
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT
+                            visitor_count,
+                            product_visitor_count,
+                            page_views,
+                            order_count,
+                            sku_order_count,
+                            gmv,
+                            total_transaction_amount
+                        FROM semantic.fact_analytics_monthly_atomic
+                        WHERE platform_code = 'shopee'
+                          AND metric_date = DATE '2026-03-01'
+                        """
+                    )
+                )
+            ).mappings().one()
+
+        assert row["visitor_count"] is None
+        assert row["product_visitor_count"] is None
+        assert row["page_views"] is None
+        assert row["order_count"] is None
+        assert row["sku_order_count"] is None
+        assert row["gmv"] is None
+        assert row["total_transaction_amount"] is None
 
         await engine.dispose()

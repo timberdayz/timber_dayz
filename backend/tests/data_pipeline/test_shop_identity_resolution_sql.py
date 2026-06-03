@@ -14,3 +14,6 @@ def test_shop_identity_resolution_sql_asset():
     assert "shop_account_id" in sql_text
     assert "resolution_method" in sql_text
     assert "resolved_shop_id" in sql_text
+    assert "CREATE INDEX IF NOT EXISTS ix_shop_accounts_platform_shop_id_lookup" in sql_text
+    assert "CREATE INDEX IF NOT EXISTS ix_shop_accounts_platform_account_id_lookup" in sql_text
+    assert "CREATE INDEX IF NOT EXISTS ix_shop_account_aliases_platform_alias_lookup" in sql_text

@@ -6,7 +6,7 @@ CREATE SCHEMA IF NOT EXISTS semantic;
 DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv CASCADE;
 
 CREATE MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv AS
-WITH raw_monthly_orders AS (
+WITH raw_monthly_orders AS MATERIALIZED (
     SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
     FROM b_class.fact_shopee_orders_monthly
     UNION ALL
@@ -16,51 +16,9 @@ WITH raw_monthly_orders AS (
     SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
     FROM b_class.fact_miaoshou_orders_monthly
 ),
-mapped_monthly_orders AS (
+mapped_monthly_orders AS MATERIALIZED (
     SELECT
-        COALESCE(
-            date_trunc(
-                'month',
-                CASE
-                    WHEN COALESCE(
-                        NULLIF(TRIM(raw_data->>'下单时间'), ''),
-                        NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
-                        NULLIF(TRIM(raw_data->>'create_time'), ''),
-                        NULLIF(TRIM(raw_data->>'order_create_time'), ''),
-                        NULLIF(TRIM(raw_data->>'order_time'), '')
-                    ) ~ '^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}'
-                    THEN to_timestamp(
-                        COALESCE(
-                            NULLIF(TRIM(raw_data->>'下单时间'), ''),
-                            NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
-                            NULLIF(TRIM(raw_data->>'create_time'), ''),
-                            NULLIF(TRIM(raw_data->>'order_create_time'), ''),
-                            NULLIF(TRIM(raw_data->>'order_time'), '')
-                        ),
-                        'YYYY-MM-DD HH24:MI:SS'
-                    )
-                    WHEN COALESCE(
-                        NULLIF(TRIM(raw_data->>'下单时间'), ''),
-                        NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
-                        NULLIF(TRIM(raw_data->>'create_time'), ''),
-                        NULLIF(TRIM(raw_data->>'order_create_time'), ''),
-                        NULLIF(TRIM(raw_data->>'order_time'), '')
-                    ) ~ '^\d{4}-\d{2}-\d{2}$'
-                    THEN to_date(
-                        COALESCE(
-                            NULLIF(TRIM(raw_data->>'下单时间'), ''),
-                            NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
-                            NULLIF(TRIM(raw_data->>'create_time'), ''),
-                            NULLIF(TRIM(raw_data->>'order_create_time'), ''),
-                            NULLIF(TRIM(raw_data->>'order_time'), '')
-                        ),
-                        'YYYY-MM-DD'
-                    )::timestamp
-                    ELSE metric_date::timestamp
-                END
-            )::date,
-            date_trunc('month', metric_date)::date
-        ) AS metric_date,
+        metric_date,
         platform_code,
         NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
         NULLIF(
@@ -107,38 +65,76 @@ mapped_monthly_orders AS (
             raw_data->>'Order ID',
             raw_data->>'order_no'
         ) AS order_id,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'下单时间'), ''),
+            NULLIF(TRIM(raw_data->>'订单创建时间'), ''),
+            NULLIF(TRIM(raw_data->>'create_time'), ''),
+            NULLIF(TRIM(raw_data->>'order_create_time'), ''),
+            NULLIF(TRIM(raw_data->>'order_time'), '')
+        ) AS order_time_raw,
+        COALESCE(
+            raw_data->>'buyer_payment_rmb',
+            raw_data->>'买家支付(RMB)',
+            raw_data->>'买家实付金额_rmb',
+            raw_data->>'买家实付金额(RMB)',
+            raw_data->>'buyer_payment',
+            raw_data->>'买家支付',
+            raw_data->>'实付金额',
+            raw_data->>'买家实付金额',
+            raw_data->>'总收入',
+            raw_data->>'paid_amount',
+            raw_data->>'Paid Amount'
+        ) AS paid_amount_raw,
+        COALESCE(
+            raw_data->>'利润(RMB)',
+            raw_data->>'profit_rmb',
+            raw_data->>'利润',
+            raw_data->>'profit',
+            raw_data->>'毛利',
+            raw_data->>'Profit'
+        ) AS profit_raw,
+        COALESCE(
+            raw_data->>'产品数量',
+            raw_data->>'商品数量',
+            raw_data->>'数量',
+            raw_data->>'件数',
+            raw_data->>'销售数量',
+            raw_data->>'出库数量',
+            raw_data->>'product_quantity',
+            raw_data->>'quantity',
+            raw_data->>'qty',
+            raw_data->>'item_quantity'
+        ) AS product_quantity_raw,
+        data_hash,
+        ingest_timestamp
+    FROM raw_monthly_orders
+),
+normalized_monthly_orders AS MATERIALIZED (
+    SELECT
+        COALESCE(
+            date_trunc(
+                'month',
+                CASE
+                    WHEN order_time_raw ~ '^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}'
+                    THEN to_timestamp(order_time_raw, 'YYYY-MM-DD HH24:MI:SS')
+                    WHEN order_time_raw ~ '^\d{4}-\d{2}-\d{2}$'
+                    THEN to_date(order_time_raw, 'YYYY-MM-DD')::timestamp
+                    ELSE metric_date::timestamp
+                END
+            )::date,
+            date_trunc('month', metric_date)::date
+        ) AS metric_date,
+        platform_code,
+        source_shop_id,
+        store_label_raw,
+        source_platform_shop_id,
+        source_shop_account_id,
+        order_id,
         CASE
-            WHEN COALESCE(
-                raw_data->>'buyer_payment_rmb',
-                raw_data->>'买家支付(RMB)',
-                raw_data->>'买家实付金额_rmb',
-                raw_data->>'买家实付金额(RMB)',
-                raw_data->>'buyer_payment',
-                raw_data->>'买家支付',
-                raw_data->>'实付金额',
-                raw_data->>'买家实付金额',
-                raw_data->>'总收入',
-                raw_data->>'paid_amount',
-                raw_data->>'Paid Amount'
-            ) IS NULL THEN NULL
+            WHEN paid_amount_raw IS NULL THEN NULL
             ELSE NULLIF(
                 REGEXP_REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(
-                        COALESCE(
-                            raw_data->>'buyer_payment_rmb',
-                            raw_data->>'买家支付(RMB)',
-                            raw_data->>'买家实付金额_rmb',
-                            raw_data->>'买家实付金额(RMB)',
-                            raw_data->>'buyer_payment',
-                            raw_data->>'买家支付',
-                            raw_data->>'实付金额',
-                            raw_data->>'买家实付金额',
-                            raw_data->>'总收入',
-                            raw_data->>'paid_amount',
-                            raw_data->>'Paid Amount'
-                        ),
-                        ',', ''
-                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                    REPLACE(REPLACE(REPLACE(REPLACE(paid_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''),
                     '[^0-9.-]',
                     '',
                     'g'
@@ -147,27 +143,10 @@ mapped_monthly_orders AS (
             )::numeric
         END AS paid_amount,
         CASE
-            WHEN COALESCE(
-                raw_data->>'利润(RMB)',
-                raw_data->>'profit_rmb',
-                raw_data->>'利润',
-                raw_data->>'profit',
-                raw_data->>'毛利',
-                raw_data->>'Profit'
-            ) IS NULL THEN NULL
+            WHEN profit_raw IS NULL THEN NULL
             ELSE NULLIF(
                 REGEXP_REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(
-                        COALESCE(
-                            raw_data->>'利润(RMB)',
-                            raw_data->>'profit_rmb',
-                            raw_data->>'利润',
-                            raw_data->>'profit',
-                            raw_data->>'毛利',
-                            raw_data->>'Profit'
-                        ),
-                        ',', ''
-                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                    REPLACE(REPLACE(REPLACE(REPLACE(profit_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''),
                     '[^0-9.-]',
                     '',
                     'g'
@@ -176,35 +155,10 @@ mapped_monthly_orders AS (
             )::numeric
         END AS profit,
         CASE
-            WHEN COALESCE(
-                raw_data->>'产品数量',
-                raw_data->>'商品数量',
-                raw_data->>'数量',
-                raw_data->>'件数',
-                raw_data->>'销售数量',
-                raw_data->>'出库数量',
-                raw_data->>'product_quantity',
-                raw_data->>'quantity',
-                raw_data->>'qty',
-                raw_data->>'item_quantity'
-            ) IS NULL THEN NULL
+            WHEN product_quantity_raw IS NULL THEN NULL
             ELSE NULLIF(
                 REGEXP_REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(
-                        COALESCE(
-                            raw_data->>'产品数量',
-                            raw_data->>'商品数量',
-                            raw_data->>'数量',
-                            raw_data->>'件数',
-                            raw_data->>'销售数量',
-                            raw_data->>'出库数量',
-                            raw_data->>'product_quantity',
-                            raw_data->>'quantity',
-                            raw_data->>'qty',
-                            raw_data->>'item_quantity'
-                        ),
-                        ',', ''
-                    ), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                    REPLACE(REPLACE(REPLACE(REPLACE(product_quantity_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''),
                     '[^0-9.-]',
                     '',
                     'g'
@@ -212,11 +166,51 @@ mapped_monthly_orders AS (
                 ''
             )::numeric
         END AS product_quantity,
+        LOWER(COALESCE(source_shop_id, '')) AS normalized_source_shop_id,
+        LOWER(COALESCE(source_platform_shop_id, '')) AS normalized_source_platform_shop_id,
+        LOWER(COALESCE(source_shop_account_id, '')) AS normalized_source_shop_account_id,
+        REGEXP_REPLACE(
+            REGEXP_REPLACE(
+                LOWER(TRIM(COALESCE(source_shop_id, ''))),
+                '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                '',
+                'i'
+            ),
+            '[[:space:]_()/-]+',
+            '',
+            'g'
+        ) AS normalized_source_shop_id_compact,
+        REGEXP_REPLACE(
+            REGEXP_REPLACE(
+                LOWER(TRIM(COALESCE(store_label_raw, ''))),
+                '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                '',
+                'i'
+            ),
+            '[[:space:]_()/-]+',
+            '',
+            'g'
+        ) AS normalized_store_label_raw,
         data_hash,
         ingest_timestamp
-    FROM raw_monthly_orders
+    FROM mapped_monthly_orders
 ),
-resolved_monthly_orders AS (
+prepared_identity_monthly_orders AS MATERIALIZED (
+    SELECT
+        n.*,
+        ARRAY_REMOVE(
+            ARRAY[
+                n.normalized_source_platform_shop_id,
+                n.normalized_source_shop_account_id,
+                n.normalized_source_shop_id,
+                n.normalized_source_shop_id_compact,
+                n.normalized_store_label_raw
+            ],
+            ''
+        ) AS normalized_identity_candidates
+    FROM normalized_monthly_orders n
+),
+resolved_monthly_orders AS MATERIALIZED (
     SELECT
         m.metric_date,
         m.platform_code,
@@ -240,7 +234,7 @@ resolved_monthly_orders AS (
         m.profit,
         m.data_hash,
         m.ingest_timestamp
-    FROM mapped_monthly_orders m
+    FROM prepared_identity_monthly_orders m
     LEFT JOIN LATERAL (
         SELECT
             c.resolved_shop_id,
@@ -249,23 +243,7 @@ resolved_monthly_orders AS (
             c.resolution_priority
         FROM semantic.shop_identity_resolution_candidates c
         WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
-          AND c.identity_value_normalized IN (
-              LOWER(COALESCE(m.source_platform_shop_id, '')),
-              LOWER(COALESCE(m.source_shop_account_id, '')),
-              LOWER(COALESCE(m.source_shop_id, '')),
-              REGEXP_REPLACE(
-                  REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.source_shop_id, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'),
-                  '[[:space:]_()/-]+',
-                  '',
-                  'g'
-              ),
-              REGEXP_REPLACE(
-                  REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'),
-                  '[[:space:]_()/-]+',
-                  '',
-                  'g'
-              )
-          )
+          AND c.identity_value_normalized = ANY (m.normalized_identity_candidates)
         ORDER BY c.resolution_priority, c.resolved_shop_id
         LIMIT 1
     ) resolved ON TRUE

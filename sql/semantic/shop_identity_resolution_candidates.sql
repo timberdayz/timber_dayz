@@ -56,7 +56,7 @@ identity_rows AS (
     FROM active_shop_accounts asa
     INNER JOIN core.shop_account_aliases saa
       ON saa.shop_account_id = asa.shop_account_pk
-     AND saa.is_active = true
+     AND saa.is_active = TRUE
     WHERE NULLIF(TRIM(COALESCE(saa.alias_normalized, '')), '') IS NOT NULL
 
     UNION ALL
@@ -70,7 +70,7 @@ identity_rows AS (
         REGEXP_REPLACE(
             REGEXP_REPLACE(
                 LOWER(TRIM(candidate_store_label)),
-                '^(shopee|tiktok\\s*shop|tiktok|tk|miaoshou|amazon|lazada)\\s*',
+                '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
                 '',
                 'i'
             ),
@@ -93,3 +93,21 @@ SELECT
 FROM identity_rows
 WHERE NULLIF(TRIM(COALESCE(identity_value_normalized, '')), '') IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS ix_shop_accounts_platform_shop_id_lookup
+ON core.shop_accounts (
+    LOWER(COALESCE(platform, '')),
+    LOWER(COALESCE(platform_shop_id, ''))
+);
+
+CREATE INDEX IF NOT EXISTS ix_shop_accounts_platform_account_id_lookup
+ON core.shop_accounts (
+    LOWER(COALESCE(platform, '')),
+    LOWER(COALESCE(shop_account_id, ''))
+);
+
+CREATE INDEX IF NOT EXISTS ix_shop_account_aliases_platform_alias_lookup
+ON core.shop_account_aliases (
+    platform,
+    LOWER(TRIM(alias_normalized)),
+    is_active
+);
