@@ -28,9 +28,14 @@ export const SEMANTIC_FIELD_META = {
     description: '区分不同店铺，参与去重边界。',
     aliases: ['shop_id', '店铺', '店铺ID', 'shop id'],
   },
+  warehouse_name: {
+    label: '仓库标识',
+    description: '区分同一 SKU 在不同仓库的库存快照，可参与去重。',
+    aliases: ['warehouse_name', 'warehouse', '仓库', '仓库名称', 'warehouse name'],
+  },
   metric_date: {
     label: '统计日期',
-    description: '用于日级/周级/月级统计时间定位。',
+    description: '用于日级、周级、月级统计时间定位。',
     aliases: ['metric_date', '日期', '统计日期', 'date'],
   },
   order_date: {
@@ -88,6 +93,7 @@ function semanticRequirements(semanticKey) {
     'platform_sku',
     'sku_id',
     'shop_id',
+    'warehouse_name',
     'metric_date',
     'order_date',
   ])

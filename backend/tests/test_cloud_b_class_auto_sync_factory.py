@@ -7,6 +7,7 @@ from backend.services.cloud_b_class_auto_sync_factory import (
     build_cloud_sync_runtime_from_env,
     build_cloud_sync_service_from_env,
     build_cloud_sync_worker_factory_from_env,
+    run_cloud_sync_startup_checks_from_env,
 )
 from backend.services.cloud_b_class_auto_sync_runtime import CloudBClassAutoSyncRuntime
 
@@ -106,3 +107,82 @@ def test_build_cloud_sync_runtime_from_env_returns_runtime_when_enabled(monkeypa
     assert isinstance(runtime, CloudBClassAutoSyncRuntime)
     assert runtime.poll_interval_seconds == 9.0
     assert runtime.worker_id == "cloud-sync-worker-test"
+
+
+def test_run_cloud_sync_startup_checks_reports_degraded_when_cloud_db_missing(monkeypatch):
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def exec_driver_sql(self, sql: str):
+            return 1
+
+    class FakeEngine:
+        def begin(self):
+            return FakeConnection()
+
+        def dispose(self):
+            return None
+
+    class FakeInspector:
+        def get_table_names(self):
+            return [
+                "cloud_b_class_sync_checkpoints",
+                "cloud_b_class_sync_runs",
+                "cloud_b_class_sync_tasks",
+            ]
+
+    monkeypatch.delenv("CLOUD_DATABASE_URL", raising=False)
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", lambda *args, **kwargs: FakeEngine())
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.sa_inspect", lambda *args, **kwargs: FakeInspector())
+
+    payload = run_cloud_sync_startup_checks_from_env()
+
+    assert payload["status"] == "degraded"
+    assert payload["checks"]["local_database"]["ok"] is True
+    assert payload["checks"]["cloud_sync_state_tables"]["ok"] is True
+    assert payload["checks"]["cloud_database_url"]["ok"] is False
+
+
+def test_run_cloud_sync_startup_checks_reports_ok_when_tunnel_and_cloud_db_are_reachable(monkeypatch):
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def exec_driver_sql(self, sql: str):
+            return 1
+
+    class FakeEngine:
+        def begin(self):
+            return FakeConnection()
+
+        def dispose(self):
+            return None
+
+    class FakeInspector:
+        def get_table_names(self):
+            return [
+                "cloud_b_class_sync_checkpoints",
+                "cloud_b_class_sync_runs",
+                "cloud_b_class_sync_tasks",
+            ]
+
+    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:pass@host.docker.internal:15433/xihong_erp")
+    monkeypatch.setenv("CLOUD_SYNC_TUNNEL_ENABLED", "true")
+    monkeypatch.setenv("CLOUD_SYNC_TUNNEL_HOST", "host.docker.internal")
+    monkeypatch.setenv("CLOUD_SYNC_TUNNEL_PORT", "15433")
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", lambda *args, **kwargs: FakeEngine())
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.sa_inspect", lambda *args, **kwargs: FakeInspector())
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
+
+    payload = run_cloud_sync_startup_checks_from_env()
+
+    assert payload["status"] == "ok"
+    assert payload["checks"]["cloud_database_tcp"]["ok"] is True
+    assert payload["checks"]["cloud_sync_tunnel"]["ok"] is True

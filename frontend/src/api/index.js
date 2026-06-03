@@ -1154,6 +1154,10 @@ export default {
     return await this._get('/data-sync/files', { params: filters })
   },
 
+  async repairInventorySnapshotSemantics(fileIds = []) {
+    return await this._post('/data-sync/repair-inventory-snapshot-semantics', fileIds)
+  },
+
   async getDataSyncFileDeleteImpact(fileId) {
     return await this._get(`/data-sync/files/${fileId}/delete-impact`)
   },

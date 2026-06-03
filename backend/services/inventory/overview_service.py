@@ -42,11 +42,7 @@ class InventoryOverviewService:
         keyword: Optional[str] = None,
     ):
         filters = [
-            or_(
-                FactProductMetric.data_domain == "inventory",
-                FactProductMetric.data_domain == "products",
-                FactProductMetric.data_domain.is_(None),
-            )
+            FactProductMetric.data_domain == "inventory"
         ]
         if platform:
             filters.append(FactProductMetric.platform_code == platform)

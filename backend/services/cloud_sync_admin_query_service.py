@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.engine import make_url
 
+from backend.services.cloud_b_class_auto_sync_factory import get_current_checkpoint_scope_from_env
 from backend.schemas.cloud_sync_admin import (
     CloudSyncCheckpointState,
     CloudSyncDependencyHealth,
@@ -100,15 +101,10 @@ class CloudSyncAdminQueryService:
 
         cloud_db_health = self._probe_cloud_db_health()
         tunnel_health = self._probe_tunnel_health(cloud_db_health)
+        worker_health = self._resolve_worker_health(runtime_health)
 
         payload = CloudSyncHealthSummary(
-            worker=CloudSyncWorkerHealth(
-                status=(runtime_health or {}).get("status", "not_started"),
-                worker_id=(runtime_health or {}).get("worker_id"),
-                poll_interval_seconds=(runtime_health or {}).get("poll_interval_seconds"),
-                last_error=_sanitize_error_text((runtime_health or {}).get("last_error")),
-                last_heartbeat_at=(runtime_health or {}).get("last_heartbeat_at"),
-            ),
+            worker=CloudSyncWorkerHealth(**worker_health),
             tunnel=CloudSyncDependencyHealth(**tunnel_health),
             cloud_db=CloudSyncDependencyHealth(**cloud_db_health),
             queue=CloudSyncQueueSummary(
@@ -136,6 +132,7 @@ class CloudSyncAdminQueryService:
         return self._serialize_task(task).model_dump()
 
     async def list_table_states(self) -> list[dict]:
+        current_scope = self._current_checkpoint_scope()
         checkpoints = (
             await self.db.execute(select(CloudBClassSyncCheckpoint).order_by(CloudBClassSyncCheckpoint.id.desc()))
         ).scalars().all()
@@ -145,10 +142,14 @@ class CloudSyncAdminQueryService:
 
         checkpoint_by_table = {}
         for checkpoint in checkpoints:
+            if checkpoint.table_schema != current_scope:
+                continue
             checkpoint_by_table.setdefault(checkpoint.table_name, checkpoint)
 
         latest_task_by_table = {}
         for task in tasks:
+            if not self._task_matches_scope(task, current_scope):
+                continue
             latest_task_by_table.setdefault(task.source_table_name, task)
 
         table_names = sorted(set(checkpoint_by_table) | set(latest_task_by_table))
@@ -234,6 +235,54 @@ class CloudSyncAdminQueryService:
             auto_sync_enabled=await self._auto_sync_enabled(),
         )
         return payload.model_dump()
+
+    def _resolve_worker_health(self, runtime_health: dict | None) -> dict:
+        if runtime_health is not None:
+            return {
+                "status": runtime_health.get("status", "not_started"),
+                "worker_id": runtime_health.get("worker_id"),
+                "poll_interval_seconds": runtime_health.get("poll_interval_seconds"),
+                "last_error": _sanitize_error_text(runtime_health.get("last_error")),
+                "last_heartbeat_at": runtime_health.get("last_heartbeat_at"),
+            }
+
+        if self._worker_prereqs_missing():
+            return {
+                "status": "not_configured",
+                "worker_id": None,
+                "poll_interval_seconds": None,
+                "last_error": None,
+                "last_heartbeat_at": None,
+            }
+
+        return {
+            "status": "not_started",
+            "worker_id": None,
+            "poll_interval_seconds": None,
+            "last_error": None,
+            "last_heartbeat_at": None,
+        }
+
+    def _worker_prereqs_missing(self) -> bool:
+        worker_enabled = self._parse_bool(os.getenv("CLOUD_SYNC_WORKER_ENABLED"), default=False)
+        collection_enabled = self._parse_bool(os.getenv("ENABLE_COLLECTION"), default=True)
+        deployment_role = str(os.getenv("DEPLOYMENT_ROLE", "")).strip().lower()
+        cloud_database_url = os.getenv("CLOUD_DATABASE_URL")
+        if not worker_enabled:
+            return False
+        return (not collection_enabled) or deployment_role == "cloud" or not cloud_database_url
+
+    @staticmethod
+    def _current_checkpoint_scope() -> str:
+        return get_current_checkpoint_scope_from_env(dry_run=False)
+
+    @staticmethod
+    def _task_matches_scope(task: CloudBClassSyncTask, checkpoint_scope: str) -> bool:
+        metadata = task.metadata_json or {}
+        task_scope = metadata.get("checkpoint_scope")
+        if task_scope is None:
+            return True
+        return task_scope == checkpoint_scope
 
     async def get_runtime_summary(self, runtime_health: dict | None = None) -> dict:
         running_task = (

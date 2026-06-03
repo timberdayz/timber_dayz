@@ -63,6 +63,7 @@ CLOUD_DATABASE_URL=postgresql://...
 
 See also:
 - `docs/deployment/CLOUD_SYNC_ADMIN_CONSOLE_RUNBOOK.md`
+- `docs/deployment/WINDOWS_COLLECTION_CLOUD_SYNC.md`
 
 ## Important Boundaries
 
@@ -70,10 +71,14 @@ See also:
   - no cloud writes
   - no cloud mirror DDL
   - local read + canonical contract verification only
+- Windows collection-machine formal topology:
+  - Docker Desktop
+  - host-managed SSH tunnel
+  - `backend-collector` as the only always-on cloud sync owner
 - auto sync currently has:
   - durable task table
   - enqueue-only ingestion listener
-  - worker/runtime skeleton
+  - worker/runtime with startup checks
   - health and task APIs
 - before production enablement, a dedicated security review is still required for:
   - SSH tunnel / credentials

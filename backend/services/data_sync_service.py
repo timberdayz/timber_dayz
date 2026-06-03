@@ -40,6 +40,8 @@ from backend.services.data_ingestion_service import DataIngestionService
 from backend.services.c_class_data_validator import get_c_class_data_validator
 from backend.services.executor_manager import get_executor_manager  # v4.19.0新增:使用统一执行器管理器
 from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
+from backend.services.spreadsheet_normalization_service import get_spreadsheet_normalization_service
+from modules.services.file_semantics import validate_file_semantics
 
 logger = get_logger(__name__)
 
@@ -72,6 +74,24 @@ class DataSyncService:
         self.template_resolver = get_template_resolver(db)
         self.ingestion_service = DataIngestionService(db)
         self.template_status_service = DataSyncTemplateStatusService(db)
+
+    def _resolve_runtime_spreadsheet_path(self, file_path: str) -> str:
+        resolved_path = self._safe_resolve_path(file_path)
+        source_format = ExcelParser.detect_file_format(resolved_path)
+        if source_format in {"xls", "xlsx_with_ole", "html"}:
+            normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
+                resolved_path,
+                source_format=source_format,
+            )
+            logger.info(
+                "[DataSync] 使用标准化副本读取文件: %s -> %s (converter=%s, cache_hit=%s)",
+                Path(resolved_path).name,
+                normalized.path.name,
+                normalized.converter,
+                normalized.cache_hit,
+            )
+            return str(normalized.path)
+        return str(resolved_path)
     
     def _safe_resolve_path(self, file_path: str) -> str:
         """
@@ -274,6 +294,31 @@ class DataSyncService:
         template=None,
         use_template_header_row: bool = True,
     ) -> Dict[str, Any]:
+        semantic_validation = validate_file_semantics(
+            source_platform=getattr(catalog_file, "source_platform", None) or getattr(catalog_file, "platform_code", None),
+            platform_code=getattr(catalog_file, "platform_code", None),
+            data_domain=getattr(catalog_file, "data_domain", None),
+            granularity=getattr(catalog_file, "granularity", None),
+            sub_domain=getattr(catalog_file, "sub_domain", None),
+            file_name=getattr(catalog_file, "file_name", None),
+        )
+        if not semantic_validation.is_valid:
+            return {
+                "template_status": "semantic_invalid",
+                "governance_status": "semantic_invalid",
+                "has_template": False,
+                "template_name": None,
+                "template_header_row": None,
+                "template_update_required": False,
+                "update_reason": semantic_validation.reason,
+                "error_code": "SEMANTIC_INVALID",
+                "should_auto_sync": False,
+                "exact_match": False,
+                "semantic_match": False,
+                "shadow_compare": None,
+                "semantic_anomaly_type": semantic_validation.reason,
+            }
+
         normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
         resolver_result = None
         try:
@@ -334,7 +379,7 @@ class DataSyncService:
         parse_error: Optional[Exception] = None
         missing_file = False
         try:
-            file_path = self._safe_resolve_path(catalog_file.file_path)
+            file_path = self._resolve_runtime_spreadsheet_path(catalog_file.file_path)
             loop = asyncio.get_running_loop()
             file_exists = await loop.run_in_executor(None, lambda: Path(file_path).exists())
             if not file_exists:
@@ -456,6 +501,25 @@ class DataSyncService:
                 }
             
             # 2. 检查状态(防止并发)
+            semantic_validation = validate_file_semantics(
+                source_platform=getattr(catalog_file, "source_platform", None) or getattr(catalog_file, "platform_code", None),
+                platform_code=getattr(catalog_file, "platform_code", None),
+                data_domain=getattr(catalog_file, "data_domain", None),
+                granularity=getattr(catalog_file, "granularity", None),
+                sub_domain=getattr(catalog_file, "sub_domain", None),
+                file_name=getattr(catalog_file, "file_name", None),
+            )
+            if not semantic_validation.is_valid:
+                return {
+                    'success': False,
+                    'file_id': file_id,
+                    'file_name': catalog_file.file_name,
+                    'status': 'skipped',
+                    'message': f'鏂囦欢璇箟寮傚父: {semantic_validation.reason}',
+                    'skip_reason': semantic_validation.reason,
+                    'semantic_anomaly_type': semantic_validation.reason,
+                }
+
             if catalog_file.status == 'processing':
                 return {
                     'success': False,
@@ -550,7 +614,7 @@ class DataSyncService:
             # 5. 预览文件(复用ExcelParser)[*] **v4.6.0重构:严格执行模板表头行**
             try:
                 # [*] 修复:使用安全路径解析,确保文件路径正确
-                file_path = self._safe_resolve_path(catalog_file.file_path)
+                file_path = self._resolve_runtime_spreadsheet_path(catalog_file.file_path)
                 
                 # [*] v4.18.2修复:使用 run_in_executor 包装文件系统检查,避免阻塞事件循环
                 loop = asyncio.get_running_loop()

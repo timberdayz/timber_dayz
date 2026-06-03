@@ -52,7 +52,7 @@ UPSERT_UPDATE_FIELDS: Dict[str, List[str]] = {
 DEFAULT_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
     'orders': ['order_id', 'order_date', 'platform_code', 'shop_id'],
     'products': ['product_sku', 'product_id', 'platform_code', 'shop_id'],
-    'inventory': ['product_sku', 'warehouse_id', 'platform_code', 'shop_id'],
+    'inventory': ['platform_sku', 'product_id', 'warehouse_name', 'platform_code', 'shop_id'],
     'traffic': ['date', 'platform_code', 'shop_id'],
     'services': ['service_id', 'date', 'platform_code', 'shop_id'],
     'analytics': ['date', 'platform_code', 'shop_id'],

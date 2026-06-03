@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
+
 from backend.services.currency_extractor import get_currency_extractor
 
 
@@ -10,6 +11,7 @@ SEMANTIC_FIELD_ALIASES: dict[str, list[str]] = {
     "platform_sku": ["platform_sku", "平台sku", "平台 sku", "product_sku", "产品sku"],
     "sku_id": ["sku_id", "sku id", "sku编号", "sku id"],
     "shop_id": ["shop_id", "店铺", "店铺id", "shop id"],
+    "warehouse_name": ["warehouse_name", "warehouse", "仓库", "仓库名称", "warehouse name"],
     "metric_date": ["metric_date", "日期", "统计日期", "data_date", "date"],
     "period_start_date": ["period_start_date", "开始日期", "周期开始日期"],
     "period_end_date": ["period_end_date", "结束日期", "周期结束日期"],
@@ -22,13 +24,21 @@ SEMANTIC_FIELD_REQUIREMENTS: dict[str, dict[str, Any]] = {
     "platform_sku": {"required": False, "hash_participates": True},
     "sku_id": {"required": False, "hash_participates": True},
     "shop_id": {"required": False, "hash_participates": True},
+    "warehouse_name": {"required": False, "hash_participates": True},
     "metric_date": {"required": False, "hash_participates": True},
     "period_start_date": {"required": False, "hash_participates": False},
     "period_end_date": {"required": False, "hash_participates": False},
     "order_date": {"required": False, "hash_participates": True},
 }
 
-SEMANTIC_HASH_IDENTITY_KEYS = {"order_id", "product_id", "platform_sku", "sku_id", "shop_id"}
+SEMANTIC_HASH_IDENTITY_KEYS = {
+    "order_id",
+    "product_id",
+    "platform_sku",
+    "sku_id",
+    "shop_id",
+    "warehouse_name",
+}
 
 
 def normalize_semantic_key(value: Optional[str]) -> Optional[str]:
@@ -85,66 +95,57 @@ def get_semantic_requirements(semantic_key: Optional[str]) -> dict[str, Any]:
     }
 
 
-def build_semantic_binding_lookup(header_bindings: Iterable[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
-    lookup: dict[str, dict[str, Any]] = {}
-    for binding in header_bindings or []:
-        raw_name = str(binding.get("raw_name", "")).strip()
-        if raw_name:
-            lookup[raw_name.lower()] = dict(binding)
-    return lookup
+def _normalize_key_variants(key: str) -> set[str]:
+    lowered = key.strip().lower()
+    variants = {lowered}
+    extractor = get_currency_extractor()
+    normalized = extractor.normalize_field_name(key)
+    variants.add(normalized.lower())
+    variants.add(lowered.replace(" ", ""))
+    variants.add(lowered.replace("_", ""))
+    variants.add(normalized.lower().replace("_", ""))
+    return {variant for variant in variants if variant}
 
 
 def resolve_semantic_value(
     row: Dict[str, Any],
     semantic_key: str,
-    header_bindings: Iterable[dict[str, Any]] | None = None,
-) -> tuple[Optional[str], Optional[str]]:
+    header_bindings: Optional[Iterable[Dict[str, Any]]] = None,
+) -> tuple[Any, Optional[str]]:
     normalized_key = normalize_semantic_key(semantic_key)
     if not normalized_key:
         return None, None
 
-    currency_extractor = get_currency_extractor()
-    row_lookup = {str(key).strip().lower(): key for key in row.keys()}
-    normalized_row_lookup = {}
-    for key in row.keys():
-        raw_key = str(key).strip()
-        if not raw_key:
+    candidate_names: list[str] = []
+    binding_candidates = list(header_bindings or [])
+    for binding in binding_candidates:
+        binding_semantic_key = normalize_semantic_key(binding.get("semantic_key"))
+        if binding_semantic_key != normalized_key:
             continue
-        normalized_key = currency_extractor.normalize_field_name(raw_key).strip().lower()
-        if normalized_key and normalized_key not in normalized_row_lookup:
-            normalized_row_lookup[normalized_key] = key
-    binding_lookup = build_semantic_binding_lookup(header_bindings)
+        raw_name = str(binding.get("raw_name") or "").strip()
+        if raw_name:
+            candidate_names.append(raw_name)
+        display_name = str(binding.get("display_name") or "").strip()
+        if display_name:
+            candidate_names.append(display_name)
+        for alias in binding.get("aliases") or []:
+            alias_text = str(alias or "").strip()
+            if alias_text:
+                candidate_names.append(alias_text)
 
-    for binding in binding_lookup.values():
-        binding_semantic = normalize_semantic_key(
-            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
-        )
-        if binding_semantic != normalized_key:
+    candidate_names.extend(get_semantic_aliases(normalized_key))
+    seen_names: list[str] = []
+    seen_set = set()
+    for name in candidate_names:
+        lowered = str(name).strip().lower()
+        if not lowered or lowered in seen_set:
             continue
-        raw_name = str(binding.get("raw_name", "")).strip()
-        matched_key = row_lookup.get(raw_name.lower())
-        if matched_key is None and raw_name:
-            matched_key = normalized_row_lookup.get(
-                currency_extractor.normalize_field_name(raw_name).strip().lower()
-            )
-        if matched_key is None:
-            continue
-        raw_value = row.get(matched_key)
-        if raw_value is None or str(raw_value).strip() == "":
-            continue
-        return str(raw_value).strip(), matched_key
+        seen_set.add(lowered)
+        seen_names.append(str(name).strip())
 
-    for alias in get_semantic_aliases(normalized_key):
-        matched_key = row_lookup.get(alias.lower())
-        if matched_key is None:
-            matched_key = normalized_row_lookup.get(
-                currency_extractor.normalize_field_name(alias).strip().lower()
-            )
-        if matched_key is None:
-            continue
-        raw_value = row.get(matched_key)
-        if raw_value is None or str(raw_value).strip() == "":
-            continue
-        return str(raw_value).strip(), matched_key
-
+    for key, value in row.items():
+        key_variants = _normalize_key_variants(str(key))
+        for candidate in seen_names:
+            if any(candidate_variant in key_variants for candidate_variant in _normalize_key_variants(candidate)):
+                return value, key
     return None, None

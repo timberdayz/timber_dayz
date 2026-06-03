@@ -15,6 +15,7 @@ import pandas as pd
 import shutil
 import tempfile
 from modules.core.logger import get_logger
+from backend.services.spreadsheet_normalization_service import get_spreadsheet_normalization_service
 
 logger = get_logger(__name__)
 
@@ -120,6 +121,8 @@ class ExcelParser:
         Returns:
             文件格式: 'xlsx', 'xls', 'html', 'unknown'
         """
+        file_path = Path(file_path)
+
         with open(file_path, 'rb') as f:
             header = f.read(8)
             

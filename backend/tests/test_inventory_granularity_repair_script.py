@@ -60,3 +60,26 @@ def test_repair_script_updates_file_name_meta_and_catalog_record(tmp_path):
 
     saved_meta = json.loads(Path(repaired["meta_file_path"]).read_text(encoding="utf-8"))
     assert saved_meta["business_metadata"]["granularity"] == "snapshot"
+
+
+def test_repair_script_supports_weekly_inventory_file_name(tmp_path):
+    from scripts.repair_inventory_snapshot_granularity import repair_inventory_record
+
+    raw_dir = tmp_path / "data" / "raw" / "2026"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    wrong_file = raw_dir / "miaoshou_inventory_weekly_20260413_232430.xls"
+    wrong_file.write_text("demo", encoding="utf-8")
+
+    row = {
+        "id": 2,
+        "file_name": wrong_file.name,
+        "file_path": str(wrong_file),
+        "data_domain": "inventory",
+        "granularity": "weekly",
+    }
+
+    repaired = repair_inventory_record(row, apply_changes=False)
+
+    assert repaired["granularity"] == "snapshot"
+    assert repaired["file_name"] == "miaoshou_inventory_snapshot_20260413_232430.xls"

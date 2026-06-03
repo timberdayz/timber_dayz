@@ -59,6 +59,7 @@ from backend.utils.config import get_settings
 from modules.core.logger import get_logger
 from backend.services.cloud_b_class_auto_sync_factory import (
     build_cloud_sync_runtime_from_env,
+    run_cloud_sync_startup_checks_from_env,
 )
 from backend.services.system_role_service import ensure_system_roles
 from backend.utils.postgres_path import auto_configure_postgres_path
@@ -172,6 +173,7 @@ async def lifespan(app: FastAPI):
     # 后台任务列表(用于关闭时正确取消)
     background_tasks = []
     app.state.cloud_sync_runtime = None
+    app.state.cloud_sync_startup_checks = None
     app.state.collection_leader_lock = None
 
     startup_start = time.time()
@@ -502,6 +504,9 @@ async def lifespan(app: FastAPI):
         # v4.6.3新增:初始化Redis缓存(可选,不影响主流程)
         if should_start_cloud_sync_worker(background_role):
             try:
+                startup_checks = run_cloud_sync_startup_checks_from_env()
+                app.state.cloud_sync_startup_checks = startup_checks
+                logger.info("[CloudSync] Startup checks status=%s details=%s", startup_checks["status"], startup_checks["checks"])
                 cloud_sync_runtime = build_cloud_sync_runtime_from_env()
                 app.state.cloud_sync_runtime = cloud_sync_runtime
                 if cloud_sync_runtime is None:

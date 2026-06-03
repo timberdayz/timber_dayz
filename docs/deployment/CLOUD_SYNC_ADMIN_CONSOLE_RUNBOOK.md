@@ -8,6 +8,7 @@ This runbook covers the admin-only collection-to-cloud operations console and th
 
 It is intended for:
 - local collection environments that own cloud sync execution
+- Windows collection machines running Docker Desktop + `backend-collector`
 - admins who need to inspect queue state, retry failures, repair checkpoints, and verify worker health
 
 It is not intended for:
@@ -42,6 +43,9 @@ Recommended operational variables:
 ```env
 CLOUD_SYNC_POLL_INTERVAL_SECONDS=5
 CLOUD_SYNC_WORKER_ID=cloud-sync-worker-1
+CLOUD_SYNC_TUNNEL_ENABLED=true
+CLOUD_SYNC_TUNNEL_HOST=host.docker.internal
+CLOUD_SYNC_TUNNEL_PORT=15433
 ```
 
 ## Enablement Rules
@@ -55,6 +59,11 @@ The worker only starts when all of the following are true:
 If those conditions are not met:
 - runtime health should remain `not_started` or `not_configured`
 - queue inspection APIs can still be used
+
+For the Windows collection-machine topology, also verify:
+- Docker Desktop is running
+- the host-managed SSH tunnel is up
+- `backend-collector` is the formal always-on worker host
 
 ## Admin API Surface
 
@@ -120,10 +129,12 @@ If worker is `not_configured`:
 - verify `ENABLE_COLLECTION`
 - verify `DEPLOYMENT_ROLE`
 - verify `CLOUD_DATABASE_URL`
+- verify collector startup logs for cloud sync startup checks
 
 If tasks accumulate in `pending`:
 - verify worker is actually running
 - verify the process with `cloud_sync_runtime` is the intended role
+- verify the active checkpoint scope matches the intended cloud target
 
 If tasks are stuck in `running`:
 - inspect `heartbeat_at` and `lease_expires_at`

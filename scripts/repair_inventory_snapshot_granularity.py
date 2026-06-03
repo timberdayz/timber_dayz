@@ -19,7 +19,10 @@ def find_repair_candidates(rows: Iterable[dict]) -> list[dict]:
 
 
 def _snapshot_name(file_name: str) -> str:
-    return file_name.replace("_inventory_monthly_", "_inventory_snapshot_")
+    target = file_name
+    for token in ("monthly", "weekly", "daily"):
+        target = target.replace(f"_inventory_{token}_", "_inventory_snapshot_")
+    return target
 
 
 def repair_inventory_record(row: dict, *, apply_changes: bool = False) -> dict:

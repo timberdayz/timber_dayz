@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
@@ -369,3 +369,121 @@ async def test_list_files_excludes_semantic_anomaly_pending_file(file_list_clien
     assert [row["file_name"] for row in payload["data"]["files"]] == [
         "tiktok_products_monthly_20260517_221824.xlsx"
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_files_keeps_inventory_granularity_anomaly_visible_for_repair(file_list_client):
+    client, session_factory = file_list_client
+
+    async with session_factory() as session:
+        session.add(
+            CatalogFile(
+                file_path="data/raw/2026/miaoshou_inventory_monthly_20260407_121357.xls",
+                file_name="miaoshou_inventory_monthly_20260407_121357.xls",
+                source="data/raw",
+                platform_code="miaoshou",
+                source_platform="miaoshou",
+                data_domain="inventory",
+                granularity="monthly",
+                status="pending",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    response = await client.get(
+        "/api/data-sync/files",
+        params={"platform": "miaoshou", "domain": "inventory", "status": "pending"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["total"] == 1
+    file_row = payload["data"]["files"][0]
+    assert file_row["file_name"] == "miaoshou_inventory_monthly_20260407_121357.xls"
+    assert file_row["template_status"] == "semantic_invalid"
+    assert file_row["governance_status"] == "semantic_invalid"
+    assert file_row["semantic_anomaly_type"] == "inventory_granularity_invalid"
+
+
+@pytest.mark.asyncio
+async def test_list_files_includes_inventory_granularity_anomaly_with_repair_context(file_list_client):
+    client, session_factory = file_list_client
+
+    async with session_factory() as session:
+        session.add(
+            CatalogFile(
+                file_path="data/raw/2026/miaoshou_inventory_monthly_20260407_121357.xls",
+                file_name="miaoshou_inventory_monthly_20260407_121357.xls",
+                source="data/raw",
+                platform_code="miaoshou",
+                source_platform="miaoshou",
+                data_domain="inventory",
+                granularity="monthly",
+                status="pending",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    response = await client.get(
+        "/api/data-sync/files",
+        params={"platform": "miaoshou", "domain": "inventory", "status": "pending"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["total"] == 1
+
+    file_row = payload["data"]["files"][0]
+    assert file_row["file_name"] == "miaoshou_inventory_monthly_20260407_121357.xls"
+    assert file_row["template_status"] == "semantic_invalid"
+    assert file_row["governance_status"] == "semantic_invalid"
+    assert file_row["semantic_anomaly_type"] == "inventory_granularity_invalid"
+    assert file_row["semantic_repair_action"] == "repair_inventory_snapshot"
+
+
+@pytest.mark.asyncio
+async def test_repair_inventory_snapshot_semantics_endpoint_updates_catalog_record(file_list_client, tmp_path):
+    client, session_factory = file_list_client
+
+    raw_dir = tmp_path / "data" / "raw" / "2026"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    wrong_file = raw_dir / "miaoshou_inventory_monthly_20260407_121357.xls"
+    wrong_file.write_text("demo", encoding="utf-8")
+    meta_path = wrong_file.with_suffix(".meta.json")
+    meta_path.write_text(
+        '{"business_metadata": {"granularity": "monthly"}}',
+        encoding="utf-8",
+    )
+
+    async with session_factory() as session:
+        session.add(
+            CatalogFile(
+                file_path=str(wrong_file),
+                file_name=wrong_file.name,
+                source="data/raw",
+                platform_code="miaoshou",
+                source_platform="miaoshou",
+                data_domain="inventory",
+                granularity="monthly",
+                status="pending",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    response = await client.post("/api/data-sync/repair-inventory-snapshot-semantics", json=[])
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["repaired_count"] == 1
+
+    async with session_factory() as session:
+        result = await session.execute(select(CatalogFile))
+        repaired = result.scalar_one()
+        assert repaired.granularity == "snapshot"
+        assert repaired.file_name == "miaoshou_inventory_snapshot_20260407_121357.xls"

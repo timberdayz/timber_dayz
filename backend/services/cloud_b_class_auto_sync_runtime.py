@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import datetime, timezone
 
 
@@ -69,7 +70,7 @@ class CloudBClassAutoSyncRuntime:
                     # Cloud sync worker code uses synchronous SQLAlchemy engines/sessions and can
                     # block the main FastAPI event loop if awaited directly. Run it in a dedicated
                     # thread with its own event loop to keep API latency isolated.
-                    await asyncio.to_thread(lambda: asyncio.run(worker.run_one(self.worker_id)))
+                    await asyncio.to_thread(self._run_worker_once, worker)
                     self._last_heartbeat_at = datetime.now(timezone.utc).isoformat()
                 finally:
                     if hasattr(worker, "close"):
@@ -80,6 +81,11 @@ class CloudBClassAutoSyncRuntime:
         except Exception as exc:
             self._last_error = str(exc)
             self._status = "error"
+
+    def _run_worker_once(self, worker) -> None:
+        result = worker.run_one(self.worker_id)
+        if inspect.isawaitable(result):
+            asyncio.run(result)
 
     def get_health(self) -> dict:
         return {

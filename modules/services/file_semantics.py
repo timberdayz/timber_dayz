@@ -32,7 +32,7 @@ def validate_file_semantics(
     platform = str(source_platform or "").strip().lower()
     business_platform = str(platform_code or "").strip().lower()
     domain = str(data_domain or "").strip().lower()
-    _ = str(granularity or "").strip().lower()
+    normalized_granularity = str(granularity or "").strip().lower()
     normalized_sub_domain = str(sub_domain or "").strip().lower()
     normalized_file_name = str(file_name or "").strip().lower()
 
@@ -60,6 +60,14 @@ def validate_file_semantics(
             normalized_platform=platform,
             normalized_sub_domain=normalized_sub_domain,
             reason="services_invalid_subdomain",
+        )
+
+    if domain == "inventory" and normalized_granularity and normalized_granularity != "snapshot":
+        return SemanticValidationResult(
+            is_valid=False,
+            normalized_platform=platform,
+            normalized_sub_domain=normalized_sub_domain,
+            reason="inventory_granularity_invalid",
         )
 
     if domain in {"products", "analytics", "inventory", "finance"} and normalized_sub_domain:

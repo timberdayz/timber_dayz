@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta, timezone
 import socket
+import os
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend.services.cloud_b_class_auto_sync_factory import _build_checkpoint_scope_key
 from backend.services.cloud_sync_admin_query_service import CloudSyncAdminQueryService
 from modules.core.db import Base
 from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncTask, SystemConfig
@@ -38,9 +40,13 @@ async def cloud_sync_sqlite_session():
 @pytest_asyncio.fixture
 async def seeded_cloud_sync_query_data(cloud_sync_sqlite_session):
     now = datetime.now(timezone.utc)
+    current_scope = _build_checkpoint_scope_key(
+        os.getenv("CLOUD_DATABASE_URL"),
+        dry_run=False,
+    )
 
     checkpoint = CloudBClassSyncCheckpoint(
-        table_schema="cloud_sync:demo",
+        table_schema=current_scope,
         table_name="fact_shopee_orders_daily",
         last_source_id=321,
         last_status="completed",
@@ -99,6 +105,63 @@ async def test_table_state_row_contains_checkpoint_and_projection_sections(seede
 
 
 @pytest.mark.asyncio
+async def test_table_state_rows_only_include_current_scope_checkpoint(
+    monkeypatch,
+    cloud_sync_sqlite_session,
+):
+    current_cloud_url = "postgresql://erp_user:secret-pass@127.0.0.1:15433/xihong_erp"
+    other_cloud_url = "postgresql://erp_user:secret-pass@127.0.0.1:15434/xihong_erp"
+    monkeypatch.setenv("CLOUD_DATABASE_URL", current_cloud_url)
+    current_scope = _build_checkpoint_scope_key(current_cloud_url, dry_run=False)
+    other_scope = _build_checkpoint_scope_key(other_cloud_url, dry_run=False)
+    now = datetime.now(timezone.utc)
+    cloud_sync_sqlite_session.add_all(
+        [
+            CloudBClassSyncCheckpoint(
+                table_schema=other_scope,
+                table_name="fact_shopee_orders_daily",
+                last_source_id=999,
+                last_status="completed",
+                last_ingest_timestamp=now - timedelta(minutes=5),
+            ),
+            CloudBClassSyncCheckpoint(
+                table_schema=current_scope,
+                table_name="fact_shopee_orders_daily",
+                last_source_id=321,
+                last_status="completed",
+                last_ingest_timestamp=now - timedelta(minutes=10),
+            ),
+            CloudBClassSyncTask(
+                job_id="job-scope-current",
+                dedupe_key="fact_shopee_orders_daily",
+                source_table_name="fact_shopee_orders_daily",
+                status="pending",
+                metadata_json={"checkpoint_scope": current_scope},
+                created_at=now - timedelta(minutes=1),
+            ),
+            CloudBClassSyncTask(
+                job_id="job-scope-other",
+                dedupe_key="fact_shopee_orders_daily-other",
+                source_table_name="fact_shopee_orders_daily",
+                status="failed",
+                metadata_json={"checkpoint_scope": other_scope},
+                created_at=now - timedelta(minutes=2),
+            ),
+        ]
+    )
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+    rows = await service.list_table_states()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["checkpoint"]["table_schema"] == current_scope
+    assert row["checkpoint"]["last_source_id"] == 321
+    assert row["latest_task"]["job_id"] == "job-scope-current"
+
+
+@pytest.mark.asyncio
 async def test_query_service_redacts_credentials_in_errors(cloud_sync_sqlite_session):
     task = CloudBClassSyncTask(
         job_id="job-sensitive",
@@ -153,6 +216,22 @@ async def test_health_summary_redacts_cloud_db_probe_error(monkeypatch, seeded_c
     assert payload["cloud_db"]["status"] == "unreachable"
     assert payload["cloud_db"]["error"] is not None
     assert "secret-pass" not in payload["cloud_db"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_health_summary_reports_not_configured_when_worker_prereqs_missing(
+    monkeypatch,
+    seeded_cloud_sync_query_data,
+):
+    monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "true")
+    monkeypatch.setenv("ENABLE_COLLECTION", "true")
+    monkeypatch.setenv("DEPLOYMENT_ROLE", "collector")
+    monkeypatch.delenv("CLOUD_DATABASE_URL", raising=False)
+
+    service = CloudSyncAdminQueryService(seeded_cloud_sync_query_data)
+    payload = await service.get_health_summary(runtime_health=None)
+
+    assert payload["worker"]["status"] == "not_configured"
 
 
 @pytest.mark.asyncio
@@ -222,3 +301,50 @@ async def test_settings_summary_reads_persisted_auto_sync_flag(cloud_sync_sqlite
     payload = await service.get_settings()
 
     assert payload["auto_sync_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_table_state_rows_only_include_current_cloud_scope(
+    monkeypatch,
+    cloud_sync_sqlite_session,
+):
+    current_cloud_url = "postgresql://erp_user:erp_pass_2025@127.0.0.1:15433/xihong_erp"
+    other_cloud_url = "postgresql://erp_user:erp_pass_2025@127.0.0.1:15434/xihong_erp"
+    monkeypatch.setenv("CLOUD_DATABASE_URL", current_cloud_url)
+    current_scope = _build_checkpoint_scope_key(current_cloud_url, dry_run=False)
+    other_scope = _build_checkpoint_scope_key(other_cloud_url, dry_run=False)
+
+    cloud_sync_sqlite_session.add_all(
+        [
+            CloudBClassSyncCheckpoint(
+                table_schema=current_scope,
+                table_name="fact_scope_sensitive",
+                last_source_id=11,
+                last_status="completed",
+                last_ingest_timestamp=datetime.now(timezone.utc),
+            ),
+            CloudBClassSyncCheckpoint(
+                table_schema=other_scope,
+                table_name="fact_scope_sensitive",
+                last_source_id=22,
+                last_status="failed",
+                last_error="wrong-scope",
+                last_ingest_timestamp=datetime.now(timezone.utc),
+            ),
+            CloudBClassSyncTask(
+                job_id="job-current",
+                dedupe_key="fact_scope_sensitive",
+                source_table_name="fact_scope_sensitive",
+                status="completed",
+            ),
+        ]
+    )
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+    rows = await service.list_table_states()
+
+    row = next(item for item in rows if item["source_table_name"] == "fact_scope_sensitive")
+    assert row["checkpoint"]["table_schema"] == current_scope
+    assert row["checkpoint"]["last_source_id"] == 11
+    assert row["checkpoint"]["last_status"] == "completed"

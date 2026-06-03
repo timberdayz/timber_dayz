@@ -32,6 +32,7 @@ from backend.services.data_standardizer import standardize_rows
 from backend.services.currency_extractor import get_currency_extractor
 from backend.services.data_ingestion_service import normalize_row_fields_for_domain
 from backend.services.excel_parser import ExcelParser
+from backend.services.spreadsheet_normalization_service import get_spreadsheet_normalization_service
 from backend.services.template_family_service import get_template_resolver
 from modules.services.smart_date_parser import parse_date_by_declared_format
 from modules.core.db import FieldMappingTemplate
@@ -39,6 +40,20 @@ from modules.core.logger import get_logger
 from backend.domains.data_platform.routers._field_mapping_helpers import _safe_resolve_path
 
 logger = get_logger(__name__)
+
+
+def _runtime_safe_path(file_path: str) -> str:
+    safe_path = _safe_resolve_path(file_path)
+    if not Path(safe_path).exists():
+        return str(safe_path)
+    source_format = ExcelParser.detect_file_format(Path(safe_path))
+    if source_format in {"xls", "xlsx_with_ole", "html"}:
+        normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
+            safe_path,
+            source_format=source_format,
+        )
+        return str(normalized.path)
+    return str(safe_path)
 
 router = APIRouter()
 
@@ -92,7 +107,7 @@ async def _load_field_parse_rules_for_file(
     if not file_record:
         return []
 
-    safe_path = _safe_resolve_path(file_record.file_path)
+    safe_path = _runtime_safe_path(file_record.file_path)
     sample_rows: list[dict[str, Any]] = []
     header_columns: list[str] = []
     try:
@@ -146,7 +161,7 @@ async def _load_field_parse_rules_for_file(
     for template in templates_with_rules:
         header_row = template.header_row or 0
         if header_row not in sample_cache:
-            df = ExcelParser.read_excel(safe_path, header=header_row, nrows=5)
+            df = ExcelParser.read_excel(_runtime_safe_path(file_record.file_path), header=header_row, nrows=5)
             df.columns = [str(col).strip() for col in df.columns]
             df = df.dropna(how="all").fillna("")
             sample_cache[header_row] = df.to_dict("records")
@@ -282,8 +297,9 @@ async def preview_file(file_data: dict, db: AsyncSession = Depends(get_async_db)
         
         logger.info(f"[Preview] 文件大小: {file_size_mb:.2f}MB, 预览行数: {preview_rows}")
         
+        safe_runtime_path = _runtime_safe_path(catalog_record.file_path)
         df = ExcelParser.read_excel(
-            safe_path,
+            safe_runtime_path,
             header=header_param,
             nrows=preview_rows
         )
@@ -293,7 +309,7 @@ async def preview_file(file_data: dict, db: AsyncSession = Depends(get_async_db)
                 df,
                 data_domain=catalog_record.data_domain or "products",
                 file_size_mb=file_size_mb,
-                source_path=safe_path,
+                source_path=safe_runtime_path,
                 header_row=header_row,
             )
             if file_size_mb > 10:
@@ -561,8 +577,9 @@ async def ingest_file(
         logger.info(f"[Ingest] 实际使用的表头行: header_param={header_param} (0-based, Excel第{header_param+1 if header_param is not None else '无表头'}行)")
         
         try:
+            safe_runtime_path = _runtime_safe_path(catalog_record.file_path)
             df = ExcelParser.read_excel(
-                safe_path,
+                safe_runtime_path,
                 header=header_param,
                 nrows=None
             )
@@ -574,7 +591,7 @@ async def ingest_file(
                     df,
                     data_domain=domain or "products",
                     file_size_mb=file_size_mb,
-                    source_path=safe_path,
+                        source_path=safe_runtime_path,
                     header_row=header_row,
                 )
                 if file_size_mb > 10:

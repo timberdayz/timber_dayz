@@ -5,7 +5,6 @@ import os
 from datetime import datetime, timezone
 
 from sqlalchemy import select, text
-from sqlalchemy import or_
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,8 +13,8 @@ from backend.services.cloud_b_class_auto_sync_dispatch_service import (
     CloudBClassAutoSyncDispatchService,
 )
 from backend.services.cloud_b_class_auto_sync_factory import (
-    _build_checkpoint_scope_key,
     build_cloud_sync_service_from_env,
+    get_current_checkpoint_scope_from_env,
 )
 from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
@@ -171,18 +170,16 @@ class CloudSyncAdminCommandService:
 
     async def repair_checkpoint(self, source_table_name: str) -> dict:
         source_table_name = validate_b_class_table_name(source_table_name)
+        current_scope = self._current_checkpoint_scope()
         stmt = select(CloudBClassSyncCheckpoint).where(
             CloudBClassSyncCheckpoint.table_name == source_table_name,
-            or_(
-                CloudBClassSyncCheckpoint.table_schema.like("cloud_sync:%"),
-                CloudBClassSyncCheckpoint.table_schema == "cloud_sync:local",
-            ),
+            CloudBClassSyncCheckpoint.table_schema == current_scope,
         )
         checkpoints = (await self.db.execute(stmt)).scalars().all()
 
         if not checkpoints:
             checkpoint = CloudBClassSyncCheckpoint(
-                table_schema=_build_checkpoint_scope_key(None, dry_run=False),
+                table_schema=current_scope,
                 table_name=source_table_name,
                 last_status="pending",
             )
@@ -262,12 +259,10 @@ class CloudSyncAdminCommandService:
         return await self.db.run_sync(_inspect_tables)
 
     async def _table_needs_catch_up(self, table_name: str) -> bool:
+        current_scope = self._current_checkpoint_scope()
         checkpoint_stmt = select(CloudBClassSyncCheckpoint).where(
             CloudBClassSyncCheckpoint.table_name == table_name,
-            or_(
-                CloudBClassSyncCheckpoint.table_schema.like("cloud_sync:%"),
-                CloudBClassSyncCheckpoint.table_schema == "cloud_sync:local",
-            ),
+            CloudBClassSyncCheckpoint.table_schema == current_scope,
         )
         checkpoint = (await self.db.execute(checkpoint_stmt)).scalars().first()
         if checkpoint is None or checkpoint.last_ingest_timestamp is None:
@@ -313,3 +308,7 @@ class CloudSyncAdminCommandService:
         if len(parts) < 4 or parts[0] != "fact":
             raise ValueError(f"Unsupported B-class table name: {source_table_name}")
         return parts[2]
+
+    @staticmethod
+    def _current_checkpoint_scope() -> str:
+        return get_current_checkpoint_scope_from_env(dry_run=False)

@@ -5,6 +5,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.services.cloud_b_class_auto_sync_factory import get_current_checkpoint_scope_from_env
 from backend.services.task_center_sync_service import TaskCenterSyncService
 from modules.core.db import CloudBClassSyncTask
 
@@ -26,6 +27,7 @@ class CloudBClassAutoSyncDispatchService:
             metadata = dict(existing.metadata_json or {})
             metadata["trigger_count"] = int(metadata.get("trigger_count", 1)) + 1
             metadata["latest_trigger_at"] = event.timestamp
+            metadata.setdefault("checkpoint_scope", get_current_checkpoint_scope_from_env())
             existing.metadata_json = metadata
             if event.file_id is not None:
                 existing.source_file_id = event.file_id
@@ -70,6 +72,7 @@ class CloudBClassAutoSyncDispatchService:
             metadata_json={
                 "trigger_count": 1,
                 "latest_trigger_at": event.timestamp,
+                "checkpoint_scope": get_current_checkpoint_scope_from_env(),
             },
         )
         self.db.add(task)

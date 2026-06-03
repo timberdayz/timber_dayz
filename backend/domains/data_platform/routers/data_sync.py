@@ -28,6 +28,7 @@ from backend.models.database import get_db, get_async_db, SessionLocal, AsyncSes
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.data_sync_service import DataSyncService
 from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
+from backend.services.spreadsheet_normalization_service import get_spreadsheet_normalization_service
 from backend.services.sync_progress_tracker import SyncProgressTracker
 from backend.dependencies.auth import get_current_user, require_admin  # [*] Phase 4.2: 用户认证
 from backend.services.user_task_quota import get_user_task_quota_service  # [*] Phase 4.2: 用户任务配额
@@ -126,6 +127,21 @@ def _semantic_anomaly_reason(catalog_file: CatalogFile | None) -> str:
         file_name=getattr(catalog_file, "file_name", None),
     )
     return result.reason
+
+
+def _semantic_anomaly_display_reason(reason: str) -> str:
+    mapping = {
+        "miaoshou_orders_business_platform_collapsed": "妙手 orders 业务平台语义错误，需先修复平台语义",
+        "inventory_granularity_invalid": "库存文件只能使用 snapshot 粒度，需先修复为 snapshot",
+        "services_invalid_subdomain": "services 文件子类型不合法",
+        "nonsvc_should_not_have_subdomain": "当前数据域不允许配置子类型",
+        "orders_subdomain_not_allowed": "orders 数据域不允许子类型",
+    }
+    return mapping.get(reason, reason or "语义异常")
+
+
+def _is_inventory_granularity_anomaly(catalog_file: CatalogFile | None) -> bool:
+    return _semantic_anomaly_reason(catalog_file) == "inventory_granularity_invalid"
 
 
 def _resolve_miaoshou_orders_business_platform(catalog_file: CatalogFile) -> str | None:
@@ -273,12 +289,20 @@ async def preview_file(
             lambda: PathLib(file_path).stat().st_size / (1024 * 1024)
         )
         preview_rows = 50 if file_size_mb > 10 else 100
+        runtime_file_path = file_path
+        runtime_source_format = ExcelParser.detect_file_format(PathLib(file_path))
+        if runtime_source_format in {"xls", "xlsx_with_ole", "html"}:
+            normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
+                file_path,
+                source_format=runtime_source_format,
+            )
+            runtime_file_path = str(normalized.path)
         
         # [*] v4.18.2修复:使用 run_in_executor 包装文件读取,避免阻塞事件循环
         df = await loop.run_in_executor(
             None,
             ExcelParser.read_excel,
-            file_path,
+            runtime_file_path,
             request.header_row,  # [*] 直接使用用户选择的表头行
             preview_rows
         )
@@ -290,7 +314,7 @@ async def preview_file(
                 df,
                 data_domain=catalog_record.data_domain or "products",
                 file_size_mb=file_size_mb,
-                source_path=safe_path,
+                source_path=runtime_file_path,
                 header_row=request.header_row,
             )
         except Exception as norm_error:
@@ -389,18 +413,18 @@ async def list_files(
         # 2. 查询文件列表([*] v4.18.2:使用 await)
         result = await db.execute(query)
         all_files = result.scalars().all()
-        valid_files = [
+        display_files = [
             file_record
             for file_record in all_files
-            if is_catalog_file_semantically_valid(file_record)
+            if is_catalog_file_semantically_valid(file_record) or _is_inventory_granularity_anomaly(file_record)
         ]
-        total_count = len(valid_files)
+        total_count = len(display_files)
 
         if limit is not None:
-            files = valid_files[:limit]
+            files = display_files[:limit]
         else:
             offset = (page - 1) * page_size
-            files = valid_files[offset: offset + page_size]
+            files = display_files[offset: offset + page_size]
         
         # [*] v4.19.5 优化:预加载所有已发布模板,减少重复查询
         from modules.core.db import FieldMappingTemplate
@@ -436,6 +460,9 @@ async def list_files(
         loop = asyncio.get_running_loop()
         
         for file_record in files:
+            semantic_anomaly_type = None
+            if not is_catalog_file_semantically_valid(file_record):
+                semantic_anomaly_type = _semantic_anomaly_reason(file_record)
             # [*] v4.19.5 优化:使用缓存快速匹配模板,避免重复查询数据库
             template = None
             platform = file_record.platform_code or ""
@@ -489,10 +516,28 @@ async def list_files(
                 except Exception as e:
                     logger.warning(f"[DataSync Files] 获取文件大小失败: {file_path_str}, 错误: {e}")
             
-            template_status_info = await data_sync_service.evaluate_catalog_file_template_status(
-                file_record,
-                template=template,
-            )
+            if semantic_anomaly_type:
+                template_status_info = {
+                    "has_template": False,
+                    "template_status": "semantic_invalid",
+                    "governance_status": "semantic_invalid",
+                    "template_update_required": False,
+                    "update_reason": _semantic_anomaly_display_reason(semantic_anomaly_type),
+                    "template_name": None,
+                    "template_header_row": None,
+                    "shadow_compare": None,
+                    "semantic_anomaly_type": semantic_anomaly_type,
+                    "semantic_repair_action": (
+                        "repair_inventory_snapshot"
+                        if semantic_anomaly_type == "inventory_granularity_invalid"
+                        else None
+                    ),
+                }
+            else:
+                template_status_info = await data_sync_service.evaluate_catalog_file_template_status(
+                    file_record,
+                    template=template,
+                )
 
             file_list.append({
                 "id": file_record.id,
@@ -512,6 +557,8 @@ async def list_files(
                 "template_name": template_status_info["template_name"],
                 "template_header_row": template_status_info["template_header_row"],
                 "shadow_compare": template_status_info.get("shadow_compare"),
+                "semantic_anomaly_type": template_status_info.get("semantic_anomaly_type"),
+                "semantic_repair_action": template_status_info.get("semantic_repair_action"),
                 "status": file_record.status
             })
         
@@ -2326,10 +2373,18 @@ async def get_detailed_template_coverage(
                         
                         # [*] v4.18.2修复:使用 run_in_executor 包装文件读取,避免阻塞事件循环
                         loop = asyncio.get_running_loop()
+                        runtime_sample_path = str(sample_file.file_path)
+                        runtime_source_format = ExcelParser.detect_file_format(PathLib(runtime_sample_path))
+                        if runtime_source_format in {"xls", "xlsx_with_ole", "html"}:
+                            normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
+                                runtime_sample_path,
+                                source_format=runtime_source_format,
+                            )
+                            runtime_sample_path = str(normalized.path)
                         df = await loop.run_in_executor(
                             None,
                             ExcelParser.read_excel,
-                            sample_file.file_path,
+                            runtime_sample_path,
                             template.header_row or 0,
                             5  # nrows=5
                         )
@@ -2707,6 +2762,101 @@ async def cleanup_semantic_anomalies(
             recovery_suggestion="请检查数据库连接和文件权限，或联系系统管理员",
             status_code=500
         )
+
+@router.post("/data-sync/repair-inventory-snapshot-semantics")
+async def repair_inventory_snapshot_semantics(
+    file_ids: list[int] | None = Body(default=None),
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    from scripts.repair_inventory_snapshot_granularity import repair_inventory_record
+
+    try:
+        query = select(CatalogFile).where(
+            CatalogFile.status == "pending",
+            CatalogFile.data_domain == "inventory",
+            CatalogFile.granularity != "snapshot",
+        )
+        if file_ids:
+            query = query.where(CatalogFile.id.in_(file_ids))
+
+        result = await db.execute(query)
+        pending_records = result.scalars().all()
+
+        repaired_rows: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+
+        for file_record in pending_records:
+            if _semantic_anomaly_reason(file_record) != "inventory_granularity_invalid":
+                continue
+
+            original_file_name = file_record.file_name
+            original_granularity = file_record.granularity
+            try:
+                fixed = repair_inventory_record(
+                    {
+                        "id": file_record.id,
+                        "file_name": file_record.file_name,
+                        "file_path": file_record.file_path,
+                        "data_domain": file_record.data_domain,
+                        "granularity": file_record.granularity,
+                    },
+                    apply_changes=True,
+                )
+                file_record.file_name = fixed["file_name"]
+                file_record.file_path = fixed["file_path"]
+                file_record.granularity = fixed["granularity"]
+                if isinstance(file_record.file_metadata, dict):
+                    file_record.file_metadata = {
+                        **file_record.file_metadata,
+                        "semantic_repair": {
+                            "reason": "inventory_granularity_invalid",
+                            "repaired_at": datetime.now(timezone.utc).isoformat(),
+                            "old_granularity": original_granularity,
+                            "new_granularity": "snapshot",
+                        },
+                    }
+                repaired_rows.append(
+                    {
+                        "file_id": file_record.id,
+                        "old_file_name": original_file_name,
+                        "new_file_name": fixed["file_name"],
+                        "old_granularity": original_granularity,
+                        "new_granularity": fixed["granularity"],
+                    }
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "file_id": file_record.id,
+                        "file_name": file_record.file_name,
+                        "error": str(exc),
+                    }
+                )
+
+        await db.commit()
+
+        return success_response(
+            data={
+                "matched_count": len(pending_records),
+                "repaired_count": len(repaired_rows),
+                "repaired_rows": repaired_rows,
+                "failures": failures,
+            },
+            message=f"库存 snapshot 语义修复完成，修复 {len(repaired_rows)} 条记录",
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[DataSync SemanticRepair] 修复库存 snapshot 语义失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="修复库存 snapshot 语义失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接、文件权限或伴生 meta 文件",
+            status_code=500,
+        )
+
 
 @router.post("/data-sync/repair-miaoshou-orders-platform-semantics")
 async def repair_miaoshou_orders_platform_semantics(

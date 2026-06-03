@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import socket
 
 from sqlalchemy import create_engine, inspect as sa_inspect
 from sqlalchemy.engine import make_url
@@ -48,6 +49,124 @@ def _build_checkpoint_scope_key(cloud_database_url: str | None, dry_run: bool) -
     )
     digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
     return f"cloud_sync:{digest}"
+
+
+def get_current_checkpoint_scope_from_env(*, dry_run: bool = False) -> str:
+    return _build_checkpoint_scope_key(os.getenv("CLOUD_DATABASE_URL"), dry_run=dry_run)
+
+
+def _tcp_probe(host: str, port: int, timeout_seconds: float = 1.0) -> tuple[bool, str | None]:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
+def run_cloud_sync_startup_checks_from_env() -> dict:
+    checks: dict[str, dict[str, str | bool | None]] = {}
+    status = "ok"
+
+    local_engine = None
+    try:
+        local_engine = create_engine(DATABASE_URL)
+        with local_engine.begin() as conn:
+            conn.exec_driver_sql("SELECT 1")
+        inspector = sa_inspect(local_engine)
+        table_names = set(inspector.get_table_names())
+        required_tables = {
+            "cloud_b_class_sync_checkpoints",
+            "cloud_b_class_sync_runs",
+            "cloud_b_class_sync_tasks",
+        }
+        missing_tables = sorted(required_tables - table_names)
+        checks["local_database"] = {
+            "ok": True,
+            "detail": "connected",
+        }
+        checks["cloud_sync_state_tables"] = {
+            "ok": not missing_tables,
+            "detail": None if not missing_tables else f"missing: {', '.join(missing_tables)}",
+        }
+        if missing_tables:
+            status = "degraded"
+    except Exception as exc:
+        checks["local_database"] = {
+            "ok": False,
+            "detail": str(exc),
+        }
+        checks["cloud_sync_state_tables"] = {
+            "ok": False,
+            "detail": "local database unavailable",
+        }
+        status = "error"
+    finally:
+        if local_engine is not None:
+            local_engine.dispose()
+
+    cloud_database_url = os.getenv("CLOUD_DATABASE_URL")
+    if cloud_database_url:
+        try:
+            parsed = make_url(cloud_database_url)
+            checks["cloud_database_url"] = {
+                "ok": True,
+                "detail": f"{parsed.drivername.split('+', 1)[0]}://{parsed.host or ''}:{parsed.port or 5432}/{parsed.database or ''}",
+            }
+            host = parsed.host or "127.0.0.1"
+            port = int(parsed.port or 5432)
+            ok, error = _tcp_probe(host, port)
+            checks["cloud_database_tcp"] = {
+                "ok": ok,
+                "detail": None if ok else error,
+            }
+            if not ok and status == "ok":
+                status = "degraded"
+        except Exception as exc:
+            checks["cloud_database_url"] = {
+                "ok": False,
+                "detail": str(exc),
+            }
+            checks["cloud_database_tcp"] = {
+                "ok": False,
+                "detail": "cloud database url invalid",
+            }
+            status = "error"
+    else:
+        checks["cloud_database_url"] = {
+            "ok": False,
+            "detail": "missing",
+        }
+        checks["cloud_database_tcp"] = {
+            "ok": False,
+            "detail": "missing",
+        }
+        status = "degraded" if status == "ok" else status
+
+    tunnel_enabled = str(os.getenv("CLOUD_SYNC_TUNNEL_ENABLED", "")).lower() in {"1", "true", "yes", "on"}
+    tunnel_host = os.getenv("CLOUD_SYNC_TUNNEL_HOST")
+    tunnel_port = os.getenv("CLOUD_SYNC_TUNNEL_PORT")
+    if tunnel_enabled:
+        if tunnel_host and tunnel_port:
+            ok, error = _tcp_probe(tunnel_host, int(tunnel_port))
+            checks["cloud_sync_tunnel"] = {
+                "ok": ok,
+                "detail": None if ok else error,
+            }
+            if not ok and status == "ok":
+                status = "degraded"
+        else:
+            checks["cloud_sync_tunnel"] = {
+                "ok": False,
+                "detail": "missing host or port",
+            }
+            status = "degraded" if status == "ok" else status
+    else:
+        checks["cloud_sync_tunnel"] = {
+            "ok": True,
+            "detail": "disabled",
+        }
+
+    return {"status": status, "checks": checks}
 
 
 def _build_cloud_sync_service(

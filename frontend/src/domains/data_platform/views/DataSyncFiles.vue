@@ -326,6 +326,14 @@ v4.6.0新增：独立的数据同步系统
               </el-tag>
             </el-tooltip>
             <el-tag
+              v-else-if="row.template_status === 'semantic_invalid'"
+              type="danger"
+              size="small"
+            >
+              <el-icon><Warning /></el-icon>
+              语义异常
+            </el-tag>
+            <el-tag
               v-else-if="row.template_status === 'file_missing'"
               type="warning"
               size="small"
@@ -416,6 +424,15 @@ v4.6.0新增：独立的数据同步系统
             <el-button size="small" type="primary" @click="viewDetail(row.id)">
               <el-icon><View /></el-icon>
               详情
+            </el-button>
+            <el-button
+              v-if="row.semantic_repair_action === 'repair_inventory_snapshot'"
+              size="small"
+              type="warning"
+              @click="repairInventorySnapshot(row)"
+            >
+              <el-icon><RefreshRight /></el-icon>
+              修复为 snapshot
             </el-button>
             <el-button
               v-if="row.status === 'failed' || row.status === 'partial_success'"
@@ -1117,13 +1134,25 @@ const isRowSyncable = (row) => {
 
   if (!row?.has_template) return false
   if (row?.status === 'ingested') return false
-  if (templateStatus === 'update_required' || templateStatus === 'parse_failed' || templateStatus === 'file_missing') {
+  if (templateStatus === 'update_required' || templateStatus === 'parse_failed' || templateStatus === 'file_missing' || templateStatus === 'semantic_invalid') {
     return false
   }
-  if (governanceStatus === 'missing_variant' || governanceStatus === 'missing_family' || governanceStatus === 'breaking_drift') {
+  if (governanceStatus === 'missing_variant' || governanceStatus === 'missing_family' || governanceStatus === 'breaking_drift' || governanceStatus === 'semantic_invalid') {
     return false
   }
   return true
+}
+
+const repairInventorySnapshot = async (row) => {
+  try {
+    const result = await api.repairInventorySnapshotSemantics([row.id])
+    ElMessage.success(result?.message || '库存 snapshot 语义修复成功')
+    await loadFiles(false)
+    await loadGovernanceStats(false)
+  } catch (error) {
+    console.error('修复库存 snapshot 语义失败:', error)
+    ElMessage.error(error.message || '修复库存 snapshot 语义失败')
+  }
 }
 
 // 查看详情

@@ -132,3 +132,42 @@ async def test_inventory_overview_products_paginates_latest_snapshots(inventory_
     assert result.total == 3
     assert result.page == 2
     assert len(result.data) == 1
+
+
+@pytest.mark.asyncio
+async def test_inventory_overview_summary_does_not_mix_products_domain_rows(inventory_overview_session):
+    session = inventory_overview_session
+    session.add_all(
+        [
+            FactProductMetric(
+                platform_code="miaoshou",
+                shop_id="shop-1",
+                platform_sku="INV-1",
+                metric_date=date(2026, 6, 2),
+                metric_type="inventory",
+                granularity="snapshot",
+                data_domain="inventory",
+                stock=8,
+                price=10,
+                updated_at=datetime(2026, 6, 2, tzinfo=timezone.utc),
+            ),
+            FactProductMetric(
+                platform_code="miaoshou",
+                shop_id="shop-1",
+                platform_sku="PROD-1",
+                metric_date=date(2026, 6, 2),
+                metric_type="product",
+                granularity="daily",
+                data_domain="products",
+                stock=999,
+                price=1,
+                updated_at=datetime(2026, 6, 2, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    await session.commit()
+
+    summary = await InventoryOverviewService(session).get_summary()
+
+    assert summary.total_products == 1
+    assert summary.total_stock == 8
