@@ -628,7 +628,6 @@ const adjustmentSubmitting = ref(false)
 // 新增/编辑模式
 const adjustmentMode = ref('create')
 let shopDisplayLookup = new Map()
-let shopDisplayLookup = new Map()
 
 const inputList = reactive({
   data: [],
