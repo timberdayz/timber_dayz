@@ -15,6 +15,7 @@ Do not use full-repository search as the first step when one of these files cove
 - `docs/guides/CHANGE_CONTROL.md`: phase-specific scope constraints
 - `docs/guides/VERIFICATION_MATRIX.md`: verification checks by changed surface
 - `docs/guides/DOCUMENT_LIFECYCLE.md`: active, reference, runbook, and archive document policy
+- `docs/guides/PERMISSION_MODEL.md`: active frontend/backend permission model and maintenance rules
 
 ## Development And Release
 
