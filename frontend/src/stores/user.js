@@ -5,6 +5,7 @@ import authApi from '@/api/auth'
 import { hasAnyRole, hasPermissionForRoles } from '@/utils/authRoles'
 import {
   clearPersistedAuthState,
+  hasAuthRecoveryFailed,
   hasPersistedAuthSession,
   readPersistedAuthState,
   writePersistedAuthState,
@@ -68,7 +69,7 @@ export const useUserStore = defineStore('user', () => {
   const initUserInfo = async () => {
     const state = readPersistedAuthState(localStorage)
 
-    if (!hasPersistedAuthSession(state)) {
+    if (!hasPersistedAuthSession(state) || hasAuthRecoveryFailed(localStorage)) {
       logout()
       return
     }
@@ -105,10 +106,11 @@ export const useUserStore = defineStore('user', () => {
         return
       }
     } catch (error) {
-      console.error('获取用户信息失败:', error)
       if (error.response && error.response.status === 401) {
         logout()
+        return
       }
+      console.warn('获取用户信息失败:', error)
     }
   }
 

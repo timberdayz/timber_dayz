@@ -60,8 +60,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, ArrowDown, Setting, SwitchButton, Check } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useAuthStore } from '@/stores/auth'
-import authApi from '@/api/auth'
 import { ROLE_CONFIG, normalizeRoleCode } from '@/config/rolePermissions'
+import {
+  hasAuthRecoveryFailed,
+  hasPersistedAuthSession,
+  readPersistedAuthState,
+} from '@/utils/authSession'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -147,8 +151,19 @@ const ensureActiveRole = (roles = []) => {
   userStore.updateUserInfo({ activeRole: preferredRole })
 }
 
-onMounted(async () => {
-  await loadUserInfo()
+onMounted(() => {
+  if (hasAuthRecoveryFailed(localStorage)) {
+    return
+  }
+
+  const persistedState = readPersistedAuthState(localStorage)
+  if (!hasPersistedAuthSession(persistedState)) {
+    return
+  }
+
+  if (userRoles.value.length > 0) {
+    ensureActiveRole(userRoles.value)
+  }
 })
 
 watch(
@@ -174,42 +189,6 @@ watch(
   },
   { immediate: true }
 )
-
-const loadUserInfo = async () => {
-  try {
-    if (authStore.user?.roles) {
-      ensureActiveRole(authStore.user.roles.map(normalizeRoleCode).filter(Boolean))
-      return
-    }
-
-    const response = await authApi.getCurrentUser()
-    if (!response?.roles) return
-    const normalizedRoles = response.roles.map(normalizeRoleCode).filter(Boolean)
-    authStore.user = {
-      id: response.id,
-      username: response.username,
-      full_name: response.full_name || response.username,
-      email: response.email,
-      roles: normalizedRoles,
-      permissions: response.permissions || [],
-      is_admin: response.is_admin || false,
-    }
-    userStore.updateUserInfo({
-      id: response.id,
-      username: response.username,
-      name: response.full_name || response.username,
-      email: response.email,
-      roles: normalizedRoles,
-      permissions: response.permissions || [],
-      is_admin: response.is_admin || false,
-    })
-    userStore.roles = normalizedRoles
-    userStore.permissions = response.permissions || []
-    ensureActiveRole(normalizedRoles)
-  } catch (error) {
-    console.error('获取用户信息失败:', error)
-  }
-}
 
 const switchRole = (roleCode) => {
   if (!userRoles.value.includes(roleCode)) {
