@@ -33,6 +33,7 @@ Do not use full-repository search as the first step when one of these files cove
 - `docs/architecture/PROJECT_STRUCTURE.md`: repository file tree, ownership, and placement boundaries
 - `docs/architecture/BOUNDARIES.md`: module and domain boundaries
 - `docs/architecture/DASHBOARD.md`: PostgreSQL-first Dashboard architecture
+- `docs/architecture/SAFE_CHANGE_ZONES.md`: safe vs high-risk change zones across raw/semantic/mart/api/frontend layers
 - `docs/adr/README.md`: architecture decision record policy
 
 ## Implementation Standards

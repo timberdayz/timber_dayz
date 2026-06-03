@@ -292,6 +292,26 @@ class DataIngestionService:
         
         allowed_dirs_str = [str(d) for d in allowed_dirs_paths]
         raise ValueError(f"[SafePath] 文件路径不在允许的目录中: {file_path} (项目根目录: {project_root}, 允许目录: {allowed_dirs_str})")
+
+    def _resolve_runtime_spreadsheet_path(self, file_path: str) -> str:
+        from backend.services.spreadsheet_normalization_service import get_spreadsheet_normalization_service
+
+        safe_path = self._safe_resolve_path(file_path)
+        source_format = ExcelParser.detect_file_format(Path(safe_path))
+        if source_format in {"xls", "xlsx_with_ole", "html"}:
+            normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
+                safe_path,
+                source_format=source_format,
+            )
+            logger.info(
+                "[Ingest] 使用标准化副本读取文件: %s -> %s (converter=%s, cache_hit=%s)",
+                Path(safe_path).name,
+                normalized.path.name,
+                normalized.converter,
+                normalized.cache_hit,
+            )
+            return str(normalized.path)
+        return str(safe_path)
     
     async def ingest_data(
         self,
@@ -367,7 +387,7 @@ class DataIngestionService:
                     }
             
             # 4. 读取完整文件
-            safe_path = self._safe_resolve_path(file_record.file_path)
+            safe_path = self._resolve_runtime_spreadsheet_path(file_record.file_path)
             
             # [*] v4.18.2修复:使用 run_in_executor 包装文件系统检查,避免阻塞事件循环
             loop = asyncio.get_running_loop()
