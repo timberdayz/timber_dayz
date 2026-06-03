@@ -70,6 +70,14 @@
         <el-option label="Shopee" value="Shopee" />
         <el-option label="Lazada" value="Lazada" />
       </el-select>
+      <el-input
+        v-if="filters.groupBy === 'shop'"
+        v-model="shopKeyword"
+        clearable
+        placeholder="按别名 / 标准名 / 店铺ID筛选"
+        size="default"
+        style="width: 220px;"
+      />
     </div>
 
     <el-card shadow="never" class="policy-card">
@@ -111,7 +119,11 @@
           show-overflow-tooltip
         >
           <template #default="{ row }">
-            {{ filters.groupBy === 'person' ? (row.employee_name || row.employee_code || '—') : (row.shop_name || row.shop_id || '—') }}
+            <template v-if="filters.groupBy === 'person'">{{ row.employee_name || row.employee_code || '—' }}</template>
+            <div v-else class="shop-display-cell">
+              <div>{{ row.shop_name || row.shop_id || '—' }}</div>
+              <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" label="销售额目标" width="110" align="right">
@@ -244,7 +256,12 @@
     <el-dialog v-model="detailVisible" title="绩效详情" width="900px">
       <div v-if="performanceDetail.data" v-loading="performanceDetail.loading">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="店铺名称" :span="2">{{ performanceDetail.data.shop_name }}</el-descriptions-item>
+          <el-descriptions-item label="店铺名称" :span="2">
+            <div class="shop-display-cell">
+              <div>{{ performanceDetail.data.shop_name }}</div>
+              <div v-if="performanceDetail.data.secondary_name" class="shop-display-secondary">{{ performanceDetail.data.secondary_name }}</div>
+            </div>
+          </el-descriptions-item>
           <el-descriptions-item label="考核周期">{{ performanceDetail.data.period }}</el-descriptions-item>
           <el-descriptions-item label="总分">
             <el-tag :type="performanceDetail.data.total_score != null ? scoreTagType(performanceDetail.data.total_score) : 'info'" size="large">
@@ -302,6 +319,7 @@ import employeeTasksApi from '@/api/employeeTasks.js'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatPercent } from '@/utils/dataFormatter'
 import { hasScopedActionPermission } from '@/utils/actionPermissions'
+import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
 
 const props = defineProps({
   forcedGroupBy: {
@@ -345,6 +363,8 @@ const calculating = ref(false)
 const detailVisible = ref(false)
 const poolFilter = ref('all')
 const alertFilter = ref('all')
+const shopKeyword = ref('')
+let shopDisplayLookup = new Map()
 
 const weightConfig = reactive({
   sales_weight: 30,
@@ -403,9 +423,19 @@ const filteredPerformanceData = computed(() => {
           : 'none'
     const poolOk = poolFilter.value === 'all' || pool === poolFilter.value
     const alertOk = alertFilter.value === 'all' || alert === alertFilter.value
-    return poolOk && alertOk
+    const keywordOk = !shopKeyword.value.trim() || (row.search_text || `${row.shop_name || ''} ${row.shop_id || ''}`.toLowerCase()).includes(shopKeyword.value.trim().toLowerCase())
+    return poolOk && alertOk && keywordOk
   })
 })
+
+const loadShopDisplayLookup = async () => {
+  try {
+    const response = await api.getShopDirectory({ enabled: true })
+    shopDisplayLookup = buildShopAccountLookup(Array.isArray(response) ? response : [])
+  } catch (_error) {
+    shopDisplayLookup = new Map()
+  }
+}
 
 const detailMetricCards = computed(() => {
   const data = performanceDetail.data || {}
@@ -570,10 +600,15 @@ const loadPerformanceList = async () => {
     })
 
     if (response && Array.isArray(response)) {
-      performanceList.data = response
+      performanceList.data = filters.groupBy === 'shop'
+        ? response.map((row) => decorateShopEntity(row, shopDisplayLookup))
+        : response
       performanceList.total = response.length
     } else {
-      performanceList.data = response?.data || response || []
+      const rows = response?.data || response || []
+      performanceList.data = filters.groupBy === 'shop'
+        ? rows.map((row) => decorateShopEntity(row, shopDisplayLookup))
+        : rows
       performanceList.total = response?.total || 0
     }
   } catch (error) {
@@ -650,7 +685,8 @@ const handleViewDetail = async (row) => {
       ? filters.period
       : (filters.period ? `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : undefined)
     const response = await api.getShopPerformanceDetail(row.platform_code, row.shop_id, period)
-    performanceDetail.data = response?.data ?? response ?? {}
+    const payload = response?.data ?? response ?? {}
+    performanceDetail.data = decorateShopEntity(payload, shopDisplayLookup)
   } catch (error) {
     handleApiError(error, { showMessage: true, logError: true })
   } finally {
@@ -666,7 +702,9 @@ watch(() => route.path, () => {
 onMounted(() => {
   initTaskContext()
   loadWeightConfig()
-  loadPerformanceList()
+  loadShopDisplayLookup().finally(() => {
+    loadPerformanceList()
+  })
 })
 </script>
 
@@ -771,6 +809,15 @@ onMounted(() => {
   color: var(--perf-text-muted);
 }
 
+.shop-display-cell {
+  line-height: 1.4;
+}
+
+.shop-display-secondary {
+  font-size: 12px;
+  color: var(--perf-text-secondary);
+}
+
 .empty-state {
   padding: 40px;
   text-align: center;
@@ -780,6 +827,15 @@ onMounted(() => {
 .pager {
   margin-top: 20px;
   justify-content: flex-end;
+}
+
+.shop-display-cell {
+  line-height: 1.4;
+}
+
+.shop-display-secondary {
+  font-size: 12px;
+  color: var(--perf-text-secondary);
 }
 
 .erp-table :deep(.el-table__fixed-left) {

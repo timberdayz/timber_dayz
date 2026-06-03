@@ -69,7 +69,10 @@
             @click="$emit('select-shop', shop)"
           >
             <div class="shop-row-top">
-              <span class="shop-name">{{ shop.shop_name }}</span>
+              <div class="shop-display-cell">
+                <span class="shop-name">{{ shop.shop_name }}</span>
+                <div v-if="shop.secondary_name" class="shop-display-secondary">{{ shop.secondary_name }}</div>
+              </div>
               <div class="shop-row-tags">
                 <el-tag v-if="selectedShop?.shop_id === shop.shop_id" size="small" type="primary">当前</el-tag>
                 <el-tag size="small" :type="shop.enabled === false ? 'danger' : 'success'">{{ shop.enabled === false ? '停用' : '可用' }}</el-tag>
@@ -91,7 +94,13 @@
         <div class="shop-detail-header">
           <div>
             <div class="shop-detail-title">当前店铺详情</div>
-            <div class="shop-detail-meta">{{ selectedShop ? `${selectedShop.shop_name}（${selectedShop.shop_id}）` : '请先从左侧选择店铺' }}</div>
+            <div class="shop-detail-meta">
+              <template v-if="selectedShop">
+                {{ selectedShop.shop_name }}（{{ selectedShop.shop_id }}）
+                <span v-if="selectedShop.secondary_name" class="shop-display-secondary shop-detail-secondary">{{ selectedShop.secondary_name }}</span>
+              </template>
+              <template v-else>请先从左侧选择店铺</template>
+            </div>
           </div>
           <div v-if="selectedShop" class="shop-detail-signals">
             <el-tag effect="plain" :type="settlementStore.profitBasis.data ? 'success' : 'info'">{{ settlementStore.profitBasis.data ? '利润口径已加载' : '待加载利润口径' }}</el-tag>
@@ -138,7 +147,12 @@
                 <el-form :inline="true" class="filter-form">
                   <el-form-item label="月份"><el-date-picker v-model="profitBasisForm.period_month" type="month" value-format="YYYY-MM" format="YYYY-MM" style="width: 140px" /></el-form-item>
                   <el-form-item label="平台"><el-input :model-value="selectedPlatformLabel" disabled style="width: 140px" /></el-form-item>
-                  <el-form-item label="店铺"><el-input :model-value="selectedShop?.shop_name || ''" disabled style="width: 220px" /></el-form-item>
+                  <el-form-item label="店铺">
+                    <div class="shop-display-input">
+                      <el-input :model-value="selectedShop?.shop_name || ''" disabled style="width: 220px" />
+                      <div v-if="selectedShop?.secondary_name" class="shop-display-secondary">{{ selectedShop.secondary_name }}</div>
+                    </div>
+                  </el-form-item>
                   <el-form-item>
                     <el-button type="primary" @click="$emit('load-profit-basis')" :disabled="!selectedShop" :loading="settlementStore.profitBasis.loading">查询基准</el-button>
                     <el-button @click="$emit('rebuild-profit-basis')" :disabled="!selectedShop" :loading="settlementStore.profitBasis.loading">重算基准</el-button>
@@ -159,7 +173,12 @@
                 <el-form :inline="true" class="filter-form">
                   <el-form-item label="月份"><el-date-picker v-model="followInvestmentForm.period_month" type="month" value-format="YYYY-MM" format="YYYY-MM" style="width: 140px" /></el-form-item>
                   <el-form-item label="平台"><el-input :model-value="selectedPlatformLabel" disabled style="width: 140px" /></el-form-item>
-                  <el-form-item label="店铺"><el-input :model-value="selectedShop?.shop_name || ''" disabled style="width: 220px" /></el-form-item>
+                  <el-form-item label="店铺">
+                    <div class="shop-display-input">
+                      <el-input :model-value="selectedShop?.shop_name || ''" disabled style="width: 220px" />
+                      <div v-if="selectedShop?.secondary_name" class="shop-display-secondary">{{ selectedShop.secondary_name }}</div>
+                    </div>
+                  </el-form-item>
                   <el-form-item label="分配比例"><el-input-number v-model="followInvestmentForm.distribution_ratio" :min="0" :max="1" :step="0.05" :precision="2" /></el-form-item>
                   <el-form-item><el-button type="primary" @click="$emit('run-follow-settlement')" :disabled="!selectedShop" :loading="settlementStore.followInvestmentSettlement.loading">试算收益</el-button></el-form-item>
                 </el-form>
@@ -337,6 +356,8 @@ const activeShopTabValue = computed({
 .shop-row.active { border-color: #2f7a9a; background: #f0f7fb; box-shadow: inset 0 0 0 1px rgba(47, 122, 154, 0.08); }
 .shop-row-top { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .shop-row-tags { display: inline-flex; gap: 6px; align-items: center; }
+.shop-display-cell { line-height: 1.4; }
+.shop-display-secondary { font-size: 12px; color: #909399; }
 .shop-name { font-weight: 600; color: #303133; }
 .shop-meta { color: #909399; font-size: 12px; }
 .shop-submeta { margin-top: 6px; color: #606266; font-size: 12px; }
@@ -344,6 +365,8 @@ const activeShopTabValue = computed({
 .shop-detail-header { margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .shop-detail-title { font-size: 18px; font-weight: 700; color: #303133; }
 .shop-detail-meta { color: #909399; margin-top: 4px; }
+.shop-display-input { display: flex; flex-direction: column; gap: 4px; }
+.shop-detail-secondary { margin-left: 6px; }
 .shop-detail-signals { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .shop-exception-card { margin-bottom: 16px; border-color: #f7d8a8; background: linear-gradient(180deg, #fffdf8 0%, #fff8eb 100%); }
 .shop-next-step-card { margin-bottom: 16px; border-color: #b7d3f3; background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%); }

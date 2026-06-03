@@ -109,3 +109,17 @@ export function resolveShopDisplay(entity = {}, lookup = new Map()) {
 
   return createDisplayMeta(entity)
 }
+
+export function decorateShopEntity(entity = {}, lookup = new Map()) {
+  const displayMeta = resolveShopDisplay(entity, lookup)
+  return {
+    ...entity,
+    display_name: displayMeta.display_name,
+    secondary_name: displayMeta.secondary_name,
+    canonical_name: displayMeta.canonical_name,
+    option_label: displayMeta.option_label,
+    search_text: displayMeta.search_text,
+    shop_name: displayMeta.display_name,
+    canonical_shop_name: displayMeta.canonical_name,
+  }
+}
