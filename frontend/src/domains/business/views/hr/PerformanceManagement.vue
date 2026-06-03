@@ -52,6 +52,14 @@
         <el-option label="Shopee" value="Shopee" />
         <el-option label="Lazada" value="Lazada" />
       </el-select>
+      <el-input
+        v-if="filters.groupBy === 'shop'"
+        v-model="shopKeyword"
+        clearable
+        placeholder="按别名 / 标准名 / 店铺ID筛选"
+        size="default"
+        style="width: 220px;"
+      />
     </div>
 
     <el-card shadow="never" class="policy-card">
@@ -88,8 +96,14 @@
       </template>
       
       <el-table :data="filteredPerformanceData" stripe v-loading="performanceList.loading" class="erp-table" border>
-        <el-table-column :prop="filters.groupBy === 'person' ? 'employee_name' : 'shop_name'" :label="filters.groupBy === 'person' ? '人员' : '店铺'" width="180" fixed="left" show-overflow-tooltip>
-          <template #default="{ row }">{{ filters.groupBy === 'person' ? (row.employee_name || row.employee_code || '—') : (row.shop_name || row.shop_id || '—') }}</template>
+        <el-table-column :prop="filters.groupBy === 'person' ? 'employee_name' : 'shop_name'" :label="filters.groupBy === 'person' ? '人员' : '店铺'" width="200" fixed="left" show-overflow-tooltip>
+          <template #default="{ row }">
+            <template v-if="filters.groupBy === 'person'">{{ row.employee_name || row.employee_code || '—' }}</template>
+            <div v-else class="shop-display-cell">
+              <div>{{ row.shop_name || row.shop_id || '—' }}</div>
+              <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" label="销售额目标" width="110" align="right">
           <template #default="{ row }">{{ formatCell(row.sales_target) }}</template>
@@ -306,7 +320,12 @@
     >
       <div v-if="performanceDetail.data" v-loading="performanceDetail.loading">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="店铺名称" :span="2">{{ performanceDetail.data.shop_name }}</el-descriptions-item>
+          <el-descriptions-item label="店铺名称" :span="2">
+            <div class="shop-display-cell">
+              <div>{{ performanceDetail.data.shop_name }}</div>
+              <div v-if="performanceDetail.data.secondary_name" class="shop-display-secondary">{{ performanceDetail.data.secondary_name }}</div>
+            </div>
+          </el-descriptions-item>
           <el-descriptions-item label="考核周期">{{ performanceDetail.data.period }}</el-descriptions-item>
           <el-descriptions-item label="总分">
             <el-tag :type="performanceDetail.data.total_score != null ? (performanceDetail.data.total_score >= 90 ? 'success' : performanceDetail.data.total_score >= 80 ? 'warning' : 'danger') : 'info'" size="large">
@@ -525,6 +544,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatNumber, formatPercent, formatInteger } from '@/utils/dataFormatter'
 import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
 import { hasScopedActionPermission } from '@/utils/actionPermissions'
+import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
 
 const props = defineProps({
   forcedGroupBy: {
@@ -590,6 +610,7 @@ const performanceDetail = reactive({
 const detailVisible = ref(false)
 const poolFilter = ref('all')
 const alertFilter = ref('all')
+const shopKeyword = ref('')
 const loadError = ref(false)
 const calculating = ref(false)
 const configVisible = ref(false)
@@ -606,6 +627,8 @@ const adjustmentDialogVisible = ref(false)
 const adjustmentSubmitting = ref(false)
 // 新增/编辑模式
 const adjustmentMode = ref('create')
+let shopDisplayLookup = new Map()
+let shopDisplayLookup = new Map()
 
 const inputList = reactive({
   data: [],
@@ -784,9 +807,19 @@ const filteredPerformanceData = computed(() => {
           : 'none'
     const poolOk = poolFilter.value === 'all' || pool === poolFilter.value
     const alertOk = alertFilter.value === 'all' || alert === alertFilter.value
-    return poolOk && alertOk
+    const keywordOk = !shopKeyword.value.trim() || (row.search_text || `${row.shop_name || ''} ${row.shop_id || ''}`.toLowerCase()).includes(shopKeyword.value.trim().toLowerCase())
+    return poolOk && alertOk && keywordOk
   })
 })
+
+const loadShopDisplayLookup = async () => {
+  try {
+    const response = await api.getShopDirectory({ enabled: true })
+    shopDisplayLookup = buildShopAccountLookup(Array.isArray(response) ? response : [])
+  } catch (_error) {
+    shopDisplayLookup = new Map()
+  }
+}
 
 const detailMetricCards = computed(() => {
   const data = performanceDetail.data || {}
@@ -842,10 +875,15 @@ const loadPerformanceList = async () => {
     
     // 兼容分页响应结构
     if (response && Array.isArray(response)) {
-      performanceList.data = response
+      performanceList.data = filters.groupBy === 'shop'
+        ? response.map((row) => decorateShopEntity(row, shopDisplayLookup))
+        : response
       performanceList.total = response.length
     } else {
-      performanceList.data = response?.data || response || []
+      const rows = response?.data || response || []
+      performanceList.data = filters.groupBy === 'shop'
+        ? rows.map((row) => decorateShopEntity(row, shopDisplayLookup))
+        : rows
       performanceList.total = response?.total || 0
     }
   } catch (error) {
@@ -1224,7 +1262,8 @@ const handleViewDetail = async (row) => {
     const period = typeof filters.period === 'string' ? filters.period : 
       (filters.period ? `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : undefined)
     const response = await api.getShopPerformanceDetail(row.platform_code, row.shop_id, period)
-    performanceDetail.data = response?.data ?? response ?? {}
+    const payload = response?.data ?? response ?? {}
+    performanceDetail.data = decorateShopEntity(payload, shopDisplayLookup)
   } catch (error) {
     handleApiError(error, { showMessage: true, logError: true })
   } finally {
@@ -1312,6 +1351,7 @@ watch(() => route.path, () => {
 onMounted(async () => {
   await loadWeightConfig()
   await loadEmployeeDirectory()
+  await loadShopDisplayLookup()
   await handleRefreshAll()
 })
 </script>
@@ -1376,6 +1416,15 @@ onMounted(async () => {
 
 .card-header span {
   color: var(--perf-text-primary);
+}
+
+.shop-display-cell {
+  line-height: 1.4;
+}
+
+.shop-display-secondary {
+  font-size: 12px;
+  color: var(--perf-text-secondary);
 }
 
 /* 浼佷笟绾ц〃鏍兼牱寮?*/

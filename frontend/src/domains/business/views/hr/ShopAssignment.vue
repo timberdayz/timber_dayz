@@ -61,9 +61,12 @@
               <span v-if="row._isFirst">{{ row.platform_code }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="店铺" width="180" fixed="left" show-overflow-tooltip>
+          <el-table-column label="店铺" width="200" fixed="left" show-overflow-tooltip>
             <template #default="{ row }">
-              <span v-if="row._isFirst">{{ row.shop_name }}</span>
+              <div v-if="row._isFirst" class="shop-display-cell">
+                <div>{{ row.shop_name }}</div>
+                <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="当月销售额" width="120" align="right">
@@ -181,7 +184,14 @@
       <el-card>
         <el-table :data="statsRows" stripe v-loading="statsLoading" class="erp-table" border>
           <el-table-column prop="platform_code" label="平台" width="100" fixed="left" />
-          <el-table-column prop="shop_name" label="店铺" width="180" fixed="left" show-overflow-tooltip />
+          <el-table-column prop="shop_name" label="店铺" width="200" fixed="left" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div class="shop-display-cell">
+                <div>{{ row.shop_name }}</div>
+                <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column prop="monthly_sales" label="当月销售额" width="120" align="right">
             <template #default="{ row }">¥{{ formatNumber(row.monthly_sales) }}</template>
           </el-table-column>
@@ -256,7 +266,14 @@
           border
         >
           <el-table-column prop="platform_code" label="平台" width="100" fixed="left" />
-          <el-table-column prop="shop_name" label="店铺" width="180" fixed="left" show-overflow-tooltip />
+          <el-table-column prop="shop_name" label="店铺" width="200" fixed="left" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div class="shop-display-cell">
+                <div>{{ row.shop_name }}</div>
+                <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column v-for="m in 12" :key="m" :label="`${m}月利润`" width="110" align="right">
             <template #default="{ row }">
               ¥{{ formatNumber(row.months && row.months[String(m).padStart(2, '0')] && row.months[String(m).padStart(2, '0')].monthly_profit) }}
@@ -280,6 +297,7 @@
       <el-form :model="form" label-width="100px">
         <el-form-item v-if="addForShopRow" label="店铺">
           <el-input :value="addForShopRow.shop_name || addForShopRow.shop_id" disabled />
+          <div v-if="addForShopRow.secondary_name" class="shop-display-secondary dialog-shop-secondary">{{ addForShopRow.secondary_name }}</div>
         </el-form-item>
         <el-form-item label="角色" required>
           <el-select v-model="form.role" placeholder="选择角色" style="width: 100%;">
@@ -301,7 +319,10 @@
         </el-form-item>
         <el-form-item v-if="!addForShopRow" label="店铺" required>
           <el-select v-model="form.shop_id" placeholder="选择店铺" filterable style="width: 100%;">
-            <el-option v-for="s in shopsFiltered" :key="`${s.platform_code}-${s.shop_id}`" :label="s.shop_name || s.shop_id" :value="s.shop_id" />
+            <el-option v-for="s in shopsFiltered" :key="`${s.platform_code}-${s.shop_id}`" :label="s.option_label || s.shop_name || s.shop_id" :value="s.shop_id">
+              <div>{{ s.shop_name || s.shop_id }}</div>
+              <div v-if="s.secondary_name" class="shop-display-secondary">{{ s.secondary_name }}</div>
+            </el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="提成比例" required>
@@ -334,6 +355,7 @@ import { Setting, DataAnalysis, Calendar } from '@element-plus/icons-vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { exceedsCommissionRatioLimit, setShopAllocatableProfitRate, sumCommissionRatio } from './shopAssignmentRules'
+import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
 
 const activeTab = ref('config')
 const configMonth = ref(new Date().toISOString().slice(0, 7))  // YYYY-MM
@@ -350,9 +372,10 @@ const annualYear = ref(new Date().getFullYear().toString())
 const annualGroupBy = ref('employee')
 const annualLoading = ref(false)
 const annualData = ref({ year: null, by_employee: [], by_shop: [] })
+let shopAccountLookup = new Map()
 
 const annualByEmployee = computed(() => annualData.value.by_employee || [])
-const annualByShop = computed(() => annualData.value.by_shop || [])
+const annualByShop = computed(() => (annualData.value.by_shop || []).map((row) => decorateShopEntity(row, shopAccountLookup)))
 
 const employees = ref([])
 const employeesActive = computed(() => employees.value.filter((e) => e.status === 'active'))
@@ -585,9 +608,18 @@ async function loadEmployees() {
 
 async function loadShops() {
   try {
-    const res = await api.getTargetShops()
-    const data = res?.data ?? res
-    shops.value = Array.isArray(data) ? data : (data?.data ?? data ?? [])
+    const [targetShopsResult, shopDirectoryResult] = await Promise.allSettled([
+      api.getTargetShops(),
+      api.getShopDirectory({ enabled: true }),
+    ])
+    if (targetShopsResult.status !== 'fulfilled') {
+      throw targetShopsResult.reason
+    }
+    const shopDirectory = shopDirectoryResult.status === 'fulfilled' ? shopDirectoryResult.value : []
+    shopAccountLookup = buildShopAccountLookup(Array.isArray(shopDirectory) ? shopDirectory : [])
+    const data = targetShopsResult.value?.data ?? targetShopsResult.value
+    const rows = Array.isArray(data) ? data : (data?.data ?? data ?? [])
+    shops.value = rows.map((row) => decorateShopEntity(row, shopAccountLookup))
   } catch (_) {
     shops.value = []
   }
@@ -604,7 +636,7 @@ async function loadConfigData() {
       api.getHrShopCommissionConfig({ year_month: configMonth.value }).catch(() => ({ data: [] }))
     ])
     const shopData = shopsRes?.data ?? shopsRes ?? []
-    const shopList = Array.isArray(shopData) ? shopData : (shopData?.data ?? shopData ?? [])
+    const shopList = (Array.isArray(shopData) ? shopData : (shopData?.data ?? shopData ?? [])).map((row) => decorateShopEntity(row, shopAccountLookup))
     const assData = assignmentsRes?.data ?? assignmentsRes ?? {}
     const items = (assData?.items ?? (Array.isArray(assData) ? assData : [])).filter(Boolean)
     const statsData = statsRes?.data ?? statsRes ?? []
@@ -615,12 +647,14 @@ async function loadConfigData() {
     const byShop = {}
     for (const s of shopList) {
       const key = `${(s.platform_code || '').toLowerCase()}|${s.shop_id}`
-      byShop[key] = {
-        platform_code: (s.platform_code || '').toLowerCase(),
-        shop_id: s.shop_id,
-        shop_name: s.shop_name || s.shop_id,
-        allocatable_profit_rate: 0,
-        assignments: [],
+        byShop[key] = {
+          platform_code: (s.platform_code || '').toLowerCase(),
+          shop_id: s.shop_id,
+          shop_name: s.shop_name || s.shop_id,
+          secondary_name: s.secondary_name || '',
+          canonical_shop_name: s.canonical_shop_name || '',
+          allocatable_profit_rate: 0,
+          assignments: [],
         saving: false,
         monthly_sales: 0,
         monthly_profit: 0,
@@ -649,7 +683,7 @@ async function loadConfigData() {
         byShop[key] = {
           platform_code: (a.platform_code || '').toLowerCase(),
           shop_id: a.shop_id,
-          shop_name: a.shop_name || a.shop_id,
+          ...decorateShopEntity(a, shopAccountLookup),
           allocatable_profit_rate: 0,
           assignments: [],
           saving: false,
@@ -684,7 +718,7 @@ async function loadStatsData() {
     const res = await api.getHrShopProfitStatistics({ month: statsMonth.value })
     const data = res?.data ?? res ?? []
     const items = Array.isArray(data) ? data : (data?.data ?? data ?? [])
-    statsRows.value = items
+    statsRows.value = items.map((row) => decorateShopEntity(row, shopAccountLookup))
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '加载失败')
     statsRows.value = []
@@ -810,5 +844,15 @@ onMounted(async () => {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+}
+.shop-display-cell {
+  line-height: 1.4;
+}
+.shop-display-secondary {
+  font-size: 12px;
+  color: #909399;
+}
+.dialog-shop-secondary {
+  margin-top: 4px;
 }
 </style>

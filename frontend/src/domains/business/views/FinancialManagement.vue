@@ -111,6 +111,7 @@ import financeApi from '@/api/finance'
 import { useFinanceSettlementStore } from '@/stores/financeSettlement'
 import MonthlySettlementPanel from './finance-settlement/MonthlySettlementPanel.vue'
 import SettlementWorkspacePanel from './finance-settlement/SettlementWorkspacePanel.vue'
+import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
 
 const settlementStore = useFinanceSettlementStore()
 const currentMonth = new Date().toISOString().slice(0, 7)
@@ -122,6 +123,7 @@ const shopFilterMode = ref('all')
 const platformLabels = { shopee: 'Shopee', tiktok: 'TikTok', amazon: 'Amazon', miaoshou: '妙手ERP' }
 const platformOptions = Object.keys(platformLabels)
 const allShops = ref([])
+let shopDisplayLookup = new Map()
 const selectedShop = ref(null)
 const platformFollowInvestments = ref([])
 const platformSettlementRows = ref([])
@@ -149,7 +151,7 @@ const filteredShops = computed(() => {
     if (shopFilterMode.value === 'exception' && !status.hasException) return false
     if (shopFilterMode.value === 'pending' && !status.pendingData) return false
     if (!keyword) return true
-    return `${shop.shop_name || ''} ${shop.shop_id || ''}`.toLowerCase().includes(keyword)
+    return (shop.search_text || `${shop.shop_name || ''} ${shop.shop_id || ''}`.toLowerCase()).includes(keyword)
   })
 })
 
@@ -238,8 +240,19 @@ const syncSelectedShopForms = () => {
 }
 
 const loadShopList = async () => {
-  const response = await api.getTargetShops()
-  allShops.value = (response?.data || response || []).filter((shop) => shop.platform_code)
+  const [targetShopsResult, shopDirectoryResult] = await Promise.allSettled([
+    api.getTargetShops(),
+    api.getShopDirectory({ enabled: true }),
+  ])
+  if (targetShopsResult.status !== 'fulfilled') {
+    throw targetShopsResult.reason
+  }
+  const shopDirectory = shopDirectoryResult.status === 'fulfilled' ? shopDirectoryResult.value : []
+  shopDisplayLookup = buildShopAccountLookup(Array.isArray(shopDirectory) ? shopDirectory : [])
+  const response = targetShopsResult.value
+  allShops.value = (response?.data || response || [])
+    .filter((shop) => shop.platform_code)
+    .map((shop) => decorateShopEntity(shop, shopDisplayLookup))
   if (!selectedShop.value || selectedShop.value.platform_code !== selectedPlatform.value) {
     selectedShop.value = filteredShops.value[0] || null
     syncSelectedShopForms()
