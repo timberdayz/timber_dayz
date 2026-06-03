@@ -88,6 +88,30 @@ def test_build_module_report_marks_refreshing_when_active_run_exists():
     assert report["ready"] is True
 
 
+def test_build_module_report_marks_drift_when_ready_state_hides_missing_core_objects():
+    core_plan = dashboard_bootstrap._module_core_plan("business_overview")
+    refresh_plan = dashboard_bootstrap._module_refresh_plan("business_overview")
+    existing_objects = set(core_plan + refresh_plan)
+    existing_objects.remove("api.business_overview_comparison_platform_module")
+
+    report = dashboard_bootstrap._build_module_report(
+        module_name="business_overview",
+        module_state={
+            "status": "ready",
+            "asset_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(core_plan),
+            "details_json": {
+                "refresh_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(refresh_plan)
+            },
+        },
+        existing_objects=existing_objects,
+        active_refresh_run=None,
+    )
+
+    assert report["status"] == "drift"
+    assert report["ready"] is False
+    assert "api.business_overview_comparison_platform_module" in report["core_missing_objects"]
+
+
 @pytest.mark.asyncio
 async def test_inspect_dashboard_assets_ignores_stale_refreshing_state(monkeypatch):
     existing_objects = set()
@@ -137,6 +161,49 @@ async def test_inspect_dashboard_assets_ignores_stale_refreshing_state(monkeypat
     report = await dashboard_bootstrap.inspect_dashboard_assets(object())
 
     assert report["modules"]["business_overview"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_inspect_dashboard_assets_ready_state_does_not_mask_missing_objects(monkeypatch):
+    core_plan = dashboard_bootstrap._module_core_plan("business_overview")
+    refresh_plan = dashboard_bootstrap._module_refresh_plan("business_overview")
+    existing_objects = set()
+    for module_name in dashboard_bootstrap.DASHBOARD_MODULE_TARGETS:
+        existing_objects.update(dashboard_bootstrap._module_core_plan(module_name))
+        existing_objects.update(dashboard_bootstrap._module_refresh_plan(module_name))
+    existing_objects.update(dashboard_bootstrap.DASHBOARD_REQUIRED_OBJECTS)
+    existing_objects.discard("api.business_overview_comparison_platform_module")
+
+    async def fake_collect(_session):
+        return set(dashboard_bootstrap.DASHBOARD_REQUIRED_SCHEMAS), existing_objects
+
+    async def fake_load_state(_session):
+        return {
+            "business_overview": {
+                "status": "ready",
+                "asset_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(core_plan),
+                "details_json": {
+                    "refresh_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(refresh_plan)
+                },
+            }
+        }
+
+    async def fake_load_active_runs(_session):
+        return {}
+
+    monkeypatch.setattr(dashboard_bootstrap, "_collect_existing_assets", fake_collect)
+    monkeypatch.setattr(dashboard_bootstrap, "_load_dashboard_asset_state", fake_load_state)
+    monkeypatch.setattr(
+        dashboard_bootstrap,
+        "_load_active_dashboard_refresh_runs",
+        fake_load_active_runs,
+    )
+
+    report = await dashboard_bootstrap.inspect_dashboard_assets(object())
+
+    assert report["ready"] is False
+    assert report["modules"]["business_overview"]["status"] == "drift"
+    assert "api.business_overview_comparison_platform_module" in report["missing_objects"]
 
 
 @pytest.mark.asyncio

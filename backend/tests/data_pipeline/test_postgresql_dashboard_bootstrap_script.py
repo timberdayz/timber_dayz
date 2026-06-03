@@ -47,3 +47,25 @@ def test_bootstrap_script_supports_module_selection():
 
     assert args.module == "business_overview"
     assert args.json is True
+
+
+def test_bootstrap_script_supports_diagnostic_output_capture(capsys):
+    script = load_script_module()
+
+    script._print_report(
+        {
+            "ready": False,
+            "module": "business_overview",
+            "missing_objects": ["api.business_overview_comparison_platform_module"],
+            "modules": {
+                "business_overview": {
+                    "status": "drift",
+                    "ready": False,
+                }
+            },
+        },
+        as_json=False,
+    )
+    captured = capsys.readouterr().out
+    assert "business_overview" in captured
+    assert "missing_objects" in captured

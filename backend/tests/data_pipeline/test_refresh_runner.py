@@ -501,7 +501,7 @@ async def test_execute_sql_target_retries_and_recovers(monkeypatch, tmp_path):
                     await session.execute(
                         text(
                             """
-                            SELECT status, details->>'attempts'
+                            SELECT status, details->>'attempts', details->>'sql_path'
                             FROM ops.pipeline_step_log
                             WHERE run_id = :run_id AND target_name = :target_name
                             ORDER BY id DESC
@@ -511,7 +511,7 @@ async def test_execute_sql_target_retries_and_recovers(monkeypatch, tmp_path):
                         {"run_id": run_id, "target_name": target_name},
                     )
                 ).fetchone()
-                assert step_row == ("success", "2")
+                assert step_row == ("success", "2", str(sql_path))
         finally:
             refresh_registry.SQL_TARGET_PATHS.clear()
             refresh_registry.SQL_TARGET_PATHS.update(original_paths)
@@ -610,3 +610,9 @@ async def test_execute_refresh_plan_marks_partial_failed_and_skips_downstream(tm
             refresh_registry.PIPELINE_DEPENDENCIES.clear()
             refresh_registry.PIPELINE_DEPENDENCIES.update(original_dependencies)
             await engine.dispose()
+
+
+def test_execute_sql_text_keeps_target_diagnostic_context():
+    from backend.services.data_pipeline.refresh_runner import _target_type
+
+    assert _target_type("api.business_overview_comparison_platform_module") == "api"

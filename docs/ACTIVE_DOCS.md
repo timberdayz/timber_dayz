@@ -20,6 +20,7 @@ Do not use full-repository search as the first step when one of these files cove
 ## Development And Release
 
 - `docs/guides/DEVELOPMENT_WORKFLOW.md`: startup, validation, testing, and release commands
+- `docs/guides/LOCAL_DASHBOARD_ASSET_RECOVERY.md`: local dashboard asset recovery and rebuild decision path
 - `docs/guides/COLLECTION_AUTHORING_RULES.md`: clean active collection authoring rules
 - `docs/guides/PWCLI_COMMAND_REFERENCE.md`: `pwcli`, `pwcap`, and evidence helper command reference
 - `docs/guides/PRE_LAUNCH_RULES.md`: launch-period change constraints

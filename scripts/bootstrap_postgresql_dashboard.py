@@ -69,6 +69,12 @@ def _print_report(report: dict, as_json: bool) -> None:
                 f"- {module_name}: status={module_report.get('status')} "
                 f"ready={module_report.get('ready')}"
             )
+            core_missing = module_report.get("core_missing_objects") or []
+            refresh_missing = module_report.get("refresh_missing_objects") or []
+            if core_missing:
+                print(f"  core_missing_objects: {', '.join(core_missing)}")
+            if refresh_missing:
+                print(f"  refresh_missing_objects: {', '.join(refresh_missing)}")
     if report.get("run_ids"):
         for module_name, run_id in report["run_ids"].items():
             print(f"run_id[{module_name}]: {run_id}")
@@ -86,6 +92,8 @@ async def _async_main(args: argparse.Namespace) -> int:
             return 0 if module_report.get("status") in {"ready", "refreshing"} else 1
 
         if args.refresh_materializations:
+            if not args.json:
+                print(f"[refresh] module={args.module} phase=refresh-materializations")
             report = await refresh_dashboard_materialization_assets(session, module=args.module)
             await session.commit()
             report["module"] = args.module
@@ -95,6 +103,8 @@ async def _async_main(args: argparse.Namespace) -> int:
             module_report = report["modules"].get(args.module, {})
             return 0 if module_report.get("status") == "ready" else 1
 
+        if not args.json:
+            print(f"[bootstrap] module={args.module} phase=core+refresh")
         report = await bootstrap_dashboard_assets(session, module=args.module)
         await session.commit()
         report["module"] = args.module
