@@ -44,8 +44,21 @@ def register_system_routes(app, settings, app_version, get_db):
             health_status["status"] = "unready"
             ready = False
 
+        try:
+            from backend.models.database import AsyncSessionLocal
+            from backend.services.data_pipeline.dashboard_bootstrap import inspect_dashboard_assets
+
+            async with AsyncSessionLocal() as session:
+                dashboard_report = await inspect_dashboard_assets(session)
+            app.state.dashboard_assets_report = dashboard_report
+            app.state.dashboard_assets_ready = bool(dashboard_report.get("ready"))
+        except Exception as exc:
+            dashboard_report = getattr(app.state, "dashboard_assets_report", None) or {}
+            health_status["checks"]["dashboard"]["refresh_error"] = str(exc)
+        else:
+            dashboard_report = getattr(app.state, "dashboard_assets_report", None) or {}
+
         dashboard_ready = bool(getattr(app.state, "dashboard_assets_ready", True))
-        dashboard_report = getattr(app.state, "dashboard_assets_report", None) or {}
         dashboard_modules = dashboard_report.get("modules") if isinstance(dashboard_report, dict) else None
         dashboard_has_non_ready_module = isinstance(dashboard_modules, dict) and any(
             module_report.get("status") != "ready" for module_report in dashboard_modules.values()
@@ -54,6 +67,8 @@ def register_system_routes(app, settings, app_version, get_db):
             health_status["checks"]["dashboard"]["status"] = "ready"
         else:
             health_status["checks"]["dashboard"]["status"] = "degraded"
+            health_status["status"] = "unready"
+            ready = False
             if isinstance(dashboard_report, dict) and dashboard_report:
                 health_status["checks"]["dashboard"]["details"] = dashboard_report
 

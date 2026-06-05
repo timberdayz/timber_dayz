@@ -22,9 +22,9 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 # 加载 .env 文件(从项目根目录)
-from dotenv import load_dotenv
+from backend.utils.project_env import load_project_env
 
-load_dotenv(dotenv_path=project_root / ".env")
+load_project_env(project_root)
 
 
 def _load_app_version() -> str:

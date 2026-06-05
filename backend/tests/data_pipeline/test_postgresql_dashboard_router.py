@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
 from backend.domains.business.routers.dashboard_api_postgresql import (
+    _require_dashboard_assets_ready,
     get_business_overview_comparison_postgresql,
     get_business_overview_inventory_backlog_postgresql,
     get_business_overview_kpi_postgresql,
@@ -157,6 +158,74 @@ async def test_postgresql_kpi_route_rejects_legacy_month_param(monkeypatch):
     assert response.status_code == 422
     assert body["detail"]["message"] == "Business Overview API no longer accepts legacy query params."
     assert "month" in body["detail"]["legacy_params"]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_readiness_guard_refreshes_stale_app_state(monkeypatch):
+    stale_report = {
+        "ready": False,
+        "assets_drift": True,
+        "modules": {
+            "business_overview": {
+                "status": "drift",
+                "ready": False,
+                "assets_drift": True,
+            }
+        },
+    }
+    fresh_report = {
+        "ready": True,
+        "assets_drift": False,
+        "modules": {
+            "business_overview": {
+                "status": "ready",
+                "ready": True,
+                "assets_drift": False,
+            }
+        },
+    }
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            dashboard_assets_ready=False,
+            dashboard_assets_report=stale_report,
+        )
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/dashboard/business-overview/kpi",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 8001),
+            "app": app,
+        }
+    )
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.AsyncSessionLocal",
+        lambda: _FakeSession(),
+    )
+
+    async def _fake_inspect(_session):
+        return fresh_report
+
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.inspect_dashboard_assets",
+        _fake_inspect,
+    )
+
+    await _require_dashboard_assets_ready(request)
+
+    assert app.state.dashboard_assets_ready is True
+    assert app.state.dashboard_assets_report == fresh_report
 
 
 def test_postgresql_comparison_route_returns_service_payload(monkeypatch):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from modules.utils.sessions.session_manager import SessionManager
@@ -133,3 +134,69 @@ def test_automatic_save_does_not_override_manual_seeded_session_even_if_new_stat
     assert payload["metadata"]["manual_seeded"] is True
     assert payload["metadata"]["protected"] is True
     assert payload["metadata"]["quality_source"] == "manual"
+
+
+def test_resaving_session_refreshes_expiration_window(tmp_path: Path) -> None:
+    manager = SessionManager(base_path=tmp_path / "sessions")
+    platform = "shopee"
+    account_id = "acc-1"
+    state = {
+        "cookies": [
+            {"name": "csrftoken", "domain": "seller.example.com", "path": "/"},
+            {"name": "session", "domain": "seller.example.com", "path": "/"},
+            {"name": "token", "domain": "seller.example.com", "path": "/"},
+        ],
+        "origins": [{"origin": "https://seller.example.com", "localStorage": []}],
+    }
+
+    stale_time = 1_700_000_000.0
+    fresh_time = stale_time + 60 * 86400
+
+    original_time = time.time
+    try:
+        time.time = lambda: stale_time
+        assert manager.save_session(platform, account_id, state, metadata={"quality_source": "manual"})
+
+        time.time = lambda: fresh_time
+        assert manager.save_session(platform, account_id, state, metadata={"quality_source": "manual"})
+
+        session = manager.load_session(platform, account_id, max_age_days=30)
+        assert session is not None
+        payload = _read_session(manager.get_session_path(platform, account_id))
+        assert payload["last_used_at"] >= fresh_time
+        assert payload["metadata"]["saved_at"] >= fresh_time
+    finally:
+        time.time = original_time
+
+
+def test_session_info_age_uses_latest_saved_time(tmp_path: Path) -> None:
+    manager = SessionManager(base_path=tmp_path / "sessions")
+    platform = "miaoshou"
+    account_id = "acc-2"
+    state = {
+        "cookies": [
+            {"name": "JSESSIONID", "domain": "erp.example.com", "path": "/"},
+            {"name": "token", "domain": "erp.example.com", "path": "/"},
+            {"name": "SESSION", "domain": "erp.example.com", "path": "/"},
+        ],
+        "origins": [{"origin": "https://erp.example.com", "localStorage": []}],
+    }
+
+    stale_time = 1_700_000_000.0
+    fresh_time = stale_time + 45 * 86400
+    inspect_time = fresh_time + 5 * 86400
+
+    original_time = time.time
+    try:
+        time.time = lambda: stale_time
+        assert manager.save_session(platform, account_id, state, metadata={"quality_source": "automatic"})
+
+        time.time = lambda: fresh_time
+        assert manager.save_session(platform, account_id, state, metadata={"quality_source": "automatic"})
+
+        time.time = lambda: inspect_time
+        info = manager.get_session_info(platform, account_id)
+        assert info["exists"] is True
+        assert info["age_days"] < 10
+    finally:
+        time.time = original_time

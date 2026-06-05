@@ -20,6 +20,19 @@ Recommended command:
 python run.py --local
 ```
 
+When a Windows development machine temporarily takes over collection duties,
+keep the base developer values in `.env` or `.env.local`, and place the
+collection-specific overrides in `.env.collection.local`. Then start the mixed
+mode runtime with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_local_collection_mode.ps1
+```
+
+That wrapper sets `XIHONG_ENV_PROFILE=collection`, runs
+`python scripts/check_local_run_env.py --profile collection`, and then starts
+`python run.py --local`.
+
 ## Redis Port Convention
 
 For local Windows development, use:

@@ -34,6 +34,8 @@ from pathlib import Path
 import platform as sys_platform
 import os
 
+from backend.utils.project_env import load_project_env
+
 _WINDOWS_CHILD_JOB_HANDLE = None
 _WINDOWS_CHILD_JOB_INIT_FAILED = False
 
@@ -41,15 +43,9 @@ BACKEND_PORT = 8001
 FRONTEND_PORT = 5173
 ACTIVE_BACKEND_PORT = BACKEND_PORT
 
-# 本地启动时加载项目根目录 .env，使 check_redis/check_postgresql 及后端能读取 REDIS_URL、DATABASE_URL 等
+# 本地启动时按项目规则加载环境覆盖层，使检查逻辑与后端运行时保持一致。
 _project_root = Path(__file__).resolve().parent
-_env_file = _project_root / ".env"
-if _env_file.exists():
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(_env_file)
-    except ImportError:
-        pass
+load_project_env(_project_root)
 
 def safe_print(text):
     """安全打印（处理Windows GBK编码）"""
@@ -241,26 +237,36 @@ def ensure_postgresql_dashboard_assets(project_root):
     except Exception:
         report = None
 
-    # Best practice: local startup should not be blocked by deploy-time-heavy SQL.
-    # If assets are missing or drifted, we warn and continue. Dashboard routes will
-    # degrade (503) until bootstrap is completed.
     missing_objects = None
     assets_drift = None
     if isinstance(report, dict):
         missing_objects = report.get("missing_objects")
         assets_drift = report.get("assets_drift")
+    env_auto_bootstrap = os.getenv("AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP")
+    auto_bootstrap = True if env_auto_bootstrap is None else env_auto_bootstrap.lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not auto_bootstrap:
+        if assets_drift:
+            safe_print("  [WARNING] PostgreSQL Dashboard 资产发生漂移（SQL 指纹不一致），已按配置跳过自动初始化")
+        elif isinstance(missing_objects, list) and missing_objects:
+            safe_print("  [WARNING] PostgreSQL Dashboard 资产不完整，已按配置跳过自动初始化")
+        else:
+            safe_print("  [SKIP] 未启用启动期自动初始化（AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false）")
+        safe_print("  提示: 如需自动初始化，请设置环境变量 AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=true")
+        safe_print("  提示: 手动执行 `python scripts/bootstrap_postgresql_dashboard.py` 更符合生产化最佳实践")
+        return True
 
     if assets_drift:
-        safe_print("  [WARNING] PostgreSQL Dashboard 资产发生漂移（SQL 指纹不一致），跳过自动初始化（将继续启动本地服务）")
-        safe_print("  提示: 请在空闲时手动执行 `python scripts/bootstrap_postgresql_dashboard.py` 进行部署期初始化")
-        return True
+        safe_print("  [修复] 检测到 PostgreSQL Dashboard 资产漂移，开始自动初始化...")
+    elif isinstance(missing_objects, list) and missing_objects:
+        safe_print("  [修复] 检测到 PostgreSQL Dashboard 资产不完整，开始自动初始化...")
+    else:
+        safe_print("  [修复] 检测到 PostgreSQL Dashboard 资产未就绪，开始初始化...")
 
-    if isinstance(missing_objects, list) and missing_objects:
-        safe_print("  [WARNING] PostgreSQL Dashboard 资产不完整，跳过自动初始化（将继续启动本地服务）")
-        safe_print("  提示: 请在空闲时手动执行 `python scripts/bootstrap_postgresql_dashboard.py` 进行部署期初始化")
-        return True
-
-    safe_print("  [修复] 检测到 PostgreSQL Dashboard 资产未就绪，开始初始化...")
     hygiene_result = subprocess.run(
         [sys.executable, str(project_root / "scripts" / "verify_sql_asset_hygiene.py")],
         cwd=project_root,
@@ -276,18 +282,6 @@ def ensure_postgresql_dashboard_assets(project_root):
         for line in output:
             if line.strip():
                 safe_print(f"    {line}")
-        return True
-    # As a fallback, allow manual forcing via env var for users who prefer auto-bootstrap.
-    auto_bootstrap = os.getenv("AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP", "false").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    if not auto_bootstrap:
-        safe_print("  [SKIP] 未启用启动期自动初始化（AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false）")
-        safe_print("  提示: 如需自动初始化，请设置环境变量 AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=true")
-        safe_print("  提示: 手动执行 `python scripts/bootstrap_postgresql_dashboard.py` 更符合生产化最佳实践")
         return True
 
     apply_result = subprocess.run(

@@ -6,11 +6,12 @@ This file defines how agents should read, edit, and reference environment files.
 
 - `.env`: local developer runtime values. Read when needed for local debugging, but do not copy secrets into code, docs, tests, or chat output.
 - `.env.local`: optional local override file. It is local-only and must not be treated as a shared baseline.
+- `.env.collection.local`: optional local-only collection takeover overlay. Use it only when a development machine temporarily takes over collection, sync, and cloud-sync duties.
 - `.env.production`: production runtime values. Do not edit unless the task explicitly targets production configuration.
 - `.env.production.passwords.txt`: sensitive production password material. Do not read, print, summarize, or modify unless the user explicitly requests a secret-handling task.
 - `.env.backup` and `.env.cleaned`: local recovery or cleanup artifacts. Do not use them as active configuration sources.
 - `.env.limiter`: specialized local limiter configuration. Do not generalize it into the default runtime unless the task targets limiter behavior.
-- `.env.example`, `env.example`, `env.development.example`, `env.docker.example`, `env.production.example`, `env.production.cloud.example`: shared templates. Prefer editing these when documenting required variables.
+- `.env.example`, `env.example`, `env.development.example`, `env.docker.example`, `env.production.example`, `env.production.cloud.example`, `env.collection.local.example`: shared templates. Prefer editing these when documenting required variables.
 
 ## Source Of Truth
 

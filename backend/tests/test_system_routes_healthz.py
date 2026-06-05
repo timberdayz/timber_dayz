@@ -57,12 +57,29 @@ async def test_live_health_endpoint_is_lightweight(system_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_ready_health_endpoint_reports_unready_when_dashboard_assets_missing(
     system_client: AsyncClient,
+    monkeypatch,
 ):
+    async def _fake_inspect(_session):
+        return {
+            "ready": False,
+            "assets_drift": True,
+            "modules": {
+                "business_overview": {
+                    "status": "drift",
+                    "ready": False,
+                }
+            },
+        }
+
+    monkeypatch.setattr(
+        "backend.services.data_pipeline.dashboard_bootstrap.inspect_dashboard_assets",
+        _fake_inspect,
+    )
+
     response = await system_client.get("/api/healthz/ready")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
     payload = response.json()
-    assert payload["status"] == "ready"
+    assert payload["status"] == "unready"
     assert payload["checks"]["database"]["status"] == "connected"
     assert payload["checks"]["dashboard"]["status"] == "degraded"
-

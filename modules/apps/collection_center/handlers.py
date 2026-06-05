@@ -92,6 +92,12 @@ def _auto_register_downloaded_files(downloaded_files: List[str]) -> Dict[str, An
 class RecordingWizardHandler:
     """录制向导处理器 - 迁移自原系统 run_recording_wizard"""
 
+    _MANUAL_SESSION_METADATA = {
+        "quality_source": "manual",
+        "manual_seeded": True,
+        "protected": True,
+    }
+
     def __init__(self):
         self.supported_platforms = ['妙手ERP', 'Shopee', 'Amazon', 'miaoshou', 'miaoshou_erp']
         self.recording_types = [
@@ -1389,7 +1395,12 @@ with sync_playwright() as playwright:
             self._execute_collection_recording(p, page, account, platform, login_url, data_type_key)
             # 保存并关闭上下文(必须在 Playwright 关闭之前)
             try:
-                pb.save_context_state(ctx, plat, account_id)
+                pb.save_context_state(
+                    ctx,
+                    plat,
+                    account_id,
+                    session_metadata=dict(self._MANUAL_SESSION_METADATA),
+                )
             except Exception:
                 pass
             try:
@@ -1415,7 +1426,12 @@ with sync_playwright() as playwright:
             self._execute_complete_recording(page, account, platform, login_url)
             # 结束后保存并关闭(在 Playwright 关闭之前)
             try:
-                pb.save_context_state(ctx, plat, account_id)
+                pb.save_context_state(
+                    ctx,
+                    plat,
+                    account_id,
+                    session_metadata=dict(self._MANUAL_SESSION_METADATA),
+                )
             except Exception:
                 pass
             try:

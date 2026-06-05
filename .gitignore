@@ -30,6 +30,7 @@ security/
 # 环境变量文件
 .env
 .env.local
+.env.collection.local
 .env.production
 
 # 数据库全量导出（大文件，含数据）

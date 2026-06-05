@@ -307,7 +307,8 @@ class PersistentBrowserManager:
         self,
         context: BrowserContext,
         platform: str,
-        account_id: str
+        account_id: str,
+        session_metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         保存上下文状态(稳健版)
@@ -338,15 +339,19 @@ class PersistentBrowserManager:
                             logger.debug(f"创建临时页失败: {ne}")
                     storage_state = context.storage_state()
 
+                metadata = {
+                    'saved_at': time.time(),
+                    'persistent_profile': True,
+                    'context_type': 'persistent',
+                }
+                if isinstance(session_metadata, dict) and session_metadata:
+                    metadata.update(session_metadata)
+
                 success = self.session_manager.save_session(
                     platform,
                     account_id,
                     storage_state,
-                    metadata={
-                        'saved_at': time.time(),
-                        'persistent_profile': True,
-                        'context_type': 'persistent',
-                    },
+                    metadata=metadata,
                 )
                 if success:
                     logger.info(f"上下文状态已保存: {platform}/{account_id}")
