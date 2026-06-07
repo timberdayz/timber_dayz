@@ -287,6 +287,25 @@ def normalize_domain_subtypes(
     return normalized
 
 
+def normalize_config_domain_subtypes(
+    *,
+    data_domains: List[str],
+    domain_subtypes: Optional[Dict[str, List[str]]] = None,
+    sub_domains: Optional[Dict[str, List[str]] | List[str]] = None,
+) -> Dict[str, List[str]]:
+    normalized = normalize_domain_subtypes(
+        data_domains=data_domains,
+        domain_subtypes=domain_subtypes,
+        sub_domains=sub_domains,
+    )
+    allowed_mapping = _allowed_subtype_mapping()
+    for domain in data_domains or []:
+        allowed_subtypes = allowed_mapping.get(domain, [])
+        if allowed_subtypes and not normalized.get(domain):
+            normalized[domain] = list(allowed_subtypes)
+    return normalized
+
+
 def iter_domain_targets(
     data_domains: List[str],
     domain_subtypes: Optional[Dict[str, List[str]]] = None,

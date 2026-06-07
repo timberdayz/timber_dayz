@@ -53,7 +53,7 @@ from backend.services.collection_contracts import (
     derive_granularity_from_time_selection,
     get_recommended_config_domains,
     get_supported_config_data_domains,
-    normalize_domain_subtypes,
+    normalize_config_domain_subtypes,
     normalize_time_selection,
     resolve_shop_capabilities,
     summarize_shop_scopes,
@@ -186,7 +186,7 @@ def _normalize_template_scope_rows(
             {
                 "shop_account_id": shop_account_id,
                 "data_domains": data_domains,
-                "sub_domains": normalize_domain_subtypes(
+                "sub_domains": normalize_config_domain_subtypes(
                     data_domains=data_domains,
                     sub_domains=scope.get("sub_domains"),
                 )
@@ -496,7 +496,7 @@ def _normalize_scope_rows_for_storage(
                 detail=f"unsupported data domain for {shop_account_id}: {', '.join(unsupported_domains)}",
             )
 
-        normalized_sub_domains = normalize_domain_subtypes(
+        normalized_sub_domains = normalize_config_domain_subtypes(
             data_domains=domains,
             sub_domains=scope.get("sub_domains"),
         ) or None

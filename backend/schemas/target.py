@@ -3,7 +3,7 @@
 """
 
 from datetime import date, datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -165,3 +165,46 @@ class BreakdownResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ShopTargetWorkbenchShopInput(BaseModel):
+    platform_code: str
+    shop_id: str
+    ratio: float = Field(0.0, ge=0)
+    target_amount: float = Field(0.0, ge=0)
+    target_quantity: int = Field(0, ge=0)
+
+
+class ShopTargetWorkbenchApplyRequest(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    company_target_amount: float = Field(0.0, ge=0)
+    company_target_quantity: int = Field(0, ge=0)
+    weekday_ratios: Dict[str, float] = Field(default_factory=dict)
+    shops: List[ShopTargetWorkbenchShopInput] = Field(default_factory=list)
+
+
+class ShopTargetWorkbenchShopResponse(BaseModel):
+    platform_code: str
+    shop_id: str
+    standard_name: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
+    ratio: float = 0.0
+    target_amount: float = 0.0
+    target_quantity: int = 0
+    daily_target_count: int = 0
+
+
+class ShopTargetWorkbenchResponse(BaseModel):
+    year_month: str
+    target_id: Optional[int] = None
+    company_target_amount: float = 0.0
+    company_target_quantity: int = 0
+    weekday_ratios: Dict[str, float] = Field(default_factory=dict)
+    shops: List[ShopTargetWorkbenchShopResponse] = Field(default_factory=list)
+
+
+class ShopTargetWorkbenchApplyResponse(BaseModel):
+    year_month: str
+    target_id: int
+    synced: int = 0
+    errors: List[str] = Field(default_factory=list)

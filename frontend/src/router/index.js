@@ -383,9 +383,9 @@ const routes = [
   {
     path: '/target-management/shop',
     name: 'TargetManagementShop',
-    component: () => import('@/domains/business/views/target/TargetManagement.vue'),
+    component: () => import('@/domains/business/views/target/TargetShopWorkbench.vue'),
     meta: {
-      title: '??????',
+      title: '店铺目标管理',
       icon: 'Aim',
       permission: 'target:read',
       roles: ['admin']
@@ -396,7 +396,7 @@ const routes = [
     name: 'TargetManagementPerson',
     component: () => import('@/domains/business/views/target/TargetPersonManagement.vue'),
     meta: {
-      title: '??????',
+      title: '个人目标管理',
       icon: 'Aim',
       permission: 'target:read',
       roles: ['admin']
@@ -407,7 +407,7 @@ const routes = [
     name: 'TargetManagementOperation',
     component: () => import('@/domains/business/views/target/TargetOperationManagement.vue'),
     meta: {
-      title: '??????',
+      title: '运营目标管理',
       icon: 'Aim',
       permission: 'target:read',
       roles: ['admin']

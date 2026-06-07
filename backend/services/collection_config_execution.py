@@ -13,6 +13,7 @@ from backend.services.collection_contracts import (
     count_collection_targets,
     derive_granularity_from_time_selection,
     iter_domain_targets,
+    normalize_config_domain_subtypes,
     normalize_domain_subtypes,
     normalize_time_selection,
     resolve_shop_capabilities,
@@ -203,7 +204,7 @@ async def create_tasks_for_config(
             continue
 
         normalized_sub_domains = (
-            normalize_domain_subtypes(
+            normalize_config_domain_subtypes(
                 data_domains=filtered_domains,
                 sub_domains=scope.sub_domains,
             )

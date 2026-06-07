@@ -107,88 +107,30 @@
         </el-button>
       </div>
 
-      <!-- KPI 分组仪表盘 -->
+      <!-- KPI 两行紧凑仪表盘 -->
       <div class="kpi-dashboard" v-loading="loadingKPI">
-        <section class="kpi-subsection kpi-results-panel">
-          <div class="kpi-subsection-header">
-            <div>
-              <div class="kpi-subsection-title">经营结果</div>
-              <div class="kpi-subsection-subtitle">先看结果，再看流量与效率</div>
-            </div>
-          </div>
-          <div class="kpi-primary-grid">
-            <div
-              v-for="kpi in primaryKpiCards"
-              :key="kpi.key"
-              class="kpi-card kpi-card-primary"
-            >
-              <div class="kpi-content">
-                <div class="kpi-icon" :class="kpi.iconClass">
-                  <el-icon><component :is="kpi.icon" /></el-icon>
-                </div>
-                <div class="kpi-info">
-                  <div class="kpi-title">{{ kpi.title }}</div>
-                  <div class="kpi-value">{{ kpi.value }}</div>
-                  <div class="kpi-change" :class="kpi.changeType">
-                    <el-icon><component :is="kpi.changeIcon" /></el-icon>
-                    {{ kpi.change }}
-                  </div>
+        <div class="kpi-compact-grid">
+          <div
+            v-for="kpi in coreKpiCards"
+            :key="kpi.key"
+            class="kpi-card kpi-strip-card"
+            :class="{ 'is-primary': kpi.isPrimary, 'is-funnel': kpi.isFunnel }"
+          >
+            <div class="kpi-content">
+              <div class="kpi-icon" :class="kpi.iconClass">
+                <el-icon><component :is="kpi.icon" /></el-icon>
+              </div>
+              <div class="kpi-info">
+                <div class="kpi-title">{{ kpi.title }}</div>
+                <div class="kpi-value">{{ kpi.value }}</div>
+                <div class="kpi-change" :class="kpi.changeType">
+                  <el-icon><component :is="kpi.changeIcon" /></el-icon>
+                  {{ kpi.change }}
                 </div>
               </div>
             </div>
           </div>
-        </section>
-
-        <section class="kpi-subsection kpi-funnel-panel">
-          <div class="kpi-subsection-header">
-            <div>
-              <div class="kpi-subsection-title">流量漏斗</div>
-              <div class="kpi-subsection-subtitle">曝光、浏览、访客、订单和成交额的完整链路</div>
-            </div>
-          </div>
-          <div class="kpi-funnel-flow">
-            <template v-for="(step, index) in funnelSteps" :key="step.key">
-              <div class="kpi-funnel-step">
-                <div class="kpi-funnel-label">{{ step.title }}</div>
-                <div class="kpi-funnel-value">{{ step.value }}</div>
-              </div>
-              <div v-if="index < funnelSteps.length - 1" class="kpi-funnel-arrow">→</div>
-            </template>
-          </div>
-          <div class="kpi-funnel-metrics">
-            <div
-              v-for="metric in funnelMetricCards"
-              :key="metric.key"
-              class="kpi-mini-card"
-            >
-              <div class="kpi-mini-title">{{ metric.title }}</div>
-              <div class="kpi-mini-value">{{ metric.value }}</div>
-            </div>
-          </div>
-        </section>
-
-        <section class="kpi-subsection kpi-efficiency-panel">
-          <div class="kpi-subsection-header">
-            <div>
-              <div class="kpi-subsection-title">效率指标</div>
-              <div class="kpi-subsection-subtitle">用于判断转化质量、连带表现和当前人效</div>
-            </div>
-          </div>
-          <div class="kpi-efficiency-grid">
-            <div
-              v-for="kpi in efficiencyKpiCards"
-              :key="kpi.key"
-              class="kpi-mini-card"
-            >
-              <div class="kpi-mini-title">{{ kpi.title }}</div>
-              <div class="kpi-mini-value">{{ kpi.value }}</div>
-              <div class="kpi-change" :class="kpi.changeType">
-                <el-icon><component :is="kpi.changeIcon" /></el-icon>
-                {{ kpi.change }}
-              </div>
-            </div>
-          </div>
-        </section>
+        </div>
       </div>
     </div>
 
@@ -1778,20 +1720,29 @@ const kpiData = ref([
 const findKpiCard = (key) => kpiData.value.find((item) => item.key === key)
 const pickKpiCards = (keys) => keys.map(findKpiCard).filter(Boolean)
 
-const primaryKpiCards = computed(() =>
-  pickKpiCards(['gmv', 'order_count', 'uv_conversion_rate', 'avg_order_value'])
-)
+const primaryKpiKeys = new Set(['gmv', 'order_count', 'uv_conversion_rate', 'avg_order_value'])
+const funnelKpiKeys = new Set(['impressions', 'page_views', 'visitor_count'])
 
-const funnelSteps = computed(() =>
-  pickKpiCards(['impressions', 'page_views', 'visitor_count', 'order_count', 'gmv'])
-)
-
-const funnelMetricCards = computed(() =>
-  pickKpiCards(['visit_rate', 'browse_depth', 'pv_conversion_rate', 'uv_conversion_rate', 'exposure_order_rate'])
-)
-
-const efficiencyKpiCards = computed(() =>
-  pickKpiCards(['pv_conversion_rate', 'exposure_order_rate', 'browse_depth', 'attach_rate', 'labor_efficiency'])
+const coreKpiCards = computed(() =>
+  pickKpiCards([
+    'gmv',
+    'order_count',
+    'uv_conversion_rate',
+    'avg_order_value',
+    'impressions',
+    'page_views',
+    'visitor_count',
+    'visit_rate',
+    'browse_depth',
+    'pv_conversion_rate',
+    'exposure_order_rate',
+    'attach_rate',
+    'labor_efficiency'
+  ]).map((item) => ({
+    ...item,
+    isPrimary: primaryKpiKeys.has(item.key),
+    isFunnel: funnelKpiKeys.has(item.key)
+  }))
 )
 
 // 数据对比（默认跟随全局：月）
@@ -1817,7 +1768,7 @@ const comparisonTableData = ref([])
 const targetValue = ref(0)
 const achievedValue = ref(0)
 const targetAchievementRate = ref(0)
-const targetUnit = ref("")
+const targetUnit = ref('')
 
 // 根据粒度计算列标题
 const currentPeriodLabel = computed(() => {
@@ -3072,54 +3023,25 @@ watch(
 }
 
 .kpi-dashboard {
-  display: grid;
-  gap: 16px;
   min-width: 0;
 }
 
-.kpi-subsection {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 16px;
-  padding: 18px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
-}
-
-.kpi-subsection-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.kpi-subsection-title {
-  color: #1f2937;
-  font-size: 16px;
-  font-weight: 650;
-}
-
-.kpi-subsection-subtitle {
-  color: #8a94a6;
-  font-size: 12px;
-  margin-top: 3px;
-}
-
-.kpi-primary-grid {
+.kpi-compact-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.kpi-card,
-.kpi-mini-card,
-.kpi-funnel-step {
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 14px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
 }
 
 .kpi-card {
-  padding: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+}
+
+.kpi-card {
+  padding: 10px 12px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
@@ -3129,22 +3051,47 @@ watch(
   transform: translateY(-2px);
 }
 
+.kpi-strip-card {
+  min-height: 78px;
+  position: relative;
+  overflow: hidden;
+}
+
+.kpi-strip-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+}
+
+.kpi-strip-card.is-primary::before {
+  background: #2563eb;
+}
+
+.kpi-strip-card.is-funnel::before {
+  background: #60a5fa;
+}
+
 .kpi-content {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
   min-width: 0;
 }
 
 .kpi-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  font-size: 20px;
+  font-size: 14px;
   color: #2563eb;
   background: rgba(37, 99, 235, 0.1);
 }
@@ -3166,74 +3113,36 @@ watch(
 
 .kpi-title {
   color: #7b8494;
-  font-size: 13px;
-  line-height: 1.35;
-  margin-bottom: 8px;
+  font-size: 11px;
+  line-height: 1.25;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kpi-value {
   color: #111827;
-  font-size: 26px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1.15;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kpi-change {
   color: #9aa3b2;
-  font-size: 12px;
+  font-size: 10px;
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 18px;
-}
-
-.kpi-funnel-flow {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr) auto minmax(120px, 1fr) auto minmax(120px, 1fr) auto minmax(120px, 1fr);
-  align-items: stretch;
-  gap: 10px;
-}
-
-.kpi-funnel-step {
-  padding: 14px;
-  min-width: 0;
-}
-
-.kpi-funnel-label,
-.kpi-mini-title {
-  color: #7b8494;
-  font-size: 12px;
-}
-
-.kpi-funnel-value,
-.kpi-mini-value {
-  color: #111827;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.2;
-  margin-top: 8px;
-}
-
-.kpi-funnel-arrow {
-  align-self: center;
-  color: #bfcbda;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.kpi-funnel-metrics,
-.kpi-efficiency-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.kpi-mini-card {
-  padding: 12px 14px;
-  min-width: 0;
+  min-height: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kpi-change.increase {
@@ -3420,18 +3329,8 @@ watch(
 }
 
 @media (max-width: 1200px) {
-  .kpi-primary-grid,
-  .kpi-funnel-metrics,
-  .kpi-efficiency-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .kpi-funnel-flow {
-    grid-template-columns: 1fr;
-  }
-
-  .kpi-funnel-arrow {
-    display: none;
+  .kpi-compact-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .operational-metrics-grid {
@@ -3450,15 +3349,8 @@ watch(
     flex-wrap: wrap;
   }
 
-  .kpi-primary-grid,
-  .kpi-funnel-metrics,
-  .kpi-efficiency-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .kpi-subsection {
-    border-radius: 14px;
-    padding: 14px;
+  .kpi-compact-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .operational-metrics-grid {
@@ -3467,6 +3359,12 @@ watch(
   .metric-item.metric-result-vertical {
     grid-column: 1;
     grid-row: auto;
+  }
+}
+
+@media (max-width: 360px) {
+  .kpi-compact-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -3518,9 +3416,9 @@ watch(
   }
 
   .kpi-icon {
-    width: 40px;
-    height: 40px;
-    font-size: 18px;
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
   }
 
   .header-controls {
