@@ -45,6 +45,38 @@ def test_non_orders_template_header_normalization_preserves_raw_headers_for_temp
     assert normalized == ["利润(RMB)"]
 
 
+def test_confirmed_non_semantic_binding_is_not_returned_for_manual_review():
+    from backend.routers.field_mapping_templates import _filter_bindings_for_manual_review
+
+    bindings = [
+        {
+            "raw_name": "商品名",
+            "display_name": "商品名",
+            "semantic_key": None,
+            "semantic_review_status": "confirmed_non_semantic",
+            "hash_participates": False,
+        },
+        {
+            "raw_name": "商品 ID",
+            "display_name": "商品 ID",
+            "semantic_key": "product_id",
+            "semantic_review_status": "confirmed_semantic",
+            "hash_participates": True,
+        },
+        {
+            "raw_name": "发品状态",
+            "display_name": "发品状态",
+            "semantic_key": None,
+            "semantic_review_status": "pending",
+            "hash_participates": False,
+        },
+    ]
+
+    filtered = _filter_bindings_for_manual_review(bindings)
+
+    assert [item["raw_name"] for item in filtered] == ["发品状态"]
+
+
 @pytest_asyncio.fixture
 async def template_update_context_client():
     from backend.main import app
@@ -200,6 +232,7 @@ async def test_template_update_context_returns_lightweight_summary_for_with_samp
             "aliases": [],
             "required": False,
             "hash_participates": False,
+            "semantic_review_status": "pending",
             "position": 3,
             "sample_type": "number",
             "confidence": 0.7,
@@ -747,7 +780,7 @@ async def test_save_mapping_template_persists_field_parse_rules_and_update_conte
         assert field_parse_rules[0]["date_format"] == "yyyy-mm-dd hh:mm:ss"
         assert field_parse_rules[0]["strict"] is True
         assert field_parse_rules[0]["source_label"] == "order_time"
-        assert field_parse_rules[0]["source_aliases"] == []
+        assert "metric_date" in field_parse_rules[0]["source_aliases"]
 
     context_response = await client.get(
         f"/api/field-mapping/templates/{template_id}/update-context",
@@ -913,8 +946,8 @@ async def test_save_mapping_template_preserves_raw_non_orders_headers(
             "data_domain": "products",
             "granularity": "monthly",
             "header_row": 1,
-            "header_columns": ["Current Item Status", "销售额（已下订单） (COP)"],
-            "deduplication_fields": ["Current Item Status"],
+            "header_columns": ["platform_sku", "Current Item Status", "销售额（已下订单） (COP)"],
+            "deduplication_fields": ["platform_sku"],
             "template_name": "raw_header_preserve_test",
             "created_by": "test",
         },
@@ -934,7 +967,7 @@ async def test_save_mapping_template_preserves_raw_non_orders_headers(
         header_columns = row["header_columns"]
         if isinstance(header_columns, str):
             header_columns = json.loads(header_columns)
-        assert header_columns == ["Current Item Status", "销售额（已下订单） (COP)"]
+        assert header_columns == ["platform_sku", "Current Item Status", "销售额（已下订单） (COP)"]
 
 
 @pytest.mark.asyncio
@@ -1099,6 +1132,47 @@ async def test_save_mapping_template_returns_versioning_metadata(
     assert second_payload["data"]["operation"] == "new_version"
     assert second_payload["data"]["archived_template_id"] == first_payload["data"]["template_id"]
     assert second_payload["data"]["template_name"].endswith("_v2")
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_rejects_confirmed_non_semantic_dedup_field(
+    template_update_context_client,
+):
+    client, _session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "tiktok",
+            "data_domain": "products",
+            "granularity": "daily",
+            "header_row": 0,
+            "header_columns": ["商品名", "商品 ID"],
+            "deduplication_fields": ["商品名"],
+            "header_bindings": [
+                {
+                    "raw_name": "商品名",
+                    "display_name": "商品名",
+                    "semantic_key": None,
+                    "semantic_review_status": "confirmed_non_semantic",
+                    "hash_participates": False,
+                },
+                {
+                    "raw_name": "商品 ID",
+                    "display_name": "商品 ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                    "hash_participates": True,
+                },
+            ],
+            "created_by": "test",
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["success"] is False
+    assert "商品名" in payload["message"]
 
 
 @pytest.mark.asyncio

@@ -177,7 +177,7 @@
         <el-table-column label="语义字段" min-width="240">
           <template #default="{ row }">
             <el-select
-              :model-value="row.semantic_key"
+              :model-value="semanticSelectValue(row)"
               clearable
               filterable
               placeholder="请选择语义字段"
@@ -305,6 +305,7 @@ import { Check, Document, Refresh, View, Warning } from '@element-plus/icons-vue
 
 import DeduplicationFieldsSelector from '@/components/DeduplicationFieldsSelector.vue'
 import {
+  NON_SEMANTIC_FIELD_VALUE,
   SEMANTIC_FIELD_OPTIONS,
   getSemanticFieldMeta,
   inferHeaderBindings,
@@ -407,6 +408,13 @@ watch(
 
 function handleSemanticKeyChange(rawName, semanticKey) {
   localHeaderBindings.value = updateHeaderBindingSemantic(localHeaderBindings.value, rawName, semanticKey)
+}
+
+function semanticSelectValue(row) {
+  if (row?.semantic_review_status === 'confirmed_non_semantic') {
+    return NON_SEMANTIC_FIELD_VALUE
+  }
+  return row?.semantic_key || null
 }
 
 function emitFieldParseRulesChange() {

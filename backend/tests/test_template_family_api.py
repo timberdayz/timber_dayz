@@ -255,6 +255,106 @@ async def test_template_resolve_endpoint_matches_variant_and_reports_shadow_comp
 
 
 @pytest.mark.asyncio
+async def test_template_resolve_uses_selected_variant_bindings_not_active_version(
+    template_family_client,
+):
+    client, session_factory = template_family_client
+    now = datetime.now(timezone.utc)
+
+    async with session_factory() as session:
+        session.add_all(
+            [
+                FieldMappingTemplate(
+                    platform="shopee",
+                    data_domain="analytics",
+                    granularity="monthly",
+                    sub_domain=None,
+                    header_row=3,
+                    template_name="shopee_analytics__monthly_slash_v3",
+                    version=3,
+                    status="published",
+                    field_count=2,
+                    header_columns=["slash_date", "GMV"],
+                    deduplication_fields=["metric_date"],
+                    header_bindings=[
+                        {
+                            "raw_name": "slash_date",
+                            "display_name": "slash_date",
+                            "semantic_key": "metric_date",
+                            "semantic_review_status": "confirmed_semantic",
+                            "hash_participates": True,
+                        }
+                    ],
+                    field_parse_rules=[
+                        {
+                            "target_field": "metric_date",
+                            "source_column": "slash_date",
+                            "value_kind": "single_date",
+                            "date_format": "dd/mm/yyyy",
+                            "strict": True,
+                        }
+                    ],
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplate(
+                    platform="shopee",
+                    data_domain="analytics",
+                    granularity="monthly",
+                    sub_domain=None,
+                    header_row=3,
+                    template_name="shopee_analytics__monthly_dash_v4",
+                    version=4,
+                    status="published",
+                    field_count=2,
+                    header_columns=["dash_date", "GMV"],
+                    deduplication_fields=["order_id"],
+                    header_bindings=[
+                        {
+                            "raw_name": "dash_date",
+                            "display_name": "dash_date",
+                            "semantic_key": "order_id",
+                            "semantic_review_status": "confirmed_semantic",
+                            "hash_participates": True,
+                        }
+                    ],
+                    field_parse_rules=[
+                        {
+                            "target_field": "metric_date",
+                            "source_column": "dash_date",
+                            "value_kind": "single_date",
+                            "date_format": "dd-mm-yyyy",
+                            "strict": True,
+                        }
+                    ],
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/field-mapping/template-resolve",
+        json={
+            "platform": "shopee",
+            "data_domain": "analytics",
+            "granularity": "monthly",
+            "header_columns": ["slash_date", "GMV"],
+            "sample_rows": [{"slash_date": "01/03/2026", "GMV": "100"}],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["variant"]["template_name"] == "shopee_analytics__monthly_slash_v3"
+    assert payload["data"]["active_version"]["version_no"] == 4
+    assert payload["data"]["semantic_bindings"][0]["raw_name"] == "slash_date"
+    assert payload["data"]["hash_participating_semantic_keys"] == ["metric_date"]
+
+
+@pytest.mark.asyncio
 async def test_template_family_projection_keeps_distinct_variants_with_same_header_row(
     template_family_client,
 ):

@@ -720,8 +720,19 @@ class TemplateResolver:
             selected_variant=selected_variant,
         )
         semantic_bindings = list(active_version.get("header_bindings") or [])
+        deduplication_fields = list(active_version.get("deduplication_fields") or [])
+        field_parse_rules = list(active_version.get("field_parse_rules") or [])
+        if selected_variant and selected_variant.get("source_legacy_template_id"):
+            legacy_template = await self.db.get(
+                FieldMappingTemplate,
+                selected_variant["source_legacy_template_id"],
+            )
+            if legacy_template:
+                semantic_bindings = list(legacy_template.header_bindings or [])
+                deduplication_fields = list(legacy_template.deduplication_fields or [])
+                field_parse_rules = list(legacy_template.field_parse_rules or [])
         required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
-            list(active_version.get("deduplication_fields") or []),
+            deduplication_fields,
             semantic_bindings,
         )
         return {
@@ -731,6 +742,8 @@ class TemplateResolver:
             "active_version": active_version,
             "variant": selected_variant,
             "semantic_bindings": semantic_bindings,
+            "deduplication_fields": deduplication_fields,
+            "field_parse_rules": field_parse_rules,
             "required_semantic_keys": required_semantic_keys,
             "hash_participating_semantic_keys": hash_participating_semantic_keys,
             "shadow_compare": shadow_compare,

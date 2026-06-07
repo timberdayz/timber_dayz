@@ -59,9 +59,11 @@ const SEMANTIC_FIELD_ALIASES = Object.fromEntries(
   Object.entries(SEMANTIC_FIELD_META).map(([key, meta]) => [key, meta.aliases])
 )
 
+export const NON_SEMANTIC_FIELD_VALUE = '__non_semantic__'
+
 export const SEMANTIC_FIELD_OPTIONS = [
   {
-    value: null,
+    value: NON_SEMANTIC_FIELD_VALUE,
     label: '不作为语义核心字段',
     description: '仅保留原始字段，不参与语义去重。',
   },
@@ -169,6 +171,7 @@ export function inferHeaderBindings({
       aliases,
       required: requirements.required,
       hash_participates: requirements.hash_participates,
+      semantic_review_status: semanticKey ? 'confirmed_semantic' : 'pending',
       position,
       sample_type: sampleType,
       confidence,
@@ -179,6 +182,18 @@ export function inferHeaderBindings({
 export function updateHeaderBindingSemantic(headerBindings = [], rawName, semanticKey) {
   return (Array.isArray(headerBindings) ? headerBindings : []).map((binding) => {
     if (binding?.raw_name !== rawName) return binding
+    if (semanticKey === NON_SEMANTIC_FIELD_VALUE) {
+      return {
+        ...binding,
+        semantic_key: null,
+        semantic_role: null,
+        aliases: [],
+        required: false,
+        hash_participates: false,
+        semantic_review_status: 'confirmed_non_semantic',
+        display_name: binding?.display_name || binding?.raw_name,
+      }
+    }
     const normalizedKey = semanticKey || null
     const meta = normalizedKey ? getSemanticFieldMeta(normalizedKey) : null
     const requirements = semanticRequirements(normalizedKey)
@@ -189,6 +204,7 @@ export function updateHeaderBindingSemantic(headerBindings = [], rawName, semant
       aliases: meta?.aliases ? [...meta.aliases] : [],
       required: requirements.required,
       hash_participates: requirements.hash_participates,
+      semantic_review_status: normalizedKey ? 'confirmed_semantic' : 'pending',
       display_name: binding?.display_name || binding?.raw_name,
     }
   })

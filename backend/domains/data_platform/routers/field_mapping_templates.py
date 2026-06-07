@@ -189,8 +189,14 @@ def _filter_bindings_for_manual_review(
     filtered: list[dict[str, Any]] = []
     for binding in bindings:
         semantic_key = normalize_semantic_key(binding.get("semantic_key"))
-        if not semantic_key or semantic_counts.get(semantic_key, 0) > 1:
-            filtered.append(binding)
+        review_status = str(binding.get("semantic_review_status") or "").strip()
+        if not review_status:
+            review_status = "confirmed_semantic" if semantic_key else "pending"
+        has_conflict = bool(semantic_key and semantic_counts.get(semantic_key, 0) > 1)
+        if review_status == "confirmed_non_semantic" and not has_conflict:
+            continue
+        if review_status == "pending" or has_conflict:
+            filtered.append({**binding, "semantic_review_status": review_status})
     return filtered
 
 
@@ -330,6 +336,18 @@ def _normalize_header_bindings(
             *aliases,
         )
         semantic_requirements = get_semantic_requirements(inferred_semantic_key)
+        requested_review_status = str(requested.get("semantic_review_status") or "").strip()
+        if requested_review_status not in {
+            "pending",
+            "confirmed_semantic",
+            "confirmed_non_semantic",
+        }:
+            requested_review_status = ""
+        if requested_review_status == "confirmed_non_semantic":
+            inferred_semantic_key = None
+            semantic_role = None
+            aliases = []
+            semantic_requirements = {"required": False, "hash_participates": False}
         if _looks_like_unnamed_header(raw_name) and sample_type == "date":
             if display_name == raw_name:
                 display_name = "日期"
@@ -343,6 +361,25 @@ def _normalize_header_bindings(
         elif inferred_semantic_key:
             aliases = list(dict.fromkeys([*aliases, *get_semantic_aliases(inferred_semantic_key)]))
 
+        if requested_review_status:
+            semantic_review_status = requested_review_status
+        elif inferred_semantic_key:
+            semantic_review_status = "confirmed_semantic"
+        else:
+            semantic_review_status = "pending"
+
+        if semantic_review_status == "confirmed_non_semantic":
+            inferred_semantic_key = None
+            semantic_role = None
+            aliases = []
+            semantic_requirements = {"required": False, "hash_participates": False}
+
+        required = bool(requested.get("required", semantic_requirements["required"]))
+        hash_participates = bool(requested.get("hash_participates", semantic_requirements["hash_participates"]))
+        if semantic_review_status == "confirmed_non_semantic":
+            required = False
+            hash_participates = False
+
         normalized.append(
             {
                 "raw_name": raw_name,
@@ -350,14 +387,126 @@ def _normalize_header_bindings(
                 "semantic_key": inferred_semantic_key,
                 "semantic_role": semantic_role,
                 "aliases": aliases,
-                "required": bool(requested.get("required", semantic_requirements["required"])),
-                "hash_participates": bool(requested.get("hash_participates", semantic_requirements["hash_participates"])),
+                "required": required,
+                "hash_participates": hash_participates,
+                "semantic_review_status": semantic_review_status,
                 "position": requested.get("position", position),
                 "sample_type": sample_type,
                 "confidence": confidence,
             }
         )
     return normalized
+
+
+def _apply_mapping_semantics_to_header_bindings(
+    header_bindings: list[dict[str, Any]],
+    mappings: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not mappings:
+        return header_bindings
+
+    mapping_by_raw = {
+        str(raw_name).strip(): _extract_standard_field(mapping_info)
+        for raw_name, mapping_info in mappings.items()
+        if str(raw_name).strip()
+    }
+    if not mapping_by_raw:
+        return header_bindings
+
+    enriched: list[dict[str, Any]] = []
+    for binding in header_bindings:
+        raw_name = str(binding.get("raw_name", "")).strip()
+        standard_field = mapping_by_raw.get(raw_name)
+        semantic_key = normalize_semantic_key(standard_field) if standard_field else None
+        if semantic_key and is_canonical_semantic_key(semantic_key):
+            semantic_requirements = get_semantic_requirements(semantic_key)
+            enriched.append(
+                {
+                    **binding,
+                    "semantic_key": semantic_key,
+                    "semantic_role": "metric_date" if semantic_key == "metric_date" else binding.get("semantic_role"),
+                    "aliases": list(
+                        dict.fromkeys(
+                            [
+                                *(binding.get("aliases") or []),
+                                *get_semantic_aliases(semantic_key),
+                            ]
+                        )
+                    ),
+                    "required": bool(binding.get("required") or semantic_requirements["required"]),
+                    "hash_participates": bool(
+                        binding.get("hash_participates") or semantic_requirements["hash_participates"]
+                    ),
+                    "semantic_review_status": "confirmed_semantic",
+                }
+            )
+            continue
+        enriched.append(binding)
+
+    return enriched
+
+
+def _validate_deduplication_fields_against_bindings(
+    deduplication_fields: list[str],
+    header_columns: list[str],
+    header_bindings: list[dict[str, Any]],
+) -> None:
+    binding_by_raw = {
+        str(binding.get("raw_name", "")).strip().lower(): binding
+        for binding in header_bindings
+        if str(binding.get("raw_name", "")).strip()
+    }
+    bindings_by_semantic: dict[str, list[dict[str, Any]]] = {}
+    for binding in header_bindings:
+        semantic_key = normalize_semantic_key(
+            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+        )
+        if semantic_key:
+            bindings_by_semantic.setdefault(semantic_key, []).append(binding)
+
+    header_lookup = {str(column).strip().lower() for column in header_columns}
+    invalid_fields: list[str] = []
+    non_semantic_fields: list[str] = []
+
+    for field in deduplication_fields:
+        field_text = str(field).strip()
+        field_key = field_text.lower()
+        normalized_key = normalize_semantic_key(field_text)
+        raw_binding = binding_by_raw.get(field_key)
+        semantic_bindings = bindings_by_semantic.get(normalized_key or "", [])
+
+        candidate_bindings = [binding for binding in [raw_binding, *semantic_bindings] if binding]
+        if any(binding.get("semantic_review_status") == "confirmed_non_semantic" for binding in candidate_bindings):
+            non_semantic_fields.append(field_text)
+            continue
+
+        if normalized_key and is_canonical_semantic_key(normalized_key) and semantic_bindings:
+            continue
+        raw_semantic_key = None
+        if raw_binding:
+            raw_semantic_key = normalize_semantic_key(
+                raw_binding.get("semantic_key") or raw_binding.get("semantic_role")
+            )
+        if (
+            field_key in header_lookup
+            and raw_binding
+            and raw_binding.get("semantic_review_status") != "confirmed_non_semantic"
+            and raw_semantic_key
+            and is_canonical_semantic_key(raw_semantic_key)
+        ):
+            continue
+        invalid_fields.append(field_text)
+
+    if non_semantic_fields:
+        raise ValueError(
+            "deduplication_fields包含已确认非核心语义字段，不能参与Hash: "
+            + ", ".join(non_semantic_fields)
+        )
+    if invalid_fields:
+        raise ValueError(
+            "deduplication_fields必须能通过表头或语义绑定解析到真实字段: "
+            + ", ".join(invalid_fields)
+        )
 
 
 def _extract_semantic_key_sets(
@@ -577,6 +726,10 @@ async def save_mapping_template(
             header_columns,
             request.sample_data,
         )
+        header_bindings = _apply_mapping_semantics_to_header_bindings(
+            header_bindings,
+            request.mappings,
+        )
         field_parse_rules = _enrich_field_parse_rules(
             _normalize_field_parse_rules(request.field_parse_rules),
             header_bindings,
@@ -603,6 +756,11 @@ async def save_mapping_template(
             raise ValueError("deduplication_fields列表中的元素必须是字符串")
         deduplication_fields = _normalize_deduplication_fields_for_template(
             deduplication_fields,
+            header_bindings,
+        )
+        _validate_deduplication_fields_against_bindings(
+            deduplication_fields,
+            header_columns,
             header_bindings,
         )
 
