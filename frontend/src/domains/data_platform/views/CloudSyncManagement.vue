@@ -352,7 +352,7 @@
               :timestamp="formatTime(event.timestamp)"
               :type="timelineType(event.status)"
             >
-              <div class="event-title">{{ event.title }}</div>
+              <div class="event-title">{{ formatEventTitle(event) }}</div>
               <div class="event-meta">{{ event.source_table_name || '-' }}</div>
               <div v-if="event.last_error" class="event-error">{{ event.last_error }}</div>
             </el-timeline-item>
@@ -561,6 +561,14 @@ function formatResultStatus(status) {
     skipped: '已跳过',
   }
   return mapping[status] || status || '-'
+}
+
+function formatEventTitle(event) {
+  const statusText = formatResultStatus(event?.status)
+  if (event?.source_table_name && statusText !== '-') {
+    return `${event.source_table_name} ${statusText}`
+  }
+  return statusText !== '-' ? statusText : (event?.title || '-')
 }
 
 function formatTrigger(trigger) {
