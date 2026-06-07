@@ -10,6 +10,7 @@ TemplateUpdateMode = Literal["with-sample", "core-only"]
 TemplateSaveOperation = Literal["created", "new_version"]
 TemplateFieldParseRuleValueKind = Literal["single_date", "date_range"]
 TemplateFieldParseRuleRangePick = Literal["start", "end"]
+TemplateSemanticReviewStatus = Literal["pending", "confirmed_semantic", "confirmed_non_semantic"]
 
 
 class TemplateHeaderBinding(BaseModel):
@@ -20,6 +21,10 @@ class TemplateHeaderBinding(BaseModel):
     aliases: List[str] = Field(default_factory=list, description="Alternative labels for matching")
     required: Optional[bool] = Field(None, description="Whether this semantic binding is required for sync")
     hash_participates: Optional[bool] = Field(None, description="Whether this binding participates in data_hash")
+    semantic_review_status: Optional[TemplateSemanticReviewStatus] = Field(
+        None,
+        description="Manual review status for semantic identity governance",
+    )
     position: Optional[int] = Field(None, description="0-based column position")
     sample_type: Optional[str] = Field(None, description="Sample-inferred type")
     confidence: Optional[float] = Field(None, description="Inference confidence")
@@ -377,6 +382,8 @@ class TemplateResolveData(BaseModel):
     active_version: Optional[TemplateVersionListItem] = None
     variant: Optional[TemplateVariantListItem] = None
     semantic_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    deduplication_fields: List[str] = Field(default_factory=list)
+    field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
     required_semantic_keys: List[str] = Field(default_factory=list)
     hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     shadow_compare: TemplateResolveShadowCompare

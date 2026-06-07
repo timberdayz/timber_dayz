@@ -146,7 +146,7 @@
               <template #default="{ row }">
                 <el-select
                   v-if="isBindingEditable(row.raw_name)"
-                  :model-value="row.semantic_key"
+                  :model-value="semanticSelectValue(row)"
                   clearable
                   filterable
                   placeholder="Select semantic field"
@@ -180,6 +180,7 @@
               <template #default="{ row }">
                 <div class="template-update-workbench-drawer__tags">
                   <el-tag v-if="row.needsReview" size="small" type="warning">Needs Review</el-tag>
+                  <el-tag v-if="row.semantic_review_status === 'confirmed_non_semantic'" size="small" type="info">Non-core</el-tag>
                   <el-tag v-if="row.required" size="small" type="danger">Required</el-tag>
                   <el-tag v-if="row.hash_participates" size="small" type="success">Hash</el-tag>
                 </div>
@@ -232,6 +233,7 @@ import api from '@/api'
 import {
   formatHeaderBindingLabel,
   getSemanticFieldMeta,
+  NON_SEMANTIC_FIELD_VALUE,
   SEMANTIC_FIELD_OPTIONS,
   updateHeaderBindingSemantic,
 } from '@/domains/data_platform/utils/headerBindings'
@@ -340,7 +342,7 @@ watch(
       selectedDeduplicationFields.value = [...recommended]
       return
     }
-    selectedDeduplicationFields.value = currentFields.slice(0, 1)
+    selectedDeduplicationFields.value = []
   },
   { immediate: true },
 )
@@ -372,9 +374,11 @@ const bindingRows = computed(() => {
 
   return activeBindingSource.value.map((binding) => {
     const semanticKey = String(binding?.semantic_key || '').trim()
-    const needsReview = !semanticKey || (counts.get(semanticKey) || 0) > 1
+    const reviewStatus = binding?.semantic_review_status || (semanticKey ? 'confirmed_semantic' : 'pending')
+    const needsReview = reviewStatus === 'pending' || (semanticKey && (counts.get(semanticKey) || 0) > 1)
     return {
       ...binding,
+      semantic_review_status: reviewStatus,
       needsReview,
       meta: getSemanticFieldMeta(binding.semantic_key),
     }
@@ -467,6 +471,71 @@ function isBindingEditable(rawName) {
   return editingBindingNames.value.includes(rawName)
 }
 
+function semanticSelectValue(row) {
+  if (row?.semantic_review_status === 'confirmed_non_semantic') {
+    return NON_SEMANTIC_FIELD_VALUE
+  }
+  return row?.semantic_key || null
+}
+
+function normalizeDeduplicationSelection(fields, bindings, preferredSemanticKey = null) {
+  const bindingByRaw = new Map()
+  const semanticKeys = new Set()
+
+  for (const binding of Array.isArray(bindings) ? bindings : []) {
+    const rawName = String(binding?.raw_name || '').trim()
+    const semanticKey = String(binding?.semantic_key || '').trim()
+    if (rawName) {
+      bindingByRaw.set(rawName.toLowerCase(), binding)
+    }
+    if (
+      semanticKey &&
+      binding?.semantic_review_status !== 'confirmed_non_semantic' &&
+      binding?.hash_participates
+    ) {
+      semanticKeys.add(semanticKey)
+    }
+  }
+
+  const normalized = []
+  const seen = new Set()
+  const pushField = (field) => {
+    const value = String(field || '').trim()
+    if (!value) return
+    const lowered = value.toLowerCase()
+    if (seen.has(lowered)) return
+    seen.add(lowered)
+    normalized.push(value)
+  }
+
+  for (const field of Array.isArray(fields) ? fields : []) {
+    const value = String(field || '').trim()
+    if (!value) continue
+
+    const rawBinding = bindingByRaw.get(value.toLowerCase())
+    if (rawBinding) {
+      if (rawBinding.semantic_review_status === 'confirmed_non_semantic') {
+        continue
+      }
+      const semanticKey = String(rawBinding.semantic_key || '').trim()
+      if (semanticKey && rawBinding.hash_participates) {
+        pushField(semanticKey)
+      }
+      continue
+    }
+
+    if (semanticKeys.has(value)) {
+      pushField(value)
+    }
+  }
+
+  if (preferredSemanticKey && semanticKeys.has(preferredSemanticKey) && normalized.length === 0) {
+    pushField(preferredSemanticKey)
+  }
+
+  return normalized
+}
+
 function handleSemanticKeyChange(rawName, semanticKey) {
   const nextBindings = updateHeaderBindingSemantic(activeBindingSource.value, rawName, semanticKey)
   if (bindingsLoaded.value && fullHeaderBindings.value.length > 0) {
@@ -474,6 +543,15 @@ function handleSemanticKeyChange(rawName, semanticKey) {
   } else {
     localHeaderBindings.value = nextBindings
   }
+  const updatedBinding = nextBindings.find(binding => binding?.raw_name === rawName)
+  const preferredSemanticKey = updatedBinding?.hash_participates
+    ? String(updatedBinding?.semantic_key || '').trim()
+    : null
+  selectedDeduplicationFields.value = normalizeDeduplicationSelection(
+    selectedDeduplicationFields.value,
+    nextBindings,
+    preferredSemanticKey,
+  )
 }
 
 function formatFieldLabel(field) {
@@ -486,6 +564,10 @@ async function handleSave() {
     if (updateMode.value !== 'core-only') {
       await ensureBindingsLoaded()
     }
+    selectedDeduplicationFields.value = normalizeDeduplicationSelection(
+      selectedDeduplicationFields.value,
+      activeBindingSource.value,
+    )
     emit('save', {
       deduplicationFields: [...selectedDeduplicationFields.value],
       headerRow: selectedHeaderRow.value,
