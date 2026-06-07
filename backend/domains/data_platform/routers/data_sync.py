@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 from pathlib import Path as PathLib  # [*] 修复:重命名避免与 fastapi.Path 冲突
+import re
 import uuid
 import asyncio
 import copy
@@ -153,6 +154,105 @@ def _is_inventory_granularity_anomaly(catalog_file: CatalogFile | None) -> bool:
 DATA_SYNC_RAW_EXTENSIONS = {".xlsx", ".xls", ".csv", ".tsv", ".html", ".htm"}
 
 
+def _raw_path_parts(raw_root: PathLib, file_path: PathLib) -> list[str]:
+    try:
+        relative = file_path.relative_to(raw_root)
+    except ValueError:
+        relative = file_path
+    return [part.lower() for part in relative.parts]
+
+
+def _is_repaired_raw_file(raw_root: PathLib, file_path: PathLib) -> bool:
+    return "repaired" in _raw_path_parts(raw_root, file_path)
+
+
+def _is_legacy_without_meta(raw_root: PathLib, file_path: PathLib) -> bool:
+    parts = _raw_path_parts(raw_root, file_path)
+    if not parts:
+        return False
+    year_part = parts[0]
+    if not year_part.isdigit() or len(year_part) != 4:
+        return False
+    if int(year_part) >= datetime.now(timezone.utc).year:
+        return False
+    return not file_path.with_suffix(".meta.json").exists()
+
+
+def _resolve_catalog_file_path(file_record: CatalogFile) -> PathLib:
+    file_path = PathLib(str(file_record.file_path))
+    if file_path.is_absolute():
+        return file_path
+
+    from modules.core.path_manager import get_project_root
+
+    return get_project_root() / file_path
+
+
+def _resolve_catalog_meta_path(file_record: CatalogFile, raw_path: PathLib | None = None) -> PathLib:
+    meta_file_path = getattr(file_record, "meta_file_path", None)
+    if meta_file_path:
+        meta_path = PathLib(str(meta_file_path))
+        if meta_path.is_absolute():
+            return meta_path
+        return to_absolute_path(str(meta_file_path))
+
+    if raw_path is None:
+        raw_path = _resolve_catalog_file_path(file_record)
+    return raw_path.with_suffix(".meta.json")
+
+
+def _read_catalog_meta(file_record: CatalogFile, raw_path: PathLib | None = None) -> dict[str, Any]:
+    meta_path = _resolve_catalog_meta_path(file_record, raw_path)
+    if not meta_path.exists():
+        return {}
+    try:
+        return MetadataManager.read_meta_file(meta_path)
+    except Exception as exc:
+        logger.warning("[DataSync Files] 读取伴生meta失败: %s, 错误: %s", meta_path, exc)
+        return {}
+
+
+def _extract_collection_task_ids_from_meta(meta: dict[str, Any]) -> set[str]:
+    collection_info = meta.get("collection_info") or {}
+    task_ids = {
+        str(value)
+        for value in (
+            collection_info.get("collection_task_id"),
+            collection_info.get("collection_task_uuid"),
+            collection_info.get("task_id"),
+            collection_info.get("task_uuid"),
+            meta.get("collection_task_id"),
+            meta.get("collection_task_uuid"),
+        )
+        if value
+    }
+
+    original_path = str(collection_info.get("original_path") or "")
+    normalized_path = original_path.replace("\\", "/")
+    if normalized_path:
+        task_ids.update(
+            re.findall(
+                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+                normalized_path,
+            )
+        )
+        path_parts = [part for part in normalized_path.split("/") if part]
+        for marker in ("downloads", "collection", "tasks"):
+            if marker in path_parts:
+                marker_index = path_parts.index(marker)
+                if marker_index + 1 < len(path_parts):
+                    task_ids.add(path_parts[marker_index + 1])
+
+    return task_ids
+
+
+def _catalog_file_matches_collection_task(file_record: CatalogFile, collection_task_id: str) -> bool:
+    if not collection_task_id:
+        return True
+    meta = _read_catalog_meta(file_record)
+    return collection_task_id in _extract_collection_task_ids_from_meta(meta)
+
+
 def _normalize_local_path_key(path_value: Any) -> str:
     try:
         path = PathLib(str(path_value))
@@ -176,16 +276,64 @@ def _iter_data_raw_files(limit: int | None = None) -> list[PathLib]:
             continue
         if candidate.suffix.lower() not in DATA_SYNC_RAW_EXTENSIONS:
             continue
+        if _is_repaired_raw_file(raw_root, candidate):
+            continue
+        if _is_legacy_without_meta(raw_root, candidate):
+            continue
         files.append(candidate)
         if limit is not None and len(files) >= limit:
             break
     return files
 
 
+def _collect_raw_file_categories(limit: int | None = None) -> dict[str, list[PathLib]]:
+    raw_root = PathLib(get_data_raw_dir())
+    categories = {
+        "official": [],
+        "repaired_cache": [],
+        "legacy_without_meta": [],
+    }
+    if not raw_root.exists():
+        return categories
+
+    seen = 0
+    for candidate in raw_root.rglob("*"):
+        if not candidate.is_file():
+            continue
+        if candidate.suffix.lower() == ".json" and candidate.name.endswith(".meta.json"):
+            continue
+        if candidate.suffix.lower() not in DATA_SYNC_RAW_EXTENSIONS:
+            continue
+
+        if _is_repaired_raw_file(raw_root, candidate):
+            categories["repaired_cache"].append(candidate)
+        elif _is_legacy_without_meta(raw_root, candidate):
+            categories["legacy_without_meta"].append(candidate)
+        else:
+            categories["official"].append(candidate)
+
+        seen += 1
+        if limit is not None and seen >= limit:
+            break
+    return categories
+
+
 async def _build_raw_unregistered_hint(db: AsyncSession) -> dict[str, Any] | None:
-    raw_files = _iter_data_raw_files(limit=1001)
+    raw_categories = _collect_raw_file_categories(limit=1001)
+    raw_files = raw_categories["official"]
+    repaired_cache_count = len(raw_categories["repaired_cache"])
+    legacy_without_meta_count = len(raw_categories["legacy_without_meta"])
     if not raw_files:
-        return None
+        if repaired_cache_count == 0 and legacy_without_meta_count == 0:
+            return None
+        return {
+            "candidate_count": 0,
+            "official_unregistered_count": 0,
+            "repaired_cache_count": repaired_cache_count,
+            "legacy_without_meta_count": legacy_without_meta_count,
+            "sample_files": [],
+            "action": "refresh_data_sync_files",
+        }
 
     result = await db.execute(select(CatalogFile.file_path))
     catalog_path_keys = {
@@ -198,11 +346,14 @@ async def _build_raw_unregistered_hint(db: AsyncSession) -> dict[str, Any] | Non
         for raw_file in raw_files
         if _normalize_local_path_key(raw_file) not in catalog_path_keys
     ]
-    if not unregistered:
+    if not unregistered and repaired_cache_count == 0 and legacy_without_meta_count == 0:
         return None
 
     return {
         "candidate_count": len(unregistered),
+        "official_unregistered_count": len(unregistered),
+        "repaired_cache_count": repaired_cache_count,
+        "legacy_without_meta_count": legacy_without_meta_count,
         "sample_files": [str(path) for path in unregistered[:5]],
         "action": "refresh_data_sync_files",
     }
@@ -262,6 +413,9 @@ async def _build_data_sync_file_diagnostics(db: AsyncSession, hours: int) -> dic
         "raw_file_count": len(raw_files),
         "catalog_file_count": len(catalog_files),
         "unregistered_raw_candidates": (raw_hint or {}).get("candidate_count", 0),
+        "official_unregistered_count": (raw_hint or {}).get("official_unregistered_count", 0),
+        "repaired_cache_count": (raw_hint or {}).get("repaired_cache_count", 0),
+        "legacy_without_meta_count": (raw_hint or {}).get("legacy_without_meta_count", 0),
         "semantic_invalid_count": semantic_invalid_count,
         "recommendations": recommendations,
     }
@@ -526,6 +680,7 @@ async def list_files(
     page: int = Query(1, description="页码", ge=1),  # v4.18.0新增:分页支持
     page_size: int = Query(50, description="每页数量", ge=1, le=200),  # v4.18.0新增:分页支持
     limit: int = Query(None, description="数量限制(已废弃,使用page和page_size)"),  # v4.18.0:向后兼容
+    collection_task_id: Optional[str] = Query(None, description="采集任务ID/UUID，兼容从meta original_path解析"),
     db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2:改为异步会话
 ):
     """
@@ -570,6 +725,12 @@ async def list_files(
             for file_record in all_files
             if is_catalog_file_semantically_valid(file_record) or _is_inventory_granularity_anomaly(file_record)
         ]
+        if collection_task_id:
+            display_files = [
+                file_record
+                for file_record in display_files
+                if _catalog_file_matches_collection_task(file_record, collection_task_id)
+            ]
         hidden_semantic_invalid_count = len(all_files) - len(display_files)
         raw_unregistered_hint = await _build_raw_unregistered_hint(db)
         total_count = len(display_files)
@@ -670,6 +831,21 @@ async def list_files(
                 except Exception as e:
                     logger.warning(f"[DataSync Files] 获取文件大小失败: {file_path_str}, 错误: {e}")
             
+            meta_file_path = getattr(file_record, "meta_file_path", None)
+            if meta_file_path:
+                meta_path_value = PathLib(str(meta_file_path))
+                meta_resolved_path = (
+                    meta_path_value
+                    if meta_path_value.is_absolute()
+                    else to_absolute_path(str(meta_file_path))
+                )
+            else:
+                meta_resolved_path = resolved_path.with_suffix(".meta.json")
+            meta_exists = await loop.run_in_executor(
+                None,
+                lambda: meta_resolved_path.exists()
+            )
+
             if semantic_anomaly_type:
                 template_status_info = {
                     "has_template": False,
@@ -701,10 +877,19 @@ async def list_files(
                 "id": file_record.id,
                 "file_name": file_record.file_name,
                 "platform": file_record.platform_code,
+                "business_platform": file_record.platform_code,
+                "collection_platform": file_record.source_platform,
                 "domain": file_record.data_domain,
                 "granularity": file_record.granularity,
                 "sub_domain": file_record.sub_domain,
+                "account": file_record.account,
+                "shop_id": file_record.shop_id,
+                "date_from": file_record.date_from.isoformat() if file_record.date_from else None,
+                "date_to": file_record.date_to.isoformat() if file_record.date_to else None,
                 "file_size": file_size,
+                "meta_file_path": str(meta_resolved_path),
+                "meta_exists": meta_exists,
+                "catalog_registered": True,
                 "file_path": str(resolved_path),  # [*] 新增:返回解析后的文件路径(用于调试)
                 "collected_at": file_record.first_seen_at.isoformat() if file_record.first_seen_at else None,
                 "has_template": template_status_info["has_template"],
@@ -852,6 +1037,92 @@ async def delete_catalog_files_batch(
         return error_response(
             code=ErrorCode.DATABASE_QUERY_ERROR,
             message="批量删除文件失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            status_code=500,
+        )
+
+
+@router.get("/data-sync/files/{file_id}")
+async def get_data_sync_file_detail(
+    file_id: int = Path(..., description="文件ID"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        result = await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))
+        file_record = result.scalar_one_or_none()
+        if not file_record:
+            return error_response(
+                code=ErrorCode.DATA_NOT_FOUND,
+                message="文件不存在",
+                error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+                detail=f"CatalogFile id={file_id} not found",
+                status_code=404,
+            )
+
+        raw_path = _resolve_catalog_file_path(file_record)
+        raw_exists = raw_path.exists()
+        meta_path = _resolve_catalog_meta_path(file_record, raw_path)
+        meta_exists = meta_path.exists()
+        meta_content = _read_catalog_meta(file_record, raw_path) if meta_exists else {}
+        collection_info = meta_content.get("collection_info") or {}
+        collection_task_ids = sorted(_extract_collection_task_ids_from_meta(meta_content))
+
+        payload = {
+            "id": file_record.id,
+            "file_name": file_record.file_name,
+            "platform": file_record.platform_code,
+            "business_platform": file_record.platform_code,
+            "collection_platform": file_record.source_platform,
+            "domain": file_record.data_domain,
+            "granularity": file_record.granularity,
+            "sub_domain": file_record.sub_domain,
+            "account": file_record.account,
+            "shop_id": file_record.shop_id,
+            "date_from": file_record.date_from.isoformat() if file_record.date_from else None,
+            "date_to": file_record.date_to.isoformat() if file_record.date_to else None,
+            "status": file_record.status,
+            "collected_at": file_record.first_seen_at.isoformat() if file_record.first_seen_at else None,
+            "catalog_registered": True,
+            "meta_exists": meta_exists,
+            "meta_file_path": str(meta_path),
+            "file_path": str(raw_path),
+            "raw_file": {
+                "path": str(raw_path),
+                "exists": raw_exists,
+                "size": raw_path.stat().st_size if raw_exists else 0,
+            },
+            "meta_file": {
+                "path": str(meta_path),
+                "exists": meta_exists,
+                "collection_info": collection_info,
+                "original_path": collection_info.get("original_path"),
+                "collection_task_ids": collection_task_ids,
+            },
+            "catalog_record": {
+                "id": file_record.id,
+                "file_path": file_record.file_path,
+                "file_name": file_record.file_name,
+                "source_platform": file_record.source_platform,
+                "platform_code": file_record.platform_code,
+                "data_domain": file_record.data_domain,
+                "sub_domain": file_record.sub_domain,
+                "granularity": file_record.granularity,
+                "status": file_record.status,
+                "first_seen_at": file_record.first_seen_at.isoformat() if file_record.first_seen_at else None,
+                "account": file_record.account,
+                "shop_id": file_record.shop_id,
+                "date_from": file_record.date_from.isoformat() if file_record.date_from else None,
+                "date_to": file_record.date_to.isoformat() if file_record.date_to else None,
+            },
+        }
+        return success_response(data=payload, message="获取采集文件详情成功")
+    except Exception as exc:
+        logger.error("[DataSync FileDetail] 查询失败: %s", exc, exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="获取采集文件详情失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(exc),
             status_code=500,
@@ -2898,11 +3169,23 @@ async def get_governance_stats(
         # 计算总文件数(所有已注册的文件)
         total_result = await db.execute(select(func.count(CatalogFile.id)))
         total_count = total_result.scalar() or 0
+        raw_hint = await _build_raw_unregistered_hint(db)
+        official_unregistered_count = (
+            (raw_hint or {}).get("official_unregistered_count", 0)
+        )
+        legacy_file_count = (
+            (raw_hint or {}).get("legacy_without_meta_count", 0)
+            + (raw_hint or {}).get("repaired_cache_count", 0)
+        )
         
         return success_response(
             data={
                 "pending_count": pending_count,  # [*] v4.18.1修复:从数据库查询status='pending'
                 "ingested_count": ingested_count,
+                "registered_count": total_count,
+                "recent_collected_count": total_count,
+                "official_unregistered_count": official_unregistered_count,
+                "legacy_file_count": legacy_file_count,
                 "failed_count": failed_count,  # 仅failed状态的文件数
                 "total_count": total_count,  # [*] v4.18.1修复:总文件数从数据库查询
                 "status_counts": status_counts,  # [*] 各状态的详细数量

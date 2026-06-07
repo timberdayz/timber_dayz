@@ -573,3 +573,50 @@ async def create_employee_target(
         await db.rollback()
         logger.error("创建员工目标失败: %s", e, exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建员工目标失败: {str(e)}", status_code=500)
+
+@router.put("/employee-targets/{target_id}", response_model=EmployeeTargetResponse)
+async def update_employee_target(
+    target_id: int,
+    target: EmployeeTargetUpdate,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """更新个人目标规划层记录，不直接参与个人绩效结果和工资单计算。"""
+    try:
+        result = await db.execute(select(EmployeeTarget).where(EmployeeTarget.id == target_id))
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工目标不存在: {target_id}", status_code=404)
+
+        update_data = target.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(record, field, value)
+
+        await db.commit()
+        await db.refresh(record)
+        return EmployeeTargetResponse.model_validate(record)
+    except Exception as e:
+        await db.rollback()
+        logger.error("更新员工目标失败: %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新员工目标失败: {str(e)}", status_code=500)
+
+
+@router.delete("/employee-targets/{target_id}", status_code=204)
+async def delete_employee_target(
+    target_id: int,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """删除个人目标规划层记录，不直接影响已生成绩效结果。"""
+    try:
+        result = await db.execute(select(EmployeeTarget).where(EmployeeTarget.id == target_id))
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工目标不存在: {target_id}", status_code=404)
+        delete_result = db.delete(record)
+        if hasattr(delete_result, "__await__"):
+            await delete_result
+        await db.commit()
+        return None
+    except Exception as e:
+        await db.rollback()
+        logger.error("删除员工目标失败: %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除员工目标失败: {str(e)}", status_code=500)

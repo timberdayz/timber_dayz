@@ -6,8 +6,8 @@ v4.6.0新增：独立的数据同步系统
 <template>
   <div class="data-sync-files erp-page-container erp-page--admin">
     <PageHeader
-      title="数据同步文件列表"
-      subtitle="选择待同步文件，支持筛选、批量同步、失败重试和治理巡检。"
+      title="采集文件列表"
+      subtitle="查看已采集、已注册和待治理的数据文件，支持筛选、同步、失败重试和治理巡检。"
       family="admin"
     />
 
@@ -27,6 +27,17 @@ v4.6.0新增：独立的数据同步系统
         </div>
       </template>
       <div class="governance-stats">
+        <div class="stat-item" @click="setFileView('recent')">
+          <div class="stat-icon stat-icon-primary">
+            <el-icon><Document /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">最近采集</div>
+            <div class="stat-value">
+              {{ governanceStats.recent_collected_count || 0 }}
+            </div>
+          </div>
+        </div>
         <div class="stat-item">
           <div class="stat-icon stat-icon-primary">
             <el-icon><Document /></el-icon>
@@ -35,6 +46,17 @@ v4.6.0新增：独立的数据同步系统
             <div class="stat-label">待同步文件</div>
             <div class="stat-value">
               {{ governanceStats.pending_count || 0 }}
+            </div>
+          </div>
+        </div>
+        <div class="stat-item" @click="setFileView('ingested')">
+          <div class="stat-icon stat-icon-success">
+            <el-icon><Check /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">已入库文件</div>
+            <div class="stat-value">
+              {{ governanceStats.ingested_count || 0 }}
             </div>
           </div>
         </div>
@@ -49,6 +71,17 @@ v4.6.0新增：独立的数据同步系统
             </div>
           </div>
         </div>
+        <div class="stat-item" @click="setFileView('legacy')">
+          <div class="stat-icon stat-icon-warning">
+            <el-icon><Warning /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">历史遗留</div>
+            <div class="stat-value">
+              {{ governanceStats.legacy_file_count || 0 }}
+            </div>
+          </div>
+        </div>
         <div class="stat-item">
           <div class="stat-icon stat-icon-warning">
             <el-icon><Warning /></el-icon>
@@ -60,7 +93,7 @@ v4.6.0新增：独立的数据同步系统
             </div>
           </div>
         </div>
-        <div class="stat-item">
+        <div class="stat-item" @click="handleFailedStatsClick">
           <div class="stat-icon stat-icon-danger">
             <el-icon><Warning /></el-icon>
           </div>
@@ -193,8 +226,24 @@ v4.6.0新增：独立的数据同步系统
       </el-form>
     </el-card>
 
+    <el-card class="view-switch-card erp-card">
+      <el-radio-group
+        v-model="activeFileView"
+        size="small"
+        @change="handleFileViewChange"
+      >
+        <el-radio-button
+          v-for="option in fileViewOptions"
+          :key="option.value"
+          :label="option.value"
+        >
+          {{ option.label }}
+        </el-radio-button>
+      </el-radio-group>
+    </el-card>
+
     <el-alert
-      v-if="files.length === 0 && (rawUnregisteredHint || hiddenSemanticInvalidCount > 0)"
+      v-if="displayFiles.length === 0 && (rawOfficialUnregisteredCount > 0 || hiddenSemanticInvalidCount > 0)"
       class="file-diagnostics-alert"
       type="warning"
       show-icon
@@ -204,8 +253,8 @@ v4.6.0新增：独立的数据同步系统
         文件列表为空，但发现可能不可同步的采集文件
       </template>
       <template #default>
-        <span v-if="rawUnregisteredHint">
-          data/raw 中有 {{ rawUnregisteredHint.candidate_count || 0 }} 个文件尚未注册到文件列表。
+        <span v-if="rawOfficialUnregisteredCount > 0">
+          data/raw 中有 {{ rawOfficialUnregisteredCount }} 个正式采集文件尚未注册到文件列表。
         </span>
         <span v-if="hiddenSemanticInvalidCount > 0">
           另有 {{ hiddenSemanticInvalidCount }} 个语义异常文件被隐藏。
@@ -312,12 +361,12 @@ v4.6.0新增：独立的数据同步系统
     <el-card>
       <template #header>
         <div class="card-header-row">
-          <span>待同步文件（共 {{ files.length }} 个）</span>
+          <span>{{ activeFileViewLabel }}（共 {{ listTotalCount }} 个）</span>
           <el-button
             type="primary"
             @click="syncAll"
             :loading="syncing"
-            :disabled="files.length === 0"
+            :disabled="displayFiles.length === 0"
           >
             <el-icon><Upload /></el-icon>
             同步当前列表
@@ -327,7 +376,7 @@ v4.6.0新增：独立的数据同步系统
 
       <el-table
         ref="filesTableRef"
-        :data="files"
+        :data="displayFiles"
         v-loading="loading"
         @selection-change="handleSelectionChange"
         stripe
@@ -335,10 +384,37 @@ v4.6.0新增：独立的数据同步系统
       >
         <el-table-column type="selection" width="55" />
         <el-table-column prop="file_name" label="文件名" min-width="200" />
-        <el-table-column prop="platform" label="平台" width="100" />
+        <el-table-column prop="collection_platform" label="采集平台" width="110" />
+        <el-table-column prop="business_platform" label="业务平台" width="110" />
         <el-table-column prop="domain" label="数据域" width="100" />
         <el-table-column prop="granularity" label="粒度" width="100" />
         <el-table-column prop="sub_domain" label="子类型" width="120" />
+        <el-table-column label="店铺/账号" width="160">
+          <template #default="{ row }">
+            {{ row.shop_id || row.account || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="数据日期" width="190">
+          <template #default="{ row }">
+            {{ formatDateRange(row.date_from, row.date_to) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="注册/伴生" width="120">
+          <template #default="{ row }">
+            <el-tag
+              :type="row.catalog_registered && row.meta_exists ? 'success' : 'warning'"
+              size="small"
+            >
+              {{
+                row.catalog_registered && row.meta_exists
+                  ? '已注册'
+                  : row.catalog_registered
+                  ? '缺少meta'
+                  : '未注册'
+              }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="模板状态" width="120">
           <template #default="{ row }">
             <el-tooltip
@@ -768,7 +844,7 @@ v4.6.0新增：独立的数据同步系统
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Document,
@@ -789,6 +865,10 @@ import api from '@/api'
 import PageHeader from '@/components/common/PageHeader.vue'
 
 const router = useRouter()
+const route = useRoute()
+const collectionTaskId = computed(() => {
+  return route.query.collection_task_id || route.query.task_id || null
+})
 
 // 状态
 const loading = ref(false)
@@ -811,8 +891,12 @@ const governanceStats = ref({
   ready_to_sync_count: 0,
   template_update_required_count: 0,
   missing_template_count: 0,
+  recent_collected_count: 0,
+  registered_count: 0,
   ingested_count: 0,
   failed_count: 0,
+  official_unregistered_count: 0,
+  legacy_file_count: 0,
   total_count: 0
 })
 const filters = ref({
@@ -820,8 +904,19 @@ const filters = ref({
   domain: null,
   granularity: null,
   sub_domain: null,
-  status: 'pending' // ⭐ 修复：默认只显示待同步状态，符合"待同步文件"列表的语义
+  status: null
 })
+
+const fileViewOptions = [
+  { label: '最近采集', value: 'recent', status: null },
+  { label: '待治理', value: 'pending', status: 'pending' },
+  { label: '可同步', value: 'ready', status: 'pending' },
+  { label: '同步失败', value: 'failed', status: 'failed' },
+  { label: '已入库', value: 'ingested', status: 'ingested' },
+  { label: '异常文件', value: 'anomaly', status: null },
+  { label: '历史遗留', value: 'legacy', status: null }
+]
+const activeFileView = ref('recent')
 
 // v4.18.0新增：分页相关
 const pagination = ref({
@@ -842,6 +937,44 @@ const taskProgress = ref(new Map()) // task_id -> progress_data
 // 进度显示计算属性
 const activeProgressTasks = computed(() => {
   return Array.from(taskProgress.value.values())
+})
+
+const activeFileViewOption = computed(() => {
+  return fileViewOptions.find((option) => option.value === activeFileView.value) || fileViewOptions[0]
+})
+
+const activeFileViewLabel = computed(() => activeFileViewOption.value.label)
+
+const rawOfficialUnregisteredCount = computed(() => {
+  return rawUnregisteredHint.value?.official_unregistered_count || 0
+})
+
+const displayFiles = computed(() => {
+  if (activeFileView.value === 'ready') {
+    return files.value.filter(
+      (file) =>
+        file.status === 'pending' &&
+        file.has_template &&
+        !file.template_update_required &&
+        !['semantic_invalid', 'breaking_drift', 'missing_family', 'missing_variant'].includes(file.governance_status)
+    )
+  }
+  if (activeFileView.value === 'anomaly') {
+    return files.value.filter((file) =>
+      ['semantic_invalid', 'parse_failed', 'file_missing'].includes(file.governance_status || file.template_status)
+    )
+  }
+  if (activeFileView.value === 'legacy') {
+    return []
+  }
+  return files.value
+})
+
+const listTotalCount = computed(() => {
+  if (['ready', 'anomaly', 'legacy'].includes(activeFileView.value)) {
+    return displayFiles.value.length
+  }
+  return pagination.value.total
 })
 
 // 获取任务状态类型
@@ -1034,8 +1167,14 @@ const loadFiles = async (showLoading = true) => {
     const params = {
       ...filters.value,
       page: pagination.value.page,
-      page_size: pagination.value.pageSize
+      page_size: pagination.value.pageSize,
+      collection_task_id: collectionTaskId.value
     }
+    Object.keys(params).forEach((key) => {
+      if (params[key] === null || params[key] === undefined || params[key] === '') {
+        delete params[key]
+      }
+    })
 
     // ⭐ v4.19.0新增：添加超时机制，避免长时间阻塞
     const API_TIMEOUT = 10000 // 10秒超时
@@ -1082,6 +1221,18 @@ const handlePageSizeChange = (newSize) => {
   pagination.value.pageSize = newSize
   pagination.value.page = 1 // 重置到第一页
   loadFiles()
+}
+
+const setFileView = (view) => {
+  const option = fileViewOptions.find((item) => item.value === view) || fileViewOptions[0]
+  activeFileView.value = option.value
+  filters.value.status = option.status
+  pagination.value.page = 1
+  return loadFiles()
+}
+
+const handleFileViewChange = (view) => {
+  setFileView(view)
 }
 
 // v4.18.0新增：加载同步历史记录
@@ -1135,6 +1286,14 @@ const formatTime = (timeStr) => {
   })
 }
 
+const formatDateRange = (dateFrom, dateTo) => {
+  if (!dateFrom && !dateTo) return '-'
+  if (dateFrom && dateTo && dateFrom !== dateTo) {
+    return `${dateFrom} ~ ${dateTo}`
+  }
+  return dateFrom || dateTo || '-'
+}
+
 // v4.18.0新增：计算耗时
 const calculateDuration = (startTime, endTime) => {
   if (!startTime) return '-'
@@ -1159,12 +1318,13 @@ const calculateDuration = (startTime, endTime) => {
 
 // 重置筛选器
 const resetFilters = () => {
+  activeFileView.value = 'recent'
   filters.value = {
     platform: null,
     domain: null,
     granularity: null,
     sub_domain: null,
-    status: 'pending' // ⭐ 修复：重置时也默认只显示待同步状态
+    status: null
   }
   pagination.value.page = 1 // v4.18.0: 重置到第一页
   loadFiles()
@@ -1622,6 +1782,9 @@ const retrySingle = async (fileId) => {
 
 // 批量重试失败文件
 const retryAllFailed = async () => {
+  if (activeFileView.value !== 'failed') {
+    await setFileView('failed')
+  }
   // 获取所有失败的文件
   const failedFiles = files.value.filter(
     (f) => f.status === 'failed' || f.status === 'partial_success'
@@ -1683,6 +1846,10 @@ const retryAllFailed = async () => {
     }
   }
   // ⭐ 关键修改：不设置 syncing.value = false（因为已经移除了）
+}
+
+const handleFailedStatsClick = () => {
+  setFileView('failed')
 }
 
 // 批量同步
@@ -1860,7 +2027,7 @@ const loadFileDiagnostics = async (showMessage = false) => {
     const data = await api.getDataSyncFileDiagnostics({ hours: 24 })
     fileDiagnostics.value = data
     if (showMessage) {
-      const unregistered = data?.unregistered_raw_candidates || 0
+      const unregistered = data?.official_unregistered_count ?? data?.unregistered_raw_candidates ?? 0
       const semanticInvalid = data?.semantic_invalid_count || 0
       ElMessage.info(
         `诊断完成：未注册raw文件 ${unregistered} 个，语义异常 ${semanticInvalid} 个`
@@ -1912,10 +2079,11 @@ const handleRefreshFiles = async () => {
 
 // 手动全部数据同步
 const handleSyncAll = async () => {
+  const readyCount = governanceStats.value.ready_to_sync_count || 0
   try {
     await ElMessageBox.confirm(
       `确定要提交所有待同步且已匹配模板的文件吗？当前共有 ${
-        governanceStats.value.pending_count || 0
+        readyCount
       } 个待同步文件。`,
       '确认全部同步',
       {
@@ -2186,6 +2354,16 @@ onMounted(() => {
   border-radius: 8px;
   flex: 1;
   min-width: 200px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.stat-item:hover {
+  background: #eef3fb;
+}
+
+.view-switch-card {
+  margin-bottom: 12px;
 }
 
 .stat-icon {

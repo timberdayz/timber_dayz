@@ -56,7 +56,9 @@ from backend.schemas.target import (
     GenerateDailyBreakdownRequest,
     TargetResponse,
     BreakdownResponse,
+    ShopTargetWorkbenchApplyRequest,
 )
+from backend.services.shop_target_workbench_service import ShopTargetWorkbenchService
 from backend.dependencies.auth import get_current_user  # [OK] 2026-01-08: 添加用户认证
 
 logger = get_logger(__name__)
@@ -152,6 +154,40 @@ async def require_admin(current_user: DimUser = Depends(get_current_user)):
 # ==================== Request/Response Models ====================
 
 # ==================== API Endpoints ====================
+
+@router.get("/shop-workbench", response_model=Dict[str, Any])
+async def get_shop_target_workbench(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    service = ShopTargetWorkbenchService(db)
+    data = await service.get_workbench(year_month)
+    return {"success": True, "data": data.model_dump(mode="json")}
+
+
+@router.post("/shop-workbench/apply", response_model=Dict[str, Any])
+async def apply_shop_target_workbench(
+    request: ShopTargetWorkbenchApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    service = ShopTargetWorkbenchService(db)
+    username = getattr(current_user, "username", None)
+    data = await service.apply(request, username=username)
+    return {"success": True, "data": data.model_dump(mode="json")}
+
+
+@router.post("/shop-workbench/copy-prev-month", response_model=Dict[str, Any])
+async def copy_prev_month_shop_target_workbench(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    service = ShopTargetWorkbenchService(db)
+    username = getattr(current_user, "username", None)
+    data = await service.copy_prev_month(year_month, username=username)
+    return {"success": True, "data": data.model_dump(mode="json")}
 
 @router.get("", response_model=Dict[str, Any])
 async def list_targets(

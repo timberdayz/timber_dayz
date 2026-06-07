@@ -166,11 +166,78 @@ async def test_create_tasks_for_config_expands_per_shop_scope(config_execution_s
     assert len(tasks) == 2
     task_map = {task.account: task for task in tasks}
     assert task_map["shop-sg-1"].data_domains == ["orders", "services"]
-    assert task_map["shop-sg-1"].sub_domains == {"services": ["agent"]}
+    assert task_map["shop-sg-1"].sub_domains == {
+        "orders": ["shopee", "tiktok"],
+        "services": ["agent"],
+    }
+    assert task_map["shop-sg-1"].total_domains == 3
     assert task_map["shop-sg-1"].config_run_id == config_run_id
     assert task_map["shop-my-1"].data_domains == ["products"]
     assert task_map["shop-my-1"].sub_domains is None
     assert task_map["shop-my-1"].config_run_id == config_run_id
+
+
+@pytest.mark.asyncio
+async def test_create_tasks_for_config_defaults_order_subtypes_for_config_scopes(
+    config_execution_session,
+):
+    config_id = await _seed_config(config_execution_session)
+    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+
+    scope_result = await config_execution_session.execute(
+        select(CollectionConfigShopScope).where(
+            CollectionConfigShopScope.config_id == config_id,
+            CollectionConfigShopScope.shop_account_id == "shop-sg-1",
+        )
+    )
+    scope = scope_result.scalar_one()
+    scope.data_domains = ["orders"]
+    scope.sub_domains = None
+    await config_execution_session.commit()
+
+    tasks = await create_tasks_for_config(
+        config_execution_session,
+        config_id=config_id,
+        config_run_id=config_run_id,
+        trigger_type="scheduled",
+        resolve_runtime=False,
+    )
+
+    task = next(task for task in tasks if task.account == "shop-sg-1")
+    assert task.data_domains == ["orders"]
+    assert task.sub_domains == {"orders": ["shopee", "tiktok"]}
+    assert task.total_domains == 2
+
+
+@pytest.mark.asyncio
+async def test_create_tasks_for_config_preserves_explicit_order_subtype_selection(
+    config_execution_session,
+):
+    config_id = await _seed_config(config_execution_session)
+    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+
+    scope_result = await config_execution_session.execute(
+        select(CollectionConfigShopScope).where(
+            CollectionConfigShopScope.config_id == config_id,
+            CollectionConfigShopScope.shop_account_id == "shop-sg-1",
+        )
+    )
+    scope = scope_result.scalar_one()
+    scope.data_domains = ["orders"]
+    scope.sub_domains = {"orders": ["shopee"]}
+    await config_execution_session.commit()
+
+    tasks = await create_tasks_for_config(
+        config_execution_session,
+        config_id=config_id,
+        config_run_id=config_run_id,
+        trigger_type="scheduled",
+        resolve_runtime=False,
+    )
+
+    task = next(task for task in tasks if task.account == "shop-sg-1")
+    assert task.sub_domains == {"orders": ["shopee"]}
+    assert task.total_domains == 1
 
 
 @pytest.mark.asyncio

@@ -4,29 +4,45 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_ROOT = PROJECT_ROOT / "frontend"
+COLLECTION_CONFIG_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionConfig.vue"
+COLLECTION_TASKS_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionTasks.vue"
+COLLECTION_HISTORY_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionHistory.vue"
+COMPONENT_RECORDER_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentRecorder.vue"
+COMPONENT_VERSIONS_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentVersions.vue"
+ACCOUNT_MANAGEMENT_VIEW = PROJECT_ROOT / "frontend/src/domains/platform/views/AccountManagement.vue"
 
 
 def test_collection_config_run_uses_sub_domains_payload():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
 
     assert "sub_domain: row.sub_domain" not in text
     assert "sub_domains" in text
 
 
+def test_collection_config_uses_generic_domain_subtype_controls():
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
+
+    assert "getSelectedSubtypeDomains" in text
+    assert "getScopeSubtypeDomains(row.scope)" in text
+    assert "getSubtypeOptions(domain)" in text
+    assert "row.scope.sub_domains.services" not in text
+    assert "getSubtypeOptions('services')" not in text
+
+
 def test_collection_tasks_supports_domain_scoped_subtypes():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+    text = COLLECTION_TASKS_VIEW.read_text(encoding="utf-8")
 
     assert "quickForm.sub_domains = {}" in text or "sub_domains: {}" in text
 
 
 def test_component_recorder_does_not_hardcode_services_only_subtype_logic():
-    text = (PROJECT_ROOT / "frontend/src/views/ComponentRecorder.vue").read_text(encoding="utf-8")
+    text = COMPONENT_RECORDER_VIEW.read_text(encoding="utf-8")
 
     assert 'dataDomain === "services"' not in text
 
 
 def test_component_versions_page_states_stable_only_for_formal_collection():
-    text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
+    text = COMPONENT_VERSIONS_VIEW.read_text(encoding="utf-8")
 
     assert "V2:" in text
     assert "stable" in text
@@ -45,13 +61,13 @@ def test_frontend_eslint_patch_dependency_is_declared():
 
 
 def test_component_versions_closes_verification_dialog_after_submission():
-    text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
+    text = COMPONENT_VERSIONS_VIEW.read_text(encoding="utf-8")
 
     assert "verificationRequired.value = null" in text
 
 
 def test_account_management_uses_main_and_shop_account_terms():
-    text = (PROJECT_ROOT / "frontend/src/views/AccountManagement.vue").read_text(encoding="utf-8")
+    text = ACCOUNT_MANAGEMENT_VIEW.read_text(encoding="utf-8")
 
     assert 'prop="parent_account" label="主账号ID"' in text
     assert 'prop="account_id" label="店铺账号ID"' in text
@@ -60,35 +76,35 @@ def test_account_management_uses_main_and_shop_account_terms():
 
 
 def test_component_versions_uses_test_shop_term():
-    text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
+    text = COMPONENT_VERSIONS_VIEW.read_text(encoding="utf-8")
 
     assert "测试店铺" in text
     assert "测试账号" not in text
 
 
 def test_collection_tasks_uses_submitted_verification_payload():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+    text = COLLECTION_TASKS_VIEW.read_text(encoding="utf-8")
 
     assert "const submitVerification = async (submitted) =>" in text
     assert "const code = String(submitted?.value || '').trim()" in text
 
 
 def test_collection_tasks_cancel_button_targets_verification_required_tasks():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+    text = COLLECTION_TASKS_VIEW.read_text(encoding="utf-8")
 
     assert 'cancel-text="取消任务"' in text
     assert "await collectionApi.cancelTask(currentTask.value.task_id)" in text
 
 
 def test_component_versions_loads_shop_accounts_directly():
-    text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
+    text = COMPONENT_VERSIONS_VIEW.read_text(encoding="utf-8")
 
     assert "listShopAccounts" in text
     assert "listAccounts({" not in text
 
 
 def test_component_recorder_loads_shop_accounts_directly():
-    text = (PROJECT_ROOT / "frontend/src/views/ComponentRecorder.vue").read_text(encoding="utf-8")
+    text = COMPONENT_RECORDER_VIEW.read_text(encoding="utf-8")
 
     assert "listShopAccounts" in text
     assert "listAccounts(params)" not in text
@@ -102,33 +118,33 @@ def test_accounts_api_uses_new_unmatched_alias_route():
 
 
 def test_collection_config_run_uses_backend_config_run_endpoint():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
 
     assert "collectionApi.runConfig(row.id)" in text
     assert "for (const accountId of accountIds)" not in text
 
 
 def test_collection_config_loads_config_run_queue_panel():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
 
     assert "collectionApi.getConfigRuns(" in text
     assert "activeConfigRuns" in text
     assert "queuedConfigRuns" in text
-    assert "max-height: 360px" in text or "max-height: 420px" in text
+    assert "max-height: 260px" in text
     assert "overflow-y: auto" in text
-    assert "::before" in text and "::after" in text
-    assert "::-webkit-scrollbar" in text
+    assert "queue-status-bar" in text
+    assert "cancelConfigRun(run)" in text
 
 
 def test_collection_config_run_uses_queue_run_feedback_not_task_id_redirect():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
 
     assert "runResult.run_id" in text
     assert "task_ids" not in text or "taskIds" not in text
 
 
 def test_collection_config_exposes_cancel_action_for_queued_runs():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
     api_text = (PROJECT_ROOT / "frontend/src/api/collection.js").read_text(encoding="utf-8")
 
     assert "collectionApi.cancelConfigRun(run.run_id)" in text
@@ -137,30 +153,29 @@ def test_collection_config_exposes_cancel_action_for_queued_runs():
 
 
 def test_collection_config_exposes_main_account_scoping_hooks():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
 
-    assert "filters.main_account_id" in text
-    assert 'data-testid="collection-config-main-account-filter"' in text
+    assert "selectedMainAccountKey" in text
     assert 'data-testid="collection-config-main-account-field"' in text
     assert "main_account_id: form.main_account_id" in text
 
 
 def test_collection_tasks_uses_task_ids_hint_for_config_navigation():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+    text = COLLECTION_TASKS_VIEW.read_text(encoding="utf-8")
 
     assert "route.query.task_ids" in text
     assert "matchedTask" in text
 
 
 def test_collection_history_exposes_origin_fields():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionHistory.vue").read_text(encoding="utf-8")
+    text = COLLECTION_HISTORY_VIEW.read_text(encoding="utf-8")
 
     assert "config_id" in text
     assert "trigger_type" in text
 
 
 def test_collection_tasks_mentions_main_account_coordination_steps():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+    text = COLLECTION_TASKS_VIEW.read_text(encoding="utf-8")
 
     assert "waiting_for_main_account_session" in text or "等待主账号会话" in text
     assert "preparing_main_account_session" in text or "准备主账号会话" in text
@@ -169,7 +184,7 @@ def test_collection_tasks_mentions_main_account_coordination_steps():
 
 
 def test_collection_tasks_detail_drawer_shows_runtime_metadata():
-    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+    text = COLLECTION_TASKS_VIEW.read_text(encoding="utf-8")
 
     assert "actual_execution_mode" in text
     assert "runtime_session_mode" in text
@@ -184,7 +199,7 @@ def test_collection_tasks_detail_drawer_shows_runtime_metadata():
 
 
 def test_account_management_does_not_offer_free_form_login_url_editing():
-    text = (PROJECT_ROOT / "frontend/src/views/AccountManagement.vue").read_text(encoding="utf-8")
+    text = ACCOUNT_MANAGEMENT_VIEW.read_text(encoding="utf-8")
 
     assert '<el-form-item label="登录URL">' not in text
     assert 'v-model="accountForm.login_url"' not in text or 'disabled' in text

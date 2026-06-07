@@ -37,7 +37,7 @@ class TargetSyncService:
         """初始化服务（仅支持异步）"""
         self.db = db
     
-    async def sync_target_to_a_class(self, target_id: int) -> Dict[str, Any]:
+    async def sync_target_to_a_class(self, target_id: int, commit: bool = True) -> Dict[str, Any]:
         """
         将单个目标的分解数据同步到 a_class.sales_targets_a
         
@@ -102,11 +102,13 @@ class TargetSyncService:
                     result["errors"].append(f"Failed to sync shop {breakdown.shop_id}: {str(e)}")
                     logger.error(f"[TargetSync] Failed to sync breakdown: {e}", exc_info=True)
             
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
             logger.info(f"[TargetSync] Target {target_id} synced: {result['synced']} records")
             
         except Exception as e:
-            await self.db.rollback()
+            if commit:
+                await self.db.rollback()
             result["errors"].append(str(e))
             logger.error(f"[TargetSync] sync_target_to_a_class failed: {e}", exc_info=True)
         
@@ -149,7 +151,7 @@ class TargetSyncService:
         
         return result
     
-    async def delete_target_from_a_class(self, target_id: int) -> Dict[str, Any]:
+    async def delete_target_from_a_class(self, target_id: int, commit: bool = True) -> Dict[str, Any]:
         """
         删除目标时，清理 a_class.sales_targets_a 中对应的数据
         
@@ -209,11 +211,13 @@ class TargetSyncService:
                     )
                     result["deleted"] += 1
             
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
             logger.info(f"[TargetSync] Target {target_id} cleanup: {result['deleted']} records deleted from a_class")
             
         except Exception as e:
-            await self.db.rollback()
+            if commit:
+                await self.db.rollback()
             result["errors"].append(str(e))
             logger.error(f"[TargetSync] delete_target_from_a_class failed: {e}", exc_info=True)
         

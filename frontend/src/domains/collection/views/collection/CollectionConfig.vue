@@ -361,21 +361,25 @@
                 </el-checkbox-group>
               </template>
             </el-table-column>
-            <el-table-column label="服务子类型" min-width="180">
+            <el-table-column label="数据域子类型" min-width="180">
               <template #default="{ row }">
-                <el-checkbox-group
-                  v-if="row.scope.data_domains?.includes('services')"
-                  v-model="row.scope.sub_domains.services"
+                <div
+                  v-for="domain in getScopeSubtypeDomains(row.scope)"
+                  :key="`${row.scope.shop_account_id}-inline-${domain}`"
+                  class="sub-domain-section"
                 >
-                  <el-checkbox
-                    v-for="option in getSubtypeOptions('services')"
-                    :key="`${row.scope.shop_account_id}-inline-services-${option.value}`"
-                    :label="option.value"
-                  >
-                    {{ option.label }}
-                  </el-checkbox>
-                </el-checkbox-group>
-                <span v-else class="shop-scope-meta">-</span>
+                  <span class="sub-domain-label">{{ getDomainLabel(domain) }}子类型</span>
+                  <el-checkbox-group v-model="row.scope.sub_domains[domain]">
+                    <el-checkbox
+                      v-for="option in getSubtypeOptions(domain)"
+                      :key="`${row.scope.shop_account_id}-inline-${domain}-${option.value}`"
+                      :label="option.value"
+                    >
+                      {{ option.label }}
+                    </el-checkbox>
+                  </el-checkbox-group>
+                </div>
+                <span v-if="!getScopeSubtypeDomains(row.scope).length" class="shop-scope-meta">-</span>
               </template>
             </el-table-column>
             <el-table-column label="继承状态" width="120">
@@ -547,6 +551,7 @@ import {
   buildAutoSelectedSubDomains,
   buildTimeSelectionPayload,
   getAvailableDomainOptions,
+  getSelectedSubtypeDomains,
   getSubtypeOptions,
   normalizeConfigGranularity,
   normalizeDomainSubtypeMap,
@@ -962,6 +967,26 @@ function isScopeDomainAvailable(scope, domain) {
   return Boolean(account?.capabilities?.[domain])
 }
 
+function normalizeScopeSubDomains(dataDomains = [], rawSubDomains = {}) {
+  const normalized = normalizeDomainSubtypeMap(rawSubDomains)
+  const subtypeDomains = getSelectedSubtypeDomains(dataDomains)
+  const subtypeDomainSet = new Set(subtypeDomains)
+
+  for (const domain of subtypeDomains) {
+    if (!Array.isArray(normalized[domain]) || normalized[domain].length === 0) {
+      normalized[domain] = getSubtypeOptions(domain).map((option) => option.value)
+    }
+  }
+
+  for (const domain of Object.keys(normalized)) {
+    if (!subtypeDomainSet.has(domain)) {
+      delete normalized[domain]
+    }
+  }
+
+  return normalized
+}
+
 function buildScopeFromAccount(account, existingScope = null) {
   const allowedDomains = getAvailableDomainOptions(account.platform)
     .map((option) => option.value)
@@ -969,7 +994,8 @@ function buildScopeFromAccount(account, existingScope = null) {
   const dataDomains = existingScope?.data_domains?.length
     ? existingScope.data_domains.filter((domain) => allowedDomains.includes(domain))
     : allowedDomains
-  const subDomains = normalizeDomainSubtypeMap(
+  const subDomains = normalizeScopeSubDomains(
+    dataDomains,
     existingScope?.sub_domains || buildAutoSelectedSubDomains(dataDomains)
   )
   return {
@@ -984,9 +1010,12 @@ function ensureScopeSubtypeMap(scope) {
   if (!scope.sub_domains || typeof scope.sub_domains !== 'object' || Array.isArray(scope.sub_domains)) {
     scope.sub_domains = {}
   }
-  if (!Array.isArray(scope.sub_domains.services)) {
-    scope.sub_domains.services = []
-  }
+  scope.sub_domains = normalizeScopeSubDomains(scope.data_domains || [], scope.sub_domains)
+}
+
+function getScopeSubtypeDomains(scope) {
+  ensureScopeSubtypeMap(scope)
+  return getSelectedSubtypeDomains(scope.data_domains || [])
 }
 
 function buildDefaultShopScopes(platform, mainAccountId, existingScopes = []) {
@@ -1032,7 +1061,7 @@ function restoreScopeToDefault(shopAccountId) {
   if (!defaultScope || !targetScope) return
   targetScope.enabled = Boolean(defaultScope.enabled)
   targetScope.data_domains = [...(defaultScope.data_domains || [])]
-  targetScope.sub_domains = normalizeDomainSubtypeMap(defaultScope.sub_domains)
+  targetScope.sub_domains = normalizeScopeSubDomains(targetScope.data_domains, defaultScope.sub_domains)
   ensureScopeSubtypeMap(targetScope)
 }
 
@@ -1105,7 +1134,7 @@ function buildCurrentConfigPayload() {
       shop_account_id: scope.shop_account_id,
       enabled: Boolean(scope.enabled),
       data_domains: [...(scope.data_domains || [])],
-      sub_domains: normalizeDomainSubtypeMap(scope.sub_domains),
+      sub_domains: normalizeScopeSubDomains(scope.data_domains || [], scope.sub_domains),
     })),
     time_selection: buildTimeSelectionPayload(form.default_date_range_type, {
       customRange: customDateRange.value,
@@ -1153,7 +1182,7 @@ async function saveCurrentConfigFromWorkbench() {
         shop_account_id: scope.shop_account_id,
         enabled: Boolean(scope.enabled),
         data_domains: [...(scope.data_domains || [])],
-        sub_domains: normalizeDomainSubtypeMap(scope.sub_domains),
+        sub_domains: normalizeScopeSubDomains(scope.data_domains || [], scope.sub_domains),
       })),
     })
     ElMessage.success('当前配置已保存')
@@ -1198,7 +1227,7 @@ async function syncTemplateShopScopes() {
         shop_account_id: scope.shop_account_id,
         enabled: Boolean(scope.enabled),
         data_domains: [...(scope.data_domains || [])],
-        sub_domains: normalizeDomainSubtypeMap(scope.sub_domains),
+        sub_domains: normalizeScopeSubDomains(scope.data_domains || [], scope.sub_domains),
       })),
     })
     ElMessage.success('主账号默认店铺范围已同步')
@@ -1433,7 +1462,7 @@ async function submitTemporaryRun() {
           platform: currentConfigSummary.value.platform,
           account_id: row.scope.shop_account_id,
           data_domains: [...(row.scope.data_domains || [])],
-          sub_domains: normalizeDomainSubtypeMap(row.scope.sub_domains),
+          sub_domains: normalizeScopeSubDomains(row.scope.data_domains || [], row.scope.sub_domains),
           granularity: activeGranularity.value,
           time_selection: timeSelection,
           debug_mode: temporaryRunForm.execution_mode === 'headed',

@@ -54,6 +54,48 @@ v4.6.0新增：独立的数据同步系统
       </el-descriptions>
     </el-card>
 
+    <el-card class="asset-chain-card" style="margin-bottom: 20px">
+      <template #header>
+        <span>采集文件资产链路</span>
+      </template>
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="raw 文件">
+          <div class="asset-line">
+            <el-tag :type="rawFileInfo.exists ? 'success' : 'danger'" size="small">
+              {{ rawFileInfo.exists ? '存在' : '缺失' }}
+            </el-tag>
+            <span>{{ rawFileInfo.path || '-' }}</span>
+          </div>
+        </el-descriptions-item>
+        <el-descriptions-item label="meta 伴生文件">
+          <div class="asset-line">
+            <el-tag :type="metaFileInfo.exists ? 'success' : 'warning'" size="small">
+              {{ metaFileInfo.exists ? '存在' : '缺失' }}
+            </el-tag>
+            <span>{{ metaFileInfo.path || '-' }}</span>
+          </div>
+          <div class="asset-subline">
+            original_path: {{ metaFileInfo.original_path || '-' }}
+          </div>
+          <div class="asset-subline">
+            采集任务: {{ formatTaskIds(metaFileInfo.collection_task_ids) }}
+          </div>
+        </el-descriptions-item>
+        <el-descriptions-item label="catalog 注册记录">
+          <div class="asset-line">
+            <el-tag :type="fileInfo.catalog_registered ? 'success' : 'warning'" size="small">
+              {{ fileInfo.catalog_registered ? '已注册' : '未注册' }}
+            </el-tag>
+            <span>
+              ID {{ catalogRecordInfo.id || '-' }} /
+              {{ catalogRecordInfo.source_platform || '-' }} -> {{ catalogRecordInfo.platform_code || '-' }} /
+              {{ catalogRecordInfo.data_domain || '-' }}
+            </span>
+          </div>
+        </el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
     <!-- 表头行选择器 -->
     <el-card class="header-row-card" style="margin-bottom: 20px">
       <template #header>
@@ -233,6 +275,17 @@ const headerColumnsWithSamples = computed(() => {
   }))
 })
 
+const rawFileInfo = computed(() => fileInfo.value.raw_file || {})
+const metaFileInfo = computed(() => fileInfo.value.meta_file || {})
+const catalogRecordInfo = computed(() => fileInfo.value.catalog_record || {})
+
+const formatTaskIds = (taskIds) => {
+  if (!Array.isArray(taskIds) || taskIds.length === 0) {
+    return '-'
+  }
+  return taskIds.join(', ')
+}
+
 // 加载文件信息
 const loadFileInfo = async () => {
   const fileId = route.params.fileId
@@ -243,9 +296,7 @@ const loadFileInfo = async () => {
   }
 
   try {
-    // 修复：查询所有状态的文件（status: null），避免已同步/失败文件找不到
-    const data = await api.getDataSyncFiles({ limit: 500, status: null })
-    const file = data.files?.find((f) => f.id === parseInt(fileId))
+    const file = await api.getDataSyncFileDetail(fileId)
     if (file) {
       fileInfo.value = file
       // 如果有模板，使用模板的表头行
@@ -371,6 +422,24 @@ onMounted(() => {
 
 .page-header {
   margin-bottom: 20px;
+}
+
+.asset-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.asset-line span {
+  overflow-wrap: anywhere;
+}
+
+.asset-subline {
+  margin-top: 6px;
+  color: #606266;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 /* ⭐ v4.16.0优化：确保预览卡片不会超出页面宽度 */

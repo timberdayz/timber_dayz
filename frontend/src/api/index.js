@@ -1182,6 +1182,10 @@ export default {
     return await this._get('/data-sync/files/diagnostics', { params })
   },
 
+  async getDataSyncFileDetail(fileId) {
+    return await this._get(`/data-sync/files/${fileId}`)
+  },
+
   async repairInventorySnapshotSemantics(fileIds = []) {
     return await this._post('/data-sync/repair-inventory-snapshot-semantics', fileIds)
   },
@@ -1870,6 +1874,23 @@ export default {
   },
   async createHrEmployeeTarget(data) {
     return await this._post('/hr/employee-targets', data)
+  },
+  async updateHrEmployeeTarget(targetId, data) {
+    return await this._put(`/hr/employee-targets/${targetId}`, data)
+  },
+  async deleteHrEmployeeTarget(targetId) {
+    return await this._delete(`/hr/employee-targets/${targetId}`)
+  },
+
+  // === 店铺目标工作台 ===
+  async getShopTargetWorkbench(yearMonth) {
+    return await this._get('/targets/shop-workbench', { params: { year_month: yearMonth } })
+  },
+  async applyShopTargetWorkbench(data) {
+    return await this._post('/targets/shop-workbench/apply', data)
+  },
+  async copyPrevMonthShopTargetWorkbench(yearMonth) {
+    return await this._post(`/targets/shop-workbench/copy-prev-month?year_month=${encodeURIComponent(yearMonth)}`)
   },
 
   // === 绩效查询（只读） ===

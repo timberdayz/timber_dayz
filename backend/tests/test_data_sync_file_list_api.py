@@ -58,6 +58,167 @@ async def file_list_client():
 
 
 @pytest.mark.asyncio
+async def test_list_files_without_status_returns_recent_ingested_asset_fields(
+    file_list_client,
+    tmp_path,
+):
+    client, session_factory = file_list_client
+
+    raw_dir = tmp_path / "data" / "raw" / "2026"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_file = raw_dir / "shopee_orders_monthly_20260608_035100.xls"
+    raw_file.write_text("demo", encoding="utf-8")
+    meta_file = raw_file.with_suffix(".meta.json")
+    meta_file.write_text('{"collection_info": {"collection_platform": "miaoshou"}}', encoding="utf-8")
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        session.add(
+            CatalogFile(
+                file_path=str(raw_file),
+                file_name=raw_file.name,
+                source="data/raw",
+                platform_code="shopee",
+                source_platform="miaoshou",
+                data_domain="orders",
+                granularity="monthly",
+                status="ingested",
+                first_seen_at=now,
+                meta_file_path=str(meta_file),
+            )
+        )
+        await session.commit()
+
+    response = await client.get("/api/data-sync/files")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["total"] == 1
+    file_row = payload["data"]["files"][0]
+    assert file_row["file_name"] == raw_file.name
+    assert file_row["status"] == "ingested"
+    assert file_row["platform"] == "shopee"
+    assert file_row["business_platform"] == "shopee"
+    assert file_row["collection_platform"] == "miaoshou"
+    assert file_row["meta_file_path"] == str(meta_file)
+    assert file_row["meta_exists"] is True
+    assert file_row["catalog_registered"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_files_filters_by_collection_task_id_from_meta_original_path(
+    file_list_client,
+    tmp_path,
+):
+    client, session_factory = file_list_client
+
+    raw_dir = tmp_path / "data" / "raw" / "2026"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    matched_file = raw_dir / "matched.xlsx"
+    matched_file.write_text("demo", encoding="utf-8")
+    matched_meta = matched_file.with_suffix(".meta.json")
+    matched_meta.write_text(
+        '{"collection_info": {"original_path": "temp/downloads/task-abc-123/miaoshou/orders/export.xls"}}',
+        encoding="utf-8",
+    )
+    other_file = raw_dir / "other.xlsx"
+    other_file.write_text("demo", encoding="utf-8")
+    other_meta = other_file.with_suffix(".meta.json")
+    other_meta.write_text(
+        '{"collection_info": {"original_path": "temp/downloads/task-other/miaoshou/orders/export.xls"}}',
+        encoding="utf-8",
+    )
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        session.add_all(
+            [
+                CatalogFile(
+                    file_path=str(matched_file),
+                    file_name=matched_file.name,
+                    source="data/raw",
+                    platform_code="shopee",
+                    source_platform="miaoshou",
+                    data_domain="orders",
+                    granularity="monthly",
+                    status="ingested",
+                    first_seen_at=now,
+                    meta_file_path=str(matched_meta),
+                ),
+                CatalogFile(
+                    file_path=str(other_file),
+                    file_name=other_file.name,
+                    source="data/raw",
+                    platform_code="shopee",
+                    source_platform="miaoshou",
+                    data_domain="orders",
+                    granularity="monthly",
+                    status="ingested",
+                    first_seen_at=now,
+                    meta_file_path=str(other_meta),
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await client.get("/api/data-sync/files", params={"collection_task_id": "task-abc-123"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["total"] == 1
+    assert payload["data"]["files"][0]["file_name"] == matched_file.name
+
+
+@pytest.mark.asyncio
+async def test_get_file_detail_returns_raw_meta_and_catalog_sections(
+    file_list_client,
+    tmp_path,
+):
+    client, session_factory = file_list_client
+
+    raw_file = tmp_path / "data" / "raw" / "2026" / "detail.xlsx"
+    raw_file.parent.mkdir(parents=True, exist_ok=True)
+    raw_file.write_text("demo", encoding="utf-8")
+    meta_file = raw_file.with_suffix(".meta.json")
+    meta_file.write_text(
+        '{"collection_info": {"collection_platform": "miaoshou", "original_path": "temp/downloads/task-detail-1/export.xls"}}',
+        encoding="utf-8",
+    )
+
+    async with session_factory() as session:
+        record = CatalogFile(
+            file_path=str(raw_file),
+            file_name=raw_file.name,
+            source="data/raw",
+            platform_code="shopee",
+            source_platform="miaoshou",
+            data_domain="orders",
+            granularity="monthly",
+            status="ingested",
+            first_seen_at=datetime.now(timezone.utc),
+            meta_file_path=str(meta_file),
+        )
+        session.add(record)
+        await session.commit()
+        file_id = record.id
+
+    response = await client.get(f"/api/data-sync/files/{file_id}")
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["raw_file"]["path"] == str(raw_file)
+    assert payload["raw_file"]["exists"] is True
+    assert payload["meta_file"]["path"] == str(meta_file)
+    assert payload["meta_file"]["exists"] is True
+    assert payload["meta_file"]["original_path"].endswith("task-detail-1/export.xls")
+    assert payload["meta_file"]["collection_task_ids"] == ["task-detail-1"]
+    assert payload["catalog_record"]["id"] == file_id
+    assert payload["catalog_record"]["source_platform"] == "miaoshou"
+    assert payload["catalog_record"]["platform_code"] == "shopee"
+
+
+@pytest.mark.asyncio
 async def test_list_files_does_not_mark_services_file_as_template_covered_when_only_other_sub_domain_template_exists(
     file_list_client,
 ):
@@ -484,6 +645,49 @@ async def test_list_files_returns_hidden_and_raw_unregistered_hints(file_list_cl
     assert payload["data"]["files"] == []
     assert payload["data"]["hidden_semantic_invalid_count"] == 1
     assert payload["data"]["raw_unregistered_hint"]["candidate_count"] == 1
+    assert payload["data"]["raw_unregistered_hint"]["official_unregistered_count"] == 1
+    assert payload["data"]["raw_unregistered_hint"]["repaired_cache_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_list_files_diagnostics_classifies_repaired_and_legacy_raw_files(
+    file_list_client,
+    tmp_path,
+    monkeypatch,
+):
+    client, _session_factory = file_list_client
+
+    official_dir = tmp_path / "data" / "raw" / "2026"
+    official_dir.mkdir(parents=True, exist_ok=True)
+    official_file = official_dir / "shopee_orders_monthly_20260608_010000.xlsx"
+    official_file.write_text("demo", encoding="utf-8")
+    official_file.with_suffix(".meta.json").write_text("{}", encoding="utf-8")
+
+    repaired_dir = tmp_path / "data" / "raw" / "repaired" / "2025"
+    repaired_dir.mkdir(parents=True, exist_ok=True)
+    repaired_file = repaired_dir / "shopee_orders_monthly_20250925_105724.xlsx"
+    repaired_file.write_text("demo", encoding="utf-8")
+
+    legacy_dir = tmp_path / "data" / "raw" / "2025"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file = legacy_dir / "tiktok_analytics_daily_20250923_205930.xlsx"
+    legacy_file.write_text("demo", encoding="utf-8")
+
+    from backend.domains.data_platform.routers import data_sync as router_module
+
+    monkeypatch.setattr(router_module, "get_data_raw_dir", lambda: tmp_path / "data" / "raw", raising=False)
+
+    response = await client.get("/api/data-sync/files")
+
+    assert response.status_code == 200
+    payload = response.json()
+    raw_hint = payload["data"]["raw_unregistered_hint"]
+    assert raw_hint["official_unregistered_count"] == 1
+    assert raw_hint["candidate_count"] == 1
+    assert raw_hint["repaired_cache_count"] == 1
+    assert raw_hint["legacy_without_meta_count"] == 1
+    assert str(repaired_file) not in raw_hint["sample_files"]
+    assert str(legacy_file) not in raw_hint["sample_files"]
 
 
 @pytest.mark.asyncio

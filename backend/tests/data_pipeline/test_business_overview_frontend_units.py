@@ -40,11 +40,19 @@ def test_business_overview_frontend_groups_kpis_and_allows_wrapping():
     )
 
     for marker in (
-        "kpi-primary-grid",
-        "kpi-funnel-panel",
-        "kpi-efficiency-grid",
+        "kpi-compact-grid",
+        "kpi-strip-card",
+        "coreKpiCards",
         "exposure_order_rate",
     ):
         assert marker in text
+
+    for legacy_marker in (
+        "kpi-row-primary",
+        "kpi-row-funnel",
+        "kpi-flow-group",
+        "kpi-rate-group",
+    ):
+        assert legacy_marker not in text
 
     assert "flex-wrap: nowrap" not in text

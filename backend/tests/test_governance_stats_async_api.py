@@ -320,3 +320,85 @@ async def test_data_sync_governance_stats_excludes_semantic_anomaly_pending_file
     assert payload["success"] is True
     assert payload["data"]["pending_count"] == 1
     assert payload["data"]["ready_to_sync_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_data_sync_governance_stats_reports_asset_ledger_counts(
+    governance_client,
+    tmp_path,
+    monkeypatch,
+):
+    client, session_factory = governance_client
+
+    raw_root = tmp_path / "data" / "raw"
+    official_dir = raw_root / "2026"
+    official_dir.mkdir(parents=True, exist_ok=True)
+    official_file = official_dir / "shopee_orders_monthly_20260608_010000.xlsx"
+    official_file.write_text("demo", encoding="utf-8")
+    official_file.with_suffix(".meta.json").write_text("{}", encoding="utf-8")
+
+    legacy_dir = raw_root / "2025"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file = legacy_dir / "tiktok_analytics_daily_20250923_205930.xlsx"
+    legacy_file.write_text("demo", encoding="utf-8")
+
+    from backend.domains.data_platform.routers import data_sync as router_module
+
+    monkeypatch.setattr(router_module, "get_data_raw_dir", lambda: raw_root, raising=False)
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        session.add_all(
+            [
+                CatalogFile(
+                    file_path="data/raw/2026/tiktok_products_monthly_20260517_221824.xlsx",
+                    file_name="tiktok_products_monthly_20260517_221824.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="products",
+                    granularity="monthly",
+                    status="pending",
+                    first_seen_at=now,
+                ),
+                CatalogFile(
+                    file_path="data/raw/2026/tiktok_products_monthly_20260518_221824.xlsx",
+                    file_name="tiktok_products_monthly_20260518_221824.xlsx",
+                    source="data/raw",
+                    platform_code="tiktok",
+                    source_platform="tiktok",
+                    data_domain="products",
+                    granularity="monthly",
+                    status="ingested",
+                    first_seen_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    async def _fake_readiness(self, file_id, use_template_header_row=True):
+        return {
+            "file_id": file_id,
+            "file_name": f"file-{file_id}.xlsx",
+            "template_update_required": False,
+            "update_reason": None,
+            "ready": True,
+            "template_status": "ready",
+            "should_auto_sync": True,
+        }
+
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.DataSyncService.get_file_sync_readiness",
+        _fake_readiness,
+    )
+
+    response = await client.get("/api/data-sync/governance/stats")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["registered_count"] == 2
+    assert payload["data"]["recent_collected_count"] == 2
+    assert payload["data"]["ingested_count"] == 1
+    assert payload["data"]["official_unregistered_count"] == 1
+    assert payload["data"]["legacy_file_count"] == 1
