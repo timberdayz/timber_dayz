@@ -5,7 +5,7 @@ from httpx import ASGITransport, AsyncClient
 
 def _build_test_app():
     from backend.dependencies.auth import require_admin
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     app = FastAPI()
     app.include_router(cloud_sync.router)
@@ -19,7 +19,7 @@ def _build_test_app():
 
 @pytest.mark.asyncio
 async def test_cloud_sync_health_endpoint_returns_worker_status(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     monkeypatch.setattr(
         cloud_sync,
@@ -53,7 +53,7 @@ async def test_cloud_sync_health_endpoint_returns_worker_status(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_manual_trigger_endpoint_enqueues_task(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeCommandService:
         async def trigger_sync(self, source_table_name: str):
@@ -82,7 +82,7 @@ async def test_manual_trigger_endpoint_enqueues_task(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_and_get_task_endpoints(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeQueryService:
         async def list_tasks(self):
@@ -121,7 +121,7 @@ async def test_list_and_get_task_endpoints(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_retry_task_endpoint(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeCommandService:
         async def retry_task(self, job_id: str):
@@ -140,7 +140,7 @@ async def test_retry_task_endpoint(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_manual_trigger_endpoint_rejects_invalid_table_name(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeCommandService:
         async def trigger_sync(self, source_table_name: str):
@@ -161,7 +161,7 @@ async def test_manual_trigger_endpoint_rejects_invalid_table_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tables_endpoint_returns_table_rows(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeQueryService:
         async def list_table_states(self):
@@ -187,7 +187,7 @@ async def test_tables_endpoint_returns_table_rows(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_events_endpoint_returns_recent_items(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeQueryService:
         async def list_events(self):
@@ -212,7 +212,7 @@ async def test_events_endpoint_returns_recent_items(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_table_action_endpoints(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeCommandService:
         async def dry_run_table(self, table_name: str):
@@ -246,7 +246,7 @@ async def test_table_action_endpoints(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_overview_runtime_history_and_settings_endpoints(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeQueryService:
         async def get_overview_summary(self, runtime_health=None):
@@ -291,7 +291,7 @@ async def test_overview_runtime_history_and_settings_endpoints(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_now_retry_failed_and_update_settings_endpoints(monkeypatch):
-    from backend.routers import cloud_sync
+    from backend.domains.data_platform.routers import cloud_sync
 
     class FakeCommandService:
         async def sync_now(self):

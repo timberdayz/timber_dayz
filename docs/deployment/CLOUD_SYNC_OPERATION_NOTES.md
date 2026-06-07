@@ -84,3 +84,24 @@ See also:
   - SSH tunnel / credentials
   - cloud DB access
   - admin API exposure
+
+## Resetting Historical Sync State
+
+After the admin console optimization, it is acceptable to clear historical cloud sync runtime state before restarting normal work:
+
+- `cloud_b_class_sync_tasks`
+- `cloud_b_class_sync_runs`
+- `cloud_b_class_sync_checkpoints`
+
+This reset is intended to rebuild sync state from a clean baseline.
+
+Do not clear:
+
+- local `b_class.fact_*` business data
+- cloud business data tables
+
+Expected result after reset:
+
+- homepage history is empty
+- checkpoints are rebuilt by the next `sync_now` or automatic sync run
+- business data remains unchanged
