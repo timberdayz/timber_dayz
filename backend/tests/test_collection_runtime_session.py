@@ -95,8 +95,9 @@ async def test_open_persistent_runtime_bundle_uses_launch_persistent_context(
     assert bundle.page is page
     assert bundle.reused_session is True
     assert launch_kwargs["user_data_dir"] == str(profile_path)
-    assert launch_kwargs["locale"] == "zh-CN"
     assert launch_kwargs["accept_downloads"] is True
+    assert "locale" not in launch_kwargs
+    assert "viewport" not in launch_kwargs
 
 
 @pytest.mark.asyncio
@@ -140,16 +141,16 @@ async def test_open_persistent_runtime_bundle_preserves_headed_launch_kwargs(
 
 
 @pytest.mark.asyncio
-async def test_open_persistent_runtime_bundle_captures_tiktok_page_and_context_diagnostics(
+async def test_open_persistent_runtime_bundle_captures_page_and_context_diagnostics_for_persistent_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    profile_path = tmp_path / "profiles" / "tiktok" / "main-1"
+    profile_path = tmp_path / "profiles" / "shopee" / "main-1"
     profile_path.mkdir(parents=True)
     (profile_path / "Preferences").write_text("{}", encoding="utf-8")
 
-    page_a = type("Page", (), {"url": "https://seller.tiktokshopglobalselling.com/account/login"})()
-    page_b = type("Page", (), {"url": "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"})()
+    page_a = type("Page", (), {"url": "https://seller.shopee.cn/account/signin"})()
+    page_b = type("Page", (), {"url": "https://seller.shopee.cn/?cnsc_shop_id=1"})()
 
     class _FakeContext:
         pages = [page_a, page_b]
@@ -181,17 +182,17 @@ async def test_open_persistent_runtime_bundle_captures_tiktok_page_and_context_d
 
     bundle = await open_persistent_runtime_bundle(
         browser_type=_FakeBrowserType(),
-        platform="tiktok",
+        platform="shopee",
         session_owner_id="main-1",
-        account={"login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+        account={"login_url": "https://seller.shopee.cn/account/signin"},
         launch_kwargs={"headless": False},
     )
 
     assert bundle.available_page_urls == [
-        "https://seller.tiktokshopglobalselling.com/account/login",
-        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY",
+        "https://seller.shopee.cn/account/signin",
+        "https://seller.shopee.cn/?cnsc_shop_id=1",
     ]
-    assert bundle.selected_page_url == "https://seller.tiktokshopglobalselling.com/account/login"
+    assert bundle.selected_page_url == "https://seller.shopee.cn/account/signin"
     assert bundle.context_summary["user_agent"] is None
     assert bundle.context_summary["locale"] is None
     assert bundle.context_summary["timezone_id"] is None
@@ -199,11 +200,11 @@ async def test_open_persistent_runtime_bundle_captures_tiktok_page_and_context_d
 
 
 @pytest.mark.asyncio
-async def test_open_persistent_runtime_bundle_strips_tiktok_runtime_context_overrides(
+async def test_open_persistent_runtime_bundle_strips_runtime_context_overrides_for_persistent_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    profile_path = tmp_path / "profiles" / "tiktok" / "main-1"
+    profile_path = tmp_path / "profiles" / "miaoshou" / "main-1"
     profile_path.mkdir(parents=True)
     (profile_path / "Preferences").write_text("{}", encoding="utf-8")
 
@@ -240,9 +241,9 @@ async def test_open_persistent_runtime_bundle_strips_tiktok_runtime_context_over
 
     await open_persistent_runtime_bundle(
         browser_type=_FakeBrowserType(),
-        platform="tiktok",
+        platform="miaoshou",
         session_owner_id="main-1",
-        account={"login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+        account={"login_url": "https://erp.91miaoshou.com/login"},
         launch_kwargs={"headless": False},
     )
 

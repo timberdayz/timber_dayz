@@ -924,6 +924,17 @@ class CollectionExecutorV2:
             "session_protected": session_metadata.get("protected"),
         }
 
+    @staticmethod
+    async def _apply_runtime_interaction_viewport(page: Any, params: Dict[str, Any]) -> None:
+        if str(params.get("_runtime_session_mode") or "").strip().lower() != "persistent_profile":
+            return
+        if not hasattr(page, "set_viewport_size"):
+            return
+        try:
+            await page.set_viewport_size(dict(runtime_session.STANDARD_HEADLESS_VIEWPORT))
+        except Exception as exc:
+            logger.debug("Apply runtime interaction viewport skipped: %s", exc)
+
     async def _execute_shared_login_phase(
         self,
         *,
@@ -1025,6 +1036,7 @@ class CollectionExecutorV2:
                 MAIN_ACCOUNT_SESSION_STEP_MESSAGES["switching_target_shop"],
             )
         gate_result = await self._ensure_login_gate_ready(page, platform)
+        await self._apply_runtime_interaction_viewport(page, params)
         await self._update_status(
             task_id,
             15,

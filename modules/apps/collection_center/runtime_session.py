@@ -697,12 +697,10 @@ def normalize_persistent_profile_context_options(
     context_options: Dict[str, Any],
 ) -> Dict[str, Any]:
     normalized = dict(context_options or {})
-    if str(platform or "").strip().lower() != "tiktok":
-        return normalized
 
-    # TikTok persistent-profile restore is more reliable when we let Chromium
-    # reuse the original profile environment as-is instead of layering runtime
-    # fingerprint overrides on top of it.
+    # Persistent-profile restore is more reliable when Chromium can reuse the
+    # original profile environment as-is instead of layering runtime context
+    # overrides on top of it.
     stripped = dict(normalized)
     for key in (
         "user_agent",

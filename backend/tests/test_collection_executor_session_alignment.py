@@ -220,6 +220,60 @@ async def test_shared_login_phase_primes_page_before_login_component(
 
 
 @pytest.mark.asyncio
+async def test_shared_login_phase_applies_interaction_viewport_after_login_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._execute_python_component = AsyncMock(return_value=True)
+    executor._ensure_login_gate_ready = AsyncMock(
+        return_value=GateResult(
+            stage="login_gate",
+            status=GateStatus.READY,
+            reason="ready",
+            current_url="https://seller.shopee.cn/?cnsc_shop_id=1",
+        )
+    )
+
+    order: list[str] = []
+
+    async def _prime(page, platform, account):
+        order.append("prime")
+
+    async def _apply_viewport(page, params):
+        order.append("viewport")
+
+    monkeypatch.setattr(executor, "_prime_runtime_page_for_login_gate", _prime)
+    monkeypatch.setattr(executor, "_apply_runtime_interaction_viewport", _apply_viewport)
+
+    await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="shopee",
+        account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
+        params={"_runtime_session_mode": "persistent_profile"},
+        context=type(
+            "Ctx",
+            (),
+            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        )(),
+        browser=object(),
+        play_context=object(),
+        page=object(),
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="shopee",
+        session_account_id="main-1",
+        save_session_after_login=False,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    assert order == ["prime", "viewport"]
+
+
+@pytest.mark.asyncio
 async def test_shared_login_phase_does_not_probe_storage_state_runtime_gate_before_login_component(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
