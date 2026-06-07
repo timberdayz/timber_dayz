@@ -64,8 +64,11 @@ class TiktokExport(ExportComponent):
     def _export_button_selectors(self) -> tuple[str, ...]:
         return (
             'button:has-text("\u5bfc\u51fa\u6570\u636e")',
+            '[role="button"]:has-text("\u5bfc\u51fa\u6570\u636e")',
             'button:has-text("\u5bfc\u51fa")',
+            '[role="button"]:has-text("\u5bfc\u51fa")',
             'button:has-text("Export")',
+            '[role="button"]:has-text("Export")',
             '[data-testid*="export"]',
         )
 

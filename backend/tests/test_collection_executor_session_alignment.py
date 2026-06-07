@@ -539,6 +539,14 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
                 "shop_account_id": "shop-1",
                 "persistent_profile_path": "profiles/tiktok/main-1",
                 "profile_contains_state": True,
+                "selected_page_url": "https://seller.tiktok.com/account/login",
+                "available_page_urls": [
+                    "https://seller.tiktok.com/account/login",
+                    "https://seller.tiktok.com/homepage?shop_region=MY",
+                ],
+                "runtime_context_summary": {
+                    "locale": None,
+                },
                 "runtime_strategy_reason": "storage_state_missing",
                 "session_source": "persistent_profile",
                 "probe_urls": [
@@ -556,6 +564,12 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
     assert details["shop_account_id"] == "shop-1"
     assert details["persistent_profile_path"] == "profiles/tiktok/main-1"
     assert details["profile_contains_state"] is True
+    assert details["selected_page_url"] == "https://seller.tiktok.com/account/login"
+    assert details["available_page_urls"] == [
+        "https://seller.tiktok.com/account/login",
+        "https://seller.tiktok.com/homepage?shop_region=MY",
+    ]
+    assert details["runtime_context_summary"] == {"locale": None}
     assert details["runtime_strategy_reason"] == "storage_state_missing"
     assert details["session_source"] == "persistent_profile"
     assert details["probe_urls"] == [

@@ -140,6 +140,121 @@ async def test_open_persistent_runtime_bundle_preserves_headed_launch_kwargs(
 
 
 @pytest.mark.asyncio
+async def test_open_persistent_runtime_bundle_captures_tiktok_page_and_context_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    profile_path = tmp_path / "profiles" / "tiktok" / "main-1"
+    profile_path.mkdir(parents=True)
+    (profile_path / "Preferences").write_text("{}", encoding="utf-8")
+
+    page_a = type("Page", (), {"url": "https://seller.tiktokshopglobalselling.com/account/login"})()
+    page_b = type("Page", (), {"url": "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"})()
+
+    class _FakeContext:
+        pages = [page_a, page_b]
+
+        async def add_init_script(self, script: str) -> None:
+            return None
+
+    class _FakeBrowserType:
+        async def launch_persistent_context(self, **kwargs):
+            return _FakeContext()
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.get_persistent_profile_path",
+        lambda self, platform, account_id: profile_path,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.build_runtime_context_options",
+        AsyncMock(
+            return_value={
+                "locale": "en-MY",
+                "timezone_id": "Asia/Kuala_Lumpur",
+                "user_agent": "UA",
+                "viewport": {"width": 1920, "height": 1080},
+                "extra_http_headers": {"Accept-Language": "ms-MY,ms;q=0.9"},
+                "accept_downloads": True,
+            }
+        ),
+    )
+
+    bundle = await open_persistent_runtime_bundle(
+        browser_type=_FakeBrowserType(),
+        platform="tiktok",
+        session_owner_id="main-1",
+        account={"login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+        launch_kwargs={"headless": False},
+    )
+
+    assert bundle.available_page_urls == [
+        "https://seller.tiktokshopglobalselling.com/account/login",
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY",
+    ]
+    assert bundle.selected_page_url == "https://seller.tiktokshopglobalselling.com/account/login"
+    assert bundle.context_summary["user_agent"] is None
+    assert bundle.context_summary["locale"] is None
+    assert bundle.context_summary["timezone_id"] is None
+    assert bundle.context_summary["accept_language"] is None
+
+
+@pytest.mark.asyncio
+async def test_open_persistent_runtime_bundle_strips_tiktok_runtime_context_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    profile_path = tmp_path / "profiles" / "tiktok" / "main-1"
+    profile_path.mkdir(parents=True)
+    (profile_path / "Preferences").write_text("{}", encoding="utf-8")
+
+    launch_kwargs: dict[str, object] = {}
+
+    class _FakeContext:
+        pages = [object()]
+
+        async def add_init_script(self, script: str) -> None:
+            return None
+
+    class _FakeBrowserType:
+        async def launch_persistent_context(self, **kwargs):
+            launch_kwargs.update(kwargs)
+            return _FakeContext()
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.get_persistent_profile_path",
+        lambda self, platform, account_id: profile_path,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.build_runtime_context_options",
+        AsyncMock(
+            return_value={
+                "locale": "en-MY",
+                "timezone_id": "Asia/Kuala_Lumpur",
+                "user_agent": "UA",
+                "viewport": {"width": 1920, "height": 1080},
+                "extra_http_headers": {"Accept-Language": "ms-MY,ms;q=0.9"},
+                "accept_downloads": True,
+            }
+        ),
+    )
+
+    await open_persistent_runtime_bundle(
+        browser_type=_FakeBrowserType(),
+        platform="tiktok",
+        session_owner_id="main-1",
+        account={"login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+        launch_kwargs={"headless": False},
+    )
+
+    assert launch_kwargs["accept_downloads"] is True
+    assert "locale" not in launch_kwargs
+    assert "timezone_id" not in launch_kwargs
+    assert "user_agent" not in launch_kwargs
+    assert "viewport" not in launch_kwargs
+    assert "extra_http_headers" not in launch_kwargs
+
+
+@pytest.mark.asyncio
 async def test_open_persistent_runtime_bundle_does_not_inject_browser_scripts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

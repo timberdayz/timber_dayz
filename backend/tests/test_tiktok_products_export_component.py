@@ -43,6 +43,9 @@ class _FakePage:
     async def wait_for_timeout(self, ms: int) -> None:
         self.wait_calls.append(ms)
 
+    def on(self, event: str, handler) -> None:  # noqa: ANN001, ARG002
+        return None
+
     def locator(self, selector: str):
         return _FakeLocator(visible=selector in self.visible_selectors)
 
@@ -53,6 +56,9 @@ class _FakePage:
 class _FakeLocator:
     def __init__(self, *, visible: bool = False) -> None:
         self._visible = visible
+        self.clicked = 0
+        self.enabled = True
+        self.attrs: dict[str, str | None] = {}
 
     @property
     def first(self):
@@ -63,6 +69,47 @@ class _FakeLocator:
 
     async def count(self) -> int:
         return 1 if self._visible else 0
+
+    async def is_enabled(self) -> bool:
+        return self.enabled
+
+    async def click(self, timeout: int | None = None) -> None:  # noqa: ARG002
+        self.clicked += 1
+
+    async def scroll_into_view_if_needed(self, timeout: int | None = None) -> None:  # noqa: ARG002
+        return None
+
+    async def get_attribute(self, name: str) -> str | None:
+        return self.attrs.get(name)
+
+
+class _DelayedExportReadyLocator(_FakeLocator):
+    def __init__(self, page: "_ExportReadyAfterWaitPage", *, ready_after_waits: int) -> None:
+        super().__init__(visible=False)
+        self._page = page
+        self._ready_after_waits = ready_after_waits
+
+    async def count(self) -> int:
+        return 1 if self._page.wait_ticks >= self._ready_after_waits else 0
+
+    async def is_visible(self, timeout: int | None = None) -> bool:  # noqa: ARG002
+        return self._page.wait_ticks >= self._ready_after_waits
+
+
+class _ExportReadyAfterWaitPage(_FakePage):
+    def __init__(self, url: str, *, ready_after_waits: int = 2) -> None:
+        super().__init__(url)
+        self.wait_ticks = 0
+        self.export_locator = _DelayedExportReadyLocator(self, ready_after_waits=ready_after_waits)
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        self.wait_ticks += 1
+        await super().wait_for_timeout(ms)
+
+    def locator(self, selector: str):
+        if selector == 'button:has-text("导出数据")':
+            return self.export_locator
+        return super().locator(selector)
 
 
 def _mark_products_ready(page: _FakePage) -> None:
@@ -460,3 +507,18 @@ async def test_tiktok_products_export_uses_explicit_trigger_and_collect_stages(
     collect_mock.assert_awaited_once_with(page)
     assert result.success is True
     assert result.file_path == "temp/products-delayed.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_trigger_waits_for_export_button_after_date_loading() -> None:
+    page = _ExportReadyAfterWaitPage(
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG",
+        ready_after_waits=2,
+    )
+    component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+
+    triggered = await component.trigger_export(page)
+
+    assert triggered is True
+    assert page.export_locator.clicked == 1
+    assert page.wait_ticks >= 2

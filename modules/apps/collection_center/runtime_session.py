@@ -490,6 +490,9 @@ class RuntimeContextBundle:
     strategy_reason: Optional[str] = None
     session_source: Optional[str] = None
     session_metadata: Dict[str, Any] = field(default_factory=dict)
+    available_page_urls: list[str] = field(default_factory=list)
+    selected_page_url: Optional[str] = None
+    context_summary: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -664,6 +667,61 @@ async def build_runtime_context_options(
     return context_options
 
 
+def summarize_runtime_context_options(context_options: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(context_options or {})
+    extra_headers = normalized.get("extra_http_headers", {}) or {}
+    return {
+        "user_agent": normalized.get("user_agent"),
+        "locale": normalized.get("locale"),
+        "timezone_id": normalized.get("timezone_id"),
+        "accept_language": extra_headers.get("Accept-Language"),
+        "viewport": normalized.get("viewport"),
+        "has_storage_state": "storage_state" in normalized,
+        "accept_downloads": normalized.get("accept_downloads"),
+    }
+
+
+def list_context_page_urls(context: Any) -> list[str]:
+    urls: list[str] = []
+    for page in list(getattr(context, "pages", []) or []):
+        try:
+            urls.append(str(getattr(page, "url", "") or ""))
+        except Exception:
+            urls.append("")
+    return urls
+
+
+def normalize_persistent_profile_context_options(
+    *,
+    platform: str,
+    context_options: Dict[str, Any],
+) -> Dict[str, Any]:
+    normalized = dict(context_options or {})
+    if str(platform or "").strip().lower() != "tiktok":
+        return normalized
+
+    # TikTok persistent-profile restore is more reliable when we let Chromium
+    # reuse the original profile environment as-is instead of layering runtime
+    # fingerprint overrides on top of it.
+    stripped = dict(normalized)
+    for key in (
+        "user_agent",
+        "viewport",
+        "locale",
+        "timezone_id",
+        "extra_http_headers",
+        "device_scale_factor",
+        "is_mobile",
+        "has_touch",
+        "color_scheme",
+        "reduced_motion",
+        "forced_colors",
+        "permissions",
+    ):
+        stripped.pop(key, None)
+    return stripped
+
+
 async def open_persistent_runtime_bundle(
     *,
     browser_type: Any,
@@ -691,6 +749,10 @@ async def open_persistent_runtime_bundle(
         accept_downloads=True,
         headless=bool((launch_kwargs or {}).get("headless", True)),
     )
+    context_options = normalize_persistent_profile_context_options(
+        platform=platform,
+        context_options=context_options,
+    )
     launch_options = enforce_official_playwright_browser(dict(launch_kwargs or {}))
 
     context = await browser_type.launch_persistent_context(
@@ -698,6 +760,7 @@ async def open_persistent_runtime_bundle(
         **launch_options,
         **context_options,
     )
+    page_urls = list_context_page_urls(context)
     if getattr(context, "pages", None):
         page = context.pages[0]
         if str(platform or "").strip().lower() != "tiktok":
@@ -708,6 +771,17 @@ async def open_persistent_runtime_bundle(
                     pass
     else:
         page = await context.new_page()
+        page_urls = list_context_page_urls(context)
+    selected_page_url = str(getattr(page, "url", "") or "")
+    context_summary = summarize_runtime_context_options(context_options)
+    if str(platform or "").strip().lower() == "tiktok":
+        logger.info(
+            "TikTok persistent runtime: profile=%s pages=%s selected=%s context=%s",
+            str(profile_path),
+            page_urls,
+            selected_page_url,
+            context_summary,
+        )
     return RuntimeContextBundle(
         mode="persistent_profile",
         context=context,
@@ -717,6 +791,9 @@ async def open_persistent_runtime_bundle(
         context_options=context_options,
         session_owner_id=session_owner_id,
         profile_path=str(profile_path),
+        available_page_urls=page_urls,
+        selected_page_url=selected_page_url,
+        context_summary=context_summary,
     )
 
 
@@ -749,6 +826,9 @@ async def open_storage_state_runtime_bundle(
         storage_state=storage_state,
         context_options=context_options,
         session_owner_id=session_owner_id,
+        available_page_urls=list_context_page_urls(context),
+        selected_page_url=str(getattr(page, "url", "") or ""),
+        context_summary=summarize_runtime_context_options(context_options),
     )
 
 

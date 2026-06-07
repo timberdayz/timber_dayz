@@ -331,6 +331,10 @@ class TiktokProductsExport(ExportComponent):
     async def trigger_export(self, page: Any) -> bool:
         helper = TiktokExport(self.ctx)
         self._download_capture = create_download_capture(page)
+        if not await self._wait_export_button_ready(page, helper):
+            cleanup_download_capture(page, self._download_capture)
+            self._download_capture = None
+            return False
         clicked = await helper._click_first(page, helper._export_button_selectors(), timeout=3000)
         if not clicked:
             cleanup_download_capture(page, self._download_capture)
@@ -340,6 +344,28 @@ class TiktokProductsExport(ExportComponent):
         if hasattr(page, "wait_for_timeout"):
             await page.wait_for_timeout(500)
         return True
+
+    async def _wait_export_button_ready(
+        self,
+        page: Any,
+        helper: TiktokExport,
+        *,
+        timeout_ms: int = 10000,
+        poll_ms: int = 300,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            for selector in helper._export_button_selectors():
+                try:
+                    locator = page.locator(selector).first
+                    if await locator.count() > 0 and await helper._is_clickable(locator):
+                        return True
+                except Exception:
+                    continue
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
 
     async def collect_download_result(self, page: Any) -> str | None:
         capture = self._download_capture
