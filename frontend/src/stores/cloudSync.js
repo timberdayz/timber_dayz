@@ -27,27 +27,32 @@ export const useCloudSyncStore = defineStore('cloudSync', {
     tasks: [],
     events: [],
     selectedTableName: '',
-    taskFilters: {
-      status: '',
-      source_table_name: '',
-    },
     loading: createLoadingState(),
     lastError: null,
     lastActionResult: null,
   }),
 
   getters: {
-    autoSyncEnabled: (state) => state.settings?.auto_sync_enabled ?? state.overview?.auto_sync_enabled ?? true,
+    autoSyncEnabled: (state) =>
+      state.settings?.auto_sync_enabled ?? state.overview?.auto_sync_enabled ?? true,
     catchUpStatus: (state) => state.overview?.catch_up_status || 'up_to_date',
     exceptionTaskCount: (state) => state.overview?.exception_task_count || 0,
     failedTaskCount: (state) => state.overview?.failed_task_count || 0,
     partialSuccessTaskCount: (state) => state.overview?.partial_success_task_count || 0,
-    pendingTaskCount: (state) => (state.overview?.pending_task_count ?? state.health?.queue?.pending ?? 0),
-    runningTaskCount: (state) => (state.overview?.running_task_count ?? state.health?.queue?.running ?? 0),
-    retryWaitingTaskCount: (state) => (state.overview?.retry_waiting_task_count ?? state.health?.queue?.retry_waiting ?? 0),
-    workerSummaryStatus: (state) => state.overview?.worker_status || state.runtime?.worker_status || state.health?.worker?.status || 'unknown',
+    pendingTaskCount: (state) =>
+      state.overview?.pending_task_count ?? state.health?.queue?.pending ?? 0,
+    runningTaskCount: (state) =>
+      state.overview?.running_task_count ?? state.health?.queue?.running ?? 0,
+    retryWaitingTaskCount: (state) =>
+      state.overview?.retry_waiting_task_count ?? state.health?.queue?.retry_waiting ?? 0,
+    workerSummaryStatus: (state) =>
+      state.overview?.worker_status ||
+      state.runtime?.worker_status ||
+      state.health?.worker?.status ||
+      'unknown',
     lastSuccessAt: (state) => state.overview?.last_success_at || null,
     runtimeRunning: (state) => state.runtime?.is_running || false,
+    hasHistory: (state) => state.history.length > 0 || Boolean(state.overview?.last_success_at),
     selectedTableState: (state) =>
       state.tableStates.find((row) => row.source_table_name === state.selectedTableName) || null,
   },
@@ -73,7 +78,7 @@ export const useCloudSyncStore = defineStore('cloudSync', {
         this.runtime = await cloudSyncApi.getRuntime()
         return this.runtime
       } catch (error) {
-        this.lastError = normalizeErrorMessage(error, '加载同步运行状态失败')
+        this.lastError = normalizeErrorMessage(error, '加载追平运行状态失败')
         if (showError) ElMessage.error(this.lastError)
         throw error
       } finally {
@@ -87,7 +92,7 @@ export const useCloudSyncStore = defineStore('cloudSync', {
         this.history = await cloudSyncApi.getHistory(params)
         return this.history
       } catch (error) {
-        this.lastError = normalizeErrorMessage(error, '加载同步历史失败')
+        this.lastError = normalizeErrorMessage(error, '加载追平历史失败')
         if (showError) ElMessage.error(this.lastError)
         throw error
       } finally {
@@ -101,7 +106,7 @@ export const useCloudSyncStore = defineStore('cloudSync', {
         this.settings = await cloudSyncApi.getSettings()
         return this.settings
       } catch (error) {
-        this.lastError = normalizeErrorMessage(error, '加载自动同步设置失败')
+        this.lastError = normalizeErrorMessage(error, '加载自动追平设置失败')
         if (showError) ElMessage.error(this.lastError)
         throw error
       } finally {
@@ -115,7 +120,7 @@ export const useCloudSyncStore = defineStore('cloudSync', {
         this.health = await cloudSyncApi.getHealth()
         return this.health
       } catch (error) {
-        this.lastError = normalizeErrorMessage(error, '加载同步健康状态失败')
+        this.lastError = normalizeErrorMessage(error, '加载追平健康状态失败')
         if (showError) ElMessage.error(this.lastError)
         throw error
       } finally {
@@ -129,7 +134,7 @@ export const useCloudSyncStore = defineStore('cloudSync', {
         this.tableStates = await cloudSyncApi.getTables(params)
         return this.tableStates
       } catch (error) {
-        this.lastError = normalizeErrorMessage(error, '加载高级诊断表状态失败')
+        this.lastError = normalizeErrorMessage(error, '加载表级状态失败')
         if (showError) ElMessage.error(this.lastError)
         throw error
       } finally {
@@ -140,11 +145,10 @@ export const useCloudSyncStore = defineStore('cloudSync', {
     async loadTasks(params = {}, showError = false) {
       this.loading.diagnostics = true
       try {
-        const mergedParams = { ...this.taskFilters, ...params }
-        this.tasks = await cloudSyncApi.getTasks(mergedParams)
+        this.tasks = await cloudSyncApi.getTasks(params)
         return this.tasks
       } catch (error) {
-        this.lastError = normalizeErrorMessage(error, '加载高级诊断任务失败')
+        this.lastError = normalizeErrorMessage(error, '加载诊断任务失败')
         if (showError) ElMessage.error(this.lastError)
         throw error
       } finally {
@@ -162,7 +166,7 @@ export const useCloudSyncStore = defineStore('cloudSync', {
           this.events = []
           return this.events
         }
-        this.lastError = normalizeErrorMessage(error, '加载同步事件失败')
+        this.lastError = normalizeErrorMessage(error, '加载追平事件失败')
         if (showError) ElMessage.error(this.lastError)
         throw error
       } finally {
@@ -207,7 +211,7 @@ export const useCloudSyncStore = defineStore('cloudSync', {
     async toggleAutoSync(enabled) {
       return await this.runAction(
         () => cloudSyncApi.updateSettings({ auto_sync_enabled: enabled }),
-        enabled ? '已开启自动同步' : '已暂停自动同步',
+        enabled ? '已恢复自动追平' : '已暂停自动追平',
       )
     },
 
@@ -223,16 +227,22 @@ export const useCloudSyncStore = defineStore('cloudSync', {
       return await this.runAction(() => cloudSyncApi.cancelTask(jobId), '已取消任务')
     },
 
-    async dryRunTable(tableName, payload = {}) {
-      return await this.runAction(() => cloudSyncApi.dryRunTable(tableName, payload), '已提交模拟执行')
+    async dryRunTable(tableName) {
+      return await this.runAction(() => cloudSyncApi.dryRunTable(tableName), '已提交模拟执行')
     },
 
-    async repairCheckpoint(tableName, payload = {}) {
-      return await this.runAction(() => cloudSyncApi.repairCheckpoint(tableName, payload), '已提交同步点修复')
+    async repairCheckpoint(tableName) {
+      return await this.runAction(
+        () => cloudSyncApi.repairCheckpoint(tableName),
+        '已提交同步点修复',
+      )
     },
 
-    async refreshProjection(tableName, payload = {}) {
-      return await this.runAction(() => cloudSyncApi.refreshProjection(tableName, payload), '已提交投影刷新')
+    async refreshProjection(tableName) {
+      return await this.runAction(
+        () => cloudSyncApi.refreshProjection(tableName),
+        '已提交投影刷新',
+      )
     },
 
     async runAction(action, successMessage) {
@@ -240,15 +250,19 @@ export const useCloudSyncStore = defineStore('cloudSync', {
       try {
         const result = await action()
         this.lastActionResult = result
+
         if (result?.metadata?.auto_sync_enabled !== undefined) {
           this.settings = {
             ...(this.settings || {}),
-            ...result.metadata,
+            auto_sync_enabled: result.metadata.auto_sync_enabled,
+            pause_mode: result.metadata.pause_mode || this.settings?.pause_mode || 'buffer_backlog',
           }
         }
+
         if (successMessage) {
           ElMessage.success(successMessage)
         }
+
         await Promise.allSettled([
           this.loadOverview(false),
           this.loadRuntime(false),
@@ -257,7 +271,9 @@ export const useCloudSyncStore = defineStore('cloudSync', {
           this.loadHealth(false),
           this.loadTableStates({}, false),
           this.loadTasks({}, false),
+          this.loadEvents({}, false),
         ])
+
         return result
       } catch (error) {
         this.lastError = normalizeErrorMessage(error, '执行云端追平操作失败')
@@ -270,10 +286,6 @@ export const useCloudSyncStore = defineStore('cloudSync', {
 
     setSelectedTableName(tableName) {
       this.selectedTableName = tableName || ''
-    },
-
-    setTaskFilters(filters) {
-      this.taskFilters = { ...this.taskFilters, ...filters }
     },
   },
 })

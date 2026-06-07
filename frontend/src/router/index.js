@@ -1010,6 +1010,11 @@ const routes = [
   }
 ]
 
+const cloudSyncRoute = routes.find((route) => route.name === 'CloudSyncManagement')
+if (cloudSyncRoute?.meta) {
+  cloudSyncRoute.meta.title = 'B类云端追平'
+}
+
 const router = createRouter({
   history: createWebHashHistory(),
   routes,

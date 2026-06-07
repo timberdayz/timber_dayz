@@ -108,19 +108,44 @@ Queue:
    - tunnel status
    - cloud DB status
    - pending/running counts
-3. Use table state as the primary surface:
+   - whether there are any exception tasks
+3. Use the homepage actions first:
+   - sync now
+   - pause or resume auto sync
+   - retry failed tasks
+4. Use table state only when you need diagnosis:
    - identify the affected `fact_*` table
    - inspect checkpoint and latest task state
-4. Use task queue for detail:
+5. Use task queue for detail:
    - read last error
    - inspect attempts / claimed worker / timestamps
-5. Execute a controlled action only when needed:
+6. Execute a controlled diagnostic action only when needed:
    - trigger sync
    - retry task
    - cancel stuck task
    - dry-run
    - repair checkpoint
    - refresh projection
+
+## Resetting Old Sync State
+
+If you want to start from a clean cloud sync state after a console overhaul or before a new validation cycle, you may clear the cloud sync runtime state tables:
+
+- `cloud_b_class_sync_tasks`
+- `cloud_b_class_sync_runs`
+- `cloud_b_class_sync_checkpoints`
+
+This is a state reset, not a business-data rollback.
+
+Do not delete:
+
+- local `b_class.fact_*` business data
+- cloud business data tables
+
+Expected behavior after reset:
+
+- `/cloud-sync` should show that no sync history exists yet
+- the next `sync_now` or automatic sync run will rebuild tasks and checkpoints from the current local B-class data
 
 ## Recovery Guidance
 

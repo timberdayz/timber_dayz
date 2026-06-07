@@ -417,6 +417,19 @@ async def test_command_service_update_settings_returns_pause_state(cloud_sync_sq
 
 
 @pytest.mark.asyncio
+async def test_command_service_sync_now_empty_database_is_safe(cloud_sync_sqlite_session):
+    service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
+
+    payload = await service.sync_now()
+
+    assert payload["status"] == "submitted"
+    assert payload["detail"] == "catch_up"
+    assert payload["metadata"]["checked_table_count"] == 0
+    assert payload["metadata"]["enqueued_table_count"] == 0
+    assert payload["metadata"]["skipped_up_to_date_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_command_service_sync_now_only_considers_current_cloud_scope(
     monkeypatch,
     cloud_sync_sqlite_session,

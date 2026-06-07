@@ -304,6 +304,25 @@ async def test_settings_summary_reads_persisted_auto_sync_flag(cloud_sync_sqlite
 
 
 @pytest.mark.asyncio
+async def test_empty_state_query_service_returns_safe_defaults(cloud_sync_sqlite_session):
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+
+    overview = await service.get_overview_summary()
+    runtime = await service.get_runtime_summary()
+    history = await service.list_history()
+    tables = await service.list_table_states()
+    events = await service.list_events()
+
+    assert overview["exception_task_count"] == 0
+    assert overview["last_success_at"] is None
+    assert overview["catch_up_status"] == "up_to_date"
+    assert runtime["is_running"] is False
+    assert history == []
+    assert tables == []
+    assert events == []
+
+
+@pytest.mark.asyncio
 async def test_table_state_rows_only_include_current_cloud_scope(
     monkeypatch,
     cloud_sync_sqlite_session,
