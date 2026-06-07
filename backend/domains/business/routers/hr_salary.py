@@ -512,7 +512,7 @@ async def list_employee_targets(
     year_month: Optional[str] = Query(None, description="目标月份筛选(YYYY-MM)"),
     target_type: Optional[str] = Query(None, description="目标类型筛选"),
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    page_size: int = Query(20, ge=1, le=500, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
 ):
     """个人目标规划层查询接口，不直接参与个人绩效结果和工资单计算。"""

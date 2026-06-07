@@ -179,6 +179,7 @@ class ShopTargetWorkbenchApplyRequest(BaseModel):
     year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
     company_target_amount: float = Field(0.0, ge=0)
     company_target_quantity: int = Field(0, ge=0)
+    weekday_ratios: Dict[str, float] = Field(default_factory=dict)
     shops: List[ShopTargetWorkbenchShopInput] = Field(default_factory=list)
 
 
@@ -198,6 +199,7 @@ class ShopTargetWorkbenchResponse(BaseModel):
     target_id: Optional[int] = None
     company_target_amount: float = 0.0
     company_target_quantity: int = 0
+    weekday_ratios: Dict[str, float] = Field(default_factory=dict)
     shops: List[ShopTargetWorkbenchShopResponse] = Field(default_factory=list)
 
 

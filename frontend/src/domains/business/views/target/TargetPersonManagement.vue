@@ -97,10 +97,16 @@ import { Check, Refresh } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import api from '@/api'
+import {
+  PERSON_TARGET_TYPES,
+  buildPersonTargetPayload,
+  buildPersonTargetRows,
+  filterTargetEmployees,
+  normalizeApiList
+} from './personTargetUtils'
 
 const router = useRouter()
-const targetTypes = ['sales', 'orders', 'customers']
-
+const targetTypes = PERSON_TARGET_TYPES
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
@@ -120,21 +126,9 @@ const visibleRows = computed(() => {
   })
 })
 
-function createTargetCell(existingTarget = null) {
-  return {
-    id: existingTarget?.id || null,
-    target_value: Number(existingTarget?.target_value || 0)
-  }
-}
-
-function normalizeList(response) {
-  if (Array.isArray(response)) return response
-  return response?.items || response?.data?.items || response?.data || []
-}
-
 async function loadEmployees() {
-  const response = await api.getHrEmployees({ page: 1, page_size: 500, status: 'active' })
-  return normalizeList(response)
+  const response = await api.getHrEmployees({ page: 1, page_size: 500 })
+  return filterTargetEmployees(response)
 }
 
 async function loadTargets() {
@@ -143,33 +137,24 @@ async function loadTargets() {
     page: 1,
     page_size: 500
   })
-  return normalizeList(response)
+  return normalizeApiList(response)
 }
 
 function buildRows(employees, targets) {
-  const targetMap = new Map()
-  targets.forEach((target) => {
-    targetMap.set(`${target.employee_code}::${target.target_type}`, target)
-  })
-
-  rows.value = employees.map((employee) => {
-    const row = {
-      employee_code: employee.employee_code,
-      name: employee.name || employee.employee_code,
-      sales: createTargetCell(targetMap.get(`${employee.employee_code}::sales`)),
-      orders: createTargetCell(targetMap.get(`${employee.employee_code}::orders`)),
-      customers: createTargetCell(targetMap.get(`${employee.employee_code}::customers`))
-    }
-    row.hasExistingTarget = targetTypes.some((type) => row[type].id)
-    return row
-  })
+  rows.value = buildPersonTargetRows(employees, targets)
 }
 
 async function loadPageData() {
   loading.value = true
   try {
-    const [employees, targets] = await Promise.all([loadEmployees(), loadTargets()])
-    buildRows(Array.isArray(employees) ? employees : [], Array.isArray(targets) ? targets : [])
+    const employees = await loadEmployees()
+    let targets = []
+    try {
+      targets = await loadTargets()
+    } catch (targetError) {
+      ElMessage.warning(targetError?.response?.data?.detail || targetError?.message || '个人目标记录加载失败，已先显示员工列表')
+    }
+    buildRows(employees, targets)
   } catch (error) {
     rows.value = []
     ElMessage.error(error?.response?.data?.detail || error?.message || '加载个人目标失败')
@@ -184,12 +169,7 @@ function applyEmployeeFilter() {
 
 async function saveTargetCell(row, targetType) {
   const cell = row[targetType]
-  const payload = {
-    employee_code: row.employee_code,
-    year_month: filters.month,
-    target_type: targetType,
-    target_value: Number(cell.target_value || 0)
-  }
+  const payload = buildPersonTargetPayload(row, targetType, filters.month)
   if (cell.id) {
     await api.updateHrEmployeeTarget(cell.id, { target_value: payload.target_value })
     return

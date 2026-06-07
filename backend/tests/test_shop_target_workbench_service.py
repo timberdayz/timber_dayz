@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -30,7 +30,7 @@ def test_shop_workbench_response_includes_standard_name_alias_and_shop_id():
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
-            _ScalarOneResult(None),
+            _ScalarsResult([]),
             _ScalarsResult(
                 [
                     SimpleNamespace(
@@ -63,7 +63,7 @@ def test_shop_workbench_response_includes_standard_name_alias_and_shop_id():
 
 def test_apply_shop_workbench_creates_shop_and_daily_breakdowns_then_syncs_projection():
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[_ScalarOneResult(None), None])
+    db.execute = AsyncMock(side_effect=[_ScalarsResult([]), None])
     db.add = AsyncMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
@@ -85,6 +85,7 @@ def test_apply_shop_workbench_creates_shop_and_daily_breakdowns_then_syncs_proje
         year_month="2026-03",
         company_target_amount=243148.08,
         company_target_quantity=2655,
+        weekday_ratios={"1": 0.2, "2": 0.2, "3": 0.2, "4": 0.2, "5": 0.1, "6": 0.05, "7": 0.05},
         shops=[
             ShopTargetWorkbenchShopInput(
                 platform_code="shopee",
@@ -102,9 +103,39 @@ def test_apply_shop_workbench_creates_shop_and_daily_breakdowns_then_syncs_proje
     breakdown_types = [getattr(obj, "breakdown_type", None) for obj in added_objects]
 
     assert result.target_id == 77
+    target = next(obj for obj in [call.args[0] for call in db.add.call_args_list] if hasattr(obj, "target_name"))
+    assert round(sum(target.weekday_ratios.values()), 6) == 1
     assert "shop" in breakdown_types
     assert "time" in breakdown_types
     assert "shop_time" in breakdown_types
     assert service.cleanup_projection.await_count == 1
     assert service.sync_projection.await_count == 1
     assert db.commit.await_count == 1
+
+
+def test_find_month_target_uses_latest_updated_record_when_month_has_multiple_versions():
+    older = SimpleNamespace(id=1, updated_at=datetime(2026, 3, 1, tzinfo=timezone.utc))
+    latest = SimpleNamespace(id=2, updated_at=datetime(2026, 3, 15, tzinfo=timezone.utc))
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarsResult([latest, older]))
+
+    service = ShopTargetWorkbenchService(db)
+    result = asyncio.run(service._find_month_target(date(2026, 3, 1), date(2026, 3, 31)))
+
+    assert result.id == 2
+    query_text = str(db.execute.await_args.args[0])
+    assert "updated_at" in query_text
+
+
+def test_deactivate_older_month_targets_keeps_latest_month_version_only():
+    current = SimpleNamespace(id=9, status="active")
+    older = SimpleNamespace(id=8, status="active")
+    db = AsyncMock()
+    service = ShopTargetWorkbenchService(db)
+    service.cleanup_projection = AsyncMock(return_value={"deleted": 1, "errors": []})
+
+    asyncio.run(service._deactivate_older_month_targets([current, older], current.id))
+
+    assert current.status == "active"
+    assert older.status == "inactive"
+    service.cleanup_projection.assert_awaited_once_with(older.id)

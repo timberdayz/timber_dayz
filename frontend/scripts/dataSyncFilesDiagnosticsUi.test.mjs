@@ -53,10 +53,16 @@ assert.match(
   'DataSyncFiles should load diagnostics from the api'
 )
 
-assert.doesNotMatch(
+assert.match(
   viewSource,
-  /const filters = ref\(\{[^}]*status:\s*'pending'/,
-  'DataSyncFiles should not default the main file list to pending-only'
+  /const activeFileView = ref\('ready'\)/,
+  'DataSyncFiles should default to the ready-to-sync view'
+)
+
+assert.match(
+  viewSource,
+  /const filters = ref\(\{[\s\S]*status:\s*'pending'/,
+  'DataSyncFiles should request pending files for the default ready-to-sync view'
 )
 
 assert.match(

@@ -52,4 +52,8 @@ test('shop target workbench supports month copy, ratio split, aliases, and daily
   assert.equal(shopWorkbenchSource.includes('aliases'), true)
   assert.equal(shopWorkbenchSource.includes('daily_target_count'), true)
   assert.equal(shopWorkbenchSource.includes('ratio_percent'), true)
+  assert.equal(shopWorkbenchSource.includes('totals'), true)
+  assert.equal(shopWorkbenchSource.includes('canSave'), true)
+  assert.equal(shopWorkbenchSource.includes('weekdayRatioPercents'), true)
+  assert.equal(shopWorkbenchSource.includes('dailyPreview'), true)
 })

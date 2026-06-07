@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +62,7 @@ class ShopTargetWorkbenchService:
             target_id=getattr(target, "id", None),
             company_target_amount=total_amount,
             company_target_quantity=int(getattr(target, "target_quantity", 0) or 0) if target else 0,
+            weekday_ratios=getattr(target, "weekday_ratios", None) or self._default_weekday_ratios(),
             shops=response_shops,
         )
 
@@ -70,8 +71,10 @@ class ShopTargetWorkbenchService:
         request: ShopTargetWorkbenchApplyRequest,
         username: str | None = None,
     ) -> ShopTargetWorkbenchApplyResponse:
+        self._validate_request(request)
         month_start, month_end = self._month_range(request.year_month)
-        target = await self._find_month_target(month_start, month_end)
+        month_targets = await self._list_month_targets(month_start, month_end)
+        target = month_targets[0] if month_targets else None
         if target is None:
             target = SalesTarget(
                 target_name=f"{request.year_month} 店铺销售目标",
@@ -84,12 +87,16 @@ class ShopTargetWorkbenchService:
             )
             await self._add(target)
 
+        target.status = "active"
         target.target_amount = request.company_target_amount
         target.target_quantity = request.company_target_quantity
         target.target_profit_amount = getattr(target, "target_profit_amount", 0.0) or 0.0
+        target.weekday_ratios = self._normalize_weekday_ratios(request.weekday_ratios)
         target.description = "店铺目标工作台维护"
+        target.updated_at = datetime.now(timezone.utc)
 
         await self.db.flush()
+        await self._deactivate_older_month_targets(month_targets, target.id)
         cleanup_result = await self.cleanup_projection(target.id)
         if cleanup_result.get("errors"):
             raise RuntimeError("; ".join(cleanup_result["errors"]))
@@ -120,6 +127,7 @@ class ShopTargetWorkbenchService:
             year_month=year_month,
             company_target_amount=previous.company_target_amount,
             company_target_quantity=previous.company_target_quantity,
+            weekday_ratios=previous.weekday_ratios,
             shops=[
                 {
                     "platform_code": shop.platform_code,
@@ -141,15 +149,28 @@ class ShopTargetWorkbenchService:
         return await TargetSyncService(self.db).delete_target_from_a_class(target_id, commit=False)
 
     async def _find_month_target(self, month_start: date, month_end: date):
+        targets = await self._list_month_targets(month_start, month_end)
+        return targets[0] if targets else None
+
+    async def _list_month_targets(self, month_start: date, month_end: date):
         result = await self.db.execute(
             select(SalesTarget)
             .where(SalesTarget.target_type == "shop")
             .where(SalesTarget.status == "active")
             .where(SalesTarget.period_start <= month_end)
             .where(SalesTarget.period_end >= month_start)
-            .order_by(SalesTarget.created_at.desc(), SalesTarget.id.desc())
+            .order_by(SalesTarget.updated_at.desc(), SalesTarget.created_at.desc(), SalesTarget.id.desc())
         )
-        return result.scalar_one_or_none()
+        return result.scalars().all()
+
+    async def _deactivate_older_month_targets(self, month_targets, current_target_id: int) -> None:
+        for target in month_targets:
+            if getattr(target, "id", None) == current_target_id:
+                continue
+            target.status = "inactive"
+            cleanup_result = await self.cleanup_projection(target.id)
+            if cleanup_result.get("errors"):
+                raise RuntimeError("; ".join(cleanup_result["errors"]))
 
     async def _list_active_shops(self):
         result = await self.db.execute(
@@ -195,11 +216,12 @@ class ShopTargetWorkbenchService:
     ) -> None:
         await self.db.execute(delete(TargetBreakdown).where(TargetBreakdown.target_id == target_id))
         days = monthrange(month_start.year, month_start.month)[1]
-        daily_company_amount = request.company_target_amount / days if days else 0.0
-        daily_company_quantity = request.company_target_quantity // days if days else 0
+        day_weights = self._month_day_weights(month_start, days, request.weekday_ratios)
+        total_weight = sum(weight for _, weight in day_weights) or 1.0
 
-        for day in range(1, days + 1):
-            current = date(month_start.year, month_start.month, day)
+        company_daily_amounts = self._split_amount_by_weights(request.company_target_amount, day_weights, total_weight)
+        company_daily_quantities = self._split_quantity_by_weights(request.company_target_quantity, day_weights, total_weight)
+        for idx, (current, _) in enumerate(day_weights):
             await self._add(
                 TargetBreakdown(
                     target_id=target_id,
@@ -207,8 +229,8 @@ class ShopTargetWorkbenchService:
                     period_start=current,
                     period_end=current,
                     period_label=current.isoformat(),
-                    target_amount=daily_company_amount,
-                    target_quantity=daily_company_quantity,
+                    target_amount=company_daily_amounts[idx],
+                    target_quantity=company_daily_quantities[idx],
                 )
             )
 
@@ -226,10 +248,9 @@ class ShopTargetWorkbenchService:
                     target_quantity=shop.target_quantity,
                 )
             )
-            daily_amount = shop.target_amount / days if days else 0.0
-            daily_quantity = shop.target_quantity // days if days else 0
-            for day in range(1, days + 1):
-                current = date(month_start.year, month_start.month, day)
+            shop_daily_amounts = self._split_amount_by_weights(shop.target_amount, day_weights, total_weight)
+            shop_daily_quantities = self._split_quantity_by_weights(shop.target_quantity, day_weights, total_weight)
+            for idx, (current, _) in enumerate(day_weights):
                 await self._add(
                     TargetBreakdown(
                         target_id=target_id,
@@ -239,8 +260,8 @@ class ShopTargetWorkbenchService:
                         period_start=current,
                         period_end=current,
                         period_label=current.isoformat(),
-                        target_amount=daily_amount,
-                        target_quantity=daily_quantity,
+                        target_amount=shop_daily_amounts[idx],
+                        target_quantity=shop_daily_quantities[idx],
                     )
                 )
 
@@ -252,3 +273,64 @@ class ShopTargetWorkbenchService:
     def _month_range(self, year_month: str) -> tuple[date, date]:
         year, month = [int(part) for part in year_month.split("-")]
         return date(year, month, 1), date(year, month, monthrange(year, month)[1])
+
+    def _validate_request(self, request: ShopTargetWorkbenchApplyRequest) -> None:
+        ratio_total = sum(float(shop.ratio or 0.0) for shop in request.shops)
+        amount_total = round(sum(float(shop.target_amount or 0.0) for shop in request.shops), 2)
+        quantity_total = sum(int(shop.target_quantity or 0) for shop in request.shops)
+        if abs(ratio_total - 1.0) > 0.0001:
+            raise ValueError("店铺拆分比例合计必须等于100%")
+        if abs(amount_total - round(float(request.company_target_amount or 0.0), 2)) > 0.01:
+            raise ValueError("店铺目标销售额合计必须等于公司总销售额")
+        if quantity_total != int(request.company_target_quantity or 0):
+            raise ValueError("店铺订单目标合计必须等于公司订单目标")
+
+    def _default_weekday_ratios(self) -> dict[str, float]:
+        return {str(day): 1 / 7 for day in range(1, 8)}
+
+    def _normalize_weekday_ratios(self, ratios: dict[str, float] | None) -> dict[str, float]:
+        source = ratios or self._default_weekday_ratios()
+        normalized = {str(day): max(float(source.get(str(day), 0.0) or 0.0), 0.0) for day in range(1, 8)}
+        total = sum(normalized.values())
+        if total <= 0:
+            return self._default_weekday_ratios()
+        return {key: value / total for key, value in normalized.items()}
+
+    def _month_day_weights(
+        self,
+        month_start: date,
+        days: int,
+        weekday_ratios: dict[str, float] | None,
+    ) -> list[tuple[date, float]]:
+        ratios = self._normalize_weekday_ratios(weekday_ratios)
+        weights = []
+        for day in range(1, days + 1):
+            current = date(month_start.year, month_start.month, day)
+            weekday_key = str(current.weekday() + 1)
+            weights.append((current, ratios.get(weekday_key, 0.0)))
+        return weights
+
+    def _split_amount_by_weights(
+        self,
+        total_amount: float,
+        day_weights: list[tuple[date, float]],
+        total_weight: float,
+    ) -> list[float]:
+        values = [round(float(total_amount or 0.0) * weight / total_weight, 2) for _, weight in day_weights]
+        if values:
+            values[-1] = round(values[-1] + round(float(total_amount or 0.0) - sum(values), 2), 2)
+        return values
+
+    def _split_quantity_by_weights(
+        self,
+        total_quantity: int,
+        day_weights: list[tuple[date, float]],
+        total_weight: float,
+    ) -> list[int]:
+        raw_values = [float(total_quantity or 0) * weight / total_weight for _, weight in day_weights]
+        values = [int(value) for value in raw_values]
+        remainder = int(total_quantity or 0) - sum(values)
+        ranked = sorted(range(len(raw_values)), key=lambda idx: raw_values[idx] - values[idx], reverse=True)
+        for idx in ranked[:remainder]:
+            values[idx] += 1
+        return values

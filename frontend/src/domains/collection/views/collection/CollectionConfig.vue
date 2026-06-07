@@ -361,7 +361,7 @@
                 </el-checkbox-group>
               </template>
             </el-table-column>
-            <el-table-column label="数据域子类型" min-width="180">
+            <el-table-column label="可编辑子类型" min-width="220">
               <template #default="{ row }">
                 <div
                   v-for="domain in getScopeSubtypeDomains(row.scope)"
@@ -379,10 +379,10 @@
                     </el-checkbox>
                   </el-checkbox-group>
                 </div>
-                <span v-if="!getScopeSubtypeDomains(row.scope).length" class="shop-scope-meta">-</span>
+                <span v-if="!getScopeSubtypeDomains(row.scope).length" class="shop-scope-meta">无子类型</span>
               </template>
             </el-table-column>
-            <el-table-column label="继承状态" width="120">
+            <el-table-column label="配置来源" width="120">
               <template #default="{ row }">
                 <el-tag :type="row.isException ? 'warning' : 'success'">{{ row.isException ? '已覆盖' : '继承默认' }}</el-tag>
               </template>

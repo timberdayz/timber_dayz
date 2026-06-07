@@ -904,7 +904,7 @@ const filters = ref({
   domain: null,
   granularity: null,
   sub_domain: null,
-  status: null
+  status: 'pending'
 })
 
 const fileViewOptions = [
@@ -916,7 +916,7 @@ const fileViewOptions = [
   { label: '异常文件', value: 'anomaly', status: null },
   { label: '历史遗留', value: 'legacy', status: null }
 ]
-const activeFileView = ref('recent')
+const activeFileView = ref('ready')
 
 // v4.18.0新增：分页相关
 const pagination = ref({
@@ -1318,13 +1318,13 @@ const calculateDuration = (startTime, endTime) => {
 
 // 重置筛选器
 const resetFilters = () => {
-  activeFileView.value = 'recent'
+  activeFileView.value = 'ready'
   filters.value = {
     platform: null,
     domain: null,
     granularity: null,
     sub_domain: null,
-    status: null
+    status: 'pending'
   }
   pagination.value.page = 1 // v4.18.0: 重置到第一页
   loadFiles()

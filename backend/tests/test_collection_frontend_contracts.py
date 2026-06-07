@@ -22,6 +22,9 @@ def test_collection_config_run_uses_sub_domains_payload():
 def test_collection_config_uses_generic_domain_subtype_controls():
     text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
 
+    assert 'label="可编辑子类型"' in text
+    assert 'label="配置来源"' in text
+    assert "无子类型" in text
     assert "getSelectedSubtypeDomains" in text
     assert "getScopeSubtypeDomains(row.scope)" in text
     assert "getSubtypeOptions(domain)" in text

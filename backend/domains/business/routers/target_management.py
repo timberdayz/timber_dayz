@@ -174,7 +174,10 @@ async def apply_shop_target_workbench(
 ):
     service = ShopTargetWorkbenchService(db)
     username = getattr(current_user, "username", None)
-    data = await service.apply(request, username=username)
+    try:
+        data = await service.apply(request, username=username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"success": True, "data": data.model_dump(mode="json")}
 
 
@@ -186,7 +189,10 @@ async def copy_prev_month_shop_target_workbench(
 ):
     service = ShopTargetWorkbenchService(db)
     username = getattr(current_user, "username", None)
-    data = await service.copy_prev_month(year_month, username=username)
+    try:
+        data = await service.copy_prev_month(year_month, username=username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"success": True, "data": data.model_dump(mode="json")}
 
 @router.get("", response_model=Dict[str, Any])

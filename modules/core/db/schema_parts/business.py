@@ -2272,17 +2272,17 @@ class EmployeeTarget(Base):
     __tablename__ = "employee_targets"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    employee_code = Column(String(64), nullable=False)  # 迁移时将重命名为"员工编号"
-    year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
-    target_type = Column(String(32), nullable=False)  # 迁移时将重命名为"目标类型"
-    target_value = Column(Numeric(15, 2), nullable=False)  # 迁移时将重命名为"目标值"
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    employee_code = Column("员工编号", String(64), nullable=False)
+    year_month = Column("年月", String(7), nullable=False)
+    target_type = Column("目标类型", String(32), nullable=False)
+    target_value = Column("目标值", Numeric(15, 2), nullable=False)
+    created_at = Column("创建时间", DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column("更新时间", DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
-        UniqueConstraint("employee_code", "year_month", "target_type", name="uq_employee_targets_a"),
-        Index("ix_employee_targets_a_employee", "employee_code"),
-        Index("ix_employee_targets_a_month", "year_month"),
+        UniqueConstraint("员工编号", "年月", "目标类型", name="uq_employee_targets_a"),
+        Index("ix_employee_targets_a_employee", "员工编号"),
+        Index("ix_employee_targets_a_month", "年月"),
         {"schema": "a_class"},
     )
 
