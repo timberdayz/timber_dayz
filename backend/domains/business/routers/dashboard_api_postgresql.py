@@ -188,6 +188,23 @@ def _detect_business_overview_empty_period(data: Any) -> bool:
         return True
     if not isinstance(data, dict):
         return False
+    bootstrap_keys = {"kpi", "comparison", "operational_metrics", "traffic_ranking", "shop_racing"}
+    if bootstrap_keys.issubset(data.keys()):
+        return (
+            _detect_business_overview_empty_period(data.get("kpi"))
+            and _detect_business_overview_empty_period(data.get("comparison"))
+            and _detect_business_overview_empty_period(data.get("traffic_ranking"))
+            and _detect_business_overview_empty_period(data.get("shop_racing"))
+            and _detect_business_overview_empty_period(data.get("operational_metrics"))
+        )
+    if "monthly_target" in data and "monthly_total_achieved" in data:
+        ignored_keys = {"meta"}
+        for key, value in data.items():
+            if key in ignored_keys:
+                continue
+            if value not in {0, 0.0, None}:
+                return False
+        return True
     if {"gmv", "order_count", "visitor_count", "profit"}.issubset(data.keys()):
         return (
             (data.get("gmv") in {0, 0.0})

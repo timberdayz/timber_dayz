@@ -31,3 +31,20 @@ def test_business_overview_frontend_shows_explicit_pv_uv_kpi_cards():
     assert "客流量" not in text
     assert "uv_conversion_rate" in text
     assert "pv_conversion_rate" in text
+
+
+def test_business_overview_frontend_groups_kpis_and_allows_wrapping():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    for marker in (
+        "kpi-primary-grid",
+        "kpi-funnel-panel",
+        "kpi-efficiency-grid",
+        "exposure_order_rate",
+    ):
+        assert marker in text
+
+    assert "flex-wrap: nowrap" not in text

@@ -107,18 +107,21 @@
         </el-button>
       </div>
 
-      <!-- KPI 卡片 -->
-      <div class="kpi-cards" v-loading="loadingKPI">
-        <el-row :gutter="20" class="kpi-cards-row">
-          <el-col
-            :xs="24"
-            :sm="12"
-            :md="8"
-            :lg="4"
-            v-for="kpi in kpiData"
-            :key="kpi.key"
-          >
-            <el-card class="kpi-card" shadow="hover">
+      <!-- KPI 分组仪表盘 -->
+      <div class="kpi-dashboard" v-loading="loadingKPI">
+        <section class="kpi-subsection kpi-results-panel">
+          <div class="kpi-subsection-header">
+            <div>
+              <div class="kpi-subsection-title">经营结果</div>
+              <div class="kpi-subsection-subtitle">先看结果，再看流量与效率</div>
+            </div>
+          </div>
+          <div class="kpi-primary-grid">
+            <div
+              v-for="kpi in primaryKpiCards"
+              :key="kpi.key"
+              class="kpi-card kpi-card-primary"
+            >
               <div class="kpi-content">
                 <div class="kpi-icon" :class="kpi.iconClass">
                   <el-icon><component :is="kpi.icon" /></el-icon>
@@ -132,9 +135,60 @@
                   </div>
                 </div>
               </div>
-            </el-card>
-          </el-col>
-        </el-row>
+            </div>
+          </div>
+        </section>
+
+        <section class="kpi-subsection kpi-funnel-panel">
+          <div class="kpi-subsection-header">
+            <div>
+              <div class="kpi-subsection-title">流量漏斗</div>
+              <div class="kpi-subsection-subtitle">曝光、浏览、访客、订单和成交额的完整链路</div>
+            </div>
+          </div>
+          <div class="kpi-funnel-flow">
+            <template v-for="(step, index) in funnelSteps" :key="step.key">
+              <div class="kpi-funnel-step">
+                <div class="kpi-funnel-label">{{ step.title }}</div>
+                <div class="kpi-funnel-value">{{ step.value }}</div>
+              </div>
+              <div v-if="index < funnelSteps.length - 1" class="kpi-funnel-arrow">→</div>
+            </template>
+          </div>
+          <div class="kpi-funnel-metrics">
+            <div
+              v-for="metric in funnelMetricCards"
+              :key="metric.key"
+              class="kpi-mini-card"
+            >
+              <div class="kpi-mini-title">{{ metric.title }}</div>
+              <div class="kpi-mini-value">{{ metric.value }}</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="kpi-subsection kpi-efficiency-panel">
+          <div class="kpi-subsection-header">
+            <div>
+              <div class="kpi-subsection-title">效率指标</div>
+              <div class="kpi-subsection-subtitle">用于判断转化质量、连带表现和当前人效</div>
+            </div>
+          </div>
+          <div class="kpi-efficiency-grid">
+            <div
+              v-for="kpi in efficiencyKpiCards"
+              :key="kpi.key"
+              class="kpi-mini-card"
+            >
+              <div class="kpi-mini-title">{{ kpi.title }}</div>
+              <div class="kpi-mini-value">{{ kpi.value }}</div>
+              <div class="kpi-change" :class="kpi.changeType">
+                <el-icon><component :is="kpi.changeIcon" /></el-icon>
+                {{ kpi.change }}
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -1680,6 +1734,16 @@ const kpiData = ref([
     iconClass: 'kpi-conversion'
   },
   {
+    key: 'exposure_order_rate',
+    title: '曝光成交率',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'TrendCharts',
+    iconClass: 'kpi-conversion'
+  },
+  {
     key: 'avg_order_value',
     title: '客单价',
     value: '--',
@@ -1710,6 +1774,25 @@ const kpiData = ref([
     iconClass: 'kpi-labor'
   }
 ])
+
+const findKpiCard = (key) => kpiData.value.find((item) => item.key === key)
+const pickKpiCards = (keys) => keys.map(findKpiCard).filter(Boolean)
+
+const primaryKpiCards = computed(() =>
+  pickKpiCards(['gmv', 'order_count', 'uv_conversion_rate', 'avg_order_value'])
+)
+
+const funnelSteps = computed(() =>
+  pickKpiCards(['impressions', 'page_views', 'visitor_count', 'order_count', 'gmv'])
+)
+
+const funnelMetricCards = computed(() =>
+  pickKpiCards(['visit_rate', 'browse_depth', 'pv_conversion_rate', 'uv_conversion_rate', 'exposure_order_rate'])
+)
+
+const efficiencyKpiCards = computed(() =>
+  pickKpiCards(['pv_conversion_rate', 'exposure_order_rate', 'browse_depth', 'attach_rate', 'labor_efficiency'])
+)
 
 // 数据对比（默认跟随全局：月）
 const comparisonChart = ref(null)
@@ -2196,6 +2279,12 @@ const applyKpiCards = (data = {}) => {
     data.pv_conversion_rate,
     (n) => `${n.toFixed(2)}%`,
     data.pv_conversion_rate_change
+  )
+  updateKpiCard(
+    'exposure_order_rate',
+    data.exposure_order_rate,
+    (n) => `${n.toFixed(2)}%`,
+    data.exposure_order_rate_change
   )
   updateKpiCard(
     'avg_order_value',
@@ -2982,102 +3071,169 @@ watch(
   margin-right: 8px;
 }
 
-.kpi-cards {
-  /* margin-bottom: 24px; */
+.kpi-dashboard {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
 }
 
-/* 大屏下 5 张 KPI 卡片等分一行，避免右侧留空（与 el-col :lg 断点一致） */
-@media (min-width: 1200px) {
-  .kpi-cards-row.el-row {
-    display: flex;
-    flex-wrap: nowrap;
-  }
-  .kpi-cards-row .el-col {
-    flex: 1 1 0%;
-    min-width: 0;
-    max-width: none;
-  }
+.kpi-subsection {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+.kpi-subsection-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.kpi-subsection-title {
+  color: #1f2937;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.kpi-subsection-subtitle {
+  color: #8a94a6;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.kpi-primary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.kpi-card,
+.kpi-mini-card,
+.kpi-funnel-step {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
 }
 
 .kpi-card {
-  border: none;
-  border-radius: 12px;
-  overflow: hidden;
-  transition: all 0.3s ease;
+  padding: 18px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .kpi-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  border-color: rgba(59, 130, 246, 0.28);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  transform: translateY(-2px);
 }
 
 .kpi-content {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
+  min-width: 0;
 }
 
 .kpi-icon {
-  width: 60px;
-  height: 60px;
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
-  color: white;
+  flex: 0 0 auto;
+  font-size: 20px;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.1);
 }
 
-.kpi-icon.kpi-conversion {
-  background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-}
-
-.kpi-icon.kpi-traffic {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-}
-
-.kpi-icon.kpi-aov {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.kpi-icon.kpi-attach {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-}
-
+.kpi-icon.kpi-gmv,
+.kpi-icon.kpi-orders,
+.kpi-icon.kpi-conversion,
+.kpi-icon.kpi-traffic,
+.kpi-icon.kpi-aov,
+.kpi-icon.kpi-attach,
 .kpi-icon.kpi-labor {
-  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-}
-
-.kpi-icon.kpi-orders {
-  background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
-}
-
-.kpi-icon.kpi-gmv {
-  background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
+  background: rgba(37, 99, 235, 0.1);
 }
 
 .kpi-info {
   flex: 1;
+  min-width: 0;
 }
 
 .kpi-title {
-  font-size: 14px;
-  color: #909399;
+  color: #7b8494;
+  font-size: 13px;
+  line-height: 1.35;
   margin-bottom: 8px;
 }
 
 .kpi-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 4px;
+  color: #111827;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.15;
+  margin-bottom: 6px;
 }
 
 .kpi-change {
+  color: #9aa3b2;
   font-size: 12px;
   display: flex;
   align-items: center;
   gap: 4px;
+  min-height: 18px;
+}
+
+.kpi-funnel-flow {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr) auto minmax(120px, 1fr) auto minmax(120px, 1fr) auto minmax(120px, 1fr);
+  align-items: stretch;
+  gap: 10px;
+}
+
+.kpi-funnel-step {
+  padding: 14px;
+  min-width: 0;
+}
+
+.kpi-funnel-label,
+.kpi-mini-title {
+  color: #7b8494;
+  font-size: 12px;
+}
+
+.kpi-funnel-value,
+.kpi-mini-value {
+  color: #111827;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 8px;
+}
+
+.kpi-funnel-arrow {
+  align-self: center;
+  color: #bfcbda;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.kpi-funnel-metrics,
+.kpi-efficiency-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.kpi-mini-card {
+  padding: 12px 14px;
+  min-width: 0;
 }
 
 .kpi-change.increase {
@@ -3264,6 +3420,20 @@ watch(
 }
 
 @media (max-width: 1200px) {
+  .kpi-primary-grid,
+  .kpi-funnel-metrics,
+  .kpi-efficiency-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .kpi-funnel-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .kpi-funnel-arrow {
+    display: none;
+  }
+
   .operational-metrics-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -3275,6 +3445,22 @@ watch(
 }
 
 @media (max-width: 768px) {
+  .kpi-filters {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .kpi-primary-grid,
+  .kpi-funnel-metrics,
+  .kpi-efficiency-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kpi-subsection {
+    border-radius: 14px;
+    padding: 14px;
+  }
+
   .operational-metrics-grid {
     grid-template-columns: 1fr;
   }
@@ -3328,14 +3514,13 @@ watch(
 /* 响应式设计 */
 @media (max-width: 768px) {
   .kpi-content {
-    flex-direction: column;
-    text-align: center;
+    align-items: flex-start;
   }
 
   .kpi-icon {
-    width: 50px;
-    height: 50px;
-    font-size: 20px;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
   }
 
   .header-controls {
