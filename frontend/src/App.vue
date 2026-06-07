@@ -94,6 +94,8 @@ html, body {
 .app-layout {
   display: flex;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 /* 侧边栏样式 */
@@ -137,9 +139,11 @@ html, body {
 
 /* 主容器 */
 .main-container {
-  flex: 1;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: calc(100% - 250px);
 }
 
 /* 头部样式（由 Header 组件内部处理） */
@@ -150,6 +154,7 @@ html, body {
   background-color: #f5f7fa;
   padding: 20px;
   overflow-y: auto;
+  min-width: 0;
 }
 
 /* 滚动条样式 */
@@ -170,5 +175,26 @@ html, body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #34495e;
+}
+
+@media (max-width: 768px) {
+  .app-layout {
+    display: block;
+  }
+
+  .grouped-sidebar {
+    display: none !important;
+  }
+
+  .main-container {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .main-content {
+    padding: 12px;
+    overflow-x: hidden;
+  }
 }
 </style>

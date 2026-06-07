@@ -13,7 +13,18 @@ from backend.domains.business.routers.dashboard_api_postgresql import (
 
 
 def _make_request(path: str = "/api/dashboard/test"):
-    app = SimpleNamespace(state=SimpleNamespace())
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            dashboard_assets_report={
+                "modules": {
+                    "business_overview": {
+                        "status": "ready",
+                        "ready": True,
+                    }
+                }
+            }
+        )
+    )
     return Request(
         {
             "type": "http",
@@ -47,6 +58,17 @@ class _PostgresqlServiceStub:
         return self.payload
 
 
+def _patch_dashboard_service(monkeypatch, service):
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: service,
+    )
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: service,
+    )
+
+
 def test_postgresql_dashboard_router_exposes_expected_contract_paths():
     paths = {route.path for route in dashboard_router.router.routes}
     assert "/api/dashboard/business-overview/kpi" in paths
@@ -56,9 +78,9 @@ def test_postgresql_dashboard_router_exposes_expected_contract_paths():
 
 def test_business_overview_kpi_contract_shape(monkeypatch):
     request = _make_request("/api/dashboard/business-overview/kpi")
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _PostgresqlServiceStub(
+    _patch_dashboard_service(
+        monkeypatch,
+        _PostgresqlServiceStub(
             {
                 "gmv": 100,
                 "order_count": 10,
@@ -101,9 +123,9 @@ def test_business_overview_kpi_contract_shape(monkeypatch):
 
 def test_business_overview_comparison_contract_shape(monkeypatch):
     request = _make_request("/api/dashboard/business-overview/comparison")
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _PostgresqlServiceStub(
+    _patch_dashboard_service(
+        monkeypatch,
+        _PostgresqlServiceStub(
             {
                 "metrics": {
                     "sales_amount": {
@@ -144,9 +166,9 @@ def test_business_overview_comparison_contract_shape(monkeypatch):
 
 def test_business_overview_bootstrap_contract_shape(monkeypatch):
     request = _make_request("/api/dashboard/business-overview/bootstrap")
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _PostgresqlServiceStub(
+    _patch_dashboard_service(
+        monkeypatch,
+        _PostgresqlServiceStub(
             {
                 "any": "payload",
             }

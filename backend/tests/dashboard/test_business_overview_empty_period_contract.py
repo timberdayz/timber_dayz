@@ -6,6 +6,7 @@ import pytest
 from starlette.requests import Request
 
 from backend.domains.business.routers.dashboard_api_postgresql import (
+    get_business_overview_bootstrap_postgresql,
     get_business_overview_comparison_postgresql,
     get_business_overview_kpi_postgresql,
     get_business_overview_operational_metrics_postgresql,
@@ -174,3 +175,73 @@ def test_bo_list_modules_empty_period_returns_empty_list(monkeypatch, endpoint_f
     assert body["meta"]["is_empty_period"] is True
     assert body["meta"]["data_status"] == "empty_period"
     assert body["data"] == []
+
+
+def test_bo_bootstrap_route_marks_empty_period_meta(monkeypatch):
+    class _ServiceStub:
+        async def get_business_overview_kpi(self, **kwargs):
+            return {
+                "gmv": 0,
+                "order_count": 0,
+                "visitor_count": 0,
+                "page_views": 0,
+                "impressions": 0,
+                "conversion_rate": None,
+                "uv_conversion_rate": None,
+                "pv_conversion_rate": None,
+                "visit_rate": None,
+                "browse_depth": None,
+                "exposure_order_rate": None,
+                "avg_order_value": None,
+                "attach_rate": None,
+                "labor_efficiency": 0,
+                "profit": 0,
+            }
+
+        async def get_business_overview_comparison(self, **kwargs):
+            return {
+                "metrics": {
+                    "sales_amount": {"today": 0, "yesterday": 0, "average": 0, "change": None},
+                    "conversion_rate": {"today": None, "yesterday": None, "average": None, "change": None},
+                },
+                "target": {"sales_amount": None, "sales_quantity": None, "achievement_rate": None},
+            }
+
+        async def get_business_overview_operational_metrics(self, **kwargs):
+            return {
+                "monthly_target": None,
+                "monthly_total_achieved": None,
+                "today_sales": None,
+                "monthly_achievement_rate": None,
+                "time_gap": None,
+                "estimated_gross_profit": None,
+                "estimated_expenses": 0,
+                "operating_result": None,
+                "monthly_order_count": None,
+                "today_order_count": None,
+                "operating_result_text": None,
+            }
+
+        async def get_business_overview_traffic_ranking(self, **kwargs):
+            return []
+
+        async def get_business_overview_shop_racing(self, **kwargs):
+            return []
+
+    _patch_dashboard_service(monkeypatch, _ServiceStub())
+
+    response = asyncio.run(
+        get_business_overview_bootstrap_postgresql(
+            request=_make_request("/api/dashboard/business-overview/bootstrap"),
+            granularity="monthly",
+            period_key="2099-01-01",
+            platform_code=None,
+            shop_id=None,
+        )
+    )
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["meta"]["is_empty_period"] is True
+    assert body["meta"]["data_status"] == "empty_period"
+    assert body["data"]["traffic_ranking"] == []
+    assert body["data"]["shop_racing"] == []
