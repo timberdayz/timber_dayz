@@ -52,7 +52,7 @@ class CollectionConfigShopScopePayload(BaseModel):
     """店铺维度配置输入/输出载荷"""
 
     shop_account_id: str = Field(..., min_length=1, description="店铺账号ID")
-    data_domains: List[str] = Field(..., min_length=1, description="该店铺实际采集的数据域")
+    data_domains: List[str] = Field(default_factory=list, description="该店铺实际采集的数据域")
     sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(
         None,
         description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组",
@@ -104,6 +104,9 @@ class CollectionConfigUpdate(BaseModel):
     schedule_cron: Optional[str] = None
     retry_count: Optional[int] = None
     is_active: Optional[bool] = None
+    batch_key: Optional[str] = Field(None, min_length=1, max_length=32)
+    batch_status: Optional[Literal["draft", "active", "completed", "disabled"]] = None
+    batch_note: Optional[str] = Field(None, max_length=500)
 
 
 class CollectionConfigResponse(BaseModel):
@@ -151,6 +154,110 @@ class CollectionConfigResponse(BaseModel):
                 return self
             self.time_selection = TimeSelectionPayload.model_validate(payload)
         return self
+
+
+class CollectionTemplateShopScopePayload(BaseModel):
+    shop_account_id: str = Field(..., min_length=1)
+    data_domains: List[str] = Field(default_factory=list)
+    sub_domains: Optional[Dict[str, List[str]] | List[str]] = None
+    enabled: bool = True
+
+
+class CollectionTemplateShopScopeResponse(CollectionTemplateShopScopePayload):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CollectionConfigTemplateCreate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$")
+    main_account_id: str = Field(..., min_length=1)
+    granularity: Literal["daily", "weekly", "monthly"]
+    default_date_range_type: str = Field(...)
+    default_execution_mode: Literal["headless", "headed"] = "headless"
+    default_schedule_enabled: bool = False
+    default_schedule_cron: Optional[str] = None
+    default_retry_count: int = Field(3, ge=0, le=10)
+    default_shop_scopes: List[CollectionTemplateShopScopePayload] = Field(..., min_length=1)
+
+
+class CollectionConfigTemplateUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    default_date_range_type: Optional[str] = None
+    default_execution_mode: Optional[Literal["headless", "headed"]] = None
+    default_schedule_enabled: Optional[bool] = None
+    default_schedule_cron: Optional[str] = None
+    default_retry_count: Optional[int] = Field(None, ge=0, le=10)
+    default_shop_scopes: Optional[List[CollectionTemplateShopScopePayload]] = None
+    is_active: Optional[bool] = None
+
+
+class CollectionConfigBatchCreate(BaseModel):
+    batch_key: str = Field(..., min_length=1, max_length=32)
+    time_selection: TimeSelectionPayload
+    status: Literal["draft", "active", "completed", "disabled"] = "draft"
+    note: Optional[str] = Field(None, max_length=500)
+    shop_overrides: List[CollectionTemplateShopScopePayload] = Field(default_factory=list)
+
+
+class CollectionConfigFutureBatchCreateRequest(BaseModel):
+    periods: int = Field(..., ge=1, le=12)
+
+
+class CollectionConfigFutureBatchCreateResponse(BaseModel):
+    created_batches: List["CollectionConfigBatchResponse"]
+    skipped_batch_keys: List[str] = Field(default_factory=list)
+
+
+class CollectionConfigBulkAdvanceRequest(BaseModel):
+    granularity: Literal["daily", "weekly", "monthly"]
+    platform: Optional[str] = None
+    main_account_ids: List[str] = Field(default_factory=list)
+
+
+class CollectionConfigBulkAdvanceResponse(BaseModel):
+    affected_config_ids: List[int] = Field(default_factory=list)
+    skipped_config_ids: List[int] = Field(default_factory=list)
+
+
+class CollectionConfigTemplateBackfillResponse(BaseModel):
+    created_template_count: int = 0
+    attached_batch_count: int = 0
+    skipped_config_ids: List[int] = Field(default_factory=list)
+
+
+class CollectionConfigBatchResponse(CollectionConfigResponse):
+    template_id: Optional[int] = None
+    batch_key: Optional[str] = None
+    status: Literal["draft", "active", "completed", "disabled"] = "draft"
+    note: Optional[str] = None
+    shop_overrides: List[CollectionTemplateShopScopeResponse] = Field(default_factory=list)
+    missing_template_shop_scope_ids: List[str] = Field(default_factory=list)
+    stale_template_shop_scope_ids: List[str] = Field(default_factory=list)
+
+
+class CollectionConfigTemplateSummaryResponse(BaseModel):
+    id: int
+    name: Optional[str] = None
+    platform: str
+    main_account_id: str
+    granularity: Literal["daily", "weekly", "monthly"]
+    default_date_range_type: str
+    default_execution_mode: Literal["headless", "headed"] = "headless"
+    default_schedule_enabled: bool = False
+    default_schedule_cron: Optional[str] = None
+    default_retry_count: int = 3
+    default_shop_scopes: List[CollectionTemplateShopScopeResponse] = Field(default_factory=list)
+    active_shop_count: int = 0
+    template_shop_count: int = 0
+    missing_shop_scope_ids: List[str] = Field(default_factory=list)
+    stale_shop_scope_ids: List[str] = Field(default_factory=list)
+    batch_count: int = 0
+    batches: List[CollectionConfigBatchResponse] = Field(default_factory=list)
+    is_active: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TaskCreateRequest(BaseModel):
@@ -417,6 +524,20 @@ class ScheduleUpdateRequest(BaseModel):
     schedule_cron: Optional[str] = Field(None, description="Cron表达式")
 
 
+class GranularityScheduleUpdateRequest(BaseModel):
+    schedule_enabled: bool = Field(..., description="是否启用该粒度统一定时")
+
+
+class GranularityScheduleResponse(BaseModel):
+    granularity: Literal["daily", "weekly", "monthly"]
+    enabled: bool
+    cron: Optional[str] = None
+    description: str
+    affected_config_count: int = 0
+    enabled_config_count: int = 0
+    is_mixed: bool = False
+
+
 class CronValidateRequest(BaseModel):
     """Cron 验证请求"""
 
@@ -511,3 +632,5 @@ class HealthCheckResponse(BaseModel):
     browser_pool: BrowserPoolStatus
     database: str
     scheduler: str
+    queue_runner: str = "unknown"
+    can_consume_queue: bool = False

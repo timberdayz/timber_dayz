@@ -268,6 +268,27 @@ async def test_process_run_passes_runtime_manifests_from_expansion_to_execute_ta
 
 
 @pytest.mark.asyncio
+async def test_process_run_raises_clear_error_when_no_tasks_are_expandable(
+    queue_runner_session_factory,
+):
+    from backend.services.collection_queue_runner import CollectionQueueRunner
+
+    runner = CollectionQueueRunner(
+        session_factory=queue_runner_session_factory,
+        poll_interval_seconds=0.01,
+    )
+    run = SimpleNamespace(id=13, config_id=23, trigger_type="scheduled")
+
+    async def _fake_expand(_run):
+        return []
+
+    runner._expand_run_tasks = _fake_expand
+
+    with pytest.raises(RuntimeError, match="produced no runnable tasks"):
+        await runner._process_run(run)
+
+
+@pytest.mark.asyncio
 async def test_execute_task_forwards_runtime_manifests_to_background_executor(
     queue_runner_session_factory,
     monkeypatch: pytest.MonkeyPatch,

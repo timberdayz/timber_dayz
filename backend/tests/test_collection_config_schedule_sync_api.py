@@ -73,6 +73,7 @@ async def schedule_sync_session(schedule_sync_session_factory):
 
 @pytest_asyncio.fixture
 async def schedule_sync_client(schedule_sync_session, monkeypatch):
+    from backend.dependencies.auth import get_current_user
     from backend.main import app
     from backend.models.database import get_async_db
     import backend.services.collection_scheduler as scheduler_module
@@ -82,16 +83,33 @@ async def schedule_sync_client(schedule_sync_session, monkeypatch):
     async def override_get_async_db():
         yield schedule_sync_session
 
+    async def override_current_user():
+        return type(
+            "AdminUser",
+            (),
+            {
+                "user_id": 1,
+                "id": 1,
+                "username": "admin",
+                "is_active": True,
+                "status": "active",
+                "is_superuser": True,
+                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+            },
+        )()
+
     monkeypatch.setattr(scheduler_module, "APSCHEDULER_AVAILABLE", True)
     monkeypatch.setattr(scheduler_module.CollectionScheduler, "_instance", fake_scheduler)
     monkeypatch.setattr(scheduler_module.CollectionScheduler, "get_instance", classmethod(lambda cls, *args, **kwargs: fake_scheduler))
     monkeypatch.setattr(scheduler_module.CollectionScheduler, "validate_cron_expression", staticmethod(lambda expr: True))
 
     app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:
         yield client, fake_scheduler
     app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 async def _seed_shopee_accounts(session):
@@ -259,6 +277,184 @@ async def test_disable_and_delete_config_remove_registered_job_immediately(
     delete_response = await client.delete(f"/api/collection/configs/{config_id}", headers=auth_headers)
     assert delete_response.status_code == 200
     assert fake_scheduler.remove_calls[-1] == config_id
+
+
+@pytest.mark.asyncio
+async def test_update_granularity_schedule_enables_all_matching_configs_with_preset(
+    schedule_sync_client,
+    schedule_sync_session,
+    auth_headers,
+):
+    client, fake_scheduler = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    for name in ("daily-a", "daily-b"):
+        response = await client.post(
+            "/api/collection/configs",
+            headers=auth_headers,
+            json={
+                "name": name,
+                "platform": "shopee",
+                "main_account_id": "main-shopee",
+                "shop_scopes": [
+                    {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
+                    {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
+                ],
+                "granularity": "daily",
+                "time_selection": {"mode": "preset", "preset": "yesterday"},
+                "schedule_enabled": False,
+                "retry_count": 3,
+            },
+        )
+        assert response.status_code == 200
+
+    update_response = await client.post(
+        "/api/collection/schedule/granularity/daily",
+        headers=auth_headers,
+        json={"schedule_enabled": True},
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.json()
+    assert payload["enabled"] is True
+    assert payload["cron"] == "0 7 * * *"
+    assert payload["affected_config_count"] == 1
+    assert len(fake_scheduler.add_calls) >= 1
+
+
+@pytest.mark.asyncio
+async def test_get_granularity_schedule_reports_mixed_state(
+    schedule_sync_client,
+    schedule_sync_session,
+    auth_headers,
+):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    extra_main = MainAccount(
+        platform="shopee",
+        main_account_id="main-shopee-2",
+        main_account_name="Shopee Main 2",
+        username="shopee-main-2",
+        password_encrypted="enc",
+        enabled=True,
+    )
+    extra_shop = ShopAccount(
+        platform="shopee",
+        shop_account_id="shop-extra-1",
+        main_account_id="main-shopee-2",
+        store_name="Shop Extra 1",
+        platform_shop_id="platform-extra-1",
+        shop_region="SG",
+        shop_type="local",
+        enabled=True,
+    )
+    schedule_sync_session.add_all([extra_main, extra_shop])
+    await schedule_sync_session.flush()
+    schedule_sync_session.add(
+        ShopAccountCapability(shop_account_id=extra_shop.id, data_domain="orders", enabled=True)
+    )
+    await schedule_sync_session.commit()
+
+    response_a = await client.post(
+        "/api/collection/configs",
+        headers=auth_headers,
+        json={
+            "name": "weekly-a",
+            "platform": "shopee",
+            "main_account_id": "main-shopee",
+            "shop_scopes": [
+                {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
+                {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
+            ],
+            "granularity": "weekly",
+            "time_selection": {"mode": "preset", "preset": "last_7_days"},
+            "schedule_enabled": True,
+            "schedule_cron": "0 9 * * 1",
+            "retry_count": 3,
+        },
+    )
+    response_b = await client.post(
+        "/api/collection/configs",
+        headers=auth_headers,
+        json={
+            "name": "weekly-b",
+            "platform": "shopee",
+            "main_account_id": "main-shopee-2",
+            "shop_scopes": [
+                {"shop_account_id": "shop-extra-1", "data_domains": ["orders"]},
+            ],
+            "granularity": "weekly",
+            "time_selection": {"mode": "preset", "preset": "last_7_days"},
+            "schedule_enabled": False,
+            "retry_count": 3,
+        },
+    )
+
+    assert response_a.status_code == 200
+    assert response_b.status_code == 200
+
+    get_response = await client.get(
+        "/api/collection/schedule/granularity/weekly",
+        headers=auth_headers,
+    )
+
+    assert get_response.status_code == 200
+    payload = get_response.json()
+    assert payload["enabled"] is False
+    assert payload["is_mixed"] is True
+    assert payload["affected_config_count"] == 2
+    assert payload["enabled_config_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_granularity_schedule_deduplicates_multiple_configs_under_same_main_account(
+    schedule_sync_client,
+    schedule_sync_session,
+    auth_headers,
+):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    for payload in (
+        {
+            "name": "monthly-old",
+            "platform": "shopee",
+            "main_account_id": "main-shopee",
+            "shop_scopes": [
+                {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
+                {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
+            ],
+            "granularity": "monthly",
+            "time_selection": {"mode": "preset", "preset": "last_30_days"},
+            "schedule_enabled": False,
+            "retry_count": 3,
+        },
+        {
+            "name": "monthly-new",
+            "platform": "shopee",
+            "main_account_id": "main-shopee",
+            "shop_scopes": [
+                {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
+                {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
+            ],
+            "granularity": "monthly",
+            "time_selection": {"mode": "preset", "preset": "last_30_days"},
+            "schedule_enabled": False,
+            "retry_count": 3,
+        },
+    ):
+        response = await client.post("/api/collection/configs", headers=auth_headers, json=payload)
+        assert response.status_code == 200
+
+    get_response = await client.get(
+        "/api/collection/schedule/granularity/monthly",
+        headers=auth_headers,
+    )
+
+    assert get_response.status_code == 200
+    payload = get_response.json()
+    assert payload["affected_config_count"] == 1
 
 
 @pytest.mark.asyncio

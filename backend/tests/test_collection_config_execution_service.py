@@ -265,6 +265,71 @@ async def test_create_tasks_for_config_treats_verification_states_as_active_conf
 
 
 @pytest.mark.asyncio
+async def test_create_tasks_for_config_does_not_crash_when_multiple_active_tasks_exist_for_same_shop(
+    config_execution_session,
+):
+    config_id = await _seed_config(config_execution_session)
+    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+
+    config_result = await config_execution_session.execute(
+        select(CollectionConfig).where(CollectionConfig.id == config_id)
+    )
+    config = config_result.scalar_one()
+    config_execution_session.add_all(
+        [
+            CollectionTask(
+                task_id="existing-running-task-a",
+                config_id=config.id,
+                platform=config.platform,
+                account="shop-sg-1",
+                status="running",
+                progress=20,
+                trigger_type="scheduled",
+                data_domains=["orders"],
+                sub_domains=None,
+                granularity="daily",
+                date_range={"start_date": "2026-04-01", "end_date": "2026-04-01"},
+                total_domains=1,
+                completed_domains=[],
+                failed_domains=[],
+                current_domain="orders",
+                debug_mode=False,
+            ),
+            CollectionTask(
+                task_id="existing-running-task-b",
+                config_id=config.id,
+                platform=config.platform,
+                account="shop-sg-1",
+                status="verification_required",
+                progress=30,
+                trigger_type="scheduled",
+                data_domains=["services"],
+                sub_domains={"services": ["agent"]},
+                granularity="daily",
+                date_range={"start_date": "2026-04-01", "end_date": "2026-04-01"},
+                total_domains=1,
+                completed_domains=[],
+                failed_domains=[],
+                current_domain="services",
+                debug_mode=False,
+            ),
+        ]
+    )
+    await config_execution_session.commit()
+
+    tasks = await create_tasks_for_config(
+        config_execution_session,
+        config_id=config_id,
+        config_run_id=config_run_id,
+        trigger_type="scheduled",
+        resolve_runtime=False,
+    )
+
+    assert len(tasks) == 1
+    assert tasks[0].account == "shop-my-1"
+
+
+@pytest.mark.asyncio
 async def test_create_tasks_for_config_prunes_unsupported_subtypes_without_skipping_scope(
     config_execution_session,
     monkeypatch,

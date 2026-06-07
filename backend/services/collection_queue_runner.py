@@ -85,6 +85,11 @@ class CollectionQueueRunner:
             return
 
         tasks = await self._expand_run_tasks(run)
+        if not tasks:
+            raise RuntimeError(
+                "config run produced no runnable tasks; scopes may be blocked by active tasks "
+                "or have no supported runtime domains"
+            )
         for task_info in tasks:
             runtime_manifests = None
             task = task_info

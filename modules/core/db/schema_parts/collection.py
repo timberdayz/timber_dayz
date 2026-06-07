@@ -29,6 +29,47 @@ from sqlalchemy.sql import func
 
 from .base import Base, JSON_COMPAT
 
+
+class CollectionConfigTemplate(Base):
+    """主账号 + 粒度级模板。"""
+
+    __tablename__ = "collection_config_templates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=True)
+    platform = Column(String(50), nullable=False)
+    main_account_id = Column(
+        String(100),
+        ForeignKey("core.main_accounts.main_account_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="归属主账号ID",
+    )
+    granularity = Column(String(20), default="daily", nullable=False)
+    default_date_range_type = Column(String(32), default="yesterday", nullable=False)
+    default_execution_mode = Column(String(20), default="headless", nullable=False)
+    default_schedule_enabled = Column(Boolean, default=False, nullable=False)
+    default_schedule_cron = Column(String(50), nullable=True)
+    default_retry_count = Column(Integer, default=3, nullable=False)
+    default_shop_scopes = Column(JSON_COMPAT, nullable=False, default=list)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    batches = relationship("CollectionConfig", back_populates="template")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "platform",
+            "main_account_id",
+            "granularity",
+            name="uq_cc_templates_platform_main_granularity",
+        ),
+        Index("ix_collection_config_templates_platform", "platform"),
+        Index("ix_collection_config_templates_main_account_id", "main_account_id"),
+        Index("ix_collection_config_templates_granularity", "granularity"),
+        {"schema": "core"},
+    )
+
 class CollectionConfig(Base):
     """
     数据采集配置表
@@ -46,6 +87,11 @@ class CollectionConfig(Base):
     __tablename__ = "collection_configs"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
+    template_id = Column(
+        Integer,
+        ForeignKey("core.collection_config_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     name = Column(String(100), nullable=False)  # 配置名称
     platform = Column(String(50), nullable=False)  # 平台:shopee/tiktok/miaoshou
     main_account_id = Column(
@@ -65,12 +111,17 @@ class CollectionConfig(Base):
     schedule_enabled = Column(Boolean, default=False, nullable=False)  # 是否启用定时
     schedule_cron = Column(String(50), nullable=True)  # Cron表达式
     retry_count = Column(Integer, default=3, nullable=False)  # 重试次数
+    batch_key = Column(String(32), nullable=True)
+    batch_status = Column(String(20), default="draft", nullable=False)
+    batch_note = Column(Text, nullable=True)
+    batch_shop_overrides = Column(JSON_COMPAT, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)  # 是否启用
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_by = Column(String(100), nullable=True)  # 创建者
     
     # 关系
+    template = relationship("CollectionConfigTemplate", back_populates="batches")
     shop_scopes = relationship(
         "CollectionConfigShopScope",
         back_populates="config",
@@ -89,6 +140,8 @@ class CollectionConfig(Base):
         Index("ix_collection_configs_platform", "platform"),
         Index("ix_collection_configs_main_account_id", "main_account_id"),
         Index("ix_collection_configs_platform_main_account_id", "platform", "main_account_id"),
+        Index("ix_collection_configs_template_id", "template_id"),
+        Index("ix_collection_configs_batch_key", "batch_key"),
         Index("ix_collection_configs_active", "is_active"),
         {"schema": "core"},
     )

@@ -175,7 +175,7 @@ async def create_tasks_for_config(
                     CollectionTask.status.in_(ACTIVE_COLLECTION_TASK_STATUSES),
                 )
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
         if existing_task is not None:
             logger.warning(
                 "Skip config %s scope %s due to active task %s",

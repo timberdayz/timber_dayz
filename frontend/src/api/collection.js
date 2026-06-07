@@ -35,6 +35,56 @@ export const getConfig = async (id) => {
   return response
 }
 
+export const getConfigTemplates = async (params = {}) => {
+  const response = await api.get('/collection/config-templates', { params })
+  return response || []
+}
+
+export const createConfigTemplate = async (payload) => {
+  const response = await api.post('/collection/config-templates', payload)
+  return response
+}
+
+export const updateConfigTemplate = async (id, payload) => {
+  const response = await api.put(`/collection/config-templates/${id}`, payload)
+  return response
+}
+
+export const createConfigBatch = async (templateId, payload) => {
+  const response = await api.post(`/collection/config-templates/${templateId}/batches`, payload)
+  return response
+}
+
+export const cloneNextConfigBatch = async (configId) => {
+  const response = await api.post(`/collection/config-batches/${configId}/clone-next`)
+  return response
+}
+
+export const reapplyTemplateDefaults = async (configId) => {
+  const response = await api.post(`/collection/config-batches/${configId}/reapply-template`)
+  return response
+}
+
+export const createFutureConfigBatches = async (configId, payload) => {
+  const response = await api.post(`/collection/config-batches/${configId}/create-future-batches`, payload)
+  return response
+}
+
+export const advanceCurrentConfig = async (configId) => {
+  const response = await api.post(`/collection/configs/${configId}/advance-current`)
+  return response
+}
+
+export const bulkAdvanceCurrentGranularity = async (payload) => {
+  const response = await api.post('/collection/configs/advance-current-granularity', payload)
+  return response
+}
+
+export const backfillLegacyConfigTemplates = async () => {
+  const response = await api.post('/collection/config-template-backfill')
+  return response
+}
+
 /**
  * 创建采集配置
  * @param {Object} config - 配置数据
@@ -316,6 +366,16 @@ export const getConfigSchedule = async (configId) => {
   return response
 }
 
+export const getGranularitySchedule = async (granularity) => {
+  const response = await api.get(`/collection/schedule/granularity/${granularity}`)
+  return response
+}
+
+export const updateGranularitySchedule = async (granularity, payload) => {
+  const response = await api.post(`/collection/schedule/granularity/${granularity}`, payload)
+  return response
+}
+
 /**
  * 验证Cron表达式
  * @param {string} cronExpression - Cron表达式
@@ -446,6 +506,16 @@ export default {
   // 配置管理
   getConfigs,
   getConfig,
+  getConfigTemplates,
+  createConfigTemplate,
+  updateConfigTemplate,
+  createConfigBatch,
+  cloneNextConfigBatch,
+  reapplyTemplateDefaults,
+  createFutureConfigBatches,
+  advanceCurrentConfig,
+  bulkAdvanceCurrentGranularity,
+  backfillLegacyConfigTemplates,
   createConfig,
   updateConfig,
   deleteConfig,
@@ -480,6 +550,8 @@ export default {
   // 调度管理
   updateConfigSchedule,
   getConfigSchedule,
+  getGranularitySchedule,
+  updateGranularitySchedule,
   validateCronExpression,
   getCronPresets,
   getScheduledJobs,

@@ -53,6 +53,7 @@ from .schema_parts.facts import (
     CatalogFile,
 )
 from .schema_parts.collection import (
+    CollectionConfigTemplate,
     CollectionConfig,
     CollectionConfigShopScope,
     CollectionConfigRun,
@@ -226,6 +227,7 @@ _FACT_EXPORTS = (
     "CatalogFile",
 )
 _COLLECTION_EXPORTS = (
+    "CollectionConfigTemplate",
     "CollectionConfig",
     "CollectionConfigShopScope",
     "CollectionConfigRun",
