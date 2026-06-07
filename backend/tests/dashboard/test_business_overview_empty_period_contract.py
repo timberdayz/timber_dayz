@@ -19,7 +19,18 @@ from backend.services.postgresql_dashboard_service import (
 
 
 def _make_request(path: str):
-    app = SimpleNamespace(state=SimpleNamespace())
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            dashboard_assets_report={
+                "modules": {
+                    "business_overview": {
+                        "status": "ready",
+                        "ready": True,
+                    }
+                }
+            }
+        )
+    )
     return Request(
         {
             "type": "http",
@@ -30,6 +41,17 @@ def _make_request(path: str):
             "client": ("127.0.0.1", 8001),
             "app": app,
         }
+    )
+
+
+def _patch_dashboard_service(monkeypatch, service):
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: service,
+    )
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: service,
     )
 
 
@@ -69,10 +91,7 @@ def test_bo_kpi_route_marks_empty_period_meta(monkeypatch):
                 "profit": 0,
             }
 
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
+    _patch_dashboard_service(monkeypatch, _ServiceStub())
 
     response = asyncio.run(
         get_business_overview_kpi_postgresql(
@@ -102,10 +121,7 @@ def test_bo_comparison_route_marks_empty_period_meta(monkeypatch):
                 "target": {"sales_amount": None, "sales_quantity": None, "achievement_rate": None},
             }
 
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
+    _patch_dashboard_service(monkeypatch, _ServiceStub())
 
     response = asyncio.run(
         get_business_overview_comparison_postgresql(
@@ -142,10 +158,7 @@ def test_bo_list_modules_empty_period_returns_empty_list(monkeypatch, endpoint_f
         async def get_business_overview_operational_metrics(self, **kwargs):
             return []
 
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
+    _patch_dashboard_service(monkeypatch, _ServiceStub())
 
     response = asyncio.run(
         endpoint_fn(

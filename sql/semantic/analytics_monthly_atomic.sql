@@ -15,6 +15,7 @@ SELECT
     visitor_count,
     product_visitor_count,
     page_views,
+    impressions,
     order_count,
     sku_order_count,
     gmv,

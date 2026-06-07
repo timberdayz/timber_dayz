@@ -123,6 +123,7 @@ def test_analytics_monthly_atomic_sql_asset():
             "product_visitor_count",
             "visitor_count",
             "page_views",
+            "impressions",
         ),
     )
 
@@ -141,6 +142,7 @@ def test_analytics_monthly_atomic_mv_sql_asset():
             "visitor_count_raw",
             "product_visitor_count_raw",
             "page_views_raw",
+            "impressions_raw",
             "order_count_raw",
             "sku_order_count_raw",
             "gmv_raw",
@@ -164,6 +166,7 @@ def test_platform_month_kpi_sql_asset():
             "order_count",
             "visitor_count",
             "page_views",
+            "impressions",
         ),
     )
 
@@ -179,8 +182,19 @@ def test_business_overview_kpi_module_sql_asset():
             "gmv",
             "order_count",
             "visitor_count",
+            "page_views",
+            "impressions",
             "conversion_rate",
+            "uv_conversion_rate",
+            "pv_conversion_rate",
+            "visit_rate",
+            "browse_depth",
+            "exposure_order_rate",
             "avg_order_value",
             "attach_rate",
         ),
     )
+    sql_text = Path("sql/api_modules/business_overview_kpi_module.sql").read_text(
+        encoding="utf-8",
+    )
+    assert "COALESCE(page_views, visitor_count) AS visitor_count" not in sql_text

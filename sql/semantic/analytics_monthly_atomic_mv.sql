@@ -76,6 +76,7 @@ mapped_monthly_traffic AS MATERIALIZED (
             raw_data->>'views',
             raw_data->>'page_view'
         ) AS page_views_raw,
+        COALESCE(raw_data->>'鏇濆厜娆℃暟', raw_data->>'impressions', raw_data->>'Impressions') AS impressions_raw,
         COALESCE(
             raw_data->>'订单数',
             raw_data->>'订单数量',
@@ -177,6 +178,29 @@ normalized_monthly_traffic AS MATERIALIZED (
                 )::numeric
             END
         END AS page_views,
+        CASE
+            WHEN impressions_raw IS NULL THEN NULL
+            ELSE CASE
+                WHEN NULLIF(
+                    REGEXP_REPLACE(
+                        REPLACE(REPLACE(REPLACE(REPLACE(impressions_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                        '[^0-9.-]',
+                        '',
+                        'g'
+                    ),
+                    ''
+                ) IN ('-', '.', '-.') THEN NULL
+                ELSE NULLIF(
+                    REGEXP_REPLACE(
+                        REPLACE(REPLACE(REPLACE(REPLACE(impressions_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''),
+                        '[^0-9.-]',
+                        '',
+                        'g'
+                    ),
+                    ''
+                )::numeric
+            END
+        END AS impressions,
         CASE
             WHEN order_count_raw IS NULL THEN NULL
             ELSE CASE
@@ -324,6 +348,7 @@ resolved_monthly_traffic AS MATERIALIZED (
         m.visitor_count,
         m.product_visitor_count,
         m.page_views,
+        m.impressions,
         m.order_count,
         m.sku_order_count,
         m.gmv,
@@ -365,6 +390,7 @@ SELECT
     visitor_count,
     product_visitor_count,
     page_views,
+    impressions,
     order_count,
     sku_order_count,
     gmv,

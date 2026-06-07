@@ -33,6 +33,32 @@ def _sum_present_values(rows: list[dict[str, Any]], key: str) -> float | None:
     return sum(values)
 
 
+def _to_optional_int(value: float | None) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _percent_or_none(numerator: int | float | None, denominator: int | float | None) -> float | None:
+    if numerator is None or denominator is None:
+        return None
+    if denominator > 0:
+        return round(float(numerator) * 100.0 / float(denominator), 2)
+    if denominator == 0 and numerator == 0:
+        return 0
+    return None
+
+
+def _ratio_or_none(numerator: int | float | None, denominator: int | float | None) -> float | None:
+    if numerator is None or denominator is None:
+        return None
+    if denominator > 0:
+        return round(float(numerator) / float(denominator), 2)
+    if denominator == 0 and numerator == 0:
+        return 0
+    return None
+
+
 def _sort_numeric(value: Any) -> float:
     maybe_value = _to_optional_float(value)
     return maybe_value if maybe_value is not None else float("-inf")
@@ -52,12 +78,19 @@ def reduce_business_overview_kpi_rows(
     rows: list[dict[str, Any]],
     labor_efficiency: float | None = 0,
 ) -> dict[str, Any]:
-    if _is_empty_period_rows(rows, core_keys=("gmv", "order_count", "visitor_count", "profit")):
+    if _is_empty_period_rows(rows, core_keys=("gmv", "order_count", "visitor_count", "page_views", "impressions", "profit")):
         return {
             "gmv": 0,
             "order_count": 0,
             "visitor_count": 0,
+            "page_views": 0,
+            "impressions": 0,
             "conversion_rate": None,
+            "uv_conversion_rate": None,
+            "pv_conversion_rate": None,
+            "visit_rate": None,
+            "browse_depth": None,
+            "exposure_order_rate": None,
             "avg_order_value": None,
             "attach_rate": None,
             "labor_efficiency": 0,
@@ -67,18 +100,21 @@ def reduce_business_overview_kpi_rows(
     total_gmv = _sum_present_values(rows, "gmv")
     total_orders_raw = _sum_present_values(rows, "order_count")
     total_visitors_raw = _sum_present_values(rows, "visitor_count")
+    total_page_views_raw = _sum_present_values(rows, "page_views")
+    total_impressions_raw = _sum_present_values(rows, "impressions")
     total_items = _sum_present_values(rows, "total_items")
     total_profit = _sum_present_values(rows, "profit")
 
-    total_orders = int(total_orders_raw) if total_orders_raw is not None else None
-    total_visitors = int(total_visitors_raw) if total_visitors_raw is not None else None
+    total_orders = _to_optional_int(total_orders_raw)
+    total_visitors = _to_optional_int(total_visitors_raw)
+    total_page_views = _to_optional_int(total_page_views_raw)
+    total_impressions = _to_optional_int(total_impressions_raw)
 
-    if total_orders is None or total_visitors is None:
-        conversion_rate = None
-    elif total_visitors > 0:
-        conversion_rate = round((total_orders * 100.0 / total_visitors), 2)
-    else:
-        conversion_rate = None
+    uv_conversion_rate = _percent_or_none(total_orders, total_visitors)
+    pv_conversion_rate = _percent_or_none(total_orders, total_page_views)
+    visit_rate = _percent_or_none(total_visitors, total_impressions)
+    browse_depth = _ratio_or_none(total_page_views, total_visitors)
+    exposure_order_rate = _percent_or_none(total_orders, total_impressions)
 
     if total_orders is None or total_gmv is None:
         avg_order_value = None
@@ -96,9 +132,16 @@ def reduce_business_overview_kpi_rows(
 
     return {
         "gmv": _round_or_none(total_gmv, 2) or 0,
-        "order_count": total_orders or 0,
-        "visitor_count": total_visitors or 0,
-        "conversion_rate": conversion_rate,
+        "order_count": total_orders if total_orders is not None else 0,
+        "visitor_count": total_visitors,
+        "page_views": total_page_views,
+        "impressions": total_impressions,
+        "conversion_rate": uv_conversion_rate,
+        "uv_conversion_rate": uv_conversion_rate,
+        "pv_conversion_rate": pv_conversion_rate,
+        "visit_rate": visit_rate,
+        "browse_depth": browse_depth,
+        "exposure_order_rate": exposure_order_rate,
         "avg_order_value": avg_order_value,
         "attach_rate": attach_rate,
         "labor_efficiency": _round_or_none(labor_efficiency, 2),
@@ -1116,7 +1159,14 @@ class PostgresqlDashboardService:
                     gmv,
                     order_count,
                     visitor_count,
+                    page_views,
+                    impressions,
                     conversion_rate,
+                    uv_conversion_rate,
+                    pv_conversion_rate,
+                    visit_rate,
+                    browse_depth,
+                    exposure_order_rate,
                     avg_order_value,
                     attach_rate,
                     total_items,
@@ -1148,8 +1198,15 @@ class PostgresqlDashboardService:
                 platform_code,
                 gmv,
                 order_count,
-                COALESCE(page_views, visitor_count) AS visitor_count,
+                visitor_count,
+                page_views,
+                impressions,
                 conversion_rate,
+                uv_conversion_rate,
+                pv_conversion_rate,
+                visit_rate,
+                browse_depth,
+                exposure_order_rate,
                 avg_order_value,
                 attach_rate,
                 total_items,
