@@ -1676,9 +1676,10 @@ onMounted(() => {
 
 .workbench-layout {
   display: grid;
-  grid-template-columns: 220px 260px minmax(0, 1fr);
+  grid-template-columns: 280px 320px minmax(760px, 1fr);
   gap: 16px;
   min-height: calc(100vh - 320px);
+  align-items: start;
 }
 
 .nav-panel,
@@ -1752,7 +1753,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 12px;
   height: 100%;
-    min-height: calc(100vh - 410px);
+  min-height: calc(100vh - 410px);
 }
 
 .shop-search {
@@ -1813,6 +1814,12 @@ onMounted(() => {
   max-height: calc(100vh - 220px);
   overflow-y: auto;
   padding-top: 12px;
+}
+
+@media (max-width: 1520px) {
+  .workbench-layout {
+    grid-template-columns: 240px 280px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 1180px) {

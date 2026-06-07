@@ -84,6 +84,44 @@ async def test_miaoshou_login_returns_success_when_goto_redirects_to_welcome(mon
     assert cleaned == ["https://erp.91miaoshou.com/welcome"]
 
 
+@pytest.mark.asyncio
+async def test_miaoshou_login_reused_session_welcome_short_circuits_without_goto(monkeypatch):
+    component = MiaoshouLogin(_ctx())
+    cleaned = []
+
+    class _Page:
+        def __init__(self):
+            self.url = "https://erp.91miaoshou.com/welcome"
+            self.goto_calls = []
+
+        async def goto(self, url, wait_until="domcontentloaded", timeout=60000):
+            self.goto_calls.append(url)
+
+        def get_by_text(self, text, exact=False):
+            class _Locator:
+                def __init__(self):
+                    self.first = self
+
+                async def is_visible(self, timeout=0):
+                    return True
+
+            return _Locator()
+
+    async def _fake_cleanup(page):
+        cleaned.append(str(getattr(page, "url", "")))
+
+    monkeypatch.setattr(component, "_cleanup_after_login", _fake_cleanup)
+    page = _Page()
+    component.ctx.config = {"reused_session": True}
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert result.message == "already logged in"
+    assert page.goto_calls == []
+    assert cleaned == ["https://erp.91miaoshou.com/welcome"]
+
+
 def test_miaoshou_login_homepage_ready_texts_include_dashboard_signals():
     component = MiaoshouLogin(_ctx())
 

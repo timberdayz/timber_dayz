@@ -541,6 +541,15 @@ def choose_runtime_strategy(
             fallback_allowed=True,
         )
 
+    if has_persistent_profile:
+        return RuntimeStrategyDecision(
+            mode="persistent_profile",
+            reason="persistent_profile_available",
+            used_storage_state=False,
+            used_persistent_profile=True,
+            fallback_allowed=True,
+        )
+
     if has_manual_storage_state:
         return RuntimeStrategyDecision(
             mode="storage_state_fanout",
@@ -557,15 +566,6 @@ def choose_runtime_strategy(
             used_storage_state=True,
             used_persistent_profile=False,
             fallback_allowed=bool(has_persistent_profile or session_owner_id),
-        )
-
-    if has_persistent_profile:
-        return RuntimeStrategyDecision(
-            mode="persistent_profile",
-            reason="storage_state_missing",
-            used_storage_state=False,
-            used_persistent_profile=True,
-            fallback_allowed=True,
         )
 
     return RuntimeStrategyDecision(
@@ -962,14 +962,83 @@ async def _wait_for_probe_page_ready(page: Any, *, settle_ms: int = 800) -> None
             await maybe_wait
 
 
+async def wait_for_runtime_page_stable(
+    *,
+    page: Any,
+    platform: str,
+    timeout_ms: int = 30000,
+    poll_ms: int = 500,
+    stable_cycles: int = 3,
+) -> None:
+    normalized_platform = str(platform or "").strip().lower()
+    stable_hits = 0
+    waited = 0
+    last_url = None
+
+    while waited <= timeout_ms:
+        await _wait_for_probe_page_ready(page, settle_ms=min(max(poll_ms, 100), 800))
+
+        current_url = str(getattr(page, "url", "") or "").strip()
+        same_url = bool(current_url) and current_url == last_url
+        last_url = current_url or last_url
+
+        is_loading = False
+        if normalized_platform == "tiktok":
+            try:
+                from modules.platforms.tiktok.components._navigation import page_looks_loading
+
+                is_loading = await page_looks_loading(page)
+            except Exception:
+                is_loading = False
+
+        dom_ready = True
+        try:
+            dom_ready = bool(
+                await page.evaluate(
+                    """() => {
+                      try {
+                        if (!document || !document.body) return false;
+                        const ready = document.readyState;
+                        if (ready !== "interactive" && ready !== "complete") return false;
+                        const rect = document.body.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0;
+                      } catch (error) {
+                        return false;
+                      }
+                    }"""
+                )
+            )
+        except Exception:
+            dom_ready = bool(current_url)
+
+        if current_url and same_url and dom_ready and not is_loading:
+            stable_hits += 1
+            if stable_hits >= stable_cycles:
+                return
+        else:
+            stable_hits = 0
+
+        waited += poll_ms
+        if hasattr(page, "wait_for_timeout"):
+            maybe_wait = page.wait_for_timeout(poll_ms)
+            if inspect.isawaitable(maybe_wait):
+                await maybe_wait
+        else:
+            await asyncio.sleep(poll_ms / 1000)
+
+
 async def prime_runtime_page_for_login_gate(
     *,
     page: Any,
     platform: str,
     account: Optional[Dict[str, Any]],
 ) -> None:
+    if not hasattr(page, "goto"):
+        return
+
     current_url = str(getattr(page, "url", "") or "").strip().lower()
     if current_url and current_url != "about:blank":
+        await wait_for_runtime_page_stable(page=page, platform=platform)
         return
 
     login_url = str(
@@ -978,7 +1047,7 @@ async def prime_runtime_page_for_login_gate(
     if not login_url:
         return
     await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-    await _wait_for_probe_page_ready(page, settle_ms=800)
+    await wait_for_runtime_page_stable(page=page, platform=platform)
 
 
 async def check_login_gate_ready(

@@ -739,15 +739,6 @@ class TiktokLogin(LoginComponent):
             if not password:
                 return LoginResult(success=False, message="password is required in account")
 
-            current_url = str(getattr(page, "url", "") or "").strip()
-            if "/account/login" in current_url.lower():
-                self._log_url_event("login_surface_reuse", current_url)
-            else:
-                self._log_url_event("goto_login_before", current_url)
-                await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-                self._log_url_event("goto_login_after", getattr(page, "url", ""))
-                await page.wait_for_timeout(800)
-
             if reused_session:
                 redirected = await self._wait_for_reused_session_redirect(page)
                 if redirected:
@@ -768,6 +759,24 @@ class TiktokLogin(LoginComponent):
                         login_error = await self._find_visible_login_error(page)
                         seller_error = await self._find_visible_text(page, self._seller_context_error_texts())
                         return LoginResult(success=False, message=login_error or seller_error or "login failed")
+
+            current_url = str(getattr(page, "url", "") or "").strip()
+            if "/account/login" in current_url.lower():
+                self._log_url_event("login_surface_reuse", current_url)
+            elif current_url.lower() != "about:blank":
+                if self._login_looks_successful(current_url):
+                    self._log_url_event("login_short_circuit_success", current_url)
+                    await self._cleanup_after_login(page)
+                    return LoginResult(success=True, message="ok")
+                self._log_url_event("goto_login_before", current_url)
+                await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+                self._log_url_event("goto_login_after", getattr(page, "url", ""))
+                await page.wait_for_timeout(800)
+            else:
+                self._log_url_event("goto_login_before", current_url)
+                await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+                self._log_url_event("goto_login_after", getattr(page, "url", ""))
+                await page.wait_for_timeout(800)
 
             await self._wait_for_login_surface_ready(page)
 

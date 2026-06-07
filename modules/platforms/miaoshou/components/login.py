@@ -124,6 +124,23 @@ class MiaoshouLogin(LoginComponent):
             waited += poll_ms
         return False
 
+    async def _wait_for_reused_session_settle(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 8000,
+        poll_ms: int = 250,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            if await self._homepage_ready(page):
+                return True
+            if self._login_looks_successful(str(getattr(page, "url", "") or "")):
+                return True
+            await asyncio.sleep(poll_ms / 1000)
+            waited += poll_ms
+        return False
+
     async def _wait_for_login_outcome(
         self,
         page: Any,
@@ -191,6 +208,9 @@ class MiaoshouLogin(LoginComponent):
         if await self._homepage_ready(page):
             await self._cleanup_after_login(page)
             return LoginResult(success=True, message="already logged in")
+        if reused_session and await self._wait_for_reused_session_settle(page):
+            await self._cleanup_after_login(page)
+            return LoginResult(success=True, message="already logged in")
 
         resumed_code = (params.get("captcha_code") or params.get("otp") or "").strip()
         if resumed_code:
@@ -198,7 +218,9 @@ class MiaoshouLogin(LoginComponent):
 
         login_url = acc.get("login_url") or get_platform_login_entry(self.platform)
         try:
-            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+            current_url = str(getattr(page, "url", "") or "").strip().lower()
+            if current_url == "about:blank" or "/login" not in current_url:
+                await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
             return LoginResult(success=False, message=f"failed to open login page: {e}")
 

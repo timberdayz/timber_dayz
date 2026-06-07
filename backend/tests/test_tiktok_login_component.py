@@ -256,7 +256,7 @@ async def test_tiktok_login_reused_session_observes_redirect_before_touching_log
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     component = TiktokLogin(_ctx(config={"reused_session": True, "params": {}}))
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
     calls: list[str] = []
 
     async def _wait_reused_session_redirect(current_page) -> bool:
@@ -277,7 +277,8 @@ async def test_tiktok_login_reused_session_observes_redirect_before_touching_log
     result = await component.run(page)
 
     assert result.success is True
-    assert calls == ["wait_reused_session_redirect", "wait_reused_session_bootstrap"]
+    assert calls == []
+    assert page.goto_calls == []
 
 
 @pytest.mark.asyncio

@@ -762,7 +762,7 @@ class CollectionExecutorV2:
             has_persistent_profile = bool(
                 session_owner_id and runtime_session.runtime_profile_exists(platform, session_owner_id)
             )
-            if effective_storage_state is None and session_owner_id:
+            if not has_persistent_profile and effective_storage_state is None and session_owner_id:
                 session_candidate = await runtime_session.load_runtime_session_candidate(
                     platform=platform,
                     session_owner_id=session_owner_id,
@@ -806,7 +806,7 @@ class CollectionExecutorV2:
             )
             return bundle
 
-        if effective_storage_state is None and session_owner_id:
+        if normalized_mode != "persistent_profile" and effective_storage_state is None and session_owner_id:
             session_candidate = await runtime_session.load_runtime_session_candidate(
                 platform=platform,
                 session_owner_id=session_owner_id,
@@ -944,6 +944,7 @@ class CollectionExecutorV2:
         await self._check_cancelled(task_id)
         if str(platform or "").strip().lower() != "tiktok":
             await self.popup_handler.close_popups(page, platform=platform)
+        await self._prime_runtime_page_for_login_gate(page, platform, account)
 
         login_success = False
         while True:
@@ -2280,17 +2281,11 @@ class CollectionExecutorV2:
         return verification_input_mode(verification_type) == "manual_continue"
 
     async def _prime_runtime_page_for_login_gate(self, page: Any, platform: str, account: Dict[str, Any]) -> None:
-        current_url = str(getattr(page, "url", "") or "").strip().lower()
-        if current_url and current_url != "about:blank":
-            return
-
-        login_url = get_platform_login_entry(platform)
-        if not login_url:
-            return
-
-        await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-        if hasattr(page, "wait_for_timeout"):
-            await page.wait_for_timeout(800)
+        await runtime_session.prime_runtime_page_for_login_gate(
+            page=page,
+            platform=platform,
+            account=account,
+        )
 
     async def _recreate_runtime_page_with_saved_session(
         self,

@@ -361,6 +361,17 @@ class ShopeeLogin(LoginComponent):
         await page.screenshot(path=screenshot_path, timeout=5000)
         raise VerificationRequiredError("manual_intervention", screenshot_path)
 
+    def _requires_manual_intervention_url(self, url: str) -> bool:
+        current = str(url or "").strip().lower()
+        if not current:
+            return False
+        return any(
+            marker in current
+            for marker in (
+                "/portal/merchant/setting",
+            )
+        )
+
     async def _wait_for_post_login_outcome(
         self,
         page: Any,
@@ -378,6 +389,8 @@ class ShopeeLogin(LoginComponent):
                 return login_error
 
             current_url = str(getattr(page, "url", "") or "")
+            if phase == "post_otp_submit" and self._requires_manual_intervention_url(current_url):
+                return "manual_intervention"
             if self._homepage_looks_ready(current_url):
                 if await self._homepage_dom_looks_ready(page):
                     homepage_stable_hits += 1
@@ -449,6 +462,7 @@ class ShopeeLogin(LoginComponent):
         current_url = str(getattr(page, "url", "") or "")
         otp_value = str(params.get("captcha_code") or params.get("otp") or "").strip()
         manual_completed = bool(params.get("manual_completed"))
+        reused_session = bool(params.get("reused_session") or config.get("reused_session"))
 
         if self._login_looks_successful(current_url):
             await self._cleanup_after_login(page)
@@ -497,16 +511,21 @@ class ShopeeLogin(LoginComponent):
             if not username or not password:
                 return LoginResult(success=False, message="username and password are required in account")
 
-            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-            await page.wait_for_timeout(800)
-
-            if self._login_looks_successful(str(getattr(page, "url", "") or "")):
-                await self._cleanup_after_login(page)
-                return LoginResult(success=True, message="ok")
-
-            if params.get("reused_session"):
+            if reused_session:
                 redirected = await self._wait_for_reused_session_redirect(page)
                 if redirected:
+                    await self._cleanup_after_login(page)
+                    return LoginResult(success=True, message="ok")
+            current_url = str(getattr(page, "url", "") or "").strip().lower()
+            if current_url != "about:blank" and "/account/signin" not in current_url:
+                if self._login_looks_successful(str(getattr(page, "url", "") or "")):
+                    await self._cleanup_after_login(page)
+                    return LoginResult(success=True, message="ok")
+            if "/account/signin" not in current_url:
+                await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+                await page.wait_for_timeout(800)
+
+                if self._login_looks_successful(str(getattr(page, "url", "") or "")):
                     await self._cleanup_after_login(page)
                     return LoginResult(success=True, message="ok")
 

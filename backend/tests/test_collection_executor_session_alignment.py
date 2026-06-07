@@ -91,8 +91,22 @@ async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
         storage_open,
     )
     monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
-        AsyncMock(return_value={"cookies": [], "origins": []}),
+        "modules.apps.collection_center.runtime_session.load_runtime_session_candidate",
+        AsyncMock(
+            return_value=type(
+                "Candidate",
+                (),
+                {
+                    "storage_state": {"cookies": [], "origins": []},
+                    "metadata": {},
+                    "manual_seeded": False,
+                },
+            )()
+        ),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.runtime_profile_exists",
+        lambda platform, session_owner_id: True,
     )
 
     result = await executor._open_runtime_bundle(
@@ -106,9 +120,9 @@ async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
         launch_kwargs={"headless": True},
     )
 
-    assert result == "storage-bundle"
-    storage_open.assert_awaited_once()
-    persistent_open.assert_not_awaited()
+    assert result == "persistent-bundle"
+    persistent_open.assert_awaited_once()
+    storage_open.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -155,6 +169,54 @@ async def test_shared_login_phase_does_not_probe_runtime_gate_before_login_compo
     assert page is not None
     executor._execute_python_component.assert_awaited_once()
     probe_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_shared_login_phase_primes_page_before_login_component(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._execute_python_component = AsyncMock(return_value=True)
+    executor._ensure_login_gate_ready = AsyncMock()
+
+    order: list[str] = []
+
+    async def _prime(page, platform, account):
+        order.append("prime")
+
+    async def _execute_component(*args, **kwargs):
+        order.append("login")
+        return True
+
+    monkeypatch.setattr(executor, "_prime_runtime_page_for_login_gate", _prime)
+    monkeypatch.setattr(executor, "_execute_python_component", _execute_component)
+
+    await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="shopee",
+        account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
+        params={"_runtime_session_mode": "persistent_profile"},
+        context=type(
+            "Ctx",
+            (),
+            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        )(),
+        browser=object(),
+        play_context=object(),
+        page=object(),
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="shopee",
+        session_account_id="main-1",
+        save_session_after_login=False,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    assert order == ["prime", "login"]
 
 
 @pytest.mark.asyncio

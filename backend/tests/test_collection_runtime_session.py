@@ -411,10 +411,10 @@ def test_formal_sequential_runtime_prefers_storage_state_when_available() -> Non
         parallel_mode=False,
     )
 
-    assert decision.mode == "storage_state_fanout"
-    assert decision.reason == "storage_state_available"
-    assert decision.used_storage_state is True
-    assert decision.used_persistent_profile is False
+    assert decision.mode == "persistent_profile"
+    assert decision.reason == "persistent_profile_available"
+    assert decision.used_storage_state is False
+    assert decision.used_persistent_profile is True
 
 
 def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tiktok_when_enabled(
@@ -432,9 +432,10 @@ def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tikt
         parallel_mode=False,
     )
 
-    assert decision.mode == "storage_state_fanout"
-    assert decision.used_persistent_profile is False
-    assert decision.used_storage_state is True
+    assert decision.mode == "persistent_profile"
+    assert decision.reason == "persistent_profile_available"
+    assert decision.used_persistent_profile is True
+    assert decision.used_storage_state is False
 
 
 def test_formal_sequential_runtime_prefers_manual_storage_state_when_available() -> None:
@@ -450,9 +451,10 @@ def test_formal_sequential_runtime_prefers_manual_storage_state_when_available()
         parallel_mode=False,
     )
 
-    assert decision.mode == "storage_state_fanout"
-    assert decision.reason == "manual_storage_state_available"
-    assert decision.used_storage_state is True
+    assert decision.mode == "persistent_profile"
+    assert decision.reason == "persistent_profile_available"
+    assert decision.used_storage_state is False
+    assert decision.used_persistent_profile is True
 
 
 def test_tiktok_storage_state_quality_gate_rejects_shallow_bootstrap_state() -> None:
