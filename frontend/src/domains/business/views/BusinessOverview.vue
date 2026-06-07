@@ -107,7 +107,7 @@
         </el-button>
       </div>
 
-      <!-- KPI 卡片（7 张等分一行：转化率、客流量、客单价、GMV、订单数、连带率、人效） -->
+      <!-- KPI 卡片 -->
       <div class="kpi-cards" v-loading="loadingKPI">
         <el-row :gutter="20" class="kpi-cards-row">
           <el-col
@@ -1587,38 +1587,8 @@ const kpiDatePickerValueFormat = computed(() => {
 })
 const kpiPlatform = ref('') // 默认全部平台
 
-// KPI数据（7 张卡片：转化率、客流量、客单价、GMV、订单数、连带率、人效）
+// KPI数据
 const kpiData = ref([
-  {
-    key: 'conversion_rate',
-    title: '转化率',
-    value: '--',
-    change: '--',
-    changeType: 'neutral',
-    changeIcon: 'TrendCharts',
-    icon: 'DataBoard',
-    iconClass: 'kpi-conversion'
-  },
-  {
-    key: 'traffic',
-    title: '客流量',
-    value: '--',
-    change: '--',
-    changeType: 'neutral',
-    changeIcon: 'TrendCharts',
-    icon: 'User',
-    iconClass: 'kpi-traffic'
-  },
-  {
-    key: 'average_order_value',
-    title: '客单价',
-    value: '--',
-    change: '--',
-    changeType: 'neutral',
-    changeIcon: 'TrendCharts',
-    icon: 'Money',
-    iconClass: 'kpi-aov'
-  },
   {
     key: 'gmv',
     title: 'GMV',
@@ -1640,6 +1610,86 @@ const kpiData = ref([
     iconClass: 'kpi-orders'
   },
   {
+    key: 'impressions',
+    title: '曝光量',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'View',
+    iconClass: 'kpi-traffic'
+  },
+  {
+    key: 'page_views',
+    title: '浏览量(PV)',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'DataAnalysis',
+    iconClass: 'kpi-traffic'
+  },
+  {
+    key: 'visitor_count',
+    title: '访客数(UV)',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'User',
+    iconClass: 'kpi-traffic'
+  },
+  {
+    key: 'visit_rate',
+    title: '访问率',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'TrendCharts',
+    iconClass: 'kpi-conversion'
+  },
+  {
+    key: 'browse_depth',
+    title: '浏览深度',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'DataLine',
+    iconClass: 'kpi-traffic'
+  },
+  {
+    key: 'uv_conversion_rate',
+    title: 'UV转化率',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'DataBoard',
+    iconClass: 'kpi-conversion'
+  },
+  {
+    key: 'pv_conversion_rate',
+    title: 'PV转化率',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'DataBoard',
+    iconClass: 'kpi-conversion'
+  },
+  {
+    key: 'avg_order_value',
+    title: '客单价',
+    value: '--',
+    change: '--',
+    changeType: 'neutral',
+    changeIcon: 'TrendCharts',
+    icon: 'Money',
+    iconClass: 'kpi-aov'
+  },
+  {
     key: 'attach_rate',
     title: '连带率',
     value: '--',
@@ -1651,7 +1701,7 @@ const kpiData = ref([
   },
   {
     key: 'labor_efficiency',
-    title: '人效',
+    title: '人效(当前)',
     value: '--',
     change: '--',
     changeType: 'neutral',
@@ -2118,6 +2168,55 @@ const getChangeIcon = (change) => {
   return 'Minus'
 }
 
+const updateKpiCard = (key, value, formatter, change) => {
+  const card = kpiData.value.find((item) => item.key === key)
+  if (!card) return
+  card.value = value != null && value !== '' ? formatter(Number(value)) : '--'
+  card.change = change == null ? '--' : `${Number(change) > 0 ? '+' : ''}${Number(change).toFixed(1)}%`
+  card.changeType = getChangeType(change)
+  card.changeIcon = getChangeIcon(change)
+}
+
+const applyKpiCards = (data = {}) => {
+  updateKpiCard('gmv', data.gmv, (n) => formatCurrency(n), data.gmv_change)
+  updateKpiCard('order_count', data.order_count, (n) => formatInteger(n), data.order_count_change)
+  updateKpiCard('impressions', data.impressions, (n) => formatInteger(n), data.impressions_change)
+  updateKpiCard('page_views', data.page_views, (n) => formatInteger(n), data.page_views_change)
+  updateKpiCard('visitor_count', data.visitor_count, (n) => formatInteger(n), data.visitor_count_change)
+  updateKpiCard('visit_rate', data.visit_rate, (n) => `${n.toFixed(2)}%`, data.visit_rate_change)
+  updateKpiCard('browse_depth', data.browse_depth, (n) => n.toFixed(2), data.browse_depth_change)
+  updateKpiCard(
+    'uv_conversion_rate',
+    data.uv_conversion_rate ?? data.conversion_rate,
+    (n) => `${n.toFixed(2)}%`,
+    data.uv_conversion_rate_change ?? data.conversion_rate_change
+  )
+  updateKpiCard(
+    'pv_conversion_rate',
+    data.pv_conversion_rate,
+    (n) => `${n.toFixed(2)}%`,
+    data.pv_conversion_rate_change
+  )
+  updateKpiCard(
+    'avg_order_value',
+    data.avg_order_value ?? data.average_order_value?.current,
+    (n) => formatCurrency(n),
+    data.avg_order_value_change
+  )
+  updateKpiCard(
+    'attach_rate',
+    data.attach_rate ?? data.attach_rate_obj?.current,
+    (n) => n.toFixed(2),
+    data.attach_rate_change ?? data.attach_rate_obj?.change
+  )
+  updateKpiCard(
+    'labor_efficiency',
+    data.labor_efficiency ?? data.labor_efficiency_obj?.current,
+    (n) => formatCurrency(n),
+    data.labor_efficiency_change ?? data.labor_efficiency_obj?.change
+  )
+}
+
 // 获取完成率颜色
 const getAchievementColor = (rate) => {
   if (rate >= 1.0) return '#67C23A'
@@ -2229,56 +2328,7 @@ const loadKPIData = async () => {
 
     if (response) {
       const data = response
-      const formatChange = (num) => {
-        if (num === null || num === undefined) return '--'
-        const n = Number(num)
-        if (Number.isNaN(n)) return '--'
-        return (n > 0 ? '+' : '') + n.toFixed(2) + '%'
-      }
-      const showValue = (v, formatter) =>
-        v != null && v !== '' ? formatter(Number(v)) : '--'
-
-      const conversionRate = data.conversion_rate
-      kpiData.value[0].value = showValue(conversionRate, (n) => `${n.toFixed(2)}%`)
-      kpiData.value[0].change = formatChange(data.conversion_rate_change)
-      kpiData.value[0].changeType = getChangeType(data.conversion_rate_change)
-      kpiData.value[0].changeIcon = getChangeIcon(data.conversion_rate_change)
-
-      const visitorCount = data.visitor_count ?? data.traffic?.current
-      kpiData.value[1].value = showValue(visitorCount, (n) => formatInteger(n))
-      kpiData.value[1].change = formatChange(data.visitor_count_change)
-      kpiData.value[1].changeType = getChangeType(data.visitor_count_change)
-      kpiData.value[1].changeIcon = getChangeIcon(data.visitor_count_change)
-
-      const avgOrderValue = data.avg_order_value ?? data.average_order_value?.current
-      kpiData.value[2].value = showValue(avgOrderValue, (n) => formatCurrency(n))
-      kpiData.value[2].change = formatChange(data.avg_order_value_change)
-      kpiData.value[2].changeType = getChangeType(data.avg_order_value_change)
-      kpiData.value[2].changeIcon = getChangeIcon(data.avg_order_value_change)
-
-      const gmv = data.gmv
-      kpiData.value[3].value = showValue(gmv, (n) => formatCurrency(n))
-      kpiData.value[3].change = formatChange(data.gmv_change)
-      kpiData.value[3].changeType = getChangeType(data.gmv_change)
-      kpiData.value[3].changeIcon = getChangeIcon(data.gmv_change)
-
-      const orderCount = data.order_count
-      kpiData.value[4].value = showValue(orderCount, (n) => formatInteger(n))
-      kpiData.value[4].change = formatChange(data.order_count_change)
-      kpiData.value[4].changeType = getChangeType(data.order_count_change)
-      kpiData.value[4].changeIcon = getChangeIcon(data.order_count_change)
-
-      const attachRate = data.attach_rate ?? data.attach_rate_obj?.current
-      kpiData.value[5].value = showValue(attachRate, (n) => n.toFixed(2))
-      kpiData.value[5].change = formatChange(data.attach_rate_change ?? data.attach_rate_obj?.change)
-      kpiData.value[5].changeType = getChangeType(data.attach_rate_change ?? data.attach_rate_obj?.change)
-      kpiData.value[5].changeIcon = getChangeIcon(data.attach_rate_change ?? data.attach_rate_obj?.change)
-
-      const laborEfficiency = data.labor_efficiency ?? data.labor_efficiency_obj?.current
-      kpiData.value[6].value = showValue(laborEfficiency, (n) => formatCurrency(n))
-      kpiData.value[6].change = formatChange(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
-      kpiData.value[6].changeType = getChangeType(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
-      kpiData.value[6].changeIcon = getChangeIcon(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
+      applyKpiCards(data)
     }
   } catch (error) {
     console.error('??KPI????:', error)
@@ -2355,10 +2405,10 @@ const updateComparisonTable = () => {
     todayClass: ''
   })
 
-  // 客流量
+  // 流量
   const traffic = getMetric(metrics, 'traffic')
   tableData.push({
-    metric: '客流量',
+    metric: '流量',
     today: traffic.today != null ? formatInteger(traffic.today) : '--',
     yesterday: traffic.yesterday != null ? formatInteger(traffic.yesterday) : '--',
     average: traffic.average != null ? formatInteger(traffic.average) : '--',
@@ -2727,56 +2777,7 @@ const loadCriticalTierBootstrap = async () => {
 
     const applyKpiPayload = (data) => {
       if (!data) return
-      const formatChange = (num) => {
-        if (num === null || num === undefined) return '--'
-        const n = Number(num)
-        if (Number.isNaN(n)) return '--'
-        return (n > 0 ? '+' : '') + n.toFixed(2) + '%'
-      }
-      const showValue = (v, formatter) =>
-        v != null && v !== '' ? formatter(Number(v)) : '--'
-
-      const conversionRate = data.conversion_rate
-      kpiData.value[0].value = showValue(conversionRate, (n) => `${n.toFixed(2)}%`)
-      kpiData.value[0].change = formatChange(data.conversion_rate_change)
-      kpiData.value[0].changeType = getChangeType(data.conversion_rate_change)
-      kpiData.value[0].changeIcon = getChangeIcon(data.conversion_rate_change)
-
-      const visitorCount = data.visitor_count ?? data.traffic?.current
-      kpiData.value[1].value = showValue(visitorCount, (n) => formatInteger(n))
-      kpiData.value[1].change = formatChange(data.visitor_count_change)
-      kpiData.value[1].changeType = getChangeType(data.visitor_count_change)
-      kpiData.value[1].changeIcon = getChangeIcon(data.visitor_count_change)
-
-      const avgOrderValue = data.avg_order_value ?? data.average_order_value?.current
-      kpiData.value[2].value = showValue(avgOrderValue, (n) => formatCurrency(n))
-      kpiData.value[2].change = formatChange(data.avg_order_value_change)
-      kpiData.value[2].changeType = getChangeType(data.avg_order_value_change)
-      kpiData.value[2].changeIcon = getChangeIcon(data.avg_order_value_change)
-
-      const gmv = data.gmv
-      kpiData.value[3].value = showValue(gmv, (n) => formatCurrency(n))
-      kpiData.value[3].change = formatChange(data.gmv_change)
-      kpiData.value[3].changeType = getChangeType(data.gmv_change)
-      kpiData.value[3].changeIcon = getChangeIcon(data.gmv_change)
-
-      const orderCount = data.order_count
-      kpiData.value[4].value = showValue(orderCount, (n) => formatInteger(n))
-      kpiData.value[4].change = formatChange(data.order_count_change)
-      kpiData.value[4].changeType = getChangeType(data.order_count_change)
-      kpiData.value[4].changeIcon = getChangeIcon(data.order_count_change)
-
-      const attachRate = data.attach_rate ?? data.attach_rate_obj?.current
-      kpiData.value[5].value = showValue(attachRate, (n) => n.toFixed(2))
-      kpiData.value[5].change = formatChange(data.attach_rate_change ?? data.attach_rate_obj?.change)
-      kpiData.value[5].changeType = getChangeType(data.attach_rate_change ?? data.attach_rate_obj?.change)
-      kpiData.value[5].changeIcon = getChangeIcon(data.attach_rate_change ?? data.attach_rate_obj?.change)
-
-      const laborEfficiency = data.labor_efficiency ?? data.labor_efficiency_obj?.current
-      kpiData.value[6].value = showValue(laborEfficiency, (n) => formatCurrency(n))
-      kpiData.value[6].change = formatChange(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
-      kpiData.value[6].changeType = getChangeType(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
-      kpiData.value[6].changeIcon = getChangeIcon(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
+      applyKpiCards(data)
     }
 
     const applyComparisonPayload = (data) => {

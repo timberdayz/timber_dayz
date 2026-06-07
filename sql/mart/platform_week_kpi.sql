@@ -21,7 +21,8 @@ weekly_traffic AS (
         date_trunc('week', metric_date)::date AS period_week,
         platform_code,
         SUM(visitor_count) AS visitor_count,
-        SUM(page_views) AS page_views
+        SUM(page_views) AS page_views,
+        SUM(impressions) AS impressions
     FROM semantic.fact_analytics_atomic
     WHERE granularity = 'weekly'
     GROUP BY date_trunc('week', metric_date)::date, platform_code
@@ -33,13 +34,49 @@ SELECT
     o.order_count,
     t.visitor_count,
     t.page_views,
+    t.impressions,
     CASE
-        WHEN o.order_count IS NOT NULL AND COALESCE(t.page_views, t.visitor_count) IS NOT NULL AND COALESCE(t.page_views, t.visitor_count) > 0
-        THEN ROUND(o.order_count * 100.0 / COALESCE(t.page_views, t.visitor_count), 2)
-        WHEN o.order_count IS NOT NULL AND COALESCE(t.page_views, t.visitor_count) = 0 AND o.order_count = 0
+        WHEN o.order_count IS NOT NULL AND t.visitor_count IS NOT NULL AND t.visitor_count > 0
+        THEN ROUND(o.order_count * 100.0 / t.visitor_count, 2)
+        WHEN o.order_count IS NOT NULL AND t.visitor_count = 0 AND o.order_count = 0
         THEN 0
         ELSE NULL
     END AS conversion_rate,
+    CASE
+        WHEN o.order_count IS NOT NULL AND t.visitor_count IS NOT NULL AND t.visitor_count > 0
+        THEN ROUND(o.order_count * 100.0 / t.visitor_count, 2)
+        WHEN o.order_count IS NOT NULL AND t.visitor_count = 0 AND o.order_count = 0
+        THEN 0
+        ELSE NULL
+    END AS uv_conversion_rate,
+    CASE
+        WHEN o.order_count IS NOT NULL AND t.page_views IS NOT NULL AND t.page_views > 0
+        THEN ROUND(o.order_count * 100.0 / t.page_views, 2)
+        WHEN o.order_count IS NOT NULL AND t.page_views = 0 AND o.order_count = 0
+        THEN 0
+        ELSE NULL
+    END AS pv_conversion_rate,
+    CASE
+        WHEN t.visitor_count IS NOT NULL AND t.impressions IS NOT NULL AND t.impressions > 0
+        THEN ROUND(t.visitor_count * 100.0 / t.impressions, 2)
+        WHEN t.visitor_count = 0 AND t.impressions = 0
+        THEN 0
+        ELSE NULL
+    END AS visit_rate,
+    CASE
+        WHEN t.page_views IS NOT NULL AND t.visitor_count IS NOT NULL AND t.visitor_count > 0
+        THEN ROUND(t.page_views / t.visitor_count, 2)
+        WHEN t.page_views = 0 AND t.visitor_count = 0
+        THEN 0
+        ELSE NULL
+    END AS browse_depth,
+    CASE
+        WHEN o.order_count IS NOT NULL AND t.impressions IS NOT NULL AND t.impressions > 0
+        THEN ROUND(o.order_count * 100.0 / t.impressions, 2)
+        WHEN o.order_count = 0 AND t.impressions = 0
+        THEN 0
+        ELSE NULL
+    END AS exposure_order_rate,
     CASE
         WHEN o.gmv IS NOT NULL AND o.order_count > 0
         THEN ROUND(o.gmv::numeric / o.order_count, 2)

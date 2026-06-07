@@ -77,6 +77,67 @@ def test_reduce_business_overview_kpi_rows_multi_platform():
     assert result["attach_rate"] == 1.31
 
 
+def test_reduce_business_overview_kpi_rows_calculates_pv_uv_funnel_metrics():
+    result = reduce_business_overview_kpi_rows(
+        [
+            {
+                "gmv": 100,
+                "order_count": 10,
+                "visitor_count": 200,
+                "page_views": 500,
+                "impressions": 1000,
+                "total_items": 12,
+                "profit": 30,
+            },
+            {
+                "gmv": 60,
+                "order_count": 6,
+                "visitor_count": 100,
+                "page_views": 300,
+                "impressions": 500,
+                "total_items": 9,
+                "profit": 18,
+            },
+        ]
+    )
+
+    assert result["visitor_count"] == 300
+    assert result["page_views"] == 800
+    assert result["impressions"] == 1500
+    assert result["uv_conversion_rate"] == 5.33
+    assert result["pv_conversion_rate"] == 2.0
+    assert result["conversion_rate"] == 5.33
+    assert result["visit_rate"] == 20.0
+    assert result["browse_depth"] == 2.67
+    assert result["exposure_order_rate"] == 1.07
+
+
+def test_reduce_business_overview_kpi_rows_preserves_missing_pv_uv_funnel_inputs():
+    result = reduce_business_overview_kpi_rows(
+        [
+            {
+                "gmv": 100,
+                "order_count": 10,
+                "visitor_count": None,
+                "page_views": None,
+                "impressions": None,
+                "total_items": 12,
+                "profit": 30,
+            }
+        ]
+    )
+
+    assert result["visitor_count"] is None
+    assert result["page_views"] is None
+    assert result["impressions"] is None
+    assert result["uv_conversion_rate"] is None
+    assert result["pv_conversion_rate"] is None
+    assert result["conversion_rate"] is None
+    assert result["visit_rate"] is None
+    assert result["browse_depth"] is None
+    assert result["exposure_order_rate"] is None
+
+
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(monkeypatch):
     service = PostgresqlDashboardService()
@@ -2178,7 +2239,7 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     )
                     VALUES (
                         'shopee', 'shop-a', DATE '2026-03-01',
-                        '{"visitor_count":"200","page_views":"300"}'::jsonb,
+                        '{"visitor_count":"200","page_views":"300","impressions":"1000"}'::jsonb,
                         'month-analytics-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
                     """
@@ -2193,6 +2254,7 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     "semantic.shop_identity_resolution_candidates",
                     "semantic.fact_orders_monthly_atomic_mv",
                     "semantic.fact_orders_monthly_atomic",
+                    "semantic.fact_analytics_monthly_atomic_mv",
                     "semantic.fact_analytics_monthly_atomic",
                     "mart.shop_month_kpi",
                     "mart.platform_month_kpi",
@@ -2214,7 +2276,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
 
         assert result["gmv"] == 100
         assert result["order_count"] == 1
-        assert result["visitor_count"] == 300
+        assert result["visitor_count"] == 200
+        assert result["page_views"] == 300
+        assert result["uv_conversion_rate"] == 0.5
+        assert result["pv_conversion_rate"] == 0.33
         assert result["avg_order_value"] == 100
         assert result["attach_rate"] == 12
 
@@ -2223,7 +2288,7 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_monthly_kpi_uses_page_views_as_unified_traffic(monkeypatch):
+async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate(monkeypatch):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -2355,6 +2420,7 @@ async def test_postgresql_dashboard_service_monthly_kpi_uses_page_views_as_unifi
                 "semantic.shop_identity_resolution_candidates",
                 "semantic.fact_orders_monthly_atomic_mv",
                 "semantic.fact_orders_monthly_atomic",
+                "semantic.fact_analytics_monthly_atomic_mv",
                 "semantic.fact_analytics_monthly_atomic",
                 "mart.platform_month_kpi",
                 "api.business_overview_kpi_module",
@@ -2375,15 +2441,20 @@ async def test_postgresql_dashboard_service_monthly_kpi_uses_page_views_as_unifi
 
         assert result["gmv"] == 300
         assert result["order_count"] == 2
-        assert result["visitor_count"] == 380
-        assert result["conversion_rate"] == 0.53
+        assert result["visitor_count"] is None
+        assert result["page_views"] == 380
+        assert result["impressions"] is None
+        assert result["conversion_rate"] is None
+        assert result["uv_conversion_rate"] is None
+        assert result["pv_conversion_rate"] == 0.53
+        assert result["visit_rate"] is None
 
         await engine.dispose()
 
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_business_overview_kpi_module_uses_page_views_for_conversion_rate():
+async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -2434,6 +2505,7 @@ async def test_business_overview_kpi_module_uses_page_views_for_conversion_rate(
                     CREATE TABLE IF NOT EXISTS core.shop_account_aliases (
                         id SERIAL PRIMARY KEY,
                         shop_account_id INTEGER,
+                        platform VARCHAR(50),
                         alias_value VARCHAR(256),
                         alias_normalized VARCHAR(256),
                         is_active BOOLEAN DEFAULT TRUE,
@@ -2485,7 +2557,7 @@ async def test_business_overview_kpi_module_uses_page_views_for_conversion_rate(
                         platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
                     ) VALUES (
                         'shopee', 'shop-a', DATE '2026-03-01',
-                        '{"visitor_count":"200","page_views":"300"}'::jsonb,
+                        '{"visitor_count":"200","page_views":"300","impressions":"1000"}'::jsonb,
                         'month-traffic-1', TIMESTAMP '2026-03-02 10:00:00'
                     )
                     """
@@ -2498,6 +2570,7 @@ async def test_business_overview_kpi_module_uses_page_views_for_conversion_rate(
                 "semantic.shop_identity_resolution_candidates",
                 "semantic.fact_orders_monthly_atomic_mv",
                 "semantic.fact_orders_monthly_atomic",
+                "semantic.fact_analytics_monthly_atomic_mv",
                 "semantic.fact_analytics_monthly_atomic",
                 "mart.platform_month_kpi",
                 "api.business_overview_kpi_module",
@@ -2509,7 +2582,7 @@ async def test_business_overview_kpi_module_uses_page_views_for_conversion_rate(
                 await session.execute(
                     text(
                         """
-                        SELECT visitor_count, conversion_rate
+                        SELECT visitor_count, page_views, impressions, conversion_rate, uv_conversion_rate, pv_conversion_rate, visit_rate
                         FROM api.business_overview_kpi_module
                         WHERE period_month = DATE '2026-03-01'
                           AND platform_code = 'shopee'
@@ -2518,8 +2591,13 @@ async def test_business_overview_kpi_module_uses_page_views_for_conversion_rate(
                 )
             ).fetchone()
 
-            assert row[0] == 300
-            assert float(row[1]) == 0.33
+            assert row[0] == 200
+            assert row[1] == 300
+            assert row[2] == 1000
+            assert float(row[3]) == 0.5
+            assert float(row[4]) == 0.5
+            assert float(row[5]) == 0.33
+            assert float(row[6]) == 20.0
 
         await engine.dispose()
 
