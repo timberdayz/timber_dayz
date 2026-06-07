@@ -698,6 +698,30 @@ export default {
     })
   },
 
+  async getTemplateUpdatePreview(templateId, { fileId, headerRow } = {}) {
+    if (!templateId) {
+      throw new Error('templateId涓哄繀濉」')
+    }
+    return await this._get(`/field-mapping/templates/${templateId}/update-preview`, {
+      params: {
+        file_id: fileId || null,
+        header_row: headerRow === undefined ? null : headerRow
+      }
+    })
+  },
+
+  async getTemplateUpdateBindings(templateId, { fileId, headerRow } = {}) {
+    if (!templateId) {
+      throw new Error('templateId涓哄繀濉」')
+    }
+    return await this._get(`/field-mapping/templates/${templateId}/update-bindings`, {
+      params: {
+        file_id: fileId || null,
+        header_row: headerRow === undefined ? null : headerRow
+      }
+    })
+  },
+
   // 保存模板
   // ⭐ v4.6.0 DSS架构：使用新API路径和header_columns参数
   // ⭐ v4.14.0新增：添加deduplication_fields参数（必填）

@@ -175,6 +175,35 @@ class TemplateUpdateContextResponse(BaseModel):
     message: str
 
 
+class TemplateUpdatePreviewData(BaseModel):
+    current_file: TemplateCurrentFileSummary
+    current_header_columns: List[str] = Field(default_factory=list)
+    current_header_row: int = 0
+    sample_data: Dict[str, Any] = Field(default_factory=dict)
+    preview_data: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class TemplateUpdatePreviewResponse(BaseModel):
+    success: bool = True
+    data: TemplateUpdatePreviewData
+    message: str
+
+
+class TemplateUpdateBindingsData(BaseModel):
+    current_file: TemplateCurrentFileSummary
+    current_header_columns: List[str] = Field(default_factory=list)
+    current_header_row: int = 0
+    current_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    required_semantic_keys: List[str] = Field(default_factory=list)
+    hash_participating_semantic_keys: List[str] = Field(default_factory=list)
+
+
+class TemplateUpdateBindingsResponse(BaseModel):
+    success: bool = True
+    data: TemplateUpdateBindingsData
+    message: str
+
+
 class TemplateVariantCreateContextData(BaseModel):
     resolved_object_type: str = "variant_create"
     family: TemplateFamilyListItem

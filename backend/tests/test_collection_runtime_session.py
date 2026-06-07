@@ -97,7 +97,7 @@ async def test_open_persistent_runtime_bundle_uses_launch_persistent_context(
     assert launch_kwargs["user_data_dir"] == str(profile_path)
     assert launch_kwargs["accept_downloads"] is True
     assert "locale" not in launch_kwargs
-    assert "viewport" not in launch_kwargs
+    assert launch_kwargs["viewport"] == {"width": 1920, "height": 1080}
 
 
 @pytest.mark.asyncio
@@ -248,10 +248,10 @@ async def test_open_persistent_runtime_bundle_strips_runtime_context_overrides_f
     )
 
     assert launch_kwargs["accept_downloads"] is True
+    assert launch_kwargs["viewport"] == {"width": 1920, "height": 1080}
     assert "locale" not in launch_kwargs
     assert "timezone_id" not in launch_kwargs
     assert "user_agent" not in launch_kwargs
-    assert "viewport" not in launch_kwargs
     assert "extra_http_headers" not in launch_kwargs
 
 

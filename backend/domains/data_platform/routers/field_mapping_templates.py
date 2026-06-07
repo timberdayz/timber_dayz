@@ -40,6 +40,10 @@ from backend.schemas.field_mapping_template import (
     TemplateSaveResponse,
     TemplateUpdateContextData,
     TemplateUpdateContextResponse,
+    TemplateUpdatePreviewData,
+    TemplateUpdatePreviewResponse,
+    TemplateUpdateBindingsData,
+    TemplateUpdateBindingsResponse,
     TemplateVariantCreateContextData,
     TemplateVariantCreateContextResponse,
     TemplateVersionVariantsData,
@@ -117,6 +121,77 @@ async def _load_file_update_preview(
         "sample_data": sample_data,
         "preview_data": df.head(20).to_dict("records"),
     }
+
+
+async def _load_file_update_summary(
+    db: AsyncSession,
+    file_id: int,
+    header_row: int,
+) -> Dict[str, Any]:
+    """Load lightweight header context for first-paint template update review."""
+    import asyncio
+
+    from backend.services.excel_parser import ExcelParser
+    from modules.core.db import CatalogFile
+    from modules.core.path_manager import to_absolute_path
+
+    file_result = await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))
+    catalog_file = file_result.scalar_one_or_none()
+
+    if not catalog_file:
+        raise ValueError(f"file_id={file_id} 瀵瑰簲鐨勬枃浠朵笉瀛樺湪")
+
+    file_path = to_absolute_path(catalog_file.file_path)
+    loop = asyncio.get_running_loop()
+    file_exists = await loop.run_in_executor(None, lambda: file_path.exists())
+    if not file_exists:
+        raise ValueError(f"鏂囦欢涓嶅瓨鍦? {catalog_file.file_path}")
+
+    # First-paint only needs headers plus one sample row for lightweight semantic hints.
+    df = await loop.run_in_executor(None, ExcelParser.read_excel, file_path, header_row, 1)
+    df.columns = [str(col).strip() for col in df.columns]
+    df = df.dropna(how="all").fillna("")
+
+    header_columns = df.columns.tolist()
+    sample_data: Dict[str, str] = {}
+    if len(df) > 0:
+        first_row = df.iloc[0]
+        for col in header_columns:
+            sample_data[col] = str(first_row[col]) if first_row[col] is not None else ""
+
+    return {
+        "file": {
+            "id": catalog_file.id,
+            "file_name": catalog_file.file_name,
+            "platform": catalog_file.platform_code,
+            "domain": catalog_file.data_domain,
+            "granularity": catalog_file.granularity,
+            "sub_domain": catalog_file.sub_domain,
+        },
+        "header_columns": header_columns,
+        "header_bindings": _normalize_header_bindings(None, header_columns, sample_data),
+    }
+
+
+def _filter_bindings_for_manual_review(
+    header_bindings: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    bindings = list(header_bindings or [])
+    if not bindings:
+        return []
+
+    semantic_counts: dict[str, int] = {}
+    for binding in bindings:
+        semantic_key = normalize_semantic_key(binding.get("semantic_key"))
+        if semantic_key:
+            semantic_counts[semantic_key] = semantic_counts.get(semantic_key, 0) + 1
+
+    filtered: list[dict[str, Any]] = []
+    for binding in bindings:
+        semantic_key = normalize_semantic_key(binding.get("semantic_key"))
+        if not semantic_key or semantic_counts.get(semantic_key, 0) > 1:
+            filtered.append(binding)
+    return filtered
 
 
 def _split_existing_deduplication_fields(
@@ -807,9 +882,9 @@ async def get_template_update_context(
                 }
             )
         elif file_id is not None:
-            file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
-            current_header_columns = file_preview["header_columns"]
-            current_header_bindings = file_preview.get("header_bindings", [])
+            file_summary = await _load_file_update_summary(db, file_id, effective_header_row)
+            current_header_columns = file_summary["header_columns"]
+            current_header_bindings = file_summary.get("header_bindings", [])
             matcher = get_template_matcher(db)
             header_changes = await matcher.detect_header_changes(
                 template_id,
@@ -830,12 +905,12 @@ async def get_template_update_context(
             )
             response_data.update(
                 {
-                    "current_file": file_preview["file"],
+                    "current_file": file_summary["file"],
                     "current_header_columns": current_header_columns,
-                    "current_header_bindings": current_header_bindings,
+                    "current_header_bindings": _filter_bindings_for_manual_review(current_header_bindings),
                     "current_header_row": effective_header_row,
-                    "sample_data": file_preview.get("sample_data", {}),
-                    "preview_data": file_preview.get("preview_data", []),
+                    "sample_data": {},
+                    "preview_data": [],
                     "header_changes": header_changes,
                     "match_rate": header_changes.get("match_rate", 0.0),
                     "added_fields": added_fields,
@@ -871,6 +946,133 @@ async def get_template_update_context(
             recovery_suggestion="请检查数据库连接或候选文件状态",
             status_code=500,
         )
+
+
+@router.get(
+    "/templates/{template_id}/update-preview",
+    response_model=TemplateUpdatePreviewResponse,
+)
+async def get_template_update_preview(
+    template_id: int,
+    file_id: int = Query(..., description="鐢ㄤ簬鏇存柊妯℃澘鐨勫€欓€夋枃浠禝D"),
+    header_row: Optional[int] = Query(None, description="鍙€夎鐩栬〃澶磋"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        template_result = await db.execute(
+            select(FieldMappingTemplate).where(FieldMappingTemplate.id == template_id)
+        )
+        template = template_result.scalar_one_or_none()
+        if not template:
+            return error_response(
+                code=ErrorCode.NOT_FOUND,
+                message="妯℃澘涓嶅瓨鍦?",
+                error_type=get_error_type(ErrorCode.NOT_FOUND),
+                detail=f"妯℃澘ID {template_id} 涓嶅瓨鍦?",
+                recovery_suggestion="璇锋鏌ユā鏉縄D鏄惁姝ｇ‘",
+                status_code=404,
+            )
+
+        effective_header_row = header_row if header_row is not None else (template.header_row or 0)
+        file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
+        return TemplateUpdatePreviewResponse(
+            success=True,
+            data=TemplateUpdatePreviewData(
+                current_file=file_preview["file"],
+                current_header_columns=file_preview.get("header_columns", []),
+                current_header_row=effective_header_row,
+                sample_data=file_preview.get("sample_data", {}),
+                preview_data=file_preview.get("preview_data", []),
+            ),
+            message="鑾峰彇妯℃澘鏇存柊棰勮鎴愬姛",
+        )
+    except ValueError as exc:
+        logger.error(f"鑾峰彇妯℃澘鏇存柊棰勮澶辫触(鍙傛暟閿欒): {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATA_VALIDATION_FAILED,
+            message="鑾峰彇妯℃澘鏇存柊棰勮澶辫触",
+            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+            detail=str(exc),
+            recovery_suggestion="璇锋鏌ユā鏉垮拰鍊欓€夋枃浠舵槸鍚﹀瓨鍦?",
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"鑾峰彇妯℃澘鏇存柊棰勮澶辫触: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="鑾峰彇妯℃澘鏇存柊棰勮澶辫触",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="璇锋鏌ユ暟鎹簱杩炴帴鎴栧€欓€夋枃浠剁姸鎬?",
+            status_code=500,
+        )
+
+
+@router.get(
+    "/templates/{template_id}/update-bindings",
+    response_model=TemplateUpdateBindingsResponse,
+)
+async def get_template_update_bindings(
+    template_id: int,
+    file_id: int = Query(..., description="鐢ㄤ簬鏇存柊妯℃澘鐨勫€欓€夋枃浠禝D"),
+    header_row: Optional[int] = Query(None, description="鍙€夎鐩栬〃澶磋"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        template_result = await db.execute(
+            select(FieldMappingTemplate).where(FieldMappingTemplate.id == template_id)
+        )
+        template = template_result.scalar_one_or_none()
+        if not template:
+            return error_response(
+                code=ErrorCode.NOT_FOUND,
+                message="妯℃澘涓嶅瓨鍦?",
+                error_type=get_error_type(ErrorCode.NOT_FOUND),
+                detail=f"妯℃澘ID {template_id} 涓嶅瓨鍦?",
+                recovery_suggestion="璇锋鏌ユā鏉縄D鏄惁姝ｇ‘",
+                status_code=404,
+            )
+
+        effective_header_row = header_row if header_row is not None else (template.header_row or 0)
+        file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
+        current_header_bindings = file_preview.get("header_bindings", [])
+        required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
+            template.deduplication_fields or [],
+            current_header_bindings,
+        )
+        return TemplateUpdateBindingsResponse(
+            success=True,
+            data=TemplateUpdateBindingsData(
+                current_file=file_preview["file"],
+                current_header_columns=file_preview.get("header_columns", []),
+                current_header_row=effective_header_row,
+                current_header_bindings=current_header_bindings,
+                required_semantic_keys=required_semantic_keys,
+                hash_participating_semantic_keys=hash_participating_semantic_keys,
+            ),
+            message="鑾峰彇妯℃澘鏇存柊璇箟缁戝畾鎴愬姛",
+        )
+    except ValueError as exc:
+        logger.error(f"鑾峰彇妯℃澘鏇存柊璇箟缁戝畾澶辫触(鍙傛暟閿欒): {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATA_VALIDATION_FAILED,
+            message="鑾峰彇妯℃澘鏇存柊璇箟缁戝畾澶辫触",
+            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+            detail=str(exc),
+            recovery_suggestion="璇锋鏌ユā鏉垮拰鍊欓€夋枃浠舵槸鍚﹀瓨鍦?",
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"鑾峰彇妯℃澘鏇存柊璇箟缁戝畾澶辫触: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="鑾峰彇妯℃澘鏇存柊璇箟缁戝畾澶辫触",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="璇锋鏌ユ暟鎹簱杩炴帴鎴栧€欓€夋枃浠剁姸鎬?",
+            status_code=500,
+        )
+
 
 @router.get(
     "/template-families/{family_id}/variant-create-context",

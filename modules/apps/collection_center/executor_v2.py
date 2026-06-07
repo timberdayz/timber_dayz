@@ -1457,6 +1457,12 @@ class CollectionExecutorV2:
         if debug_mode:
             browser_config['headless'] = False
             logger.info("Debug mode enabled: forcing headful browser")
+
+        if not browser_config.get("headless", True):
+            args = list(browser_config.get("args") or [])
+            if "--start-maximized" not in args:
+                args.append("--start-maximized")
+            browser_config["args"] = args
         
         logger.info(f"Starting browser: environment={settings.ENVIRONMENT}, headless={browser_config['headless']}, slow_mo={browser_config.get('slow_mo', 0)}")
         
@@ -1467,7 +1473,7 @@ class CollectionExecutorV2:
         
         # 创建浏览器上下文(反检测指纹)；下载路径由组件通过 download.save_as() 指定，不传 downloads_path
         context = await browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
+            viewport=dict(runtime_session.STANDARD_HEADLESS_VIEWPORT),
             locale='zh-CN',
             timezone_id='Asia/Shanghai',
             accept_downloads=True,
@@ -2332,8 +2338,7 @@ class CollectionExecutorV2:
         context_options.setdefault("accept_downloads", True)
         if storage_state:
             context_options["storage_state"] = storage_state
-        if not context_options.get("viewport"):
-            context_options["viewport"] = {"width": 1920, "height": 1080}
+        context_options.setdefault("viewport", dict(runtime_session.STANDARD_HEADLESS_VIEWPORT))
         if "locale" not in context_options:
             context_options["locale"] = "zh-CN"
 
@@ -2378,7 +2383,7 @@ class CollectionExecutorV2:
 
                     context_options = get_browser_context_args()
                 context_options.setdefault("accept_downloads", True)
-                context_options["viewport"] = None
+                context_options.setdefault("viewport", dict(runtime_session.STANDARD_HEADLESS_VIEWPORT))
                 context_options.setdefault("locale", "zh-CN")
 
                 headed_context = await headed_browser.new_context(**context_options)

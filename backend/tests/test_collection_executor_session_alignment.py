@@ -126,6 +126,47 @@ async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
 
 
 @pytest.mark.asyncio
+async def test_recreate_runtime_page_with_saved_session_preserves_fingerprint_viewport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._close_playwright_resource = AsyncMock()
+    executor._prime_runtime_page_for_login_gate = AsyncMock()
+
+    class _FakeContext:
+        async def new_page(self):
+            return object()
+
+    captured: dict[str, object] = {}
+
+    class _FakeBrowser:
+        async def new_context(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeContext()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._get_fingerprint_context_options_async",
+        AsyncMock(
+            return_value={
+                "locale": "zh-CN",
+                "viewport": {"width": 2880, "height": 1800},
+                "accept_downloads": True,
+            }
+        ),
+    )
+
+    await executor._recreate_runtime_page_with_saved_session(
+        browser=_FakeBrowser(),
+        old_context=object(),
+        platform="miaoshou",
+        account={"account_id": "acc-1", "login_url": "https://erp.91miaoshou.com"},
+        account_id="acc-1",
+    )
+
+    assert captured["viewport"] == {"width": 2880, "height": 1800}
+
+
+@pytest.mark.asyncio
 async def test_shared_login_phase_does_not_probe_runtime_gate_before_login_component(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -220,7 +261,7 @@ async def test_shared_login_phase_primes_page_before_login_component(
 
 
 @pytest.mark.asyncio
-async def test_shared_login_phase_applies_interaction_viewport_after_login_gate(
+async def test_shared_login_phase_applies_interaction_viewport_after_login_gate_in_headless_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     executor = CollectionExecutorV2()
@@ -252,7 +293,7 @@ async def test_shared_login_phase_applies_interaction_viewport_after_login_gate(
         task_id="task-1",
         platform="shopee",
         account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
-        params={"_runtime_session_mode": "persistent_profile"},
+        params={"_runtime_session_mode": "persistent_profile", "_actual_execution_mode": "headless"},
         context=type(
             "Ctx",
             (),
@@ -271,6 +312,97 @@ async def test_shared_login_phase_applies_interaction_viewport_after_login_gate(
     )
 
     assert order == ["prime", "viewport"]
+
+
+@pytest.mark.asyncio
+async def test_shared_login_phase_applies_interaction_viewport_in_headed_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._execute_python_component = AsyncMock(return_value=True)
+    executor._ensure_login_gate_ready = AsyncMock(
+        return_value=GateResult(
+            stage="login_gate",
+            status=GateStatus.READY,
+            reason="ready",
+            current_url="https://seller.shopee.cn/?cnsc_shop_id=1",
+        )
+    )
+
+    order: list[str] = []
+
+    async def _prime(page, platform, account):
+        order.append("prime")
+
+    async def _apply_viewport(page, params):
+        order.append("viewport")
+
+    monkeypatch.setattr(executor, "_prime_runtime_page_for_login_gate", _prime)
+    monkeypatch.setattr(executor, "_apply_runtime_interaction_viewport", _apply_viewport)
+
+    await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="shopee",
+        account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
+        params={"_runtime_session_mode": "persistent_profile", "_actual_execution_mode": "headed"},
+        context=type(
+            "Ctx",
+            (),
+            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        )(),
+        browser=object(),
+        play_context=object(),
+        page=object(),
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="shopee",
+        session_account_id="main-1",
+        save_session_after_login=False,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    assert order == ["prime", "viewport"]
+
+
+@pytest.mark.asyncio
+async def test_apply_runtime_interaction_viewport_applies_standard_size_in_headed_mode() -> None:
+    page = type(
+        "Page",
+        (),
+        {
+            "calls": [],
+            "set_viewport_size": AsyncMock(),
+        },
+    )()
+
+    await CollectionExecutorV2._apply_runtime_interaction_viewport(
+        page,
+        {"_runtime_session_mode": "persistent_profile", "_actual_execution_mode": "headed"},
+    )
+
+    page.set_viewport_size.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_runtime_interaction_viewport_applies_standard_size_in_headless_mode() -> None:
+    page = type(
+        "Page",
+        (),
+        {
+            "set_viewport_size": AsyncMock(),
+        },
+    )()
+
+    await CollectionExecutorV2._apply_runtime_interaction_viewport(
+        page,
+        {"_runtime_session_mode": "persistent_profile", "_actual_execution_mode": "headless"},
+    )
+
+    page.set_viewport_size.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -581,6 +713,57 @@ def test_build_runtime_launch_kwargs_uses_headed_when_debug_mode_enabled() -> No
 
     assert launch_kwargs["headless"] is False
     assert "--start-maximized" in launch_kwargs["args"]
+
+
+@pytest.mark.asyncio
+async def test_start_browser_uses_standard_viewport_in_headed_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    captured_launch: dict[str, object] = {}
+    captured_context: dict[str, object] = {}
+
+    class _FakeBrowser:
+        async def new_context(self, **kwargs):
+            captured_context.update(kwargs)
+            return object()
+
+    class _FakePlaywright:
+        chromium = type(
+            "Chromium",
+            (),
+            {
+                "launch": AsyncMock(side_effect=lambda **kwargs: captured_launch.update(kwargs) or _FakeBrowser())
+            },
+        )()
+
+        async def start(self):
+            return self
+
+    class _AsyncPlaywrightFactory:
+        async def start(self):
+            return _FakePlaywright()
+
+    monkeypatch.setattr(
+        "backend.utils.config.get_settings",
+        lambda: type("Settings", (), {"ENVIRONMENT": "development", "browser_config": {"headless": False, "args": []}})(),
+    )
+    monkeypatch.setattr(
+        "playwright.async_api.async_playwright",
+        lambda: _AsyncPlaywrightFactory(),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.runtime_session.apply_stealth_init_scripts",
+        AsyncMock(),
+    )
+
+    playwright, browser, context = await executor.start_browser(debug_mode=False)
+
+    assert playwright is not None
+    assert browser is not None
+    assert context is not None
+    assert "--start-maximized" in captured_launch["args"]
+    assert captured_context["viewport"] == {"width": 1920, "height": 1080}
 
 
 def test_runtime_metadata_details_include_session_diagnostics() -> None:

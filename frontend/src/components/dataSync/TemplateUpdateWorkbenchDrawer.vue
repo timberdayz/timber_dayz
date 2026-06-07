@@ -7,6 +7,50 @@
     @close="handleClose"
   >
     <div class="template-update-workbench-drawer">
+      <div v-if="!workbenchContext" class="template-update-workbench-drawer__mode-picker">
+        <div class="template-update-workbench-drawer__meta-card">
+          <div class="template-update-workbench-drawer__meta-name">
+            {{ template?.template_name || 'Unnamed Template' }}
+          </div>
+          <div class="template-update-workbench-drawer__meta-detail">
+            {{ template?.platform || '-' }} / {{ template?.data_domain || template?.domain || '-' }} /
+            {{ template?.granularity || '-' }}
+          </div>
+        </div>
+
+        <div class="template-update-workbench-drawer__mode-grid">
+          <el-card shadow="never" class="template-update-workbench-drawer__mode-card">
+            <div class="template-update-workbench-drawer__section-title">Core Fields Only</div>
+            <div class="template-update-workbench-drawer__muted">
+              Directly edit `deduplication_fields` based on the current template field pool.
+            </div>
+            <el-button
+              type="primary"
+              :loading="loadingMode === 'core-only'"
+              :disabled="!!loadingMode"
+              @click="$emit('select-mode', 'core-only')"
+            >
+              Core Fields Only
+            </el-button>
+          </el-card>
+
+          <el-card shadow="never" class="template-update-workbench-drawer__mode-card">
+            <div class="template-update-workbench-drawer__section-title">Reset From Sample File</div>
+            <div class="template-update-workbench-drawer__muted">
+              Re-check schema changes against the sample file, then update the template.
+            </div>
+            <el-button
+              :loading="loadingMode === 'with-sample'"
+              :disabled="!!loadingMode"
+              @click="$emit('select-mode', 'with-sample')"
+            >
+              Reset From Sample File
+            </el-button>
+          </el-card>
+        </div>
+      </div>
+
+      <template v-else>
       <div class="template-update-workbench-drawer__meta">
         <el-tag size="small" type="info">Mode: {{ updateMode }}</el-tag>
         <el-tag size="small">{{ headerSource }}</el-tag>
@@ -22,9 +66,9 @@
             @change="reloadContext"
           />
           <span class="template-update-workbench-drawer__header-row-label">
-            表头行 (Excel第{{ selectedHeaderRow + 1 }}行)
+            Header Row (Excel row {{ selectedHeaderRow + 1 }})
           </span>
-          <el-button size="small" :loading="reloadingContext" @click="reloadContext">重新加载</el-button>
+          <el-button size="small" :loading="reloadingContext" @click="reloadContext">Reload</el-button>
         </div>
       </div>
 
@@ -47,53 +91,102 @@
         :current-header-columns="currentHeaderColumns"
       />
 
-      <TemplateRawPreviewPanel v-if="updateMode !== 'core-only' && previewData.length > 0" :preview-data="previewData" />
+      <div v-if="updateMode !== 'core-only'" class="template-update-workbench-drawer__section">
+        <div class="template-update-workbench-drawer__section-header">
+          <div>
+            <div class="template-update-workbench-drawer__section-title">Sample Preview</div>
+            <div class="template-update-workbench-drawer__muted">
+              Preview data is loaded on demand so large files do not block the first render.
+            </div>
+          </div>
+          <el-button size="small" :loading="loadingPreview" @click="togglePreviewSection">
+            {{ previewExpanded ? 'Hide Preview' : previewLoaded ? 'Show Preview' : 'Load Preview' }}
+          </el-button>
+        </div>
+        <TemplateRawPreviewPanel
+          v-if="previewExpanded && previewLoaded && previewData.length > 0"
+          :preview-data="previewData"
+        />
+        <div v-else-if="previewExpanded && !loadingPreview" class="template-update-workbench-drawer__empty">
+          No preview data available.
+        </div>
+      </div>
 
       <div class="template-update-workbench-drawer__section">
-        <div class="template-update-workbench-drawer__section-title">语义核心字段确认</div>
-        <div class="template-update-workbench-drawer__muted">
-          系统会自动推荐语义字段；如当前样本和主模板的字段别名不同，请在这里人工修正。
+        <div class="template-update-workbench-drawer__section-header">
+          <div>
+            <div class="template-update-workbench-drawer__section-title">Semantic Bindings</div>
+            <div class="template-update-workbench-drawer__muted">
+              The drawer starts with only the fields that need review. Load all bindings only when needed.
+            </div>
+          </div>
+          <div class="template-update-workbench-drawer__section-actions">
+            <el-radio-group
+              v-model="bindingsViewMode"
+              size="small"
+              :disabled="!bindingsExpanded"
+            >
+              <el-radio-button label="needs-review">Needs Review</el-radio-button>
+              <el-radio-button label="all">All Fields</el-radio-button>
+            </el-radio-group>
+            <el-button size="small" :loading="loadingBindings" @click="toggleBindingsSection">
+              {{ bindingsExpanded ? 'Hide Bindings' : bindingsLoaded ? 'Show Bindings' : 'Load Bindings' }}
+            </el-button>
+          </div>
         </div>
-        <el-table :data="semanticBindingRows" stripe border style="margin-top: 12px;">
-          <el-table-column prop="raw_name" label="源字段" min-width="180" />
-          <el-table-column label="语义字段" min-width="240">
-            <template #default="{ row }">
-              <el-select
-                :model-value="row.semantic_key"
-                clearable
-                filterable
-                placeholder="请选择语义字段"
-                style="width: 100%;"
-                @change="handleSemanticKeyChange(row.raw_name, $event)"
-              >
-                <el-option
-                  v-for="option in semanticFieldOptions"
-                  :key="option.value || '__none__'"
-                  :label="option.label"
-                  :value="option.value"
-                />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="中文说明" min-width="260">
-            <template #default="{ row }">
-              <div class="template-update-workbench-drawer__binding-title">
-                {{ row.meta?.label || '非语义核心字段' }}
-              </div>
-              <div class="template-update-workbench-drawer__muted">
-                {{ row.meta?.description || '该字段仅保留原始值，不参与语义去重。' }}
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="规则" width="150">
-            <template #default="{ row }">
-              <div class="template-update-workbench-drawer__tags">
-                <el-tag v-if="row.required" size="small" type="danger">必需</el-tag>
-                <el-tag v-if="row.hash_participates" size="small" type="success">参与去重</el-tag>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+
+        <div v-if="!bindingsExpanded" class="template-update-workbench-drawer__muted">
+          {{ summaryBindingRows.length > 0 ? `There are ${summaryBindingRows.length} fields that need review.` : 'No fields currently require manual review.' }}
+        </div>
+
+        <template v-else>
+          <el-table :data="visibleBindingRows" stripe border style="margin-top: 12px;">
+            <el-table-column prop="raw_name" label="Source Field" min-width="180" />
+            <el-table-column label="Semantic Field" min-width="260">
+              <template #default="{ row }">
+                <el-select
+                  v-if="isBindingEditable(row.raw_name)"
+                  :model-value="row.semantic_key"
+                  clearable
+                  filterable
+                  placeholder="Select semantic field"
+                  style="width: 100%;"
+                  @change="handleSemanticKeyChange(row.raw_name, $event)"
+                >
+                  <el-option
+                    v-for="option in semanticFieldOptions"
+                    :key="option.value || '__none__'"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+                <div v-else class="template-update-workbench-drawer__inline-display">
+                  <span>{{ row.meta?.label || row.semantic_key || 'Unmapped' }}</span>
+                  <el-button link type="primary" @click="startEditingBinding(row.raw_name)">Edit</el-button>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="Description" min-width="260">
+              <template #default="{ row }">
+                <div class="template-update-workbench-drawer__binding-title">
+                  {{ row.meta?.label || 'Non-semantic field' }}
+                </div>
+                <div class="template-update-workbench-drawer__muted">
+                  {{ row.meta?.description || 'This field keeps the raw value only and does not participate in semantic deduplication.' }}
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="Rules" width="170">
+              <template #default="{ row }">
+                <div class="template-update-workbench-drawer__tags">
+                  <el-tag v-if="row.needsReview" size="small" type="warning">Needs Review</el-tag>
+                  <el-tag v-if="row.required" size="small" type="danger">Required</el-tag>
+                  <el-tag v-if="row.hash_participates" size="small" type="success">Hash</el-tag>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
       </div>
 
       <div class="template-update-workbench-drawer__section">
@@ -112,14 +205,16 @@
           No deduplication field selected.
         </div>
       </div>
+      </template>
     </div>
 
     <template #footer>
       <div class="template-update-workbench-drawer__footer">
-        <el-button @click="$emit('update:visible', false)">Cancel</el-button>
+        <el-button @click="handleClose">Cancel</el-button>
         <el-button
           type="primary"
-          :disabled="selectedDeduplicationFields.length === 0"
+          :disabled="!workbenchContext || selectedDeduplicationFields.length === 0 || saving"
+          :loading="saving"
           @click="handleSave"
         >
           Save Template
@@ -155,11 +250,36 @@ const props = defineProps({
     type: Object,
     default: () => null,
   },
+  template: {
+    type: Object,
+    default: () => null,
+  },
+  loadingMode: {
+    type: String,
+    default: '',
+  },
 })
 
-const emit = defineEmits(['update:visible', 'save', 'close'])
+const emit = defineEmits(['save', 'close', 'select-mode'])
 
 const activeContext = ref(null)
+const selectedDeduplicationFields = ref([])
+const selectedHeaderRow = ref(0)
+const reloadingContext = ref(false)
+const previewExpanded = ref(false)
+const previewLoaded = ref(false)
+const loadingPreview = ref(false)
+const bindingsExpanded = ref(false)
+const bindingsLoaded = ref(false)
+const loadingBindings = ref(false)
+const bindingsViewMode = ref('needs-review')
+const previewData = ref([])
+const fullHeaderBindings = ref([])
+const localHeaderBindings = ref([])
+const editingBindingNames = ref([])
+const saving = ref(false)
+const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
+
 const workbenchContext = computed(() => activeContext.value ?? props.context?.context ?? null)
 const templateContext = computed(() => workbenchContext.value?.template ?? props.context?.template ?? {})
 const currentHeaderColumns = computed(() => workbenchContext.value?.current_header_columns ?? [])
@@ -175,16 +295,8 @@ const existingDeduplicationFieldsMissing = computed(
 const recommendedDeduplicationFields = computed(
   () => workbenchContext.value?.recommended_deduplication_fields ?? [],
 )
-const previewData = computed(() => workbenchContext.value?.preview_data ?? [])
-const currentHeaderBindings = computed(() => workbenchContext.value?.current_header_bindings ?? [])
 const updateMode = computed(() => workbenchContext.value?.update_mode ?? 'with-sample')
 const headerSource = computed(() => workbenchContext.value?.header_source ?? 'sample-file')
-
-const selectedDeduplicationFields = ref([])
-const selectedHeaderRow = ref(0)
-const reloadingContext = ref(false)
-const localHeaderBindings = ref([])
-const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
 
 const fallbackFileId = computed(() => props.context?.row?.sample_file_id ?? null)
 const currentFileId = computed(() => workbenchContext.value?.current_file?.id ?? fallbackFileId.value)
@@ -205,6 +317,14 @@ watch(
     localHeaderBindings.value = Array.isArray(next?.current_header_bindings)
       ? next.current_header_bindings.map(item => ({ ...item }))
       : []
+    previewExpanded.value = false
+    previewLoaded.value = false
+    previewData.value = []
+    bindingsExpanded.value = false
+    bindingsLoaded.value = false
+    fullHeaderBindings.value = []
+    editingBindingNames.value = []
+    bindingsViewMode.value = 'needs-review'
   },
   { immediate: true },
 )
@@ -235,28 +355,146 @@ const changeSummary = computed(() => ({
   existing_deduplication_fields_missing: existingDeduplicationFieldsMissing.value,
 }))
 
-function handleSave() {
-  emit('save', {
-    deduplicationFields: [...selectedDeduplicationFields.value],
-    headerRow: selectedHeaderRow.value,
-    headerBindings: localHeaderBindings.value.map(item => ({ ...item })),
+const activeBindingSource = computed(() => {
+  if (bindingsLoaded.value && fullHeaderBindings.value.length > 0) {
+    return fullHeaderBindings.value
+  }
+  return localHeaderBindings.value
+})
+
+const bindingRows = computed(() => {
+  const counts = new Map()
+  for (const binding of activeBindingSource.value) {
+    const key = String(binding?.semantic_key || '').trim()
+    if (!key) continue
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+
+  return activeBindingSource.value.map((binding) => {
+    const semanticKey = String(binding?.semantic_key || '').trim()
+    const needsReview = !semanticKey || (counts.get(semanticKey) || 0) > 1
+    return {
+      ...binding,
+      needsReview,
+      meta: getSemanticFieldMeta(binding.semantic_key),
+    }
   })
+})
+
+const summaryBindingRows = computed(() => bindingRows.value.filter(row => row.needsReview))
+
+const visibleBindingRows = computed(() => {
+  if (bindingsViewMode.value === 'all') {
+    return bindingRows.value
+  }
+  return summaryBindingRows.value
+})
+
+async function ensurePreviewLoaded() {
+  if (previewLoaded.value || loadingPreview.value || updateMode.value === 'core-only') {
+    return
+  }
+  const templateId = templateContext.value?.id
+  const fileId = currentFileId.value
+  if (!templateId || !fileId) return
+
+  loadingPreview.value = true
+  try {
+    const payload = await api.getTemplateUpdatePreview(templateId, {
+      fileId,
+      headerRow: selectedHeaderRow.value,
+    })
+    const data = payload?.data || payload
+    previewData.value = data?.preview_data || []
+    previewLoaded.value = true
+  } catch (error) {
+    console.error('Failed to load preview:', error)
+    ElMessage.error(error?.message || 'Failed to load preview')
+  } finally {
+    loadingPreview.value = false
+  }
 }
 
-function formatFieldLabel(field) {
-  return formatHeaderBindingLabel(field, currentHeaderBindings.value)
+async function ensureBindingsLoaded() {
+  if (bindingsLoaded.value || loadingBindings.value || updateMode.value === 'core-only') {
+    return
+  }
+  const templateId = templateContext.value?.id
+  const fileId = currentFileId.value
+  if (!templateId || !fileId) return
+
+  loadingBindings.value = true
+  try {
+    const payload = await api.getTemplateUpdateBindings(templateId, {
+      fileId,
+      headerRow: selectedHeaderRow.value,
+    })
+    const data = payload?.data || payload
+    fullHeaderBindings.value = Array.isArray(data?.current_header_bindings)
+      ? data.current_header_bindings.map(item => ({ ...item }))
+      : []
+    bindingsLoaded.value = true
+  } catch (error) {
+    console.error('Failed to load bindings:', error)
+    ElMessage.error(error?.message || 'Failed to load bindings')
+  } finally {
+    loadingBindings.value = false
+  }
+}
+
+async function togglePreviewSection() {
+  if (!previewExpanded.value) {
+    await ensurePreviewLoaded()
+  }
+  previewExpanded.value = !previewExpanded.value
+}
+
+async function toggleBindingsSection() {
+  if (!bindingsExpanded.value) {
+    await ensureBindingsLoaded()
+  }
+  bindingsExpanded.value = !bindingsExpanded.value
+}
+
+function startEditingBinding(rawName) {
+  if (editingBindingNames.value.includes(rawName)) {
+    return
+  }
+  editingBindingNames.value = [...editingBindingNames.value, rawName]
+}
+
+function isBindingEditable(rawName) {
+  return editingBindingNames.value.includes(rawName)
 }
 
 function handleSemanticKeyChange(rawName, semanticKey) {
-  localHeaderBindings.value = updateHeaderBindingSemantic(localHeaderBindings.value, rawName, semanticKey)
+  const nextBindings = updateHeaderBindingSemantic(activeBindingSource.value, rawName, semanticKey)
+  if (bindingsLoaded.value && fullHeaderBindings.value.length > 0) {
+    fullHeaderBindings.value = nextBindings
+  } else {
+    localHeaderBindings.value = nextBindings
+  }
 }
 
-const semanticBindingRows = computed(() =>
-  localHeaderBindings.value.map((binding) => ({
-    ...binding,
-    meta: getSemanticFieldMeta(binding.semantic_key),
-  }))
-)
+function formatFieldLabel(field) {
+  return formatHeaderBindingLabel(field, activeBindingSource.value)
+}
+
+async function handleSave() {
+  saving.value = true
+  try {
+    if (updateMode.value !== 'core-only') {
+      await ensureBindingsLoaded()
+    }
+    emit('save', {
+      deduplicationFields: [...selectedDeduplicationFields.value],
+      headerRow: selectedHeaderRow.value,
+      headerBindings: activeBindingSource.value.map(item => ({ ...item })),
+    })
+  } finally {
+    saving.value = false
+  }
+}
 
 async function reloadContext() {
   const templateId = templateContext.value?.id
@@ -272,15 +510,14 @@ async function reloadContext() {
     })
     activeContext.value = context
   } catch (error) {
-    console.error('重新加载模板更新上下文失败:', error)
-    ElMessage.error(error?.message || '重新加载失败')
+    console.error('Failed to reload context:', error)
+    ElMessage.error(error?.message || 'Failed to reload context')
   } finally {
     reloadingContext.value = false
   }
 }
 
 function handleClose() {
-  emit('update:visible', false)
   emit('close')
 }
 </script>
@@ -290,6 +527,37 @@ function handleClose() {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.template-update-workbench-drawer__mode-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.template-update-workbench-drawer__meta-card {
+  padding: 16px;
+  border-radius: 12px;
+  background: #f5f7fa;
+}
+
+.template-update-workbench-drawer__meta-name {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.template-update-workbench-drawer__meta-detail {
+  margin-top: 8px;
+  color: #606266;
+}
+
+.template-update-workbench-drawer__mode-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.template-update-workbench-drawer__mode-card {
+  border-radius: 12px;
 }
 
 .template-update-workbench-drawer__meta {
@@ -318,8 +586,23 @@ function handleClose() {
   background: #fff;
 }
 
+.template-update-workbench-drawer__section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.template-update-workbench-drawer__section-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .template-update-workbench-drawer__section-title {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   font-weight: 600;
 }
 
@@ -335,9 +618,17 @@ function handleClose() {
   gap: 8px;
 }
 
-.template-update-workbench-drawer__muted {
+.template-update-workbench-drawer__muted,
+.template-update-workbench-drawer__empty {
   color: #909399;
   font-size: 12px;
+}
+
+.template-update-workbench-drawer__inline-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .template-update-workbench-drawer__footer {

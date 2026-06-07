@@ -76,7 +76,7 @@ async def template_update_context_client():
 
 
 @pytest.mark.asyncio
-async def test_template_update_context_returns_diff_and_deduplication_groups(
+async def test_template_update_context_returns_lightweight_summary_for_with_sample(
     template_update_context_client,
     monkeypatch,
 ):
@@ -116,7 +116,7 @@ async def test_template_update_context_returns_diff_and_deduplication_groups(
 
     from backend.routers import field_mapping_templates as router_module
 
-    async def fake_load_file_update_preview(db, file_id, header_row):
+    async def fake_load_file_update_summary(db, file_id, header_row):
         assert file_id == file_record.id
         assert header_row == expected_header_row
         return {
@@ -129,32 +129,38 @@ async def test_template_update_context_returns_diff_and_deduplication_groups(
                 "sub_domain": None,
             },
             "header_columns": ["order_id", "amount", "platform_sku", "new_metric"],
-            "sample_data": {
-                "order_id": "SO-1",
-                "amount": "99.5",
-                "platform_sku": "SKU-1",
-                "new_metric": "7",
-            },
-            "preview_data": [
+            "header_bindings": [
                 {
-                    "order_id": "SO-1",
-                    "amount": "99.5",
-                    "platform_sku": "SKU-1",
-                    "new_metric": "7",
+                    "raw_name": "order_id",
+                    "display_name": "order_id",
+                    "semantic_key": "order_id",
+                    "semantic_role": None,
+                    "aliases": ["order_id"],
+                    "required": True,
+                    "hash_participates": True,
+                    "position": 0,
+                    "sample_type": "string",
+                    "confidence": 0.9,
                 },
                 {
-                    "order_id": "SO-2",
-                    "amount": "120.0",
-                    "platform_sku": "SKU-2",
-                    "new_metric": "9",
+                    "raw_name": "new_metric",
+                    "display_name": "new_metric",
+                    "semantic_key": None,
+                    "semantic_role": None,
+                    "aliases": [],
+                    "required": False,
+                    "hash_participates": False,
+                    "position": 3,
+                    "sample_type": "number",
+                    "confidence": 0.7,
                 },
             ],
         }
 
     monkeypatch.setattr(
         router_module,
-        "_load_file_update_preview",
-        fake_load_file_update_preview,
+        "_load_file_update_summary",
+        fake_load_file_update_summary,
         raising=False,
     )
 
@@ -177,13 +183,28 @@ async def test_template_update_context_returns_diff_and_deduplication_groups(
     assert data["current_file"]["file_name"] == file_record.file_name
     assert data["current_header_columns"] == ["order_id", "amount", "platform_sku", "new_metric"]
     assert data["current_header_row"] == expected_header_row
-    assert data["preview_data"][0]["order_id"] == "SO-1"
+    assert data["preview_data"] == []
+    assert data["sample_data"] == {}
     assert data["header_changes"]["detected"] is True
     assert data["added_fields"] == ["new_metric"]
     assert data["removed_fields"] == ["shop_id"]
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["shop_id"]
     assert data["recommended_deduplication_fields"] == ["order_id"]
+    assert data["current_header_bindings"] == [
+        {
+            "raw_name": "new_metric",
+            "display_name": "new_metric",
+            "semantic_key": None,
+            "semantic_role": None,
+            "aliases": [],
+            "required": False,
+            "hash_participates": False,
+            "position": 3,
+            "sample_type": "number",
+            "confidence": 0.7,
+        }
+    ]
     assert data["update_mode"] == "with-sample"
 
 
@@ -247,6 +268,178 @@ async def test_template_update_context_core_only_uses_template_headers_as_field_
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["missing_field"]
     assert data["recommended_deduplication_fields"] == ["order_id", "shop_id"]
+
+
+@pytest.mark.asyncio
+async def test_template_update_preview_returns_preview_payload(
+    template_update_context_client,
+    monkeypatch,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=2,
+            header_columns=["order_id", "amount"],
+            deduplication_fields=["order_id"],
+            template_name="shopee_orders_daily_preview_v1",
+            version=1,
+            status="published",
+            field_count=2,
+            created_by="test",
+        )
+        file_record = CatalogFile(
+            file_path="data/raw/shopee/orders/orders_preview_demo.xlsx",
+            file_name="orders_preview_demo.xlsx",
+            source="data/raw",
+            platform_code="shopee",
+            source_platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            status="pending",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        session.add_all([template, file_record])
+        await session.commit()
+        await session.refresh(template)
+        await session.refresh(file_record)
+
+    from backend.routers import field_mapping_templates as router_module
+
+    async def fake_load_file_update_preview(db, file_id, header_row):
+        assert file_id == file_record.id
+        assert header_row == 4
+        return {
+            "file": {
+                "id": file_record.id,
+                "file_name": file_record.file_name,
+                "platform": "shopee",
+                "domain": "orders",
+                "granularity": "daily",
+                "sub_domain": None,
+            },
+            "header_columns": ["order_id", "amount"],
+            "sample_data": {"order_id": "SO-1", "amount": "9.9"},
+            "preview_data": [{"order_id": "SO-1", "amount": "9.9"}],
+            "header_bindings": [],
+        }
+
+    monkeypatch.setattr(router_module, "_load_file_update_preview", fake_load_file_update_preview, raising=False)
+
+    response = await client.get(
+        f"/api/field-mapping/templates/{template.id}/update-preview",
+        params={"file_id": file_record.id, "header_row": 4},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["current_file"]["id"] == file_record.id
+    assert payload["data"]["current_header_columns"] == ["order_id", "amount"]
+    assert payload["data"]["sample_data"]["order_id"] == "SO-1"
+    assert payload["data"]["preview_data"][0]["amount"] == "9.9"
+
+
+@pytest.mark.asyncio
+async def test_template_update_bindings_returns_full_bindings_payload(
+    template_update_context_client,
+    monkeypatch,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=1,
+            header_columns=["order_id", "metric_date", "amount"],
+            deduplication_fields=["order_id", "metric_date"],
+            template_name="shopee_orders_daily_bindings_v1",
+            version=1,
+            status="published",
+            field_count=3,
+            created_by="test",
+        )
+        file_record = CatalogFile(
+            file_path="data/raw/shopee/orders/orders_bindings_demo.xlsx",
+            file_name="orders_bindings_demo.xlsx",
+            source="data/raw",
+            platform_code="shopee",
+            source_platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            status="pending",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        session.add_all([template, file_record])
+        await session.commit()
+        await session.refresh(template)
+        await session.refresh(file_record)
+
+    from backend.routers import field_mapping_templates as router_module
+
+    async def fake_load_file_update_preview(db, file_id, header_row):
+        assert file_id == file_record.id
+        assert header_row == 1
+        return {
+            "file": {
+                "id": file_record.id,
+                "file_name": file_record.file_name,
+                "platform": "shopee",
+                "domain": "orders",
+                "granularity": "daily",
+                "sub_domain": None,
+            },
+            "header_columns": ["order_id", "Unnamed: 0", "amount"],
+            "sample_data": {"order_id": "SO-1", "Unnamed: 0": "2026-06-07", "amount": "9.9"},
+            "preview_data": [],
+            "header_bindings": [
+                {
+                    "raw_name": "order_id",
+                    "display_name": "order_id",
+                    "semantic_key": "order_id",
+                    "semantic_role": None,
+                    "aliases": ["order_id"],
+                    "required": True,
+                    "hash_participates": True,
+                    "position": 0,
+                    "sample_type": "string",
+                    "confidence": 0.9,
+                },
+                {
+                    "raw_name": "Unnamed: 0",
+                    "display_name": "日期",
+                    "semantic_key": "metric_date",
+                    "semantic_role": "metric_date",
+                    "aliases": ["日期", "统计日期"],
+                    "required": False,
+                    "hash_participates": True,
+                    "position": 1,
+                    "sample_type": "date",
+                    "confidence": 0.98,
+                },
+            ],
+        }
+
+    monkeypatch.setattr(router_module, "_load_file_update_preview", fake_load_file_update_preview, raising=False)
+
+    response = await client.get(
+        f"/api/field-mapping/templates/{template.id}/update-bindings",
+        params={"file_id": file_record.id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert len(payload["data"]["current_header_bindings"]) == 2
+    assert payload["data"]["required_semantic_keys"] == ["order_id"]
+    assert payload["data"]["hash_participating_semantic_keys"] == ["order_id", "metric_date"]
 
 
 @pytest.mark.asyncio
@@ -785,7 +978,7 @@ async def test_template_update_context_orders_ignores_currency_suffix_difference
 
     from backend.routers import field_mapping_templates as router_module
 
-    async def fake_load_file_update_preview(*_, **__):
+    async def fake_load_file_update_summary(*_, **__):
         return {
             "file": {
                 "id": file_record.id,
@@ -796,24 +989,13 @@ async def test_template_update_context_orders_ignores_currency_suffix_difference
                 "sub_domain": None,
             },
             "header_columns": ["订单编号", "利润(RMB)", "买家支付(RMB)"],
-            "sample_data": {
-                "订单编号": "MS-1",
-                "利润(RMB)": "100",
-                "买家支付(RMB)": "200",
-            },
-            "preview_data": [
-                {
-                    "订单编号": "MS-1",
-                    "利润(RMB)": "100",
-                    "买家支付(RMB)": "200",
-                }
-            ],
+            "header_bindings": [],
         }
 
     monkeypatch.setattr(
         router_module,
-        "_load_file_update_preview",
-        fake_load_file_update_preview,
+        "_load_file_update_summary",
+        fake_load_file_update_summary,
         raising=False,
     )
 

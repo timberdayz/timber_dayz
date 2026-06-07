@@ -5,37 +5,37 @@ function looksLikeUnnamedHeader(columnName) {
 export const SEMANTIC_FIELD_META = {
   order_id: {
     label: '订单唯一标识',
-    description: '用于识别同一笔订单，参与去重。',
+    description: '用于识别同一笔订单，参与语义去重。',
     aliases: ['order_id', '订单号', '订单编号', 'order id'],
   },
   product_id: {
     label: '产品 ID',
-    description: '用于识别同一商品，常与 SKU 一起参与去重。',
+    description: '用于识别同一商品，通常与 SKU 一起参与去重。',
     aliases: ['product_id', '产品ID', '商品ID', 'product id'],
   },
   platform_sku: {
     label: '平台 SKU',
-    description: '平台侧商品规格编号，常用于跨地区同品识别。',
+    description: '平台侧商品规格编号，常用于跨店铺或跨地区的商品识别。',
     aliases: ['platform_sku', '平台SKU', '平台 sku', 'product_sku', '产品SKU', '商品SKU'],
   },
   sku_id: {
     label: 'SKU 内部编号',
-    description: '平台或系统内部的 SKU 编号，参与去重。',
+    description: '平台或系统内部的 SKU 编号，可参与去重。',
     aliases: ['sku_id', 'sku id', 'SKU ID', 'SKU编号'],
   },
   shop_id: {
     label: '店铺标识',
-    description: '区分不同店铺，参与去重边界。',
+    description: '用于区分不同店铺，是重要的去重边界。',
     aliases: ['shop_id', '店铺', '店铺ID', 'shop id'],
   },
   warehouse_name: {
     label: '仓库标识',
-    description: '区分同一 SKU 在不同仓库的库存快照，可参与去重。',
+    description: '用于区分同一 SKU 在不同仓库的库存快照，可参与去重。',
     aliases: ['warehouse_name', 'warehouse', '仓库', '仓库名称', 'warehouse name'],
   },
   metric_date: {
     label: '统计日期',
-    description: '用于日级、周级、月级统计时间定位。',
+    description: '用于日级、周级、月级统计的时间定位。',
     aliases: ['metric_date', '日期', '统计日期', 'date'],
   },
   order_date: {
@@ -60,7 +60,11 @@ const SEMANTIC_FIELD_ALIASES = Object.fromEntries(
 )
 
 export const SEMANTIC_FIELD_OPTIONS = [
-  { value: null, label: '不作为语义核心字段', description: '仅保留原始字段，不参与语义去重。' },
+  {
+    value: null,
+    label: '不作为语义核心字段',
+    description: '仅保留原始字段，不参与语义去重。',
+  },
   ...Object.entries(SEMANTIC_FIELD_META).map(([value, meta]) => ({
     value,
     label: `${meta.label} (${value})`,

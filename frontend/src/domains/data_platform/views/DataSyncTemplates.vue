@@ -30,7 +30,7 @@
     </el-card>
 
     <TemplateBuilderWorkspace
-      v-show="showTemplateBuilder && !isCreateWorkbenchVisible && !isVariantWorkbenchVisible"
+      v-if="showTemplateBuilder && !isCreateWorkbenchVisible && !isVariantWorkbenchVisible && !isWorkbenchVisible"
       :file-filters="fileFilters"
       :available-platforms="availablePlatforms"
       :available-sub-domains="availableSubDomains"
@@ -218,8 +218,10 @@
     <TemplateUpdateWorkbenchDrawer
       :visible="isWorkbenchVisible"
       :context="updateWorkbenchContext"
+      :template="pendingManualUpdateTemplate"
+      :loading-mode="manualUpdateLoadingMode"
       @save="handleWorkbenchSave"
-      @update:visible="isWorkbenchVisible = $event"
+      @select-mode="handleWorkbenchModeSelect"
       @close="closeTemplateUpdateWorkbench"
     />
 
@@ -256,12 +258,6 @@
       @update:headerRow="headerRow = $event"
       @update:visible="isVariantWorkbenchVisible = $event"
       @close="closeVariantWorkbench"
-    />
-
-    <TemplateManualUpdateModeDialog
-      v-model:visible="manualUpdateModeDialogVisible"
-      :template="pendingManualUpdateTemplate"
-      @select="chooseManualUpdateMode"
     />
 
     <TemplateCreateWorkbenchDrawer
@@ -310,7 +306,6 @@ import api from '@/api'
 import TemplateBuilderWorkspace from '@/components/dataSync/TemplateBuilderWorkspace.vue'
 import TemplateCreateWorkbenchDrawer from '@/components/dataSync/TemplateCreateWorkbenchDrawer.vue'
 import TemplateGovernancePanel from '@/components/dataSync/TemplateGovernancePanel.vue'
-import TemplateManualUpdateModeDialog from '@/components/dataSync/TemplateManualUpdateModeDialog.vue'
 import TemplateUpdateWorkbenchDrawer from '@/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
 import VariantCreateWorkbenchDrawer from '@/components/dataSync/VariantCreateWorkbenchDrawer.vue'
 import { inferHeaderBindings } from '@/domains/data_platform/utils/headerBindings'
@@ -323,8 +318,10 @@ const governanceLoading = ref(false)
 const isWorkbenchVisible = ref(false)
 const isCreateWorkbenchVisible = ref(false)
 const isVariantWorkbenchVisible = ref(false)
-const manualUpdateModeDialogVisible = ref(false)
 const showTemplateBuilder = ref(false)
+const manualUpdateLoadingMode = ref('')
+const suppressFileListAutoLoad = ref(false)
+const workbenchRequestToken = ref(0)
 
 const pendingManualUpdateTemplate = ref(null)
 const manualUpdateMode = ref('with-sample')
@@ -523,8 +520,13 @@ const loadGovernanceStats = async () => {
 }
 
 const closeTemplateUpdateWorkbench = () => {
+  workbenchRequestToken.value += 1
   isWorkbenchVisible.value = false
   updateWorkbenchContext.value = null
+  pendingManualUpdateTemplate.value = null
+  manualUpdateMode.value = 'with-sample'
+  manualUpdateLoadingMode.value = ''
+  headerBindings.value = []
 }
 
 const closeTemplateCreateWorkbench = () => {
@@ -540,10 +542,15 @@ const handleManualUpdate = (row) => {
   row = normalizeTemplateActionRow(row)
   if (row?.governance_status === 'missing_variant') {
     handleCreateVariantForFamily(row)
+    isWorkbenchVisible.value = false
     return
   }
+  workbenchRequestToken.value += 1
   pendingManualUpdateTemplate.value = row
-  manualUpdateModeDialogVisible.value = true
+  updateWorkbenchContext.value = null
+  manualUpdateMode.value = 'with-sample'
+  manualUpdateLoadingMode.value = ''
+  isWorkbenchVisible.value = true
 }
 
 const handleCreateVariantForFamily = async (row) => {
@@ -576,20 +583,39 @@ const handleCreateVariantForFamily = async (row) => {
   }
 }
 
-const chooseManualUpdateMode = async (mode) => {
+const chooseManualUpdateMode = async (mode, requestToken = workbenchRequestToken.value) => {
   manualUpdateMode.value = mode
-  manualUpdateModeDialogVisible.value = false
   if (!pendingManualUpdateTemplate.value) {
+    manualUpdateLoadingMode.value = ''
     return
   }
   if (mode === 'with-sample' && !pendingManualUpdateTemplate.value.sample_file_id) {
     ElMessage.warning('当前模板没有可直接使用的样本文件，建议先使用 Core Fields Only')
     return
   }
-  await openTemplateUpdateWorkbench(pendingManualUpdateTemplate.value, mode)
+  await openTemplateUpdateWorkbench(pendingManualUpdateTemplate.value, mode, requestToken)
 }
 
-const openTemplateUpdateWorkbench = async (row, mode = 'with-sample') => {
+const handleWorkbenchModeSelect = async (mode) => {
+  if (manualUpdateLoadingMode.value) {
+    return
+  }
+  const requestToken = workbenchRequestToken.value + 1
+  workbenchRequestToken.value = requestToken
+  manualUpdateLoadingMode.value = mode
+  try {
+    await chooseManualUpdateMode(mode, requestToken)
+  } catch (error) {
+    isWorkbenchVisible.value = false
+    throw error
+  } finally {
+    if (workbenchRequestToken.value === requestToken) {
+      manualUpdateLoadingMode.value = ''
+    }
+  }
+}
+
+const openTemplateUpdateWorkbench = async (row, mode = 'with-sample', requestToken = workbenchRequestToken.value) => {
   row = normalizeTemplateActionRow(row)
   const templateId = row.template_id || row.id || null
   if (!templateId) {
@@ -602,6 +628,9 @@ const openTemplateUpdateWorkbench = async (row, mode = 'with-sample') => {
       mode,
       fileId: mode === 'with-sample' ? row.sample_file_id || null : null,
     })
+    if (workbenchRequestToken.value !== requestToken) {
+      return
+    }
     updateWorkbenchContext.value = {
       template: row,
       row,
@@ -612,6 +641,7 @@ const openTemplateUpdateWorkbench = async (row, mode = 'with-sample') => {
   } catch (error) {
     console.error('加载模板更新上下文失败:', error)
     ElMessage.error(error.message || '加载模板更新上下文失败')
+    isWorkbenchVisible.value = false
     return
   }
 }
@@ -631,11 +661,14 @@ const handleCreateTemplateForMissing = (row) => {
 
 const handleUpdateTemplate = (row) => {
   handleManualUpdate(row)
+  suppressFileListAutoLoad.value = true
   fileFilters.value.platform = row.platform
   fileFilters.value.domain = row.domain
   fileFilters.value.sub_domain = row.sub_domain === 'N/A' ? null : row.sub_domain
   fileFilters.value.granularity = row.granularity
-  loadAvailableFiles()
+  queueMicrotask(() => {
+    suppressFileListAutoLoad.value = false
+  })
 }
 
 const loadAvailableFiles = async () => {
@@ -690,6 +723,9 @@ const handleFileChange = async (fileId) => {
 }
 
 watch([() => fileFilters.value.sub_domain, () => fileFilters.value.granularity], () => {
+  if (suppressFileListAutoLoad.value) {
+    return
+  }
   loadAvailableFiles()
 })
 
@@ -735,7 +771,7 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
   try {
     const { rules: nextFieldParseRules, droppedRules } = buildTemplateUpdateFieldParseRulesPayload({
       currentHeaderColumns: context.current_header_columns,
-      currentHeaderBindings: context.current_header_bindings || [],
+      currentHeaderBindings: selectedHeaderBindings || [],
       templateHeaderBindings: template.header_bindings || [],
       existingRules: template.field_parse_rules || [],
     })
@@ -780,7 +816,6 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
     const sampleFileId = getCurrentWorkbenchSampleFileId()
     await loadTemplates()
     await loadGovernanceStats()
-    await loadAvailableFiles()
 
     if (sampleFileId && isSampleStillInNeedsUpdate(sampleFileId)) {
       ElMessage.warning('模板已保存，但该样本文件仍未通过治理复核，请继续检查字段差异')

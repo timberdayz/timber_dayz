@@ -22,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path as PathLib  # [*] 修复:重命名避免与 fastapi.Path 冲突
 import uuid
 import asyncio
+import copy
+import time
 import pandas as pd
 
 from backend.models.database import get_db, get_async_db, SessionLocal, AsyncSessionLocal
@@ -57,6 +59,8 @@ def conditional_rate_limit(limit_str: str):
 # [*] v4.18.2修复:全局并发控制,限制同时运行的后台同步任务数量
 # 最多允许10个并发任务,避免资源耗尽
 MAX_CONCURRENT_SYNC_TASKS = asyncio.Semaphore(10)
+TEMPLATE_STATUS_CACHE_TTL_SECONDS = 180
+_template_status_cache: dict[tuple[Any, ...], tuple[float, Dict[str, Any]]] = {}
 from backend.services.c_class_data_validator import get_c_class_data_validator
 from backend.services.data_loss_analyzer import (
     analyze_data_loss, check_data_loss_threshold,
@@ -216,6 +220,35 @@ def _infer_miaoshou_orders_business_platform(catalog_file: CatalogFile) -> str |
             pass
 
     return None
+
+
+def _build_template_status_cache_key(file_record: CatalogFile, template) -> tuple[Any, ...]:
+    return (
+        getattr(file_record, "id", None),
+        getattr(template, "id", None),
+        getattr(template, "version", None),
+        getattr(template, "header_row", None),
+        getattr(file_record, "status", None),
+    )
+
+
+def _get_cached_template_status(cache_key: tuple[Any, ...]) -> Dict[str, Any] | None:
+    cached = _template_status_cache.get(cache_key)
+    if cached is None:
+        return None
+
+    expires_at, payload = cached
+    if expires_at <= time.monotonic():
+        _template_status_cache.pop(cache_key, None)
+        return None
+    return copy.deepcopy(payload)
+
+
+def _set_cached_template_status(cache_key: tuple[Any, ...], payload: Dict[str, Any]) -> None:
+    _template_status_cache[cache_key] = (
+        time.monotonic() + TEMPLATE_STATUS_CACHE_TTL_SECONDS,
+        copy.deepcopy(payload),
+    )
 
 
 # ==================== 数据同步API ====================
@@ -534,10 +567,14 @@ async def list_files(
                     ),
                 }
             else:
-                template_status_info = await data_sync_service.evaluate_catalog_file_template_status(
-                    file_record,
-                    template=template,
-                )
+                cache_key = _build_template_status_cache_key(file_record, template)
+                template_status_info = _get_cached_template_status(cache_key)
+                if template_status_info is None:
+                    template_status_info = await data_sync_service.evaluate_catalog_file_template_status(
+                        file_record,
+                        template=template,
+                    )
+                    _set_cached_template_status(cache_key, template_status_info)
 
             file_list.append({
                 "id": file_record.id,

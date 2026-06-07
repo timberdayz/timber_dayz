@@ -24,6 +24,7 @@
       </el-card>
 
       <TemplateBuilderWorkspace
+        v-if="visible"
         :file-filters="fileFilters"
         :available-platforms="availablePlatforms"
         :available-sub-domains="availableSubDomains"

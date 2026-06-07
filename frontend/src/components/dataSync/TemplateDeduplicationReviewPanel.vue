@@ -2,53 +2,74 @@
   <el-card class="template-deduplication-review-panel" shadow="never">
     <template #header>
       <div class="template-deduplication-review-panel__header">
-        <span>核心字段复核</span>
-        <el-tag size="small" type="primary">
-          {{ currentHeaderColumns.length }} 个候选字段
-        </el-tag>
+        <span>Deduplication Review</span>
+        <div class="template-deduplication-review-panel__actions">
+          <el-tag size="small" type="primary">
+            {{ currentHeaderColumns.length }} candidate fields
+          </el-tag>
+          <el-button link type="primary" @click="expanded = !expanded">
+            {{ expanded ? 'Hide Field Pool' : 'Show Field Pool' }}
+          </el-button>
+        </div>
       </div>
     </template>
 
     <div class="template-deduplication-review-panel__groups">
       <section class="template-deduplication-review-panel__group">
-        <div class="template-deduplication-review-panel__group-title">旧核心字段仍可用</div>
+        <div class="template-deduplication-review-panel__group-title">Selected Fields</div>
+        <div class="template-deduplication-review-panel__tags">
+          <el-tag v-for="field in modelValue" :key="field" size="small" type="primary">
+            {{ field }}
+          </el-tag>
+          <span v-if="modelValue.length === 0" class="template-deduplication-review-panel__muted">None</span>
+        </div>
+      </section>
+
+      <section class="template-deduplication-review-panel__group">
+        <div class="template-deduplication-review-panel__group-title">Still Available</div>
         <div class="template-deduplication-review-panel__tags">
           <el-tag v-for="field in existingDeduplicationFieldsAvailable" :key="field" size="small" type="success">
             {{ field }}
           </el-tag>
-          <span v-if="existingDeduplicationFieldsAvailable.length === 0" class="template-deduplication-review-panel__muted">无</span>
+          <span v-if="existingDeduplicationFieldsAvailable.length === 0" class="template-deduplication-review-panel__muted">None</span>
         </div>
       </section>
 
       <section class="template-deduplication-review-panel__group template-deduplication-review-panel__group--warning">
-        <div class="template-deduplication-review-panel__group-title">旧核心字段缺失</div>
+        <div class="template-deduplication-review-panel__group-title">Missing Old Fields</div>
         <div class="template-deduplication-review-panel__tags">
           <el-tag v-for="field in existingDeduplicationFieldsMissing" :key="field" size="small" type="danger">
             {{ field }}
           </el-tag>
-          <span v-if="existingDeduplicationFieldsMissing.length === 0" class="template-deduplication-review-panel__muted">无</span>
+          <span v-if="existingDeduplicationFieldsMissing.length === 0" class="template-deduplication-review-panel__muted">None</span>
         </div>
       </section>
 
       <section class="template-deduplication-review-panel__group">
-        <div class="template-deduplication-review-panel__group-title">推荐核心字段</div>
+        <div class="template-deduplication-review-panel__group-title">Recommended Fields</div>
         <div class="template-deduplication-review-panel__tags">
           <el-tag v-for="field in recommendedDeduplicationFields" :key="field" size="small" type="warning">
             {{ field }}
           </el-tag>
-          <span v-if="recommendedDeduplicationFields.length === 0" class="template-deduplication-review-panel__muted">无</span>
+          <span v-if="recommendedDeduplicationFields.length === 0" class="template-deduplication-review-panel__muted">None</span>
         </div>
       </section>
 
-      <section class="template-deduplication-review-panel__group">
-        <div class="template-deduplication-review-panel__group-title">当前字段池</div>
+      <section v-if="expanded" class="template-deduplication-review-panel__group">
+        <div class="template-deduplication-review-panel__group-title">Field Pool</div>
+        <el-input
+          v-model="searchText"
+          class="template-deduplication-review-panel__search"
+          clearable
+          placeholder="Search fields"
+        />
         <el-checkbox-group
           :model-value="modelValue"
           class="template-deduplication-review-panel__checkboxes"
           @update:model-value="$emit('update:modelValue', $event)"
         >
           <el-checkbox
-            v-for="field in currentHeaderColumns"
+            v-for="field in filteredHeaderColumns"
             :key="field"
             :label="field"
             :value="field"
@@ -62,7 +83,9 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed, ref } from 'vue'
+
+const props = defineProps({
   modelValue: {
     type: Array,
     default: () => []
@@ -90,6 +113,19 @@ defineProps({
 })
 
 defineEmits(['update:modelValue'])
+
+const expanded = ref(false)
+const searchText = ref('')
+
+const filteredHeaderColumns = computed(() => {
+  const keyword = String(searchText.value || '').trim().toLowerCase()
+  if (!keyword) {
+    return props.currentHeaderColumns
+  }
+  return props.currentHeaderColumns.filter(field =>
+    String(field || '').toLowerCase().includes(keyword)
+  )
+})
 </script>
 
 <style scoped>
@@ -98,6 +134,13 @@ defineEmits(['update:modelValue'])
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.template-deduplication-review-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .template-deduplication-review-panel__groups {
@@ -127,6 +170,10 @@ defineEmits(['update:modelValue'])
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.template-deduplication-review-panel__search {
+  margin-bottom: 12px;
 }
 
 .template-deduplication-review-panel__checkboxes {

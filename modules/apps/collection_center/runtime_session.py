@@ -695,6 +695,7 @@ def normalize_persistent_profile_context_options(
     *,
     platform: str,
     context_options: Dict[str, Any],
+    headless: Optional[bool] = None,
 ) -> Dict[str, Any]:
     normalized = dict(context_options or {})
 
@@ -704,7 +705,6 @@ def normalize_persistent_profile_context_options(
     stripped = dict(normalized)
     for key in (
         "user_agent",
-        "viewport",
         "locale",
         "timezone_id",
         "extra_http_headers",
@@ -717,6 +717,7 @@ def normalize_persistent_profile_context_options(
         "permissions",
     ):
         stripped.pop(key, None)
+    stripped.setdefault("viewport", dict(STANDARD_HEADLESS_VIEWPORT))
     return stripped
 
 
@@ -750,6 +751,7 @@ async def open_persistent_runtime_bundle(
     context_options = normalize_persistent_profile_context_options(
         platform=platform,
         context_options=context_options,
+        headless=bool((launch_kwargs or {}).get("headless", True)),
     )
     launch_options = enforce_official_playwright_browser(dict(launch_kwargs or {}))
 

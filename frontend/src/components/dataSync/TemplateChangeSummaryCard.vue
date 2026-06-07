@@ -23,7 +23,7 @@
         <strong>{{ removedFields.length }}</strong>
       </div>
       <div class="template-change-summary-card__metric">
-        <span class="template-change-summary-card__label">旧核心字段缺失</span>
+        <span class="template-change-summary-card__label">缺失旧核心字段</span>
         <strong>{{ missingDeduplicationFields.length }}</strong>
       </div>
     </div>
@@ -54,7 +54,7 @@
       v-if="existingDeduplicationFieldsMissing.length > 0"
       class="template-change-summary-card__warning"
     >
-      <div class="template-change-summary-card__label">旧核心字段缺失</div>
+      <div class="template-change-summary-card__label">缺失旧核心字段</div>
       <div class="template-change-summary-card__tags">
         <el-tag
           v-for="field in existingDeduplicationFieldsMissing"
@@ -75,8 +75,8 @@ import { computed } from 'vue'
 const props = defineProps({
   summary: {
     type: Object,
-    default: () => ({})
-  }
+    default: () => ({}),
+  },
 })
 
 const matchRate = computed(() => props.summary.match_rate ?? props.summary.matchRate ?? 0)

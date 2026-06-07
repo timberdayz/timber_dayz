@@ -22,7 +22,7 @@
           <div class="template-manual-update-mode-dialog__desc">
             直接基于模板当前保存的字段池修改 deduplication_fields。
           </div>
-          <el-button type="primary" @click="$emit('select', 'core-only')">
+          <el-button :loading="loadingMode === 'core-only'" :disabled="!!loadingMode" type="primary" @click="$emit('select', 'core-only')">
             Core Fields Only
           </el-button>
         </el-card>
@@ -32,7 +32,7 @@
           <div class="template-manual-update-mode-dialog__desc">
             基于样本文件重新检查字段差异，并重新设定模板。
           </div>
-          <el-button @click="$emit('select', 'with-sample')">
+          <el-button :loading="loadingMode === 'with-sample'" :disabled="!!loadingMode" @click="$emit('select', 'with-sample')">
             Reset From Sample File
           </el-button>
         </el-card>
@@ -54,6 +54,10 @@ defineProps({
   template: {
     type: Object,
     default: () => null,
+  },
+  loadingMode: {
+    type: String,
+    default: '',
   },
 })
 
