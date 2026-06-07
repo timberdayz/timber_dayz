@@ -235,6 +235,9 @@ class CollectionConfigBatchResponse(CollectionConfigResponse):
     stale_template_shop_scope_ids: List[str] = Field(default_factory=list)
 
 
+CollectionConfigFutureBatchCreateResponse.model_rebuild()
+
+
 class CollectionConfigTemplateSummaryResponse(BaseModel):
     id: int
     name: Optional[str] = None

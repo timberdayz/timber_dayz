@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import or_, select
 
 from backend.services.task_center_sync_service import TaskCenterSyncService
-from modules.core.db import CloudBClassSyncTask, SystemConfig
+from modules.core.db import CloudBClassSyncRun, CloudBClassSyncTask, SystemConfig
 
 
 class CloudBClassAutoSyncWorker:
@@ -22,12 +22,16 @@ class CloudBClassAutoSyncWorker:
         "projection_runtime_failure",
     }
 
-    def __init__(self, db, sync_executor, lease_seconds: int = 300):
+    def __init__(self, db, sync_executor, lease_seconds: int = 300, batch_size: int = 1000):
         self.db = db
         self.sync_executor = sync_executor
         self.lease_seconds = lease_seconds
+        self.batch_size = batch_size
 
     def _auto_sync_enabled(self) -> bool:
+        explicit_flag = os.getenv("CLOUD_SYNC_AUTO_SYNC_ENABLED")
+        if explicit_flag is not None:
+            return str(explicit_flag).lower() in {"1", "true", "yes", "on"}
         try:
             stmt = select(SystemConfig).where(SystemConfig.config_key == "cloud_sync_auto_sync_enabled")
             record = self.db.execute(stmt).scalars().one_or_none()
@@ -35,7 +39,7 @@ class CloudBClassAutoSyncWorker:
                 return str(record.config_value).lower() in {"1", "true", "yes", "on"}
         except Exception:
             pass
-        return str(os.getenv("CLOUD_SYNC_AUTO_SYNC_ENABLED", "true")).lower() in {"1", "true", "yes", "on"}
+        return True
 
     def claim_next_task(self, worker_id: str) -> CloudBClassSyncTask | None:
         if not self._auto_sync_enabled():
@@ -165,7 +169,7 @@ class CloudBClassAutoSyncWorker:
             result = await self._run_with_lease_heartbeat(
                 task.id,
                 worker_id,
-                self.sync_executor.sync_table(task.source_table_name),
+                self.sync_executor.sync_table(task.source_table_name, batch_size=self.batch_size),
             )
             sync_status = result.get("status", "completed")
             projection_status = result.get("projection_status", "completed")
@@ -202,6 +206,7 @@ class CloudBClassAutoSyncWorker:
             task.lease_expires_at = None
             self.db.commit()
             self.db.refresh(task)
+            self._update_parent_run(task)
             mirrored = task_center.get_task(task.job_id)
             if mirrored is not None:
                 task_center.update_task(
@@ -223,6 +228,48 @@ class CloudBClassAutoSyncWorker:
                 )
 
         return task
+
+    def _update_parent_run(self, task: CloudBClassSyncTask) -> None:
+        run_id = (task.metadata_json or {}).get("run_id")
+        if not run_id:
+            return
+
+        run = self.db.get(CloudBClassSyncRun, run_id)
+        if run is None:
+            return
+
+        all_tasks = self.db.execute(select(CloudBClassSyncTask)).scalars().all()
+        run_tasks = [
+            item
+            for item in all_tasks
+            if (item.metadata_json or {}).get("run_id") == run_id
+        ]
+        if not run_tasks:
+            return
+
+        terminal_statuses = {"completed", "partial_success", "failed", "cancelled"}
+        failed_statuses = {"failed", "partial_success"}
+        succeeded_count = sum(1 for item in run_tasks if item.status == "completed")
+        failed_count = sum(1 for item in run_tasks if item.status in failed_statuses)
+        active_count = sum(1 for item in run_tasks if item.status not in terminal_statuses)
+
+        run.succeeded_tables = succeeded_count
+        run.failed_tables = failed_count
+        if active_count:
+            run.status = "running"
+            run.finished_at = None
+        else:
+            run.finished_at = datetime.now(timezone.utc)
+            if failed_count == 0:
+                run.status = "completed"
+                run.error_summary = None
+            elif succeeded_count:
+                run.status = "partial_success"
+                run.error_summary = f"{failed_count} tables failed or partially succeeded"
+            else:
+                run.status = "failed"
+                run.error_summary = f"{failed_count} tables failed"
+        self.db.commit()
 
     @staticmethod
     def _compute_next_retry_at(attempt_count: int, error_code: str) -> datetime:

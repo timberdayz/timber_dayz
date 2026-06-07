@@ -220,11 +220,20 @@ def build_cloud_sync_service_from_env(dry_run: bool = False) -> CloudBClassSyncS
 
 
 class CloudSyncWorkerFactory:
-    def __init__(self, *, local_engine, cloud_engine, session_factory, dry_run: bool) -> None:
+    def __init__(
+        self,
+        *,
+        local_engine,
+        cloud_engine,
+        session_factory,
+        dry_run: bool,
+        batch_size: int = 1000,
+    ) -> None:
         self.local_engine = local_engine
         self.cloud_engine = cloud_engine
         self.session_factory = session_factory
         self.dry_run = dry_run
+        self.batch_size = batch_size
         self.checkpoint_scope = _build_checkpoint_scope_key(
             str(cloud_engine.url) if hasattr(cloud_engine, "url") else None,
             dry_run,
@@ -239,7 +248,11 @@ class CloudSyncWorkerFactory:
             dry_run=self.dry_run,
             checkpoint_scope=self.checkpoint_scope,
         )
-        return CloudBClassAutoSyncWorker(db=db, sync_executor=service)
+        return CloudBClassAutoSyncWorker(
+            db=db,
+            sync_executor=service,
+            batch_size=self.batch_size,
+        )
 
     def close(self) -> None:
         try:
@@ -256,12 +269,14 @@ def build_cloud_sync_worker_factory_from_env(dry_run: bool = False):
 
     local_engine = create_engine(DATABASE_URL)
     cloud_engine = create_engine(cloud_database_url) if cloud_database_url else local_engine
+    batch_size = int(os.getenv("CLOUD_SYNC_BATCH_SIZE", "1000"))
 
     return CloudSyncWorkerFactory(
         local_engine=local_engine,
         cloud_engine=cloud_engine,
         session_factory=SessionLocal,
         dry_run=dry_run,
+        batch_size=batch_size,
     )
 
 

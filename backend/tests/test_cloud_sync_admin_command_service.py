@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from backend.services.cloud_sync_admin_command_service import CloudSyncAdminCommandService
 from backend.services.cloud_b_class_auto_sync_factory import _build_checkpoint_scope_key
 from modules.core.db import Base
-from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncTask, SystemConfig
+from modules.core.db import (
+    CloudBClassSyncCheckpoint,
+    CloudBClassSyncRun,
+    CloudBClassSyncTask,
+    SystemConfig,
+)
 
 
 @pytest_asyncio.fixture
@@ -24,6 +29,7 @@ async def cloud_sync_sqlite_session():
             Base.metadata.create_all,
             tables=[
                 CloudBClassSyncCheckpoint.__table__,
+                CloudBClassSyncRun.__table__,
                 CloudBClassSyncTask.__table__,
                 SystemConfig.__table__,
             ],
@@ -290,11 +296,16 @@ async def test_command_service_sync_now_only_enqueues_tables_ahead_of_checkpoint
             select(CloudBClassSyncTask).order_by(CloudBClassSyncTask.source_table_name.asc())
         )
     ).scalars().all()
+    runs = (await cloud_sync_sqlite_session.execute(select(CloudBClassSyncRun))).scalars().all()
 
     assert payload["status"] == "submitted"
     assert payload["metadata"]["checked_table_count"] == 2
     assert payload["metadata"]["enqueued_table_count"] == 1
     assert payload["metadata"]["skipped_up_to_date_count"] == 1
+    assert payload["metadata"]["run_id"] == runs[0].run_id
+    assert runs[0].status == "submitted"
+    assert runs[0].total_tables == 1
+    assert tasks[0].metadata_json["run_id"] == runs[0].run_id
     assert [task.source_table_name for task in tasks] == ["fact_sync_due"]
 
 

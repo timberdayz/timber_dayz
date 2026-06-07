@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select, text
@@ -20,7 +21,12 @@ from backend.services.event_listeners import determine_pipeline_targets_for_data
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
 from backend.services.cloud_b_class_sync_utils import validate_b_class_table_name
 from backend.utils.events import DataIngestedEvent
-from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncTask, SystemConfig
+from modules.core.db import (
+    CloudBClassSyncCheckpoint,
+    CloudBClassSyncRun,
+    CloudBClassSyncTask,
+    SystemConfig,
+)
 
 
 class CloudSyncAdminCommandService:
@@ -59,25 +65,80 @@ class CloudSyncAdminCommandService:
 
     async def sync_now(self) -> dict:
         checked_tables = await self._list_local_b_class_tables()
-        enqueued_count = 0
+        due_tables = []
         skipped_count = 0
 
         for table_name in checked_tables:
             if not await self._table_needs_catch_up(table_name):
                 skipped_count += 1
                 continue
-            await self.trigger_sync(table_name)
-            enqueued_count += 1
+            due_tables.append(table_name)
+
+        run = await self._create_sync_now_run(
+            checked_table_count=len(checked_tables),
+            enqueued_table_count=len(due_tables),
+            skipped_up_to_date_count=skipped_count,
+        )
+        run_id = run.run_id
+
+        for table_name in due_tables:
+            payload = await self.trigger_sync(table_name)
+            await self._attach_task_to_run(
+                job_id=payload.get("job_id"),
+                run_id=run_id,
+            )
+
+        if not due_tables:
+            run.status = "completed"
+            run.finished_at = datetime.now(timezone.utc)
+            await self.db.commit()
 
         return CloudSyncCommandResponse(
             status="submitted",
             detail="catch_up",
             metadata={
                 "checked_table_count": len(checked_tables),
-                "enqueued_table_count": enqueued_count,
+                "enqueued_table_count": len(due_tables),
                 "skipped_up_to_date_count": skipped_count,
+                "run_id": run_id,
             },
         ).model_dump()
+
+    async def _create_sync_now_run(
+        self,
+        *,
+        checked_table_count: int,
+        enqueued_table_count: int,
+        skipped_up_to_date_count: int,
+    ) -> CloudBClassSyncRun:
+        run = CloudBClassSyncRun(
+            run_id=f"sync-now-{uuid.uuid4().hex}",
+            status="submitted",
+            total_tables=enqueued_table_count,
+            metadata_json={
+                "trigger_source": "sync_now",
+                "checked_table_count": checked_table_count,
+                "enqueued_table_count": enqueued_table_count,
+                "skipped_up_to_date_count": skipped_up_to_date_count,
+            },
+        )
+        self.db.add(run)
+        await self.db.commit()
+        await self.db.refresh(run)
+        return run
+
+    async def _attach_task_to_run(self, *, job_id: str | None, run_id: str) -> None:
+        if not job_id:
+            return
+        stmt = select(CloudBClassSyncTask).where(CloudBClassSyncTask.job_id == job_id)
+        task = (await self.db.execute(stmt)).scalars().one_or_none()
+        if task is None:
+            return
+        metadata = dict(task.metadata_json or {})
+        metadata["run_id"] = run_id
+        metadata["trigger_source"] = "sync_now"
+        task.metadata_json = metadata
+        await self.db.commit()
 
     async def retry_task(self, job_id: str) -> dict:
         task = await self._get_task(job_id)
