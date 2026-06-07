@@ -61,6 +61,9 @@ from backend.services.semantic_field_registry import (
     is_canonical_semantic_key,
     normalize_semantic_key,
 )
+from backend.services.semantic_alias_registry import SemanticAliasRegistryService
+from backend.services.template_hash_policy import TemplateHashPolicyService
+from backend.services.template_semantic_coverage_checker import TemplateSemanticCoverageChecker
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import FieldMappingTemplate
@@ -638,6 +641,15 @@ async def save_mapping_template(
             header_columns=header_columns,
             field_parse_rules=field_parse_rules,
         )
+        hash_policy_result = TemplateHashPolicyService().validate(
+            data_domain=request.data_domain,
+            granularity=request.granularity,
+            deduplication_fields=deduplication_fields,
+            header_bindings=header_bindings,
+            field_parse_rules=field_parse_rules,
+        )
+        if not hash_policy_result.passed:
+            raise ValueError("; ".join(hash_policy_result.blocking_errors))
 
         save_result = await template_service.save_template(
             platform=request.platform,
@@ -657,6 +669,23 @@ async def save_mapping_template(
             save_mode=request.save_mode,
             base_template_id=request.base_template_id,
         )
+        alias_registry = SemanticAliasRegistryService()
+        alias_summary = await alias_registry.upsert_template_confirmed_aliases(
+            db,
+            data_domain=request.data_domain,
+            platform_code=request.platform,
+            granularity=request.granularity,
+            header_bindings=header_bindings,
+        )
+        governance_checks = TemplateSemanticCoverageChecker(alias_registry).build_summary(
+            data_domain=request.data_domain,
+            platform_code=request.platform,
+            granularity=request.granularity,
+            sample_data=request.sample_data,
+            confirmed_aliases=alias_summary.aliases,
+            hash_policy_result=hash_policy_result,
+        )
+        save_result["governance_checks"] = governance_checks
 
         logger.info(
             f"[Template] 保存成功: platform={request.platform}, domain={request.data_domain}, "

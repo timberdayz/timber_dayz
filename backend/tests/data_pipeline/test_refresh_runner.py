@@ -94,6 +94,8 @@ def test_refresh_registry_exposes_dependency_order():
     assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic"] == ["semantic.fact_orders_monthly_atomic_mv"]
     assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_monthly_atomic"] == ["semantic.fact_analytics_monthly_atomic_mv"]
     assert SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic"] == "sql/semantic/orders_monthly_atomic.sql"
+    assert PIPELINE_DEPENDENCIES["semantic.fact_products_atomic"] == ["semantic.alias_registry"]
+    assert SQL_TARGET_PATHS["semantic.alias_registry"] == "sql/semantic/semantic_alias_registry.sql"
     assert SQL_TARGET_PATHS["api.business_overview_kpi_module"] == "sql/api_modules/business_overview_kpi_module.sql"
     ordered = topologically_sort_targets(
         [
@@ -112,6 +114,9 @@ def test_refresh_registry_exposes_dependency_order():
     assert ordered.index("semantic.fact_analytics_monthly_atomic") < ordered.index("mart.shop_month_kpi")
     assert ordered.index("mart.shop_month_kpi") < ordered.index("mart.platform_month_kpi")
     assert ordered.index("mart.shop_month_kpi") < ordered.index("api.business_overview_kpi_module")
+
+    products_ordered = topologically_sort_targets(["mart.product_day_kpi"])
+    assert products_ordered.index("semantic.alias_registry") < products_ordered.index("semantic.fact_products_atomic")
 
 
 def test_refresh_runner_builds_step_plan():

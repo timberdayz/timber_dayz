@@ -591,6 +591,7 @@ class CollectionResult:
     completed_domains: List[str] = field(default_factory=list)
     failed_domains: List[Dict[str, str]] = field(default_factory=list)
     total_domains: int = 0
+    file_processing_summary: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -4075,6 +4076,15 @@ class CollectionExecutorV2:
         from modules.services.metadata_manager import MetadataManager
         
         processed = []
+        summary = {
+            "downloaded_count": len(file_paths or []),
+            "raw_promoted_count": 0,
+            "catalog_registered_count": 0,
+            "registration_skipped_count": 0,
+            "semantic_rejected_count": 0,
+            "registration_errors": [],
+        }
+        self._last_file_processing_summary = summary
         
         # 提取账号信息
         account = account or {}
@@ -4114,6 +4124,7 @@ class CollectionExecutorV2:
                     sub_domain=landing_semantics["landing_sub_domain"],
                 )
                 if not semantic_result.is_valid:
+                    summary["semantic_rejected_count"] += 1
                     rejected_dir = source_path.parent / "_semantic_rejected"
                     rejected_dir.mkdir(parents=True, exist_ok=True)
                     rejected_path = rejected_dir / source_path.name
@@ -4151,6 +4162,7 @@ class CollectionExecutorV2:
                     sub_domain=parsed_standard.get("sub_domain"),
                 )
                 if not parsed_semantic_result.is_valid:
+                    summary["semantic_rejected_count"] += 1
                     rejected_dir = source_path.parent / "_semantic_rejected"
                     rejected_dir.mkdir(parents=True, exist_ok=True)
                     rejected_path = rejected_dir / source_path.name
@@ -4183,6 +4195,7 @@ class CollectionExecutorV2:
                 
                 # 3. 移动文件
                 shutil.move(str(source_path), str(target_path))
+                summary["raw_promoted_count"] += 1
                 logger.info(f"[OK] File moved: {source_path.name} -> {target_path}")
                 
                 # 4. 生成 .meta.json 伴生文件
@@ -4222,17 +4235,63 @@ class CollectionExecutorV2:
                     catalog_id = register_single_file(str(target_path))
                     if catalog_id:
                         logger.info(f"[OK] File registered: {target_path.name} (id={catalog_id})")
+                        summary["catalog_registered_count"] += 1
+                        processed.append(str(target_path))
                     else:
+                        summary["registration_skipped_count"] += 1
                         logger.warning(f"[WARN] File registration returned None: {target_path}")
                 except Exception as reg_error:
+                    summary["registration_errors"].append(
+                        {"file_path": str(target_path), "error": str(reg_error)}
+                    )
                     logger.warning(f"[WARN] Failed to register file {target_path}: {reg_error}")
-                
-                processed.append(str(target_path))
             
             except Exception as e:
                 logger.error(f"[FAIL] Failed to process file {file_path}: {e}")
         
         return processed
+
+    def _resolve_final_collection_status(
+        self,
+        *,
+        completed_count: int,
+        failed_count: int,
+        total_domains_count: int,
+        processed_file_count: int,
+        file_processing_summary: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, str]:
+        summary = file_processing_summary or {}
+        downloaded_count = int(summary.get("downloaded_count") or 0)
+        raw_promoted_count = int(summary.get("raw_promoted_count") or 0)
+        catalog_registered_count = int(summary.get("catalog_registered_count") or 0)
+        registration_skipped_count = int(summary.get("registration_skipped_count") or 0)
+        registration_error_count = len(summary.get("registration_errors") or [])
+
+        if completed_count == 0 and failed_count > 0:
+            return TASK_STATUS.FAILED, f"采集失败,0/{total_domains_count} 个域成功"
+
+        if (
+            completed_count > 0
+            and processed_file_count == 0
+            and (downloaded_count > 0 or raw_promoted_count > 0)
+            and catalog_registered_count == 0
+        ):
+            return (
+                TASK_STATUS.PARTIAL_SUCCESS,
+                (
+                    "文件已下载但未注册，需刷新/诊断后才能同步"
+                    f"(下载{downloaded_count}个,移动{raw_promoted_count}个,"
+                    f"跳过注册{registration_skipped_count}个,注册错误{registration_error_count}个)"
+                ),
+            )
+
+        if failed_count > 0:
+            return (
+                TASK_STATUS.PARTIAL_SUCCESS,
+                f"部分成功,{completed_count}/{total_domains_count} 个域成功,{failed_count} 个失败",
+            )
+
+        return TASK_STATUS.COMPLETED, f"采集完成,共采集 {processed_file_count} 个文件"
     
     def _infer_data_domain_from_path(self, file_path: str, data_domains: List[str], index: int) -> str:
         """

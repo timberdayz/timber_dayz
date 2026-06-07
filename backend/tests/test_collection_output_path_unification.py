@@ -114,6 +114,69 @@ async def test_executor_process_files_uses_configured_data_raw_dir(tmp_path, mon
     assert Path(processed[0]).parent.parent == raw_dir
 
 
+@pytest.mark.asyncio
+async def test_executor_process_files_only_counts_catalog_registered_files(tmp_path, monkeypatch):
+    raw_dir = tmp_path / "custom-raw-root"
+    download_file = tmp_path / "download.xlsx"
+    download_file.write_text("demo", encoding="utf-8")
+
+    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+
+    import modules.services.catalog_scanner as catalog_scanner_module
+    from modules.services.metadata_manager import MetadataManager
+
+    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: None)
+    monkeypatch.setattr(
+        MetadataManager,
+        "create_meta_file",
+        staticmethod(
+            lambda file_path, business_metadata, collection_info: Path(str(file_path) + ".meta.json")
+        ),
+    )
+
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: data_domains[idx]
+    executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: ""
+
+    processed = await CollectionExecutorV2._process_files(
+        executor,
+        [str(download_file)],
+        platform="shopee",
+        data_domains=["orders"],
+        granularity="monthly",
+    )
+
+    assert processed == []
+    assert list(raw_dir.rglob("*.xlsx"))
+    assert executor._last_file_processing_summary["downloaded_count"] == 1
+    assert executor._last_file_processing_summary["raw_promoted_count"] == 1
+    assert executor._last_file_processing_summary["catalog_registered_count"] == 0
+    assert executor._last_file_processing_summary["registration_skipped_count"] == 1
+
+
+def test_executor_marks_export_success_without_catalog_registration_as_partial_success():
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+
+    status, message = CollectionExecutorV2._resolve_final_collection_status(
+        executor,
+        completed_count=1,
+        failed_count=0,
+        total_domains_count=1,
+        processed_file_count=0,
+        file_processing_summary={
+            "downloaded_count": 1,
+            "raw_promoted_count": 1,
+            "catalog_registered_count": 0,
+            "registration_skipped_count": 1,
+            "semantic_rejected_count": 0,
+            "registration_errors": [],
+        },
+    )
+
+    assert status == "partial_success"
+    assert "未注册" in message
+
+
 def test_executor_infers_orders_sub_domain_from_download_path():
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
 

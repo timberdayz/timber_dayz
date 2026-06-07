@@ -32,8 +32,11 @@ class TemplateSemanticCoverageChecker:
         confirmed_aliases: Iterable[AliasRecord],
         hash_policy_result: HashPolicyResult,
     ) -> Dict[str, Any]:
-        sample_rows = list(sample_data or [])
-        sample_row = sample_rows[0] if sample_rows else {}
+        if isinstance(sample_data, dict):
+            sample_row = sample_data
+        else:
+            sample_rows = list(sample_data or [])
+            sample_row = sample_rows[0] if sample_rows else {}
         fields = PRODUCT_COVERAGE_FIELDS if (data_domain or "").lower() == "products" else []
         coverage: Dict[str, Dict[str, Any]] = {}
         warnings: List[str] = list(hash_policy_result.warnings)

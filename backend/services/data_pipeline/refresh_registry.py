@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
+    "semantic.alias_registry": [],
     "semantic.shop_identity_resolution_candidates": [],
     "semantic.fact_orders_monthly_atomic_mv": ["semantic.shop_identity_resolution_candidates"],
     "semantic.fact_analytics_monthly_atomic_mv": ["semantic.shop_identity_resolution_candidates"],
@@ -9,7 +10,7 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.fact_analytics_atomic": ["semantic.shop_identity_resolution_candidates"],
     "semantic.fact_orders_monthly_atomic": ["semantic.fact_orders_monthly_atomic_mv"],
     "semantic.fact_analytics_monthly_atomic": ["semantic.fact_analytics_monthly_atomic_mv"],
-    "semantic.fact_products_atomic": [],
+    "semantic.fact_products_atomic": ["semantic.alias_registry"],
     "semantic.fact_inventory_snapshot": [],
     "semantic.fact_services_atomic": [],
     "mart.shop_day_kpi": ["semantic.fact_orders_atomic", "semantic.fact_analytics_atomic"],
@@ -51,6 +52,7 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
 }
 
 SQL_TARGET_PATHS: dict[str, str] = {
+    "semantic.alias_registry": "sql/semantic/semantic_alias_registry.sql",
     "semantic.shop_identity_resolution_candidates": "sql/semantic/shop_identity_resolution_candidates.sql",
     "semantic.fact_orders_monthly_atomic_mv": "sql/semantic/orders_monthly_atomic_mv.sql",
     "semantic.fact_analytics_monthly_atomic_mv": "sql/semantic/analytics_monthly_atomic_mv.sql",

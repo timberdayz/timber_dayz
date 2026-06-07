@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -443,6 +444,121 @@ async def test_list_files_includes_inventory_granularity_anomaly_with_repair_con
     assert file_row["governance_status"] == "semantic_invalid"
     assert file_row["semantic_anomaly_type"] == "inventory_granularity_invalid"
     assert file_row["semantic_repair_action"] == "repair_inventory_snapshot"
+
+
+@pytest.mark.asyncio
+async def test_list_files_returns_hidden_and_raw_unregistered_hints(file_list_client, tmp_path, monkeypatch):
+    client, session_factory = file_list_client
+
+    raw_dir = tmp_path / "data" / "raw" / "2026"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_file = raw_dir / "shopee_orders_monthly_20260608_010000.xlsx"
+    raw_file.write_text("demo", encoding="utf-8")
+
+    from backend.domains.data_platform.routers import data_sync as router_module
+
+    monkeypatch.setattr(router_module, "get_data_raw_dir", lambda: tmp_path / "data" / "raw", raising=False)
+
+    async with session_factory() as session:
+        session.add(
+            CatalogFile(
+                file_path="data/raw/2026/tiktok_products_tiktok_monthly_20260407_123005.xlsx",
+                file_name="tiktok_products_tiktok_monthly_20260407_123005.xlsx",
+                source="data/raw",
+                platform_code="tiktok",
+                source_platform="tiktok",
+                data_domain="products",
+                granularity="monthly",
+                sub_domain="tiktok",
+                status="pending",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    response = await client.get("/api/data-sync/files", params={"status": "pending"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["files"] == []
+    assert payload["data"]["hidden_semantic_invalid_count"] == 1
+    assert payload["data"]["raw_unregistered_hint"]["candidate_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_data_sync_files_scans_data_raw(file_list_client, tmp_path, monkeypatch):
+    client, _session_factory = file_list_client
+
+    from backend.domains.data_platform.routers import data_sync as router_module
+
+    calls = []
+
+    def fake_scan_and_register(base_dir):
+        calls.append(base_dir)
+        return SimpleNamespace(seen=3, registered=2, skipped=1, new_file_ids=[10, 11])
+
+    monkeypatch.setattr(router_module, "get_data_raw_dir", lambda: tmp_path / "data" / "raw", raising=False)
+    monkeypatch.setattr(router_module, "scan_and_register", fake_scan_and_register, raising=False)
+
+    response = await client.post("/api/data-sync/files/refresh")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"] == {
+        "seen": 3,
+        "registered": 2,
+        "skipped": 1,
+        "new_file_ids": [10, 11],
+    }
+    assert calls == [tmp_path / "data" / "raw"]
+
+
+@pytest.mark.asyncio
+async def test_data_sync_file_diagnostics_reports_unregistered_raw_candidates(
+    file_list_client,
+    tmp_path,
+    monkeypatch,
+):
+    client, session_factory = file_list_client
+
+    raw_dir = tmp_path / "data" / "raw" / "2026"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_file = raw_dir / "shopee_orders_monthly_20260608_010000.xlsx"
+    raw_file.write_text("demo", encoding="utf-8")
+
+    from backend.domains.data_platform.routers import data_sync as router_module
+
+    monkeypatch.setattr(router_module, "get_data_raw_dir", lambda: tmp_path / "data" / "raw", raising=False)
+
+    async with session_factory() as session:
+        session.add(
+            CatalogFile(
+                file_path="data/raw/2026/tiktok_products_tiktok_monthly_20260407_123005.xlsx",
+                file_name="tiktok_products_tiktok_monthly_20260407_123005.xlsx",
+                source="data/raw",
+                platform_code="tiktok",
+                source_platform="tiktok",
+                data_domain="products",
+                granularity="monthly",
+                sub_domain="tiktok",
+                status="pending",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    response = await client.get("/api/data-sync/files/diagnostics", params={"hours": 24})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["raw_file_count"] == 1
+    assert payload["data"]["catalog_file_count"] == 1
+    assert payload["data"]["unregistered_raw_candidates"] == 1
+    assert payload["data"]["semantic_invalid_count"] == 1
+    assert payload["data"]["recommendations"]
 
 
 @pytest.mark.asyncio

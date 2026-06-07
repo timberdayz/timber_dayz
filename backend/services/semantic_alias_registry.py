@@ -6,8 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from modules.core.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 AliasRecord = Dict[str, Any]
@@ -147,22 +152,34 @@ class SemanticAliasRegistryService:
             return AliasUpsertSummary(aliases=[])
 
         now = datetime.now(timezone.utc)
-        for alias in aliases:
-            await db.execute(
-                text(
-                    """
-                    INSERT INTO semantic.semantic_field_aliases (
-                        data_domain, standard_field, raw_alias, platform_code, granularity,
-                        source, confidence, status, created_at, updated_at
-                    )
-                    VALUES (
-                        :data_domain, :standard_field, :raw_alias, :platform_code, :granularity,
-                        :source, 0.95, 'active', :now, :now
-                    )
-                    ON CONFLICT ON CONSTRAINT uq_semantic_field_aliases_identity
-                    DO UPDATE SET updated_at = EXCLUDED.updated_at, status = 'active'
-                    """
-                ),
-                {**alias, "now": now},
-            )
+        try:
+            for alias in aliases:
+                await db.execute(
+                    text(
+                        """
+                        INSERT INTO semantic.semantic_field_aliases (
+                            data_domain, standard_field, raw_alias, platform_code, granularity,
+                            source, confidence, status, created_at, updated_at
+                        )
+                        SELECT
+                            :data_domain, :standard_field, :raw_alias, :platform_code, :granularity,
+                            :source, 0.95, 'active', :now, :now
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM semantic.semantic_field_aliases existing
+                            WHERE existing.data_domain = :data_domain
+                              AND existing.standard_field = :standard_field
+                              AND existing.raw_alias = :raw_alias
+                              AND COALESCE(existing.platform_code, '') = COALESCE(:platform_code, '')
+                              AND COALESCE(existing.granularity, '') = COALESCE(:granularity, '')
+                              AND existing.status = 'active'
+                        )
+                        """
+                    ),
+                    {**alias, "now": now},
+                )
+            await db.commit()
+        except SQLAlchemyError as exc:
+            await db.rollback()
+            logger.warning("[SemanticAliasRegistry] alias registry upsert skipped: %s", exc)
         return AliasUpsertSummary(aliases=aliases)

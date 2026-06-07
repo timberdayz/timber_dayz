@@ -524,6 +524,20 @@ v4.6.0新增：独立的数据同步系统
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="治理提示" width="180">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="getTaskWarnings(row).length > 0"
+              :content="getTaskWarnings(row).join('；')"
+              placement="top"
+            >
+              <el-tag type="warning" size="small">
+                {{ getTaskWarnings(row).length }} 条提示
+              </el-tag>
+            </el-tooltip>
+            <span v-else class="history-muted-text">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="进度" width="200">
           <template #default="{ row }">
             <el-progress
@@ -834,6 +848,23 @@ const truncateText = (text, maxLength = 50) => {
   if (!text) return ''
   if (text.length <= maxLength) return text
   return text.substring(0, maxLength) + '...'
+}
+
+const normalizeWarningMessage = (warning) => {
+  if (!warning) return ''
+  if (typeof warning === 'string') return warning
+  return warning.message || warning.detail || ''
+}
+
+const getTaskWarnings = (row) => {
+  const directWarnings = Array.isArray(row?.warnings)
+    ? row.warnings.map(normalizeWarningMessage).filter(Boolean)
+    : []
+  const standardizationChecks = row?.task_details?.standardization_quality || []
+  const standardizationWarnings = Array.isArray(standardizationChecks)
+    ? standardizationChecks.flatMap((check) => check.warnings || []).filter(Boolean)
+    : []
+  return [...directWarnings, ...standardizationWarnings]
 }
 
 // 截断文件名

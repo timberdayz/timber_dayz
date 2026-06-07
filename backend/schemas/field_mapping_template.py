@@ -124,6 +124,7 @@ class TemplateSaveData(BaseModel):
     archived_template_id: Optional[int] = None
     save_mode: TemplateSaveMode
     base_template_id: Optional[int] = None
+    governance_checks: Dict[str, Any] = Field(default_factory=dict)
 
 
 class TemplateSaveResponse(BaseModel):

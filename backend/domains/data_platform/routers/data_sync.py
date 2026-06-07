@@ -32,6 +32,7 @@ from backend.services.data_sync_service import DataSyncService
 from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
 from backend.services.spreadsheet_normalization_service import get_spreadsheet_normalization_service
 from backend.services.sync_progress_tracker import SyncProgressTracker
+from backend.services.sync_standardization_quality_service import SyncStandardizationQualityService
 from backend.dependencies.auth import get_current_user, require_admin  # [*] Phase 4.2: 用户认证
 from backend.services.user_task_quota import get_user_task_quota_service  # [*] Phase 4.2: 用户任务配额
 
@@ -1491,6 +1492,44 @@ async def process_batch_sync_background(
                     })
                     
                     logger.info(f"[BackgroundTask] 数据质量检查完成: 平均评分={avg_quality_score:.2f}")
+
+                    standardization_checks = []
+                    quality_service = SyncStandardizationQualityService()
+                    product_groups = {}
+                    for file_record in successful_files:
+                        if getattr(file_record, "data_domain", None) != "products":
+                            continue
+                        group_key = (
+                            file_record.platform_code,
+                            getattr(file_record, "granularity", None) or "daily",
+                        )
+                        product_groups.setdefault(group_key, []).append(file_record.id)
+
+                    for (platform_code, granularity), grouped_file_ids in product_groups.items():
+                        check = await quality_service.check_products_file(
+                            db_main,
+                            platform_code=platform_code,
+                            granularity=granularity,
+                            file_ids=grouped_file_ids,
+                        )
+                        warnings = list(check.get("warnings") or [])
+                        for warning in warnings:
+                            await progress_tracker.add_warning(task_id, warning)
+                        standardization_checks.append(
+                            {
+                                "platform_code": platform_code,
+                                "data_domain": "products",
+                                "granularity": granularity,
+                                "file_ids": grouped_file_ids,
+                                "warnings": warnings,
+                            }
+                        )
+
+                    if standardization_checks:
+                        await progress_tracker.update_task(
+                            task_id,
+                            {"task_details": {"standardization_quality": standardization_checks}},
+                        )
             except Exception as e:
                 logger.warning(f"[BackgroundTask] 数据质量检查失败: {e}", exc_info=True)
                 # [*] v4.17.1修复:确保质量检查会话回滚,不影响主流程

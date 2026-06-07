@@ -759,6 +759,23 @@ const handleRepreview = () => {
   handlePreview()
 }
 
+const showTemplateGovernanceSummary = (result) => {
+  const checks = result?.data?.governance_checks || result?.governance_checks
+  if (!checks) return
+
+  const aliasCount = Array.isArray(checks.registered_aliases) ? checks.registered_aliases.length : 0
+  const resolvedCount = Array.isArray(checks.required_fields_resolved)
+    ? checks.required_fields_resolved.length
+    : 0
+  const hashStatus = checks.hash_policy_status === 'passed' ? '去重规则通过' : '去重规则需检查'
+  ElMessage.success(`${hashStatus}；已登记 ${aliasCount} 个字段别名；字段标准化覆盖 ${resolvedCount} 项`)
+
+  const warnings = Array.isArray(checks.warnings) ? checks.warnings : []
+  if (warnings.length > 0) {
+    ElMessage.warning(warnings[0])
+  }
+}
+
 const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, headerRow: selectedHeaderRow, headerBindings: selectedHeaderBindings }) => {
   const context = updateWorkbenchContext.value?.context
   const template = updateWorkbenchContext.value?.template
@@ -820,6 +837,7 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
     if (sampleFileId && isSampleStillInNeedsUpdate(sampleFileId)) {
       ElMessage.warning('模板已保存，但该样本文件仍未通过治理复核，请继续检查字段差异')
     } else {
+      showTemplateGovernanceSummary(result)
       ElMessage.success(result.message || '模板更新成功，治理已通过')
       isWorkbenchVisible.value = false
     }
@@ -925,6 +943,7 @@ const handleSaveTemplate = async () => {
       fieldParseRules: fieldParseRules.value,
     })
     if (result && (result.success || result.template_id)) {
+      showTemplateGovernanceSummary(result)
       ElMessage.success(result.message || '模板保存成功')
       await loadTemplates()
       await loadGovernanceStats()
