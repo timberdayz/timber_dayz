@@ -193,6 +193,32 @@ v4.6.0新增：独立的数据同步系统
       </el-form>
     </el-card>
 
+    <el-alert
+      v-if="files.length === 0 && (rawUnregisteredHint || hiddenSemanticInvalidCount > 0)"
+      class="file-diagnostics-alert"
+      type="warning"
+      show-icon
+      :closable="false"
+    >
+      <template #title>
+        文件列表为空，但发现可能不可同步的采集文件
+      </template>
+      <template #default>
+        <span v-if="rawUnregisteredHint">
+          data/raw 中有 {{ rawUnregisteredHint.candidate_count || 0 }} 个文件尚未注册到文件列表。
+        </span>
+        <span v-if="hiddenSemanticInvalidCount > 0">
+          另有 {{ hiddenSemanticInvalidCount }} 个语义异常文件被隐藏。
+        </span>
+        <el-button size="small" text type="primary" @click="handleRefreshFiles">
+          刷新文件目录
+        </el-button>
+        <el-button size="small" text type="primary" @click="loadFileDiagnostics(true)">
+          查看诊断
+        </el-button>
+      </template>
+    </el-alert>
+
     <!-- 同步进度显示 -->
     <el-card
       v-if="activeProgressTasks.length > 0"
@@ -777,6 +803,9 @@ const statsLoading = ref(false)
 const refreshing = ref(false)
 const syncingAll = ref(false)
 const cleaning = ref(false)
+const fileDiagnostics = ref(null)
+const hiddenSemanticInvalidCount = ref(0)
+const rawUnregisteredHint = ref(null)
 const governanceStats = ref({
   pending_count: 0,
   ready_to_sync_count: 0,
@@ -1019,6 +1048,8 @@ const loadFiles = async (showLoading = true) => {
     ])
 
     files.value = data.files || []
+    hiddenSemanticInvalidCount.value = data.hidden_semantic_invalid_count || 0
+    rawUnregisteredHint.value = data.raw_unregistered_hint || null
     // 更新分页信息
     pagination.value.total = data.total || 0
     pagination.value.totalPages = data.total_pages || 1
@@ -1547,7 +1578,7 @@ const retrySingle = async (fileId) => {
     ])
 
     // v4.18.0: 异步模式 - 返回task_id，启动轮询
-    if (result?.task_id && result?.status === 'submitted') {
+    if (result?.task_id && (result?.status === 'submitted' || result?.status === 'pending')) {
       ElMessage.info(`重试任务已提交: ${result.file_name || fileId}`)
 
       // 启动进度轮询
@@ -1824,6 +1855,27 @@ const loadGovernanceStats = async (showLoading = false) => {
   }
 }
 
+const loadFileDiagnostics = async (showMessage = false) => {
+  try {
+    const data = await api.getDataSyncFileDiagnostics({ hours: 24 })
+    fileDiagnostics.value = data
+    if (showMessage) {
+      const unregistered = data?.unregistered_raw_candidates || 0
+      const semanticInvalid = data?.semantic_invalid_count || 0
+      ElMessage.info(
+        `诊断完成：未注册raw文件 ${unregistered} 个，语义异常 ${semanticInvalid} 个`
+      )
+    }
+    return data
+  } catch (error) {
+    console.error('加载文件链路诊断失败:', error)
+    if (showMessage) {
+      ElMessage.error(error.message || '加载文件链路诊断失败')
+    }
+    return null
+  }
+}
+
 // 刷新待同步文件
 const handleRefreshFiles = async () => {
   refreshing.value = true
@@ -1839,9 +1891,15 @@ const handleRefreshFiles = async () => {
     )
 
     const result = await api.refreshPendingFiles()
-    ElMessage.success(result.message || '刷新成功')
+    ElMessage.success(
+      result.message ||
+        `刷新成功：扫描 ${result.seen || 0} 个，新增注册 ${result.registered || 0} 个，跳过 ${
+          result.skipped || 0
+        } 个`
+    )
     await loadFiles()
     await loadGovernanceStats()
+    await loadFileDiagnostics(false)
   } catch (error) {
     if (error !== 'cancel') {
       console.error('刷新文件失败:', error)
@@ -2099,6 +2157,7 @@ onUnmounted(() => {
 onMounted(() => {
   loadFiles()
   loadGovernanceStats()
+  loadFileDiagnostics()
   loadSyncHistory() // v4.18.0新增：加载同步历史
 })
 </script>
@@ -2106,6 +2165,10 @@ onMounted(() => {
 <style scoped>
 .data-sync-files {
   min-height: calc(100vh - var(--header-height));
+}
+
+.file-diagnostics-alert {
+  margin-bottom: 16px;
 }
 
 .governance-stats {

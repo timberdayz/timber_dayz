@@ -70,11 +70,12 @@ from backend.services.data_loss_analyzer import (
 from backend.services.field_mapping_validator import validate_field_mapping, calculate_mapping_quality_score
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
-from modules.core.db import CatalogFile
+from modules.core.db import CatalogFile, CollectionTask
 from modules.core.file_naming import StandardFileName
 from modules.core.logger import get_logger
-from modules.core.path_manager import to_absolute_path
+from modules.core.path_manager import get_data_raw_dir, to_absolute_path
 from modules.services.catalog_scanner import _compute_sha256
+from modules.services.catalog_scanner import scan_and_register
 from modules.services.metadata_manager import MetadataManager
 from modules.services.file_semantics import is_catalog_file_semantically_valid, validate_file_semantics
 from sqlalchemy import select, func, and_, distinct, case
@@ -147,6 +148,123 @@ def _semantic_anomaly_display_reason(reason: str) -> str:
 
 def _is_inventory_granularity_anomaly(catalog_file: CatalogFile | None) -> bool:
     return _semantic_anomaly_reason(catalog_file) == "inventory_granularity_invalid"
+
+
+DATA_SYNC_RAW_EXTENSIONS = {".xlsx", ".xls", ".csv", ".tsv", ".html", ".htm"}
+
+
+def _normalize_local_path_key(path_value: Any) -> str:
+    try:
+        path = PathLib(str(path_value))
+        if not path.is_absolute():
+            path = to_absolute_path(str(path_value))
+        return str(path.resolve()).replace("\\", "/").lower()
+    except Exception:
+        return str(path_value or "").replace("\\", "/").lower()
+
+
+def _iter_data_raw_files(limit: int | None = None) -> list[PathLib]:
+    raw_root = PathLib(get_data_raw_dir())
+    if not raw_root.exists():
+        return []
+
+    files: list[PathLib] = []
+    for candidate in raw_root.rglob("*"):
+        if not candidate.is_file():
+            continue
+        if candidate.suffix.lower() == ".json" and candidate.name.endswith(".meta.json"):
+            continue
+        if candidate.suffix.lower() not in DATA_SYNC_RAW_EXTENSIONS:
+            continue
+        files.append(candidate)
+        if limit is not None and len(files) >= limit:
+            break
+    return files
+
+
+async def _build_raw_unregistered_hint(db: AsyncSession) -> dict[str, Any] | None:
+    raw_files = _iter_data_raw_files(limit=1001)
+    if not raw_files:
+        return None
+
+    result = await db.execute(select(CatalogFile.file_path))
+    catalog_path_keys = {
+        _normalize_local_path_key(row[0])
+        for row in result.all()
+        if row[0]
+    }
+    unregistered = [
+        raw_file
+        for raw_file in raw_files
+        if _normalize_local_path_key(raw_file) not in catalog_path_keys
+    ]
+    if not unregistered:
+        return None
+
+    return {
+        "candidate_count": len(unregistered),
+        "sample_files": [str(path) for path in unregistered[:5]],
+        "action": "refresh_data_sync_files",
+    }
+
+
+async def _build_data_sync_file_diagnostics(db: AsyncSession, hours: int) -> dict[str, Any]:
+    safe_hours = max(1, min(int(hours or 24), 24 * 30))
+    since_time = datetime.now(timezone.utc) - timedelta(hours=safe_hours)
+
+    raw_files = _iter_data_raw_files()
+    raw_hint = await _build_raw_unregistered_hint(db)
+
+    catalog_result = await db.execute(select(CatalogFile))
+    catalog_files = catalog_result.scalars().all()
+    semantic_invalid_count = sum(
+        1
+        for file_record in catalog_files
+        if not is_catalog_file_semantically_valid(file_record)
+        and not _is_inventory_granularity_anomaly(file_record)
+    )
+
+    recent_collection_tasks: list[dict[str, Any]] = []
+    try:
+        task_result = await db.execute(
+            select(CollectionTask)
+            .where(CollectionTask.created_at >= since_time)
+            .order_by(CollectionTask.created_at.desc())
+            .limit(10)
+        )
+        for task in task_result.scalars().all():
+            recent_collection_tasks.append(
+                {
+                    "id": getattr(task, "id", None),
+                    "task_id": getattr(task, "task_id", None) or getattr(task, "id", None),
+                    "status": getattr(task, "status", None),
+                    "files_collected": getattr(task, "files_collected", 0) or 0,
+                    "created_at": (
+                        task.created_at.isoformat()
+                        if getattr(task, "created_at", None)
+                        else None
+                    ),
+                }
+            )
+    except Exception as exc:
+        logger.debug("[DataSync Diagnostics] collection task lookup skipped: %s", exc)
+
+    recommendations = []
+    if raw_hint and raw_hint.get("candidate_count", 0) > 0:
+        recommendations.append("点击刷新文件目录，将 data/raw 中未注册文件补录到文件列表。")
+    if semantic_invalid_count > 0:
+        recommendations.append("存在语义异常 catalog 文件，请清理或修复后再同步。")
+    if not recommendations:
+        recommendations.append("未发现明显的文件注册链路异常。")
+
+    return {
+        "recent_collection_tasks": recent_collection_tasks,
+        "raw_file_count": len(raw_files),
+        "catalog_file_count": len(catalog_files),
+        "unregistered_raw_candidates": (raw_hint or {}).get("candidate_count", 0),
+        "semantic_invalid_count": semantic_invalid_count,
+        "recommendations": recommendations,
+    }
 
 
 def _resolve_miaoshou_orders_business_platform(catalog_file: CatalogFile) -> str | None:
@@ -452,6 +570,8 @@ async def list_files(
             for file_record in all_files
             if is_catalog_file_semantically_valid(file_record) or _is_inventory_granularity_anomaly(file_record)
         ]
+        hidden_semantic_invalid_count = len(all_files) - len(display_files)
+        raw_unregistered_hint = await _build_raw_unregistered_hint(db)
         total_count = len(display_files)
 
         if limit is not None:
@@ -606,7 +726,9 @@ async def list_files(
                 "total": total_count,  # v4.18.0: 返回总数(用于分页)
                 "page": page,
                 "page_size": page_size,
-                "total_pages": (total_count + page_size - 1) // page_size if page_size > 0 else 1
+                "total_pages": (total_count + page_size - 1) // page_size if page_size > 0 else 1,
+                "hidden_semantic_invalid_count": hidden_semantic_invalid_count,
+                "raw_unregistered_hint": raw_unregistered_hint,
             },
             message=f"查询到 {len(file_list)} 个文件(共 {total_count} 个)"
         )
@@ -620,6 +742,53 @@ async def list_files(
             detail=str(e),
             recovery_suggestion="请检查查询参数和数据库连接,或联系系统管理员",
             status_code=500
+        )
+
+
+@router.post("/data-sync/files/refresh")
+async def refresh_data_sync_files(
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        result = await asyncio.to_thread(scan_and_register, get_data_raw_dir())
+        data = {
+            "seen": result.seen,
+            "registered": result.registered,
+            "skipped": result.skipped,
+            "new_file_ids": result.new_file_ids,
+        }
+        return success_response(data=data, message="刷新文件目录完成")
+    except Exception as e:
+        logger.error(f"[DataSync Files Refresh] 刷新文件目录失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.FILE_OPERATION_ERROR,
+            message="刷新文件目录失败",
+            error_type=get_error_type(ErrorCode.FILE_OPERATION_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查 data/raw 目录权限和文件命名是否符合规范",
+            status_code=500,
+        )
+
+
+@router.get("/data-sync/files/diagnostics")
+async def get_data_sync_file_diagnostics(
+    hours: int = Query(24, ge=1, le=720),
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    try:
+        data = await _build_data_sync_file_diagnostics(db, hours)
+        return success_response(data=data, message="获取文件链路诊断成功")
+    except Exception as e:
+        logger.error(f"[DataSync Files Diagnostics] 获取文件链路诊断失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="获取文件链路诊断失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接和 data/raw 目录权限",
+            status_code=500,
         )
 
 

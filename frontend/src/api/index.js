@@ -1178,6 +1178,10 @@ export default {
     return await this._get('/data-sync/files', { params: filters })
   },
 
+  async getDataSyncFileDiagnostics(params = {}) {
+    return await this._get('/data-sync/files/diagnostics', { params })
+  },
+
   async repairInventorySnapshotSemantics(fileIds = []) {
     return await this._post('/data-sync/repair-inventory-snapshot-semantics', fileIds)
   },
@@ -2303,7 +2307,7 @@ export default {
    */
   async refreshPendingFiles() {
     // 调用扫描文件API（修复：使用正确的API路径）
-    return await this._post('/field-mapping/scan')
+    return await this._post('/data-sync/files/refresh')
   },
 
   // ==================== 组件版本管理API (Phase 9.4) ====================

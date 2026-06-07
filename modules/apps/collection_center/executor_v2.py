@@ -2035,19 +2035,14 @@ class CollectionExecutorV2:
             
             completed_count = len(context.completed_domains)
             failed_count = len(context.failed_domains)
-            
-            if completed_count == 0 and failed_count > 0:
-                # 全部失败
-                final_status = TASK_STATUS.FAILED
-                final_message = f"采集失败,0/{total_domains_count} 个域成功"
-            elif failed_count > 0:
-                # 部分成功
-                final_status = TASK_STATUS.PARTIAL_SUCCESS
-                final_message = f"部分成功,{completed_count}/{total_domains_count} 个域成功,{failed_count} 个失败"
-            else:
-                # 全部成功
-                final_status = TASK_STATUS.COMPLETED
-                final_message = f"采集完成,共采集 {len(processed_files)} 个文件"
+            file_processing_summary = getattr(self, "_last_file_processing_summary", {})
+            final_status, final_message = self._resolve_final_collection_status(
+                completed_count=completed_count,
+                failed_count=failed_count,
+                total_domains_count=total_domains_count,
+                processed_file_count=len(processed_files),
+                file_processing_summary=file_processing_summary,
+            )
             
             await self._update_status(task_id, 100, final_message)
             
@@ -2067,6 +2062,7 @@ class CollectionExecutorV2:
                 completed_domains=context.completed_domains,
                 failed_domains=context.failed_domains,
                 total_domains=total_domains_count,
+                file_processing_summary=file_processing_summary,
             )
 
         except TaskCancelledError:
@@ -2783,16 +2779,14 @@ class CollectionExecutorV2:
         duration = (datetime.now() - start_time).total_seconds()
         completed_count = len(context.completed_domains)
         failed_count = len(context.failed_domains)
-        
-        if completed_count == 0 and failed_count > 0:
-            final_status = TASK_STATUS.FAILED
-            final_message = f"Collection failed, 0/{total_domains_count} domains succeeded"
-        elif failed_count > 0:
-            final_status = TASK_STATUS.PARTIAL_SUCCESS
-            final_message = f"Partial success, {completed_count}/{total_domains_count} domains succeeded, {failed_count} failed"
-        else:
-            final_status = TASK_STATUS.COMPLETED
-            final_message = f"Collection completed, {len(processed_files)} files collected"
+        file_processing_summary = getattr(self, "_last_file_processing_summary", {})
+        final_status, final_message = self._resolve_final_collection_status(
+            completed_count=completed_count,
+            failed_count=failed_count,
+            total_domains_count=total_domains_count,
+            processed_file_count=len(processed_files),
+            file_processing_summary=file_processing_summary,
+        )
         
         await self._update_status(task_id, 100, final_message)
         logger.info(f"Task {task_id}: [Python] {final_status} - completed={completed_count}, failed={failed_count}, files={len(processed_files)}")
@@ -2808,6 +2802,7 @@ class CollectionExecutorV2:
             completed_domains=context.completed_domains,
             failed_domains=context.failed_domains,
             total_domains=total_domains_count,
+            file_processing_summary=file_processing_summary,
         )
     
     async def _execute_component(
@@ -5032,16 +5027,14 @@ class CollectionExecutorV2:
         duration = (datetime.now() - start_time).total_seconds()
         completed_count = len(context.completed_domains)
         failed_count = len(context.failed_domains)
-        
-        if completed_count == 0 and failed_count > 0:
-            final_status = "failed"
-            final_message = f"采集失败,0/{len(data_domains)} 个域成功"
-        elif failed_count > 0:
-            final_status = "partial_success"
-            final_message = f"部分成功,{completed_count}/{len(data_domains)} 个域成功,{failed_count} 个失败"
-        else:
-            final_status = "completed"
-            final_message = f"采集完成,共采集 {len(processed_files)} 个文件"
+        file_processing_summary = getattr(self, "_last_file_processing_summary", {})
+        final_status, final_message = self._resolve_final_collection_status(
+            completed_count=completed_count,
+            failed_count=failed_count,
+            total_domains_count=len(data_domains),
+            processed_file_count=len(processed_files),
+            file_processing_summary=file_processing_summary,
+        )
         
         await self._update_status(task_id, 100, final_message)
         logger.info(f"Task {task_id}: Parallel execution completed in {duration:.1f}s - {final_status}")
@@ -5058,6 +5051,7 @@ class CollectionExecutorV2:
             completed_domains=context.completed_domains,
             failed_domains=context.failed_domains,
             total_domains=len(data_domains),
+            file_processing_summary=file_processing_summary,
         )
     
     async def _execute_single_domain_parallel(
