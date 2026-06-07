@@ -99,7 +99,7 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
                 "--profile",
                 "production",
                 "build",
-                "backend",
+                "backend-api",
                 "migrate",
                 "frontend",
             ],

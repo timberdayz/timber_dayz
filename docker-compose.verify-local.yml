@@ -4,7 +4,7 @@
 # active local verification overlay.
 
 services:
-  backend:
+  backend-api:
     environment:
       DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
     ports:

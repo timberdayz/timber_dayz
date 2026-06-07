@@ -56,31 +56,46 @@ def _column_exists(connection, schema_name: str, table_name: str, column_name: s
     return result.scalar() is not None
 
 
+def _rename_column_if_needed(connection, old_name: str, new_name: str) -> None:
+    if _column_exists(connection, "a_class", "operating_costs", old_name) and not _column_exists(
+        connection, "a_class", "operating_costs", new_name
+    ):
+        op.execute(sa.text(f'ALTER TABLE a_class.operating_costs RENAME COLUMN "{old_name}" TO "{new_name}"'))
+
+
+def _add_numeric_column_if_missing(connection, column_name: str) -> None:
+    if not _column_exists(connection, "a_class", "operating_costs", column_name):
+        op.add_column(
+            "operating_costs",
+            sa.Column(column_name, sa.Numeric(15, 2), nullable=False, server_default="0"),
+            schema="a_class",
+        )
+
+
 def upgrade() -> None:
     connection = op.get_bind()
     if not _table_exists(connection, "a_class", "operating_costs"):
         return
 
-    # 1) Rename legacy column if present.
-    has_salary = _column_exists(connection, "a_class", "operating_costs", "工资")
-    has_marketing = _column_exists(connection, "a_class", "operating_costs", "营销费用")
-    if has_salary and not has_marketing:
-        op.execute(sa.text('ALTER TABLE a_class.operating_costs RENAME COLUMN "工资" TO "营销费用"'))
+    # 1) Normalize the v5 snapshot English columns to the current Chinese-column contract.
+    _rename_column_if_needed(connection, "shop_id", "店铺ID")
+    _rename_column_if_needed(connection, "year_month", "年月")
+    _rename_column_if_needed(connection, "rent", "租金")
+    _rename_column_if_needed(connection, "salary", "工资")
+    _rename_column_if_needed(connection, "utilities", "水电费")
+    _rename_column_if_needed(connection, "other_costs", "其他成本")
+    _rename_column_if_needed(connection, "created_at", "创建时间")
+    _rename_column_if_needed(connection, "updated_at", "更新时间")
+    _rename_column_if_needed(connection, "工资", "营销费用")
+
+    _add_numeric_column_if_missing(connection, "租金")
+    _add_numeric_column_if_missing(connection, "营销费用")
+    _add_numeric_column_if_missing(connection, "水电费")
+    _add_numeric_column_if_missing(connection, "其他成本")
 
     # 2) Add new columns (idempotent).
-    if not _column_exists(connection, "a_class", "operating_costs", "AI Token费用"):
-        op.add_column(
-            "operating_costs",
-            sa.Column("AI Token费用", sa.Numeric(15, 2), nullable=False, server_default="0"),
-            schema="a_class",
-        )
-
-    if not _column_exists(connection, "a_class", "operating_costs", "成本合计"):
-        op.add_column(
-            "operating_costs",
-            sa.Column("成本合计", sa.Numeric(15, 2), nullable=False, server_default="0"),
-            schema="a_class",
-        )
+    _add_numeric_column_if_missing(connection, "AI Token费用")
+    _add_numeric_column_if_missing(connection, "成本合计")
 
     if not _column_exists(connection, "a_class", "operating_costs", "备注"):
         op.add_column(
@@ -157,4 +172,3 @@ def downgrade() -> None:
     has_marketing = _column_exists(connection, "a_class", "operating_costs", "营销费用")
     if (not has_salary) and has_marketing:
         op.execute(sa.text('ALTER TABLE a_class.operating_costs RENAME COLUMN "营销费用" TO "工资"'))
-
