@@ -63,11 +63,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
-COPY requirements.txt requirements.txt
+COPY backend/requirements.txt requirements_backend.txt
+COPY requirements.txt requirements_base.txt
 
 # 安装Python依赖
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt && \
+    pip install -r requirements_backend.txt && \
+    pip install -r requirements_base.txt && \
     pip install uvicorn[standard]
 
 # 安装Playwright并下载Chromium
@@ -80,6 +82,9 @@ COPY backend /app/backend
 COPY modules /app/modules
 COPY config /app/config
 COPY tools /app/tools
+COPY migrations /app/migrations
+COPY alembic.ini /app/alembic.ini
+COPY VERSION /app/VERSION
 
 # 创建必要的目录
 RUN mkdir -p \
@@ -133,4 +138,3 @@ CMD ["uvicorn", "backend.main:app", \
 #   PROXY_MODE: 代理模式（none/static/pool/rotating）
 #   PROXY_HOST/PROXY_PORT: 静态代理配置
 # ===================================================
-

@@ -13,8 +13,10 @@ class FakeSyncExecutor:
         self.error_code = error_code
         self.sync_ok = sync_ok
         self.projection_ok = projection_ok
+        self.batch_sizes = []
 
-    def sync_table(self, source_table_name: str):
+    def sync_table(self, source_table_name: str, batch_size: int = 1000):
+        self.batch_sizes.append(batch_size)
         if self.should_fail:
             raise RuntimeError(self.error_code or "sync_failed")
         return {
@@ -161,7 +163,7 @@ def test_worker_supports_async_sync_executor():
         pending_task = _create_task(db, source_table_name="fact_shopee_orders_daily_async")
 
         class AsyncExecutor:
-            async def sync_table(self, source_table_name: str):
+            async def sync_table(self, source_table_name: str, batch_size: int = 1000):
                 return {
                     "status": "completed",
                     "projection_status": "completed",
@@ -231,7 +233,7 @@ def test_worker_renews_lease_while_async_sync_is_running():
         pending_task = _create_task(db, source_table_name="fact_shopee_orders_daily_long_run")
 
         class SlowAsyncExecutor:
-            async def sync_table(self, source_table_name: str):
+            async def sync_table(self, source_table_name: str, batch_size: int = 1000):
                 await asyncio.sleep(0.12)
                 return {
                     "status": "completed",
