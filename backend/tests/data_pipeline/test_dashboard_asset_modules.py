@@ -29,6 +29,7 @@ def test_dashboard_module_targets_exclude_heavy_mv_from_business_overview_core()
 
     assert "semantic.fact_orders_monthly_atomic_mv" not in targets
     assert "api.business_overview_operational_metrics_module" in targets
+    assert "api.business_overview_shop_racing_monthly_module" in targets
 
 
 def test_dashboard_module_targets_track_business_overview_refreshing_targets():

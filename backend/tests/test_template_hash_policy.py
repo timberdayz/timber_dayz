@@ -17,6 +17,7 @@ def test_semantic_registry_contains_hour_identity_and_metric_contract_fields():
         "order_id",
         "line_id",
         "product_id",
+        "product_name",
         "platform_sku",
         "sku_id",
         "service_id",
@@ -64,6 +65,16 @@ def test_semantic_registry_contains_hour_identity_and_metric_contract_fields():
         assert meta["kind"] == "metric"
         assert meta["hash_eligible"] is False
         assert is_hash_identity_semantic_key(metric_key) is False
+
+
+def test_product_name_is_weak_hash_eligible_identity_field():
+    meta = get_semantic_field_meta("product_name")
+
+    assert meta["kind"] == "dimension"
+    assert meta["hash_eligible"] is True
+    assert meta["default_hash"] is False
+    assert meta["identity_strength"] == "weak"
+    assert is_hash_identity_semantic_key("product_name") is True
 
 
 def test_products_daily_requires_product_id_and_date_source():
@@ -288,6 +299,39 @@ def test_products_monthly_passes_when_selected_date_parse_rule_is_derived():
     ]
 
 
+def test_sample_diagnostics_treats_file_date_rule_as_derived_hash_field():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="products",
+        granularity="daily",
+        deduplication_fields=["product_id", "metric_date"],
+        header_bindings=[
+            {
+                "source_header": "Product ID",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            }
+        ],
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            }
+        ],
+        sample_rows=[
+            {"Product ID": "A-1"},
+            {"Product ID": "A-2"},
+        ],
+    )
+
+    assert result.passed is True
+    assert result.sample_diagnostics["field_null_rates"]["metric_date"] == 0.0
+    assert result.sample_diagnostics["derived_fields"]["metric_date"]["source_column"] == "__file_date_from__"
+    assert not any("metric_date null rate" in warning for warning in result.warnings)
+
+
 def test_products_monthly_parse_rule_without_user_selection_still_fails():
     service = TemplateHashPolicyService()
 
@@ -315,7 +359,7 @@ def test_products_monthly_parse_rule_without_user_selection_still_fails():
     assert result.missing_required_groups[0]["key"] == "products_period_date"
 
 
-def test_metric_and_attribute_fields_are_invalid_hash_identity_fields():
+def test_metrics_and_item_status_are_invalid_hash_identity_fields():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -323,9 +367,10 @@ def test_metric_and_attribute_fields_are_invalid_hash_identity_fields():
         granularity="daily",
         deduplication_fields=[
             "product_id",
+            "metric_date",
             "gmv",
             "sales_amount",
-            "product_name",
+            "item_status",
             "page_views",
             "live_attributed_gmv",
         ],
@@ -346,8 +391,13 @@ def test_metric_and_attribute_fields_are_invalid_hash_identity_fields():
                 "semantic_review_status": "confirmed_semantic",
             },
             {
-                "source_header": "product name",
-                "semantic_key": "product_name",
+                "source_header": "metric date",
+                "semantic_key": "metric_date",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "source_header": "item status",
+                "semantic_key": "item_status",
                 "semantic_review_status": "confirmed_semantic",
             },
             {
@@ -367,11 +417,73 @@ def test_metric_and_attribute_fields_are_invalid_hash_identity_fields():
     assert result.passed is False
     assert result.invalid_keys == [
         "gmv",
+        "item_status",
         "live_attributed_gmv",
         "page_views",
-        "product_name",
         "sales_amount",
     ]
+
+
+def test_products_daily_allows_product_name_fallback_with_weak_identity_warning():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="products",
+        granularity="daily",
+        deduplication_fields=["product_name", "metric_date"],
+        header_bindings=[
+            {
+                "source_header": "商品名称",
+                "semantic_key": "product_name",
+                "semantic_review_status": "confirmed_semantic",
+            }
+        ],
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            }
+        ],
+    )
+
+    assert result.passed is True
+    assert result.invalid_keys == []
+    assert result.requirement_groups[0]["selected_keys"] == ["product_name"]
+    assert result.effective_components["derived_identity_fields"] == ["metric_date"]
+    assert any("product_name" in warning and "弱身份" in warning for warning in result.warnings)
+
+
+def test_products_daily_warns_when_product_name_is_selected_with_strong_identity():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="products",
+        granularity="daily",
+        deduplication_fields=["product_id", "product_name", "metric_date"],
+        header_bindings=[
+            {
+                "source_header": "商品 ID",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "source_header": "商品名称",
+                "semantic_key": "product_name",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "source_header": "统计日期",
+                "semantic_key": "metric_date",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+        field_parse_rules=[],
+    )
+
+    assert result.passed is True
+    assert result.invalid_keys == []
+    assert any("改名" in warning and "product_name" in warning for warning in result.warnings)
 
 
 def test_traffic_daily_allows_user_selected_hour_identity_field():

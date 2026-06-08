@@ -935,7 +935,43 @@ async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(
 
     assert result[0]["target_amount"] == 120
     assert result[0]["achievement_rate"] == 83.33
+    assert "api.business_overview_shop_racing_monthly_module" in captured[0][0]
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_daily_keeps_generic_module(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "granularity": "daily",
+                "period_key": "2026-03-02",
+                "platform_code": "shopee",
+                "shop_id": "shop-a",
+                "gmv": 100,
+                "order_count": 10,
+                "avg_order_value": 10,
+                "attach_rate": 1.2,
+                "profit": 30,
+                "target_amount": 120,
+                "achievement_rate": 83.33,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_shop_racing(
+        granularity="daily",
+        target_date="2026-03-02",
+        group_by="shop",
+    )
+
+    assert result[0]["target_amount"] == 120
     assert "api.business_overview_shop_racing_module" in captured[0][0]
+    assert "api.business_overview_shop_racing_monthly_module" not in captured[0][0]
 
 
 @pytest.mark.asyncio
@@ -972,7 +1008,7 @@ async def test_postgresql_dashboard_service_shop_racing_prefers_resolved_display
 
     assert result[0]["name"] == "Singapore(HX Home)"
     assert result[0]["shop_id"] == "1308200830"
-    assert "api.business_overview_shop_racing_module" in captured[0][0]
+    assert "api.business_overview_shop_racing_monthly_module" in captured[0][0]
 
 
 @pytest.mark.asyncio
@@ -1426,6 +1462,8 @@ async def test_postgresql_dashboard_service_operational_metrics_supports_shop_fi
     assert params["platform_code"] == "shopee"
     assert params["shop_id"] == "shop-1"
     assert captured[1][1]["shop_id"] == "shop-1"
+    assert result["meta"]["target_source"] == "service_target_summary"
+    assert "monthly_target" in result["meta"]["service_enriched_fields"]
 
 
 @pytest.mark.asyncio
@@ -2301,6 +2339,36 @@ async def test_postgresql_dashboard_service_traffic_ranking_prefers_resolved_dis
     )
 
     assert result[0]["name"] == "Singapore(HX Home)"
+
+
+@pytest.mark.asyncio
+async def test_business_overview_shop_and_traffic_queries_share_display_identity_join(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[str] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append(query)
+        return []
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    await service.get_business_overview_shop_racing(
+        granularity="monthly",
+        target_date="2026-03-01",
+        group_by="shop",
+    )
+    await service.get_business_overview_traffic_ranking(
+        granularity="monthly",
+        target_date="2026-03-01",
+        dimension="shop",
+    )
+
+    assert len(captured) == 2
+    for query in captured:
+        assert "LOWER(COALESCE(ds.platform_code, '')) = LOWER(COALESCE(src.platform_code, ''))" in query
+        assert "COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')" in query
+        assert "sa.id::text = COALESCE(src.shop_id, '')" in query
+        assert "AS account_display_name" in query
 
 
 @pytest.mark.asyncio

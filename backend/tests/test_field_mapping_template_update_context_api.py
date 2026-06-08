@@ -77,6 +77,60 @@ def test_confirmed_non_semantic_binding_is_not_returned_for_manual_review():
     assert [item["raw_name"] for item in filtered] == ["发品状态"]
 
 
+def test_existing_deduplication_fields_match_by_semantic_key_without_raw_header_match():
+    from backend.routers.field_mapping_templates import _split_existing_deduplication_fields
+
+    available, missing, matches = _split_existing_deduplication_fields(
+        ["商品", "状态"],
+        ["商品名称", "发品状态"],
+        [
+            {
+                "raw_name": "商品名称",
+                "semantic_key": "product_name",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "发品状态",
+                "semantic_key": "item_status",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+        existing_header_bindings=[
+            {
+                "raw_name": "商品",
+                "semantic_key": "product_name",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "状态",
+                "semantic_key": "item_status",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+    )
+
+    assert available == ["product_name"]
+    assert missing == []
+    assert matches == [
+        {
+            "requested_field": "商品",
+            "semantic_key": "product_name",
+            "current_field": "商品名称",
+            "match_type": "semantic_key",
+            "hash_eligible": True,
+            "status": "matched_hashable",
+        },
+        {
+            "requested_field": "状态",
+            "semantic_key": "item_status",
+            "current_field": "发品状态",
+            "match_type": "semantic_key",
+            "hash_eligible": False,
+            "status": "matched_non_hashable",
+        },
+    ]
+
+
 @pytest_asyncio.fixture
 async def template_update_context_client():
     from backend.main import app

@@ -197,6 +197,23 @@ class TemplateFamilyService:
         self.db = db
 
     @staticmethod
+    def _is_canonical_dimension_value(value: Optional[str]) -> bool:
+        normalized = _normalize_dimension(value)
+        if normalized is None:
+            return value is None
+        return str(value).strip() == normalized
+
+    @classmethod
+    def _canonical_dimension_rank(
+        cls,
+        family: FieldMappingTemplateFamily,
+    ) -> int:
+        return sum(
+            0 if cls._is_canonical_dimension_value(value) else 1
+            for value in (family.sub_domain, family.granularity, family.account)
+        )
+
+    @staticmethod
     def _family_dimension_key(
         family: FieldMappingTemplateFamily,
     ) -> tuple[str, str, Optional[str], Optional[str], Optional[str]]:
@@ -208,14 +225,16 @@ class TemplateFamilyService:
             family.account,
         )
 
-    @staticmethod
+    @classmethod
     def _prefer_family_record(
+        cls,
         families: list[FieldMappingTemplateFamily],
     ) -> FieldMappingTemplateFamily:
         return sorted(
             families,
             key=lambda item: (
                 item.active_version_id is None,
+                cls._canonical_dimension_rank(item),
                 -(item.id or 0),
             ),
         )[0]
@@ -259,6 +278,29 @@ class TemplateFamilyService:
         group: list[FieldMappingTemplate],
     ) -> None:
         platform, data_domain, sub_domain, granularity, account = key
+        matching_group = [
+            template
+            for template in group
+            if _dimension_key(
+                template.platform,
+                template.data_domain,
+                template.sub_domain,
+                template.granularity,
+                template.account,
+            )
+            == key
+        ]
+        skipped_count = len(group) - len(matching_group)
+        if skipped_count:
+            logger.warning(
+                "[TemplateFamily] skipped %s cross-dimension template(s) for projection key=%s",
+                skipped_count,
+                key,
+            )
+        if not matching_group:
+            return
+        group = matching_group
+
         family = await self._get_family(key)
         if family is None:
             family = FieldMappingTemplateFamily(
@@ -348,19 +390,20 @@ class TemplateFamilyService:
         self,
         key: tuple[str, str, Optional[str], Optional[str], Optional[str]],
     ) -> Optional[FieldMappingTemplateFamily]:
-        platform, data_domain, sub_domain, granularity, account = key
+        platform, data_domain, _sub_domain, _granularity, _account = key
         result = await self.db.execute(
             select(FieldMappingTemplateFamily).where(
                 and_(
                     FieldMappingTemplateFamily.platform == platform,
                     FieldMappingTemplateFamily.data_domain == data_domain,
-                    FieldMappingTemplateFamily.sub_domain == sub_domain,
-                    FieldMappingTemplateFamily.granularity == granularity,
-                    FieldMappingTemplateFamily.account == account,
                 )
             )
         )
-        families = list(result.scalars().all())
+        families = [
+            family
+            for family in result.scalars().all()
+            if self._family_dimension_key(family) == key
+        ]
         if not families:
             return None
         if len(families) > 1:

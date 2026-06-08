@@ -4,7 +4,7 @@ import json
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
@@ -546,3 +546,137 @@ async def test_get_family_versions_uses_requested_family_when_normalized_duplica
     assert family_payload["id"] == 201
     assert family_payload["sub_domain"] is None
     assert versions[0]["id"] == 301
+
+
+@pytest.mark.asyncio
+async def test_template_family_list_prefers_canonical_null_over_na_duplicate(
+    template_family_client,
+):
+    _client, session_factory = template_family_client
+    now = datetime.now(timezone.utc)
+
+    async with session_factory() as session:
+        session.add_all(
+            [
+                FieldMappingTemplateFamily(
+                    id=211,
+                    platform="tiktok",
+                    data_domain="analytics",
+                    granularity="daily",
+                    sub_domain=None,
+                    account=None,
+                    governance_status="ready",
+                    display_name="canonical-null",
+                    active_version_id=311,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplateVersion(
+                    id=311,
+                    family_id=211,
+                    version_no=8,
+                    status="active",
+                    template_name="tiktok_analytics__daily_v8",
+                    deduplication_fields=["metric_date"],
+                    header_bindings=[],
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplateFamily(
+                    id=212,
+                    platform="tiktok",
+                    data_domain="analytics",
+                    granularity="daily",
+                    sub_domain="N/A",
+                    account=None,
+                    governance_status="ready",
+                    display_name="legacy-na",
+                    active_version_id=312,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplateVersion(
+                    id=312,
+                    family_id=212,
+                    version_no=2,
+                    status="active",
+                    template_name="tiktok_analytics_N/A_daily_v2",
+                    deduplication_fields=["metric_date"],
+                    header_bindings=[],
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+        from backend.services.template_family_service import TemplateFamilyService
+
+        families = await TemplateFamilyService(session).list_families(
+            platform="tiktok",
+            data_domain="analytics",
+        )
+
+    daily_family = next(item for item in families if item["granularity"] == "daily")
+    assert daily_family["id"] == 211
+    assert daily_family["sub_domain"] is None
+
+
+@pytest.mark.asyncio
+async def test_projection_ignores_cross_dimension_templates_when_building_variants(
+    template_family_client,
+):
+    _client, session_factory = template_family_client
+    now = datetime.now(timezone.utc)
+
+    async with session_factory() as session:
+        tiktok_template = FieldMappingTemplate(
+            id=401,
+            platform="tiktok",
+            data_domain="orders",
+            granularity="monthly",
+            sub_domain=None,
+            header_row=1,
+            template_name="tiktok_orders__monthly_v5",
+            version=5,
+            status="published",
+            field_count=3,
+            header_columns=["订单编号", "订单状态", "付款时间"],
+            deduplication_fields=["order_id"],
+            created_at=now,
+            updated_at=now,
+        )
+        shopee_template = FieldMappingTemplate(
+            id=402,
+            platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=1,
+            template_name="shopee_orders__daily_v2",
+            version=2,
+            status="published",
+            field_count=3,
+            header_columns=["订单编号", "订单状态", "付款时间"],
+            deduplication_fields=["order_id"],
+            created_at=now,
+            updated_at=now,
+        )
+        session.add_all([tiktok_template, shopee_template])
+        await session.commit()
+
+        from backend.services.template_family_service import TemplateFamilyService
+
+        service = TemplateFamilyService(session)
+        await service._upsert_projection_group(
+            ("tiktok", "orders", None, "monthly", None),
+            [tiktok_template, shopee_template],
+        )
+        await session.commit()
+
+        variants_result = await session.execute(
+            select(FieldMappingTemplateVariant).order_by(FieldMappingTemplateVariant.id)
+        )
+        variants = list(variants_result.scalars().all())
+
+    assert [variant.source_legacy_template_id for variant in variants] == [401]

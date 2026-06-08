@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from backend.domains.business.routers.dashboard_api_postgresql import (
     _require_dashboard_assets_ready,
+    get_business_overview_bootstrap_postgresql,
     get_business_overview_comparison_postgresql,
     get_business_overview_inventory_backlog_postgresql,
     get_business_overview_kpi_postgresql,
@@ -78,6 +79,26 @@ def _make_dashboard_not_ready_request(path: str):
                 "assets_fingerprint_expected": "expected",
                 "assets_fingerprint_last": "actual",
             }
+        )
+    )
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 8001),
+            "app": app,
+        }
+    )
+
+
+def _make_cached_request(path: str, cache_service):
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            dashboard_assets_report={"ready": True},
+            cache_service=cache_service,
         )
     )
     return Request(
@@ -359,6 +380,129 @@ def test_postgresql_comparison_route_returns_service_payload(monkeypatch):
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert "metrics" in body["data"]
+
+
+@pytest.mark.asyncio
+async def test_postgresql_business_overview_bootstrap_runs_module_calls_concurrently(monkeypatch):
+    active = 0
+    max_active = 0
+
+    async def tracked(value):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return value
+
+    class _ServiceStub:
+        async def get_business_overview_kpi(self, **_kwargs):
+            return await tracked({"gmv": 100})
+
+        async def get_business_overview_comparison(self, **_kwargs):
+            return await tracked({"metrics": {}})
+
+        async def get_business_overview_operational_metrics(self, **_kwargs):
+            return await tracked({"monthly_target": 100, "meta": {}})
+
+        async def get_business_overview_traffic_ranking(self, **_kwargs):
+            return await tracked([{"name": "shop-a", "rank": 1}])
+
+        async def get_business_overview_shop_racing(self, **_kwargs):
+            return await tracked([{"name": "shop-a", "rank": 1}])
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = await get_business_overview_bootstrap_postgresql(
+        request=_make_request("/api/dashboard/business-overview/bootstrap"),
+        granularity="monthly",
+        period_key="2026-03-01",
+        platform_code=None,
+        shop_id=None,
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert set(body["data"]) == {
+        "kpi",
+        "comparison",
+        "operational_metrics",
+        "traffic_ranking",
+        "shop_racing",
+    }
+    assert max_active > 1
+
+
+@pytest.mark.asyncio
+async def test_postgresql_business_overview_bootstrap_miss_reuses_module_caches(monkeypatch):
+    cache_calls = []
+
+    class _CacheServiceStub:
+        async def get(self, cache_type, **kwargs):
+            cache_calls.append(("get", cache_type, dict(kwargs)))
+            return None
+
+        async def get_or_set_singleflight(self, cache_type, producer, **kwargs):
+            cache_calls.append(("get_or_set_singleflight", cache_type, dict(kwargs)))
+            return await producer()
+
+    class _ServiceStub:
+        async def get_business_overview_kpi(self, **_kwargs):
+            return {"gmv": 100}
+
+        async def get_business_overview_comparison(self, **_kwargs):
+            return {"metrics": {}}
+
+        async def get_business_overview_operational_metrics(self, **_kwargs):
+            return {"monthly_target": 100, "meta": {}}
+
+        async def get_business_overview_traffic_ranking(self, **_kwargs):
+            return []
+
+        async def get_business_overview_shop_racing(self, **_kwargs):
+            return []
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = await get_business_overview_bootstrap_postgresql(
+        request=_make_cached_request(
+            "/api/dashboard/business-overview/bootstrap",
+            _CacheServiceStub(),
+        ),
+        granularity="monthly",
+        period_key="2026-03-01",
+        platform_code="shopee",
+        shop_id=None,
+    )
+
+    singleflight_types = {
+        cache_type
+        for method, cache_type, _kwargs in cache_calls
+        if method == "get_or_set_singleflight"
+    }
+    assert response.headers["X-Cache"] == "MISS"
+    assert {
+        "dashboard_business_overview_bootstrap",
+        "dashboard_kpi",
+        "dashboard_comparison",
+        "dashboard_operational_metrics",
+        "dashboard_traffic_ranking",
+        "dashboard_shop_racing",
+    }.issubset(singleflight_types)
 
 
 def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
@@ -788,3 +932,43 @@ def test_dashboard_routes_preserve_http_503_when_assets_not_ready(route_func, kw
         assert getattr(exc, "status_code", None) == 503
     else:
         assert response.status_code == 503
+
+
+def test_business_overview_schema_contract_accepts_bootstrap_payload():
+    from backend.schemas.dashboard import BusinessOverviewBootstrapPayload
+
+    payload = {
+        "kpi": {"gmv": 100, "order_count": 10},
+        "comparison": {
+            "metrics": {
+                "sales_amount": {
+                    "today": 100,
+                    "yesterday": 90,
+                    "average": 95,
+                    "change": 11.11,
+                }
+            },
+            "target": {"sales_amount": 120, "achievement_rate": 83.33},
+        },
+        "operational_metrics": {
+            "monthly_target": 120,
+            "monthly_total_achieved": 100,
+            "meta": {
+                "profit_source": "orders_raw_profit_field",
+                "target_source": "service_target_summary",
+                "expenses_source": "shop_month_rows_sum",
+                "warnings": [],
+            },
+        },
+        "traffic_ranking": [
+            {"name": "shop-a", "visitor_count": 100, "page_views": 200, "rank": 1}
+        ],
+        "shop_racing": [
+            {"name": "shop-a", "gmv": 100, "target_amount": 120, "rank": 1}
+        ],
+    }
+
+    model = BusinessOverviewBootstrapPayload.model_validate(payload)
+
+    assert model.kpi.gmv == 100
+    assert model.operational_metrics.meta["target_source"] == "service_target_summary"
