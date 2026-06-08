@@ -114,6 +114,7 @@ class DeduplicationService:
         exclude_fields: Optional[List[str]] = None,
         deduplication_fields: Optional[List[str]] = None,
         header_bindings: Optional[List[Dict[str, Any]]] = None,
+        scope_values: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         计算单行数据的哈希值
@@ -128,11 +129,12 @@ class DeduplicationService:
         """
         if exclude_fields is None:
             exclude_fields = ['file_id', 'ingest_timestamp', 'id', 'created_at', 'updated_at']
+        scope_hash_data = self._build_scope_hash_data(scope_values)
         
         # v4.14.0新增:如果提供了核心字段,只使用核心字段计算hash
         if deduplication_fields:
+            business_data = dict(scope_hash_data)
             # 只使用核心字段
-            business_data = {}
             missing_fields = []
             missing_required_fields = []
             for field in deduplication_fields:
@@ -194,6 +196,7 @@ class DeduplicationService:
                 k: v for k, v in row.items()
                 if k not in exclude_fields and v is not None
             }
+            business_data.update(scope_hash_data)
         
         # 排序键值对(确保一致性)
         sorted_items = sorted(business_data.items())
@@ -218,6 +221,21 @@ class DeduplicationService:
             )
         
         return data_hash
+
+    @staticmethod
+    def _build_scope_hash_data(scope_values: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not scope_values:
+            return {}
+        scope_hash_data: Dict[str, Any] = {}
+        for key in ("platform_code", "shop_id", "data_domain", "granularity", "sub_domain"):
+            value = scope_values.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            scope_hash_data[f"scope:{key}"] = text
+        return scope_hash_data
     
     def batch_calculate_data_hash(
         self,
@@ -225,6 +243,7 @@ class DeduplicationService:
         exclude_fields: Optional[List[str]] = None,
         deduplication_fields: Optional[List[str]] = None,
         header_bindings: Optional[List[Dict[str, Any]]] = None,
+        scope_values: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         """
         批量计算数据哈希(使用pandas向量化)
@@ -249,7 +268,7 @@ class DeduplicationService:
             # 重置日志计数器
             self._hash_log_count = 0
             hashes = [
-                self.calculate_data_hash(row, exclude_fields, deduplication_fields, header_bindings)
+                self.calculate_data_hash(row, exclude_fields, deduplication_fields, header_bindings, scope_values)
                 for row in rows
             ]
             # 验证hash唯一性(前10行)
@@ -288,7 +307,7 @@ class DeduplicationService:
             logger.error(f"[Dedup] 批量计算哈希失败,回退到逐行计算: {e}")
             # 回退到逐行计算
             return [
-                self.calculate_data_hash(row, exclude_fields, deduplication_fields, header_bindings)
+                self.calculate_data_hash(row, exclude_fields, deduplication_fields, header_bindings, scope_values)
                 for row in rows
             ]
     

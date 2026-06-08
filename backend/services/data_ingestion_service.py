@@ -577,10 +577,18 @@ class DataIngestionService:
                     
                     # 计算data_hash(批量计算,支持核心字段)
                     logger.info(f"[Ingest] [DSS] 开始计算data_hash: {len(valid_rows)}行")
+                    hash_scope_values = {
+                        "platform_code": file_platform_code if "file_platform_code" in locals() else platform,
+                        "shop_id": file_shop_id if "file_shop_id" in locals() else None,
+                        "data_domain": domain,
+                        "granularity": granularity,
+                        "sub_domain": sub_domain,
+                    }
                     data_hashes = dedup_service.batch_calculate_data_hash(
                         valid_rows,
                         deduplication_fields=final_deduplication_fields,
                         header_bindings=getattr(raw_importer, "header_bindings", None),
+                        scope_values=hash_scope_values,
                     )
                     logger.info(f"[Ingest] [DSS] data_hash计算完成: {len(data_hashes)}个哈希")
                     

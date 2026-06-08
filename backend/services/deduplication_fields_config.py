@@ -50,12 +50,12 @@ UPSERT_UPDATE_FIELDS: Dict[str, List[str]] = {
 
 # 默认核心字段配置(data_domain -> [核心字段列表])
 DEFAULT_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
-    'orders': ['order_id', 'order_date', 'platform_code', 'shop_id'],
-    'products': ['product_sku', 'product_id', 'platform_code', 'shop_id'],
-    'inventory': ['platform_sku', 'product_id', 'warehouse_name', 'platform_code', 'shop_id'],
-    'traffic': ['date', 'platform_code', 'shop_id'],
-    'services': ['service_id', 'date', 'platform_code', 'shop_id'],
-    'analytics': ['date', 'platform_code', 'shop_id'],
+    'orders': ['order_id'],
+    'products': ['platform_sku', 'product_id', 'metric_date'],
+    'inventory': ['platform_sku', 'product_id', 'warehouse_name', 'metric_date'],
+    'traffic': ['metric_date'],
+    'services': ['service_id', 'metric_date'],
+    'analytics': ['metric_date'],
 }
 
 # 子类型特定配置(sub_domain -> [核心字段列表])
@@ -75,7 +75,7 @@ def _append_required_identity_fields(
     为 data_hash 计算补齐最小身份字段，避免不同平台/店铺发生跨文件冲突。
     """
     required_fields = ["platform_code", "shop_id"]
-    if data_domain == "services" and sub_domain:
+    if sub_domain:
         required_fields.append("sub_domain")
 
     merged: List[str] = []
@@ -155,14 +155,11 @@ def get_deduplication_fields(
                 normalized_template_fields.append(normalize_semantic_key(field) or str(field).strip())
             else:
                 normalized_template_fields.append(str(field).strip())
-        if data_domain == "services":
-            merged_fields = _append_required_identity_fields(
-                normalized_template_fields,
-                data_domain=data_domain,
-                sub_domain=sub_domain,
-            )
-        else:
-            merged_fields = normalized_template_fields
+        merged_fields = _append_required_identity_fields(
+            normalized_template_fields,
+            data_domain=data_domain,
+            sub_domain=sub_domain,
+        )
         logger.debug(
             f"[DedupFields] 使用模板配置的核心字段: {merged_fields}"
         )

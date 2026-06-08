@@ -89,6 +89,7 @@
         :existing-deduplication-fields-missing="existingDeduplicationFieldsMissing"
         :recommended-deduplication-fields="recommendedDeduplicationFields"
         :current-header-columns="currentHeaderColumns"
+        :current-header-bindings="activeBindingSource"
       />
 
       <div v-if="updateMode !== 'core-only'" class="template-update-workbench-drawer__section">
@@ -490,8 +491,7 @@ function normalizeDeduplicationSelection(fields, bindings, preferredSemanticKey 
     }
     if (
       semanticKey &&
-      binding?.semantic_review_status !== 'confirmed_non_semantic' &&
-      binding?.hash_participates
+      binding?.semantic_review_status === 'confirmed_semantic'
     ) {
       semanticKeys.add(semanticKey)
     }
@@ -514,11 +514,11 @@ function normalizeDeduplicationSelection(fields, bindings, preferredSemanticKey 
 
     const rawBinding = bindingByRaw.get(value.toLowerCase())
     if (rawBinding) {
-      if (rawBinding.semantic_review_status === 'confirmed_non_semantic') {
+      if (rawBinding.semantic_review_status !== 'confirmed_semantic') {
         continue
       }
       const semanticKey = String(rawBinding.semantic_key || '').trim()
-      if (semanticKey && rawBinding.hash_participates) {
+      if (semanticKey) {
         pushField(semanticKey)
       }
       continue

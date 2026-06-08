@@ -5,10 +5,10 @@
         <span>Deduplication Review</span>
         <div class="template-deduplication-review-panel__actions">
           <el-tag size="small" type="primary">
-            {{ currentHeaderColumns.length }} candidate fields
+            {{ semanticHashOptions.length }} semantic fields
           </el-tag>
           <el-button link type="primary" @click="expanded = !expanded">
-            {{ expanded ? 'Hide Field Pool' : 'Show Field Pool' }}
+            {{ expanded ? 'Hide Semantic Fields' : 'Show Semantic Fields' }}
           </el-button>
         </div>
       </div>
@@ -22,6 +22,15 @@
             {{ field }}
           </el-tag>
           <span v-if="modelValue.length === 0" class="template-deduplication-review-panel__muted">None</span>
+        </div>
+      </section>
+
+      <section class="template-deduplication-review-panel__group">
+        <div class="template-deduplication-review-panel__group-title">System Scope Fields</div>
+        <div class="template-deduplication-review-panel__tags">
+          <el-tag v-for="field in systemScopeFields" :key="field" size="small" type="info">
+            {{ field }}
+          </el-tag>
         </div>
       </section>
 
@@ -55,13 +64,21 @@
         </div>
       </section>
 
+      <el-alert
+        v-if="modelValue.length === 0"
+        title="At least one semantic hash field is required."
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+
       <section v-if="expanded" class="template-deduplication-review-panel__group">
-        <div class="template-deduplication-review-panel__group-title">Field Pool</div>
+        <div class="template-deduplication-review-panel__group-title">Semantic Field Pool</div>
         <el-input
           v-model="searchText"
           class="template-deduplication-review-panel__search"
           clearable
-          placeholder="Search fields"
+          placeholder="Search semantic fields"
         />
         <el-checkbox-group
           :model-value="modelValue"
@@ -69,14 +86,17 @@
           @update:model-value="$emit('update:modelValue', $event)"
         >
           <el-checkbox
-            v-for="field in filteredHeaderColumns"
-            :key="field"
-            :label="field"
-            :value="field"
+            v-for="option in filteredSemanticHashOptions"
+            :key="option.semanticKey"
+            :label="option.semanticKey"
+            :value="option.semanticKey"
           >
-            {{ field }}
+            {{ option.label }}
           </el-checkbox>
         </el-checkbox-group>
+        <div v-if="filteredSemanticHashOptions.length === 0" class="template-deduplication-review-panel__muted">
+          No confirmed semantic fields available.
+        </div>
       </section>
     </div>
   </el-card>
@@ -109,6 +129,14 @@ const props = defineProps({
   currentHeaderColumns: {
     type: Array,
     default: () => []
+  },
+  currentHeaderBindings: {
+    type: Array,
+    default: () => []
+  },
+  systemScopeFields: {
+    type: Array,
+    default: () => ['platform_code', 'shop_id', 'data_domain', 'granularity', 'sub_domain']
   }
 })
 
@@ -117,13 +145,32 @@ defineEmits(['update:modelValue'])
 const expanded = ref(false)
 const searchText = ref('')
 
-const filteredHeaderColumns = computed(() => {
+const semanticHashOptions = computed(() => {
+  const seen = new Set()
+  return (Array.isArray(props.currentHeaderBindings) ? props.currentHeaderBindings : [])
+    .filter(binding => binding?.semantic_review_status === 'confirmed_semantic')
+    .map((binding) => {
+      const semanticKey = String(binding?.semantic_key || '').trim()
+      if (!semanticKey || seen.has(semanticKey)) return null
+      seen.add(semanticKey)
+      const rawName = String(binding?.raw_name || '').trim()
+      const displayName = String(binding?.display_name || '').trim()
+      return {
+        semanticKey,
+        label: rawName || displayName ? `${semanticKey} (${rawName || displayName})` : semanticKey,
+      }
+    })
+    .filter(Boolean)
+})
+
+const filteredSemanticHashOptions = computed(() => {
   const keyword = String(searchText.value || '').trim().toLowerCase()
   if (!keyword) {
-    return props.currentHeaderColumns
+    return semanticHashOptions.value
   }
-  return props.currentHeaderColumns.filter(field =>
-    String(field || '').toLowerCase().includes(keyword)
+  return semanticHashOptions.value.filter(option =>
+    option.semanticKey.toLowerCase().includes(keyword) ||
+    option.label.toLowerCase().includes(keyword)
   )
 })
 </script>

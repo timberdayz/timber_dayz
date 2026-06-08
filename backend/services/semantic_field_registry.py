@@ -7,10 +7,12 @@ from backend.services.currency_extractor import get_currency_extractor
 
 SEMANTIC_FIELD_ALIASES: dict[str, list[str]] = {
     "order_id": ["order_id", "订单号", "订单编号", "order id"],
-    "product_id": ["product_id", "产品id", "商品id", "product id"],
-    "platform_sku": ["platform_sku", "平台sku", "平台 sku", "product_sku", "产品sku"],
-    "sku_id": ["sku_id", "sku id", "sku编号", "sku id"],
-    "shop_id": ["shop_id", "店铺", "店铺id", "shop id"],
+    "product_id": ["product_id", "产品id", "商品id", "产品ID", "商品ID", "product id"],
+    "platform_sku": ["platform_sku", "平台sku", "平台 sku", "product_sku", "产品sku", "商品sku"],
+    "sku_id": ["sku_id", "sku id", "SKU ID", "SKU编号"],
+    "line_id": ["line_id", "order_line_id", "line id", "order line id"],
+    "service_id": ["service_id", "service id", "服务ID", "服务编号"],
+    "shop_id": ["shop_id", "店铺", "店铺ID", "shop id"],
     "warehouse_name": ["warehouse_name", "warehouse", "仓库", "仓库名称", "warehouse name"],
     "metric_date": ["metric_date", "日期", "统计日期", "data_date", "date"],
     "period_start_date": ["period_start_date", "开始日期", "周期开始日期"],
@@ -23,11 +25,13 @@ SEMANTIC_FIELD_REQUIREMENTS: dict[str, dict[str, Any]] = {
     "product_id": {"required": False, "hash_participates": True},
     "platform_sku": {"required": False, "hash_participates": True},
     "sku_id": {"required": False, "hash_participates": True},
+    "line_id": {"required": False, "hash_participates": True},
+    "service_id": {"required": False, "hash_participates": True},
     "shop_id": {"required": False, "hash_participates": True},
     "warehouse_name": {"required": False, "hash_participates": True},
     "metric_date": {"required": False, "hash_participates": True},
-    "period_start_date": {"required": False, "hash_participates": False},
-    "period_end_date": {"required": False, "hash_participates": False},
+    "period_start_date": {"required": False, "hash_participates": True},
+    "period_end_date": {"required": False, "hash_participates": True},
     "order_date": {"required": False, "hash_participates": True},
 }
 
@@ -36,8 +40,14 @@ SEMANTIC_HASH_IDENTITY_KEYS = {
     "product_id",
     "platform_sku",
     "sku_id",
+    "line_id",
+    "service_id",
     "shop_id",
     "warehouse_name",
+    "metric_date",
+    "period_start_date",
+    "period_end_date",
+    "order_date",
 }
 
 

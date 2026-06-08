@@ -1,206 +1,206 @@
-<!--
-核心字段选择器组件（DeduplicationFieldsSelector）
-v4.14.0新增：用于模板保存时选择核心字段
--->
 <template>
   <div class="deduplication-fields-selector">
-    <el-card class="selector-card" style="margin-bottom: 20px;">
+    <el-card class="selector-card" shadow="never">
       <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>🔑 核心字段选择（必填）</span>
-          <el-tooltip content="核心字段用于数据去重，请选择能够唯一标识每行数据的字段" placement="top">
-            <el-icon style="cursor: help;"><QuestionFilled /></el-icon>
+        <div class="selector-header">
+          <span>Data Hash 字段</span>
+          <el-tooltip content="仅已确认语义字段可参与 data_hash" placement="top">
+            <el-icon class="selector-help"><QuestionFilled /></el-icon>
           </el-tooltip>
         </div>
       </template>
-      
-      <!-- 提示文本 -->
-      <div class="selector-hint" style="margin-bottom: 15px; color: #606266; font-size: 14px;">
-        <el-icon><InfoFilled /></el-icon>
-        <span>核心字段用于数据去重，请选择能够唯一标识每行数据的字段（如：订单号、产品SKU等）</span>
-      </div>
-      
-      <!-- 推荐字段显示（不自动勾选） -->
-      <div v-if="recommendedFields.length > 0" class="recommended-fields" style="margin-bottom: 15px; padding: 10px; background: #f0f9ff; border-radius: 4px;">
-        <div style="font-weight: bold; margin-bottom: 5px; color: #409EFF;">
+
+      <div v-if="recommendedFields.length > 0" class="recommended-fields">
+        <div class="recommended-title">
           <el-icon><Star /></el-icon>
-          推荐字段（根据数据域）：
+          推荐语义字段
         </div>
-        <div style="color: #606266; font-size: 13px;">
-          {{ recommendedFields.join('、') }}
-        </div>
-        <div style="margin-top: 5px; color: #909399; font-size: 12px;">
-          {{ recommendationReason }}
-        </div>
+        <div class="recommended-values">{{ recommendedFields.join('、') }}</div>
+        <div v-if="recommendationReason" class="selector-muted">{{ recommendationReason }}</div>
       </div>
-      
-      <!-- 字段选择器 -->
+
       <el-checkbox-group v-model="selectedFields" @change="handleFieldChange">
-        <div class="fields-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">
+        <div class="fields-grid">
           <el-checkbox
-            v-for="field in availableFields"
-            :key="field"
-            :label="field"
-            :value="field"
-            style="margin-right: 0;"
+            v-for="option in selectableOptions"
+            :key="option.value"
+            :label="option.value"
+            :value="option.value"
           >
-            {{ field }}
+            {{ option.label }}
           </el-checkbox>
         </div>
       </el-checkbox-group>
-      
-      <!-- 验证提示 -->
-      <div v-if="validationWarning" class="validation-warning" style="margin-top: 15px; padding: 10px; background: #fef0f0; border-left: 4px solid #f56c6c; border-radius: 4px;">
-        <el-icon style="color: #f56c6c;"><WarningFilled /></el-icon>
-        <span style="color: #f56c6c; margin-left: 5px;">{{ validationWarning }}</span>
+
+      <div v-if="selectableOptions.length === 0" class="selector-muted empty-state">
+        暂无已确认语义字段
       </div>
-      
-      <!-- 已选择字段显示 -->
-      <div v-if="selectedFields.length > 0" class="selected-fields" style="margin-top: 15px; padding: 10px; background: #f0f9ff; border-radius: 4px;">
-        <div style="font-weight: bold; margin-bottom: 5px; color: #409EFF;">
-          已选择 {{ selectedFields.length }} 个核心字段：
+
+      <div v-if="validationWarning" class="validation-warning">
+        <el-icon><WarningFilled /></el-icon>
+        <span>{{ validationWarning }}</span>
+      </div>
+
+      <div v-if="selectedFields.length > 0" class="selected-fields">
+        <div class="selected-title">已选择 {{ selectedFields.length }} 个语义字段</div>
+        <div class="selected-tags">
+          <el-tag
+            v-for="field in selectedFields"
+            :key="field"
+            type="primary"
+            size="small"
+          >
+            {{ field }}
+          </el-tag>
         </div>
-        <el-tag
-          v-for="field in selectedFields"
-          :key="field"
-          type="primary"
-          style="margin-right: 5px; margin-bottom: 5px;"
-        >
-          {{ field }}
-        </el-tag>
       </div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { QuestionFilled, InfoFilled, Star, WarningFilled } from '@element-plus/icons-vue'
+import { QuestionFilled, Star, WarningFilled } from '@element-plus/icons-vue'
 import api from '@/api'
 
 const props = defineProps({
-  // 可用的字段列表（从表头字段中选择）
   availableFields: {
     type: Array,
     required: true,
-    default: () => []
+    default: () => [],
   },
-  // 数据域（用于获取推荐字段）
+  headerBindings: {
+    type: Array,
+    default: () => [],
+  },
   dataDomain: {
     type: String,
-    default: null
+    default: null,
   },
-  // 子类型（用于获取推荐字段）
   subDomain: {
     type: String,
-    default: null
+    default: null,
   },
-  // 初始选中的字段（用于编辑现有模板）
   initialFields: {
     type: Array,
-    default: () => []
-  }
+    default: () => [],
+  },
 })
 
 const emit = defineEmits(['update:selectedFields', 'validation-change'])
 
-// 选中的字段
 const selectedFields = ref([])
-
-// 推荐的字段
 const recommendedFields = ref([])
 const recommendationReason = ref('')
-
-// 验证警告
 const validationWarning = ref('')
 
-// 加载推荐字段
-const loadRecommendedFields = async () => {
-  if (!props.dataDomain) {
-    return
+const selectableOptions = computed(() => {
+  const semanticBindings = Array.isArray(props.headerBindings)
+    ? props.headerBindings.filter(binding =>
+      binding?.semantic_review_status === 'confirmed_semantic' &&
+      String(binding?.semantic_key || '').trim()
+    )
+    : []
+
+  if (semanticBindings.length === 0) {
+    return props.availableFields.map(field => ({
+      value: String(field || '').trim(),
+      label: String(field || '').trim(),
+    })).filter(option => option.value)
   }
-  
+
+  const seen = new Set()
+  return semanticBindings.map((binding) => {
+    const semanticKey = String(binding?.semantic_key || '').trim()
+    if (!semanticKey || seen.has(semanticKey)) return null
+    seen.add(semanticKey)
+    const rawName = String(binding?.raw_name || '').trim()
+    return {
+      value: semanticKey,
+      label: rawName ? `${semanticKey} (${rawName})` : semanticKey,
+    }
+  }).filter(Boolean)
+})
+
+const selectableValues = computed(() => new Set(selectableOptions.value.map(option => option.value)))
+
+const loadRecommendedFields = async () => {
+  if (!props.dataDomain) return
+
   try {
     const result = await api.getDefaultDeduplicationFields({
       dataDomain: props.dataDomain,
-      subDomain: props.subDomain
+      subDomain: props.subDomain,
     })
-    
+
     if (result && result.success && result.data) {
       recommendedFields.value = result.data.fields || []
       recommendationReason.value = result.data.reason || ''
     }
   } catch (error) {
-    console.warn('获取推荐字段失败:', error)
-    // 失败不影响使用，只是没有推荐
+    ElMessage.warning(error?.message || '获取推荐字段失败')
   }
 }
 
-// 验证字段选择
 const validateFields = () => {
   validationWarning.value = ''
-  
+
   if (selectedFields.value.length === 0) {
-    validationWarning.value = '请至少选择1个核心字段'
+    validationWarning.value = '请至少选择 1 个语义字段'
     emit('validation-change', false)
     return false
   }
-  
-  // 验证选择的字段是否在可用字段中
-  const missingFields = selectedFields.value.filter(
-    field => !props.availableFields.some(
-      af => af === field || af.toLowerCase() === field.toLowerCase()
-    )
-  )
-  
+
+  const missingFields = selectedFields.value.filter(field => !selectableValues.value.has(field))
   if (missingFields.length > 0) {
-    validationWarning.value = `以下字段不在表头中：${missingFields.join('、')}，可能导致去重失败`
-    // 警告但不阻止保存
+    validationWarning.value = `以下字段不是已确认语义字段：${missingFields.join('、')}`
   }
-  
-  emit('validation-change', selectedFields.value.length > 0)
-  return selectedFields.value.length > 0
+
+  const isValid = selectedFields.value.length > 0 && missingFields.length === 0
+  emit('validation-change', isValid)
+  return isValid
 }
 
-// 字段选择变化处理
 const handleFieldChange = () => {
   validateFields()
-  emit('update:selectedFields', selectedFields.value)
+  emit('update:selectedFields', [...selectedFields.value])
 }
 
-// 监听可用字段变化，重新验证
-watch(() => props.availableFields, () => {
-  validateFields()
-}, { deep: true })
-
-// 监听初始字段变化（用于编辑现有模板）
-watch(() => props.initialFields, (newFields) => {
-  if (newFields && newFields.length > 0 && selectedFields.value.length === 0) {
-    selectedFields.value = [...newFields]
+watch(
+  () => [props.availableFields, props.headerBindings],
+  () => {
     validateFields()
-  }
-}, { immediate: true })
+  },
+  { deep: true },
+)
 
-// 组件挂载时加载推荐字段
+watch(
+  () => props.initialFields,
+  (newFields) => {
+    if (newFields && newFields.length > 0 && selectedFields.value.length === 0) {
+      selectedFields.value = [...newFields]
+      validateFields()
+    }
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
   loadRecommendedFields()
-  
-  // 如果有初始字段，设置选中
   if (props.initialFields && props.initialFields.length > 0) {
     selectedFields.value = [...props.initialFields]
     validateFields()
   }
 })
 
-// 暴露方法供父组件调用
 defineExpose({
   getSelectedFields: () => selectedFields.value,
   validate: validateFields,
   clear: () => {
     selectedFields.value = []
     validateFields()
-  }
+  },
 })
 </script>
 
@@ -213,13 +213,43 @@ defineExpose({
   border: 1px solid #e4e7ed;
 }
 
-.selector-hint {
+.selector-header,
+.recommended-title,
+.validation-warning {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+}
+
+.selector-help {
+  cursor: help;
+}
+
+.recommended-fields,
+.selected-fields {
+  margin-bottom: 15px;
+  padding: 10px;
+  border-radius: 4px;
+  background: #f0f9ff;
+}
+
+.recommended-title,
+.selected-title {
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: #409eff;
+}
+
+.recommended-values,
+.selector-muted {
+  color: #606266;
+  font-size: 13px;
 }
 
 .fields-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
   max-height: 300px;
   overflow-y: auto;
   padding: 10px;
@@ -227,14 +257,22 @@ defineExpose({
   border-radius: 4px;
 }
 
-.validation-warning {
-  display: flex;
-  align-items: center;
+.empty-state {
+  margin-top: 10px;
 }
 
-.selected-fields {
+.validation-warning {
+  margin-top: 15px;
+  padding: 10px;
+  border-left: 4px solid #f56c6c;
+  border-radius: 4px;
+  color: #f56c6c;
+  background: #fef0f0;
+}
+
+.selected-tags {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 </style>
-

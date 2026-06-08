@@ -11,7 +11,7 @@ import re
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
@@ -73,6 +73,27 @@ logger = get_logger(__name__)
 router = APIRouter()
 DATE_TARGET_FIELDS = {"metric_date", "period_start_date", "period_end_date"}
 FILE_DATE_SOURCE_COLUMNS = {"__file_date_from__", "__file_date_to__"}
+SYSTEM_HASH_SCOPE_KEYS = {"platform_code", "shop_id", "data_domain", "granularity", "sub_domain"}
+
+
+def _normalize_dimension_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in {"n/a", "na", "none", "null"}:
+        return None
+    return text or None
+
+
+def _canonical_user_hash_key_set(fields: list[str] | None) -> set[str]:
+    keys: set[str] = set()
+    for field in fields or []:
+        semantic_key = normalize_semantic_key(field)
+        if not semantic_key or semantic_key in SYSTEM_HASH_SCOPE_KEYS:
+            continue
+        if is_canonical_semantic_key(semantic_key):
+            keys.add(semantic_key)
+    return keys
 
 
 async def _load_file_update_preview(
@@ -453,6 +474,7 @@ def _validate_deduplication_fields_against_bindings(
     deduplication_fields: list[str],
     header_columns: list[str],
     header_bindings: list[dict[str, Any]],
+    field_parse_rules: list[dict[str, Any]] | None = None,
 ) -> None:
     binding_by_raw = {
         str(binding.get("raw_name", "")).strip().lower(): binding
@@ -466,6 +488,14 @@ def _validate_deduplication_fields_against_bindings(
         )
         if semantic_key:
             bindings_by_semantic.setdefault(semantic_key, []).append(binding)
+    derived_semantic_keys = {
+        semantic_key
+        for semantic_key in (
+            normalize_semantic_key(rule.get("target_field") or rule.get("semantic_key") or rule.get("field"))
+            for rule in (field_parse_rules or [])
+        )
+        if semantic_key and is_canonical_semantic_key(semantic_key)
+    }
 
     header_lookup = {str(column).strip().lower() for column in header_columns}
     invalid_fields: list[str] = []
@@ -483,7 +513,14 @@ def _validate_deduplication_fields_against_bindings(
             non_semantic_fields.append(field_text)
             continue
 
-        if normalized_key and is_canonical_semantic_key(normalized_key) and semantic_bindings:
+        confirmed_semantic_bindings = [
+            binding
+            for binding in semantic_bindings
+            if binding.get("semantic_review_status") == "confirmed_semantic"
+        ]
+        if normalized_key and is_canonical_semantic_key(normalized_key) and confirmed_semantic_bindings:
+            continue
+        if normalized_key and normalized_key in derived_semantic_keys:
             continue
         raw_semantic_key = None
         if raw_binding:
@@ -493,7 +530,7 @@ def _validate_deduplication_fields_against_bindings(
         if (
             field_key in header_lookup
             and raw_binding
-            and raw_binding.get("semantic_review_status") != "confirmed_non_semantic"
+            and raw_binding.get("semantic_review_status") == "confirmed_semantic"
             and raw_semantic_key
             and is_canonical_semantic_key(raw_semantic_key)
         ):
@@ -510,6 +547,27 @@ def _validate_deduplication_fields_against_bindings(
             "deduplication_fields必须能通过表头或语义绑定解析到真实字段: "
             + ", ".join(invalid_fields)
         )
+
+
+def _sync_hash_participation_from_deduplication_fields(
+    header_bindings: list[dict[str, Any]],
+    deduplication_fields: list[str],
+) -> list[dict[str, Any]]:
+    selected_hash_keys = {
+        normalize_semantic_key(field)
+        for field in deduplication_fields or []
+        if normalize_semantic_key(field)
+    }
+    synced: list[dict[str, Any]] = []
+    for binding in header_bindings or []:
+        next_binding = dict(binding)
+        semantic_key = normalize_semantic_key(next_binding.get("semantic_key"))
+        if next_binding.get("semantic_review_status") != "confirmed_semantic" or not semantic_key:
+            next_binding["hash_participates"] = False
+        else:
+            next_binding["hash_participates"] = semantic_key in selected_hash_keys
+        synced.append(next_binding)
+    return synced
 
 
 def _extract_semantic_key_sets(
@@ -691,6 +749,58 @@ def _validate_field_parse_rules(
             )
 
 
+async def _validate_template_family_hash_keys(
+    db: AsyncSession,
+    *,
+    platform: str,
+    data_domain: str,
+    granularity: Optional[str],
+    sub_domain: Optional[str],
+    account: Optional[str],
+    deduplication_fields: list[str],
+) -> None:
+    current_keys = _canonical_user_hash_key_set(deduplication_fields)
+    result = await db.execute(
+        select(FieldMappingTemplate).where(
+            and_(
+                FieldMappingTemplate.platform == platform,
+                FieldMappingTemplate.data_domain == data_domain,
+                FieldMappingTemplate.granularity == _normalize_dimension_value(granularity),
+                FieldMappingTemplate.sub_domain == _normalize_dimension_value(sub_domain),
+                FieldMappingTemplate.account == _normalize_dimension_value(account),
+                FieldMappingTemplate.status == "published",
+            )
+        )
+    )
+    existing_templates = list(result.scalars().all())
+    if not existing_templates:
+        return
+
+    existing = sorted(
+        existing_templates,
+        key=lambda item: (item.version or 0, item.id or 0),
+        reverse=True,
+    )[0]
+    existing_keys = _canonical_user_hash_key_set(existing.deduplication_fields or [])
+    if not existing_keys:
+        return
+
+    missing_keys = sorted(existing_keys - current_keys)
+    extra_keys = sorted(current_keys - existing_keys)
+    if not missing_keys and not extra_keys:
+        return
+
+    details: list[str] = []
+    if missing_keys:
+        details.append("缺少必要 hash 语义字段: " + ", ".join(missing_keys))
+    if extra_keys:
+        details.append("新增 hash 语义字段: " + ", ".join(extra_keys))
+    raise ValueError(
+        "; ".join(details)
+        + "。同一模板家族必须保持同一套 data_hash 语义字段；如业务行粒度不同，请拆分 sub_domain 或模板家族。"
+    )
+
+
 @router.post("/templates/save", response_model=TemplateSaveResponse)
 async def save_mapping_template(
     request: TemplateSaveRequest,
@@ -765,6 +875,11 @@ async def save_mapping_template(
             deduplication_fields,
             header_columns,
             header_bindings,
+            field_parse_rules,
+        )
+        header_bindings = _sync_hash_participation_from_deduplication_fields(
+            header_bindings,
+            deduplication_fields,
         )
 
         if header_columns:
@@ -808,6 +923,16 @@ async def save_mapping_template(
         )
         if not hash_policy_result.passed:
             raise ValueError("; ".join(hash_policy_result.blocking_errors))
+
+        await _validate_template_family_hash_keys(
+            db,
+            platform=request.platform,
+            data_domain=request.data_domain,
+            granularity=request.granularity,
+            sub_domain=request.sub_domain,
+            account=request.account,
+            deduplication_fields=deduplication_fields,
+        )
 
         save_result = await template_service.save_template(
             platform=request.platform,

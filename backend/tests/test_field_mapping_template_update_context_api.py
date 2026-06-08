@@ -300,7 +300,7 @@ async def test_template_update_context_core_only_uses_template_headers_as_field_
     assert data["header_source"] == "template"
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["missing_field"]
-    assert data["recommended_deduplication_fields"] == ["order_id", "shop_id"]
+    assert data["recommended_deduplication_fields"] == ["order_id"]
 
 
 @pytest.mark.asyncio
@@ -898,7 +898,7 @@ async def test_save_mapping_template_accepts_file_date_token_parse_rules(
             "granularity": "monthly",
             "header_row": 0,
             "header_columns": ["商品编号", "商品", "销售额（已下订单） (SGD)"],
-            "deduplication_fields": ["商品编号"],
+            "deduplication_fields": ["商品编号", "metric_date"],
             "template_name": "products_file_date_rule",
             "created_by": "test",
             "mappings": {
@@ -946,8 +946,8 @@ async def test_save_mapping_template_preserves_raw_non_orders_headers(
             "data_domain": "products",
             "granularity": "monthly",
             "header_row": 1,
-            "header_columns": ["platform_sku", "Current Item Status", "销售额（已下订单） (COP)"],
-            "deduplication_fields": ["platform_sku"],
+            "header_columns": ["platform_sku", "period_start_date", "Current Item Status", "销售额（已下订单） (COP)"],
+            "deduplication_fields": ["platform_sku", "period_start_date"],
             "template_name": "raw_header_preserve_test",
             "created_by": "test",
         },
@@ -967,7 +967,7 @@ async def test_save_mapping_template_preserves_raw_non_orders_headers(
         header_columns = row["header_columns"]
         if isinstance(header_columns, str):
             header_columns = json.loads(header_columns)
-        assert header_columns == ["platform_sku", "Current Item Status", "销售额（已下订单） (COP)"]
+        assert header_columns == ["platform_sku", "period_start_date", "Current Item Status", "销售额（已下订单） (COP)"]
 
 
 @pytest.mark.asyncio
@@ -1132,6 +1132,99 @@ async def test_save_mapping_template_returns_versioning_metadata(
     assert second_payload["data"]["operation"] == "new_version"
     assert second_payload["data"]["archived_template_id"] == first_payload["data"]["template_id"]
     assert second_payload["data"]["template_name"].endswith("_v2")
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_rejects_family_hash_key_downgrade(
+    template_update_context_client,
+):
+    client, _session_factory = template_update_context_client
+
+    first_response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "orders",
+            "granularity": "daily",
+            "header_row": 0,
+            "header_columns": ["订单号", "SKU", "金额"],
+            "deduplication_fields": ["订单号", "SKU"],
+            "mappings": {
+                "订单号": {"standard_field": "order_id", "confidence": 1.0},
+                "SKU": {"standard_field": "sku_id", "confidence": 1.0},
+            },
+            "created_by": "test",
+        },
+    )
+    assert first_response.status_code == 200
+
+    second_response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "orders",
+            "granularity": "daily",
+            "header_row": 0,
+            "header_columns": ["订单编号", "金额"],
+            "deduplication_fields": ["订单编号"],
+            "mappings": {
+                "订单编号": {"standard_field": "order_id", "confidence": 1.0},
+            },
+            "created_by": "test",
+            "save_mode": "new_version",
+        },
+    )
+
+    assert second_response.status_code == 400
+    payload = second_response.json()
+    assert "缺少必要 hash 语义字段: sku_id" in payload["message"]
+    assert "同一模板家族必须保持同一套 data_hash 语义字段" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_syncs_hash_participation_from_selected_semantic_keys(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "orders",
+            "granularity": "daily",
+            "header_row": 0,
+            "header_columns": ["订单号", "日期", "金额"],
+            "deduplication_fields": ["订单号"],
+            "header_bindings": [
+                {
+                    "raw_name": "订单号",
+                    "display_name": "订单号",
+                    "semantic_key": "order_id",
+                    "semantic_review_status": "confirmed_semantic",
+                    "hash_participates": False,
+                },
+                {
+                    "raw_name": "日期",
+                    "display_name": "日期",
+                    "semantic_key": "metric_date",
+                    "semantic_review_status": "confirmed_semantic",
+                    "hash_participates": True,
+                },
+            ],
+            "created_by": "test",
+        },
+    )
+
+    assert response.status_code == 200
+    template_id = response.json()["data"]["template_id"]
+    async with session_factory() as session:
+        template = await session.get(FieldMappingTemplate, template_id)
+
+    assert template.deduplication_fields == ["order_id"]
+    bindings_by_key = {binding["semantic_key"]: binding for binding in template.header_bindings}
+    assert bindings_by_key["order_id"]["hash_participates"] is True
+    assert bindings_by_key["metric_date"]["hash_participates"] is False
 
 
 @pytest.mark.asyncio
