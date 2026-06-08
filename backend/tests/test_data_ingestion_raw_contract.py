@@ -41,7 +41,9 @@ def test_orders_raw_contract_preserves_distinct_currency_source_fields():
 
 
 @pytest.mark.asyncio
-async def test_template_recognized_columns_are_passed_through_to_raw_importer(monkeypatch, tmp_path):
+async def test_template_recognized_columns_are_passed_through_to_raw_importer(
+    monkeypatch, tmp_path
+):
     from types import SimpleNamespace
 
     import pandas as pd
@@ -76,7 +78,9 @@ async def test_template_recognized_columns_are_passed_through_to_raw_importer(mo
         def __init__(self, _db):
             pass
 
-        def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None, **_kwargs):
+        def batch_calculate_data_hash(
+            self, rows, deduplication_fields=None, header_bindings=None, **_kwargs
+        ):
             return [f"hash-{index}" for index, _ in enumerate(rows)]
 
     captured = {}
@@ -126,7 +130,10 @@ async def test_template_recognized_columns_are_passed_through_to_raw_importer(mo
     )
     monkeypatch.setattr(
         "backend.services.data_ingestion_service.ExcelParser.normalize_table",
-        lambda df, **_kwargs: (df, {"strategy": "none", "filled_rows": 0, "filled_columns": []}),
+        lambda df, **_kwargs: (
+            df,
+            {"strategy": "none", "filled_rows": 0, "filled_columns": []},
+        ),
     )
     monkeypatch.setattr(
         "backend.services.data_ingestion_service.get_raw_data_importer",
@@ -156,7 +163,9 @@ async def test_template_recognized_columns_are_passed_through_to_raw_importer(mo
 
 
 @pytest.mark.asyncio
-async def test_ingest_data_passes_file_date_range_to_raw_importer(monkeypatch, tmp_path):
+async def test_ingest_data_passes_file_date_range_to_raw_importer(
+    monkeypatch, tmp_path
+):
     from types import SimpleNamespace
 
     import pandas as pd
@@ -191,7 +200,9 @@ async def test_ingest_data_passes_file_date_range_to_raw_importer(monkeypatch, t
         def __init__(self, _db):
             pass
 
-        def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None, **_kwargs):
+        def batch_calculate_data_hash(
+            self, rows, deduplication_fields=None, header_bindings=None, **_kwargs
+        ):
             return [f"hash-{index}" for index, _ in enumerate(rows)]
 
     captured = {}
@@ -235,7 +246,10 @@ async def test_ingest_data_passes_file_date_range_to_raw_importer(monkeypatch, t
     )
     monkeypatch.setattr(
         "backend.services.data_ingestion_service.ExcelParser.normalize_table",
-        lambda df, **_kwargs: (df, {"strategy": "none", "filled_rows": 0, "filled_columns": []}),
+        lambda df, **_kwargs: (
+            df,
+            {"strategy": "none", "filled_rows": 0, "filled_columns": []},
+        ),
     )
     monkeypatch.setattr(
         "backend.services.data_ingestion_service.get_raw_data_importer",
@@ -262,8 +276,12 @@ async def test_ingest_data_passes_file_date_range_to_raw_importer(monkeypatch, t
 
 
 def test_data_ingestion_hash_uses_template_field_parse_rules():
-    text = Path("backend/services/data_ingestion_service.py").read_text(encoding="utf-8")
-    sync_text = Path("backend/services/data_sync_service.py").read_text(encoding="utf-8")
+    text = Path("backend/services/data_ingestion_service.py").read_text(
+        encoding="utf-8"
+    )
+    sync_text = Path("backend/services/data_sync_service.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "field_parse_rules: Optional[List[Dict[str, Any]]] = None" in text
     assert "raw_importer.field_parse_rules = field_parse_rules" in text
@@ -273,7 +291,9 @@ def test_data_ingestion_hash_uses_template_field_parse_rules():
 
 
 @pytest.mark.asyncio
-async def test_ingest_data_passes_date_context_to_async_raw_importer(monkeypatch, tmp_path):
+async def test_ingest_data_passes_date_context_to_async_raw_importer(
+    monkeypatch, tmp_path
+):
     from datetime import date
     from types import SimpleNamespace
 

@@ -2,7 +2,9 @@ from pathlib import Path
 
 
 def test_operational_metrics_sql_uses_current_operating_cost_contract():
-    text = Path("sql/api_modules/business_overview_operational_metrics_module.sql").read_text(
+    text = Path(
+        "sql/api_modules/business_overview_operational_metrics_module.sql"
+    ).read_text(
         encoding="utf-8",
         errors="replace",
     )
@@ -25,7 +27,9 @@ def test_target_completion_service_prefers_current_sales_target_columns():
         encoding="utf-8",
         errors="replace",
     )
-    sql_text = Path("sql/api_modules/business_overview_comparison_module.sql").read_text(
+    sql_text = Path(
+        "sql/api_modules/business_overview_comparison_module.sql"
+    ).read_text(
         encoding="utf-8",
         errors="replace",
     )
@@ -48,7 +52,9 @@ def test_sales_targets_a_contract_includes_platform_code_identity():
         encoding="utf-8",
         errors="replace",
     )
-    migration_text = Path("migrations/versions/20260610_add_platform_code_to_sales_targets_a.py").read_text(
+    migration_text = Path(
+        "migrations/versions/20260610_add_platform_code_to_sales_targets_a.py"
+    ).read_text(
         encoding="utf-8",
         errors="replace",
     )

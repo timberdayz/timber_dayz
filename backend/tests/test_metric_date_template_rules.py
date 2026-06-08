@@ -90,19 +90,23 @@ def test_parse_date_by_declared_format_supports_day_first_range_pick():
 def test_raw_data_importer_field_parse_rules_override_heuristic_metric_date_resolution():
     importer = _make_importer()
 
-    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
-        importer._extract_period_dates_by_rules(
-            row={"order_time": "2026-03-12 12:30:00"},
-            field_parse_rules=[
-                {
-                    "target_field": "metric_date",
-                    "source_column": "order_time",
-                    "value_kind": "single_date",
-                    "date_format": "yyyy-mm-dd hh:mm:ss",
-                    "strict": True,
-                }
-            ],
-        )
+    (
+        metric_date,
+        period_start_date,
+        period_end_date,
+        period_start_time,
+        period_end_time,
+    ) = importer._extract_period_dates_by_rules(
+        row={"order_time": "2026-03-12 12:30:00"},
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "order_time",
+                "value_kind": "single_date",
+                "date_format": "yyyy-mm-dd hh:mm:ss",
+                "strict": True,
+            }
+        ],
     )
 
     assert metric_date == date(2026, 3, 12)
@@ -134,19 +138,23 @@ def test_raw_data_importer_field_parse_rules_support_file_date_from_token():
     importer = _make_importer()
     importer.file_date_from = date(2026, 3, 1)
 
-    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
-        importer._extract_period_dates_by_rules(
-            row={},
-            field_parse_rules=[
-                {
-                    "target_field": "metric_date",
-                    "source_column": "__file_date_from__",
-                    "value_kind": "single_date",
-                    "date_format": "yyyy-mm-dd",
-                    "strict": True,
-                }
-            ],
-        )
+    (
+        metric_date,
+        period_start_date,
+        period_end_date,
+        period_start_time,
+        period_end_time,
+    ) = importer._extract_period_dates_by_rules(
+        row={},
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+                "date_format": "yyyy-mm-dd",
+                "strict": True,
+            }
+        ],
     )
 
     assert metric_date == date(2026, 3, 1)
@@ -160,27 +168,31 @@ def test_raw_data_importer_field_parse_rules_support_hour_target_with_file_date_
     importer = _make_importer()
     importer.file_date_from = date(2026, 6, 8)
 
-    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
-        importer._extract_period_dates_by_rules(
-            row={"hour": "13:00"},
-            field_parse_rules=[
-                {
-                    "target_field": "metric_date",
-                    "source_column": "__file_date_from__",
-                    "value_kind": "single_date",
-                    "date_format": "yyyy-mm-dd",
-                    "strict": True,
-                },
-                {
-                    "target_field": "period_start_time",
-                    "source_column": "hour",
-                    "value_kind": "time_of_day",
-                    "date_format": "hh:mm",
-                    "date_anchor": "__file_date_from__",
-                    "strict": True,
-                },
-            ],
-        )
+    (
+        metric_date,
+        period_start_date,
+        period_end_date,
+        period_start_time,
+        period_end_time,
+    ) = importer._extract_period_dates_by_rules(
+        row={"hour": "13:00"},
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+                "date_format": "yyyy-mm-dd",
+                "strict": True,
+            },
+            {
+                "target_field": "period_start_time",
+                "source_column": "hour",
+                "value_kind": "time_of_day",
+                "date_format": "hh:mm",
+                "date_anchor": "__file_date_from__",
+                "strict": True,
+            },
+        ],
     )
 
     assert metric_date == date(2026, 6, 8)
@@ -193,21 +205,25 @@ def test_raw_data_importer_field_parse_rules_support_hour_target_with_file_date_
 def test_raw_data_importer_field_parse_rules_support_source_alias_fallback():
     importer = _make_importer()
 
-    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
-        importer._extract_period_dates_by_rules(
-            row={"统计日期": "2026-03-12 12:30:00"},
-            field_parse_rules=[
-                {
-                    "target_field": "metric_date",
-                    "source_column": "Unnamed: 0",
-                    "source_label": "日期",
-                    "source_aliases": ["日期", "统计日期"],
-                    "value_kind": "single_date",
-                    "date_format": "yyyy-mm-dd hh:mm:ss",
-                    "strict": True,
-                }
-            ],
-        )
+    (
+        metric_date,
+        period_start_date,
+        period_end_date,
+        period_start_time,
+        period_end_time,
+    ) = importer._extract_period_dates_by_rules(
+        row={"统计日期": "2026-03-12 12:30:00"},
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "Unnamed: 0",
+                "source_label": "日期",
+                "source_aliases": ["日期", "统计日期"],
+                "value_kind": "single_date",
+                "date_format": "yyyy-mm-dd hh:mm:ss",
+                "strict": True,
+            }
+        ],
     )
 
     assert metric_date == date(2026, 3, 12)
@@ -284,12 +300,16 @@ def test_raw_data_importer_resolves_monthly_file_date_range_without_today_fallba
         },
     ]
 
-    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
-        importer._resolve_period_dates_for_insert(
-            row={"商品编号": "sku-1"},
-            header_columns=["商品编号", "商品"],
-            granularity="monthly",
-        )
+    (
+        metric_date,
+        period_start_date,
+        period_end_date,
+        period_start_time,
+        period_end_time,
+    ) = importer._resolve_period_dates_for_insert(
+        row={"商品编号": "sku-1"},
+        header_columns=["商品编号", "商品"],
+        granularity="monthly",
     )
 
     assert metric_date == date(2026, 4, 1)

@@ -37,7 +37,9 @@ def _table_exists(connection, schema_name: str, table_name: str) -> bool:
     return result.scalar() is not None
 
 
-def _column_exists(connection, schema_name: str, table_name: str, column_name: str) -> bool:
+def _column_exists(
+    connection, schema_name: str, table_name: str, column_name: str
+) -> bool:
     result = connection.execute(
         sa.text(
             """
@@ -49,12 +51,18 @@ def _column_exists(connection, schema_name: str, table_name: str, column_name: s
             LIMIT 1
             """
         ),
-        {"schema_name": schema_name, "table_name": table_name, "column_name": column_name},
+        {
+            "schema_name": schema_name,
+            "table_name": table_name,
+            "column_name": column_name,
+        },
     )
     return result.scalar() is not None
 
 
-def _constraint_exists(connection, schema_name: str, table_name: str, constraint_name: str) -> bool:
+def _constraint_exists(
+    connection, schema_name: str, table_name: str, constraint_name: str
+) -> bool:
     result = connection.execute(
         sa.text(
             """
@@ -97,16 +105,14 @@ def _quote_identifier(identifier: str) -> str:
 
 def _resolve_sales_targets_a_identity_columns(connection) -> tuple[str, str]:
     """Support both live Chinese columns and fresh snapshot English columns."""
-    if (
-        _column_exists(connection, "a_class", "sales_targets_a", "店铺ID")
-        and _column_exists(connection, "a_class", "sales_targets_a", "年月")
-    ):
+    if _column_exists(
+        connection, "a_class", "sales_targets_a", "店铺ID"
+    ) and _column_exists(connection, "a_class", "sales_targets_a", "年月"):
         return "店铺ID", "年月"
 
-    if (
-        _column_exists(connection, "a_class", "sales_targets_a", "shop_id")
-        and _column_exists(connection, "a_class", "sales_targets_a", "year_month")
-    ):
+    if _column_exists(
+        connection, "a_class", "sales_targets_a", "shop_id"
+    ) and _column_exists(connection, "a_class", "sales_targets_a", "year_month"):
         return "shop_id", "year_month"
 
     raise RuntimeError(
@@ -127,7 +133,12 @@ def upgrade() -> None:
     if not _column_exists(connection, "a_class", "sales_targets_a", "platform_code"):
         op.add_column(
             "sales_targets_a",
-            sa.Column("platform_code", sa.String(length=32), nullable=False, server_default="unknown"),
+            sa.Column(
+                "platform_code",
+                sa.String(length=32),
+                nullable=False,
+                server_default="unknown",
+            ),
             schema="a_class",
         )
 
@@ -141,9 +152,8 @@ def upgrade() -> None:
         )
     )
 
-    if (
-        _table_exists(connection, "a_class", "sales_targets")
-        and _table_exists(connection, "a_class", "target_breakdown")
+    if _table_exists(connection, "a_class", "sales_targets") and _table_exists(
+        connection, "a_class", "target_breakdown"
     ):
         op.execute(
             sa.text(
@@ -173,8 +183,13 @@ def upgrade() -> None:
             )
         )
 
-    for legacy_constraint in ("uq_sales_targets_a_shop_month", "uq_sales_targets_shop_month"):
-        if _constraint_exists(connection, "a_class", "sales_targets_a", legacy_constraint):
+    for legacy_constraint in (
+        "uq_sales_targets_a_shop_month",
+        "uq_sales_targets_shop_month",
+    ):
+        if _constraint_exists(
+            connection, "a_class", "sales_targets_a", legacy_constraint
+        ):
             op.drop_constraint(
                 legacy_constraint,
                 "sales_targets_a",
@@ -182,7 +197,12 @@ def upgrade() -> None:
                 type_="unique",
             )
 
-    if not _constraint_exists(connection, "a_class", "sales_targets_a", "uq_sales_targets_a_platform_shop_month"):
+    if not _constraint_exists(
+        connection,
+        "a_class",
+        "sales_targets_a",
+        "uq_sales_targets_a_platform_shop_month",
+    ):
         op.create_unique_constraint(
             "uq_sales_targets_a_platform_shop_month",
             "sales_targets_a",
@@ -222,12 +242,25 @@ def downgrade() -> None:
     )
 
     if _index_exists(connection, "a_class", "ix_sales_targets_a_platform_month"):
-        op.drop_index("ix_sales_targets_a_platform_month", table_name="sales_targets_a", schema="a_class")
+        op.drop_index(
+            "ix_sales_targets_a_platform_month",
+            table_name="sales_targets_a",
+            schema="a_class",
+        )
 
     if _index_exists(connection, "a_class", "ix_sales_targets_a_platform_shop"):
-        op.drop_index("ix_sales_targets_a_platform_shop", table_name="sales_targets_a", schema="a_class")
+        op.drop_index(
+            "ix_sales_targets_a_platform_shop",
+            table_name="sales_targets_a",
+            schema="a_class",
+        )
 
-    if _constraint_exists(connection, "a_class", "sales_targets_a", "uq_sales_targets_a_platform_shop_month"):
+    if _constraint_exists(
+        connection,
+        "a_class",
+        "sales_targets_a",
+        "uq_sales_targets_a_platform_shop_month",
+    ):
         op.drop_constraint(
             "uq_sales_targets_a_platform_shop_month",
             "sales_targets_a",
@@ -235,7 +268,9 @@ def downgrade() -> None:
             type_="unique",
         )
 
-    if not _constraint_exists(connection, "a_class", "sales_targets_a", legacy_constraint_name):
+    if not _constraint_exists(
+        connection, "a_class", "sales_targets_a", legacy_constraint_name
+    ):
         op.create_unique_constraint(
             legacy_constraint_name,
             "sales_targets_a",
