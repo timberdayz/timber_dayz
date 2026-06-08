@@ -2,7 +2,7 @@
   <div class="expense-management erp-page-container erp-page--admin">
     <PageHeader
       title="费用管理"
-      subtitle="按月份或按店铺维护费用数据。该模块中的相关费用列统一表示营销费用，不再作为员工工资录入入口。"
+      subtitle="按月份或按店铺维护经营成本。人力费用为店铺成本分摊，不作为员工工资单录入入口。"
       family="admin"
     />
 
@@ -114,6 +114,16 @@
               <div class="stat-label">本月水电</div>
               <div class="stat-value">
                 {{ formatNumber(monthlySummary.total_utilities) }}
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="4">
+          <el-card>
+            <div class="stat-item">
+              <div class="stat-label">本月人力费用</div>
+              <div class="stat-value">
+                {{ formatNumber(monthlySummary.total_labor_cost) }}
               </div>
             </div>
           </el-card>
@@ -239,6 +249,23 @@
             <template #default="{ row }">
               <el-input-number
                 v-model="row.ai_token_cost"
+                :min="0"
+                :precision="2"
+                :controls="false"
+                class="erp-w-full"
+                @change="updateRowTotal(row)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="labor_cost"
+            label="人力费用"
+            width="130"
+            align="right"
+          >
+            <template #default="{ row }">
+              <el-input-number
+                v-model="row.labor_cost"
                 :min="0"
                 :precision="2"
                 :controls="false"
@@ -390,6 +417,15 @@
               class="erp-w-full"
             />
           </el-form-item>
+          <el-form-item label="总人力费用">
+            <el-input-number
+              v-model="quickSplitForm.labor_cost"
+              :min="0"
+              :precision="2"
+              :controls="false"
+              class="erp-w-full"
+            />
+          </el-form-item>
           <el-form-item label="总其他费用">
             <el-input-number
               v-model="quickSplitForm.other_costs"
@@ -508,6 +544,16 @@
         <el-col :span="4">
           <el-card>
             <div class="stat-item">
+              <div class="stat-label">年度人力费用</div>
+              <div class="stat-value">
+                {{ formatNumber(shopSummary.total_labor_cost) }}
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="4">
+          <el-card>
+            <div class="stat-item">
               <div class="stat-label">年度其他</div>
               <div class="stat-value">
                 {{ formatNumber(shopSummary.total_other_costs) }}
@@ -605,6 +651,23 @@
             <template #default="{ row }">
               <el-input-number
                 v-model="row.ai_token_cost"
+                :min="0"
+                :precision="2"
+                :controls="false"
+                class="erp-w-full"
+                @change="updateShopRowTotal(row)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="labor_cost"
+            label="人力费用"
+            width="130"
+            align="right"
+          >
+            <template #default="{ row }">
+              <el-input-number
+                v-model="row.labor_cost"
                 :min="0"
                 :precision="2"
                 :controls="false"
@@ -753,6 +816,7 @@ const quickSplitForm = reactive({
   marketing_fee: 0,
   utilities: 0,
   ai_token_cost: 0,
+  labor_cost: 0,
   other_costs: 0
 })
 
@@ -763,6 +827,7 @@ const monthlySummary = reactive({
   total_marketing_fee: 0,
   total_utilities: 0,
   total_ai_token_cost: 0,
+  total_labor_cost: 0,
   total_other: 0
 })
 
@@ -773,6 +838,7 @@ const yearlySummary = reactive({
   total_marketing_fee: 0,
   total_utilities: 0,
   total_ai_token_cost: 0,
+  total_labor_cost: 0,
   total_other_costs: 0
 })
 
@@ -790,6 +856,7 @@ const shopSummary = reactive({
   total_marketing_fee: 0,
   total_utilities: 0,
   total_ai_token_cost: 0,
+  total_labor_cost: 0,
   total_other_costs: 0,
   month_count: 0
 })
@@ -810,12 +877,14 @@ const formatNumber = (num) => {
 const normalizeExpenseRow = (item = {}) => {
   const marketingFee = Number(item.marketing_fee) || 0
   const aiTokenCost = Number(item.ai_token_cost) || 0
+  const laborCost = Number(item.labor_cost) || 0
   const displayMeta = resolveShopDisplay(item, shopAccountLookup)
   return {
     ...item,
     platform_code: item.platform_code ?? null,
     marketing_fee: marketingFee,
     ai_token_cost: aiTokenCost,
+    labor_cost: laborCost,
     note: item.note ?? '',
     total_cost: Number(item.total_cost ?? item.total) || 0,
     shop_name: displayMeta.display_name,
@@ -837,6 +906,7 @@ const isMeaningfulExpenseRow = (row = {}) => {
     (Number(row.marketing_fee) || 0) > 0 ||
     (Number(row.utilities) || 0) > 0 ||
     (Number(row.ai_token_cost) || 0) > 0 ||
+    (Number(row.labor_cost) || 0) > 0 ||
     (Number(row.other_costs) || 0) > 0 ||
     note.length > 0 ||
     attachments.length > 0
@@ -954,6 +1024,7 @@ const loadMonthlyExpenses = async () => {
         marketing_fee: 0,
         utilities: 0,
         ai_token_cost: 0,
+        labor_cost: 0,
         other_costs: 0,
         total_cost: 0,
         total: 0,
@@ -986,6 +1057,7 @@ const loadMonthlyExpenses = async () => {
       yearlySummary.total_marketing_fee = yearlyRes.total_marketing_fee || 0
       yearlySummary.total_utilities = yearlyRes.total_utilities || 0
       yearlySummary.total_ai_token_cost = yearlyRes.total_ai_token_cost || 0
+      yearlySummary.total_labor_cost = yearlyRes.total_labor_cost || 0
       yearlySummary.total_other_costs = yearlyRes.total_other_costs || 0
     }
     deletedMonthlyData.value = deletedRes.items || []
@@ -1011,6 +1083,7 @@ const calculateMonthlySummary = () => {
   monthlySummary.total_marketing_fee = 0
   monthlySummary.total_utilities = 0
   monthlySummary.total_ai_token_cost = 0
+  monthlySummary.total_labor_cost = 0
   monthlySummary.total_other = 0
 
   monthlyTableData.value
@@ -1019,13 +1092,15 @@ const calculateMonthlySummary = () => {
       const marketingFee = Number(item.marketing_fee) || 0
       const utilities = Number(item.utilities) || 0
       const aiTokenCost = Number(item.ai_token_cost) || 0
+      const laborCost = Number(item.labor_cost) || 0
       const otherCosts = Number(item.other_costs) || 0
 
-      monthlySummary.total_amount += rent + marketingFee + utilities + aiTokenCost + otherCosts
+      monthlySummary.total_amount += rent + marketingFee + utilities + aiTokenCost + laborCost + otherCosts
       monthlySummary.total_rent += rent
       monthlySummary.total_marketing_fee += marketingFee
       monthlySummary.total_utilities += utilities
       monthlySummary.total_ai_token_cost += aiTokenCost
+      monthlySummary.total_labor_cost += laborCost
       monthlySummary.total_other += otherCosts
     })
 }
@@ -1037,6 +1112,7 @@ const updateRowTotal = (row) => {
     (Number(row.marketing_fee) || 0) +
     (Number(row.utilities) || 0) +
     (Number(row.ai_token_cost) || 0) +
+    (Number(row.labor_cost) || 0) +
     (Number(row.other_costs) || 0)
   row.total = row.total_cost
   calculateMonthlySummary()
@@ -1065,6 +1141,8 @@ const resetQuickSplitForm = () => {
   quickSplitForm.rent = 0
   quickSplitForm.marketing_fee = 0
   quickSplitForm.utilities = 0
+  quickSplitForm.ai_token_cost = 0
+  quickSplitForm.labor_cost = 0
   quickSplitForm.other_costs = 0
 }
 
@@ -1124,6 +1202,7 @@ const handleApplyQuickSplit = async () => {
   const marketingAllocations = distributeEvenly(quickSplitForm.marketing_fee, rowCount)
   const utilityAllocations = distributeEvenly(quickSplitForm.utilities, rowCount)
   const aiTokenAllocations = distributeEvenly(quickSplitForm.ai_token_cost, rowCount)
+  const laborAllocations = distributeEvenly(quickSplitForm.labor_cost, rowCount)
   const otherAllocations = distributeEvenly(quickSplitForm.other_costs, rowCount)
 
   monthlyTableData.value.forEach((row, index) => {
@@ -1131,6 +1210,7 @@ const handleApplyQuickSplit = async () => {
     row.marketing_fee = marketingAllocations[index]
     row.utilities = utilityAllocations[index]
     row.ai_token_cost = aiTokenAllocations[index]
+    row.labor_cost = laborAllocations[index]
     row.other_costs = otherAllocations[index]
     updateRowTotal(row)
   })
@@ -1165,6 +1245,7 @@ const handleSaveRow = async (row) => {
       marketing_fee: Number(row.marketing_fee) || 0,
       utilities: Number(row.utilities) || 0,
       ai_token_cost: Number(row.ai_token_cost) || 0,
+      labor_cost: Number(row.labor_cost) || 0,
       other_costs: Number(row.other_costs) || 0,
       note: row.note || null
     }
@@ -1221,6 +1302,7 @@ const handleBatchSave = async () => {
         row.marketing_fee > 0 ||
         row.utilities > 0 ||
         row.ai_token_cost > 0 ||
+        row.labor_cost > 0 ||
         row.other_costs > 0 ||
         (row.note && String(row.note).trim().length > 0))
   )
@@ -1251,6 +1333,7 @@ const handleBatchSave = async () => {
           marketing_fee: Number(row.marketing_fee) || 0,
           utilities: Number(row.utilities) || 0,
           ai_token_cost: Number(row.ai_token_cost) || 0,
+          labor_cost: Number(row.labor_cost) || 0,
           other_costs: Number(row.other_costs) || 0,
           note: row.note || null
         }
@@ -1326,6 +1409,7 @@ const loadShopExpenses = async () => {
       shopSummary.total_marketing_fee = res.summary.total_marketing_fee || 0
       shopSummary.total_utilities = res.summary.total_utilities || 0
       shopSummary.total_ai_token_cost = res.summary.total_ai_token_cost || 0
+      shopSummary.total_labor_cost = res.summary.total_labor_cost || 0
       shopSummary.total_other_costs = res.summary.total_other_costs || 0
       shopSummary.month_count = res.summary.month_count || 0
     } else {
@@ -1347,6 +1431,7 @@ const resetShopSummary = () => {
   shopSummary.total_marketing_fee = 0
   shopSummary.total_utilities = 0
   shopSummary.total_ai_token_cost = 0
+  shopSummary.total_labor_cost = 0
   shopSummary.total_other_costs = 0
   shopSummary.month_count = 0
 }
@@ -1370,6 +1455,7 @@ const updateShopRowTotal = (row) => {
     (Number(row.marketing_fee) || 0) +
     (Number(row.utilities) || 0) +
     (Number(row.ai_token_cost) || 0) +
+    (Number(row.labor_cost) || 0) +
     (Number(row.other_costs) || 0)
   row.total = row.total_cost
 }
@@ -1391,6 +1477,7 @@ const handleAddMonthRow = () => {
     marketing_fee: 0,
     utilities: 0,
     ai_token_cost: 0,
+    labor_cost: 0,
     other_costs: 0,
     total_cost: 0,
     total: 0,
@@ -1421,6 +1508,7 @@ const handleSaveShopRow = async (row) => {
       marketing_fee: Number(row.marketing_fee) || 0,
       utilities: Number(row.utilities) || 0,
       ai_token_cost: Number(row.ai_token_cost) || 0,
+      labor_cost: Number(row.labor_cost) || 0,
       other_costs: Number(row.other_costs) || 0,
       note: row.note || null
     }

@@ -71,3 +71,12 @@ def test_business_overview_frontend_groups_kpis_and_allows_wrapping():
         assert legacy_marker not in text
 
     assert "flex-wrap: nowrap" not in text
+
+
+def test_business_overview_frontend_expense_tooltip_includes_labor_cost():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "人力费用" in text

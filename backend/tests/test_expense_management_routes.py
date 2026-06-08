@@ -48,6 +48,7 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
                         marketing_fee=params["marketing_fee"],
                         utilities=params["utilities"],
                         ai_token_cost=params["ai_token_cost"],
+                        labor_cost=params["labor_cost"],
                         other_costs=params["other_costs"],
                         total_cost=params["total_cost"],
                         note=params["note"],
@@ -90,6 +91,7 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
                 "marketing_fee": 2,
                 "utilities": 3,
                 "ai_token_cost": 4,
+                "labor_cost": 6,
                 "other_costs": 5,
             },
         )
@@ -98,6 +100,10 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
     assert response.status_code == 200
     assert body["success"] is True
     assert executed["params"]["platform_code"] == "shopee"
+    assert executed["params"]["labor_cost"] == 6
+    assert executed["params"]["total_cost"] == 21
+    assert body["data"]["labor_cost"] == 6
+    assert body["data"]["total_cost"] == 21
 
 
 @pytest.mark.asyncio
@@ -145,6 +151,7 @@ async def test_expense_create_rejects_missing_platform_code_when_lookup_fails(mo
                 "marketing_fee": 2,
                 "utilities": 3,
                 "ai_token_cost": 4,
+                "labor_cost": 6,
                 "other_costs": 5,
             },
         )

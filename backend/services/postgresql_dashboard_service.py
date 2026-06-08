@@ -1073,6 +1073,26 @@ class PostgresqlDashboardService:
                     ),
                     {"year_month": year_month},
                 )
+            elif {
+                "year_month",
+                "rent",
+                "marketing_fee",
+                "utilities",
+                "other_costs",
+                "ai_token_cost",
+                "labor_cost",
+            }.issubset(columns):
+                result = await session.execute(
+                    text(
+                        f"""
+                        SELECT SUM(rent + marketing_fee + utilities + ai_token_cost + labor_cost + other_costs)
+                        FROM a_class.operating_costs
+                        WHERE year_month = :year_month
+                        {deleted_filter}
+                        """
+                    ),
+                    {"year_month": year_month},
+                )
             elif {"year_month", "rent", "marketing_fee", "utilities", "other_costs", "ai_token_cost"}.issubset(columns):
                 result = await session.execute(
                     text(
@@ -1102,6 +1122,18 @@ class PostgresqlDashboardService:
                     text(
                         f"""
                         SELECT COALESCE(SUM("成本合计"), 0)
+                        FROM a_class.operating_costs
+                        WHERE "年月" = :year_month
+                        {deleted_filter}
+                        """
+                    ),
+                    {"year_month": year_month},
+                )
+            elif {"年月", "租金", "营销费用", "水电费", "其他成本", "AI Token费用", "人力费用"}.issubset(columns):
+                result = await session.execute(
+                    text(
+                        f"""
+                        SELECT COALESCE(SUM("租金" + "营销费用" + "水电费" + "AI Token费用" + "人力费用" + "其他成本"), 0)
                         FROM a_class.operating_costs
                         WHERE "年月" = :year_month
                         {deleted_filter}

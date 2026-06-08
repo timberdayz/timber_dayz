@@ -20,6 +20,7 @@ class ExpenseCreateRequest(BaseModel):
     marketing_fee: float = Field(0.0, ge=0, description="营销费用(CNY)")
     utilities: float = Field(0.0, ge=0, description="水电费(CNY)")
     ai_token_cost: float = Field(0.0, ge=0, description="AI Token费用(CNY)")
+    labor_cost: float = Field(0.0, ge=0, description="人力费用(CNY)")
     other_costs: float = Field(0.0, ge=0, description="其他成本(CNY)")
     note: Optional[str] = Field(None, description="备注")
     attachments: Optional[list[Any]] = Field(None, description="附件(JSON数组)")
@@ -57,6 +58,7 @@ class ExpenseCreateRequest(BaseModel):
             and self.marketing_fee == 0
             and self.utilities == 0
             and self.ai_token_cost == 0
+            and self.labor_cost == 0
             and self.other_costs == 0
             and not note
             and not attachments
@@ -73,6 +75,7 @@ class ExpenseUpdateRequest(BaseModel):
     marketing_fee: Optional[float] = Field(None, ge=0)
     utilities: Optional[float] = Field(None, ge=0)
     ai_token_cost: Optional[float] = Field(None, ge=0)
+    labor_cost: Optional[float] = Field(None, ge=0)
     other_costs: Optional[float] = Field(None, ge=0)
     note: Optional[str] = Field(None)
     attachments: Optional[list[Any]] = Field(None)
@@ -95,6 +98,7 @@ class ExpenseUpdateRequest(BaseModel):
                 self.marketing_fee,
                 self.utilities,
                 self.ai_token_cost,
+                self.labor_cost,
                 self.other_costs,
                 self.note,
                 self.attachments,
@@ -109,6 +113,7 @@ class ExpenseUpdateRequest(BaseModel):
             and (self.marketing_fee in (None, 0))
             and (self.utilities in (None, 0))
             and (self.ai_token_cost in (None, 0))
+            and (self.labor_cost in (None, 0))
             and (self.other_costs in (None, 0))
             and not note
             and attachments == []
@@ -128,6 +133,7 @@ class ExpenseResponse(BaseModel):
     marketing_fee: float
     utilities: float
     ai_token_cost: float
+    labor_cost: float
     other_costs: float
     total_cost: float
     total: float
@@ -150,5 +156,6 @@ class ExpenseSummaryResponse(BaseModel):
     total_marketing_fee: float
     total_utilities: float
     total_ai_token_cost: float
+    total_labor_cost: float
     total_other_costs: float
     total_amount: float

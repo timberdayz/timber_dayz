@@ -277,6 +277,8 @@ def translate_chinese_to_english(chinese_name: str) -> str:
         "采购成本": "purchase_cost",
         "运费成本": "shipping_cost",
         "运营成本": "operation_cost",
+        "人力费用": "labor_cost",
+        "人工成本": "labor_cost",
         "其他成本": "other_cost",
         "广告成本": "advertising_cost",
         "利润": "profit",
@@ -535,4 +537,3 @@ if __name__ == "__main__":
             print(f"  {r['cn_name']} -> {r['field_code']} (出现{r['frequency']}次)")
     finally:
         db.close()
-

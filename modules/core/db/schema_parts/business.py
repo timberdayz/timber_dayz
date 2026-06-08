@@ -2096,6 +2096,7 @@ class OperatingCost(Base):
     - 营销费用: numeric(15,2)
     - 水电费: numeric(15,2)
     - AI Token费用: numeric(15,2)
+    - 人力费用: numeric(15,2)
     - 其他成本: numeric(15,2)
     - 成本合计: numeric(15,2)
     - 备注: text
@@ -2115,6 +2116,7 @@ class OperatingCost(Base):
     marketing_fee = Column("营销费用", Numeric(15, 2), nullable=False, default=0.0)
     utilities = Column("水电费", Numeric(15, 2), nullable=False, default=0.0)
     ai_token_cost = Column("AI Token费用", Numeric(15, 2), nullable=False, default=0.0)
+    labor_cost = Column("人力费用", Numeric(15, 2), nullable=False, default=0.0)
     other_costs = Column("其他成本", Numeric(15, 2), nullable=False, default=0.0)
     total_cost = Column("成本合计", Numeric(15, 2), nullable=False, default=0.0)
     note = Column("备注", Text, nullable=True)
@@ -3243,6 +3245,5 @@ class SystemConfig(Base):
         Index('ix_system_config_key', 'config_key'),  # 索引
         ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_system_config_updated_by'),
     )
-
 
 

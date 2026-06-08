@@ -27,3 +27,5 @@ def test_expense_frontend_delete_copy_and_blank_save_guard_exist():
     assert "空白费用记录无需保存，请直接保留空白行" in source
     assert "buildExpenseRowKey" in source
     assert "platform_code: shop.platform_code" in source or "row.platform_code = shop.platform_code" in source
+    assert 'prop="labor_cost"' in source
+    assert "labor_cost: Number(row.labor_cost) || 0" in source

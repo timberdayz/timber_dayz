@@ -60,6 +60,7 @@ def main() -> int:
             and row.get("营销费用") is None
             and row.get("水电费") is None
             and row.get("AI Token费用") is None
+            and row.get("人力费用") is None
             and row.get("其他成本") is None
             and row.get("成本合计") is None
             and row.get("备注") is None
