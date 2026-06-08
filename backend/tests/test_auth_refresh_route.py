@@ -57,8 +57,9 @@ async def test_refresh_route_verifies_refresh_token_type(monkeypatch):
         verify_calls.append((token, token_type))
         return {"user_id": 101, "type": token_type}
 
-    async def fake_refresh_token_pair(token):
+    async def fake_refresh_token_pair(token, session_id=None):
         assert token == refresh_token
+        assert session_id is None
         return token_pairs
 
     db = MagicMock()
@@ -117,8 +118,9 @@ async def test_refresh_route_keeps_stable_session_id(monkeypatch):
         assert token_type == "refresh"
         return {"user_id": 101, "type": "refresh", "sid": "stable-session-id"}
 
-    async def fake_refresh_token_pair(token):
+    async def fake_refresh_token_pair(token, session_id=None):
         assert token == refresh_token
+        assert session_id == "stable-session-id"
         return token_pairs
 
     db = MagicMock()
@@ -161,7 +163,8 @@ async def test_refresh_route_fails_closed_when_blacklist_storage_unavailable(mon
         assert token_type == "refresh"
         return {"user_id": 101, "type": "refresh"}
 
-    async def fake_refresh_token_pair(token):
+    async def fake_refresh_token_pair(token, session_id=None):
+        assert session_id is None
         raise HTTPException(status_code=503, detail="Refresh token service unavailable")
 
     db = MagicMock()

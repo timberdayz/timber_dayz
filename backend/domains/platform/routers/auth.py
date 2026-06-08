@@ -470,7 +470,6 @@ async def login(
     )
     
     # [*] v4.19.0: 创建会话记录
-    import hashlib
     from datetime import datetime, timedelta
     session_id = tokens["session_id"]
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
