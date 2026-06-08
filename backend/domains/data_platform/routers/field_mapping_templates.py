@@ -62,6 +62,7 @@ from backend.services.semantic_field_registry import (
     get_semantic_requirements,
     infer_semantic_key,
     is_canonical_semantic_key,
+    is_hash_eligible_semantic_key,
     normalize_semantic_key,
 )
 from backend.services.semantic_alias_registry import SemanticAliasRegistryService
@@ -74,8 +75,23 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()
-DATE_TARGET_FIELDS = {"metric_date", "period_start_date", "period_end_date"}
+DATE_TARGET_FIELDS = {
+    "metric_date",
+    "period_start_date",
+    "period_end_date",
+    "period_start_time",
+    "period_end_time",
+}
 FILE_DATE_SOURCE_COLUMNS = {"__file_date_from__", "__file_date_to__"}
+DATE_PARSE_VALUE_KINDS = {
+    "single_date",
+    "single_datetime",
+    "time_of_day",
+    "date_range",
+    "datetime_range",
+    "time_range",
+}
+DATE_PARSE_RANGE_VALUE_KINDS = {"date_range", "datetime_range", "time_range"}
 SYSTEM_HASH_SCOPE_KEYS = {"platform_code", "shop_id", "data_domain", "granularity", "sub_domain"}
 
 
@@ -231,25 +247,112 @@ def _split_existing_deduplication_fields(
     existing_fields: list[str],
     current_header_columns: list[str],
     current_header_bindings: list[dict[str, Any]] | None = None,
-) -> tuple[list[str], list[str]]:
-    current_lookup = {str(field).lower(): field for field in current_header_columns}
-    binding_semantic_keys = {
-        normalize_semantic_key(
+    existing_header_bindings: list[dict[str, Any]] | None = None,
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    current_lookup = {str(field).strip().lower(): field for field in current_header_columns}
+    current_bindings = list(current_header_bindings or [])
+    existing_bindings = list(existing_header_bindings or [])
+
+    def binding_semantic_key(binding: dict[str, Any] | None) -> Optional[str]:
+        if not binding:
+            return None
+        semantic_key = normalize_semantic_key(
             binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
         )
-        for binding in (current_header_bindings or [])
-    }
+        return semantic_key if semantic_key and is_canonical_semantic_key(semantic_key) else None
+
+    def binding_field_name(binding: dict[str, Any] | None) -> Optional[str]:
+        if not binding:
+            return None
+        for key in ("raw_name", "source_header", "display_name"):
+            value = str(binding.get(key) or "").strip()
+            if value:
+                return value
+        return None
+
+    def raw_binding_lookup(bindings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        lookup: dict[str, dict[str, Any]] = {}
+        for binding in bindings:
+            for key in ("raw_name", "source_header", "display_name"):
+                value = str(binding.get(key) or "").strip()
+                if value:
+                    lookup.setdefault(value.lower(), binding)
+        return lookup
+
+    existing_binding_by_raw = raw_binding_lookup(existing_bindings)
+    current_binding_by_raw = raw_binding_lookup(current_bindings)
+    current_binding_by_semantic: dict[str, dict[str, Any]] = {}
+    for binding in current_bindings:
+        semantic_key = binding_semantic_key(binding)
+        if semantic_key:
+            current_binding_by_semantic.setdefault(semantic_key, binding)
+
     available: list[str] = []
     missing: list[str] = []
+    matches: list[dict[str, Any]] = []
+    seen_available: set[str] = set()
 
     for field in existing_fields:
-        normalized_semantic_key = normalize_semantic_key(field)
-        if str(field).lower() in current_lookup or normalized_semantic_key in binding_semantic_keys:
-            available.append(field)
-        else:
-            missing.append(field)
+        requested_field = str(field).strip()
+        requested_key = requested_field.lower()
+        old_binding = existing_binding_by_raw.get(requested_key)
+        old_semantic_key = binding_semantic_key(old_binding)
+        normalized_semantic_key = normalize_semantic_key(requested_field)
+        if not old_semantic_key and normalized_semantic_key and is_canonical_semantic_key(normalized_semantic_key):
+            old_semantic_key = normalized_semantic_key
 
-    return available, missing
+        current_binding = current_binding_by_semantic.get(old_semantic_key or "")
+        current_field = binding_field_name(current_binding)
+        match_type = "semantic_key" if current_binding and old_semantic_key else ""
+
+        if not current_binding and requested_key in current_lookup:
+            current_field = current_lookup[requested_key]
+            current_binding = current_binding_by_raw.get(requested_key)
+            current_semantic_key = binding_semantic_key(current_binding)
+            if current_semantic_key:
+                old_semantic_key = old_semantic_key or current_semantic_key
+            match_type = "raw_header"
+
+        if current_field:
+            hash_eligible = bool(old_semantic_key and is_hash_eligible_semantic_key(old_semantic_key))
+            if hash_eligible:
+                status = "matched_hashable"
+                available_field = old_semantic_key or requested_field
+                if available_field.lower() not in seen_available:
+                    seen_available.add(available_field.lower())
+                    available.append(available_field)
+            elif old_semantic_key:
+                status = "matched_non_hashable"
+            else:
+                status = "matched_raw_header"
+                if requested_field.lower() not in seen_available:
+                    seen_available.add(requested_field.lower())
+                    available.append(requested_field)
+
+            matches.append(
+                {
+                    "requested_field": requested_field,
+                    "semantic_key": old_semantic_key,
+                    "current_field": current_field,
+                    "match_type": match_type,
+                    "hash_eligible": hash_eligible,
+                    "status": status,
+                }
+            )
+        else:
+            missing.append(requested_field)
+            matches.append(
+                {
+                    "requested_field": requested_field,
+                    "semantic_key": old_semantic_key,
+                    "current_field": None,
+                    "match_type": "missing",
+                    "hash_eligible": False,
+                    "status": "missing",
+                }
+            )
+
+    return available, missing, matches
 
 
 def _normalize_template_headers_for_domain(
@@ -730,14 +833,19 @@ def _validate_field_parse_rules(
                 f"field_parse_rules for {target_field} references unknown source_column: {source_column}"
             )
         value_kind = str(rule.get("value_kind", "")).strip()
-        if value_kind not in {"single_date", "date_range"}:
+        if value_kind not in DATE_PARSE_VALUE_KINDS:
             raise ValueError(
-                f"field_parse_rules for {target_field} must define value_kind as single_date or date_range"
+                f"field_parse_rules for {target_field} must define a supported value_kind"
             )
         date_format = str(rule.get("date_format", "")).strip()
         if not date_format:
             raise ValueError(f"field_parse_rules for {target_field} must define date_format")
-        if value_kind == "date_range":
+        date_anchor = str(rule.get("date_anchor", "") or "").strip()
+        if date_anchor and date_anchor not in FILE_DATE_SOURCE_COLUMNS and date_anchor.lower() not in header_lookup:
+            raise ValueError(
+                f"field_parse_rules for {target_field} references unknown date_anchor: {date_anchor}"
+            )
+        if value_kind in DATE_PARSE_RANGE_VALUE_KINDS:
             range_pick = str(rule.get("range_pick", "")).strip()
             if range_pick not in {"start", "end"}:
                 raise ValueError(
@@ -1239,6 +1347,7 @@ async def get_template_update_context(
             "removed_fields": [],
             "existing_deduplication_fields_available": [],
             "existing_deduplication_fields_missing": [],
+            "existing_deduplication_field_matches": [],
             "recommended_deduplication_fields": [],
             "required_semantic_keys": required_semantic_keys,
             "hash_participating_semantic_keys": hash_participating_semantic_keys,
@@ -1255,10 +1364,11 @@ async def get_template_update_context(
             raise ValueError("file_id is required when mode is with-sample")
 
         if mode == "core-only":
-            available_fields, missing_fields = _split_existing_deduplication_fields(
+            available_fields, missing_fields, field_matches = _split_existing_deduplication_fields(
                 template_deduplication_fields,
                 template_header_columns,
                 normalized_template_bindings,
+                existing_header_bindings=normalized_template_bindings,
             )
             recommended_fields = _recommended_deduplication_fields(
                 default_fields,
@@ -1280,6 +1390,7 @@ async def get_template_update_context(
                     },
                     "existing_deduplication_fields_available": available_fields,
                     "existing_deduplication_fields_missing": missing_fields,
+                    "existing_deduplication_field_matches": field_matches,
                     "recommended_deduplication_fields": recommended_fields,
                 }
             )
@@ -1295,10 +1406,11 @@ async def get_template_update_context(
             current_lookup = {str(field).lower(): field for field in current_header_columns}
             added_fields = header_changes.get("added_fields", [])
             removed_fields = header_changes.get("removed_fields", [])
-            available_fields, missing_fields = _split_existing_deduplication_fields(
+            available_fields, missing_fields, field_matches = _split_existing_deduplication_fields(
                 template_deduplication_fields,
                 current_header_columns,
                 current_header_bindings,
+                existing_header_bindings=normalized_template_bindings,
             )
             recommended_fields = _recommended_deduplication_fields(
                 default_fields,
@@ -1319,6 +1431,7 @@ async def get_template_update_context(
                     "removed_fields": removed_fields,
                     "existing_deduplication_fields_available": available_fields,
                     "existing_deduplication_fields_missing": missing_fields,
+                    "existing_deduplication_field_matches": field_matches,
                     "recommended_deduplication_fields": recommended_fields,
                 }
             )

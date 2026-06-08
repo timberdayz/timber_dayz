@@ -46,7 +46,9 @@ class HashPolicyResult:
 
 
 class TemplateHashPolicyService:
-    PRODUCT_IDENTITY_KEYS = ["product_id", "platform_sku"]
+    PRODUCT_STRONG_IDENTITY_KEYS = ["product_id", "platform_sku", "sku_id"]
+    PRODUCT_WEAK_IDENTITY_KEYS = ["product_name"]
+    PRODUCT_IDENTITY_KEYS = [*PRODUCT_STRONG_IDENTITY_KEYS, *PRODUCT_WEAK_IDENTITY_KEYS]
     PRODUCT_DAILY_DATE_KEYS = ["metric_date"]
     PERIOD_DATE_KEYS = ["metric_date", "period_start_date", "period_end_date"]
     ORDER_DETAIL_SUB_DOMAINS = {"detail", "details", "line", "lines", "order_detail", "order_lines"}
@@ -70,7 +72,8 @@ class TemplateHashPolicyService:
             header_bindings,
             field_parse_rules,
         )
-        derived_keys = self._derived_selected_keys(deduplication_fields, field_parse_rules)
+        derived_sources = self._derived_selected_sources(deduplication_fields, field_parse_rules)
+        derived_keys = set(derived_sources)
         invalid_keys = sorted(
             self._invalid_deduplication_keys(
                 deduplication_fields,
@@ -217,6 +220,9 @@ class TemplateHashPolicyService:
                 message="services 需要选择 metric_date、period_start_date 或 period_end_date。",
             )
 
+        if domain == "products":
+            warnings.extend(self._product_identity_warnings(resolved_keys))
+
         effective_components = self._effective_components(
             deduplication_fields=deduplication_fields,
             derived_keys=derived_keys,
@@ -228,6 +234,7 @@ class TemplateHashPolicyService:
                 *effective_components.get("derived_identity_fields", []),
             ],
             header_bindings=header_bindings,
+            derived_sources=derived_sources,
         )
         warnings.extend(sample_warnings)
         missing_required_groups = [
@@ -271,18 +278,25 @@ class TemplateHashPolicyService:
         deduplication_fields: Iterable[str],
         field_parse_rules: Iterable[Dict[str, Any]],
     ) -> Set[str]:
+        return set(self._derived_selected_sources(deduplication_fields, field_parse_rules))
+
+    def _derived_selected_sources(
+        self,
+        deduplication_fields: Iterable[str],
+        field_parse_rules: Iterable[Dict[str, Any]],
+    ) -> Dict[str, str]:
         selected_keys = {
             semantic_key
             for semantic_key in (normalize_semantic_key(field) for field in deduplication_fields or [])
             if semantic_key
         }
-        derived_keys: Set[str] = set()
+        derived_sources: Dict[str, str] = {}
         for rule in field_parse_rules or []:
             semantic_key = normalize_semantic_key(rule.get("target_field") or rule.get("semantic_key") or rule.get("field"))
             source_column = str(rule.get("source_column") or "").strip()
             if semantic_key in selected_keys and source_column in FILE_DATE_SOURCE_COLUMNS:
-                derived_keys.add(semantic_key)
-        return derived_keys
+                derived_sources[semantic_key] = source_column
+        return derived_sources
 
     def _invalid_deduplication_keys(
         self,
@@ -359,17 +373,38 @@ class TemplateHashPolicyService:
             "final_fields": final_fields,
         }
 
+    def _product_identity_warnings(self, resolved_keys: Set[str]) -> List[str]:
+        if "product_name" not in resolved_keys:
+            return []
+        has_strong_identity = any(key in resolved_keys for key in self.PRODUCT_STRONG_IDENTITY_KEYS)
+        if has_strong_identity:
+            return [
+                "product_name 是弱身份字段；同时选择强身份时，商品改名会产生新的 Data Hash 身份。"
+            ]
+        return [
+            "product_name 是弱身份字段，可能重名或改名；仅在没有商品 ID / SKU 时作为 Data Hash fallback。"
+        ]
+
     def _sample_diagnostics(
         self,
         *,
         sample_rows: Iterable[Dict[str, Any]] | None,
         identity_fields: List[str],
         header_bindings: Iterable[Dict[str, Any]],
+        derived_sources: Dict[str, str] | None = None,
     ) -> tuple[Dict[str, Any], List[str]]:
         rows = [row for row in (sample_rows or []) if isinstance(row, dict)]
+        derived_sources = dict(derived_sources or {})
         diagnostics: Dict[str, Any] = {
             "row_count": len(rows),
             "field_null_rates": {},
+            "derived_fields": {
+                field: {
+                    "source_column": source_column,
+                    "message": "由文件伴生日期生成",
+                }
+                for field, source_column in derived_sources.items()
+            },
             "hash_distinct_count": 0,
         }
         warnings: List[str] = []
@@ -378,6 +413,9 @@ class TemplateHashPolicyService:
 
         row_signatures: List[tuple[str, ...]] = []
         for field in identity_fields:
+            if field in derived_sources:
+                diagnostics["field_null_rates"][field] = 0.0
+                continue
             null_count = 0
             values: List[str] = []
             for row in rows:
@@ -396,8 +434,11 @@ class TemplateHashPolicyService:
         for row in rows:
             parts: List[str] = []
             for field in identity_fields:
-                value, _source = resolve_semantic_value(row, field, header_bindings)
-                parts.append("" if value is None else str(value).strip())
+                if field in derived_sources:
+                    parts.append(f"__derived__:{field}:{derived_sources[field]}")
+                else:
+                    value, _source = resolve_semantic_value(row, field, header_bindings)
+                    parts.append("" if value is None else str(value).strip())
             row_signatures.append(tuple(parts))
 
         diagnostics["hash_distinct_count"] = len(set(row_signatures))

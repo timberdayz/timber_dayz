@@ -8,7 +8,14 @@ from pydantic import BaseModel, Field
 TemplateSaveMode = Literal["create", "new_version"]
 TemplateUpdateMode = Literal["with-sample", "core-only"]
 TemplateSaveOperation = Literal["created", "new_version"]
-TemplateFieldParseRuleValueKind = Literal["single_date", "date_range"]
+TemplateFieldParseRuleValueKind = Literal[
+    "single_date",
+    "single_datetime",
+    "time_of_day",
+    "date_range",
+    "datetime_range",
+    "time_range",
+]
 TemplateFieldParseRuleRangePick = Literal["start", "end"]
 TemplateSemanticReviewStatus = Literal["pending", "confirmed_semantic", "confirmed_non_semantic"]
 
@@ -36,8 +43,12 @@ class TemplateFieldParseRule(BaseModel):
     source_label: Optional[str] = Field(None, description="Semantic display label for source column")
     source_aliases: List[str] = Field(default_factory=list, description="Alternative source labels")
     source_semantic_role: Optional[str] = Field(None, description="Semantic role for source column")
-    value_kind: TemplateFieldParseRuleValueKind = Field(..., description="single_date or date_range")
+    value_kind: TemplateFieldParseRuleValueKind = Field(..., description="Declared parse value kind")
     date_format: str = Field(..., description="Declared date format")
+    date_anchor: Optional[str] = Field(
+        None,
+        description="Date source used to combine time-only values into full datetimes",
+    )
     strict: bool = Field(True, description="Whether parsing should be strict")
     range_pick: Optional[TemplateFieldParseRuleRangePick] = Field(
         None,
@@ -195,6 +206,7 @@ class TemplateUpdateContextData(BaseModel):
     removed_fields: List[str]
     existing_deduplication_fields_available: List[str] = Field(default_factory=list)
     existing_deduplication_fields_missing: List[str] = Field(default_factory=list)
+    existing_deduplication_field_matches: List[Dict[str, Any]] = Field(default_factory=list)
     recommended_deduplication_fields: List[str] = Field(default_factory=list)
     required_semantic_keys: List[str] = Field(default_factory=list)
     hash_participating_semantic_keys: List[str] = Field(default_factory=list)

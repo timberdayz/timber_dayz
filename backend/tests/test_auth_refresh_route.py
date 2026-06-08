@@ -1,4 +1,5 @@
 from datetime import datetime, UTC
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -22,6 +23,12 @@ def _refresh_request_stub(refresh_token: str):
         client=SimpleNamespace(host="127.0.0.1"),
         url=SimpleNamespace(scheme="http"),
     )
+
+
+def _refresh_request_stub_with_access(refresh_token: str, access_token: str):
+    request = _refresh_request_stub(refresh_token)
+    request.cookies = {"refresh_token": refresh_token, "access_token": access_token}
+    return request
 
 
 class _TempSession:
@@ -87,6 +94,62 @@ async def test_refresh_route_verifies_refresh_token_type(monkeypatch):
     assert verify_calls == [
         (refresh_token, "refresh"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_refresh_route_keeps_stable_session_id(monkeypatch):
+    refresh_token = "refresh-token-value"
+    access_token = "access-token-value"
+    token_pairs = {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+    }
+    session = SimpleNamespace(
+        session_id="stable-session-id",
+        user_id=101,
+        is_active=True,
+        expires_at=datetime.max.replace(tzinfo=UTC),
+        last_active_at=datetime.now(UTC),
+    )
+
+    def fake_verify_token(token, token_type="access"):
+        assert token == refresh_token
+        assert token_type == "refresh"
+        return {"user_id": 101, "type": "refresh", "sid": "stable-session-id"}
+
+    async def fake_refresh_token_pair(token):
+        assert token == refresh_token
+        return token_pairs
+
+    db = MagicMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _scalar_result(
+                SimpleNamespace(
+                    user_id=101,
+                    status="active",
+                    is_active=True,
+                    locked_until=None,
+                )
+            ),
+            _scalar_result(session),
+            _scalar_result(session),
+        ]
+    )
+    db.commit = AsyncMock()
+
+    monkeypatch.setattr(auth_router.auth_service, "verify_token", fake_verify_token)
+    monkeypatch.setattr(auth_router.auth_service, "refresh_token_pair", fake_refresh_token_pair)
+
+    response = await auth_router.refresh_token(
+        http_request=_refresh_request_stub_with_access(refresh_token, access_token),
+        request_body=RefreshTokenRequest(refresh_token=refresh_token),
+        db=db,
+    )
+
+    assert response.status_code == 200
+    assert session.session_id == "stable-session-id"
+    assert db.commit.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -166,3 +229,10 @@ async def test_logout_revokes_current_session_and_refresh_token(monkeypatch):
     set_cookie_headers = response.headers.getlist("set-cookie")
     assert any("access_token=" in header for header in set_cookie_headers)
     assert any("refresh_token=" in header for header in set_cookie_headers)
+
+
+def test_logout_route_accepts_any_authenticated_user_dependency():
+    signature = inspect.signature(auth_router.logout)
+    dependency = signature.parameters["current_user"].default.dependency
+
+    assert dependency is auth_router.get_current_user

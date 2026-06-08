@@ -151,7 +151,7 @@
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
-                  <el-form-item label="绩效比例">
+                  <el-form-item label="绩效比例(兼容)">
                     <el-input-number v-model="salaryForm.performance_ratio_percent" :min="0" :max="100" :step="1" style="width: 100%;" />
                   </el-form-item>
                 </el-col>

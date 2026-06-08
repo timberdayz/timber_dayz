@@ -72,6 +72,7 @@
           >
             <span>{{ option.label }}</span>
             <span v-if="option.derived" class="derived-label">由文件伴生日期生成</span>
+            <span v-if="option.weakIdentity" class="weak-identity-label">弱身份字段</span>
           </el-checkbox>
         </div>
       </el-checkbox-group>
@@ -192,6 +193,7 @@ const selectableOptions = computed(() => {
         value: semanticKey,
         label: rawName ? `${meta?.label || semanticKey} (${rawName})` : `${meta?.label || semanticKey} (${semanticKey})`,
         derived: false,
+        weakIdentity: meta?.identity_strength === 'weak',
       }
     })
     .filter(Boolean)
@@ -406,10 +408,15 @@ defineExpose({
   border-radius: 6px;
 }
 
-.derived-label {
+.derived-label,
+.weak-identity-label {
   margin-left: 6px;
   color: #909399;
   font-size: 12px;
+}
+
+.weak-identity-label {
+  color: #b88230;
 }
 
 .selector-muted {

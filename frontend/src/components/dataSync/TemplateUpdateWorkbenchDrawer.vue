@@ -173,6 +173,7 @@
         :deduplication-fields="templateContext?.deduplication_fields || []"
         :existing-deduplication-fields-available="existingDeduplicationFieldsAvailable"
         :existing-deduplication-fields-missing="existingDeduplicationFieldsMissing"
+        :existing-deduplication-field-matches="existingDeduplicationFieldMatches"
         :recommended-deduplication-fields="recommendedDeduplicationFields"
         :current-header-columns="currentHeaderColumns"
         :current-header-bindings="hashPolicyBindingSource"
@@ -425,6 +426,9 @@ const existingDeduplicationFieldsAvailable = computed(
 const existingDeduplicationFieldsMissing = computed(
   () => workbenchContext.value?.existing_deduplication_fields_missing ?? [],
 )
+const existingDeduplicationFieldMatches = computed(
+  () => workbenchContext.value?.existing_deduplication_field_matches ?? [],
+)
 const recommendedDeduplicationFields = computed(
   () => workbenchContext.value?.recommended_deduplication_fields ?? [],
 )
@@ -495,6 +499,7 @@ const changeSummary = computed(() => ({
   update_reason: props.context?.row?.update_reason ?? '',
   deduplication_fields: templateContext.value?.deduplication_fields ?? [],
   existing_deduplication_fields_missing: existingDeduplicationFieldsMissing.value,
+  existing_deduplication_field_matches: existingDeduplicationFieldMatches.value,
 }))
 
 const activeBindingSource = computed(() => {

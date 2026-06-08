@@ -54,6 +54,8 @@ from backend.schemas.performance import (
     PerformanceConfigResponse,
     PerformanceScoreResponse,
 )
+from backend.dependencies.auth import get_current_user, require_admin
+from backend.services.rbac_service import get_rbac_service
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.services.postgresql_shop_metrics_service import (
@@ -68,6 +70,37 @@ from backend.services.employee_task_sources import sync_performance_confirmation
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
+
+
+def _performance_config_ordering():
+    return (
+        PerformanceConfig.effective_from.desc(),
+        PerformanceConfig.updated_at.desc(),
+        PerformanceConfig.id.desc(),
+    )
+
+
+def _current_user_identifier(current_user: Any) -> str:
+    return str(
+        getattr(current_user, "username", None)
+        or getattr(current_user, "user_id", None)
+        or getattr(current_user, "id", None)
+        or "system"
+    )
+
+
+async def _require_performance_read(current_user: Any = Depends(get_current_user)):
+    rbac = get_rbac_service()
+    if rbac.is_admin(current_user):
+        return current_user
+
+    permissions = set(
+        rbac.resolve_permissions_from_roles(getattr(current_user, "roles", []))
+    )
+    if {"*", "performance:read", "performance:config"} & permissions:
+        return current_user
+
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 
 def _is_invalid_performance_shop_id(shop_id: Optional[Any]) -> bool:
@@ -119,7 +152,8 @@ async def list_performance_configs(
     is_active: Optional[bool] = Query(None, description="是否启用筛选"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: Any = Depends(_require_performance_read),
 ):
     """
     查询绩效配置列表
@@ -135,7 +169,7 @@ async def list_performance_configs(
         total = (await db.execute(total_query)).scalar() or 0
         
         # 分页查询
-        query = query.order_by(PerformanceConfig.effective_from.desc())
+        query = query.order_by(*_performance_config_ordering())
         query = query.offset((page - 1) * page_size).limit(page_size)
         
         configs = (await db.execute(query)).scalars().all()
@@ -160,7 +194,8 @@ async def list_performance_configs(
 @router.get("/config/{config_id}", response_model=Dict[str, Any])
 async def get_performance_config(
     config_id: int,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: Any = Depends(_require_performance_read),
 ):
     """
     查询绩效配置详情
@@ -202,7 +237,7 @@ async def get_performance_config(
 async def create_performance_config(
     request: PerformanceConfigCreateRequest,
     db: AsyncSession = Depends(get_async_db),
-    created_by: str = "admin"  # TODO: 从认证中获取当前用户
+    current_user: Any = Depends(require_admin),
 ):
     """
     创建绩效配置
@@ -234,7 +269,7 @@ async def create_performance_config(
             operation_max_score=request.operation_max_score,
             effective_from=request.effective_from,
             effective_to=request.effective_to,
-            created_by=created_by,
+            created_by=_current_user_identifier(current_user),
             is_active=True
         )
         
@@ -283,7 +318,8 @@ async def create_performance_config(
 async def update_performance_config(
     config_id: int,
     request: PerformanceConfigUpdateRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: Any = Depends(require_admin),
 ):
     """
     更新绩效配置
@@ -373,7 +409,8 @@ async def update_performance_config(
 @router.delete("/config/{config_id}", response_model=Dict[str, Any])
 async def delete_performance_config(
     config_id: int,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: Any = Depends(require_admin),
 ):
     """
     删除绩效配置
@@ -900,7 +937,8 @@ async def list_performance_scores(
     group_by: Optional[str] = Query("shop", description="维度: shop 按店铺 | person 按人员"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: Any = Depends(_require_performance_read),
 ):
     """
     查询绩效评分列表
@@ -1297,7 +1335,8 @@ async def get_shop_performance(
     shop_id: str,
     platform_code: str = Query(..., description="平台代码"),
     period: Optional[str] = Query(None, description="考核周期,如'2025-01'"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: Any = Depends(_require_performance_read),
 ):
     """
     查询店铺绩效详情
@@ -1384,7 +1423,8 @@ async def get_shop_performance(
 async def calculate_performance_scores(
     period: str = Query(..., description="考核周期,如'2025-01'"),
     config_id: Optional[int] = Query(None, description="绩效配置ID(默认使用当前生效的配置)"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: Any = Depends(require_admin),
 ):
     """
     计算绩效评分(C类数据:系统自动计算)
@@ -1416,7 +1456,7 @@ async def calculate_performance_scores(
                         PerformanceConfig.effective_to.is_(None),
                         PerformanceConfig.effective_to >= period_start
                     )
-                ).order_by(PerformanceConfig.effective_from.desc())
+                ).order_by(*_performance_config_ordering())
             )
             config = result.scalar_one_or_none()
 
@@ -1708,7 +1748,7 @@ async def calculate_performance_scores(
             upserts += 1
         await _sync_performance_alerts(db, calc_list, alerts_by_shop)
         await db.flush()
-        await db.commit()
+
         income_service = HRIncomeCalculationService(db=db)
         income_result = await income_service.calculate_month(period, commit=False)
         payroll_result: Dict[str, Any] = {
@@ -1719,6 +1759,7 @@ async def calculate_performance_scores(
         }
         payroll_service = PayrollGenerationService(db=db)
         payroll_result = await payroll_service.generate_month(period)
+
         await db.commit()
         try:
             employee_rows = (

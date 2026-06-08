@@ -51,10 +51,44 @@
     </div>
 
     <div
+      v-if="matchedHashableFields.length > 0"
+      class="template-change-summary-card__section"
+    >
+      <div class="template-change-summary-card__label">已语义匹配</div>
+      <div class="template-change-summary-card__tags">
+        <el-tag
+          v-for="match in matchedHashableFields"
+          :key="`${match.requested_field}-${match.current_field}`"
+          size="small"
+          type="success"
+        >
+          {{ formatMatch(match) }}
+        </el-tag>
+      </div>
+    </div>
+
+    <div
+      v-if="matchedNonHashableFields.length > 0"
+      class="template-change-summary-card__warning"
+    >
+      <div class="template-change-summary-card__label">已语义匹配，但不再参与 Data Hash</div>
+      <div class="template-change-summary-card__tags">
+        <el-tag
+          v-for="match in matchedNonHashableFields"
+          :key="`${match.requested_field}-${match.current_field}`"
+          size="small"
+          type="warning"
+        >
+          {{ formatMatch(match) }}
+        </el-tag>
+      </div>
+    </div>
+
+    <div
       v-if="existingDeduplicationFieldsMissing.length > 0"
       class="template-change-summary-card__warning"
     >
-      <div class="template-change-summary-card__label">缺失旧核心字段</div>
+      <div class="template-change-summary-card__label">真正缺失的旧核心字段</div>
       <div class="template-change-summary-card__tags">
         <el-tag
           v-for="field in existingDeduplicationFieldsMissing"
@@ -88,13 +122,29 @@ const deduplicationFields = computed(() => props.summary.deduplication_fields ??
 const existingDeduplicationFieldsMissing = computed(
   () => props.summary.existing_deduplication_fields_missing ?? props.summary.existingDeduplicationFieldsMissing ?? []
 )
+const existingDeduplicationFieldMatches = computed(
+  () => props.summary.existing_deduplication_field_matches ?? props.summary.existingDeduplicationFieldMatches ?? []
+)
 const missingDeduplicationFields = existingDeduplicationFieldsMissing
+const matchedHashableFields = computed(() =>
+  existingDeduplicationFieldMatches.value.filter(match => match?.status === 'matched_hashable' && match?.match_type === 'semantic_key')
+)
+const matchedNonHashableFields = computed(() =>
+  existingDeduplicationFieldMatches.value.filter(match => match?.status === 'matched_non_hashable')
+)
 
 const summaryTagType = computed(() => {
   if (matchRate.value >= 95) return 'success'
   if (matchRate.value >= 80) return 'warning'
   return 'danger'
 })
+
+function formatMatch(match) {
+  const requested = match?.requested_field || '-'
+  const current = match?.current_field || '-'
+  const semanticKey = match?.semantic_key ? ` (${match.semantic_key})` : ''
+  return `${requested} -> ${current}${semanticKey}`
+}
 </script>
 
 <style scoped>

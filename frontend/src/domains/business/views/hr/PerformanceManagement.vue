@@ -32,7 +32,7 @@
         重新计算
       </el-button>
       <el-button type="primary" :icon="Setting" @click="handleConfig" v-if="hasPermission('performance:config')">
-        配置权重
+        配置公式
       </el-button>
       <el-button :icon="Download" @click="handleExport" v-if="hasPermission('performance:export')">导出报表</el-button>
       <el-select v-if="filters.groupBy === 'shop'" v-model="poolFilter" size="default" style="width: 120px;" @change="() => {}">
@@ -128,18 +128,6 @@
         </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" label="毛利得分" width="90" align="right">
           <template #default="{ row }">{{ row.profit_score != null ? Number(row.profit_score).toFixed(1) : '—' }}</template>
-        </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品目标" width="120" align="right">
-          <template #default="{ row }">{{ formatCell(row.key_product_target) }}</template>
-        </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品达成" width="120" align="right">
-          <template #default="{ row }">{{ formatCell(row.key_product_achieved) }}</template>
-        </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品达成率" width="130" align="right">
-          <template #default="{ row }">{{ formatPercent(row.key_product_rate) }}</template>
-        </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品得分" width="110" align="right">
-          <template #default="{ row }">{{ row.key_product_score != null ? Number(row.key_product_score).toFixed(1) : '—' }}</template>
         </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" prop="operation_score" label="店铺运营得分" width="120" align="right" sortable>
           <template #default="{ row }">{{ row.operation_score != null ? Number(row.operation_score).toFixed(1) : '—' }}</template>
@@ -357,7 +345,7 @@
             style="margin-bottom: 15px;"
           >
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">{{ card.label }}（权重 {{ card.weight }}%）</span>
+              <span style="font-weight: bold;">{{ card.label }}（满分 {{ card.maxScore }}）</span>
               <el-tag :type="metricTagType(card.metric, card.successThreshold, card.warningThreshold)" size="small">
                 {{ metricScoreText(card.metric) }}
               </el-tag>
@@ -375,10 +363,10 @@
       </div>
     </el-dialog>
     
-    <!-- 绩效权重配置 -->
+    <!-- 店铺绩效配置 -->
     <el-dialog
       v-model="configVisible"
-      title="绩效权重配置"
+      title="店铺绩效配置"
       width="600px"
       @close="handleConfigClose"
     >
@@ -388,43 +376,23 @@
         :rules="configRules"
         label-width="150px"
       >
-        <el-form-item label="销售额权重(%)" prop="sales_weight">
-          <el-input-number v-model="configForm.sales_weight" :min="0" :max="100" :precision="0" style="width: 100%;" />
-        </el-form-item>
-        <el-form-item label="毛利权重(%)" prop="profit_weight">
-          <el-input-number v-model="configForm.profit_weight" :min="0" :max="100" :precision="0" style="width: 100%;" />
-        </el-form-item>
-        <el-form-item label="重点产品权重(%)" prop="key_product_weight">
-          <el-input-number v-model="configForm.key_product_weight" :min="0" :max="100" :precision="0" style="width: 100%;" />
-        </el-form-item>
-        <el-form-item label="运营权重(%)" prop="operation_weight">
-          <el-input-number v-model="configForm.operation_weight" :min="0" :max="100" :precision="0" style="width: 100%;" />
-        </el-form-item>
-        <el-divider content-position="left">得分比例说明（达成率 &gt; 100% 按满分计算，≤100% 按达成率乘满分）</el-divider>
+        <el-divider content-position="left">正式公式满分配置（销售额 + 毛利 + 店铺运营）</el-divider>
         <el-form-item label="销售额满分" prop="sales_max_score">
           <el-input-number v-model="configForm.sales_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
         </el-form-item>
         <el-form-item label="毛利满分" prop="profit_max_score">
           <el-input-number v-model="configForm.profit_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
         </el-form-item>
-        <el-form-item label="重点产品满分" prop="key_product_max_score">
-          <el-input-number v-model="configForm.key_product_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
-        </el-form-item>
         <el-form-item label="运营满分" prop="operation_max_score">
           <el-input-number v-model="configForm.operation_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
         </el-form-item>
-        <el-form-item label="总权重">
-          <el-tag :type="totalWeight === 100 ? 'success' : 'danger'" size="large">
-            {{ totalWeight }}%
-          </el-tag>
-          <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-            {{ totalWeight === 100 ? '权重配置正确' : '各项权重总和必须等于100%' }}
-          </span>
+        <el-form-item label="兼容字段">
+          <el-tag type="info" size="large">重点产品与旧权重字段保留兼容，不参与当前公式</el-tag>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="configVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleConfigSubmit" :loading="configSubmitting" :disabled="totalWeight !== 100">确定</el-button>
+        <el-button type="primary" @click="handleConfigSubmit" :loading="configSubmitting">确定</el-button>
       </template>
     </el-dialog>
 
@@ -545,6 +513,11 @@ import { formatCurrency, formatNumber, formatPercent, formatInteger } from '@/ut
 import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
 import { hasScopedActionPermission } from '@/utils/actionPermissions'
 import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
+import {
+  buildFormalPerformanceConfigPayload,
+  extractPerformanceConfigRow,
+  savePerformanceConfig
+} from './performanceConfigSubmit'
 
 const props = defineProps({
   forcedGroupBy: {
@@ -571,9 +544,9 @@ const pageSubtitle = computed(() => {
     return '用于查看个人绩效结果、执行月度重算，并维护个人绩效调整项。'
   }
   if (route.path.includes('/hr-performance-management/shop')) {
-    return '用于查看店铺绩效结果、执行月度重算，并维护店铺绩效权重。'
+    return '用于查看店铺绩效结果、执行月度重算，并维护店铺绩效公式。'
   }
-  return '用于查看店铺/人员绩效、执行月度重算、维护绩效权重，以及录入个人绩效调整项。'
+  return '用于查看店铺/人员绩效、执行月度重算、维护绩效公式，以及录入个人绩效调整项。'
 })
 
 const hasPermission = (permission) =>
@@ -616,6 +589,7 @@ const calculating = ref(false)
 const configVisible = ref(false)
 const configSubmitting = ref(false)
 const configFormRef = ref(null)
+const currentConfigId = ref(null)
 const employeeDirectory = ref([])
 const templateDialogVisible = ref(false)
 const templateSubmitting = ref(false)
@@ -656,7 +630,11 @@ const weightConfig = reactive({
   sales_weight: 30,
   profit_weight: 25,
   key_product_weight: 25,
-  operation_weight: 20
+  operation_weight: 20,
+  sales_max_score: 30,
+  profit_max_score: 25,
+  key_product_max_score: 25,
+  operation_max_score: 20
 })
 const inputForm = reactive({
   id: null,
@@ -698,7 +676,7 @@ const formulaText = computed(() => {
   if (filters.groupBy === 'person') {
     return '个人绩效输入项得分 + 个人调整项 + 考勤扣分；无输入项时才回退至店铺汇总绩效'
   }
-  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 店铺运营得分(${weightConfig.operation_weight}%)`
+  return `销售额满分${weightConfig.sales_max_score} + 毛利满分${weightConfig.profit_max_score} + 店铺运营满分${weightConfig.operation_max_score}`
 })
 
 const currentGroupPolicyText = computed(() => {
@@ -826,7 +804,7 @@ const detailMetricCards = computed(() => {
     {
       key: 'sales_score',
       label: '销售额得分',
-      weight: weightConfig.sales_weight,
+      maxScore: weightConfig.sales_max_score,
       metric: data.sales_score,
       successThreshold: 27,
       warningThreshold: 24,
@@ -836,7 +814,7 @@ const detailMetricCards = computed(() => {
     {
       key: 'profit_score',
       label: '毛利得分',
-      weight: weightConfig.profit_weight,
+      maxScore: weightConfig.profit_max_score,
       metric: data.profit_score,
       successThreshold: 22.5,
       warningThreshold: 20,
@@ -846,7 +824,7 @@ const detailMetricCards = computed(() => {
     {
       key: 'operation_score',
       label: '店铺运营得分',
-      weight: weightConfig.operation_weight,
+      maxScore: weightConfig.operation_max_score,
       metric: data.operation_score,
       successThreshold: 18,
       warningThreshold: 16,
@@ -896,14 +874,16 @@ const loadPerformanceList = async () => {
 const loadWeightConfig = async () => {
   try {
     const response = await api.getPerformanceConfigs({ is_active: true, page: 1, page_size: 1 })
-    const row = Array.isArray(response)
-      ? response[0]
-      : (response?.data?.[0] || response?.data || response)
+    const row = extractPerformanceConfigRow(response)
     if (!row) return
     weightConfig.sales_weight = row.sales_weight ?? weightConfig.sales_weight
     weightConfig.profit_weight = row.profit_weight ?? weightConfig.profit_weight
     weightConfig.key_product_weight = row.key_product_weight ?? weightConfig.key_product_weight
     weightConfig.operation_weight = row.operation_weight ?? weightConfig.operation_weight
+    weightConfig.sales_max_score = row.sales_max_score ?? weightConfig.sales_max_score
+    weightConfig.profit_max_score = row.profit_max_score ?? weightConfig.profit_max_score
+    weightConfig.key_product_max_score = row.key_product_max_score ?? weightConfig.key_product_max_score
+    weightConfig.operation_max_score = row.operation_max_score ?? weightConfig.operation_max_score
   } catch (error) {
     // 配置读取失败时不阻塞页面加载
   }
@@ -1270,11 +1250,11 @@ const handleViewDetail = async (row) => {
   }
 }
 
-// 配置权重
+// 配置公式
 const handleConfig = async () => {
-  const response = await api.getPerformanceConfigs({})
-  // 兼容列表响应，取第一条有效配置
+  const response = await api.getPerformanceConfigs({ is_active: true, page: 1, page_size: 1 })
   const setForm = (config) => {
+    currentConfigId.value = config.id || null
     configForm.sales_weight = config.sales_weight ?? 30
     configForm.profit_weight = config.profit_weight ?? 25
     configForm.key_product_weight = config.key_product_weight ?? 25
@@ -1284,34 +1264,24 @@ const handleConfig = async () => {
     configForm.key_product_max_score = config.key_product_max_score ?? 25
     configForm.operation_max_score = config.operation_max_score ?? 20
   }
-  if (response && Array.isArray(response) && response.length > 0) {
-    setForm(response[0])
-  } else if (response && response.pagination && response.data && response.data.length > 0) {
-    setForm(response.data[0])
+  const currentConfig = extractPerformanceConfigRow(response)
+  if (currentConfig) {
+    setForm(currentConfig)
+  } else {
+    currentConfigId.value = null
   }
   configVisible.value = true
 }
 
 // 提交配置
 const handleConfigSubmit = async () => {
-  if (totalWeight.value !== 100) {
-    ElMessage.warning('各项权重总和必须等于100%')
-    return
-  }
-  
   configSubmitting.value = true
   try {
-    // 当前先沿用新增配置的方式，后续可切换为显式更新
-    await api.createPerformanceConfig({
-      sales_weight: configForm.sales_weight,
-      profit_weight: configForm.profit_weight,
-      key_product_weight: configForm.key_product_weight,
-      operation_weight: configForm.operation_weight,
-      sales_max_score: configForm.sales_max_score,
-      profit_max_score: configForm.profit_max_score,
-      key_product_max_score: configForm.key_product_max_score,
-      operation_max_score: configForm.operation_max_score,
-      effective_from: new Date().toISOString().slice(0, 10)
+    await savePerformanceConfig({
+      api,
+      currentConfigId: currentConfigId.value,
+      payload: buildFormalPerformanceConfigPayload(configForm),
+      effectiveFrom: new Date().toISOString().slice(0, 10)
     })
     
     ElMessage.success('配置更新成功')

@@ -118,11 +118,13 @@ export const SEMANTIC_FIELD_META = {
   },
   product_name: {
     label: '商品名',
-    description: '标准化属性字段，名称变化不应默认改变 Data Hash。',
-    aliases: ['product_name', 'item_name', 'product name', 'item name', '商品名', '商品名称', '产品名称'],
-    kind: 'attribute',
-    hash_eligible: false,
+    description: '弱身份字段。商品名可能重名或改名，优先使用商品 ID / SKU。',
+    aliases: ['product_name', 'item_name', 'product name', 'item name', '商品', '商品名', '商品名称', '产品名称'],
+    kind: 'dimension',
+    hash_eligible: true,
     default_hash: false,
+    identity_strength: 'weak',
+    hash_warning: '商品名可能重名或改名，优先使用商品 ID / SKU。',
   },
   item_status: {
     label: '发品状态',
@@ -429,6 +431,8 @@ const CANONICAL_SEMANTIC_FIELD_OPTIONS = Object.entries(SEMANTIC_FIELD_META).map
     hash_eligible: meta.hash_eligible,
     default_hash: meta.default_hash === true,
     system_scope: meta.system_scope === true,
+    identity_strength: meta.identity_strength,
+    hash_warning: meta.hash_warning,
   }))
 
 export const SEMANTIC_FIELD_OPTION_GROUPS = SEMANTIC_OPTION_GROUPS
@@ -477,6 +481,8 @@ function semanticRequirements(semanticKey) {
     hash_eligible: Boolean(meta?.hash_eligible),
     semantic_kind: meta?.kind || '',
     system_scope: Boolean(meta?.system_scope),
+    identity_strength: meta?.identity_strength || '',
+    hash_warning: meta?.hash_warning || '',
   }
 }
 
@@ -544,6 +550,8 @@ export function inferHeaderBindings({
       hash_participates: requirements.hash_participates,
       hash_eligible: requirements.hash_eligible,
       semantic_kind: requirements.semantic_kind,
+      identity_strength: requirements.identity_strength,
+      hash_warning: requirements.hash_warning,
       semantic_review_status: semanticKey ? 'confirmed_semantic' : 'pending',
       position,
       sample_type: sampleType,
@@ -581,6 +589,8 @@ export function updateHeaderBindingSemantic(headerBindings = [], rawName, semant
       hash_participates: requirements.hash_participates,
       hash_eligible: requirements.hash_eligible,
       semantic_kind: requirements.semantic_kind,
+      identity_strength: requirements.identity_strength,
+      hash_warning: requirements.hash_warning,
       semantic_review_status: normalizedKey ? 'confirmed_semantic' : 'pending',
       display_name: binding?.display_name || binding?.raw_name,
     }

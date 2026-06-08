@@ -55,6 +55,12 @@ const apiText = readFileSync(apiPath, 'utf8')
 const workbenchDrawerText = existsSync(workbenchDrawerPath)
   ? readFileSync(workbenchDrawerPath, 'utf8')
   : ''
+const changeSummaryCardText = existsSync(changeSummaryCardPath)
+  ? readFileSync(changeSummaryCardPath, 'utf8')
+  : ''
+const deduplicationReviewPanelText = existsSync(deduplicationReviewPanelPath)
+  ? readFileSync(deduplicationReviewPanelPath, 'utf8')
+  : ''
 const governancePanelText = existsSync(governancePanelPath)
   ? readFileSync(governancePanelPath, 'utf8')
   : ''
@@ -108,8 +114,12 @@ assert.match(workbenchDrawerText, /TemplateDeduplicationReviewPanel/, 'workbench
 assert.match(workbenchDrawerText, /TemplateRawPreviewPanel/, 'workbench drawer should render a raw preview panel')
 assert.match(workbenchDrawerText, /match_rate|added_fields|removed_fields|update_reason/, 'workbench drawer should surface core change summary fields')
 assert.match(workbenchDrawerText, /existing_deduplication_fields_missing|deduplication_fields/, 'workbench drawer should surface old deduplication field impact')
+assert.match(workbenchDrawerText, /existing_deduplication_field_matches/, 'workbench drawer should pass semantic-equivalent deduplication matches')
 assert.match(workbenchDrawerText, /recommended_deduplication_fields|current_header_columns/, 'workbench drawer should surface recommended and current-field context')
 assert.match(workbenchDrawerText, /preview_data|sample_data/, 'workbench drawer should surface raw preview context')
+assert.match(changeSummaryCardText, /已语义匹配/, 'change summary should show semantic-equivalent old fields')
+assert.match(changeSummaryCardText, /已语义匹配，但不再参与 Data Hash/, 'change summary should distinguish matched non-hashable fields')
+assert.match(deduplicationReviewPanelText, /匹配但不可参与 Data Hash/, 'deduplication review should show matched non-hashable old fields')
 
 assert.match(apiText, /getTemplateUpdateContext/, 'frontend api should expose getTemplateUpdateContext')
 assert.match(apiText, /getTemplateVariantCreateContext/, 'frontend api should expose getTemplateVariantCreateContext')

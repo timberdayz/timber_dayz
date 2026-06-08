@@ -296,6 +296,126 @@ async def test_template_update_context_returns_lightweight_summary_for_with_samp
 
 
 @pytest.mark.asyncio
+async def test_template_update_context_returns_semantic_equivalent_deduplication_matches(
+    template_update_context_client,
+    monkeypatch,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="products",
+            granularity="daily",
+            sub_domain=None,
+            header_row=0,
+            header_columns=["商品", "状态", "浏览量"],
+            deduplication_fields=["商品", "状态"],
+            header_bindings=[
+                {
+                    "raw_name": "商品",
+                    "display_name": "商品",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "状态",
+                    "display_name": "状态",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+            template_name="shopee_products_daily_legacy_product_name",
+            version=1,
+            status="published",
+            field_count=3,
+            created_by="test",
+        )
+        file_record = CatalogFile(
+            file_path="data/raw/shopee/products/products_daily_demo.xlsx",
+            file_name="products_daily_demo.xlsx",
+            source="data/raw",
+            platform_code="shopee",
+            source_platform="shopee",
+            data_domain="products",
+            granularity="daily",
+            status="pending",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        session.add(template)
+        session.add(file_record)
+        await session.commit()
+        await session.refresh(template)
+        await session.refresh(file_record)
+
+    from backend.routers import field_mapping_templates as router_module
+
+    async def fake_load_file_update_summary(*_, **__):
+        return {
+            "file": {
+                "id": file_record.id,
+                "file_name": file_record.file_name,
+                "platform": "shopee",
+                "domain": "products",
+                "granularity": "daily",
+                "sub_domain": None,
+            },
+            "header_columns": ["商品名称", "发品状态", "浏览量"],
+            "header_bindings": [
+                {
+                    "raw_name": "商品名称",
+                    "display_name": "商品名称",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                    "position": 0,
+                },
+                {
+                    "raw_name": "发品状态",
+                    "display_name": "发品状态",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                    "position": 1,
+                },
+            ],
+        }
+
+    monkeypatch.setattr(
+        router_module,
+        "_load_file_update_summary",
+        fake_load_file_update_summary,
+        raising=False,
+    )
+
+    response = await client.get(
+        f"/api/field-mapping/templates/{template.id}/update-context",
+        params={"mode": "with-sample", "file_id": file_record.id},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["existing_deduplication_fields_available"] == ["product_name"]
+    assert data["existing_deduplication_fields_missing"] == []
+    assert data["existing_deduplication_field_matches"] == [
+        {
+            "requested_field": "商品",
+            "semantic_key": "product_name",
+            "current_field": "商品名称",
+            "match_type": "semantic_key",
+            "hash_eligible": True,
+            "status": "matched_hashable",
+        },
+        {
+            "requested_field": "状态",
+            "semantic_key": "item_status",
+            "current_field": "发品状态",
+            "match_type": "semantic_key",
+            "hash_eligible": False,
+            "status": "matched_non_hashable",
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_template_update_context_core_only_uses_template_headers_as_field_pool(
     template_update_context_client,
 ):
@@ -985,6 +1105,76 @@ async def test_save_mapping_template_accepts_file_date_token_parse_rules(
         assert field_parse_rules[0]["date_format"] == "yyyy-mm-dd"
         assert field_parse_rules[0]["strict"] is True
         assert field_parse_rules[0]["source_aliases"] == []
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_accepts_time_of_day_parse_rule_with_date_anchor(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "traffic",
+            "granularity": "daily",
+            "header_row": 0,
+            "header_columns": ["小时", "浏览量"],
+            "deduplication_fields": ["metric_date", "period_start_time"],
+            "template_name": "traffic_hourly_time_of_day_rule",
+            "created_by": "test",
+            "header_bindings": [
+                {
+                    "raw_name": "小时",
+                    "display_name": "小时",
+                    "semantic_key": "period_start_time",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "浏览量",
+                    "display_name": "浏览量",
+                    "semantic_key": "page_views",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "metric_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                    "strict": True,
+                },
+                {
+                    "target_field": "period_start_time",
+                    "source_column": "小时",
+                    "value_kind": "time_of_day",
+                    "date_format": "hh:mm",
+                    "date_anchor": "__file_date_from__",
+                    "strict": True,
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"),
+            {"id": template_id},
+        )
+        row = result.mappings().one()
+        field_parse_rules = row["field_parse_rules"]
+        if isinstance(field_parse_rules, str):
+            field_parse_rules = json.loads(field_parse_rules)
+        hour_rule = next(rule for rule in field_parse_rules if rule["target_field"] == "period_start_time")
+        assert hour_rule["value_kind"] == "time_of_day"
+        assert hour_rule["date_anchor"] == "__file_date_from__"
 
 
 @pytest.mark.asyncio

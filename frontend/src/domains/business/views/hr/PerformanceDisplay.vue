@@ -150,18 +150,6 @@
         <el-table-column v-if="filters.groupBy === 'shop'" label="毛利得分" width="90" align="right">
           <template #default="{ row }">{{ scoreText(row.profit_score) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品目标" width="120" align="right">
-          <template #default="{ row }">{{ formatCell(row.key_product_target) }}</template>
-        </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品达成" width="120" align="right">
-          <template #default="{ row }">{{ formatCell(row.key_product_achieved) }}</template>
-        </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品达成率" width="130" align="right">
-          <template #default="{ row }">{{ formatPercent(row.key_product_rate) }}</template>
-        </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="重点产品得分" width="110" align="right">
-          <template #default="{ row }">{{ scoreText(row.key_product_score) }}</template>
-        </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" prop="operation_score" label="店铺运营得分" width="120" align="right" sortable>
           <template #default="{ row }">{{ scoreText(row.operation_score) }}</template>
         </el-table-column>
@@ -287,7 +275,7 @@
             style="margin-bottom: 15px;"
           >
             <div class="metric-header">
-              <span class="metric-title">{{ card.label }}（权重 {{ card.weight }}%）</span>
+              <span class="metric-title">{{ card.label }}（满分 {{ card.maxScore }}）</span>
               <el-tag :type="metricTagType(card.metric, card.successThreshold, card.warningThreshold)" size="small">
                 {{ metricScoreText(card.metric) }}
               </el-tag>
@@ -320,6 +308,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatPercent } from '@/utils/dataFormatter'
 import { hasScopedActionPermission } from '@/utils/actionPermissions'
 import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
+import { extractPerformanceConfigRow } from './performanceConfigSubmit'
 
 const props = defineProps({
   forcedGroupBy: {
@@ -370,7 +359,11 @@ const weightConfig = reactive({
   sales_weight: 30,
   profit_weight: 25,
   key_product_weight: 25,
-  operation_weight: 20
+  operation_weight: 20,
+  sales_max_score: 30,
+  profit_max_score: 25,
+  key_product_max_score: 25,
+  operation_max_score: 20
 })
 
 const resolveGroupBy = () => props.forcedGroupBy || (route.path.includes('/hr-performance-display/person') ? 'person' : 'shop')
@@ -397,7 +390,7 @@ const formulaText = computed(() => {
   if (filters.groupBy === 'person') {
     return '优先取个人绩效输入项得分，再叠加个人调整项与考勤扣分；无输入项时才回退到店铺汇总绩效'
   }
-  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 店铺运营得分(${weightConfig.operation_weight}%)`
+  return `销售额满分${weightConfig.sales_max_score} + 毛利满分${weightConfig.profit_max_score} + 店铺运营满分${weightConfig.operation_max_score}`
 })
 
 const currentGroupPolicyText = computed(() => {
@@ -443,7 +436,7 @@ const detailMetricCards = computed(() => {
     {
       key: 'sales_score',
       label: '销售额得分',
-      weight: weightConfig.sales_weight,
+      maxScore: weightConfig.sales_max_score,
       metric: data.sales_score,
       successThreshold: 27,
       warningThreshold: 24,
@@ -453,7 +446,7 @@ const detailMetricCards = computed(() => {
     {
       key: 'profit_score',
       label: '毛利得分',
-      weight: weightConfig.profit_weight,
+      maxScore: weightConfig.profit_max_score,
       metric: data.profit_score,
       successThreshold: 22.5,
       warningThreshold: 20,
@@ -463,7 +456,7 @@ const detailMetricCards = computed(() => {
     {
       key: 'operation_score',
       label: '店铺运营得分',
-      weight: weightConfig.operation_weight,
+      maxScore: weightConfig.operation_max_score,
       metric: data.operation_score,
       successThreshold: 18,
       warningThreshold: 16,
@@ -622,14 +615,16 @@ const loadPerformanceList = async () => {
 const loadWeightConfig = async () => {
   try {
     const response = await api.getPerformanceConfigs({ is_active: true, page: 1, page_size: 1 })
-    const row = Array.isArray(response)
-      ? response[0]
-      : (response?.data?.[0] || response?.data || response)
+    const row = extractPerformanceConfigRow(response)
     if (!row) return
     weightConfig.sales_weight = row.sales_weight ?? weightConfig.sales_weight
     weightConfig.profit_weight = row.profit_weight ?? weightConfig.profit_weight
     weightConfig.key_product_weight = row.key_product_weight ?? weightConfig.key_product_weight
     weightConfig.operation_weight = row.operation_weight ?? weightConfig.operation_weight
+    weightConfig.sales_max_score = row.sales_max_score ?? weightConfig.sales_max_score
+    weightConfig.profit_max_score = row.profit_max_score ?? weightConfig.profit_max_score
+    weightConfig.key_product_max_score = row.key_product_max_score ?? weightConfig.key_product_max_score
+    weightConfig.operation_max_score = row.operation_max_score ?? weightConfig.operation_max_score
   } catch (_error) {
     // ignore
   }

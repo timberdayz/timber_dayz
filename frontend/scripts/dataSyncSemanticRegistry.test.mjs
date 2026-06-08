@@ -23,6 +23,7 @@ const requiredSemanticKeys = [
   'order_id',
   'line_id',
   'product_id',
+  'product_name',
   'platform_sku',
   'sku_id',
   'service_id',
@@ -63,6 +64,13 @@ assert.equal(SEMANTIC_FIELD_META.period_start_time.hash_eligible, true)
 assert.equal(SEMANTIC_FIELD_META.period_start_time.default_hash, false)
 assert.equal(isHashEligibleSemanticKey('period_start_time'), true)
 assert.equal(isHashEligibleSemanticKey('period_end_time'), true)
+assert.equal(SEMANTIC_FIELD_META.product_name.kind, 'dimension')
+assert.equal(SEMANTIC_FIELD_META.product_name.hash_eligible, true)
+assert.equal(SEMANTIC_FIELD_META.product_name.default_hash, false)
+assert.equal(SEMANTIC_FIELD_META.product_name.identity_strength, 'weak')
+assert.equal(isHashEligibleSemanticKey('product_name'), true)
+assert.equal(SEMANTIC_FIELD_META.item_status.kind, 'attribute')
+assert.equal(SEMANTIC_FIELD_META.item_status.hash_eligible, false)
 assert.equal(isHashEligibleSemanticKey('page_views'), false)
 assert.equal(isHashEligibleSemanticKey('gmv'), false)
 assert.equal(isHashEligibleSemanticKey('live_attributed_gmv'), false)
@@ -76,6 +84,7 @@ const groupedOptions = Object.fromEntries(
   SEMANTIC_FIELD_OPTION_GROUPS.map(group => [group.label, group.options.map(option => option.value)])
 )
 assert.ok(groupedOptions['时间字段'].includes('period_start_time'))
+assert.ok(groupedOptions['身份字段'].includes('product_name'))
 assert.ok(groupedOptions['流量指标'].includes('page_views'))
 assert.ok(groupedOptions['渠道归因指标'].includes('live_attributed_gmv'))
 
@@ -94,6 +103,22 @@ const updated = updateHeaderBindingSemantic(
 assert.equal(updated[0].semantic_key, 'live_attributed_gmv')
 assert.equal(updated[0].hash_eligible, false)
 assert.equal(updated[0].hash_participates, false)
+
+const productNameUpdated = updateHeaderBindingSemantic(
+  [
+    {
+      raw_name: '商品名称',
+      display_name: '商品名称',
+      semantic_key: null,
+      semantic_review_status: 'pending',
+    },
+  ],
+  '商品名称',
+  'product_name'
+)
+assert.equal(productNameUpdated[0].semantic_key, 'product_name')
+assert.equal(productNameUpdated[0].hash_eligible, true)
+assert.equal(productNameUpdated[0].hash_participates, false)
 
 const nonSemantic = updateHeaderBindingSemantic(updated, '商家直播归因 GMV', NON_SEMANTIC_FIELD_VALUE)
 assert.equal(nonSemantic[0].semantic_key, null)

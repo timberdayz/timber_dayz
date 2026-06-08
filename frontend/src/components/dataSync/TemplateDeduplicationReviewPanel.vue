@@ -79,8 +79,36 @@
         </div>
       </section>
 
+      <section v-if="semanticMatchedHashableFields.length > 0" class="template-deduplication-review-panel__group">
+        <div class="template-deduplication-review-panel__group-title">已语义匹配</div>
+        <div class="template-deduplication-review-panel__tags">
+          <el-tag
+            v-for="match in semanticMatchedHashableFields"
+            :key="`${match.requested_field}-${match.current_field}`"
+            size="small"
+            type="success"
+          >
+            {{ formatMatch(match) }}
+          </el-tag>
+        </div>
+      </section>
+
+      <section v-if="semanticMatchedNonHashableFields.length > 0" class="template-deduplication-review-panel__group template-deduplication-review-panel__group--warning">
+        <div class="template-deduplication-review-panel__group-title">匹配但不可参与 Data Hash</div>
+        <div class="template-deduplication-review-panel__tags">
+          <el-tag
+            v-for="match in semanticMatchedNonHashableFields"
+            :key="`${match.requested_field}-${match.current_field}`"
+            size="small"
+            type="warning"
+          >
+            {{ formatMatch(match) }}
+          </el-tag>
+        </div>
+      </section>
+
       <section v-if="existingDeduplicationFieldsMissing.length > 0" class="template-deduplication-review-panel__group template-deduplication-review-panel__group--warning">
-        <div class="template-deduplication-review-panel__group-title">旧模板缺失字段</div>
+        <div class="template-deduplication-review-panel__group-title">真正缺失的旧模板字段</div>
         <div class="template-deduplication-review-panel__tags">
           <el-tag v-for="field in existingDeduplicationFieldsMissing" :key="field" size="small" type="danger">
             {{ field }}
@@ -109,6 +137,7 @@
           >
             <span>{{ option.label }}</span>
             <span v-if="option.derived" class="template-deduplication-review-panel__derived">由文件伴生日期生成</span>
+            <span v-if="option.weakIdentity" class="template-deduplication-review-panel__weak">弱身份字段</span>
           </el-checkbox>
         </el-checkbox-group>
         <div v-if="filteredSemanticHashOptions.length === 0" class="template-deduplication-review-panel__muted">
@@ -151,6 +180,10 @@ const props = defineProps({
     default: () => []
   },
   existingDeduplicationFieldsMissing: {
+    type: Array,
+    default: () => []
+  },
+  existingDeduplicationFieldMatches: {
     type: Array,
     default: () => []
   },
@@ -240,6 +273,7 @@ const semanticHashOptions = computed(() => {
           ? `${meta?.label || semanticKey} (${rawName || displayName})`
           : `${meta?.label || semanticKey} (${semanticKey})`,
         derived: false,
+        weakIdentity: meta?.identity_strength === 'weak',
       }
     })
     .filter(Boolean)
@@ -272,6 +306,14 @@ const passedGroups = computed(() =>
   (hashPolicyPreview.value?.requirement_groups || []).filter(group => group?.passed)
 )
 const previewWarnings = computed(() => hashPolicyPreview.value?.warnings || [])
+const semanticMatchedHashableFields = computed(() =>
+  (Array.isArray(props.existingDeduplicationFieldMatches) ? props.existingDeduplicationFieldMatches : [])
+    .filter(match => match?.status === 'matched_hashable' && match?.match_type === 'semantic_key')
+)
+const semanticMatchedNonHashableFields = computed(() =>
+  (Array.isArray(props.existingDeduplicationFieldMatches) ? props.existingDeduplicationFieldMatches : [])
+    .filter(match => match?.status === 'matched_non_hashable')
+)
 const blockingMessage = computed(() => {
   const group = missingGroups.value[0]
   if (group?.message) {
@@ -298,6 +340,13 @@ function emitPolicyState() {
 
 function handleSelectionChange(nextValue) {
   emit('update:modelValue', nextValue)
+}
+
+function formatMatch(match) {
+  const requested = match?.requested_field || '-'
+  const current = match?.current_field || '-'
+  const semanticKey = match?.semantic_key ? ` (${match.semantic_key})` : ''
+  return `${requested} -> ${current}${semanticKey}`
 }
 
 function scheduleHashPolicyPreview() {
@@ -428,10 +477,15 @@ onBeforeUnmount(() => {
   gap: 8px 12px;
 }
 
-.template-deduplication-review-panel__derived {
+.template-deduplication-review-panel__derived,
+.template-deduplication-review-panel__weak {
   margin-left: 6px;
   color: #909399;
   font-size: 12px;
+}
+
+.template-deduplication-review-panel__weak {
+  color: #b88230;
 }
 
 .template-deduplication-review-panel__muted {

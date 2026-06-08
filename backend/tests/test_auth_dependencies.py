@@ -78,3 +78,39 @@ async def test_get_current_user_rejects_inactive_session(monkeypatch):
         await get_current_user(request=request, credentials=None, db=db)
 
     assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_prefers_stable_session_id_from_token(monkeypatch):
+    request = SimpleNamespace(cookies={"access_token": "access-token"})
+    user = SimpleNamespace(
+        user_id=7,
+        username="operator",
+        is_active=True,
+        status="active",
+        roles=[],
+    )
+    active_session = SimpleNamespace(
+        session_id="stable-session-id",
+        user_id=7,
+        is_active=True,
+        expires_at=__import__("datetime").datetime.max.replace(
+            tzinfo=__import__("datetime").timezone.utc
+        ),
+    )
+    db = AsyncMock()
+    db.execute.side_effect = [_scalar_result(user), _scalar_result(active_session)]
+
+    monkeypatch.setattr(
+        "backend.dependencies.auth.auth_service.verify_token",
+        lambda token: {"user_id": 7, "sid": "stable-session-id"},
+    )
+
+    def _sha256_not_expected(_value):
+        raise AssertionError("stable sid should avoid legacy access-token hash lookup")
+
+    monkeypatch.setattr("backend.dependencies.auth.hashlib.sha256", _sha256_not_expected)
+
+    result = await get_current_user(request=request, credentials=None, db=db)
+
+    assert result is user

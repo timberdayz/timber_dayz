@@ -13,7 +13,7 @@ SEMANTIC_FIELD_ALIASES: dict[str, list[str]] = {
     "line_id": ["line_id", "order_line_id", "line id", "order line id"],
     "service_id": ["service_id", "service id", "服务ID", "服务编号"],
     "shop_id": ["shop_id", "店铺", "店铺ID", "shop id"],
-    "product_name": ["product_name", "item_name", "product name", "item name", "商品名", "商品名称", "产品名称"],
+    "product_name": ["product_name", "item_name", "product name", "item name", "商品", "商品名", "商品名称", "产品名称"],
     "item_status": ["item_status", "product_status", "listing_status", "item status", "product status", "发品状态", "商品状态"],
     "gmv_band": ["gmv_band", "gmv band", "gmv range", "GMV区间", "GMV 区间"],
     "warehouse_name": ["warehouse_name", "warehouse", "仓库", "仓库名称", "warehouse name"],
@@ -41,7 +41,13 @@ SEMANTIC_FIELD_META: dict[str, dict[str, Any]] = {
     "period_start_date": {"kind": "time", "hash_eligible": True, "default_hash": True},
     "period_end_date": {"kind": "time", "hash_eligible": True, "default_hash": True},
     "order_date": {"kind": "time", "hash_eligible": True, "default_hash": False},
-    "product_name": {"kind": "attribute", "hash_eligible": False, "default_hash": False},
+    "product_name": {
+        "kind": "dimension",
+        "hash_eligible": True,
+        "default_hash": False,
+        "identity_strength": "weak",
+        "hash_warning": "商品名可能重名或改名，优先使用商品 ID / SKU。",
+    },
     "item_status": {"kind": "attribute", "hash_eligible": False, "default_hash": False},
     "gmv": {"kind": "metric", "hash_eligible": False, "default_hash": False},
     "sales_amount": {"kind": "metric", "hash_eligible": False, "default_hash": False},
@@ -366,11 +372,13 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
     "product_name": {
         "label": "商品名称",
-        "kind": "attribute",
+        "kind": "dimension",
         "domain": "products",
-        "hash_eligible": False,
+        "hash_eligible": True,
         "default_hash": False,
-        "aliases": ["item_name", "product name", "item name", "商品名", "商品名称", "产品名称"],
+        "identity_strength": "weak",
+        "hash_warning": "商品名可能重名或改名，优先使用商品 ID / SKU。",
+        "aliases": ["item_name", "product name", "item name", "商品", "商品名", "商品名称", "产品名称"],
     },
     "item_status": {
         "label": "商品状态",
@@ -463,6 +471,8 @@ def get_semantic_requirements(semantic_key: Optional[str]) -> dict[str, Any]:
         "hash_eligible": bool(meta.get("hash_eligible", False)),
         "semantic_kind": str(meta.get("kind", "")),
         "system_scope": bool(meta.get("system_scope", False)),
+        "identity_strength": meta.get("identity_strength"),
+        "hash_warning": meta.get("hash_warning"),
     }
 
 
