@@ -1540,19 +1540,6 @@ async def test_postgresql_dashboard_service_comparison_loads_total_month_target_
             await session.execute(
                 text(
                     """
-                    CREATE TABLE a_class.sales_targets_a (
-                        "年月" VARCHAR(7),
-                        "店铺ID" VARCHAR(255),
-                        "目标销售额" NUMERIC,
-                        "目标订单数" NUMERIC,
-                        "目标单量" NUMERIC
-                    )
-                    """
-                )
-            )
-            await session.execute(
-                text(
-                    """
                     CREATE TABLE a_class.sales_targets (
                         id INTEGER PRIMARY KEY,
                         target_name VARCHAR(255),
@@ -1667,7 +1654,8 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
                         "水电费" NUMERIC,
                         "AI Token费用" NUMERIC,
                         "其他成本" NUMERIC,
-                        "成本合计" NUMERIC
+                        "成本合计" NUMERIC,
+                        "删除时间" TIMESTAMP
                     )
                     """
                 )
@@ -1737,13 +1725,6 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
             ]
 
         monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-        monkeypatch.setattr(
-            service,
-            "_load_target_summary",
-            lambda *args, **kwargs: __import__("asyncio").sleep(
-                0, result={"target_amount": 0.0, "target_quantity": 0.0}
-            ),
-        )
         result = await service.get_business_overview_operational_metrics(
             month="2025-09-01",
             platform=None,
@@ -2286,7 +2267,8 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                         granularity VARCHAR(32),
                         metric_date DATE,
                         visitor_count NUMERIC,
-                        page_views NUMERIC
+                        page_views NUMERIC,
+                        impressions NUMERIC
                     )
                     """
                 )

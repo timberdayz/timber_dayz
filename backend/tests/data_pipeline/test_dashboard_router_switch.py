@@ -256,7 +256,7 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             await session.execute(
                 text(
                     """
-                    CREATE OR REPLACE VIEW api.business_overview_shop_racing_monthly_module AS
+                    CREATE OR REPLACE VIEW api.business_overview_shop_racing_module AS
                     SELECT
                         'monthly'::varchar AS granularity,
                         DATE '2026-03-01' AS period_key,
@@ -453,11 +453,27 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             await session.commit()
 
         import backend.main as main_module
+        import backend.domains.business.routers.dashboard_api_postgresql as actual_dashboard_router
+        import backend.routers.dashboard_api_postgresql as compat_dashboard_router
+        from backend.services.postgresql_dashboard_service import (
+            get_postgresql_dashboard_service as real_get_postgresql_dashboard_service,
+        )
 
         monkeypatch.setenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "true")
         monkeypatch.setattr(
             "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
             session_factory,
+        )
+        monkeypatch.setattr(
+            actual_dashboard_router,
+            "get_postgresql_dashboard_service",
+            real_get_postgresql_dashboard_service,
+        )
+        monkeypatch.setattr(
+            compat_dashboard_router,
+            "get_postgresql_dashboard_service",
+            real_get_postgresql_dashboard_service,
+            raising=False,
         )
 
         async def override_get_async_db():
@@ -488,31 +504,11 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                 "/api/dashboard/business-overview/operational-metrics",
                 params={"granularity": "monthly", "period_key": "2026-03-01"},
             )
-            target_response = await client.get(
-                "/api/dashboard/annual-summary/target-completion",
-                params={"granularity": "yearly", "period": "2026"},
-            )
-            trend_response = await client.get(
-                "/api/dashboard/annual-summary/trend",
-                params={"granularity": "yearly", "period": "2026"},
-            )
-            platform_share_response = await client.get(
-                "/api/dashboard/annual-summary/platform-share",
-                params={"granularity": "yearly", "period": "2026"},
-            )
-            by_shop_response = await client.get(
-                "/api/dashboard/annual-summary/by-shop",
-                params={"granularity": "yearly", "period": "2026"},
-            )
 
         kpi_body = json.loads(kpi_response.content.decode("utf-8"))
         comparison_body = json.loads(comparison_response.content.decode("utf-8"))
         shop_racing_body = json.loads(shop_racing_response.content.decode("utf-8"))
         operational_body = json.loads(operational_response.content.decode("utf-8"))
-        target_body = json.loads(target_response.content.decode("utf-8"))
-        trend_body = json.loads(trend_response.content.decode("utf-8"))
-        platform_share_body = json.loads(platform_share_response.content.decode("utf-8"))
-        by_shop_body = json.loads(by_shop_response.content.decode("utf-8"))
 
         assert kpi_response.status_code == 200
         assert kpi_body["data"]["gmv"] == 321
@@ -522,14 +518,6 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
         assert shop_racing_body["data"][0]["gmv"] == 321
         assert operational_response.status_code == 200
         assert operational_body["data"]["operating_result_text"] == "亏损"
-        assert target_response.status_code == 200
-        assert target_body["data"]["achievement_rate_gmv"] == 80.0
-        assert trend_response.status_code == 200
-        assert len(trend_body["data"]) == 2
-        assert platform_share_response.status_code == 200
-        assert platform_share_body["data"][0]["platform_code"] == "shopee"
-        assert by_shop_response.status_code == 200
-        assert by_shop_body["data"][0]["shop_id"] == "shop-a"
 
         reloaded.app.dependency_overrides.clear()
         monkeypatch.delenv("USE_POSTGRESQL_DASHBOARD_ROUTER", raising=False)

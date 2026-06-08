@@ -227,7 +227,7 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     """
                 )
             )
-            await execute_sql_target(session, "semantic.fact_orders_monthly_atomic")
+            await execute_sql_target(session, "semantic.fact_orders_monthly_atomic", resolve_dependencies=True)
             await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic", resolve_dependencies=True)
             await execute_sql_target(session, "mart.shop_month_kpi")
             await session.commit()
@@ -294,7 +294,8 @@ async def test_shop_day_kpi_keeps_missing_traffic_as_null():
                         granularity VARCHAR(32),
                         metric_date DATE,
                         visitor_count NUMERIC,
-                        page_views NUMERIC
+                        page_views NUMERIC,
+                        impressions NUMERIC
                     )
                     """
                 )
