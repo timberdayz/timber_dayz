@@ -346,7 +346,7 @@ def test_calculate_month_falls_back_to_salary_structure_commission_ratio_when_as
     assert commission.commission_rate == pytest.approx(0.5)
 
 
-def test_load_profit_basis_by_shop_prefers_shop_profit_basis_snapshot(monkeypatch):
+def test_load_profit_basis_by_shop_prefers_locked_shop_profit_basis_snapshot(monkeypatch):
     db = AsyncMock()
 
     snapshot_row = SimpleNamespace(
@@ -354,6 +354,7 @@ def test_load_profit_basis_by_shop_prefers_shop_profit_basis_snapshot(monkeypatc
         platform_code="shopee",
         shop_id="S1",
         profit_basis_amount=1800.0,
+        is_locked=True,
     )
     assignment = SimpleNamespace(
         employee_code="E001",
@@ -385,6 +386,54 @@ def test_load_profit_basis_by_shop_prefers_shop_profit_basis_snapshot(monkeypatc
     result = asyncio.run(service._load_profit_basis_by_shop("2026-03", [assignment]))
 
     assert result == {"shopee|s1": {"profit_basis_amount": 1800.0}}
+
+
+def test_load_profit_basis_by_shop_rebuilds_unlocked_shop_profit_basis_snapshot(monkeypatch):
+    db = AsyncMock()
+
+    snapshot_row = SimpleNamespace(
+        period_month="2026-03",
+        platform_code="shopee",
+        shop_id="S1",
+        profit_basis_amount=0.0,
+        is_locked=False,
+    )
+    assignment = SimpleNamespace(
+        employee_code="E001",
+        platform_code="Shopee",
+        shop_id="S1",
+        commission_ratio=0.1,
+        status="active",
+        year_month="2026-03",
+    )
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is ShopProfitBasis:
+                return _MockResult(rows=[snapshot_row])
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    service = HRIncomeCalculationService(db=db)
+
+    async def _fake_build(self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"):
+        return {
+            "period_month": year_month,
+            "platform_code": platform_code,
+            "shop_id": shop_id,
+            "profit_basis_amount": 2400.0,
+            "basis_version": basis_version,
+        }
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.ProfitBasisService.build_profit_basis",
+        _fake_build,
+    )
+
+    result = asyncio.run(service._load_profit_basis_by_shop("2026-03", [assignment]))
+
+    assert result == {"shopee|s1": {"profit_basis_amount": 2400.0}}
 
 
 def test_calculate_month_employee_performance_uses_store_total_score():

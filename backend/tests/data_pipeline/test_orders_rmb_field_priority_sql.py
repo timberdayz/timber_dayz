@@ -42,6 +42,7 @@ def test_orders_monthly_atomic_sql_prefers_rmb_paid_amount_fields():
         errors="replace",
     )
 
+    _assert_prefer(sql_text, "AS profit_raw", "raw_data->>'利润(RMB)'", "raw_data->>'利润'")
     _assert_prefer(
         sql_text,
         "AS paid_amount_raw",

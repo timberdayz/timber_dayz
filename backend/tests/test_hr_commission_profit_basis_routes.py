@@ -34,6 +34,7 @@ def _body(resp):
 
 def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     module = _load_module()
+    domain_module = module.domain_module
     db = AsyncMock()
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
     current_user = SimpleNamespace(user_id=1)
@@ -66,7 +67,7 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
             _ScalarResult([assign_row]),
         ]
     )
-    module.load_shop_monthly_metrics = AsyncMock(
+    domain_module.load_shop_monthly_metrics = AsyncMock(
         return_value={
             "shopee|s1": {
                 "monthly_sales": 10000.0,
@@ -85,14 +86,16 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
                 "period_month": year_month,
                 "platform_code": platform_code,
                 "shop_id": shop_id,
+                "orders_profit_amount": 2000.0,
+                "a_class_cost_amount": 500.0,
                 "profit_basis_amount": 1500.0,
                 "basis_version": basis_version,
             }
 
-    module.ProfitBasisService = _FakeProfitBasisService
+    domain_module.ProfitBasisService = _FakeProfitBasisService
 
     resp = asyncio.run(
-        module.get_shop_profit_statistics(
+        domain_module.get_shop_profit_statistics(
             request=request,
             month="2026-04",
             db=db,
@@ -104,8 +107,57 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     row = body["data"][0]
     assert row["monthly_profit"] == 2000.0
     assert row["profit_basis_amount"] == 1500.0
+    assert row["a_class_cost_amount"] == 500.0
+    assert row["allocatable_profit_amount"] == 1200.0
+    assert row["estimated_total_commission"] == 120.0
     assert row["supervisor_profit"] == 120.0
     assert row["operator_profit"] == 0
+
+
+def test_load_profit_basis_map_rebuilds_unlocked_snapshot_for_statistics():
+    module = _load_module()
+    domain_module = module.domain_module
+    db = AsyncMock()
+    snapshot_row = SimpleNamespace(
+        period_month="2026-04",
+        platform_code="shopee",
+        shop_id="s1",
+        orders_profit_amount=2000.0,
+        a_class_cost_amount=0.0,
+        profit_basis_amount=0.0,
+        is_locked=False,
+    )
+
+    db.execute = AsyncMock(return_value=_ScalarResult([snapshot_row]))
+
+    class _FakeProfitBasisService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_profit_basis(self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"):
+            return {
+                "period_month": year_month,
+                "platform_code": platform_code,
+                "shop_id": shop_id,
+                "orders_profit_amount": 2000.0,
+                "a_class_cost_amount": 500.0,
+                "profit_basis_amount": 1500.0,
+                "basis_version": basis_version,
+            }
+
+    domain_module.ProfitBasisService = _FakeProfitBasisService
+
+    result = asyncio.run(
+        domain_module._load_profit_basis_map(
+            db,
+            "2026-04",
+            [{"platform_code": "shopee", "shop_id": "s1"}],
+        )
+    )
+
+    assert result["shopee|s1"]["orders_profit_amount"] == 2000.0
+    assert result["shopee|s1"]["a_class_cost_amount"] == 500.0
+    assert result["shopee|s1"]["profit_basis_amount"] == 1500.0
 
 
 def test_list_employee_performance_reads_english_columns():

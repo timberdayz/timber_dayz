@@ -509,6 +509,17 @@
                     <el-radio-button label="shop">店铺</el-radio-button>
                     <el-radio-button label="account">账号</el-radio-button>
                   </el-radio-group>
+                  <el-select
+                    v-model="shopRacingSortBy"
+                    size="small"
+                    class="control-offset control-w-120"
+                    placeholder="排序"
+                  >
+                    <el-option label="销售额" value="sales" />
+                    <el-option label="利润" value="profit" />
+                    <el-option label="订单数" value="orders" />
+                    <el-option label="完成率" value="achievement" />
+                  </el-select>
                   <el-date-picker
                     v-model="shopRacingDate"
                     :type="shopRacingDatePickerType"
@@ -533,47 +544,17 @@
             </template>
             <div class="racing-container" v-loading="loadingShopRacing">
               <el-table
-                :data="shopRacingData"
+                :data="sortedShopRacingData"
                 stripe
-                class="erp-w-full"
+                class="erp-w-full racing-table"
                 size="small"
               >
-                <el-table-column prop="name" label="名称" width="160" show-overflow-tooltip>
-                  <template #default="{ row }">
-                    <div class="shop-display-cell" :class="{ 'shop-display-cell--unmatched': isUnmatchedShopRow(row) }">
-                      <div>{{ row.name }}</div>
-                      <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
-                    </div>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="target" label="目标" width="80">
-                  <template #default="{ row }">
-                    {{ formatCurrency(row.target) }}
-                  </template>
-                </el-table-column>
-                <el-table-column prop="achieved" label="完成" width="80">
-                  <template #default="{ row }">
-                    {{ formatCurrency(row.achieved) }}
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  prop="achievement_rate"
-                  label="完成率"
-                  width="100"
-                >
-                  <template #default="{ row }">
-                    <el-progress
-                      :percentage="Math.round(row.achievement_rate * 100)"
-                      :color="getAchievementColor(row.achievement_rate)"
-                      :stroke-width="8"
-                    />
-                  </template>
-                </el-table-column>
                 <el-table-column
                   prop="rank"
                   label="排名"
-                  width="60"
+                  width="64"
                   align="center"
+                  fixed="left"
                 >
                   <template #default="{ row }">
                     <el-tag
@@ -582,6 +563,62 @@
                     >
                       {{ row.rank }}
                     </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="name" label="名称" width="180" fixed="left" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <div class="shop-display-cell" :class="{ 'shop-display-cell--unmatched': isUnmatchedShopRow(row) }">
+                      <div>{{ row.name }}</div>
+                      <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="platform_code" label="平台" width="90" />
+                <el-table-column prop="gmv" label="销售额" width="120" align="right">
+                  <template #default="{ row }">
+                    {{ row.gmv == null ? '--' : formatCurrency(row.gmv) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="profit" label="利润" width="120" align="right">
+                  <template #default="{ row }">
+                    <span :class="{ 'metric-negative': Number(row.profit) < 0 }">
+                      {{ row.profit == null ? '--' : formatCurrency(row.profit) }}
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="profit_margin" label="利润率" width="90" align="right">
+                  <template #default="{ row }">
+                    {{ row.profit_margin == null ? '--' : formatPercent(row.profit_margin) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="order_count" label="订单数" width="90" align="right">
+                  <template #default="{ row }">
+                    {{ row.order_count == null ? '--' : formatInteger(row.order_count) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="avg_order_value" label="客单价" width="100" align="right">
+                  <template #default="{ row }">
+                    {{ row.avg_order_value == null ? '--' : formatCurrency(row.avg_order_value) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="target_amount" label="目标" width="120" align="right">
+                  <template #default="{ row }">
+                    <el-tag v-if="!hasShopRacingTarget(row)" type="info" size="small">未设目标</el-tag>
+                    <span v-else>{{ formatCurrency(row.target_amount) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="achievement_rate" label="完成率" width="150">
+                  <template #default="{ row }">
+                    <el-tag v-if="!hasShopRacingTarget(row)" type="info" size="small">未设目标</el-tag>
+                    <div v-else class="racing-achievement-cell">
+                      <el-progress
+                        :percentage="getShopRacingProgressPercentage(row)"
+                        :color="getAchievementColor(row.achievement_rate)"
+                        :stroke-width="8"
+                        :show-text="false"
+                      />
+                      <span>{{ getShopRacingAchievementText(row) }}</span>
+                    </div>
                   </template>
                 </el-table-column>
               </el-table>
@@ -2166,7 +2203,76 @@ const onShopRacingDateChange = () => {
 }
 const racingGroupBy = ref('shop')
 const shopRacingData = ref([])
+const shopRacingSortBy = ref('sales')
 const loadingShopRacing = ref(false)
+
+const toNullableNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  const numericValue = Number(value)
+  return Number.isNaN(numericValue) ? null : numericValue
+}
+
+const calculateProfitMargin = (profit, gmv) => {
+  const profitValue = toNullableNumber(profit)
+  const gmvValue = toNullableNumber(gmv)
+  if (profitValue === null || gmvValue === null || gmvValue === 0) return null
+  return profitValue / gmvValue
+}
+
+const sortMetricValue = (value) => {
+  const numericValue = toNullableNumber(value)
+  return numericValue === null ? Number.NEGATIVE_INFINITY : numericValue
+}
+
+const compareShopRacingMetrics = (left, right, keys) => {
+  for (const key of keys) {
+    const leftValue = sortMetricValue(left[key])
+    const rightValue = sortMetricValue(right[key])
+    if (leftValue > rightValue) return -1
+    if (leftValue < rightValue) return 1
+  }
+  return String(left.name || '').localeCompare(String(right.name || ''), 'zh-Hans-CN')
+}
+
+const hasShopRacingTarget = (row) => {
+  const targetAmount = toNullableNumber(row?.target_amount)
+  return targetAmount !== null && targetAmount > 0
+}
+
+const getShopRacingProgressPercentage = (row) => {
+  if (!hasShopRacingTarget(row)) return 0
+  const rate = toNullableNumber(row?.achievement_rate)
+  if (rate === null) return 0
+  return Math.min(100, Math.max(0, Math.round(rate * 100)))
+}
+
+const getShopRacingAchievementText = (row) => {
+  if (!hasShopRacingTarget(row)) return '未设目标'
+  const rate = toNullableNumber(row?.achievement_rate)
+  return rate === null ? '--' : `${Math.round(rate * 100)}%`
+}
+
+const sortedShopRacingData = computed(() => {
+  const rows = [...shopRacingData.value]
+  if (shopRacingSortBy.value === 'profit') {
+    rows.sort((left, right) => compareShopRacingMetrics(left, right, ['profit', 'gmv', 'order_count']))
+  } else if (shopRacingSortBy.value === 'orders') {
+    rows.sort((left, right) => compareShopRacingMetrics(left, right, ['order_count', 'gmv', 'profit']))
+  } else if (shopRacingSortBy.value === 'achievement') {
+    rows.sort((left, right) => {
+      const leftHasTarget = hasShopRacingTarget(left)
+      const rightHasTarget = hasShopRacingTarget(right)
+      if (leftHasTarget !== rightHasTarget) return leftHasTarget ? -1 : 1
+      if (leftHasTarget && rightHasTarget) {
+        return compareShopRacingMetrics(left, right, ['achievement_rate', 'gmv', 'profit', 'order_count'])
+      }
+      return compareShopRacingMetrics(left, right, ['gmv', 'profit', 'order_count'])
+    })
+  } else {
+    rows.sort((left, right) => compareShopRacingMetrics(left, right, ['gmv', 'profit', 'order_count']))
+  }
+  return rows.map((row, index) => ({ ...row, rank: index + 1 }))
+})
 // 库存滞销
 const inventorySummary = ref({
   total_value: 0,
@@ -2712,11 +2818,16 @@ const loadShopRacingData = async () => {
           ...row,
           name: displayMeta.display_name,
           secondary_name: displayMeta.secondary_name,
-          target: row.target_amount ?? null,
-          achieved: row.gmv ?? null,
+          platform_code: row.platform_code ?? null,
+          gmv: toNullableNumber(row.gmv),
+          profit: toNullableNumber(row.profit),
+          profit_margin: calculateProfitMargin(row.profit, row.gmv),
+          order_count: toNullableNumber(row.order_count),
+          avg_order_value: toNullableNumber(row.avg_order_value),
+          target_amount: toNullableNumber(row.target_amount),
           achievement_rate:
             row.achievement_rate == null
-              ? 0
+              ? null
               : Number(row.achievement_rate) > 1
                 ? Number(row.achievement_rate) / 100
                 : Number(row.achievement_rate)
@@ -3491,7 +3602,11 @@ watch(
 
 .racing-container {
   max-height: 400px;
-  overflow-y: auto;
+  overflow: auto;
+}
+
+.racing-table {
+  min-width: 1080px;
 }
 
 .shop-display-cell {
@@ -3505,6 +3620,21 @@ watch(
 .shop-display-secondary {
   font-size: 12px;
   color: #909399;
+}
+
+.racing-achievement-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.racing-achievement-cell .el-progress {
+  flex: 1;
+}
+
+.metric-negative {
+  color: #f56c6c;
 }
 
 .operational-metrics-section {

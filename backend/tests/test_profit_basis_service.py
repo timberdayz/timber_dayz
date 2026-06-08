@@ -67,6 +67,142 @@ async def test_build_profit_basis_uses_orders_profit_minus_a_class_costs(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_build_profit_basis_prefers_allocated_costs_when_rows_exist(monkeypatch):
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+
+    async def fake_load_shop_metrics(db_arg, year_month):
+        return {
+            "shopee|shop-1": {
+                "monthly_sales": 10000,
+                "monthly_profit": 4000,
+                "achievement_rate": 80,
+            }
+        }
+
+    async def fake_execute(stmt, params=None):
+        sql = str(stmt)
+        if "fact_expenses_allocated_day_shop_sku" in sql:
+            return _MockMappingsResult([
+                {
+                    "allocated_row_count": 2,
+                    "a_class_cost_amount": Decimal("1500"),
+                }
+            ])
+        if "a_class.operating_costs" in sql:
+            raise AssertionError("operating_costs fallback should not run when allocated rows exist")
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.load_shop_monthly_metrics",
+        fake_load_shop_metrics,
+    )
+    db.execute = AsyncMock(side_effect=fake_execute)
+
+    basis = await service.build_profit_basis(
+        year_month="2026-04",
+        platform_code="Shopee",
+        shop_id="shop-1",
+    )
+
+    assert basis["a_class_cost_amount"] == pytest.approx(1500)
+    assert basis["profit_basis_amount"] == pytest.approx(2500)
+
+
+@pytest.mark.asyncio
+async def test_build_profit_basis_falls_back_to_operating_costs_when_allocated_rows_missing(monkeypatch):
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+
+    async def fake_load_shop_metrics(db_arg, year_month):
+        return {
+            "shopee|shop-1": {
+                "monthly_sales": 10000,
+                "monthly_profit": 4000,
+                "achievement_rate": 80,
+            }
+        }
+
+    async def fake_execute(stmt, params=None):
+        sql = str(stmt)
+        if "fact_expenses_allocated_day_shop_sku" in sql:
+            return _MockMappingsResult([
+                {
+                    "allocated_row_count": 0,
+                    "a_class_cost_amount": Decimal("0"),
+                }
+            ])
+        if "a_class.operating_costs" in sql:
+            assert '"成本合计"' in sql
+            assert '"删除时间" IS NULL' in sql
+            assert params["year_month"] == "2026-04"
+            assert params["platform_code"] == "Shopee"
+            assert params["shop_id"] == "shop-1"
+            return _MockMappingsResult([{"a_class_cost_amount": Decimal("24023")}])
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.load_shop_monthly_metrics",
+        fake_load_shop_metrics,
+    )
+    db.execute = AsyncMock(side_effect=fake_execute)
+
+    basis = await service.build_profit_basis(
+        year_month="2026-04",
+        platform_code="Shopee",
+        shop_id="shop-1",
+    )
+
+    assert basis["orders_profit_amount"] == pytest.approx(4000)
+    assert basis["a_class_cost_amount"] == pytest.approx(24023)
+    assert basis["profit_basis_amount"] == pytest.approx(-20023)
+
+
+@pytest.mark.asyncio
+async def test_build_profit_basis_operating_cost_fallback_excludes_soft_deleted_rows(monkeypatch):
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+
+    async def fake_load_shop_metrics(db_arg, year_month):
+        return {
+            "tiktok|shop-2": {
+                "monthly_sales": 5000,
+                "monthly_profit": 3000,
+                "achievement_rate": 70,
+            }
+        }
+
+    async def fake_execute(stmt, params=None):
+        sql = str(stmt)
+        if "fact_expenses_allocated_day_shop_sku" in sql:
+            return _MockMappingsResult([
+                {
+                    "allocated_row_count": 0,
+                    "a_class_cost_amount": Decimal("0"),
+                }
+            ])
+        if "a_class.operating_costs" in sql:
+            assert '"删除时间" IS NULL' in sql
+            return _MockMappingsResult([{"a_class_cost_amount": Decimal("800")}])
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.load_shop_monthly_metrics",
+        fake_load_shop_metrics,
+    )
+    db.execute = AsyncMock(side_effect=fake_execute)
+
+    basis = await service.build_profit_basis(
+        year_month="2026-04",
+        platform_code="TikTok",
+        shop_id="shop-2",
+    )
+
+    assert basis["a_class_cost_amount"] == pytest.approx(800)
+    assert basis["profit_basis_amount"] == pytest.approx(2200)
+
+
+@pytest.mark.asyncio
 async def test_build_profit_basis_clamps_negative_basis_to_zero_distributable(monkeypatch):
     db = AsyncMock()
     service = ProfitBasisService(db)

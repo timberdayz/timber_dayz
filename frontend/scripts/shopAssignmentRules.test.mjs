@@ -2,8 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  calculateAllocatableProfit,
+  calculateAssignmentCommission,
   exceedsCommissionRatioLimit,
+  inferAssignmentRole,
   setShopAllocatableProfitRate,
+  summarizeEmployeeCommissions,
   sumCommissionRatio
 } from '../src/domains/business/views/hr/shopAssignmentRules.js'
 
@@ -52,4 +56,71 @@ test('setShopAllocatableProfitRate syncs table row and source shop object', () =
 
   assert.equal(row.allocatable_profit_rate, 0.45)
   assert.equal(shop.allocatable_profit_rate, 0.45)
+})
+
+test('inferAssignmentRole maps supervisor-like positions and defaults to operator', () => {
+  assert.equal(inferAssignmentRole({ position_name: '店铺主管' }), 'supervisor')
+  assert.equal(inferAssignmentRole({ position_code: 'SUPV' }), 'supervisor')
+  assert.equal(inferAssignmentRole({ position_name: 'Operations Manager' }), 'supervisor')
+  assert.equal(inferAssignmentRole({ position_name: '' }), 'operator')
+  assert.equal(inferAssignmentRole(null), 'operator')
+})
+
+test('calculateAllocatableProfit uses net profit times allocatable rate', () => {
+  assert.equal(
+    calculateAllocatableProfit({ profit_basis_amount: 10000, allocatable_profit_rate: 0.3 }),
+    3000
+  )
+})
+
+test('calculateAssignmentCommission uses net profit, allocatable rate, and person ratio', () => {
+  assert.equal(
+    calculateAssignmentCommission(
+      { profit_basis_amount: 10000, allocatable_profit_rate: 0.3 },
+      { commission_ratio: 0.05 }
+    ),
+    150
+  )
+})
+
+test('summarizeEmployeeCommissions totals estimated monthly commission by employee', () => {
+  const rows = [
+    {
+      profit_basis_amount: 10000,
+      allocatable_profit_rate: 0.3,
+      assignments: [
+        { employee_code: 'E001', employee_name: 'Alice', role: 'supervisor', commission_ratio: 0.05 },
+        { employee_code: 'E002', employee_name: 'Bob', role: 'operator', commission_ratio: 0.03 }
+      ]
+    },
+    {
+      profit_basis_amount: 5000,
+      allocatable_profit_rate: 0.4,
+      assignments: [
+        { employee_code: 'E001', employee_name: 'Alice', role: 'supervisor', commission_ratio: 0.05 }
+      ]
+    },
+    {
+      profit_basis_amount: 9000,
+      allocatable_profit_rate: 0.2,
+      assignments: []
+    }
+  ]
+
+  assert.deepEqual(summarizeEmployeeCommissions(rows), [
+    {
+      employee_code: 'E001',
+      employee_name: 'Alice',
+      role: 'supervisor',
+      shop_count: 2,
+      estimated_commission: 250
+    },
+    {
+      employee_code: 'E002',
+      employee_name: 'Bob',
+      role: 'operator',
+      shop_count: 1,
+      estimated_commission: 90
+    }
+  ])
 })

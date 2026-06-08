@@ -1,9 +1,58 @@
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 from urllib.parse import urlparse, urlunparse
+
+
+class _MappingResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+@pytest.mark.asyncio
+async def test_load_shop_monthly_metrics_recovers_missing_shop_racing_view(monkeypatch):
+    from backend.services import postgresql_shop_metrics_service as service
+
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            Exception('UndefinedTableError: relation "api.business_overview_shop_racing_module" does not exist'),
+            _MappingResult(
+                [
+                    {
+                        "platform_code": "Shopee",
+                        "shop_id": "shop-a",
+                        "gmv": 1234,
+                        "profit": 321,
+                        "achievement_rate": 82.27,
+                    }
+                ]
+            ),
+        ]
+    )
+
+    execute_sql_target = AsyncMock(return_value="run-1")
+    monkeypatch.setattr(
+        "backend.services.data_pipeline.refresh_runner.execute_sql_target",
+        execute_sql_target,
+    )
+
+    metrics = await service.load_shop_monthly_metrics(db, "2026-03")
+
+    execute_sql_target.assert_awaited_once()
+    assert execute_sql_target.await_args.kwargs["target"] == "api.business_overview_shop_racing_module"
+    assert execute_sql_target.await_args.kwargs["resolve_dependencies"] is True
+    db.rollback.assert_awaited_once()
+    assert metrics["shopee|shop-a"]["monthly_profit"] == 321.0
 
 
 @pytest.mark.pg_only

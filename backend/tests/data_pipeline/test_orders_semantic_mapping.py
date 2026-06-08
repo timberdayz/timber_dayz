@@ -261,6 +261,61 @@ async def test_orders_monthly_atomic_prefers_rmb_paid_amount_over_local_paid_amo
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
+async def test_orders_atomic_prefers_rmb_profit_over_local_profit():
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await _create_orders_b_class_tables(session)
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_daily (
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, period_start_date, period_end_date,
+                        period_start_time, period_end_time, raw_data, header_columns,
+                        data_hash, ingest_timestamp, currency_code
+                    ) VALUES (
+                        'shopee', 'xihong', 'orders', 'daily',
+                        DATE '2026-03-08', DATE '2026-03-08', DATE '2026-03-08',
+                        TIMESTAMP '2026-03-08 00:00:00', TIMESTAMP '2026-03-08 23:59:59',
+                        '{"store_name":"Shopee菲律宾2店","order_id":"SO-RMB-PROFIT-1","buyer_payment_rmb":"20","buyer_payment":"200","profit_rmb":"5","profit":"50","product_quantity":"1"}'::jsonb,
+                        '["store_name","order_id","buyer_payment_rmb","buyer_payment","profit_rmb","profit","product_quantity"]'::jsonb,
+                        'hash-rmb-profit-priority-1', TIMESTAMP '2026-06-01 10:00:00', 'PHP'
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            await execute_sql_target(session, "semantic.fact_orders_atomic")
+            await session.commit()
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT order_id, paid_amount, profit
+                        FROM semantic.fact_orders_atomic
+                        WHERE order_id = 'SO-RMB-PROFIT-1'
+                        """
+                    )
+                )
+            ).mappings().first()
+
+        assert row is not None
+        assert float(row["paid_amount"]) == 20.0
+        assert float(row["profit"]) == 5.0
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
 async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
     with PostgresContainer("postgres:15") as pg:
         sync_url = pg.get_connection_url()
