@@ -2433,7 +2433,7 @@ const getOperatingResultTagType = (value) => {
 const formatNullablePercent = (value, decimals = 2) =>
   value != null && !Number.isNaN(Number(value)) ? `${Number(value).toFixed(decimals)}%` : '--'
 
-// 核心KPI 筛选变化时同时刷新 KPI 与经营指标
+// 核心KPI 筛选变化时刷新所有依赖平台口径的模块
 const onKpiMonthChange = () => {
   if (!_syncingFromGlobal.value) useGlobalDate.value.kpi = false
   loadKPIData()
@@ -2460,8 +2460,14 @@ const onKpiGranularityChange = () => {
   loadKPIData()
 }
 
-const onKpiFilterChange = () => {
-  loadKPIData()
+const onKpiFilterChange = async () => {
+  await Promise.allSettled([
+    loadKPIData(),
+    loadComparisonData(),
+    loadOperationalMetrics(),
+    loadShopRacingData(),
+    loadTrafficRanking()
+  ])
 }
 
 // 加载KPI数据
