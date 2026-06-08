@@ -6,8 +6,10 @@
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
+from uuid import uuid4
 
 # 添加项目根目录到Python路径
 from modules.core.path_manager import get_project_root
@@ -24,6 +26,246 @@ logger = logging.getLogger(__name__)
 
 AUTO_INGEST_MAX_FILES_PER_RUN = 50
 AUTO_INGEST_MAX_CONCURRENT = max(1, int(os.getenv("AUTO_INGEST_MAX_CONCURRENT", "2")))
+
+
+def _create_auto_ingest_task_record(
+    db,
+    pending_ids: List[int],
+    max_files: int,
+    max_concurrent: int,
+) -> str | None:
+    if not pending_ids:
+        return None
+
+    try:
+        from backend.services.task_center_sync_service import TaskCenterSyncService
+
+        started_at = datetime.now(timezone.utc)
+        task_id = f"auto_ingest_{started_at.strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:8]}"
+        task_center = TaskCenterSyncService(db)
+        task_center.create_task(
+            task_id=task_id,
+            task_family="data_sync",
+            task_type="auto_ingest",
+            status="running",
+            trigger_source="auto_ingest",
+            total_items=len(pending_ids),
+            processed_items=0,
+            success_items=0,
+            failed_items=0,
+            skipped_items=0,
+            total_rows=0,
+            processed_rows=0,
+            valid_rows=0,
+            error_rows=0,
+            quarantined_rows=0,
+            progress_percent=0.0,
+            started_at=started_at,
+            details_json={
+                "errors": [],
+                "warnings": [],
+                "message": "auto ingest running",
+                "row_progress": 0.0,
+                "task_details": {
+                    "source": "scheduled_tasks.auto_ingest_pending_files",
+                    "max_files": max_files,
+                    "max_concurrent": max_concurrent,
+                    "file_ids": list(pending_ids),
+                    "success_files": 0,
+                    "failed_files": 0,
+                    "skipped_files": 0,
+                    "quarantined_files": 0,
+                    "skipped_template_update": 0,
+                    "skipped_no_template": 0,
+                    "files": [],
+                },
+            },
+        )
+        for file_id in pending_ids:
+            try:
+                task_center.add_link(
+                    task_id,
+                    subject_type="catalog_file",
+                    subject_id=str(file_id),
+                )
+            except Exception as link_exc:  # noqa: BLE001
+                logger.warning(
+                    "[AutoIngest] failed to link task-center record %s to file %s: %s",
+                    task_id,
+                    file_id,
+                    link_exc,
+                    exc_info=True,
+                )
+        return task_id
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[AutoIngest] failed to create task-center record: %s",
+            exc,
+            exc_info=True,
+        )
+        return None
+
+
+def _auto_ingest_result_status(item: Dict[str, Any]) -> str:
+    status = str(item.get("status") or "").strip()
+    try:
+        quarantined = int(item.get("quarantined") or 0)
+    except (TypeError, ValueError):
+        quarantined = 0
+    if quarantined > 0 and status in {"", "success"}:
+        return "quarantined"
+    if status:
+        return status
+    if item.get("success") is True:
+        return "success"
+    return "failed"
+
+
+def _auto_ingest_result_message(item: Dict[str, Any]) -> str:
+    return str(
+        item.get("message")
+        or item.get("error")
+        or item.get("detail")
+        or ""
+    )
+
+
+def _build_auto_ingest_task_details(
+    summary: Dict[str, int],
+    results: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    files = []
+    errors = []
+    warnings = []
+
+    for item in results:
+        safe_item = item if isinstance(item, dict) else {"status": "failed", "message": str(item)}
+        status = _auto_ingest_result_status(safe_item)
+        message = _auto_ingest_result_message(safe_item)
+        file_entry = {
+            "file_id": safe_item.get("file_id"),
+            "file_name": safe_item.get("file_name"),
+            "status": status,
+            "error_code": safe_item.get("error_code"),
+            "message": message,
+        }
+        files.append(file_entry)
+        if status == "failed":
+            errors.append(file_entry)
+        elif status == "skipped":
+            warnings.append(file_entry)
+
+    message = (
+        "Auto ingest completed: "
+        f"success={summary.get('succeeded', 0)}, "
+        f"quarantined={summary.get('quarantined', 0)}, "
+        f"failed={summary.get('failed', 0)}, "
+        f"skipped={summary.get('skipped', 0)}"
+    )
+
+    return {
+        "errors": errors,
+        "warnings": warnings,
+        "message": message,
+        "row_progress": 0.0,
+        "task_details": {
+            "success_files": summary.get("succeeded", 0),
+            "failed_files": summary.get("failed", 0),
+            "skipped_files": summary.get("skipped", 0),
+            "quarantined_files": summary.get("quarantined", 0),
+            "skipped_template_update": summary.get("skipped_template_update", 0),
+            "skipped_no_template": summary.get("skipped_no_template", 0),
+            "files": files,
+        },
+    }
+
+
+def _resolve_auto_ingest_task_status(summary: Dict[str, int]) -> str:
+    processed = int(summary.get("processed", 0) or 0)
+    failed = int(summary.get("failed", 0) or 0)
+    if processed > 0 and failed >= processed:
+        return "failed"
+    if failed > 0:
+        return "partial_success"
+    return "completed"
+
+
+def _complete_auto_ingest_task_record(
+    db,
+    task_id: str | None,
+    summary: Dict[str, int],
+    results: List[Dict[str, Any]],
+) -> None:
+    if not task_id:
+        return
+
+    try:
+        from backend.services.task_center_sync_service import TaskCenterSyncService
+
+        task_center = TaskCenterSyncService(db)
+        task = task_center.get_task(task_id)
+        if task is None:
+            return
+        task_center.update_task(
+            task,
+            status=_resolve_auto_ingest_task_status(summary),
+            processed_items=summary.get("processed", 0),
+            success_items=summary.get("succeeded", 0),
+            failed_items=summary.get("failed", 0),
+            skipped_items=summary.get("skipped", 0),
+            progress_percent=100.0,
+            finished_at=datetime.now(timezone.utc),
+            details_json=_build_auto_ingest_task_details(summary, results),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[AutoIngest] failed to complete task-center record %s: %s",
+            task_id,
+            exc,
+            exc_info=True,
+        )
+
+
+def _fail_auto_ingest_task_record(db, task_id: str | None, error: Exception) -> None:
+    if not task_id:
+        return
+
+    error_message = str(error)
+    try:
+        from backend.services.task_center_sync_service import TaskCenterSyncService
+
+        task_center = TaskCenterSyncService(db)
+        task = task_center.get_task(task_id)
+        if task is None:
+            return
+        task_center.update_task(
+            task,
+            status="failed",
+            finished_at=datetime.now(timezone.utc),
+            error_summary=error_message,
+            details_json={
+                "errors": [{"message": error_message}],
+                "warnings": [],
+                "message": error_message,
+                "row_progress": 0.0,
+                "task_details": {
+                    "success_files": 0,
+                    "failed_files": 0,
+                    "skipped_files": 0,
+                    "quarantined_files": 0,
+                    "skipped_template_update": 0,
+                    "skipped_no_template": 0,
+                    "files": [],
+                },
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[AutoIngest] failed to mark task-center record %s as failed: %s",
+            task_id,
+            exc,
+            exc_info=True,
+        )
 
 
 @celery_app.task(name="backend.tasks.scheduled_tasks.refresh_sales_materialized_views")
@@ -273,6 +515,7 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
     v4.18.2优化:使用并发处理替代顺序处理,性能提升约5-10倍
     """
     db = SessionLocal()
+    task_record_id = None
     try:
         pending_ids = db.execute(
             select(CatalogFile.id)
@@ -290,6 +533,12 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
         
         # 预发布阶段优先稳定性，限制 auto-ingest 并发，避免 worker 被 OOM/SIGKILL。
         max_concurrent = min(AUTO_INGEST_MAX_CONCURRENT, max(1, len(pending_ids) // 10 + 1))
+        task_record_id = _create_auto_ingest_task_record(
+            db,
+            list(pending_ids),
+            max_files,
+            max_concurrent,
+        )
         
         async def _process_ids_concurrent(ids: List[int]) -> List[Dict[str, Any]]:
             """并发处理文件(使用信号量控制并发数)
@@ -400,7 +649,7 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
         }
 
         for item in results:
-            status = item.get("status")
+            status = _auto_ingest_result_status(item)
             if status == "success":
                 summary["succeeded"] += 1
             elif status == "quarantined":
@@ -412,7 +661,9 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
                 message = item.get("message", "")
                 message_lower = message.lower()
                 if (
-                    "no_template" in message_lower
+                    item.get("error_code") == "NO_TEMPLATE"
+                    or item.get("skip_reason") == "no_template"
+                    or "no_template" in message_lower
                     or "no template" in message_lower
                     or "无模板" in message
                 ):
@@ -428,6 +679,7 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
             summary["failed"],
             summary["skipped"],
         )
+        _complete_auto_ingest_task_record(db, task_record_id, summary, results)
 
         return {
             "status": "success",
@@ -436,6 +688,7 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
         }
 
     except Exception as exc:  # noqa: BLE001
+        _fail_auto_ingest_task_record(db, task_record_id, exc)
         logger.error(f"[AutoIngest] 定时任务执行失败: {exc}", exc_info=True)
         return {"status": "failed", "error": str(exc)}
     finally:

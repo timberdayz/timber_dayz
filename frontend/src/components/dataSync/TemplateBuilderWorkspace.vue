@@ -291,8 +291,10 @@
     <DeduplicationFieldsSelector
       v-if="headerColumns.length > 0"
       :available-fields="headerColumns"
+      :header-bindings="localHeaderBindings"
       :data-domain="fileFilters.domain"
       :sub-domain="fileFilters.sub_domain"
+      :initial-fields="deduplicationFields"
       @update:selectedFields="$emit('deduplication-fields-change', $event)"
       @validation-change="$emit('validation-change', $event)"
     />
