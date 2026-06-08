@@ -365,6 +365,7 @@ class SyncProgressTracker:
         return {
             "task_id": task["task_id"],
             "task_type": task["task_type"],
+            "trigger_source": self._resolve_trigger_source(task),
             "total_files": task.get("total_items", 0) or 0,
             "processed_files": task.get("processed_items", 0) or 0,
             "current_file": task.get("current_item") or "",
@@ -398,6 +399,18 @@ class SyncProgressTracker:
             "row_progress": details.get("row_progress"),
             "task_details": dict(details.get("task_details", {})),
         }
+
+    @staticmethod
+    def _resolve_trigger_source(task: Dict[str, Any]) -> str:
+        trigger_source = str(task.get("trigger_source") or "").strip()
+        if trigger_source:
+            return trigger_source
+
+        task_type = str(task.get("task_type") or "").strip()
+        task_id = str(task.get("task_id") or "").strip()
+        if task_type == "auto_ingest" or task_id.startswith("auto_ingest_"):
+            return "auto_ingest"
+        return "manual"
 
     @staticmethod
     def _legacy_status_to_task_center(status: Optional[str]) -> Optional[str]:

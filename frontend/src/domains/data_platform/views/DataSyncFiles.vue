@@ -627,11 +627,15 @@ v4.6.0新增：独立的数据同步系统
         </el-table-column>
         <el-table-column prop="task_type" label="任务类型" width="120">
           <template #default="{ row }">
-            <el-tag
-              size="small"
-              :type="row.task_type === 'bulk_ingest' ? 'primary' : 'info'"
-            >
-              {{ row.task_type === "bulk_ingest" ? "批量同步" : "单文件同步" }}
+            <el-tag size="small" :type="getSyncTaskTypeMeta(row.task_type).tagType">
+              {{ getSyncTaskTypeMeta(row.task_type).text }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="trigger_source" label="触发方式" width="110">
+          <template #default="{ row }">
+            <el-tag size="small" :type="getSyncTriggerMeta(row).tagType">
+              {{ getSyncTriggerMeta(row).text }}
             </el-tag>
           </template>
         </el-table-column>
@@ -879,6 +883,7 @@ import {
 } from '@element-plus/icons-vue'
 import api from '@/api'
 import PageHeader from '@/components/common/PageHeader.vue'
+import { getSyncTaskTypeMeta, getSyncTriggerMeta } from '@/domains/data_platform/utils/syncTaskDisplay'
 
 const router = useRouter()
 const route = useRoute()

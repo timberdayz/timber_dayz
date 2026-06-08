@@ -66,6 +66,20 @@ v4.6.0新增：独立的数据同步系统
         style="width: 100%"
       >
         <el-table-column prop="task_id" label="任务ID" width="200" />
+        <el-table-column prop="task_type" label="任务类型" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="getSyncTaskTypeMeta(row.task_type).tagType">
+              {{ getSyncTaskTypeMeta(row.task_type).text }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="trigger_source" label="触发方式" width="110">
+          <template #default="{ row }">
+            <el-tag size="small" :type="getSyncTriggerMeta(row).tagType">
+              {{ getSyncTriggerMeta(row).text }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.status === 'running' || row.status === 'processing'" type="primary" size="small">
@@ -128,6 +142,7 @@ v4.6.0新增：独立的数据同步系统
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { getSyncTaskTypeMeta, getSyncTriggerMeta } from '@/domains/data_platform/utils/syncTaskDisplay'
 
 // 状态
 const loading = ref(false)
