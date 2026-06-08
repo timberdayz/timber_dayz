@@ -86,7 +86,7 @@ async def test_process_refresh_queue_task_claims_executes_and_completes(monkeypa
 
     async def _fake_execute_refresh_plan(*args, **kwargs):
         calls.append(("execute", kwargs["targets"], kwargs["context"]))
-        return "run-1"
+        return {"run_id": "run-1", "status": "success", "failed_targets": []}
 
     monkeypatch.setattr(task_module, "AsyncSessionLocal", lambda: _FakeSession(), raising=False)
     monkeypatch.setattr(task_module, "RefreshQueueService", _FakeQueueService, raising=False)
@@ -96,10 +96,77 @@ async def test_process_refresh_queue_task_claims_executes_and_completes(monkeypa
 
     assert result["status"] == "success"
     assert result["job_id"] == "job-1"
+    assert result["run_id"] == "run-1"
     assert calls[0][0] == "recover"
     assert calls[1] == "claim"
     assert calls[2][0] == "execute"
     assert calls[3] == ("completed", 1)
+
+
+@pytest.mark.asyncio
+async def test_process_refresh_queue_task_marks_failed_on_partial_failed_run(monkeypatch):
+    from backend.tasks import refresh_queue_tasks as task_module
+
+    calls = []
+
+    class _FakeTask:
+        id = 3
+        job_id = "job-3"
+        trigger_type = "data_ingested"
+        pipeline_name = "data_ingested_refresh"
+        targets_json = ["api.business_overview_kpi_module"]
+        context_json = {"file_id": 3, "data_domain": "orders"}
+
+    class _FakeSession:
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+        async def close(self):
+            return None
+
+    class _FakeQueueService:
+        def __init__(self, db):
+            self.db = db
+
+        async def recover_stale_running_tasks(self, timeout_seconds: int):
+            calls.append(("recover", timeout_seconds))
+            return 0
+
+        async def claim_next_refresh_task(self):
+            return _FakeTask()
+
+        async def mark_completed(self, task_id: int):
+            calls.append(("completed", task_id))
+            return None
+
+        async def mark_failed(self, task_id: int, error_message: str):
+            calls.append(("failed", task_id, error_message))
+            return None
+
+    async def _fake_execute_refresh_plan(*args, **kwargs):
+        return {
+            "run_id": "run-3",
+            "status": "partial_failed",
+            "failed_targets": ["semantic.fact_orders_monthly_atomic_mv"],
+        }
+
+    monkeypatch.setattr(task_module, "AsyncSessionLocal", lambda: _FakeSession(), raising=False)
+    monkeypatch.setattr(task_module, "RefreshQueueService", _FakeQueueService, raising=False)
+    monkeypatch.setattr(task_module, "execute_refresh_plan", _fake_execute_refresh_plan, raising=False)
+
+    result = await task_module._async_process_refresh_queue_task()
+
+    assert result["status"] == "failed"
+    assert result["job_id"] == "job-3"
+    assert result["run_id"] == "run-3"
+    assert calls[0][0] == "recover"
+    assert calls[1][0] == "failed"
+    assert calls[1][1] == 3
+    assert "partial_failed" in calls[1][2]
+    assert "semantic.fact_orders_monthly_atomic_mv" in calls[1][2]
 
 
 @pytest.mark.asyncio

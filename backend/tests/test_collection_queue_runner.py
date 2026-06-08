@@ -6,7 +6,7 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from modules.core.db import CollectionConfig, CollectionConfigRun
+from modules.core.db import CollectionConfig, CollectionConfigRun, CollectionTask
 
 
 @pytest_asyncio.fixture
@@ -18,6 +18,7 @@ async def queue_runner_engine():
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
         await conn.run_sync(CollectionConfig.__table__.create)
         await conn.run_sync(CollectionConfigRun.__table__.create)
+        await conn.run_sync(CollectionTask.__table__.create)
 
     yield engine
     await engine.dispose()
@@ -216,6 +217,64 @@ async def test_process_run_executes_expanded_tasks_sequentially(queue_runner_ses
 
     assert execution_order == ["task-1", "task-2"]
     assert finalized == [11]
+
+
+@pytest.mark.asyncio
+async def test_process_run_stops_before_next_task_when_run_is_cancelled(
+    queue_runner_session_factory,
+):
+    from backend.services.collection_config_run_service import CollectionConfigRunService
+    from backend.services.collection_queue_runner import CollectionQueueRunner
+
+    config = await _seed_config(queue_runner_session_factory)
+    async with queue_runner_session_factory() as session:
+        service = CollectionConfigRunService(session)
+        run, _ = await service.enqueue_config_run(config, trigger_type="manual")
+        claimed = await service.claim_next_queued_run()
+
+    runner = CollectionQueueRunner(
+        session_factory=queue_runner_session_factory,
+        poll_interval_seconds=0.01,
+    )
+    tasks = [
+        SimpleNamespace(
+            task_id="task-1",
+            platform="shopee",
+            account="shop-sg-1",
+            data_domains=["orders"],
+            sub_domains=None,
+            date_range={"start_date": "2026-04-10", "end_date": "2026-04-10"},
+            granularity="daily",
+            debug_mode=False,
+        ),
+        SimpleNamespace(
+            task_id="task-2",
+            platform="shopee",
+            account="shop-sg-2",
+            data_domains=["orders"],
+            sub_domains=None,
+            date_range={"start_date": "2026-04-10", "end_date": "2026-04-10"},
+            granularity="daily",
+            debug_mode=False,
+        ),
+    ]
+    execution_order = []
+
+    async def _fake_expand(_run):
+        return tasks
+
+    async def _fake_execute(task, runtime_manifests=None):
+        execution_order.append(task.task_id)
+        async with queue_runner_session_factory() as session:
+            service = CollectionConfigRunService(session)
+            await service.cancel_run_by_run_id(run.run_id)
+
+    runner._expand_run_tasks = _fake_expand
+    runner._execute_task = _fake_execute
+
+    await runner._process_run(claimed)
+
+    assert execution_order == ["task-1"]
 
 
 @pytest.mark.asyncio

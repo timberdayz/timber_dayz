@@ -131,6 +131,16 @@ async def test_tiktok_login_homepage_dom_detection_uses_shop_region_signal() -> 
 
 
 @pytest.mark.asyncio
+async def test_tiktok_login_homepage_dom_detection_does_not_hard_require_local_storage_markers() -> None:
+    component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    page.text_map["SG"] = _FakeLocator()
+    page.text_map["数据分析"] = _FakeLocator()
+
+    assert await component._homepage_dom_looks_ready(page) is True
+
+
+@pytest.mark.asyncio
 async def test_tiktok_login_homepage_dom_detection_rejects_blank_homepage() -> None:
     component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
     page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")

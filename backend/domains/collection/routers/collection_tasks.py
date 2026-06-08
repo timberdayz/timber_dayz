@@ -50,6 +50,10 @@ from backend.services.verification_protocol import (
     extract_resume_submission,
     verification_input_mode,
 )
+from backend.services.collection_account_runtime_service import (
+    CollectionAccountRuntimeError,
+    load_collection_account_runtime,
+)
 from backend.services.websocket_manager import connection_manager
 from backend.services.collection_task_status import STATUS as TASK_STATUS, TERMINAL_STATUSES, ACTIVE_STATUSES
 
@@ -427,30 +431,16 @@ async def create_task(
             ),
         )
 
-    account_info = None
     try:
-        from backend.services.shop_account_loader_service import (
-            get_shop_account_loader_service,
+        account_info = await load_collection_account_runtime(
+            request.account_id,
+            db=db,
         )
-
-        shop_account_loader = get_shop_account_loader_service()
-        shop_payload = await shop_account_loader.load_shop_account_async(
-            request.account_id, db
-        )
-        if shop_payload:
-            account_info = {
-                **shop_payload["compat_account"],
-                "main_account_id": shop_payload["main_account"]["main_account_id"],
-                "shop_account_id": shop_payload["shop_context"]["shop_account_id"],
-            }
-    except Exception:
-        account_info = None
-
-    if not account_info:
-        from backend.services.account_loader_service import get_account_loader_service
-
-        account_loader = get_account_loader_service()
-        account_info = await account_loader.load_account_async(request.account_id, db)
+    except CollectionAccountRuntimeError as exc:
+        raise HTTPException(
+            status_code=exc.http_status,
+            detail=exc.user_message,
+        ) from exc
 
     if not account_info:
         raise HTTPException(
@@ -1318,37 +1308,7 @@ async def _load_collection_account_payload(account_id: str) -> dict:
     from backend.models.database import AsyncSessionLocal
 
     async with AsyncSessionLocal() as db:
-        account = None
-        try:
-            from backend.services.shop_account_loader_service import (
-                get_shop_account_loader_service,
-            )
-
-            shop_account_loader = get_shop_account_loader_service()
-            shop_payload = await shop_account_loader.load_shop_account_async(
-                account_id, db
-            )
-            if shop_payload:
-                account = {
-                    **shop_payload["compat_account"],
-                    "main_account_id": shop_payload["main_account"]["main_account_id"],
-                    "shop_account_id": shop_payload["shop_context"]["shop_account_id"],
-                }
-        except Exception:
-            account = None
-
-        if not account:
-            from backend.services.account_loader_service import (
-                get_account_loader_service,
-            )
-
-            account_loader = get_account_loader_service()
-            account = await account_loader.load_account_async(account_id, db)
-
-        if not account:
-            raise ValueError(f"Account {account_id} not found or disabled")
-
-        return account
+        return await load_collection_account_runtime(account_id, db=db)
 
 
 async def _persist_collection_task_state(
@@ -1393,6 +1353,8 @@ async def _mark_collection_task_running(task_id: str) -> CollectionTask | None:
     now = datetime.now(timezone.utc)
 
     def _mutate(task: CollectionTask) -> None:
+        if task.status == TASK_STATUS.CANCELLED:
+            return
         task.status = TASK_STATUS.RUNNING
         task.started_at = now
 
@@ -1430,6 +1392,8 @@ async def _persist_collection_task_result(
     )
 
     def _mutate(task: CollectionTask) -> None:
+        if task.status == TASK_STATUS.CANCELLED:
+            return
         task.status = result.status
         if result.status in [TASK_STATUS.COMPLETED, TASK_STATUS.PARTIAL_SUCCESS]:
             task.progress = 100
@@ -1477,14 +1441,41 @@ async def _execute_collection_task_background_v2(
         if not task:
             logger.error(f"Task {task_id} not found in database")
             return
+        if task.status == TASK_STATUS.CANCELLED:
+            logger.info("Task %s was cancelled before execution started", task_id)
+            await connection_manager.send_complete(
+                task_id,
+                TASK_STATUS.CANCELLED,
+                files_collected=getattr(task, "files_collected", 0) or 0,
+                error_message=getattr(task, "error_message", None),
+            )
+            return
 
         try:
             account = await _load_collection_account_payload(account_id)
-        except Exception as e:
-            logger.error(f"Failed to load account {account_id}: {e}")
+        except CollectionAccountRuntimeError as e:
+            logger.error(
+                "Failed to load account %s [%s]: %s",
+                account_id,
+                e.code,
+                e.log_message,
+            )
             failed_task = await _mark_collection_task_failed(
                 task_id,
-                error_message=f"璐﹀彿鍔犺浇澶辫触: {str(e)}",
+                error_message=e.user_message,
+            )
+            await connection_manager.send_complete(
+                task_id,
+                TASK_STATUS.FAILED,
+                files_collected=getattr(failed_task, "files_collected", 0) or 0,
+                error_message=getattr(failed_task, "error_message", str(e)),
+            )
+            return
+        except Exception as e:
+            logger.exception("Unexpected account runtime failure for %s: %s", account_id, e)
+            failed_task = await _mark_collection_task_failed(
+                task_id,
+                error_message=f"账号运行时预检失败: {str(e)}",
             )
             await connection_manager.send_complete(
                 task_id,

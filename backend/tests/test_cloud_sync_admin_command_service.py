@@ -201,7 +201,7 @@ async def test_command_service_refresh_projection_executes_refresh_plan(monkeypa
         calls["pipeline_name"] = pipeline_name
         calls["trigger_source"] = trigger_source
         calls["context"] = context
-        return "run-1"
+        return {"run_id": "run-1", "status": "success", "failed_targets": []}
 
     monkeypatch.setattr(
         "backend.services.cloud_sync_admin_command_service.execute_refresh_plan",
@@ -214,6 +214,7 @@ async def test_command_service_refresh_projection_executes_refresh_plan(monkeypa
     assert payload["status"] == "submitted"
     assert payload["source_table_name"] == "fact_shopee_orders_daily"
     assert payload["metadata"]["run_id"] == "run-1"
+    assert payload["metadata"]["refresh_status"] == "success"
     assert "api.business_overview_kpi_module" in calls["targets"]
 
 

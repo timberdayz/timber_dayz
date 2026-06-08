@@ -155,7 +155,7 @@
               <span class="queue-run-id">{{ run.run_id }}</span>
             </div>
             <el-button
-              v-if="run.status === 'queued'"
+              v-if="['queued', 'running'].includes(run.status)"
               size="small"
               type="danger"
               plain

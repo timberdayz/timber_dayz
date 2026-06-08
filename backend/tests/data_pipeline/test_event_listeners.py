@@ -170,3 +170,12 @@ async def test_data_ingested_refresh_runs_serially_within_same_process(
     )
 
     assert state["max_active"] == 1
+
+
+def test_data_ingested_targets_are_registered_refresh_targets():
+    from backend.services.event_listeners import DATA_INGESTED_PIPELINE_TARGETS
+    from backend.services.data_pipeline.refresh_registry import SQL_TARGET_PATHS
+
+    for domain, targets in DATA_INGESTED_PIPELINE_TARGETS.items():
+        for target in targets:
+            assert target in SQL_TARGET_PATHS, f"{domain} target must be registered: {target}"

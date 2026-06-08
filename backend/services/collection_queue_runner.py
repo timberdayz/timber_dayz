@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.services.collection_config_run_service import CollectionConfigRunService
-from modules.core.db import CollectionConfig
+from modules.core.db import CollectionConfig, CollectionConfigRun, CollectionTask
 from modules.core.logger import get_logger
 
 
@@ -91,14 +91,46 @@ class CollectionQueueRunner:
                 "or have no supported runtime domains"
             )
         for task_info in tasks:
+            if await self._is_run_cancelled(run.id):
+                logger.info(
+                    "Collection config run %s was cancelled; stop dispatching tasks",
+                    getattr(run, "run_id", run.id),
+                )
+                break
             runtime_manifests = None
             task = task_info
             if isinstance(task_info, tuple) and len(task_info) == 2:
                 task, runtime_manifests = task_info
             else:
                 runtime_manifests = getattr(task_info, "runtime_manifests", None)
+            if await self._is_task_cancelled(getattr(task, "task_id", "")):
+                logger.info(
+                    "Collection task %s was cancelled before execution; skip dispatch",
+                    getattr(task, "task_id", None),
+                )
+                continue
             await self._execute_task(task, runtime_manifests=runtime_manifests)
         await self._finalize_run(run)
+
+    async def _is_run_cancelled(self, run_id: int) -> bool:
+        async with self.session_factory() as session:
+            status = (
+                await session.execute(
+                    select(CollectionConfigRun.status).where(CollectionConfigRun.id == run_id)
+                )
+            ).scalar_one_or_none()
+            return status == "cancelled"
+
+    async def _is_task_cancelled(self, task_id: str) -> bool:
+        if not task_id:
+            return False
+        async with self.session_factory() as session:
+            status = (
+                await session.execute(
+                    select(CollectionTask.status).where(CollectionTask.task_id == task_id)
+                )
+            ).scalar_one_or_none()
+            return status == "cancelled"
 
     async def _expand_run_tasks(self, run: object):
         from backend.services.collection_config_execution import create_tasks_for_config

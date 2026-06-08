@@ -456,6 +456,7 @@ class TiktokLogin(LoginComponent):
         region = self._configured_shop_region()
         signal_count = 0
         current_url = str(getattr(page, "url", "") or "").strip().lower()
+        local_storage_ready = False
 
         if "/homepage" in current_url and not self._homepage_has_region_context(current_url):
             return False
@@ -469,9 +470,11 @@ class TiktokLogin(LoginComponent):
         except Exception:
             pass
 
-        # localStorage markers indicate the seller/shop context has finished initializing.
-        if not await self._homepage_local_storage_looks_ready(page):
-            return False
+        # localStorage is a useful readiness hint, but not a hard gate.
+        # On some persistent-profile sessions the homepage becomes fully usable
+        # before these keys are readable or populated, and blocking on them
+        # makes the login/navigation flow wait on an already-ready page.
+        local_storage_ready = await self._homepage_local_storage_looks_ready(page)
 
         if self._homepage_has_region_context(current_url):
             signal_count += 1
@@ -503,6 +506,9 @@ class TiktokLogin(LoginComponent):
                     signal_count += 1
             except Exception:
                 continue
+
+        if local_storage_ready:
+            signal_count += 1
 
         if signal_count < 2:
             return False

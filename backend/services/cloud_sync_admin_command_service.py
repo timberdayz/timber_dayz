@@ -18,7 +18,7 @@ from backend.services.cloud_b_class_auto_sync_factory import (
     get_current_checkpoint_scope_from_env,
 )
 from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
-from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
+from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, extract_run_id
 from backend.services.cloud_b_class_sync_utils import validate_b_class_table_name
 from backend.utils.events import DataIngestedEvent
 from modules.core.db import (
@@ -282,7 +282,7 @@ class CloudSyncAdminCommandService:
                 metadata={"target_count": 0},
             ).model_dump()
 
-        run_id = await execute_refresh_plan(
+        refresh_result = await execute_refresh_plan(
             self.db,
             targets=targets,
             pipeline_name="cloud_sync_admin_projection_refresh",
@@ -292,13 +292,20 @@ class CloudSyncAdminCommandService:
             max_attempts=1,
             retry_backoff_seconds=0.0,
         )
+        run_id = extract_run_id(refresh_result)
         await self.db.commit()
 
         return CloudSyncCommandResponse(
             status="submitted",
             source_table_name=source_table_name,
             detail="projection_refresh",
-            metadata={"run_id": run_id, "target_count": len(targets), "targets": targets},
+            metadata={
+                "run_id": run_id,
+                "refresh_status": refresh_result.get("status"),
+                "failed_targets": refresh_result.get("failed_targets", []),
+                "target_count": len(targets),
+                "targets": targets,
+            },
         ).model_dump()
 
     async def _get_task(self, job_id: str) -> CloudBClassSyncTask | None:

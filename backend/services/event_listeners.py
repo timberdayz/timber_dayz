@@ -13,7 +13,12 @@ from backend.services.data_pipeline.inventory_age_refresh_service import (
     InventoryAgeRefreshService,
 )
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
-from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
+from backend.services.data_pipeline.refresh_registry import SQL_TARGET_PATHS
+from backend.services.data_pipeline.refresh_runner import (
+    execute_refresh_plan,
+    extract_refresh_status,
+    extract_run_id,
+)
 from backend.utils.events import AClassUpdatedEvent, DataIngestedEvent, MVRefreshedEvent
 from modules.core.logger import get_logger
 
@@ -31,10 +36,6 @@ DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
         "api.business_overview_traffic_ranking_module",
         "api.business_overview_inventory_backlog_module",
         "api.business_overview_operational_metrics_module",
-        "api.annual_summary_kpi_module",
-        "api.annual_summary_trend_module",
-        "api.annual_summary_platform_share_module",
-        "api.annual_summary_by_shop_module",
     ],
     "analytics": [
         "api.business_overview_kpi_module",
@@ -42,10 +43,6 @@ DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
         "api.business_overview_shop_racing_module",
         "api.business_overview_traffic_ranking_module",
         "api.business_overview_operational_metrics_module",
-        "api.annual_summary_kpi_module",
-        "api.annual_summary_trend_module",
-        "api.annual_summary_platform_share_module",
-        "api.annual_summary_by_shop_module",
     ],
     "traffic": [
         "api.business_overview_comparison_module",
@@ -66,7 +63,17 @@ DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
 
 
 def determine_pipeline_targets_for_data_ingested(event: DataIngestedEvent) -> list[str]:
-    return list(DATA_INGESTED_PIPELINE_TARGETS.get(event.data_domain or "", []))
+    requested_targets = list(DATA_INGESTED_PIPELINE_TARGETS.get(event.data_domain or "", []))
+    registered_targets = [target for target in requested_targets if target in SQL_TARGET_PATHS]
+    dropped_targets = [target for target in requested_targets if target not in SQL_TARGET_PATHS]
+    if dropped_targets:
+        logger.warning(
+            "[EventListener] dropping unregistered refresh targets: domain=%s, file_id=%s, targets=%s",
+            event.data_domain,
+            event.file_id,
+            dropped_targets,
+        )
+    return registered_targets
 
 
 async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent) -> Optional[str]:
@@ -80,7 +87,7 @@ async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent)
 
     async with DATA_INGESTED_REFRESH_LOCK:
         async with AsyncSessionLocal() as session:
-            run_id = await execute_refresh_plan(
+            refresh_result = await execute_refresh_plan(
                 session,
                 targets=targets,
                 pipeline_name="data_ingested_refresh",
@@ -97,10 +104,12 @@ async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent)
                 max_attempts=2,
                 retry_backoff_seconds=0.1,
             )
+            run_id = extract_run_id(refresh_result)
             await session.commit()
             logger.info(
                 "[EventListener] PostgreSQL refresh pipeline completed: "
-                f"run_id={run_id}, file_id={event.file_id}, domain={event.data_domain}, targets={len(targets)}"
+                f"run_id={run_id}, status={extract_refresh_status(refresh_result)}, "
+                f"file_id={event.file_id}, domain={event.data_domain}, targets={len(targets)}"
             )
 
             if event.data_domain == "inventory":

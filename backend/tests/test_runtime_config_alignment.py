@@ -135,6 +135,18 @@ def test_dev_celery_healthcheck_uses_worker_readiness():
     assert "redis.from_url" not in health_joined
 
 
+def test_dev_runtime_services_mount_sql_directory_for_refresh_pipeline():
+    compose = _read_yaml("docker-compose.dev.yml")
+    services = compose["services"]
+
+    for service_name in ("backend-api", "backend-collector", "celery-worker", "celery-beat"):
+        volumes = services[service_name]["volumes"]
+        assert any(
+            str(volume).startswith("./sql:/app/sql")
+            for volume in volumes
+        ), f"{service_name} must mount sql assets into /app/sql for refresh execution"
+
+
 def test_dev_compose_includes_celery_beat_for_automatic_sync_scheduling():
     compose = _read_yaml("docker-compose.dev.yml")
     services = compose["services"]
@@ -206,6 +218,25 @@ def test_dev_compose_declares_explicit_backend_api_and_collector_services():
     assert services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
 
 
+def test_dev_collector_inherits_account_encryption_key():
+    compose = _read_yaml("docker-compose.dev.yml")
+    collector = compose["services"]["backend-collector"]
+    env = collector["environment"]
+
+    assert env["ACCOUNT_ENCRYPTION_KEY"] == "${ACCOUNT_ENCRYPTION_KEY}"
+
+
+def test_dev_collector_command_disables_reload_for_stable_worker_runtime():
+    compose = _read_yaml("docker-compose.dev.yml")
+    collector = compose["services"]["backend-collector"]
+
+    command = collector["command"]
+    command_joined = " ".join(command) if isinstance(command, list) else str(command)
+
+    assert "uvicorn" in command_joined
+    assert "--reload" not in command_joined
+
+
 def test_prod_compose_declares_explicit_backend_api_and_collector_services():
     compose = _read_yaml("docker-compose.prod.yml")
     services = compose["services"]
@@ -214,6 +245,14 @@ def test_prod_compose_declares_explicit_backend_api_and_collector_services():
     assert "backend-collector" in services
     assert "backend" not in services
     assert services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
+
+
+def test_prod_collector_inherits_account_encryption_key():
+    compose = _read_yaml("docker-compose.prod.yml")
+    collector = compose["services"]["backend-collector"]
+    env = collector["environment"]
+
+    assert env["ACCOUNT_ENCRYPTION_KEY"] == "${ACCOUNT_ENCRYPTION_KEY}"
 
 
 def test_cloud_overlays_target_backend_api_not_legacy_backend_service():

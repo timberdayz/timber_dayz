@@ -306,13 +306,36 @@ async def test_cancel_run_by_run_id_marks_queued_run_cancelled(config_run_sessio
 
 
 @pytest.mark.asyncio
-async def test_cancel_run_by_run_id_rejects_non_queued_run(config_run_session):
+async def test_cancel_run_by_run_id_marks_running_run_and_active_tasks_cancelled(config_run_session):
     from backend.services.collection_config_run_service import CollectionConfigRunService
 
     config = await _seed_config(config_run_session)
     service = CollectionConfigRunService(config_run_session)
     queued_run, _ = await service.enqueue_config_run(config, trigger_type="manual")
-    await service.claim_next_queued_run()
+    running_run = await service.claim_next_queued_run()
+    config_run_session.add(
+        CollectionTask(
+            task_id="running-config-task",
+            config_id=config.id,
+            config_run_id=running_run.id,
+            platform=config.platform,
+            account="shop-sg-1",
+            status="running",
+            trigger_type="manual",
+            data_domains=["orders"],
+        )
+    )
+    await config_run_session.commit()
 
-    with pytest.raises(ValueError, match="only queued config runs can be cancelled"):
-        await service.cancel_run_by_run_id(queued_run.run_id)
+    cancelled = await service.cancel_run_by_run_id(queued_run.run_id)
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.completed_at is not None
+    task = (
+        await config_run_session.execute(
+            select(CollectionTask).where(CollectionTask.task_id == "running-config-task")
+        )
+    ).scalar_one()
+    assert task.status == "cancelled"
+    assert task.completed_at is not None
+    assert "cancel" in (task.error_message or "")

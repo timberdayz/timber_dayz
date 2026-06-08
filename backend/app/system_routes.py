@@ -1,9 +1,14 @@
+import os
 from datetime import datetime
 
 from fastapi import Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from backend.services.collection_runtime_health import (
+    collect_collection_runtime_health,
+)
 
 
 def register_system_routes(app, settings, app_version, get_db):
@@ -18,16 +23,21 @@ def register_system_routes(app, settings, app_version, get_db):
         }
 
     async def build_ready_health_payload(db: Session) -> tuple[dict, int]:
+        runtime_mode = str(getattr(app.state, "runtime_mode", "")).strip().lower()
         ready = True
         health_status = {
             "status": "ready",
             "service": "西虹ERP系统API",
             "version": app_version,
             "timestamp": datetime.now().isoformat(),
+            "runtime_mode": runtime_mode or "development",
+            "deployment_role": os.getenv("DEPLOYMENT_ROLE", "").strip().lower(),
             "checks": {
                 "database": {
                     "status": "unknown",
-                    "type": "PostgreSQL" if "postgresql" in settings.DATABASE_URL else "SQLite",
+                    "type": "PostgreSQL"
+                    if "postgresql" in settings.DATABASE_URL
+                    else "SQLite",
                 },
                 "dashboard": {
                     "status": "unknown",
@@ -44,9 +54,22 @@ def register_system_routes(app, settings, app_version, get_db):
             health_status["status"] = "unready"
             ready = False
 
+        if runtime_mode == "collector":
+            collector_health = collect_collection_runtime_health(app, settings)
+            health_status["runtime_mode"] = collector_health["runtime_mode"]
+            health_status["deployment_role"] = collector_health["deployment_role"]
+            health_status["checks"]["dashboard"]["status"] = "ignored"
+            health_status["checks"].update(collector_health["checks"])
+            if collector_health["status"] != "ready":
+                health_status["status"] = "unready"
+                ready = False
+            return health_status, 200 if ready else 503
+
         try:
             from backend.models.database import AsyncSessionLocal
-            from backend.services.data_pipeline.dashboard_bootstrap import inspect_dashboard_assets
+            from backend.services.data_pipeline.dashboard_bootstrap import (
+                inspect_dashboard_assets,
+            )
 
             async with AsyncSessionLocal() as session:
                 dashboard_report = await inspect_dashboard_assets(session)
@@ -59,9 +82,14 @@ def register_system_routes(app, settings, app_version, get_db):
             dashboard_report = getattr(app.state, "dashboard_assets_report", None) or {}
 
         dashboard_ready = bool(getattr(app.state, "dashboard_assets_ready", True))
-        dashboard_modules = dashboard_report.get("modules") if isinstance(dashboard_report, dict) else None
+        dashboard_modules = (
+            dashboard_report.get("modules")
+            if isinstance(dashboard_report, dict)
+            else None
+        )
         dashboard_has_non_ready_module = isinstance(dashboard_modules, dict) and any(
-            module_report.get("status") != "ready" for module_report in dashboard_modules.values()
+            module_report.get("status") != "ready"
+            for module_report in dashboard_modules.values()
         )
         if dashboard_ready and not dashboard_has_non_ready_module:
             health_status["checks"]["dashboard"]["status"] = "ready"

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import asyncio
 import uuid
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,24 @@ _OPS_REQUIRED_TABLES = {
 }
 _OPS_TABLES_READY_SIGNATURE: tuple[str, str] | None = None
 logger = get_logger(__name__)
+
+
+def extract_run_id(refresh_result: str | dict[str, Any]) -> str:
+    if isinstance(refresh_result, dict):
+        return str(refresh_result.get("run_id", ""))
+    return str(refresh_result)
+
+
+def extract_refresh_status(refresh_result: str | dict[str, Any]) -> str:
+    if isinstance(refresh_result, dict):
+        return str(refresh_result.get("status", "failed"))
+    return "success"
+
+
+def extract_failed_targets(refresh_result: str | dict[str, Any]) -> list[str]:
+    if isinstance(refresh_result, dict):
+        return [str(target) for target in (refresh_result.get("failed_targets", []) or [])]
+    return []
 
 
 def build_refresh_plan(targets: list[str]) -> list[str]:
@@ -445,7 +464,7 @@ async def execute_refresh_plan(
     max_attempts: int = 1,
     retry_backoff_seconds: float = 0.0,
     preordered: bool = False,
-) -> str:
+) -> dict[str, Any]:
     run_id = f"run_{uuid.uuid4().hex}"
     ordered_targets = list(targets) if preordered else build_refresh_plan(targets)
     await _ensure_ops_tables(db)
@@ -492,7 +511,11 @@ async def execute_refresh_plan(
             await _update_run_log(db, run_id, "partial_failed")
         else:
             await _update_run_log(db, run_id, "success")
-        return run_id
+        return {
+            "run_id": run_id,
+            "status": "partial_failed" if failed_targets else "success",
+            "failed_targets": sorted(failed_targets),
+        }
     except Exception as exc:
         if continue_on_error:
             failed_targets.add(target)
@@ -526,6 +549,10 @@ async def execute_refresh_plan(
                     except Exception:
                         failed_targets.add(remaining_target)
             await _update_run_log(db, run_id, "partial_failed", error_message=str(exc))
-            return run_id
+            return {
+                "run_id": run_id,
+                "status": "partial_failed",
+                "failed_targets": sorted(failed_targets),
+            }
         await _update_run_log(db, run_id, "failed", error_message=str(exc))
         raise

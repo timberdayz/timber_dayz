@@ -48,15 +48,15 @@ Show-PwcliPaths -Platform miaoshou -AccountId '<main-account-id>' -WorkTag <fixe
 
 ## 账号总表
 
-| 平台 | 显示名 | AccountId | WorkTag |
-| --- | --- | --- | --- |
-| 妙手 | xihong | `miaoshou_real_001` | `miaoshou-miaoshou-real-001-inspect` |
-| Shopee | playwright_smoke_admin | `accept_main_1775126941575` | `shopee-accept-main-1775126941575-inspect` |
-| Shopee | shopee新加坡3C店 | `chenewei666:main` | `shopee-chenewei666-main-inspect` |
-| Shopee | hongxikeji:main | `hongxikeji:main` | `shopee-hongxikeji-main-inspect` |
-| Shopee | Leslieshop:main | `shopee KR` | `shopee-shopee-kr-inspect` |
-| TikTok | Tiktok 1店 (chenzewei666666@163.com) | `Tiktok 1店` | `tiktok-tiktok-1-inspect` |
-| TikTok | Tiktok 2店 | `chenzeweinbnb@163.com` | `tiktok-chenzeweinbnb-163-com-inspect` |
+| 平台   | 显示名                               | AccountId                   | WorkTag                                    |
+| ------ | ------------------------------------ | --------------------------- | ------------------------------------------ |
+| 妙手   | xihong                               | `miaoshou_real_001`         | `miaoshou-miaoshou-real-001-inspect`       |
+| Shopee | playwright_smoke_admin               | `accept_main_1775126941575` | `shopee-accept-main-1775126941575-inspect` |
+| Shopee | shopee新加坡3C店                     | `chenewei666:main`          | `shopee-chenewei666-main-inspect`          |
+| Shopee | hongxikeji:main                      | `hongxikeji:main`           | `shopee-hongxikeji-main-inspect`           |
+| Shopee | Leslieshop:main                      | `shopee KR`                 | `shopee-shopee-kr-inspect`                 |
+| TikTok | Tiktok 1店 (chenzewei666666@163.com) | `Tiktok 1店`                | `tiktok-tiktok-1-inspect`                  |
+| TikTok | Tiktok 2店                           | `chenzeweinbnb@163.com`     | `tiktok-chenzeweinbnb-163-com-inspect`     |
 
 ## 妙手
 
@@ -168,8 +168,8 @@ Show-PwcliPaths -Platform shopee -AccountId 'shopee KR' -WorkTag shopee-shopee-k
 
 打开:
 
-```powershell
-Open-PwcliTiktok -WorkTag tiktok-tiktok-1-inspect -AccountId 'Tiktok 1店'
+```powershell同意
+
 ```
 
 保存:

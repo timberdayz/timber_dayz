@@ -11,7 +11,7 @@ from backend.services.data_pipeline.refresh_registry import (
     PIPELINE_DEPENDENCIES,
     SQL_TARGET_PATHS,
 )
-from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, execute_sql_file
+from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, execute_sql_file, extract_run_id
 
 
 DASHBOARD_MODULE_TARGETS: dict[str, dict[str, list[str]]] = {
@@ -459,7 +459,7 @@ async def bootstrap_dashboard_assets(
 
         refresh_run_id = None
         if refresh_targets:
-            refresh_run_id = await execute_refresh_plan(
+            refresh_run_result = await execute_refresh_plan(
                 session,
                 targets=refresh_targets,
                 pipeline_name=f"bootstrap_postgresql_dashboard_refresh.{module_name}",
@@ -471,8 +471,9 @@ async def bootstrap_dashboard_assets(
                 },
                 preordered=True,
             )
+            refresh_run_id = extract_run_id(refresh_run_result)
 
-        run_id = await execute_refresh_plan(
+        run_result = await execute_refresh_plan(
             session,
             targets=core_targets,
             pipeline_name=f"bootstrap_postgresql_dashboard.{module_name}",
@@ -486,6 +487,7 @@ async def bootstrap_dashboard_assets(
             },
             preordered=True,
         )
+        run_id = extract_run_id(run_result)
         module_run_ids[module_name] = run_id
 
         await _upsert_dashboard_asset_state(
@@ -529,7 +531,7 @@ async def refresh_dashboard_materialization_assets(
         details = _normalize_json_value(state.get("details_json"))
         refresh_expected = _compute_targets_fingerprint(refresh_targets)
 
-        refresh_run_id = await execute_refresh_plan(
+        refresh_run_result = await execute_refresh_plan(
             session,
             targets=refresh_targets,
             pipeline_name=f"dashboard_materialization_refresh.{module_name}",
@@ -541,7 +543,8 @@ async def refresh_dashboard_materialization_assets(
             },
             preordered=True,
         )
-        run_id = await execute_refresh_plan(
+        refresh_run_id = extract_run_id(refresh_run_result)
+        run_result = await execute_refresh_plan(
             session,
             targets=core_targets,
             pipeline_name=f"dashboard_materialization_rebuild_core.{module_name}",
@@ -554,6 +557,7 @@ async def refresh_dashboard_materialization_assets(
             },
             preordered=True,
         )
+        run_id = extract_run_id(run_result)
         module_run_ids[module_name] = run_id
 
         await _upsert_dashboard_asset_state(

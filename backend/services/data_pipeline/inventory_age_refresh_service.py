@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.data_pipeline.refresh_runner import (
+    extract_run_id,
     execute_refresh_plan,
     execute_sql_target,
 )
@@ -404,13 +405,14 @@ class InventoryAgeRefreshService:
         if self.db is None:
             raise ValueError("AsyncSession is required for refresh execution")
 
-        upstream_run_id = await execute_refresh_plan(
+        upstream_run_result = await execute_refresh_plan(
             self.db,
             targets=SNAPSHOT_INVENTORY_AGE_UPSTREAM_TARGETS,
             pipeline_name="inventory_age_upstream_refresh",
             trigger_source="manual",
             context={"feature": "snapshot_continuous_inventory_aging"},
         )
+        upstream_run_id = extract_run_id(upstream_run_result)
         await self.ensure_runtime_assets()
 
         changed_keys = (

@@ -136,6 +136,64 @@ def test_refresh_runner_builds_step_plan():
 
 
 @pytest.mark.asyncio
+async def test_execute_refresh_plan_returns_structured_partial_failed_result(monkeypatch):
+    from backend.services.data_pipeline import refresh_runner
+
+    calls = []
+
+    class _FakeSession:
+        async def execute(self, _stmt, *_args, **_kwargs):
+            class _FakeResult:
+                def scalar(self):
+                    return 4
+
+            return _FakeResult()
+
+        def get_bind(self):
+            class _FakeBind:
+                url = "postgresql://test"
+
+            return _FakeBind()
+
+    async def _fake_insert_run_log(*args, **kwargs):
+        return None
+
+    async def _fake_update_run_log(*args, **kwargs):
+        calls.append(("update_run_log", args[2], kwargs.get("error_message")))
+        return None
+
+    async def _fake_insert_skipped_step_log(*args, **kwargs):
+        calls.append(("skipped", kwargs["target_name"], kwargs["reason"]))
+        return None
+
+    async def _fake_execute_sql_target(*args, **kwargs):
+        target = args[1]
+        if target == "first.target":
+            raise RuntimeError("boom")
+        calls.append(("executed", target))
+        return "run-x"
+
+    monkeypatch.setattr(refresh_runner, "_ensure_ops_tables", lambda db: _fake_insert_run_log())
+    monkeypatch.setattr(refresh_runner, "_insert_run_log", _fake_insert_run_log)
+    monkeypatch.setattr(refresh_runner, "_update_run_log", _fake_update_run_log)
+    monkeypatch.setattr(refresh_runner, "_insert_skipped_step_log", _fake_insert_skipped_step_log)
+    monkeypatch.setattr(refresh_runner, "execute_sql_target", _fake_execute_sql_target)
+
+    result = await refresh_runner.execute_refresh_plan(
+        _FakeSession(),
+        targets=["first.target", "second.target"],
+        continue_on_error=True,
+        preordered=True,
+    )
+
+    assert result["run_id"].startswith("run_")
+    assert result["status"] == "partial_failed"
+    assert result["failed_targets"] == ["first.target"]
+    assert ("executed", "second.target") in calls
+    assert calls[-1][0] == "update_run_log"
+
+
+@pytest.mark.asyncio
 async def test_ensure_ops_tables_runs_bootstrap_only_once_per_process(monkeypatch):
     from backend.services.data_pipeline import refresh_runner
 
@@ -392,12 +450,13 @@ async def test_execute_refresh_plan_runs_multiple_targets_with_single_run_log(tm
 
         try:
             async with session_factory() as session:
-                run_id = await execute_refresh_plan(
+                refresh_result = await execute_refresh_plan(
                     session,
                     targets=[api_target],
                     pipeline_name="pytest_batch_plan",
                     trigger_source="pytest",
                 )
+                run_id = refresh_result["run_id"]
                 await session.commit()
 
                 run_rows = (
@@ -573,7 +632,7 @@ async def test_execute_refresh_plan_marks_partial_failed_and_skips_downstream(tm
 
         try:
             async with session_factory() as session:
-                run_id = await execute_refresh_plan(
+                refresh_result = await execute_refresh_plan(
                     session,
                     targets=[downstream_target],
                     pipeline_name="pytest_partial_failure",
@@ -581,7 +640,11 @@ async def test_execute_refresh_plan_marks_partial_failed_and_skips_downstream(tm
                     continue_on_error=True,
                     max_attempts=1,
                 )
+                run_id = refresh_result["run_id"]
                 await session.commit()
+
+                assert refresh_result["status"] == "partial_failed"
+                assert refresh_result["failed_targets"] == [bad_target]
 
                 run_status = (
                     await session.execute(

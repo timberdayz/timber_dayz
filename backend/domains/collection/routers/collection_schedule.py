@@ -142,7 +142,9 @@ async def cancel_config_run(
         detail = str(exc)
         if detail.startswith("CollectionConfigRun not found:"):
             raise HTTPException(status_code=404, detail="config run not found") from exc
-        if detail == "only queued config runs can be cancelled":
+        if detail == "terminal config runs cannot be cancelled" or detail.startswith(
+            "config run status cannot be cancelled:"
+        ):
             raise HTTPException(status_code=409, detail=detail) from exc
         raise HTTPException(status_code=400, detail=detail) from exc
     return SuccessResponse(success=True, message="config run cancelled", data=None)

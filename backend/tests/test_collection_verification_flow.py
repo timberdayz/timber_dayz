@@ -408,3 +408,57 @@ async def test_persist_collection_task_result_clears_verification_fields_on_term
     assert persisted is task
     assert task.verification_type is None
     assert task.verification_screenshot is None
+
+
+@pytest.mark.asyncio
+async def test_persist_collection_task_result_preserves_cancelled_status():
+    from backend.domains.collection.routers.collection_tasks import _persist_collection_task_result
+    from modules.core.db import CollectionTask
+    import backend.models.database as database_module
+
+    stored_task = CollectionTask(
+        id=1,
+        task_id="task-cancelled",
+        platform="shopee",
+        account="acc-1",
+        status="cancelled",
+        trigger_type="manual",
+        files_collected=0,
+    )
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return stored_task
+
+    class _DbSession:
+        async def execute(self, _stmt):
+            return _Result()
+
+        async def commit(self):
+            return None
+
+    class _DbSessionManager:
+        async def __aenter__(self):
+            return _DbSession()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    final_result = SimpleNamespace(
+        status="completed",
+        files_collected=3,
+        error_message=None,
+        duration_seconds=10,
+        completed_domains=["orders"],
+        failed_domains=[],
+    )
+
+    original_async_session_local = database_module.AsyncSessionLocal
+    database_module.AsyncSessionLocal = lambda: _DbSessionManager()
+    try:
+        persisted = await _persist_collection_task_result("task-cancelled", final_result)
+    finally:
+        database_module.AsyncSessionLocal = original_async_session_local
+
+    assert persisted.status == "cancelled"
+    assert persisted.files_collected == 0

@@ -269,7 +269,8 @@ async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(
         ("/api/dashboard/clearance-ranking", "clearance_ranking"),
     ],
 )
-def test_dashboard_asset_ready_error_includes_module_name(path, module_name):
+@pytest.mark.asyncio
+async def test_dashboard_asset_ready_error_includes_module_name(path, module_name, monkeypatch):
     report = {
         "ready": False,
         "modules": {
@@ -285,8 +286,17 @@ def test_dashboard_asset_ready_error_includes_module_name(path, module_name):
     }
     request = _make_request(path, report)
 
+    async def _fake_refresh_dashboard_assets_report(_request):
+        return report
+
+    monkeypatch.setattr(
+        router_module.domain_module,
+        "_refresh_dashboard_assets_report",
+        _fake_refresh_dashboard_assets_report,
+    )
+
     with pytest.raises(HTTPException) as exc_info:
-        router_module._require_dashboard_assets_ready(request)
+        await router_module._require_dashboard_assets_ready(request)
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["module_name"] == module_name

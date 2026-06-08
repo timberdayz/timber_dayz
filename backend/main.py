@@ -648,6 +648,7 @@ async def lifespan(app: FastAPI):
                 acquired = await lock.acquire()
                 app.state.collection_leader_lock = lock
                 leader_lock_acquired = bool(acquired)
+                app.state.collection_leader_lock_acquired = leader_lock_acquired
                 if not leader_lock_acquired:
                     logger.info(
                         "[CollectionLeaderLock] Leader lock not acquired; skip starting "
@@ -658,8 +659,10 @@ async def lifespan(app: FastAPI):
                     f"[CollectionLeaderLock] Acquire failed (non-blocking): {lock_err}"
                 )
                 leader_lock_acquired = False
+                app.state.collection_leader_lock_acquired = False
         else:
             leader_lock_acquired = True
+            app.state.collection_leader_lock_acquired = True
 
         try:
             from backend.services.task_service import TaskService
@@ -852,6 +855,26 @@ async def lifespan(app: FastAPI):
         except Exception as queue_runner_err:
             logger.warning(
                 f"[QueueRunner] Initialization failed (non-blocking): {queue_runner_err}"
+            )
+
+        try:
+            from backend.services.collection_runtime_health import (
+                collect_collection_runtime_health,
+            )
+
+            runtime_health = collect_collection_runtime_health(app, settings)
+            app.state.collection_runtime_checks = runtime_health["checks"]
+            logger.info(
+                "[CollectionRuntime] mode=%s role=%s status=%s checks=%s",
+                runtime_health["runtime_mode"],
+                runtime_health["deployment_role"],
+                runtime_health["status"],
+                runtime_health["checks"],
+            )
+        except Exception as runtime_health_err:
+            logger.warning(
+                "[CollectionRuntime] Startup health summary failed (non-blocking): %s",
+                runtime_health_err,
             )
 
     except Exception as e:

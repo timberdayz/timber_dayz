@@ -19,6 +19,7 @@ TERMINAL_TASK_STATUSES = {
 }
 
 ACTIVE_RUN_STATUSES = {"queued", "running"}
+TERMINAL_RUN_STATUSES = {"completed", "partial_success", "failed", "cancelled"}
 RECOVERABLE_TASK_STATUSES = {
     "pending",
     "queued",
@@ -102,12 +103,29 @@ class CollectionConfigRunService:
         ).scalars().first()
         if run is None:
             raise ValueError(f"CollectionConfigRun not found: {run_id}")
-        if run.status != "queued":
-            raise ValueError("only queued config runs can be cancelled")
+        if run.status in TERMINAL_RUN_STATUSES:
+            raise ValueError("terminal config runs cannot be cancelled")
+        if run.status not in ACTIVE_RUN_STATUSES:
+            raise ValueError(f"config run status cannot be cancelled: {run.status}")
 
+        now = datetime.now(timezone.utc)
         run.status = "cancelled"
-        run.completed_at = datetime.now(timezone.utc)
-        run.error_message = "user cancelled queued config run"
+        run.completed_at = now
+        run.error_message = "user cancelled config run"
+
+        tasks = (
+            await self.db.execute(
+                select(CollectionTask).where(
+                    CollectionTask.config_run_id == run.id,
+                    CollectionTask.status.in_(RECOVERABLE_TASK_STATUSES),
+                )
+            )
+        ).scalars().all()
+        for task in tasks:
+            task.status = "cancelled"
+            task.error_message = "user cancelled config run"
+            task.completed_at = now
+
         await self.db.commit()
         await self.db.refresh(run)
         return run
@@ -119,6 +137,8 @@ class CollectionConfigRunService:
         error_message: str,
     ) -> CollectionConfigRun:
         run = await self._get_run(run_id)
+        if run.status == "cancelled":
+            return run
         run.status = "failed"
         run.error_message = error_message
         run.completed_at = datetime.now(timezone.utc)
@@ -168,6 +188,8 @@ class CollectionConfigRunService:
 
     async def finalize_run_from_tasks(self, run_id: int) -> CollectionConfigRun:
         run = await self._get_run(run_id)
+        if run.status == "cancelled":
+            return run
         tasks = (
             await self.db.execute(
                 select(CollectionTask).where(CollectionTask.config_run_id == run_id)
@@ -182,6 +204,8 @@ class CollectionConfigRunService:
             return run
         elif statuses <= {"completed"}:
             run.status = "completed"
+        elif statuses <= {"cancelled"}:
+            run.status = "cancelled"
         elif statuses <= {"failed", "cancelled", "interrupted"}:
             run.status = "failed"
         else:

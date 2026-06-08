@@ -658,7 +658,7 @@ async def test_cancel_config_run_marks_queued_run_cancelled(
 
 
 @pytest.mark.asyncio
-async def test_cancel_config_run_rejects_running_run(
+async def test_cancel_config_run_marks_running_run_cancelled(
     schedule_sync_client,
     schedule_sync_session,
     auth_headers,
@@ -699,6 +699,8 @@ async def test_cancel_config_run_rejects_running_run(
         headers=auth_headers,
     )
 
-    assert response.status_code == 409
+    assert response.status_code == 200
     payload = response.json()
-    assert "queued" in payload.get("message", "") or "queued" in str(payload.get("error", {}))
+    assert payload["success"] is True
+    await schedule_sync_session.refresh(run)
+    assert run.status == "cancelled"

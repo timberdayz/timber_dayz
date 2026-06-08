@@ -38,6 +38,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      ACCOUNT_ENCRYPTION_KEY: ${ACCOUNT_ENCRYPTION_KEY}
       RUN_MIGRATIONS: "0"
       DEPLOYMENT_ROLE: "api"
       DATABASE_ECHO: "true"
@@ -54,6 +55,7 @@ services:
       - ./modules:/app/modules
       - ./models:/app/models
       - ./migrations:/app/migrations
+      - ./sql:/app/sql
       - ./tools:/app/tools
       - ./profiles:/app/profiles
       - ./data:/app/data
@@ -90,6 +92,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      ACCOUNT_ENCRYPTION_KEY: ${ACCOUNT_ENCRYPTION_KEY}
       RUN_MIGRATIONS: "0"
       DEPLOYMENT_ROLE: "collector"
       APP_RUNTIME_MODE: "collector"
@@ -103,6 +106,7 @@ services:
       PROJECT_ROOT: /app
       DATA_DIR: /app/data
       DATA_RAW_DIR: /app/data/raw
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     ports: []
     profiles:
       - collection
@@ -122,6 +126,7 @@ services:
       - ./backend:/app/backend
       - ./modules:/app/modules
       - ./migrations:/app/migrations
+      - ./sql:/app/sql
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp
@@ -214,6 +219,7 @@ services:
       - ./backend:/app/backend
       - ./modules:/app/modules
       - ./migrations:/app/migrations
+      - ./sql:/app/sql
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp
@@ -261,6 +267,7 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./modules:/app/modules
+      - ./sql:/app/sql
       - ./migrations:/app/migrations
       - ./data:/app/data
       - ./logs:/app/logs
