@@ -33,6 +33,21 @@ def test_business_overview_frontend_shows_explicit_pv_uv_kpi_cards():
     assert "pv_conversion_rate" in text
 
 
+def test_business_overview_frontend_traffic_ranking_shows_pv_uv_conversion_columns():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert 'prop="uv_conversion_rate"' in text
+    assert 'label="UV\u8f6c\u5316\u7387"' in text
+    assert 'prop="pv_conversion_rate"' in text
+    assert 'label="PV\u8f6c\u5316\u7387"' in text
+    assert "order_count: row.order_count" in text
+    assert "uv_conversion_rate: row.uv_conversion_rate" in text
+    assert "pv_conversion_rate: row.pv_conversion_rate" in text
+
+
 def test_business_overview_frontend_groups_kpis_and_allows_wrapping():
     text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
         encoding="utf-8",

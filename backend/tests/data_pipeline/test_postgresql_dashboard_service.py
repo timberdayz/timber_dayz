@@ -1915,7 +1915,10 @@ async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_p
                 "shop_id": "shop-a",
                 "visitor_count": 100,
                 "page_views": 120,
+                "order_count": 3,
                 "conversion_rate": 1.0,
+                "uv_conversion_rate": 3.0,
+                "pv_conversion_rate": 2.5,
             },
             {
                 "granularity": "monthly",
@@ -1924,7 +1927,10 @@ async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_p
                 "shop_id": "shop-b",
                 "visitor_count": 50,
                 "page_views": 180,
+                "order_count": 6,
                 "conversion_rate": 1.0,
+                "uv_conversion_rate": 12.0,
+                "pv_conversion_rate": 3.33,
             },
         ]
 
@@ -1938,9 +1944,15 @@ async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_p
 
     assert result[0]["name"] == "shop-b"
     assert result[0]["page_views"] == 180
+    assert result[0]["order_count"] == 6
+    assert result[0]["uv_conversion_rate"] == 12.0
+    assert result[0]["pv_conversion_rate"] == 3.33
     assert result[1]["name"] == "shop-a"
     assert len(captured) == 1
     assert "FROM api.business_overview_traffic_ranking_module" in captured[0][0]
+    assert "src.order_count" in captured[0][0]
+    assert "src.uv_conversion_rate" in captured[0][0]
+    assert "src.pv_conversion_rate" in captured[0][0]
 
 
 @pytest.mark.asyncio
@@ -1988,9 +2000,12 @@ async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_s
                 "account_display_name": "Main SG / HX Home",
                 "main_account_id": "main_shopee_sg",
                 "main_account_name": "Main SG",
-                "visitor_count": 0,
-                "page_views": 31,
+                "visitor_count": 100,
+                "page_views": 400,
+                "order_count": 1,
                 "conversion_rate": 0,
+                "uv_conversion_rate": 1.0,
+                "pv_conversion_rate": 0.25,
             },
             {
                 "granularity": "monthly",
@@ -2002,9 +2017,12 @@ async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_s
                 "account_display_name": "Main SG / HX Home",
                 "main_account_id": "main_shopee_sg",
                 "main_account_name": "Main SG",
-                "visitor_count": 0,
-                "page_views": 12,
+                "visitor_count": 50,
+                "page_views": 100,
+                "order_count": 5,
                 "conversion_rate": 0,
+                "uv_conversion_rate": 10.0,
+                "pv_conversion_rate": 5.0,
             },
         ]
 
@@ -2020,7 +2038,11 @@ async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_s
     assert result[0]["name"] == "Main SG / HX Home"
     assert result[0]["shop_account_id"] == "shopee_sg_hx_home"
     assert result[0]["main_account_id"] == "main_shopee_sg"
-    assert result[0]["page_views"] == 43
+    assert result[0]["visitor_count"] == 150
+    assert result[0]["page_views"] == 500
+    assert result[0]["order_count"] == 6
+    assert result[0]["uv_conversion_rate"] == 4.0
+    assert result[0]["pv_conversion_rate"] == 1.2
 
 
 @pytest.mark.asyncio
