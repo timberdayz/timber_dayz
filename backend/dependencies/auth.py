@@ -118,7 +118,9 @@ async def get_current_user(
                 detail=f"Account is {user.status}, access denied",
             )
 
-        session_id = hashlib.sha256(token.encode()).hexdigest()
+        session_id = payload.get("sid")
+        if not session_id:
+            session_id = hashlib.sha256(token.encode()).hexdigest()
         session_result = await db.execute(
             select(UserSession).where(
                 UserSession.session_id == session_id,

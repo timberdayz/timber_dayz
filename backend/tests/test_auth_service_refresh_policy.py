@@ -66,8 +66,8 @@ async def test_refresh_token_pair_is_idempotent_during_rotation_grace(monkeypatc
         lambda token, token_type="access": payload,
     )
 
-    first = await service.refresh_token_pair(refresh_token)
-    second = await service.refresh_token_pair(refresh_token)
+    first = await service.refresh_token_pair(refresh_token, session_id="stable-session-id")
+    second = await service.refresh_token_pair(refresh_token, session_id="stable-session-id")
 
     assert second == first
     assert second["access_token"]

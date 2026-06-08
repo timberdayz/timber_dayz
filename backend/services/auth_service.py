@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 import uuid
 import hashlib
+import json
 
 import bcrypt
 import jwt
@@ -85,27 +86,37 @@ class AuthService:
                 detail="Invalid token",
             ) from exc
 
-    def create_token_pair(self, user_id: int, username: str, roles: list) -> Dict[str, str]:
+    def create_token_pair(
+        self,
+        user_id: int,
+        username: str,
+        roles: list,
+        session_id: str | None = None,
+    ) -> Dict[str, str]:
+        resolved_session_id = session_id or uuid.uuid4().hex
         token_data = {
             "user_id": user_id,
             "username": username,
             "roles": roles,
+            "sid": resolved_session_id,
         }
         return {
             "access_token": self.create_access_token(token_data),
             "refresh_token": self.create_refresh_token(token_data),
             "token_type": "bearer",
+            "session_id": resolved_session_id,
         }
 
     def refresh_access_token(self, refresh_token: str) -> str:
         payload = self.verify_token(refresh_token, "refresh")
-        return self.create_access_token(
-            {
-                "user_id": payload.get("user_id"),
-                "username": payload.get("username"),
-                "roles": payload.get("roles"),
-            }
-        )
+        token_data = {
+            "user_id": payload.get("user_id"),
+            "username": payload.get("username"),
+            "roles": payload.get("roles"),
+        }
+        if payload.get("sid"):
+            token_data["sid"] = payload.get("sid")
+        return self.create_access_token(token_data)
 
     def _get_redis_client(self):
         try:
@@ -158,6 +169,78 @@ class AuthService:
                 detail="Refresh token service unavailable",
             ) from exc
 
+    def _refresh_rotation_result_key(self, refresh_token: str) -> str:
+        token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
+        return f"xihong_erp:refresh_token_rotation_result:{token_hash}"
+
+    async def _get_refresh_rotation_result(
+        self,
+        refresh_token: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, str] | None:
+        redis_client = self._require_refresh_blacklist_client()
+        try:
+            raw_value = await redis_client.get(self._refresh_rotation_result_key(refresh_token))
+        except Exception as exc:
+            logger.error(f"[Auth] Failed to read refresh rotation result: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Refresh token service unavailable",
+            ) from exc
+
+        if not raw_value:
+            return None
+        if isinstance(raw_value, bytes):
+            raw_value = raw_value.decode("utf-8")
+
+        try:
+            cached = json.loads(raw_value)
+        except (TypeError, ValueError):
+            logger.warning("[Auth] Ignoring malformed refresh rotation result cache")
+            return None
+
+        if cached.get("user_id") != payload.get("user_id"):
+            return None
+        if cached.get("sid") != payload.get("sid"):
+            return None
+
+        tokens = cached.get("tokens")
+        if not isinstance(tokens, dict):
+            return None
+        if not tokens.get("access_token") or not tokens.get("refresh_token"):
+            return None
+        return {
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens["refresh_token"],
+            "token_type": tokens.get("token_type", "bearer"),
+            "session_id": tokens.get("session_id") or cached.get("sid"),
+        }
+
+    async def _store_refresh_rotation_result(
+        self,
+        refresh_token: str,
+        payload: Dict[str, Any],
+        token_pair: Dict[str, str],
+    ) -> None:
+        redis_client = self._require_refresh_blacklist_client()
+        cache_payload = {
+            "user_id": payload.get("user_id"),
+            "sid": token_pair.get("session_id") or payload.get("sid"),
+            "tokens": token_pair,
+        }
+        try:
+            await redis_client.set(
+                self._refresh_rotation_result_key(refresh_token),
+                json.dumps(cache_payload),
+                ex=settings.REFRESH_TOKEN_ROTATION_GRACE_SECONDS,
+            )
+        except Exception as exc:
+            logger.error(f"[Auth] Failed to store refresh rotation result: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Refresh token service unavailable",
+            ) from exc
+
     async def revoke_refresh_token(self, refresh_token: str) -> bool:
         payload = self.verify_token(refresh_token, "refresh")
         exp = payload.get("exp")
@@ -171,14 +254,21 @@ class AuthService:
             return False
         return await self._add_refresh_token_to_blacklist_atomic(refresh_token, expire_seconds)
 
-    async def refresh_token_pair(self, refresh_token: str) -> Dict[str, str]:
+    async def refresh_token_pair(self, refresh_token: str, session_id: str | None = None) -> Dict[str, str]:
+        payload = self.verify_token(refresh_token, "refresh")
+        resolved_session_id = session_id or payload.get("sid") or uuid.uuid4().hex
+        payload_with_session = dict(payload)
+        payload_with_session["sid"] = resolved_session_id
+
         if await self._is_refresh_token_blacklisted(refresh_token):
+            cached_pair = await self._get_refresh_rotation_result(refresh_token, payload_with_session)
+            if cached_pair:
+                return cached_pair
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Refresh token has been revoked",
             )
 
-        payload = self.verify_token(refresh_token, "refresh")
         exp = payload.get("exp")
         if exp is not None:
             current_time = datetime.now(timezone.utc).timestamp()
@@ -197,6 +287,9 @@ class AuthService:
 
             added = await self._add_refresh_token_to_blacklist_atomic(refresh_token, expire_seconds)
             if not added:
+                cached_pair = await self._get_refresh_rotation_result(refresh_token, payload_with_session)
+                if cached_pair:
+                    return cached_pair
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Refresh token has been revoked (reuse detected)",
@@ -206,12 +299,16 @@ class AuthService:
             "user_id": payload.get("user_id"),
             "username": payload.get("username"),
             "roles": payload.get("roles"),
+            "sid": resolved_session_id,
         }
-        return {
+        token_pair = {
             "access_token": self.create_access_token(token_data),
             "refresh_token": self.create_refresh_token(token_data),
             "token_type": "bearer",
+            "session_id": resolved_session_id,
         }
+        await self._store_refresh_rotation_result(refresh_token, payload_with_session, token_pair)
+        return token_pair
 
 
 auth_service = AuthService()
