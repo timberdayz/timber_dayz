@@ -45,7 +45,7 @@ class _FakeDeduplicationService:
     def __init__(self, _db):
         pass
 
-    def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None):
+    def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None, **_kwargs):
         return [f"hash-{index}" for index, _ in enumerate(rows)]
 
 

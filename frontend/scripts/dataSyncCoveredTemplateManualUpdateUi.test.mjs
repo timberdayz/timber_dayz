@@ -13,10 +13,6 @@ const needsUpdateTablePath = resolve(
   projectRoot,
   'src/components/dataSync/TemplateNeedsUpdateTable.vue'
 )
-const modeDialogPath = resolve(
-  projectRoot,
-  'src/components/dataSync/TemplateManualUpdateModeDialog.vue'
-)
 const workbenchDrawerPath = resolve(
   projectRoot,
   'src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
@@ -27,16 +23,10 @@ assert.equal(existsSync(viewPath), true, 'DataSyncTemplates.vue should exist')
 assert.equal(existsSync(governancePanelPath), true, 'TemplateGovernancePanel.vue should exist')
 assert.equal(existsSync(needsUpdateTablePath), true, 'TemplateNeedsUpdateTable.vue should exist')
 assert.equal(existsSync(workbenchDrawerPath), true, 'TemplateUpdateWorkbenchDrawer.vue should exist')
-assert.equal(
-  existsSync(modeDialogPath),
-  true,
-  'TemplateManualUpdateModeDialog.vue should exist for manual update mode selection'
-)
 
 const viewText = readFileSync(viewPath, 'utf8')
 const governancePanelText = readFileSync(governancePanelPath, 'utf8')
 const needsUpdateTableText = readFileSync(needsUpdateTablePath, 'utf8')
-const modeDialogText = readFileSync(modeDialogPath, 'utf8')
 const workbenchDrawerText = readFileSync(workbenchDrawerPath, 'utf8')
 const apiText = readFileSync(apiPath, 'utf8')
 
@@ -52,8 +42,8 @@ assert.match(
 )
 assert.match(
   viewText,
-  /TemplateManualUpdateModeDialog/,
-  'template view should render the manual update mode dialog'
+  /TemplateUpdateWorkbenchDrawer/,
+  'template view should render the manual update workbench drawer'
 )
 assert.match(
   viewText,
@@ -75,15 +65,11 @@ assert.match(
   /Manual Update/,
   'needs-update table should align its action label with Manual Update'
 )
+assert.match(workbenchDrawerText, /Core Fields Only/, 'workbench drawer should include the Core Fields Only path')
 assert.match(
-  modeDialogText,
-  /Core Fields Only/,
-  'mode dialog should include the Core Fields Only path'
-)
-assert.match(
-  modeDialogText,
+  workbenchDrawerText,
   /Reset From Sample File/,
-  'mode dialog should include the Reset From Sample File path'
+  'workbench drawer should include the Reset From Sample File path'
 )
 assert.match(
   apiText,

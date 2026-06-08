@@ -108,7 +108,7 @@
             :value="option.semanticKey"
           >
             <span>{{ option.label }}</span>
-            <span v-if="option.derived" class="template-deduplication-review-panel__derived">由文件名/任务周期生成</span>
+            <span v-if="option.derived" class="template-deduplication-review-panel__derived">由文件伴生日期生成</span>
           </el-checkbox>
         </el-checkbox-group>
         <div v-if="filteredSemanticHashOptions.length === 0" class="template-deduplication-review-panel__muted">

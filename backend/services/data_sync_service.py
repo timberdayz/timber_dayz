@@ -887,6 +887,7 @@ class DataSyncService:
                     header_bindings=resolved_header_bindings or (getattr(template, "header_bindings", None) if template else None),
                     sub_domain=sub_domain_value,  # [*] v4.16.0修复:优先从catalog_file获取
                     template_id=getattr(template, "id", None),
+                    field_parse_rules=getattr(template, "field_parse_rules", None),
                 )
                 
                 # 更新状态

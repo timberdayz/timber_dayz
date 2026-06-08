@@ -219,7 +219,7 @@ function semanticRequirements(semanticKey) {
   const meta = getSemanticFieldMeta(semanticKey)
   return {
     required: Boolean(meta?.required),
-    hash_participates: Boolean(meta?.default_hash) && !isSystemScopeSemanticKey(semanticKey),
+    hash_participates: false,
     hash_eligible: Boolean(meta?.hash_eligible),
     semantic_kind: meta?.kind || '',
     system_scope: Boolean(meta?.system_scope),

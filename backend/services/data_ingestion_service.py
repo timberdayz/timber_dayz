@@ -172,6 +172,38 @@ def normalize_row_fields_for_domain(
     return dict(row)
 
 
+def _build_hash_identity_values(
+    raw_importer: Any,
+    rows: List[Dict[str, Any]],
+    field_parse_rules: Optional[List[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    if not field_parse_rules:
+        return []
+
+    identity_values: List[Dict[str, Any]] = []
+    for row in rows:
+        (
+            metric_date,
+            period_start_date,
+            period_end_date,
+            period_start_time,
+            period_end_time,
+        ) = raw_importer._extract_period_dates_by_rules(row, field_parse_rules)
+        row_values = {
+            key: value
+            for key, value in {
+                "metric_date": metric_date,
+                "period_start_date": period_start_date,
+                "period_end_date": period_end_date,
+                "period_start_time": period_start_time,
+                "period_end_time": period_end_time,
+            }.items()
+            if value is not None
+        }
+        identity_values.append(row_values)
+    return identity_values
+
+
 class DataIngestionService:
     """
     数据入库服务(仅支持异步)
@@ -327,6 +359,7 @@ class DataIngestionService:
         header_bindings: Optional[List[Dict[str, Any]]] = None,
         sub_domain: Optional[str] = None,  # [*] v4.14.0新增:子类型
         template_id: Optional[int] = None,
+        field_parse_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         数据入库主方法
@@ -551,6 +584,7 @@ class DataIngestionService:
                         setattr(raw_importer, "file_date_from", getattr(file_record, "date_from", None))
                         setattr(raw_importer, "file_date_to", getattr(file_record, "date_to", None))
                     setattr(raw_importer, "header_bindings", header_bindings or [])
+                    raw_importer.field_parse_rules = field_parse_rules
                     
                     # 获取granularity(从file_record或默认daily)
                     granularity = getattr(file_record, 'granularity', None) or "daily"
@@ -584,11 +618,17 @@ class DataIngestionService:
                         "granularity": granularity,
                         "sub_domain": sub_domain,
                     }
+                    hash_identity_values = _build_hash_identity_values(
+                        raw_importer,
+                        valid_rows,
+                        field_parse_rules,
+                    )
                     data_hashes = dedup_service.batch_calculate_data_hash(
                         valid_rows,
                         deduplication_fields=final_deduplication_fields,
                         header_bindings=getattr(raw_importer, "header_bindings", None),
                         scope_values=hash_scope_values,
+                        identity_values=hash_identity_values,
                     )
                     logger.info(f"[Ingest] [DSS] data_hash计算完成: {len(data_hashes)}个哈希")
                     

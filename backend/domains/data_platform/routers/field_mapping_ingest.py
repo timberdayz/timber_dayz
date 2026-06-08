@@ -98,14 +98,34 @@ def _template_rules_match_sample_rows(
     return True
 
 
-async def _load_field_parse_rules_for_file(
+def _template_identity_config(template: FieldMappingTemplate | dict[str, Any] | None) -> dict[str, Any]:
+    if not template:
+        return {
+            "field_parse_rules": [],
+            "deduplication_fields": [],
+            "header_bindings": [],
+        }
+    if isinstance(template, dict):
+        return {
+            "field_parse_rules": list(template.get("field_parse_rules") or []),
+            "deduplication_fields": list(template.get("deduplication_fields") or []),
+            "header_bindings": list(template.get("header_bindings") or []),
+        }
+    return {
+        "field_parse_rules": list(template.field_parse_rules or []),
+        "deduplication_fields": list(template.deduplication_fields or []),
+        "header_bindings": list(template.header_bindings or []),
+    }
+
+
+async def _load_template_identity_config_for_file(
     db: AsyncSession,
     file_record: Any,
     domain: str,
     granularity: str,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     if not file_record:
-        return []
+        return _template_identity_config(None)
 
     safe_path = _runtime_safe_path(file_record.file_path)
     sample_rows: list[dict[str, Any]] = []
@@ -130,9 +150,9 @@ async def _load_field_parse_rules_for_file(
             sample_rows=sample_rows,
         )
         variant = resolve_result.get("variant") or {}
-        variant_rules = list(variant.get("field_parse_rules") or [])
-        if variant_rules:
-            return variant_rules
+        variant_config = _template_identity_config(variant)
+        if variant_config["field_parse_rules"]:
+            return variant_config
     except Exception:
         pass
 
@@ -148,13 +168,13 @@ async def _load_field_parse_rules_for_file(
 
     templates = list(template_result.scalars().all())
     if not templates:
-        return []
+        return _template_identity_config(None)
 
     templates_with_rules = [template for template in templates if template.field_parse_rules]
     if not templates_with_rules:
-        return []
+        return _template_identity_config(None)
     if len(templates_with_rules) == 1:
-        return list(templates_with_rules[0].field_parse_rules or [])
+        return _template_identity_config(templates_with_rules[0])
 
     sample_cache: dict[int, list[dict[str, Any]]] = {}
     matched_templates: list[FieldMappingTemplate] = []
@@ -170,8 +190,55 @@ async def _load_field_parse_rules_for_file(
             matched_templates.append(template)
 
     if matched_templates:
-        return list(matched_templates[0].field_parse_rules or [])
-    return list(templates_with_rules[0].field_parse_rules or [])
+        return _template_identity_config(matched_templates[0])
+    return _template_identity_config(templates_with_rules[0])
+
+
+async def _load_field_parse_rules_for_file(
+    db: AsyncSession,
+    file_record: Any,
+    domain: str,
+    granularity: str,
+) -> list[dict[str, Any]]:
+    config = await _load_template_identity_config_for_file(
+        db=db,
+        file_record=file_record,
+        domain=domain,
+        granularity=granularity,
+    )
+    return list(config.get("field_parse_rules") or [])
+
+
+def _build_hash_identity_values(
+    raw_data_importer: Any,
+    rows: list[dict[str, Any]],
+    field_parse_rules: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not field_parse_rules:
+        return []
+
+    identity_values: list[dict[str, Any]] = []
+    for row in rows:
+        (
+            metric_date,
+            period_start_date,
+            period_end_date,
+            period_start_time,
+            period_end_time,
+        ) = raw_data_importer._extract_period_dates_by_rules(row, field_parse_rules)
+        row_values = {
+            key: value
+            for key, value in {
+                "metric_date": metric_date,
+                "period_start_date": period_start_date,
+                "period_end_date": period_end_date,
+                "period_start_time": period_start_time,
+                "period_end_time": period_end_time,
+            }.items()
+            if value is not None
+        }
+        identity_values.append(row_values)
+    return identity_values
 
 
 def check_if_all_zero_data(rows: List[Dict], domain: str, mappings: Dict = None) -> bool:
@@ -672,8 +739,51 @@ async def ingest_file(
                 
                 raw_data_importer = RawDataImporter(db)
                 deduplication_service = DeduplicationService(db)
-                
-                data_hashes = deduplication_service.batch_calculate_data_hash(valid_rows)
+                raw_data_importer.file_date_from = getattr(file_record, "date_from", None)
+                raw_data_importer.file_date_to = getattr(file_record, "date_to", None)
+
+                sub_domain_value = None
+                if file_record and hasattr(file_record, 'sub_domain'):
+                    sub_domain_value = file_record.sub_domain
+
+                template_identity_config = await _load_template_identity_config_for_file(
+                    db=db,
+                    file_record=file_record,
+                    domain=domain,
+                    granularity=granularity,
+                )
+                field_parse_rules = list(template_identity_config.get("field_parse_rules") or [])
+                template_header_bindings = list(template_identity_config.get("header_bindings") or [])
+                template_deduplication_fields = list(template_identity_config.get("deduplication_fields") or [])
+                raw_data_importer.field_parse_rules = field_parse_rules
+
+                from backend.services.deduplication_fields_config import get_deduplication_fields
+
+                final_deduplication_fields = get_deduplication_fields(
+                    data_domain=domain,
+                    template_fields=template_deduplication_fields,
+                    sub_domain=sub_domain_value,
+                    header_bindings=template_header_bindings,
+                )
+                hash_scope_values = {
+                    "platform_code": file_record.platform_code or platform,
+                    "shop_id": file_record.shop_id,
+                    "data_domain": domain,
+                    "granularity": granularity,
+                    "sub_domain": sub_domain_value,
+                }
+                hash_identity_values = _build_hash_identity_values(
+                    raw_data_importer,
+                    valid_rows,
+                    field_parse_rules,
+                )
+                data_hashes = deduplication_service.batch_calculate_data_hash(
+                    valid_rows,
+                    deduplication_fields=final_deduplication_fields,
+                    header_bindings=template_header_bindings,
+                    scope_values=hash_scope_values,
+                    identity_values=hash_identity_values,
+                )
                 
                 currency_extractor = get_currency_extractor()
                 normalized_rows = []
@@ -693,20 +803,7 @@ async def ingest_file(
                     )
                     currency_codes.append(currency_code)
                 
-                sub_domain_value = None
-                if file_record and hasattr(file_record, 'sub_domain'):
-                    sub_domain_value = file_record.sub_domain
-                
                 normalized_header_columns = currency_extractor.normalize_field_list(original_header_columns)
-                field_parse_rules = await _load_field_parse_rules_for_file(
-                    db=db,
-                    file_record=file_record,
-                    domain=domain,
-                    granularity=granularity,
-                )
-                raw_data_importer.field_parse_rules = field_parse_rules
-                raw_data_importer.file_date_from = getattr(file_record, "date_from", None)
-                raw_data_importer.file_date_to = getattr(file_record, "date_to", None)
 
                 imported = raw_data_importer.batch_insert_raw_data(
                     rows=normalized_rows,

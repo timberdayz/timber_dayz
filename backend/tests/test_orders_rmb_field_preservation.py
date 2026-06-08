@@ -176,6 +176,17 @@ def test_field_mapping_ingest_loads_template_field_parse_rules_for_b_class_impor
     assert "raw_data_importer.field_parse_rules = field_parse_rules" in text
 
 
+def test_field_mapping_ingest_hash_uses_template_identity_policy():
+    from pathlib import Path
+
+    text = Path("backend/domains/data_platform/routers/field_mapping_ingest.py").read_text(encoding="utf-8")
+
+    assert "_load_template_identity_config_for_file(" in text
+    assert "deduplication_fields=final_deduplication_fields" in text
+    assert "scope_values=hash_scope_values" in text
+    assert "identity_values=hash_identity_values" in text
+
+
 def test_field_mapping_ingest_blocks_legacy_fallback_when_template_parse_rules_fail():
     from pathlib import Path
 

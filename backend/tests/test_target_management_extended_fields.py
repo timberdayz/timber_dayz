@@ -4,8 +4,8 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from backend.routers.target_management import create_target, list_target_products, update_target
-from backend.schemas.target import TargetCreateRequest, TargetUpdateRequest
+from backend.routers.target_management import create_target, generate_daily_breakdown, list_target_products, update_target
+from backend.schemas.target import GenerateDailyBreakdownRequest, TargetCreateRequest, TargetUpdateRequest
 
 
 class _ScalarsResult:
@@ -311,6 +311,77 @@ def test_create_product_target_accepts_product_identity_fields():
     assert result["data"]["product_id"] == 88
     assert result["data"]["platform_sku"] == "sku-88"
     assert result["data"]["company_sku"] == "cmp-88"
+
+
+def test_generate_daily_breakdown_prefers_period_scoped_shop_rows():
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    target = SimpleNamespace(
+        id=5,
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 1),
+        target_amount=100.0,
+        target_quantity=10,
+        weekday_ratios=None,
+    )
+    scoped_shop = SimpleNamespace(
+        target_id=5,
+        breakdown_type="shop",
+        platform_code="shopee",
+        shop_id="shop-1",
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 30),
+        target_amount=100.0,
+        target_quantity=10,
+    )
+    legacy_shop = SimpleNamespace(
+        target_id=5,
+        breakdown_type="shop",
+        platform_code="shopee",
+        shop_id="shop-1",
+        period_start=None,
+        period_end=None,
+        target_amount=200.0,
+        target_quantity=20,
+    )
+
+    calls = {"count": 0}
+
+    async def _execute(_stmt, *args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return _ScalarOneResult(target)
+        if calls["count"] == 2:
+            return _ScalarOneResult(None)
+        if calls["count"] == 3:
+            return _ScalarsResult([scoped_shop, legacy_shop])
+        return _ScalarOneResult(None)
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    result = asyncio.run(
+        generate_daily_breakdown(
+            target_id=5,
+            request=GenerateDailyBreakdownRequest(overwrite=True),
+            db=db,
+            current_user=SimpleNamespace(username="admin"),
+        )
+    )
+
+    shop_time_rows = [
+        call.args[0]
+        for call in db.add.call_args_list
+        if getattr(call.args[0], "breakdown_type", None) == "shop_time"
+    ]
+
+    assert result["success"] is True
+    assert result["data"]["shop_time_created"] == 1
+    assert len(shop_time_rows) == 1
+    assert shop_time_rows[0].target_amount == 100.0
+    assert shop_time_rows[0].target_quantity == 10
 
 
 def test_list_target_products_returns_product_candidates():

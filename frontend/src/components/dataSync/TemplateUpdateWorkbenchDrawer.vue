@@ -82,6 +82,80 @@
         :removed-fields="removedFields"
       />
 
+      <div class="template-update-workbench-drawer__section">
+        <div class="template-update-workbench-drawer__section-header">
+          <div>
+            <div class="template-update-workbench-drawer__section-title">日期解析规则</div>
+            <div class="template-update-workbench-drawer__muted">
+              源数据没有日期列时，选择文件伴生数据中的日期或周期。
+            </div>
+          </div>
+          <div class="template-update-workbench-drawer__section-actions">
+            <el-button size="small" @click="applyCompanionDateRules('single')">使用伴生日期</el-button>
+            <el-button size="small" @click="applyCompanionDateRules('period')">使用伴生周期</el-button>
+            <el-button size="small" @click="addFieldParseRule">新增规则</el-button>
+          </div>
+        </div>
+        <div v-if="localFieldParseRules.length === 0" class="template-update-workbench-drawer__empty">
+          尚未声明日期来源。
+        </div>
+        <div v-else class="template-update-workbench-drawer__date-rules">
+          <div
+            v-for="(rule, index) in localFieldParseRules"
+            :key="index"
+            class="template-update-workbench-drawer__date-rule"
+          >
+            <el-select v-model="rule.target_field" placeholder="目标字段">
+              <el-option
+                v-for="option in dateTargetOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-select v-model="rule.source_column" placeholder="来源列" filterable>
+              <el-option
+                v-for="option in fieldParseSourceOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-select v-model="rule.value_kind" placeholder="值类型">
+              <el-option
+                v-for="option in dateValueKindOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-select v-model="rule.date_format" placeholder="日期格式" filterable>
+              <el-option
+                v-for="option in dateFormatOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-select
+              v-if="rule.value_kind === 'date_range'"
+              v-model="rule.range_pick"
+              placeholder="区间取值"
+            >
+              <el-option label="start" value="start" />
+              <el-option label="end" value="end" />
+            </el-select>
+            <el-switch
+              v-model="rule.strict"
+              inline-prompt
+              active-text="严格"
+              inactive-text="宽松"
+            />
+            <el-button type="danger" text @click="removeFieldParseRule(index)">删除</el-button>
+          </div>
+        </div>
+      </div>
+
       <TemplateDeduplicationReviewPanel
         v-model="selectedDeduplicationFields"
         :deduplication-fields="templateContext?.deduplication_fields || []"
@@ -93,7 +167,7 @@
         :data-domain="templateContext?.data_domain || template?.data_domain || template?.domain || ''"
         :granularity="templateContext?.granularity || template?.granularity || ''"
         :sub-domain="templateContext?.sub_domain || template?.sub_domain || null"
-        :field-parse-rules="templateContext?.field_parse_rules || []"
+        :field-parse-rules="localFieldParseRules"
         :sample-rows="previewData"
         @hash-policy-change="handleHashPolicyChange"
       />
@@ -189,7 +263,14 @@
                   <el-tag v-if="row.needsReview" size="small" type="warning">待确认</el-tag>
                   <el-tag v-if="row.semantic_review_status === 'confirmed_non_semantic'" size="small" type="info">原始保留</el-tag>
                   <el-tag v-if="row.required" size="small" type="danger">Required</el-tag>
-                  <el-tag v-if="row.hash_participates" size="small" type="success">参与 Data Hash</el-tag>
+                  <el-tag v-if="row.hash_eligible" size="small" type="info">可参与 Data Hash</el-tag>
+                  <el-tag
+                    v-if="selectedDeduplicationFieldSet.has(row.semantic_key)"
+                    size="small"
+                    type="success"
+                  >
+                    已选 Data Hash
+                  </el-tag>
                 </div>
               </template>
             </el-table-column>
@@ -244,6 +325,14 @@ import {
   SEMANTIC_FIELD_OPTIONS,
   updateHeaderBindingSemantic,
 } from '@/domains/data_platform/utils/headerBindings'
+import {
+  DATE_FORMAT_OPTIONS,
+  DATE_TARGET_FIELD_OPTIONS,
+  DATE_VALUE_KIND_OPTIONS,
+  buildCompanionDateParseRules,
+  buildFieldParseSourceOptions,
+  mergeFieldParseRules,
+} from '@/domains/data_platform/utils/templateFieldParseRules'
 
 import HeaderDiffViewer from './HeaderDiffViewer.vue'
 import TemplateChangeSummaryCard from './TemplateChangeSummaryCard.vue'
@@ -285,11 +374,15 @@ const bindingsViewMode = ref('needs-review')
 const previewData = ref([])
 const fullHeaderBindings = ref([])
 const localHeaderBindings = ref([])
+const localFieldParseRules = ref([])
 const editingBindingNames = ref([])
 const saving = ref(false)
 const hashPolicyAllowsSave = ref(false)
 const hashPolicyPreview = ref(null)
 const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
+const dateTargetOptions = DATE_TARGET_FIELD_OPTIONS
+const dateValueKindOptions = DATE_VALUE_KIND_OPTIONS
+const dateFormatOptions = DATE_FORMAT_OPTIONS
 
 const workbenchContext = computed(() => activeContext.value ?? props.context?.context ?? null)
 const templateContext = computed(() => workbenchContext.value?.template ?? props.context?.template ?? {})
@@ -308,6 +401,10 @@ const recommendedDeduplicationFields = computed(
 )
 const updateMode = computed(() => workbenchContext.value?.update_mode ?? 'with-sample')
 const headerSource = computed(() => workbenchContext.value?.header_source ?? 'sample-file')
+const selectedDeduplicationFieldSet = computed(
+  () => new Set(selectedDeduplicationFields.value.map(field => String(field || '').trim()).filter(Boolean))
+)
+const fieldParseSourceOptions = computed(() => buildFieldParseSourceOptions(currentHeaderColumns.value))
 
 const fallbackFileId = computed(() => props.context?.row?.sample_file_id ?? null)
 const currentFileId = computed(() => workbenchContext.value?.current_file?.id ?? fallbackFileId.value)
@@ -327,6 +424,9 @@ watch(
     selectedHeaderRow.value = next?.current_header_row ?? next?.template?.header_row ?? 0
     localHeaderBindings.value = Array.isArray(next?.current_header_bindings)
       ? next.current_header_bindings.map(item => ({ ...item }))
+      : []
+    localFieldParseRules.value = Array.isArray(next?.template?.field_parse_rules)
+      ? next.template.field_parse_rules.map(rule => ({ strict: true, ...rule }))
       : []
     previewExpanded.value = false
     previewLoaded.value = false
@@ -590,6 +690,38 @@ function formatFieldLabel(field) {
   return formatHeaderBindingLabel(field, activeBindingSource.value)
 }
 
+function normalizeFieldParseRulesForSave() {
+  return localFieldParseRules.value.map(rule => ({
+    target_field: rule.target_field || '',
+    source_column: rule.source_column || '',
+    value_kind: rule.value_kind || 'single_date',
+    date_format: rule.date_format || '',
+    strict: rule.strict !== false,
+    ...(rule.value_kind === 'date_range' ? { range_pick: rule.range_pick || '' } : {}),
+  }))
+}
+
+function addFieldParseRule() {
+  localFieldParseRules.value.push({
+    target_field: 'metric_date',
+    source_column: '',
+    value_kind: 'single_date',
+    date_format: 'yyyy-mm-dd',
+    strict: true,
+  })
+}
+
+function applyCompanionDateRules(mode) {
+  localFieldParseRules.value = mergeFieldParseRules(
+    localFieldParseRules.value,
+    buildCompanionDateParseRules(mode)
+  )
+}
+
+function removeFieldParseRule(index) {
+  localFieldParseRules.value.splice(index, 1)
+}
+
 async function handleSave() {
   if (!hashPolicyAllowsSave.value) {
     const message =
@@ -612,6 +744,7 @@ async function handleSave() {
       deduplicationFields: [...selectedDeduplicationFields.value],
       headerRow: selectedHeaderRow.value,
       headerBindings: activeBindingSource.value.map(item => ({ ...item })),
+      fieldParseRules: normalizeFieldParseRulesForSave(),
     })
   } finally {
     saving.value = false
@@ -721,6 +854,23 @@ function handleClose() {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.template-update-workbench-drawer__date-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.template-update-workbench-drawer__date-rule {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px dashed #dcdfe6;
+  border-radius: 6px;
 }
 
 .template-update-workbench-drawer__section-title {

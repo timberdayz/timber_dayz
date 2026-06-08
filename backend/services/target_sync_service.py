@@ -26,6 +26,7 @@ from modules.core.db import (
     SalesTargetA,
 )
 from modules.core.logger import get_logger
+from backend.services.target_breakdown_selection import select_effective_shop_breakdowns
 
 logger = get_logger(__name__)
 
@@ -69,12 +70,17 @@ class TargetSyncService:
                 return result
             
             # 2. 获取按店铺分解的数据
-            breakdowns = (await self.db.execute(
+            breakdown_rows = (await self.db.execute(
                 select(TargetBreakdown).where(
                     TargetBreakdown.target_id == target_id,
                     TargetBreakdown.breakdown_type == "shop"
                 )
             )).scalars().all()
+            breakdowns = select_effective_shop_breakdowns(
+                breakdown_rows,
+                target.period_start,
+                target.period_end,
+            )
             
             if not breakdowns:
                 logger.info(f"[TargetSync] Target {target_id} has no shop breakdowns, skipping")

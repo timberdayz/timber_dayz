@@ -50,6 +50,7 @@ def test_shop_month_kpi_sql_asset():
         (
             "semantic.fact_orders_monthly_atomic",
             "semantic.fact_analytics_monthly_atomic",
+            "date_trunc('month', metric_date)::date AS period_month",
             "gmv",
             "order_count",
             "visitor_count",
@@ -58,6 +59,8 @@ def test_shop_month_kpi_sql_asset():
             "profit",
         ),
     )
+    sql_text = Path("sql/mart/shop_month_kpi.sql").read_text(encoding="utf-8")
+    assert "metric_date AS period_month" not in sql_text
 
 
 def test_orders_monthly_atomic_sql_asset():
@@ -162,6 +165,7 @@ def test_platform_month_kpi_sql_asset():
         (
             "semantic.fact_orders_monthly_atomic",
             "semantic.fact_analytics_monthly_atomic",
+            "date_trunc('month', metric_date)::date AS period_month",
             "platform_code",
             "period_month",
             "gmv",
@@ -171,6 +175,8 @@ def test_platform_month_kpi_sql_asset():
             "impressions",
         ),
     )
+    sql_text = Path("sql/mart/platform_month_kpi.sql").read_text(encoding="utf-8")
+    assert "metric_date AS period_month" not in sql_text
 
 
 def test_business_overview_kpi_module_sql_asset():

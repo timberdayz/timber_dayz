@@ -71,7 +71,7 @@
             :value="option.value"
           >
             <span>{{ option.label }}</span>
-            <span v-if="option.derived" class="derived-label">由文件名/任务周期生成</span>
+            <span v-if="option.derived" class="derived-label">由文件伴生日期生成</span>
           </el-checkbox>
         </div>
       </el-checkbox-group>

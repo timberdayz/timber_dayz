@@ -900,16 +900,27 @@ class PostgresqlDashboardService:
                 if platform or shop_id:
                     try:
                         query = """
-                            SELECT
-                                SUM(tb.target_amount) AS target_amount,
-                                SUM(tb.target_quantity) AS target_quantity
-                            FROM a_class.target_breakdown tb
-                            INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
-                            WHERE st.status = 'active'
-                              AND st.period_start <= :period_start
-                              AND st.period_end >= :period_end
-                              AND tb.breakdown_type = 'shop'
-                        """
+                            WITH matching_shop_rows AS (
+                                SELECT
+                                    tb.target_amount,
+                                    tb.target_quantity,
+                                    (
+                                        tb.period_start IS NOT NULL
+                                        AND tb.period_end IS NOT NULL
+                                        AND tb.period_start <= :period_end
+                                        AND tb.period_end >= :period_start
+                                    ) AS is_period_scoped,
+                                    (
+                                        tb.period_start IS NULL
+                                        AND tb.period_end IS NULL
+                                    ) AS is_legacy_unscoped
+                                FROM a_class.target_breakdown tb
+                                INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
+                                WHERE st.status = 'active'
+                                  AND st.period_start <= :period_start
+                                  AND st.period_end >= :period_end
+                                  AND tb.breakdown_type = 'shop'
+                            """
                         params: dict[str, Any] = {
                             "period_start": period_start,
                             "period_end": period_end,
@@ -920,6 +931,27 @@ class PostgresqlDashboardService:
                         if shop_id:
                             query += " AND tb.shop_id = :shop_id"
                             params["shop_id"] = shop_id
+                        query += """
+                            ),
+                            preferred_shop_rows AS (
+                                SELECT target_amount, target_quantity
+                                FROM matching_shop_rows
+                                WHERE is_period_scoped
+                                UNION ALL
+                                SELECT target_amount, target_quantity
+                                FROM matching_shop_rows
+                                WHERE is_legacy_unscoped
+                                  AND NOT EXISTS (
+                                      SELECT 1
+                                      FROM matching_shop_rows
+                                      WHERE is_period_scoped
+                                  )
+                            )
+                            SELECT
+                                SUM(target_amount) AS target_amount,
+                                SUM(target_quantity) AS target_quantity
+                            FROM preferred_shop_rows
+                        """
                         result = await session.execute(text(query), params)
                     except Exception:
                         await session.rollback()
@@ -2489,81 +2521,28 @@ class PostgresqlDashboardService:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity must be monthly or yearly")
 
-        columns = await self._get_table_columns("a_class", "sales_targets_a")
-
         if len(period) == 4:
-            db_params: dict[str, Any] = {"period_prefix": f"{period}-%"}
-            year_month_filter = "year_month LIKE :period_prefix"
-            year_month_filter_cn = '"年月" LIKE :period_prefix'
+            period_start = date_cls(int(period), 1, 1)
+            period_end = date_cls(int(period), 12, 31)
         else:
-            db_params = {"period": period}
-            year_month_filter = "year_month = :period"
-            year_month_filter_cn = '"年月" = :period'
+            period_start = _normalize_period_start(period)
+            period_end = _start_of_next_month(period_start) - timedelta(days=1)
 
-        # Avoid emitting Postgres ERROR logs by selecting the correct column set up front.
-        if {"year_month", "target_sales_amount", "target_quantity"}.issubset(columns):
-            result = await db.execute(
-                text(
-                    f"""
-                    SELECT SUM(target_sales_amount) AS target_gmv,
-                           SUM(target_quantity) AS target_orders
-                    FROM a_class.sales_targets_a
-                    WHERE {year_month_filter}
-                    """
-                ),
-                db_params,
-            )
-        elif {"年月", "目标销售额", "目标订单数"}.issubset(columns):
-            result = await db.execute(
-                text(
-                    f"""
-                    SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
-                           COALESCE(SUM("目标订单数"), 0) AS target_orders
-                    FROM a_class.sales_targets_a
-                    WHERE {year_month_filter_cn}
-                    """
-                ),
-                db_params,
-            )
-        elif {"年月", "目标销售额", "目标单量"}.issubset(columns):
-            result = await db.execute(
-                text(
-                    f"""
-                    SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
-                           COALESCE(SUM("目标单量"), 0) AS target_orders
-                    FROM a_class.sales_targets_a
-                    WHERE {year_month_filter_cn}
-                    """
-                ),
-                db_params,
-            )
-        else:
-            # Unknown schema variant: keep a defensive fallback without hard-failing.
-            try:
-                result = await db.execute(
-                    text(
-                        f"""
-                        SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
-                               COALESCE(SUM("目标订单数"), 0) AS target_orders
-                        FROM a_class.sales_targets_a
-                        WHERE {year_month_filter_cn}
-                        """
-                    ),
-                    db_params,
-                )
-            except Exception:
-                await db.rollback()
-                result = await db.execute(
-                    text(
-                        f"""
-                        SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
-                               COALESCE(SUM("目标单量"), 0) AS target_orders
-                        FROM a_class.sales_targets_a
-                        WHERE {year_month_filter_cn}
-                        """
-                    ),
-                    db_params,
-                )
+        result = await db.execute(
+            text(
+                """
+                SELECT
+                    COALESCE(SUM(target_amount), 0) AS target_gmv,
+                    COALESCE(SUM(target_quantity), 0) AS target_orders
+                FROM a_class.sales_targets
+                WHERE target_type = 'shop'
+                  AND status = 'active'
+                  AND period_start <= :period_end
+                  AND period_end >= :period_start
+                """
+            ),
+            {"period_start": period_start, "period_end": period_end},
+        )
         row = result.fetchone()
         target_gmv = float(row[0]) if row and row[0] is not None else None
         target_orders = int(row[1]) if row and row[1] is not None else None

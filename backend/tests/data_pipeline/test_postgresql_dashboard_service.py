@@ -1,5 +1,8 @@
+from datetime import date
+
 import pytest
 from sqlalchemy.exc import ProgrammingError
+from unittest.mock import AsyncMock
 
 from backend.services.postgresql_dashboard_service import (
     PostgresqlDashboardService,
@@ -680,6 +683,44 @@ def test_reduce_annual_summary_target_completion():
     assert target_orders == 80
     assert achieved["gmv"] == 800
     assert achievement_rate_gmv == 80.0
+
+
+class _FetchOneResult:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+@pytest.mark.asyncio
+async def test_annual_summary_target_completion_reads_active_parent_targets(monkeypatch):
+    service = PostgresqlDashboardService()
+    service.get_annual_summary_kpi = AsyncMock(return_value={"gmv": 200000.0, "profit": 50000.0})
+
+    class _Db:
+        def __init__(self):
+            self.statements = []
+            self.params = []
+
+        async def execute(self, statement, params):
+            self.statements.append(str(statement))
+            self.params.append(params)
+            return _FetchOneResult((400000.0, 3000))
+
+    db = _Db()
+
+    result = await service.get_annual_summary_target_completion(db, "monthly", "2026-04")
+
+    assert "a_class.sales_targets" in db.statements[0]
+    assert "sales_targets_a" not in db.statements[0]
+    assert db.params[0] == {
+        "period_start": date(2026, 4, 1),
+        "period_end": date(2026, 4, 30),
+    }
+    assert result["target_gmv"] == 400000.0
+    assert result["target_orders"] == 3000
+    assert result["achievement_rate_gmv"] == 50.0
 
 
 def test_rank_shop_racing_rows_desc_by_gmv():
@@ -1987,6 +2028,106 @@ async def test_load_target_summary_daily_without_platform_avoids_null_platform_s
 
         assert result["target_amount"] == 30
         assert result["target_quantity"] == 2
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_load_target_summary_monthly_platform_prefers_period_scoped_shop_rows(monkeypatch):
+    from datetime import date
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.sales_targets (
+                        id INTEGER PRIMARY KEY,
+                        target_name VARCHAR(255),
+                        target_type VARCHAR(64),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER,
+                        achieved_amount NUMERIC,
+                        achieved_quantity INTEGER,
+                        achievement_rate NUMERIC,
+                        status VARCHAR(32)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.target_breakdown (
+                        target_id INTEGER,
+                        breakdown_type VARCHAR(64),
+                        platform_code VARCHAR(64),
+                        shop_id VARCHAR(255),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.sales_targets (
+                        id, target_name, target_type, period_start, period_end,
+                        target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate, status
+                    ) VALUES (
+                        1, '2026-04 target', 'shop', DATE '2026-04-01', DATE '2026-04-30',
+                        400000, 3000, 0, 0, 0, 'active'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.target_breakdown (
+                        target_id, breakdown_type, platform_code, shop_id, period_start, period_end,
+                        target_amount, target_quantity
+                    ) VALUES
+                        (1, 'shop', 'shopee', 'shop-1', NULL, NULL, 273520, 2041),
+                        (1, 'shop', 'shopee', 'shop-1', DATE '2026-04-01', DATE '2026-04-30', 273520, 2041),
+                        (1, 'shop', 'tiktok', 'shop-2', NULL, NULL, 126480, 959),
+                        (1, 'shop', 'tiktok', 'shop-2', DATE '2026-04-01', DATE '2026-04-30', 126480, 959)
+                    """
+                )
+            )
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+        result = await service._load_target_summary(
+            granularity="monthly",
+            period_start=date(2026, 4, 1),
+            period_end=date(2026, 4, 30),
+            platform="shopee",
+        )
+
+        assert result["target_amount"] == 273520
+        assert result["target_quantity"] == 2041
 
         await engine.dispose()
 

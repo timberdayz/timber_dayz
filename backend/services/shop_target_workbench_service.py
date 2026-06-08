@@ -14,6 +14,7 @@ from backend.schemas.target import (
     ShopTargetWorkbenchShopResponse,
 )
 from backend.services.target_sync_service import TargetSyncService
+from backend.services.target_breakdown_selection import select_effective_shop_breakdowns
 from modules.core.db import DimShop, SalesTarget, ShopAccount, ShopAccountAlias, TargetBreakdown
 
 
@@ -27,16 +28,20 @@ class ShopTargetWorkbenchService:
         shops = await self._list_active_shops()
         breakdowns = await self._list_breakdowns(target.id) if target else []
 
+        shop_rows = [item for item in breakdowns if item.breakdown_type == "shop"]
+        effective_shop_rows = select_effective_shop_breakdowns(shop_rows, month_start, month_end)
         shop_breakdowns = {
             (item.platform_code, item.shop_id): item
-            for item in breakdowns
-            if item.breakdown_type == "shop"
+            for item in effective_shop_rows
         }
-        daily_counts: dict[tuple[str, str], int] = {}
+        daily_dates: dict[tuple[str, str], set[date]] = {}
         for item in breakdowns:
             if item.breakdown_type == "shop_time" and item.platform_code and item.shop_id:
                 key = (item.platform_code, item.shop_id)
-                daily_counts[key] = daily_counts.get(key, 0) + 1
+                day = item.period_start
+                if day and item.period_end == day and month_start <= day <= month_end:
+                    daily_dates.setdefault(key, set()).add(day)
+        daily_counts = {key: len(days) for key, days in daily_dates.items()}
 
         total_amount = float(target.target_amount or 0.0) if target else 0.0
         response_shops = []

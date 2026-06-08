@@ -3,7 +3,7 @@ CREATE SCHEMA IF NOT EXISTS mart;
 CREATE OR REPLACE VIEW mart.shop_month_kpi AS
 WITH monthly_orders AS (
     SELECT
-        metric_date AS period_month,
+        date_trunc('month', metric_date)::date AS period_month,
         platform_code,
         shop_id,
         SUM(paid_amount) AS gmv,
@@ -15,11 +15,11 @@ WITH monthly_orders AS (
         SUM(profit) AS profit,
         COUNT(*) AS source_row_count
     FROM semantic.fact_orders_monthly_atomic
-    GROUP BY metric_date, platform_code, shop_id
+    GROUP BY date_trunc('month', metric_date)::date, platform_code, shop_id
 ),
 monthly_traffic AS (
     SELECT
-        metric_date AS period_month,
+        date_trunc('month', metric_date)::date AS period_month,
         platform_code,
         shop_id,
         SUM(visitor_count) AS visitor_count,
@@ -27,7 +27,7 @@ monthly_traffic AS (
         SUM(impressions) AS impressions,
         COUNT(*) AS source_row_count
     FROM semantic.fact_analytics_monthly_atomic
-    GROUP BY metric_date, platform_code, shop_id
+    GROUP BY date_trunc('month', metric_date)::date, platform_code, shop_id
 )
 SELECT
     COALESCE(o.period_month, t.period_month) AS period_month,

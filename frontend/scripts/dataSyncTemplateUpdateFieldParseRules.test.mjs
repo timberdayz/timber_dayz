@@ -15,15 +15,18 @@ test('inferHeaderBindings derives a date alias for unnamed date columns', () => 
     },
   })
 
-  assert.deepEqual(bindings[0], {
-    raw_name: 'Unnamed: 0',
-    display_name: '日期',
-    semantic_role: 'metric_date',
-    aliases: ['日期', '统计日期'],
-    position: 0,
-    sample_type: 'date',
-    confidence: 0.98,
-  })
+  assert.equal(bindings[0].raw_name, 'Unnamed: 0')
+  assert.equal(bindings[0].display_name, '日期')
+  assert.equal(bindings[0].semantic_key, 'metric_date')
+  assert.equal(bindings[0].semantic_role, 'metric_date')
+  assert.equal(bindings[0].semantic_review_status, 'confirmed_semantic')
+  assert.equal(bindings[0].hash_eligible, true)
+  assert.equal(bindings[0].hash_participates, false)
+  assert.equal(bindings[0].position, 0)
+  assert.equal(bindings[0].sample_type, 'date')
+  assert.equal(bindings[0].confidence, 0.98)
+  assert.equal(bindings[0].aliases.includes('日期'), true)
+  assert.equal(bindings[0].aliases.includes('统计日期'), true)
 })
 
 test('buildTemplateUpdateFieldParseRulesPayload keeps rules whose source columns still exist', () => {

@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 
 def test_analytics_raw_contract_preserves_coexisting_source_columns():
@@ -75,7 +76,7 @@ async def test_template_recognized_columns_are_passed_through_to_raw_importer(mo
         def __init__(self, _db):
             pass
 
-        def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None):
+        def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None, **_kwargs):
             return [f"hash-{index}" for index, _ in enumerate(rows)]
 
     captured = {}
@@ -182,7 +183,7 @@ async def test_ingest_data_passes_file_date_range_to_raw_importer(monkeypatch, t
         def __init__(self, _db):
             pass
 
-        def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None):
+        def batch_calculate_data_hash(self, rows, deduplication_fields=None, header_bindings=None, **_kwargs):
             return [f"hash-{index}" for index, _ in enumerate(rows)]
 
     captured = {}
@@ -250,3 +251,14 @@ async def test_ingest_data_passes_file_date_range_to_raw_importer(monkeypatch, t
     assert result["success"] is True
     assert captured["file_date_from"] == pd.Timestamp("2026-05-16").date()
     assert captured["file_date_to"] == pd.Timestamp("2026-05-16").date()
+
+
+def test_data_ingestion_hash_uses_template_field_parse_rules():
+    text = Path("backend/services/data_ingestion_service.py").read_text(encoding="utf-8")
+    sync_text = Path("backend/services/data_sync_service.py").read_text(encoding="utf-8")
+
+    assert "field_parse_rules: Optional[List[Dict[str, Any]]] = None" in text
+    assert "raw_importer.field_parse_rules = field_parse_rules" in text
+    assert "hash_identity_values = _build_hash_identity_values(" in text
+    assert "identity_values=hash_identity_values" in text
+    assert "field_parse_rules=getattr(template, \"field_parse_rules\", None)" in sync_text

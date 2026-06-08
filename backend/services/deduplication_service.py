@@ -19,7 +19,7 @@ v4.6.0新增:
 from typing import List, Dict, Any, Set, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增:异步支持
 from sqlalchemy import select, func, and_
-from datetime import datetime
+from datetime import date, datetime
 import hashlib
 import json
 import pandas as pd
@@ -115,6 +115,7 @@ class DeduplicationService:
         deduplication_fields: Optional[List[str]] = None,
         header_bindings: Optional[List[Dict[str, Any]]] = None,
         scope_values: Optional[Dict[str, Any]] = None,
+        identity_values: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         计算单行数据的哈希值
@@ -134,11 +135,21 @@ class DeduplicationService:
         # v4.14.0新增:如果提供了核心字段,只使用核心字段计算hash
         if deduplication_fields:
             business_data = dict(scope_hash_data)
+            missing_fields = []
             # 只使用核心字段
             missing_fields = []
             missing_required_fields = []
             for field in deduplication_fields:
-                semantic_key = normalize_semantic_key(field) if is_canonical_semantic_key(field) else None
+                field_text = str(field or "").strip()
+                semantic_key = normalize_semantic_key(field_text) if is_canonical_semantic_key(field_text) else None
+                identity_key = semantic_key or field_text
+                if identity_values and identity_key:
+                    override_value = identity_values.get(identity_key)
+                    if override_value is None and field_text != identity_key:
+                        override_value = identity_values.get(field_text)
+                    if override_value is not None and str(override_value).strip() != "":
+                        business_data[identity_key] = self._normalize_hash_value(override_value)
+                        continue
                 if semantic_key:
                     semantic_value, matched_key = resolve_semantic_value(
                         row,
@@ -146,7 +157,7 @@ class DeduplicationService:
                         header_bindings=header_bindings,
                     )
                     if semantic_value is not None:
-                        business_data[semantic_key] = semantic_value
+                        business_data[semantic_key] = self._normalize_hash_value(semantic_value)
                         continue
                 # 支持中英文字段名匹配(模糊匹配)
                 matched = False
@@ -154,13 +165,13 @@ class DeduplicationService:
                 for key in row.keys():
                     # 精确匹配
                     if key == field:
-                        business_data[key] = row[key]
+                        business_data[key] = self._normalize_hash_value(row[key])
                         matched = True
                         matched_key = key
                         break
                     # 忽略大小写匹配
                     if key.lower() == field.lower():
-                        business_data[key] = row[key]
+                        business_data[key] = self._normalize_hash_value(row[key])
                         matched = True
                         matched_key = key
                         break
@@ -236,7 +247,27 @@ class DeduplicationService:
                 continue
             scope_hash_data[f"scope:{key}"] = text
         return scope_hash_data
-    
+
+    @staticmethod
+    def _normalize_hash_value(value: Any) -> Any:
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        return value
+
+    @staticmethod
+    def _identity_values_for_row(
+        identity_values: Optional[List[Dict[str, Any]] | Dict[str, Any]],
+        index: int,
+    ) -> Optional[Dict[str, Any]]:
+        if not identity_values:
+            return None
+        if isinstance(identity_values, list):
+            if index >= len(identity_values):
+                return None
+            row_values = identity_values[index]
+            return row_values if isinstance(row_values, dict) else None
+        return identity_values if isinstance(identity_values, dict) else None
+     
     def batch_calculate_data_hash(
         self,
         rows: List[Dict[str, Any]],
@@ -244,6 +275,7 @@ class DeduplicationService:
         deduplication_fields: Optional[List[str]] = None,
         header_bindings: Optional[List[Dict[str, Any]]] = None,
         scope_values: Optional[Dict[str, Any]] = None,
+        identity_values: Optional[List[Dict[str, Any]] | Dict[str, Any]] = None,
     ) -> List[str]:
         """
         批量计算数据哈希(使用pandas向量化)
@@ -268,8 +300,15 @@ class DeduplicationService:
             # 重置日志计数器
             self._hash_log_count = 0
             hashes = [
-                self.calculate_data_hash(row, exclude_fields, deduplication_fields, header_bindings, scope_values)
-                for row in rows
+                self.calculate_data_hash(
+                    row,
+                    exclude_fields,
+                    deduplication_fields,
+                    header_bindings,
+                    scope_values,
+                    self._identity_values_for_row(identity_values, index),
+                )
+                for index, row in enumerate(rows)
             ]
             # 验证hash唯一性(前10行)
             if len(hashes) > 0:

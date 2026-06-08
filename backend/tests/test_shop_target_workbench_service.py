@@ -91,6 +91,77 @@ def test_shop_workbench_prefers_dim_shop_id_when_account_shop_id_is_stale():
     assert result.shops[0].shop_id == "1407964586"
 
 
+def test_shop_workbench_prefers_period_scoped_shop_rows_when_legacy_exists():
+    target = SimpleNamespace(
+        id=5,
+        target_amount=400000.0,
+        target_quantity=3000,
+        weekday_ratios=None,
+    )
+    account = SimpleNamespace(
+        id=1,
+        platform="shopee",
+        platform_shop_id="shop-1",
+        shop_account_id="acct-1",
+        store_name="Shop 1",
+        enabled=True,
+    )
+    scoped_shop = SimpleNamespace(
+        target_id=5,
+        breakdown_type="shop",
+        platform_code="shopee",
+        shop_id="shop-1",
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 30),
+        target_amount=273520.0,
+        target_quantity=2041,
+    )
+    legacy_shop = SimpleNamespace(
+        target_id=5,
+        breakdown_type="shop",
+        platform_code="shopee",
+        shop_id="shop-1",
+        period_start=None,
+        period_end=None,
+        target_amount=547040.0,
+        target_quantity=4082,
+    )
+    first_shop_time = SimpleNamespace(
+        target_id=5,
+        breakdown_type="shop_time",
+        platform_code="shopee",
+        shop_id="shop-1",
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 1),
+    )
+    duplicate_shop_time = SimpleNamespace(
+        target_id=5,
+        breakdown_type="shop_time",
+        platform_code="shopee",
+        shop_id="shop-1",
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 1),
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarsResult([target]),
+            _ScalarsResult([account]),
+            _ScalarsResult([]),
+            _ScalarOneResult("shop-1"),
+            _ScalarsResult([scoped_shop, legacy_shop, first_shop_time, duplicate_shop_time]),
+        ]
+    )
+
+    service = ShopTargetWorkbenchService(db)
+    result = asyncio.run(service.get_workbench("2026-04"))
+
+    assert result.shops[0].target_amount == 273520.0
+    assert result.shops[0].target_quantity == 2041
+    assert result.shops[0].daily_target_count == 1
+    assert round(result.shops[0].ratio, 6) == round(273520.0 / 400000.0, 6)
+
+
 def test_apply_shop_workbench_creates_shop_and_daily_breakdowns_then_syncs_projection():
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[_ScalarsResult([]), None])

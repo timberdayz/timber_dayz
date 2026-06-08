@@ -215,7 +215,14 @@
           <template #default="{ row }">
             <div class="template-builder-workspace__rules">
               <el-tag v-if="row.required" size="small" type="danger">必需</el-tag>
-              <el-tag v-if="row.hash_participates" size="small" type="success">参与 Data Hash</el-tag>
+              <el-tag v-if="row.hash_eligible" size="small" type="info">可参与 Data Hash</el-tag>
+              <el-tag
+                v-if="selectedDeduplicationFieldSet.has(row.semantic_key)"
+                size="small"
+                type="success"
+              >
+                已选 Data Hash
+              </el-tag>
             </div>
           </template>
         </el-table-column>
@@ -226,12 +233,16 @@
       <template #header>
         <div class="template-builder-workspace__header">
           <span>日期解析规则（可选但建议配置）</span>
-          <el-button size="small" @click="addFieldParseRule">新增规则</el-button>
+          <div class="template-builder-workspace__actions">
+            <el-button size="small" @click="applyCompanionDateRules('single')">使用伴生日期</el-button>
+            <el-button size="small" @click="applyCompanionDateRules('period')">使用伴生周期</el-button>
+            <el-button size="small" @click="addFieldParseRule">新增规则</el-button>
+          </div>
         </div>
       </template>
       <el-empty
         v-if="localFieldParseRules.length === 0"
-        description="如模板需要 metric_date，请在这里声明来源列和日期格式。"
+        description="如模板需要 metric_date 或周期字段，请在这里声明来源列；源数据没有日期列时使用伴生日期。"
         :image-size="80"
       />
       <div v-else class="field-parse-rules-list">
@@ -243,28 +254,36 @@
         >
           <div class="field-parse-rules-grid">
             <el-select v-model="rule.target_field" placeholder="目标字段" @change="emitFieldParseRulesChange">
-              <el-option label="metric_date" value="metric_date" />
-              <el-option label="period_start_date" value="period_start_date" />
-              <el-option label="period_end_date" value="period_end_date" />
+              <el-option
+                v-for="option in dateTargetOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
             <el-select v-model="rule.source_column" placeholder="来源列" filterable @change="emitFieldParseRulesChange">
-              <el-option v-for="column in headerColumns" :key="column" :label="column" :value="column" />
+              <el-option
+                v-for="option in fieldParseSourceOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
             <el-select v-model="rule.value_kind" placeholder="值类型" @change="emitFieldParseRulesChange">
-              <el-option label="single_date" value="single_date" />
-              <el-option label="date_range" value="date_range" />
+              <el-option
+                v-for="option in dateValueKindOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
             <el-select v-model="rule.date_format" placeholder="日期格式" filterable @change="emitFieldParseRulesChange">
-              <el-option label="yyyy-mm-dd" value="yyyy-mm-dd" />
-              <el-option label="yyyy/mm/dd" value="yyyy/mm/dd" />
-              <el-option label="yyyy-mm-dd hh:mm:ss" value="yyyy-mm-dd hh:mm:ss" />
-              <el-option label="yyyy/mm/dd hh:mm:ss" value="yyyy/mm/dd hh:mm:ss" />
-              <el-option label="dd-mm-yyyy" value="dd-mm-yyyy" />
-              <el-option label="dd/mm/yyyy" value="dd/mm/yyyy" />
-              <el-option label="dd-mm-yyyy hh:mm:ss" value="dd-mm-yyyy hh:mm:ss" />
-              <el-option label="dd/mm/yyyy hh:mm:ss" value="dd/mm/yyyy hh:mm:ss" />
-              <el-option label="dd-mm-yyyy-dd-mm-yyyy" value="dd-mm-yyyy-dd-mm-yyyy" />
-              <el-option label="dd/mm/yyyy-dd/mm/yyyy" value="dd/mm/yyyy-dd/mm/yyyy" />
+              <el-option
+                v-for="option in dateFormatOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
             <el-select
               v-if="rule.value_kind === 'date_range'"
@@ -316,6 +335,14 @@ import {
   inferHeaderBindings,
   updateHeaderBindingSemantic,
 } from '@/domains/data_platform/utils/headerBindings'
+import {
+  DATE_FORMAT_OPTIONS,
+  DATE_TARGET_FIELD_OPTIONS,
+  DATE_VALUE_KIND_OPTIONS,
+  buildCompanionDateParseRules,
+  buildFieldParseSourceOptions,
+  mergeFieldParseRules,
+} from '@/domains/data_platform/utils/templateFieldParseRules'
 
 const props = defineProps({
   fileFilters: { type: Object, required: true },
@@ -366,10 +393,19 @@ const localHeaderBindings = ref([])
 const deduplicationSelectionValid = ref(false)
 
 const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
+const dateTargetOptions = DATE_TARGET_FIELD_OPTIONS
+const dateValueKindOptions = DATE_VALUE_KIND_OPTIONS
+const dateFormatOptions = DATE_FORMAT_OPTIONS
 
 const sampleDataLookup = computed(() =>
   Object.fromEntries((props.headerColumnsWithSamples || []).map(item => [item.field, item.sample || null]))
 )
+
+const selectedDeduplicationFieldSet = computed(
+  () => new Set((props.deduplicationFields || []).map(field => String(field || '').trim()).filter(Boolean))
+)
+
+const fieldParseSourceOptions = computed(() => buildFieldParseSourceOptions(props.headerColumns))
 
 const semanticBindingRows = computed(() =>
   localHeaderBindings.value.map((binding) => ({
@@ -450,6 +486,14 @@ function addFieldParseRule() {
     date_format: 'yyyy-mm-dd',
     strict: true,
   })
+  emitFieldParseRulesChange()
+}
+
+function applyCompanionDateRules(mode) {
+  localFieldParseRules.value = mergeFieldParseRules(
+    localFieldParseRules.value,
+    buildCompanionDateParseRules(mode)
+  )
   emitFieldParseRulesChange()
 }
 

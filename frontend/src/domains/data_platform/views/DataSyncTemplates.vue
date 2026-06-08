@@ -819,7 +819,12 @@ const ensureHashPolicyPreviewPassed = async ({
   }
 }
 
-const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, headerRow: selectedHeaderRow, headerBindings: selectedHeaderBindings }) => {
+const handleWorkbenchSave = async ({
+  deduplicationFields: selectedFields,
+  headerRow: selectedHeaderRow,
+  headerBindings: selectedHeaderBindings,
+  fieldParseRules: selectedFieldParseRules,
+}) => {
   const context = updateWorkbenchContext.value?.context
   const template = updateWorkbenchContext.value?.template
   if (!template || !context?.current_header_columns?.length) {
@@ -833,7 +838,9 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
       currentHeaderColumns: context.current_header_columns,
       currentHeaderBindings: selectedHeaderBindings || [],
       templateHeaderBindings: template.header_bindings || [],
-      existingRules: template.field_parse_rules || [],
+      existingRules: Array.isArray(selectedFieldParseRules)
+        ? selectedFieldParseRules
+        : template.field_parse_rules || [],
     })
     const templatePlatform = template.platform || context?.template?.platform || null
     const templateDataDomain =

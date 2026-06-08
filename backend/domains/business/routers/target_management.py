@@ -59,6 +59,7 @@ from backend.schemas.target import (
     ShopTargetWorkbenchApplyRequest,
 )
 from backend.services.shop_target_workbench_service import ShopTargetWorkbenchService
+from backend.services.target_breakdown_selection import select_effective_shop_breakdowns
 from backend.dependencies.auth import get_current_user  # [OK] 2026-01-08: 添加用户认证
 
 logger = get_logger(__name__)
@@ -1575,12 +1576,13 @@ async def generate_daily_breakdown(
                 created += 1
 
         # 日度按店铺：若有按店铺分解，为每店×每日生成 shop_time
-        shop_breakdowns = (await db.execute(
+        shop_breakdown_rows = (await db.execute(
             select(TargetBreakdown).where(
                 TargetBreakdown.target_id == target_id,
                 TargetBreakdown.breakdown_type == "shop",
             )
         )).scalars().all()
+        shop_breakdowns = select_effective_shop_breakdowns(shop_breakdown_rows, start, end)
         created_st = 0
         updated_st = 0
         for shop_bd in shop_breakdowns:
