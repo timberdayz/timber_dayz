@@ -104,6 +104,17 @@ v4.6.0新增：独立的数据同步系统
             </div>
           </div>
         </div>
+        <div class="stat-item" @click="setFileView('source_missing')">
+          <div class="stat-icon stat-icon-warning">
+            <el-icon><Warning /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-label">源文件缺失</div>
+            <div class="stat-value">
+              {{ governanceStats.source_missing_count || 0 }}
+            </div>
+          </div>
+        </div>
       </div>
       <div class="governance-actions">
         <el-button
@@ -138,7 +149,7 @@ v4.6.0新增：独立的数据同步系统
           :loading="cleaning"
         >
           <el-icon><Delete /></el-icon>
-          清空已入库事实数据
+          清空事实数据并重置可重建文件
         </el-button>
       </div>
     </el-card>
@@ -211,6 +222,7 @@ v4.6.0新增：独立的数据同步系统
             <el-option label="隔离" value="quarantined" />
             <el-option label="已同步" value="ingested" />
             <el-option label="处理中" value="processing" />
+            <el-option label="源文件缺失" value="source_missing" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -493,6 +505,8 @@ v4.6.0新增：独立的数据同步系统
                   ? 'info'
                   : row.status === 'partial_success'
                   ? 'warning'
+                  : row.status === 'source_missing'
+                  ? 'warning'
                   : 'info'
               "
               size="small"
@@ -510,6 +524,8 @@ v4.6.0新增：独立的数据同步系统
                   ? "需指派店铺"
                   : row.status === "partial_success"
                   ? "部分成功"
+                  : row.status === "source_missing"
+                  ? "源文件缺失"
                   : row.status || "未知"
               }}
             </el-tag>
@@ -547,7 +563,7 @@ v4.6.0新增：独立的数据同步系统
               重试
             </el-button>
             <el-button
-              v-else
+              v-else-if="row.status !== 'source_missing'"
               size="small"
               @click="syncSingle(row.id)"
               :loading="syncingFiles.includes(row.id)"
@@ -913,6 +929,7 @@ const fileViewOptions = [
   { label: '可同步', value: 'ready', status: 'pending' },
   { label: '同步失败', value: 'failed', status: 'failed' },
   { label: '已入库', value: 'ingested', status: 'ingested' },
+  { label: '源文件缺失', value: 'source_missing', status: 'source_missing' },
   { label: '异常文件', value: 'anomaly', status: null },
   { label: '历史遗留', value: 'legacy', status: null }
 ]
@@ -961,6 +978,7 @@ const displayFiles = computed(() => {
   }
   if (activeFileView.value === 'anomaly') {
     return files.value.filter((file) =>
+      file.status === 'source_missing' ||
       ['semantic_invalid', 'parse_failed', 'file_missing'].includes(file.governance_status || file.template_status)
     )
   }
@@ -1356,6 +1374,7 @@ const isRowSyncable = (row) => {
 
   if (!row?.has_template) return false
   if (row?.status === 'ingested') return false
+  if (row?.status === 'source_missing') return false
   if (templateStatus === 'update_required' || templateStatus === 'parse_failed' || templateStatus === 'file_missing' || templateStatus === 'semantic_invalid') {
     return false
   }
@@ -1435,6 +1454,37 @@ const buildBatchDeleteImpactHtml = (impact) => {
           : ''
       }
       <div style="margin-top:10px;color:#c45656;"><strong>此操作不可撤销，请确认后执行。</strong></div>
+    </div>
+  `
+}
+
+const buildCleanupImpactHtml = (impact) => {
+  const factTables = Object.entries(impact.fact_table_counts || {})
+    .slice(0, 8)
+    .map(([tableName, rowCount]) => `<li>${tableName}: ${rowCount} 行</li>`)
+    .join('')
+  const moreTablesCount = Math.max(
+    Object.keys(impact.fact_table_counts || {}).length - 8,
+    0
+  )
+
+  return `
+    <div style="line-height:1.7;">
+      <div><strong>将删除事实数据：</strong>${impact.total_fact_rows || 0} 行</div>
+      <div><strong>将重置可重建文件：</strong>${impact.resettable_files_count || 0} 个</div>
+      <div><strong>将标记源文件缺失：</strong>${impact.source_missing_files_count || 0} 个</div>
+      <div><strong>原始文件缺失：</strong>${impact.file_missing_files_count || 0} 个</div>
+      <div><strong>伴生文件缺失：</strong>${impact.meta_missing_files_count || 0} 个</div>
+      <div><strong>失败文件跳过：</strong>${impact.skipped_failed_count || 0} 个</div>
+      <div><strong>处理中跳过：</strong>${impact.skipped_processing_count || 0} 个</div>
+      ${
+        factTables
+          ? `<div style="margin-top:8px;"><strong>事实表：</strong><ul style="margin:4px 0 0 20px;">${factTables}${
+              moreTablesCount > 0 ? `<li>另有 ${moreTablesCount} 张表...</li>` : ''
+            }</ul></div>`
+          : ''
+      }
+      <div style="margin-top:10px;color:#c45656;"><strong>此操作不可恢复；缺失源文件不会进入待同步队列。</strong></div>
     </div>
   `
 }
@@ -2120,14 +2170,18 @@ const handleSyncAll = async () => {
 // 清理数据库
 const handleCleanupDatabase = async () => {
   try {
+    cleaning.value = true
+    const impact = await api.getCleanupDatabaseImpact()
+    cleaning.value = false
+
     await ElMessageBox.confirm(
-      '警告：此操作只会清空已入库的事实数据，并将部分文件状态重置为待同步；不会删除本地文件、伴生文件、staging 或 quarantine 记录。\n\n此操作不可恢复，确定要继续吗？',
-      '确认清理数据库',
+      buildCleanupImpactHtml(impact),
+      '确认清空事实数据',
       {
         confirmButtonText: '确定清理',
         cancelButtonText: '取消',
         type: 'warning',
-        dangerouslyUseHTMLString: false
+        dangerouslyUseHTMLString: true
       }
     )
 
@@ -2135,10 +2189,11 @@ const handleCleanupDatabase = async () => {
     const result = await api.cleanupDatabase()
 
     ElMessage.success(
-      result.message ||
-        `数据库清理完成：删除${result.total_deleted_rows || 0}行数据，重置${
+      `数据库清理完成：删除${result.total_deleted_rows || 0}行数据，重置${
           result.reset_files_count || 0
-        }个文件状态`
+        }个可重建文件，标记${
+          result.marked_source_missing_count || 0
+        }个源文件缺失记录`
     )
 
     await loadFiles()
