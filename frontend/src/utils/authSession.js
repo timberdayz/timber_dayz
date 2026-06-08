@@ -14,13 +14,25 @@ function resolvePermissions(userInfo = {}, roles = [], activeRole = '') {
   return activeRole ? (ROLE_CONFIG[activeRole]?.permissions || []) : []
 }
 
+export function deriveAccessTokenExpiresAt(expiresIn, nowMs = Date.now()) {
+  const expiresInSeconds = Number(expiresIn)
+  if (!Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) {
+    return null
+  }
+  return nowMs + expiresInSeconds * 1000
+}
+
+function normalizeAccessTokenExpiresAt(value) {
+  const expiresAt = Number(value)
+  return Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : null
+}
+
 export function buildPersistedAuthState(authPayload) {
   const userInfo = authPayload?.user_info || {}
   const roles = normalizeRoles(userInfo.roles)
   const activeRole = roles.includes('admin') ? 'admin' : (roles[0] || '')
   const permissions = resolvePermissions(userInfo, roles, activeRole)
-
-  return {
+  const entries = {
     user_info: JSON.stringify(userInfo),
     userInfo: JSON.stringify({
       id: userInfo.id,
@@ -37,6 +49,14 @@ export function buildPersistedAuthState(authPayload) {
     permissions: JSON.stringify(permissions),
     activeRole,
   }
+
+  const accessTokenExpiresAt =
+    normalizeAccessTokenExpiresAt(authPayload?.accessTokenExpiresAt) ||
+    deriveAccessTokenExpiresAt(authPayload?.expires_in)
+  if (accessTokenExpiresAt) {
+    entries.accessTokenExpiresAt = String(accessTokenExpiresAt)
+  }
+  return entries
 }
 
 export function writePersistedAuthState(storage, authPayload) {
@@ -55,6 +75,9 @@ export function readPersistedAuthState(storage) {
   const rolesRaw = storage.getItem('roles')
   const permissionsRaw = storage.getItem('permissions')
   const activeRole = storage.getItem('activeRole') || ''
+  const accessTokenExpiresAt = normalizeAccessTokenExpiresAt(
+    storage.getItem('accessTokenExpiresAt')
+  )
 
   let authUser = null
   let userInfo = null
@@ -115,6 +138,7 @@ export function readPersistedAuthState(storage) {
     roles,
     permissions,
     activeRole: resolvedActiveRole,
+    accessTokenExpiresAt,
   }
 }
 
@@ -136,6 +160,7 @@ export function clearPersistedAuthState(storage) {
     'roles',
     'permissions',
     'activeRole',
+    'accessTokenExpiresAt',
   ].forEach((key) => storage.removeItem(key))
 }
 
