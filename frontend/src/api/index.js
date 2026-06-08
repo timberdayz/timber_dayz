@@ -2315,8 +2315,16 @@ export default {
   },
 
   /**
-   * 清理数据库（清理所有已入库的数据）
-   * @returns {Promise} {deleted_counts, total_deleted_rows, reset_files_count}
+   * 获取清空事实数据影响预览
+   * @returns {Promise} {fact_table_counts, total_fact_rows, resettable_files_count, source_missing_files_count}
+   */
+  async getCleanupDatabaseImpact() {
+    return await this._get('/data-sync/cleanup-database/impact')
+  },
+
+  /**
+   * 清理数据库（清理事实数据并仅重置可重建文件）
+   * @returns {Promise} {deleted_counts, total_deleted_rows, reset_files_count, marked_source_missing_count}
    */
   async cleanupDatabase() {
     return await this._post('/data-sync/cleanup-database')

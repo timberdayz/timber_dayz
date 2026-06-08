@@ -30,6 +30,7 @@ import pandas as pd
 from backend.models.database import get_db, get_async_db, SessionLocal, AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.data_sync_service import DataSyncService
+from backend.services.data_sync_cleanup_service import DataSyncCleanupService
 from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
 from backend.services.spreadsheet_normalization_service import get_spreadsheet_normalization_service
 from backend.services.sync_progress_tracker import SyncProgressTracker
@@ -3155,10 +3156,15 @@ async def get_governance_stats(
             select(func.count(CatalogFile.id)).where(CatalogFile.status == 'failed')
         )
         failed_count = failed_result.scalar() or 0
+
+        source_missing_result = await db.execute(
+            select(func.count(CatalogFile.id)).where(CatalogFile.status == 'source_missing')
+        )
+        source_missing_count = source_missing_result.scalar() or 0
         
         # [*] v4.17.2新增:统计各状态的详细数量(用于调试和显示)
         status_counts = {}
-        for status_name in ['pending', 'partial_success', 'failed', 'quarantined', 'needs_shop', 'ingested', 'processing']:
+        for status_name in ['pending', 'partial_success', 'failed', 'quarantined', 'needs_shop', 'ingested', 'processing', 'source_missing']:
             count_result = await db.execute(
                 select(func.count(CatalogFile.id)).where(CatalogFile.status == status_name)
             )
@@ -3187,6 +3193,7 @@ async def get_governance_stats(
                 "official_unregistered_count": official_unregistered_count,
                 "legacy_file_count": legacy_file_count,
                 "failed_count": failed_count,  # 仅failed状态的文件数
+                "source_missing_count": source_missing_count,
                 "total_count": total_count,  # [*] v4.18.1修复:总文件数从数据库查询
                 "status_counts": status_counts,  # [*] 各状态的详细数量
                 "ready_to_sync_count": ready_to_sync_count,
@@ -3796,6 +3803,31 @@ async def repair_miaoshou_orders_platform_semantics(
         )
 
 
+@router.get("/data-sync/cleanup-database/impact")
+async def get_cleanup_database_impact(
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(require_admin),
+):
+    """预览清空事实数据会影响的事实行和文件状态。"""
+    try:
+        service = DataSyncCleanupService(db)
+        result = await service.analyze_cleanup_impact()
+        return success_response(
+            data=result,
+            message="清空事实数据影响预览查询成功",
+        )
+    except Exception as e:
+        logger.error(f"[DataSync CleanupImpact] 查询清理影响失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="查询清理影响失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
+            status_code=500,
+        )
+
+
 @router.post("/data-sync/cleanup-database")
 async def cleanup_database(
     db: AsyncSession = Depends(get_async_db),  # [*] v4.18.2:改为异步会话
@@ -3806,105 +3838,27 @@ async def cleanup_database(
     
     功能:
     - 清理所有已入库的数据(B类数据表)
-    - 重置文件状态为pending
+    - 仅将原始文件和伴生文件仍存在的已入库文件重置为pending
+    - 将无法重建的已入库文件标记为source_missing
     - 用于测试环境数据清理
     
-    v4.18.2: 迁移到异步会话(使用run_in_executor包装DDL操作)
+    v4.18.2: 迁移到异步会话
     """
     try:
-        # [*] v4.18.2:由于inspect()需要同步引擎,使用run_in_executor包装整个操作
-        def _sync_cleanup():
-            """同步执行清理操作"""
-            from sqlalchemy import inspect, text
-            
-            sync_db = SessionLocal()
-            try:
-                inspector = inspect(sync_db.bind)
-                
-                # 查询b_class schema中所有表
-                all_tables = inspector.get_table_names(schema='b_class')
-                
-                # 筛选出所有以fact_开头的表(B类数据表)
-                fact_tables = [t for t in all_tables if t.startswith('fact_')]
-                
-                if not fact_tables:
-                    logger.info("[DataSync Cleanup] b_class schema中没有找到fact_开头的表")
-                    fact_tables = []
-                
-                deleted_counts = {}
-                for table_name in fact_tables:
-                    try:
-                        # 统计行数
-                        count_sql = text(f'SELECT COUNT(*) FROM b_class."{table_name}"')
-                        count = sync_db.execute(count_sql).scalar() or 0
-                        
-                        # 使用DELETE删除数据(保留表结构)
-                        if count > 0:
-                            delete_sql = text(f'DELETE FROM b_class."{table_name}"')
-                            sync_db.execute(delete_sql)
-                            logger.info(f"[DataSync Cleanup] 删除表 b_class.{table_name}: {count} 行")
-                        else:
-                            logger.debug(f"[DataSync Cleanup] 表 b_class.{table_name} 无数据,跳过删除")
-                        
-                        deleted_counts[table_name] = count
-                        
-                    except Exception as table_error:
-                        # 单个表清理失败不影响其他表
-                        logger.error(f"[DataSync Cleanup] 清理表 b_class.{table_name} 失败: {table_error}", exc_info=True)
-                        deleted_counts[table_name] = -1  # 使用-1表示失败
-                
-                # 2. 重置所有已入库文件状态为pending(包括ingested、partial_success、processing、failed)
-                from sqlalchemy import select, update
-                # [*] v4.18.2修复:使用select查询替代db.query()
-                result = sync_db.execute(
-                    select(CatalogFile).where(
-                        CatalogFile.status.in_(['ingested', 'partial_success', 'processing', 'failed'])
-                    )
-                )
-                files_to_reset = result.scalars().all()
-                
-                status_distribution = {}
-                for file_record in files_to_reset:
-                    status = file_record.status
-                    status_distribution[status] = status_distribution.get(status, 0) + 1
-                
-                # 批量更新文件状态为pending
-                # [*] v4.18.2修复:使用update语句替代db.query().update()
-                update_stmt = update(CatalogFile).where(
-                    CatalogFile.status.in_(['ingested', 'partial_success', 'processing', 'failed'])
-                ).values(status="pending")
-                result = sync_db.execute(update_stmt)
-                updated_count = result.rowcount
-                
-                # 3. 提交事务
-                sync_db.commit()
-                
-                total_deleted = sum(v for v in deleted_counts.values() if v > 0)
-                
-                logger.info(f"[DataSync Cleanup] 清理完成: 删除{total_deleted}行数据,重置{updated_count}个文件状态为pending(状态分布: {status_distribution})")
-                
-                return {
-                    "deleted_counts": deleted_counts,
-                    "total_deleted_rows": total_deleted,
-                    "reset_files_count": updated_count,
-                    "status_distribution": status_distribution
-                }
-            except Exception as e:
-                sync_db.rollback()
-                raise
-            finally:
-                sync_db.close()
-        
-        # 在线程池中执行同步操作
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _sync_cleanup)
-        
+        service = DataSyncCleanupService(db)
+        result = await service.cleanup_database()
+
         return success_response(
             data=result,
-            message=f"数据库清理完成:删除{result['total_deleted_rows']}行数据,重置{result['reset_files_count']}个文件状态为pending"
+            message=(
+                f"数据库清理完成:删除{result['total_deleted_rows']}行数据,"
+                f"重置{result['reset_files_count']}个可重建文件,"
+                f"标记{result['marked_source_missing_count']}个源文件缺失记录"
+            ),
         )
         
     except Exception as e:
+        await db.rollback()
         logger.error(f"[DataSync Cleanup] 清理数据库失败: {e}", exc_info=True)
         return error_response(
             code=ErrorCode.DATABASE_QUERY_ERROR,
