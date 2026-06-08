@@ -288,12 +288,12 @@ class TargetSyncService:
                   AND t.status = 'active'
                   AND tb.breakdown_type = 'shop'
                   AND tb.shop_id = :shop_id
-                  AND DATE_TRUNC('month', t.period_start) = DATE_TRUNC('month', :period_start::date)
+                  AND DATE_TRUNC('month', t.period_start) = DATE_TRUNC('month', CAST(:period_start AS date))
             """),
             {
                 "target_id": target_id,
                 "shop_id": shop_id,
-                "period_start": period_start.isoformat()
+                "period_start": period_start
             }
         )
         return result.scalar() or 0

@@ -14,7 +14,7 @@ from backend.schemas.target import (
     ShopTargetWorkbenchShopResponse,
 )
 from backend.services.target_sync_service import TargetSyncService
-from modules.core.db import SalesTarget, ShopAccount, ShopAccountAlias, TargetBreakdown
+from modules.core.db import DimShop, SalesTarget, ShopAccount, ShopAccountAlias, TargetBreakdown
 
 
 class ShopTargetWorkbenchService:
@@ -189,10 +189,7 @@ class ShopTargetWorkbenchService:
             )
             alias_records = alias_result.scalars().all()
             aliases = [alias.alias_value for alias in alias_records if getattr(alias, "alias_value", None)]
-            shop_id = (
-                str(getattr(record, "platform_shop_id", "") or "").strip()
-                or str(getattr(record, "shop_account_id", "") or "").strip()
-            )
+            shop_id = await self._resolve_shop_target_id(record)
             shops.append(
                 SimpleNamespace(
                     platform_code=str(getattr(record, "platform", "") or "").strip().lower(),
@@ -202,6 +199,39 @@ class ShopTargetWorkbenchService:
                 )
             )
         return shops
+
+    async def _resolve_shop_target_id(self, record: ShopAccount) -> str:
+        platform_code = str(getattr(record, "platform", "") or "").strip().lower()
+        store_name = str(getattr(record, "store_name", "") or "").strip()
+        candidates = [
+            str(getattr(record, "platform_shop_id", "") or "").strip(),
+            str(getattr(record, "shop_account_id", "") or "").strip(),
+        ]
+        candidates = [candidate for candidate in candidates if candidate]
+
+        for candidate in candidates:
+            matched = await self.db.execute(
+                select(DimShop.shop_id).where(
+                    DimShop.platform_code == platform_code,
+                    DimShop.shop_id == candidate,
+                )
+            )
+            shop_id = matched.scalar_one_or_none()
+            if shop_id:
+                return str(shop_id)
+
+        if store_name:
+            matched = await self.db.execute(
+                select(DimShop.shop_id).where(
+                    DimShop.platform_code == platform_code,
+                    DimShop.shop_name == store_name,
+                )
+            )
+            shop_id = matched.scalar_one_or_none()
+            if shop_id:
+                return str(shop_id)
+
+        return candidates[0] if candidates else store_name
 
     async def _list_breakdowns(self, target_id: int):
         result = await self.db.execute(select(TargetBreakdown).where(TargetBreakdown.target_id == target_id))

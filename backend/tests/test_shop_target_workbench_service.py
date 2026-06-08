@@ -44,7 +44,7 @@ def test_shop_workbench_response_includes_standard_name_alias_and_shop_id():
                 ]
             ),
             _ScalarsResult([SimpleNamespace(alias_value="standard-shop", is_primary=True)]),
-            _ScalarsResult([]),
+            _ScalarOneResult("SHP-1"),
         ]
     )
 
@@ -59,6 +59,36 @@ def test_shop_workbench_response_includes_standard_name_alias_and_shop_id():
     shop_query = db.execute.await_args_list[1].args[0]
     assert "shop_accounts" in str(shop_query)
     assert "enabled" in str(shop_query)
+
+
+def test_shop_workbench_prefers_dim_shop_id_when_account_shop_id_is_stale():
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarsResult([]),
+            _ScalarsResult(
+                [
+                    SimpleNamespace(
+                        id=1,
+                        platform="shopee",
+                        platform_shop_id="1227491331",
+                        shop_account_id="shopee_sg_zewei_toys_local",
+                        store_name="zewei_toys.sg",
+                        enabled=True,
+                    )
+                ]
+            ),
+            _ScalarsResult([]),
+            _ScalarOneResult(None),
+            _ScalarOneResult(None),
+            _ScalarOneResult("1407964586"),
+        ]
+    )
+
+    service = ShopTargetWorkbenchService(db)
+    result = asyncio.run(service.get_workbench("2026-03"))
+
+    assert result.shops[0].shop_id == "1407964586"
 
 
 def test_apply_shop_workbench_creates_shop_and_daily_breakdowns_then_syncs_projection():

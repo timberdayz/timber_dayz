@@ -114,14 +114,69 @@
             v-for="kpi in coreKpiCards"
             :key="kpi.key"
             class="kpi-card kpi-strip-card"
-            :class="{ 'is-primary': kpi.isPrimary, 'is-funnel': kpi.isFunnel }"
+            :class="{
+              'is-primary': kpi.isPrimary,
+              'is-funnel': kpi.isFunnel,
+              'is-help-active': isKpiHelpVisible(kpi.key)
+            }"
           >
             <div class="kpi-content">
               <div class="kpi-icon" :class="kpi.iconClass">
                 <el-icon><component :is="kpi.icon" /></el-icon>
               </div>
               <div class="kpi-info">
-                <div class="kpi-title">{{ kpi.title }}</div>
+                <div class="kpi-title-row">
+                  <el-popover
+                    v-model:visible="kpiHelpVisibility[kpi.key]"
+                    trigger="hover"
+                    placement="top"
+                    :width="320"
+                    popper-class="kpi-help-popover"
+                  >
+                    <template #reference>
+                      <button
+                        type="button"
+                        class="kpi-help-trigger"
+                        aria-label="查看指标说明"
+                        @click.stop="toggleKpiHelp(kpi.key)"
+                        @keydown.enter.prevent="openKpiHelp(kpi.key)"
+                        @keydown.space.prevent="openKpiHelp(kpi.key)"
+                      >
+                        <span class="kpi-title">{{ kpi.title }}</span>
+                        <el-icon class="kpi-help-icon"><QuestionFilled /></el-icon>
+                      </button>
+                    </template>
+                    <div v-if="kpi.helpMeta" class="kpi-help-panel">
+                      <div class="kpi-help-panel__header">
+                        <span class="kpi-help-panel__title">{{ kpi.helpMeta.title }}</span>
+                        <el-tag
+                          size="small"
+                          effect="plain"
+                          class="kpi-help-status"
+                          :type="getKpiHelpStatusTagType(kpi.helpMeta.status)"
+                        >
+                          {{ getKpiHelpStatusText(kpi.helpMeta.status) }}
+                        </el-tag>
+                      </div>
+                      <div class="kpi-help-row">
+                        <div class="kpi-help-label">指标含义</div>
+                        <div class="kpi-help-text">{{ kpi.helpMeta.definition }}</div>
+                      </div>
+                      <div class="kpi-help-row">
+                        <div class="kpi-help-label">计算口径</div>
+                        <div class="kpi-help-text">{{ kpi.helpMeta.formulaText }}</div>
+                      </div>
+                      <div class="kpi-help-row">
+                        <div class="kpi-help-label">业务作用</div>
+                        <div class="kpi-help-text">{{ kpi.helpMeta.businessValue }}</div>
+                      </div>
+                      <div class="kpi-help-row">
+                        <div class="kpi-help-label">口径状态</div>
+                        <div class="kpi-help-text">{{ kpi.helpMeta.caution }}</div>
+                      </div>
+                    </div>
+                  </el-popover>
+                </div>
                 <div class="kpi-value">{{ kpi.value }}</div>
                 <div class="kpi-change" :class="kpi.changeType">
                   <el-icon><component :is="kpi.changeIcon" /></el-icon>
@@ -1156,7 +1211,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, computed, watch } from 'vue'
+import { reactive, ref, onMounted, nextTick, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import api from '@/api'
@@ -1171,6 +1226,11 @@ import {
   handleApiError,
   getDashboardAssetUnavailableInfo
 } from '@/utils/errorHandler'
+import {
+  KPI_HELP_STATUS,
+  businessOverviewKpiMeta,
+  getKpiHelpMeta
+} from './businessOverviewKpiMeta.js'
 import { normalizeClearanceRankingResponse } from '@/utils/businessOverviewData'
 import { buildShopAccountLookup, resolveShopDisplay } from '@/utils/shopDisplay'
 import PageHeader from '@/components/common/PageHeader.vue'
@@ -1582,6 +1642,8 @@ const kpiDatePickerValueFormat = computed(() => {
   return 'YYYY-MM-DD'
 })
 const kpiPlatform = ref('') // 默认全部平台
+const kpiHelpVisibility = reactive({})
+const kpiHelpMetaEntries = businessOverviewKpiMeta
 
 // KPI数据
 const kpiData = ref([
@@ -1718,7 +1780,14 @@ const kpiData = ref([
 ])
 
 const findKpiCard = (key) => kpiData.value.find((item) => item.key === key)
-const pickKpiCards = (keys) => keys.map(findKpiCard).filter(Boolean)
+const pickKpiCards = (keys) =>
+  keys
+    .map(findKpiCard)
+    .filter(Boolean)
+    .map((item) => ({
+      ...item,
+      helpMeta: getKpiHelpMeta(item.key)
+    }))
 
 const primaryKpiKeys = new Set(['gmv', 'order_count', 'uv_conversion_rate', 'avg_order_value'])
 const funnelKpiKeys = new Set(['impressions', 'page_views', 'visitor_count'])
@@ -1744,6 +1813,37 @@ const coreKpiCards = computed(() =>
     isFunnel: funnelKpiKeys.has(item.key)
   }))
 )
+
+const isKpiHelpVisible = (key) => Boolean(kpiHelpVisibility[key])
+
+const closeAllKpiHelp = () => {
+  for (const item of kpiHelpMetaEntries) {
+    kpiHelpVisibility[item.key] = false
+  }
+}
+
+const openKpiHelp = (key) => {
+  closeAllKpiHelp()
+  kpiHelpVisibility[key] = true
+}
+
+const toggleKpiHelp = (key) => {
+  const nextVisible = !kpiHelpVisibility[key]
+  closeAllKpiHelp()
+  kpiHelpVisibility[key] = nextVisible
+}
+
+const getKpiHelpStatusText = (status) => {
+  if (status === KPI_HELP_STATUS.observe) return '观察口径'
+  if (status === KPI_HELP_STATUS.blocked) return '谨慎使用'
+  return '稳定口径'
+}
+
+const getKpiHelpStatusTagType = (status) => {
+  if (status === KPI_HELP_STATUS.observe) return 'warning'
+  if (status === KPI_HELP_STATUS.blocked) return 'danger'
+  return 'success'
+}
 
 // 数据对比（默认跟随全局：月）
 const comparisonChart = ref(null)
@@ -3111,14 +3211,57 @@ watch(
   min-width: 0;
 }
 
+.kpi-title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+
+.kpi-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.kpi-help-trigger:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 .kpi-title {
   color: #7b8494;
   font-size: 11px;
   line-height: 1.25;
-  margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.kpi-help-icon {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #94a3b8;
+  transition: color 0.2s ease;
+}
+
+.kpi-help-trigger:hover .kpi-help-icon,
+.kpi-help-trigger:focus-visible .kpi-help-icon,
+.kpi-card.is-help-active .kpi-help-icon {
+  color: #2563eb;
+}
+
+.kpi-card.is-help-active {
+  border-color: rgba(59, 130, 246, 0.42);
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.12);
 }
 
 .kpi-value {
@@ -3155,6 +3298,53 @@ watch(
 
 .kpi-change.neutral {
   color: #909399;
+}
+
+:deep(.kpi-help-popover.el-popover) {
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+}
+
+.kpi-help-panel {
+  color: #334155;
+}
+
+.kpi-help-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.kpi-help-panel__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.kpi-help-status {
+  flex: 0 0 auto;
+}
+
+.kpi-help-row + .kpi-help-row {
+  margin-top: 10px;
+}
+
+.kpi-help-label {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+
+.kpi-help-text {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #334155;
 }
 
 .comparison-section {
