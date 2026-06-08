@@ -670,6 +670,13 @@ class DataIngestionService:
                         f"提取到{sum(1 for c in currency_codes if c)}个货币代码,"
                         f"字段名归一化完成: {len(normalized_rows)}行"
                     )
+                    logger.info(
+                        "[Ingest] raw import date context: file_id=%s, date_from=%s, date_to=%s, field_parse_rules=%s",
+                        file_id,
+                        getattr(file_record, "date_from", None) if file_record else None,
+                        getattr(file_record, "date_to", None) if file_record else None,
+                        len(field_parse_rules or []),
+                    )
                     
                     # 批量插入(使用RawDataImporter)
                     # [*] v4.16.0更新:获取sub_domain(services域必须提供)
@@ -724,7 +731,11 @@ class DataIngestionService:
                         currency_codes=currency_codes,  # [*] v4.15.0新增:货币代码列表
                         sub_domain=sub_domain_value,  # [*] v4.16.0新增:子类型(services域必须提供)
                         original_header_columns=header_columns_for_storage,  # [*] v4.16.0新增:原始header_columns(包含货币代码,用于保存到数据库)
-                        template_id=template_id
+                        template_id=template_id,
+                        file_date_from=getattr(file_record, "date_from", None) if file_record else None,
+                        file_date_to=getattr(file_record, "date_to", None) if file_record else None,
+                        field_parse_rules=field_parse_rules,
+                        header_bindings=header_bindings or [],
                     )
                     
                     # [*] v4.15.0修改:处理新的返回值格式(字典)

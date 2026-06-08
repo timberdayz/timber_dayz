@@ -91,10 +91,38 @@ def _index_exists(connection, schema_name: str, index_name: str) -> bool:
     return result.scalar() is not None
 
 
+def _quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def _resolve_sales_targets_a_identity_columns(connection) -> tuple[str, str]:
+    """Support both live Chinese columns and fresh snapshot English columns."""
+    if (
+        _column_exists(connection, "a_class", "sales_targets_a", "店铺ID")
+        and _column_exists(connection, "a_class", "sales_targets_a", "年月")
+    ):
+        return "店铺ID", "年月"
+
+    if (
+        _column_exists(connection, "a_class", "sales_targets_a", "shop_id")
+        and _column_exists(connection, "a_class", "sales_targets_a", "year_month")
+    ):
+        return "shop_id", "year_month"
+
+    raise RuntimeError(
+        "a_class.sales_targets_a is missing expected identity columns: "
+        '("店铺ID", "年月") or ("shop_id", "year_month")'
+    )
+
+
 def upgrade() -> None:
     connection = op.get_bind()
     if not _table_exists(connection, "a_class", "sales_targets_a"):
         return
+
+    shop_column, month_column = _resolve_sales_targets_a_identity_columns(connection)
+    quoted_shop_column = _quote_identifier(shop_column)
+    quoted_month_column = _quote_identifier(month_column)
 
     if not _column_exists(connection, "a_class", "sales_targets_a", "platform_code"):
         op.add_column(
@@ -113,47 +141,52 @@ def upgrade() -> None:
         )
     )
 
-    op.execute(
-        sa.text(
-            """
-            WITH resolved AS (
-                SELECT
-                    sta.ctid AS row_id,
-                    MIN(LOWER(TRIM(tb.platform_code))) AS platform_code
-                FROM a_class.sales_targets_a sta
-                JOIN a_class.sales_targets st
-                  ON DATE_TRUNC('month', st.period_start)::date = to_date(sta."年月" || '-01', 'YYYY-MM-DD')
-                JOIN a_class.target_breakdown tb
-                  ON tb.target_id = st.id
-                 AND tb.breakdown_type = 'shop'
-                 AND COALESCE(tb.shop_id, '') = COALESCE(sta."店铺ID", '')
-                WHERE LOWER(TRIM(COALESCE(sta.platform_code, 'unknown'))) = 'unknown'
-                  AND NULLIF(TRIM(tb.platform_code), '') IS NOT NULL
-                  AND LOWER(TRIM(tb.platform_code)) NOT IN ('unknown', 'none')
-                GROUP BY sta.ctid
-                HAVING COUNT(DISTINCT LOWER(TRIM(tb.platform_code))) = 1
+    if (
+        _table_exists(connection, "a_class", "sales_targets")
+        and _table_exists(connection, "a_class", "target_breakdown")
+    ):
+        op.execute(
+            sa.text(
+                f"""
+                WITH resolved AS (
+                    SELECT
+                        sta.ctid AS row_id,
+                        MIN(LOWER(TRIM(tb.platform_code))) AS platform_code
+                    FROM a_class.sales_targets_a sta
+                    JOIN a_class.sales_targets st
+                      ON DATE_TRUNC('month', st.period_start)::date = to_date(sta.{quoted_month_column} || '-01', 'YYYY-MM-DD')
+                    JOIN a_class.target_breakdown tb
+                      ON tb.target_id = st.id
+                     AND tb.breakdown_type = 'shop'
+                     AND COALESCE(tb.shop_id, '') = COALESCE(sta.{quoted_shop_column}, '')
+                    WHERE LOWER(TRIM(COALESCE(sta.platform_code, 'unknown'))) = 'unknown'
+                      AND NULLIF(TRIM(tb.platform_code), '') IS NOT NULL
+                      AND LOWER(TRIM(tb.platform_code)) NOT IN ('unknown', 'none')
+                    GROUP BY sta.ctid
+                    HAVING COUNT(DISTINCT LOWER(TRIM(tb.platform_code))) = 1
+                )
+                UPDATE a_class.sales_targets_a sta
+                SET platform_code = resolved.platform_code
+                FROM resolved
+                WHERE sta.ctid = resolved.row_id
+                """
             )
-            UPDATE a_class.sales_targets_a sta
-            SET platform_code = resolved.platform_code
-            FROM resolved
-            WHERE sta.ctid = resolved.row_id
-            """
         )
-    )
 
-    if _constraint_exists(connection, "a_class", "sales_targets_a", "uq_sales_targets_a_shop_month"):
-        op.drop_constraint(
-            "uq_sales_targets_a_shop_month",
-            "sales_targets_a",
-            schema="a_class",
-            type_="unique",
-        )
+    for legacy_constraint in ("uq_sales_targets_a_shop_month", "uq_sales_targets_shop_month"):
+        if _constraint_exists(connection, "a_class", "sales_targets_a", legacy_constraint):
+            op.drop_constraint(
+                legacy_constraint,
+                "sales_targets_a",
+                schema="a_class",
+                type_="unique",
+            )
 
     if not _constraint_exists(connection, "a_class", "sales_targets_a", "uq_sales_targets_a_platform_shop_month"):
         op.create_unique_constraint(
             "uq_sales_targets_a_platform_shop_month",
             "sales_targets_a",
-            ["platform_code", "店铺ID", "年月"],
+            ["platform_code", shop_column, month_column],
             schema="a_class",
         )
 
@@ -161,7 +194,7 @@ def upgrade() -> None:
         op.create_index(
             "ix_sales_targets_a_platform_shop",
             "sales_targets_a",
-            ["platform_code", "店铺ID"],
+            ["platform_code", shop_column],
             unique=False,
             schema="a_class",
         )
@@ -170,7 +203,7 @@ def upgrade() -> None:
         op.create_index(
             "ix_sales_targets_a_platform_month",
             "sales_targets_a",
-            ["platform_code", "年月"],
+            ["platform_code", month_column],
             unique=False,
             schema="a_class",
         )
@@ -180,6 +213,13 @@ def downgrade() -> None:
     connection = op.get_bind()
     if not _table_exists(connection, "a_class", "sales_targets_a"):
         return
+
+    shop_column, month_column = _resolve_sales_targets_a_identity_columns(connection)
+    legacy_constraint_name = (
+        "uq_sales_targets_a_shop_month"
+        if shop_column == "店铺ID"
+        else "uq_sales_targets_shop_month"
+    )
 
     if _index_exists(connection, "a_class", "ix_sales_targets_a_platform_month"):
         op.drop_index("ix_sales_targets_a_platform_month", table_name="sales_targets_a", schema="a_class")
@@ -195,11 +235,11 @@ def downgrade() -> None:
             type_="unique",
         )
 
-    if not _constraint_exists(connection, "a_class", "sales_targets_a", "uq_sales_targets_a_shop_month"):
+    if not _constraint_exists(connection, "a_class", "sales_targets_a", legacy_constraint_name):
         op.create_unique_constraint(
-            "uq_sales_targets_a_shop_month",
+            legacy_constraint_name,
             "sales_targets_a",
-            ["店铺ID", "年月"],
+            [shop_column, month_column],
             schema="a_class",
         )
 

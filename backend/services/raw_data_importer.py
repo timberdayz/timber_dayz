@@ -102,6 +102,104 @@ class RawDataImporter:
             raise ValueError(
                 f"metric_date {metric_date.isoformat()} is later than file_date_to {file_date_to.isoformat()}"
             )
+
+    def _validate_business_date_against_file_range(
+        self,
+        field_name: str,
+        value: Optional[date],
+    ) -> None:
+        if value is None:
+            return
+
+        file_date_from = getattr(self, "file_date_from", None)
+        file_date_to = getattr(self, "file_date_to", None)
+
+        if file_date_from and value < file_date_from:
+            raise ValueError(
+                f"{field_name} {value.isoformat()} is earlier than file_date_from {file_date_from.isoformat()}"
+            )
+        if file_date_to and value > file_date_to:
+            raise ValueError(
+                f"{field_name} {value.isoformat()} is later than file_date_to {file_date_to.isoformat()}"
+            )
+
+    def _validate_business_dates_against_file_range(
+        self,
+        metric_date: Optional[date],
+        period_start_date: Optional[date],
+        period_end_date: Optional[date],
+    ) -> None:
+        self._validate_business_date_against_file_range("metric_date", metric_date)
+        self._validate_business_date_against_file_range("period_start_date", period_start_date)
+        self._validate_business_date_against_file_range("period_end_date", period_end_date)
+
+    def _resolve_period_dates_for_insert(
+        self,
+        row: Dict[str, Any],
+        header_columns: List[str],
+        granularity: str,
+    ) -> tuple:
+        field_parse_rules = getattr(self, "field_parse_rules", None)
+        if field_parse_rules:
+            (
+                metric_date,
+                period_start_date,
+                period_end_date,
+                period_start_time,
+                period_end_time,
+            ) = self._extract_period_dates_by_rules(row, field_parse_rules)
+            if metric_date is None:
+                raise ValueError("failed to resolve metric_date from field_parse_rules")
+            self._validate_business_dates_against_file_range(
+                metric_date,
+                period_start_date,
+                period_end_date,
+            )
+            return (
+                metric_date,
+                period_start_date,
+                period_end_date,
+                period_start_time,
+                period_end_time,
+            )
+
+        file_date_from = getattr(self, "file_date_from", None)
+        file_date_to = getattr(self, "file_date_to", None)
+        if file_date_from:
+            metric_date = file_date_from
+            period_start_date = file_date_from
+            period_end_date = file_date_to or file_date_from
+            self._validate_business_dates_against_file_range(
+                metric_date,
+                period_start_date,
+                period_end_date,
+            )
+            return (metric_date, period_start_date, period_end_date, None, None)
+
+        period_start_date, period_end_date, period_start_time, period_end_time = (
+            self.extract_period_dates(row, header_columns or [])
+        )
+        if period_start_date:
+            metric_date = period_start_date
+            if period_end_date is None:
+                period_end_date = period_start_date
+            self._validate_business_dates_against_file_range(
+                metric_date,
+                period_start_date,
+                period_end_date,
+            )
+            return (
+                metric_date,
+                period_start_date,
+                period_end_date,
+                period_start_time,
+                period_end_time,
+            )
+
+        raise ValueError(
+            "failed to resolve business date for raw import; "
+            f"granularity={granularity}, file_date_from={file_date_from}, file_date_to={file_date_to}"
+        )
     
     def extract_metric_date(self, row: Dict[str, Any], header_columns: List[str]) -> Optional[date]:
         """
@@ -574,31 +672,20 @@ class RawDataImporter:
             
             # 准备插入数据
             insert_data = []
-            field_parse_rules = getattr(self, "field_parse_rules", None)
             for i, (row, data_hash) in enumerate(zip(rows, data_hashes)):
                 # [*] v4.18.0增强:提取period_start_date/end_date和period_start_time/end_time
-                period_start_date, period_end_date, period_start_time, period_end_time = \
-                    self.extract_period_dates(row, header_columns or [])
-                
-                # 如果无法提取日期,使用今天作为默认值
-                if not period_start_date:
-                    period_start_date = date.today()
-                    period_end_date = date.today()
-                    logger.warning(
-                        f"[RawDataImporter] 无法提取period日期,使用默认值: {period_start_date}"
-                    )
-                
-                # 向后兼容:metric_date使用period_start_date
-                metric_date = period_start_date
-                if field_parse_rules:
-                    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
-                        self._extract_period_dates_by_rules(row, field_parse_rules)
-                    )
-                    if metric_date is None:
-                        raise ValueError("failed to resolve metric_date from field_parse_rules")
+                (
+                    metric_date,
+                    period_start_date,
+                    period_end_date,
+                    period_start_time,
+                    period_end_time,
+                ) = self._resolve_period_dates_for_insert(
+                    row,
+                    header_columns or [],
+                    granularity,
+                )
 
-                self._validate_metric_date_against_file_range(metric_date)
-                
                 # [*] v4.15.0新增:获取货币代码
                 currency_code = None
                 if currency_codes and i < len(currency_codes):
@@ -1312,7 +1399,11 @@ class RawDataImporter:
         currency_codes: Optional[List[Optional[str]]] = None,
         sub_domain: Optional[str] = None,
         original_header_columns: Optional[List[str]] = None,
-        template_id: Optional[int] = None
+        template_id: Optional[int] = None,
+        file_date_from: Optional[date] = None,
+        file_date_to: Optional[date] = None,
+        field_parse_rules: Optional[List[Dict[str, Any]]] = None,
+        header_bindings: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, int]:
         """
         异步批量插入B类数据(v4.18.2新增)
@@ -1338,6 +1429,18 @@ class RawDataImporter:
             try:
                 # 创建同步版本的importer
                 sync_importer = RawDataImporter(sync_db)
+                sync_importer.file_date_from = file_date_from or getattr(self, "file_date_from", None)
+                sync_importer.file_date_to = file_date_to or getattr(self, "file_date_to", None)
+                sync_importer.field_parse_rules = (
+                    field_parse_rules
+                    if field_parse_rules is not None
+                    else getattr(self, "field_parse_rules", None)
+                )
+                sync_importer.header_bindings = (
+                    header_bindings
+                    if header_bindings is not None
+                    else getattr(self, "header_bindings", None)
+                )
                 result = sync_importer.batch_insert_raw_data(
                     rows=rows,
                     data_hashes=data_hashes,
@@ -1354,14 +1457,13 @@ class RawDataImporter:
                 )
                 sync_db.commit()
                 return result
-            except Exception as e:
+            except Exception:
                 sync_db.rollback()
                 raise
             finally:
                 sync_db.close()
         
         # 在线程池中执行同步操作
-        loop = asyncio.get_running_loop()
         # v4.19.0更新:使用统一执行器管理器(I/O密集型操作)
         executor_manager = get_executor_manager()
         result = await executor_manager.run_io_intensive(_sync_batch_insert)

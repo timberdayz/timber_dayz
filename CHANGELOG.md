@@ -1,5 +1,19 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.2.1] - 2026-06-09 - B 类产品月报入库日期异常修复
+
+### 修复
+
+- 修复 Shopee products monthly 自动入库在线程池内丢失文件日期、模板日期规则和表头绑定上下文的问题。
+- 阻断 B 类入库在无可靠业务日期时使用处理当天作为 `metric_date` 静默写入。
+- 对带 `catalog_files.date_from/date_to` 的入库结果增加业务日期范围校验，防止 4/5 月文件写入 6 月业务日期。
+- 修正 Shopee products monthly 的模板规则来源和 UPSERT 更新字段，使月报按文件月份入库并可正确更新。
+- 修复 `sales_targets_a` 平台列迁移，兼容 fresh DB 的 `shop_id/year_month` 列和生产库旧中文列。
+
+### 数据
+
+- 清理并重入库 14 个 2026-06-08 处理的 Shopee products monthly 异常文件，近期异常日期扫描归零。
+
 ## [Unreleased] - 组件版本管理模块重构 (optimize-component-version-management)
 
 ### 组件版本管理

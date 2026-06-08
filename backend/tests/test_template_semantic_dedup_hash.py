@@ -157,6 +157,44 @@ def test_deduplication_hash_uses_derived_file_date_identity_value():
     assert first_hash != second_hash
 
 
+def test_products_monthly_hash_uses_metric_date_for_month_identity():
+    service = DeduplicationService(db=None)
+    row = {
+        "product_id": "P-001",
+        "product_name": "Test Product",
+        "variant_id": "V-001",
+    }
+    scope_values = {
+        "platform_code": "shopee",
+        "shop_id": "shop-a",
+        "data_domain": "products",
+        "granularity": "monthly",
+    }
+    deduplication_fields = ["product_id", "product_name", "variant_id", "metric_date"]
+
+    april_hash = service.calculate_data_hash(
+        row,
+        deduplication_fields=deduplication_fields,
+        scope_values=scope_values,
+        identity_values={"metric_date": date(2026, 4, 1)},
+    )
+    duplicate_april_hash = service.calculate_data_hash(
+        row,
+        deduplication_fields=deduplication_fields,
+        scope_values=scope_values,
+        identity_values={"metric_date": date(2026, 4, 1)},
+    )
+    may_hash = service.calculate_data_hash(
+        row,
+        deduplication_fields=deduplication_fields,
+        scope_values=scope_values,
+        identity_values={"metric_date": date(2026, 5, 1)},
+    )
+
+    assert april_hash == duplicate_april_hash
+    assert april_hash != may_hash
+
+
 def test_deduplication_hash_uses_user_selected_hour_identity_value():
     service = DeduplicationService(db=None)
     row = {"page_views": 100}

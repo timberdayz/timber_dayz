@@ -698,6 +698,7 @@ class DataSyncService:
                 ((resolve_result or {}).get("active_version") or {}).get("deduplication_fields") or []
             )
             resolved_header_bindings = list((resolve_result or {}).get("semantic_bindings") or [])
+            resolved_field_parse_rules = list((resolve_result or {}).get("field_parse_rules") or [])
             try:
                 preview_resolve_result = await self.template_resolver.resolve(
                     platform=catalog_file.platform_code,
@@ -725,6 +726,7 @@ class DataSyncService:
                     ((resolve_result or {}).get("active_version") or {}).get("deduplication_fields") or []
                 )
                 resolved_header_bindings = list((resolve_result or {}).get("semantic_bindings") or [])
+                resolved_field_parse_rules = list((resolve_result or {}).get("field_parse_rules") or [])
 
             if template and hasattr(template, 'header_columns') and template.header_columns:
                 template_header_columns = template.header_columns
@@ -834,6 +836,16 @@ class DataSyncService:
                 f"数据域={catalog_file.data_domain}, "
                 f"子类型={normalized_sub_domain or 'None'}"
             )
+            if not resolved_field_parse_rules and template:
+                resolved_field_parse_rules = list(getattr(template, "field_parse_rules", None) or [])
+            logger.info(
+                "[DataSync] field parse rules resolved: file=%s, template=%s, date_from=%s, date_to=%s, rules=%s",
+                catalog_file.file_name,
+                getattr(template, "template_name", None) if template else None,
+                getattr(catalog_file, "date_from", None),
+                getattr(catalog_file, "date_to", None),
+                len(resolved_field_parse_rules or []),
+            )
             
             # [*] DSS架构:不再需要字段映射检查,直接使用header_columns入库
             # 向后兼容:保留field_mapping参数(但可以为空)
@@ -887,7 +899,7 @@ class DataSyncService:
                     header_bindings=resolved_header_bindings or (getattr(template, "header_bindings", None) if template else None),
                     sub_domain=sub_domain_value,  # [*] v4.16.0修复:优先从catalog_file获取
                     template_id=getattr(template, "id", None),
-                    field_parse_rules=getattr(template, "field_parse_rules", None),
+                    field_parse_rules=resolved_field_parse_rules,
                 )
                 
                 # 更新状态

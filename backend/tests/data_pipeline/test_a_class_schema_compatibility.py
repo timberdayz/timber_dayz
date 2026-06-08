@@ -62,5 +62,9 @@ def test_sales_targets_a_contract_includes_platform_code_identity():
     assert "20260609_operating_costs_labor_cost" in migration_text
     assert "op.add_column" in migration_text
     assert "platform_code" in migration_text
+    assert "_resolve_sales_targets_a_identity_columns" in migration_text
+    assert '"店铺ID", "年月"' in migration_text
+    assert '"shop_id", "year_month"' in migration_text
+    assert "uq_sales_targets_shop_month" in migration_text
     assert "uq_sales_targets_a_platform_shop_month" in migration_text
     assert "ON CONFLICT (platform_code," in sync_text
