@@ -124,8 +124,8 @@ export const deleteConfig = async (id) => {
   await api.delete(`/collection/configs/${id}`)
 }
 
-export const runConfig = async (id) => {
-  const response = await api.post(`/collection/configs/${id}/run`)
+export const runConfig = async (id, payload = {}) => {
+  const response = await api.post(`/collection/configs/${id}/run`, null, { params: payload })
   return response || null
 }
 

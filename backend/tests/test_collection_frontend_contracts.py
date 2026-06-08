@@ -25,11 +25,14 @@ def test_collection_config_uses_generic_domain_subtype_controls():
     assert 'label="可编辑子类型"' in text
     assert 'label="配置来源"' in text
     assert "无子类型" in text
+    assert "Maximum recursive updates exceeded" not in text
     assert "getSelectedSubtypeDomains" in text
     assert "getScopeSubtypeDomains(row.scope)" in text
+    assert "function getDomainLabel(domain)" in text
     assert "getSubtypeOptions(domain)" in text
     assert "row.scope.sub_domains.services" not in text
     assert "getSubtypeOptions('services')" not in text
+    assert ".map((scope) => {\n      ensureScopeSubtypeMap(scope)" not in text
 
 
 def test_collection_tasks_supports_domain_scoped_subtypes():
@@ -123,7 +126,8 @@ def test_accounts_api_uses_new_unmatched_alias_route():
 def test_collection_config_run_uses_backend_config_run_endpoint():
     text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
 
-    assert "collectionApi.runConfig(row.id)" in text
+    assert "collectionApi.runConfig(row.id, {" in text
+    assert "expected_granularity: activeGranularity.value" in text
     assert "for (const accountId of accountIds)" not in text
 
 
@@ -161,6 +165,16 @@ def test_collection_config_exposes_main_account_scoping_hooks():
     assert "selectedMainAccountKey" in text
     assert 'data-testid="collection-config-main-account-field"' in text
     assert "main_account_id: form.main_account_id" in text
+
+
+def test_collection_config_uses_granularity_filtered_current_config_and_local_edit_state():
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
+
+    assert "normalizeConfigGranularity({" in text
+    assert "item.template_id || selectedTemplate.value.id" in text
+    assert "editableShopScopes" in text
+    assert "editableCurrentConfigId" in text
+    assert "syncEditableCurrentConfig" in text
 
 
 def test_collection_tasks_uses_task_ids_hint_for_config_navigation():

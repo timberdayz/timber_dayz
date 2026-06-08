@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 
 @pytest.mark.asyncio
@@ -51,6 +52,88 @@ async def test_run_config_tasks_enqueues_config_run(monkeypatch):
     enqueue.assert_awaited_once_with(fake_config, trigger_type="manual")
     assert result["run_id"] == "run-config-1"
     assert result["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_run_config_tasks_rejects_granularity_mismatch(monkeypatch):
+    from backend.routers import collection_tasks as module
+
+    fake_config = SimpleNamespace(
+        id=123,
+        platform="shopee",
+        main_account_id="main-shopee",
+        granularity="monthly",
+        is_active=True,
+    )
+    fake_result = SimpleNamespace(scalar_one_or_none=lambda: fake_config)
+
+    async def _fake_execute(stmt):
+        return fake_result
+
+    db = SimpleNamespace(execute=_fake_execute)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await module.run_config_tasks(
+            config_id=123,
+            fastapi_request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),
+            db=db,
+            expected_granularity="daily",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "granularity" in str(exc_info.value.detail)
+    assert "daily" in str(exc_info.value.detail)
+    assert "monthly" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_run_config_tasks_accepts_matching_granularity(monkeypatch):
+    from backend.routers import collection_tasks as module
+
+    fake_config = SimpleNamespace(
+        id=123,
+        platform="shopee",
+        main_account_id="main-shopee",
+        granularity="daily",
+        is_active=True,
+    )
+    fake_run = SimpleNamespace(
+        id=1,
+        run_id="run-config-1",
+        config_id=123,
+        platform="shopee",
+        main_account_id="main-shopee",
+        trigger_type="manual",
+        status="queued",
+        priority=5,
+        scheduled_for=None,
+        started_at=None,
+        completed_at=None,
+        error_message=None,
+        created_at=None,
+        updated_at=None,
+    )
+    fake_result = SimpleNamespace(scalar_one_or_none=lambda: fake_config)
+    enqueue = AsyncMock(return_value=(fake_run, True))
+
+    async def _fake_execute(stmt):
+        return fake_result
+
+    db = SimpleNamespace(execute=_fake_execute)
+    monkeypatch.setattr(
+        "backend.services.collection_config_run_service.CollectionConfigRunService",
+        lambda db: SimpleNamespace(enqueue_config_run=enqueue),
+    )
+
+    result = await module.run_config_tasks(
+        config_id=123,
+        fastapi_request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),
+        db=db,
+        expected_granularity="daily",
+    )
+
+    enqueue.assert_awaited_once_with(fake_config, trigger_type="manual")
+    assert result["run_id"] == "run-config-1"
 
 
 class _AsyncSessionManager:

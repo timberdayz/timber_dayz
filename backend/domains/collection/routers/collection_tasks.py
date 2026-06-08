@@ -103,6 +103,10 @@ def _build_config_run_response_payload(run: Any) -> dict:
 async def run_config_tasks(
     config_id: int,
     fastapi_request: Request,
+    expected_granularity: Optional[str] = Query(
+        None,
+        pattern="^(daily|weekly|monthly)$",
+    ),
     db: AsyncSession = Depends(get_async_db),
 ):
     from backend.services.collection_config_run_service import CollectionConfigRunService
@@ -116,6 +120,19 @@ async def run_config_tasks(
     config = result.scalar_one_or_none()
     if config is None:
         raise HTTPException(status_code=404, detail="config not found")
+    expected_granularity_value = (
+        str(expected_granularity).strip().lower()
+        if isinstance(expected_granularity, str) and str(expected_granularity).strip()
+        else None
+    )
+    if expected_granularity_value and str(config.granularity or "").strip().lower() != expected_granularity_value:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "requested config granularity does not match current page granularity: "
+                f"expected={expected_granularity_value}, actual={config.granularity}"
+            ),
+        )
 
     run_service = CollectionConfigRunService(db)
     run, _ = await run_service.enqueue_config_run(config, trigger_type="manual")

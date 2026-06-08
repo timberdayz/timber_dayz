@@ -253,6 +253,9 @@
               </el-tag>
             </div>
             <div class="template-summary">
+              <el-tag size="small" type="info">配置 #{{ currentConfigSummary.id }}</el-tag>
+              <el-tag size="small" type="info">{{ getGranularityLabel(currentConfigSummary.granularity) }}</el-tag>
+              <el-tag size="small" type="info">{{ currentConfigSummary.batch_key || currentConfigSummary.name }}</el-tag>
               <el-tag size="small" type="info">{{ formatConfigDateRange(currentConfigSummary) }}</el-tag>
               <el-tag size="small" :type="currentConfigSummary.execution_mode === 'headed' ? 'warning' : 'success'">
                 {{ getExecutionModeLabel(currentConfigSummary.execution_mode) }}
@@ -318,7 +321,9 @@
         <div v-if="!currentConfigSummary" class="empty-tip">先选择一个当前配置</div>
         <div v-else class="shop-panel-body">
           <div class="shop-panel-summary">
-            <el-tag size="small" type="info">当前配置 {{ currentConfigSummary.batch_key || currentConfigSummary.name }}</el-tag>
+            <el-tag size="small" type="info">当前配置 #{{ currentConfigSummary.id }}</el-tag>
+            <el-tag size="small" type="info">{{ getGranularityLabel(currentConfigSummary.granularity) }}</el-tag>
+            <el-tag size="small" type="info">{{ currentConfigSummary.batch_key || currentConfigSummary.name }}</el-tag>
             <el-tag size="small" type="success">{{ formatConfigDateRange(currentConfigSummary) }}</el-tag>
             <el-tag size="small" :type="currentConfigSummary.execution_mode === 'headed' ? 'warning' : 'success'">
               {{ getExecutionModeLabel(currentConfigSummary.execution_mode) }}
@@ -334,7 +339,7 @@
             @selection-change="handleShopSelectionChange"
           >
             <el-table-column type="selection" width="48" />
-            <el-table-column label="店铺" min-width="180">
+            <el-table-column label="店铺" min-width="160">
               <template #default="{ row }">
                 <div class="shop-name-cell">
                   <div>{{ row.account?.name || row.scope.shop_account_id }}</div>
@@ -347,9 +352,12 @@
                 <el-switch v-model="row.scope.enabled" />
               </template>
             </el-table-column>
-            <el-table-column label="实际数据域" min-width="260">
+            <el-table-column label="实际数据域" min-width="240">
               <template #default="{ row }">
-                <el-checkbox-group v-model="row.scope.data_domains">
+                <el-checkbox-group
+                  v-model="row.scope.data_domains"
+                  @change="onScopeDataDomainsChange(row.scope)"
+                >
                   <el-checkbox
                     v-for="option in availableDomainOptions(currentConfigSummary?.platform)"
                     :key="`${row.scope.shop_account_id}-inline-${option.value}`"
@@ -361,7 +369,7 @@
                 </el-checkbox-group>
               </template>
             </el-table-column>
-            <el-table-column label="可编辑子类型" min-width="220">
+            <el-table-column label="可编辑子类型" min-width="180">
               <template #default="{ row }">
                 <div
                   v-for="domain in getScopeSubtypeDomains(row.scope)"
@@ -369,15 +377,20 @@
                   class="sub-domain-section"
                 >
                   <span class="sub-domain-label">{{ getDomainLabel(domain) }}子类型</span>
-                  <el-checkbox-group v-model="row.scope.sub_domains[domain]">
-                    <el-checkbox
+                  <div class="subtype-checkboxes">
+                    <label
                       v-for="option in getSubtypeOptions(domain)"
                       :key="`${row.scope.shop_account_id}-inline-${domain}-${option.value}`"
-                      :label="option.value"
+                      class="subtype-option"
                     >
-                      {{ option.label }}
-                    </el-checkbox>
-                  </el-checkbox-group>
+                      <input
+                        type="checkbox"
+                        :value="option.value"
+                        v-model="row.scope.sub_domains[domain]"
+                      >
+                      <span>{{ option.label }}</span>
+                    </label>
+                  </div>
                 </div>
                 <span v-if="!getScopeSubtypeDomains(row.scope).length" class="shop-scope-meta">无子类型</span>
               </template>
@@ -569,6 +582,8 @@ const temporaryRunSubmitting = ref(false)
 const isEdit = ref(false)
 const formRef = ref(null)
 const shopTableRef = ref(null)
+const editableCurrentConfigId = ref(null)
+const editableShopScopes = ref([])
 
 const activeGranularity = ref('daily')
 const selectedMainAccountKey = ref('')
@@ -724,7 +739,13 @@ const selectedTemplate = computed(() => selectedMainAccountCard.value?.currentTe
 
 const currentConfigSummary = computed(() => {
   if (!selectedTemplate.value) return null
-  const batches = [...(selectedTemplate.value.batches || [])]
+  const batches = [...(selectedTemplate.value.batches || [])].filter((item) =>
+    normalizeConfigGranularity({
+      granularity: item.granularity,
+      date_range_type: item.date_range_type,
+    }) === activeGranularity.value
+    && String(item.template_id || selectedTemplate.value.id) === String(selectedTemplate.value.id)
+  )
   batches.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
   const candidate = batches.find((item) => item.status === 'active') || batches[0] || null
   if (!candidate) return null
@@ -740,15 +761,13 @@ const currentConfigSummary = computed(() => {
 })
 
 const shopScopeRows = computed(() => {
-  if (!currentConfigSummary.value) return []
-  const exceptions = new Set((currentConfigSummary.value.shop_overrides || []).map((scope) => scope.shop_account_id))
-  return (currentConfigSummary.value.shop_scopes || [])
+  if (!currentConfigSummary.value || editableCurrentConfigId.value !== currentConfigSummary.value.id) return []
+  return (editableShopScopes.value || [])
     .map((scope) => {
-      ensureScopeSubtypeMap(scope)
       return {
         scope,
         account: getAccountById(scope.shop_account_id),
-        isException: exceptions.has(scope.shop_account_id),
+        isException: isScopeOverridden(scope),
       }
     })
     .filter((row) => {
@@ -807,6 +826,14 @@ watch(mainAccountCards, (value) => {
     selectedMainAccountKey.value = value[0].key
   }
 }, { immediate: true })
+
+watch(
+  () => [currentConfigSummary.value?.id, currentConfigSummary.value?.updated_at],
+  () => {
+    syncEditableCurrentConfig()
+  },
+  { immediate: true }
+)
 
 watch(activeGranularity, async () => {
   resetCurrentConfigForm()
@@ -967,6 +994,11 @@ function isScopeDomainAvailable(scope, domain) {
   return Boolean(account?.capabilities?.[domain])
 }
 
+function getDomainLabel(domain) {
+  const option = getAvailableDomainOptions().find((item) => item.value === domain)
+  return option?.label || domain
+}
+
 function normalizeScopeSubDomains(dataDomains = [], rawSubDomains = {}) {
   const normalized = normalizeDomainSubtypeMap(rawSubDomains)
   const subtypeDomains = getSelectedSubtypeDomains(dataDomains)
@@ -1014,8 +1046,48 @@ function ensureScopeSubtypeMap(scope) {
 }
 
 function getScopeSubtypeDomains(scope) {
-  ensureScopeSubtypeMap(scope)
   return getSelectedSubtypeDomains(scope.data_domains || [])
+}
+
+function onScopeDataDomainsChange(scope) {
+  ensureScopeSubtypeMap(scope)
+}
+
+function cloneScopeForEditing(scope) {
+  return {
+    ...cloneDeep(scope),
+    data_domains: [...(scope?.data_domains || [])],
+    sub_domains: normalizeScopeSubDomains(scope?.data_domains || [], scope?.sub_domains),
+    enabled: Boolean(scope?.enabled ?? true),
+  }
+}
+
+function syncEditableCurrentConfig() {
+  if (!currentConfigSummary.value) {
+    editableCurrentConfigId.value = null
+    editableShopScopes.value = []
+    return
+  }
+  editableCurrentConfigId.value = currentConfigSummary.value.id
+  editableShopScopes.value = (currentConfigSummary.value.shop_scopes || []).map((scope) => cloneScopeForEditing(scope))
+}
+
+function normalizedScopeSnapshot(scope) {
+  return {
+    enabled: Boolean(scope?.enabled ?? true),
+    data_domains: [...(scope?.data_domains || [])].sort(),
+    sub_domains: Object.fromEntries(
+      Object.entries(normalizeScopeSubDomains(scope?.data_domains || [], scope?.sub_domains))
+        .map(([domain, values]) => [domain, [...values].sort()])
+        .sort(([left], [right]) => left.localeCompare(right))
+    ),
+  }
+}
+
+function isScopeOverridden(scope) {
+  const defaultScope = getTemplateDefaultScope(scope.shop_account_id)
+  if (!defaultScope) return true
+  return JSON.stringify(normalizedScopeSnapshot(scope)) !== JSON.stringify(normalizedScopeSnapshot(defaultScope))
 }
 
 function buildDefaultShopScopes(platform, mainAccountId, existingScopes = []) {
@@ -1057,7 +1129,7 @@ function handleShopSelectionChange(rows) {
 
 function restoreScopeToDefault(shopAccountId) {
   const defaultScope = getTemplateDefaultScope(shopAccountId)
-  const targetScope = currentConfigSummary.value?.shop_scopes?.find((scope) => scope.shop_account_id === shopAccountId)
+  const targetScope = editableShopScopes.value.find((scope) => scope.shop_account_id === shopAccountId)
   if (!defaultScope || !targetScope) return
   targetScope.enabled = Boolean(defaultScope.enabled)
   targetScope.data_domains = [...(defaultScope.data_domains || [])]
@@ -1178,7 +1250,7 @@ async function saveCurrentConfigFromWorkbench() {
   if (!currentConfigSummary.value) return
   try {
     await collectionApi.updateConfig(currentConfigSummary.value.id, {
-      shop_scopes: (currentConfigSummary.value.shop_scopes || []).map((scope) => ({
+      shop_scopes: (editableShopScopes.value || []).map((scope) => ({
         shop_account_id: scope.shop_account_id,
         enabled: Boolean(scope.enabled),
         data_domains: [...(scope.data_domains || [])],
@@ -1411,8 +1483,14 @@ async function cancelConfigRun(run) {
 
 async function runConfig(row) {
   if (!row?.id) return
+  if (normalizeConfigGranularity(row) !== activeGranularity.value) {
+    ElMessage.error(`当前页面为${activeGranularityLabel.value}，但目标配置粒度为${getGranularityLabel(row.granularity)}`)
+    return
+  }
   try {
-    const runResult = await collectionApi.runConfig(row.id)
+    const runResult = await collectionApi.runConfig(row.id, {
+      expected_granularity: activeGranularity.value,
+    })
     if (!runResult?.run_id) {
       ElMessage.warning('当前配置未成功加入执行队列')
       return
@@ -1705,7 +1783,7 @@ onMounted(() => {
 
 .workbench-layout {
   display: grid;
-  grid-template-columns: 280px 320px minmax(760px, 1fr);
+  grid-template-columns: 240px 280px minmax(0, 1fr);
   gap: 16px;
   min-height: calc(100vh - 320px);
   align-items: start;
@@ -1793,6 +1871,21 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.subtype-checkboxes {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.subtype-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #606266;
+  cursor: pointer;
 }
 
 .full-width-select {
