@@ -18,3 +18,4 @@ def test_operational_metrics_sql_uses_platform_code_and_ai_token_fallback():
 
     assert '"platform_code"' in source or "platform_code" in source
     assert 'COALESCE("AI Token费用", 0)' in source
+    assert 'COALESCE("人力费用", 0)' in source

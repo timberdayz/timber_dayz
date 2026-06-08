@@ -21,7 +21,7 @@
 注意:
 - 使用 a_class.operating_costs 表(中文字段名)
 - 底层物理列已迁移为 "营销费用"
-- 字段: 店铺ID, 年月, 租金, 营销费用, 水电费, 其他成本
+- 字段: 店铺ID, 年月, 租金, 营销费用, 水电费, AI Token费用, 人力费用, 其他成本
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
@@ -59,6 +59,7 @@ def _calc_total_cost(
     marketing_fee: float,
     utilities: float,
     ai_token_cost: float,
+    labor_cost: float,
     other_costs: float,
 ) -> float:
     return (
@@ -66,6 +67,7 @@ def _calc_total_cost(
         + float(marketing_fee or 0)
         + float(utilities or 0)
         + float(ai_token_cost or 0)
+        + float(labor_cost or 0)
         + float(other_costs or 0)
     )
 
@@ -186,6 +188,7 @@ async def get_expense_summary(
                     COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                     COALESCE(SUM("水电费"), 0) as total_utilities,
                     COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
+                    COALESCE(SUM("人力费用"), 0) as total_labor_cost,
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
                     COALESCE(SUM("成本合计"), 0) as total_amount
                 FROM a_class.operating_costs
@@ -204,6 +207,7 @@ async def get_expense_summary(
                     COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                     COALESCE(SUM("水电费"), 0) as total_utilities,
                     COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
+                    COALESCE(SUM("人力费用"), 0) as total_labor_cost,
                     COALESCE(SUM("其他成本"), 0) as total_other_costs,
                     COALESCE(SUM("成本合计"), 0) as total_amount
                 FROM a_class.operating_costs
@@ -222,8 +226,9 @@ async def get_expense_summary(
                 "total_marketing_fee": float(row[3] or 0),
                 "total_utilities": float(row[4] or 0),
                 "total_ai_token_cost": float(row[5] or 0),
-                "total_other_costs": float(row[6] or 0),
-                "total_amount": float(row[7] or 0),
+                "total_labor_cost": float(row[6] or 0),
+                "total_other_costs": float(row[7] or 0),
+                "total_amount": float(row[8] or 0),
             }
             for row in rows
         ]
@@ -271,6 +276,7 @@ async def get_yearly_expense_summary(
                 COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
                 COALESCE(SUM("水电费"), 0) as total_utilities,
                 COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
+                COALESCE(SUM("人力费用"), 0) as total_labor_cost,
                 COALESCE(SUM("其他成本"), 0) as total_other_costs,
                 COALESCE(SUM("成本合计"), 0) as total_amount,
                 COUNT(DISTINCT "店铺ID") as shop_count,
@@ -290,10 +296,11 @@ async def get_yearly_expense_summary(
                     "total_marketing_fee": float(row[1] or 0),
                     "total_utilities": float(row[2] or 0),
                     "total_ai_token_cost": float(row[3] or 0),
-                    "total_other_costs": float(row[4] or 0),
-                    "total_amount": float(row[5] or 0),
-                    "shop_count": row[6] or 0,
-                    "month_count": row[7] or 0,
+                    "total_labor_cost": float(row[4] or 0),
+                    "total_other_costs": float(row[5] or 0),
+                    "total_amount": float(row[6] or 0),
+                    "shop_count": row[7] or 0,
+                    "month_count": row[8] or 0,
                 }
             }
         else:
@@ -305,6 +312,7 @@ async def get_yearly_expense_summary(
                     "total_marketing_fee": 0,
                     "total_utilities": 0,
                     "total_ai_token_cost": 0,
+                    "total_labor_cost": 0,
                     "total_other_costs": 0,
                     "total_amount": 0,
                     "shop_count": 0,
@@ -357,6 +365,7 @@ async def list_expenses_by_shop(
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "AI Token费用" as ai_token_cost,
+                "人力费用" as labor_cost,
                 "其他成本" as other_costs,
                 "成本合计" as total_cost,
                 "备注" as note,
@@ -381,8 +390,9 @@ async def list_expenses_by_shop(
             marketing_fee = float(row.marketing_fee or 0)
             utilities = float(row.utilities or 0)
             ai_token_cost = float(row.ai_token_cost or 0)
+            labor_cost = float(row.labor_cost or 0)
             other_costs = float(row.other_costs or 0)
-            row_total = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
+            row_total = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, labor_cost, other_costs))
             total_amount += row_total
             
             items.append({
@@ -394,6 +404,7 @@ async def list_expenses_by_shop(
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "ai_token_cost": ai_token_cost,
+                "labor_cost": labor_cost,
                 "other_costs": other_costs,
                 "total_cost": row_total,
                 "total": row_total,
@@ -411,6 +422,7 @@ async def list_expenses_by_shop(
             "total_marketing_fee": sum(item["marketing_fee"] for item in items),
             "total_utilities": sum(item["utilities"] for item in items),
             "total_ai_token_cost": sum(item.get("ai_token_cost", 0) for item in items),
+            "total_labor_cost": sum(item.get("labor_cost", 0) for item in items),
             "total_other_costs": sum(item["other_costs"] for item in items),
             "month_count": len(items),
         }
@@ -484,6 +496,7 @@ async def list_expenses(
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "AI Token费用" as ai_token_cost,
+                "人力费用" as labor_cost,
                 "其他成本" as other_costs,
                 "成本合计" as total_cost,
                 "备注" as note,
@@ -510,8 +523,9 @@ async def list_expenses(
             marketing_fee = float(row.marketing_fee or 0)
             utilities = float(row.utilities or 0)
             ai_token_cost = float(row.ai_token_cost or 0)
+            labor_cost = float(row.labor_cost or 0)
             other_costs = float(row.other_costs or 0)
-            total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
+            total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, labor_cost, other_costs))
             
             items.append({
                 "id": row.id,
@@ -522,6 +536,7 @@ async def list_expenses(
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "ai_token_cost": ai_token_cost,
+                "labor_cost": labor_cost,
                 "other_costs": other_costs,
                 "total_cost": total_amount,
                 "total": total_amount,
@@ -584,6 +599,7 @@ async def list_deleted_expenses(
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "AI Token费用" as ai_token_cost,
+                "人力费用" as labor_cost,
                 "其他成本" as other_costs,
                 "成本合计" as total_cost,
                 "备注" as note,
@@ -605,8 +621,9 @@ async def list_deleted_expenses(
             marketing_fee = float(row.marketing_fee or 0)
             utilities = float(row.utilities or 0)
             ai_token_cost = float(row.ai_token_cost or 0)
+            labor_cost = float(row.labor_cost or 0)
             other_costs = float(row.other_costs or 0)
-            total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
+            total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, labor_cost, other_costs))
             items.append({
                 "id": row.id,
                 "shop_id": row.shop_id,
@@ -616,6 +633,7 @@ async def list_deleted_expenses(
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "ai_token_cost": ai_token_cost,
+                "labor_cost": labor_cost,
                 "other_costs": other_costs,
                 "total_cost": total_amount,
                 "total": total_amount,
@@ -661,6 +679,7 @@ async def get_expense(
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "AI Token费用" as ai_token_cost,
+                "人力费用" as labor_cost,
                 "其他成本" as other_costs,
                 "成本合计" as total_cost,
                 "备注" as note,
@@ -689,8 +708,9 @@ async def get_expense(
         marketing_fee = float(row.marketing_fee or 0)
         utilities = float(row.utilities or 0)
         ai_token_cost = float(row.ai_token_cost or 0)
+        labor_cost = float(row.labor_cost or 0)
         other_costs = float(row.other_costs or 0)
-        total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
+        total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, labor_cost, other_costs))
         
         return {
             "success": True,
@@ -703,6 +723,7 @@ async def get_expense(
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "ai_token_cost": ai_token_cost,
+                "labor_cost": labor_cost,
                 "other_costs": other_costs,
                 "total_cost": total_amount,
                 "total": total_amount,
@@ -783,6 +804,7 @@ async def create_or_update_expense(
             request.marketing_fee,
             request.utilities,
             request.ai_token_cost,
+            request.labor_cost,
             request.other_costs,
         )
 
@@ -793,9 +815,9 @@ async def create_or_update_expense(
         # 使用UPSERT语法(ON CONFLICT DO UPDATE)
         upsert_query = text("""
             INSERT INTO a_class.operating_costs 
-                ("店铺ID", "platform_code", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计", "备注", "附件", "创建时间", "更新时间")
+                ("店铺ID", "platform_code", "年月", "租金", "营销费用", "水电费", "AI Token费用", "人力费用", "其他成本", "成本合计", "备注", "附件", "创建时间", "更新时间")
             VALUES 
-                (:shop_id, :platform_code, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :other_costs, :total_cost, :note, CAST(:attachments AS jsonb), NOW(), NOW())
+                (:shop_id, :platform_code, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :labor_cost, :other_costs, :total_cost, :note, CAST(:attachments AS jsonb), NOW(), NOW())
             ON CONFLICT ("platform_code", "店铺ID", "年月") 
             DO UPDATE SET 
                 "platform_code" = EXCLUDED."platform_code",
@@ -803,6 +825,7 @@ async def create_or_update_expense(
                 "营销费用" = EXCLUDED."营销费用",
                 "水电费" = EXCLUDED."水电费",
                 "AI Token费用" = EXCLUDED."AI Token费用",
+                "人力费用" = EXCLUDED."人力费用",
                 "其他成本" = EXCLUDED."其他成本",
                 "成本合计" = EXCLUDED."成本合计",
                 "备注" = EXCLUDED."备注",
@@ -817,6 +840,7 @@ async def create_or_update_expense(
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "AI Token费用" as ai_token_cost,
+                "人力费用" as labor_cost,
                 "其他成本" as other_costs,
                 "成本合计" as total_cost,
                 "备注" as note,
@@ -834,6 +858,7 @@ async def create_or_update_expense(
             "marketing_fee": request.marketing_fee,
             "utilities": request.utilities,
             "ai_token_cost": request.ai_token_cost,
+            "labor_cost": request.labor_cost,
             "other_costs": request.other_costs,
             "total_cost": total_cost,
             "note": request.note,
@@ -862,8 +887,9 @@ async def create_or_update_expense(
         marketing_fee = float(row.marketing_fee or 0)
         utilities = float(row.utilities or 0)
         ai_token_cost = float(row.ai_token_cost or 0)
+        labor_cost = float(row.labor_cost or 0)
         other_costs = float(row.other_costs or 0)
-        total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
+        total_amount = float(row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, labor_cost, other_costs))
         
         return {
             "success": True,
@@ -876,6 +902,7 @@ async def create_or_update_expense(
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "ai_token_cost": ai_token_cost,
+                "labor_cost": labor_cost,
                 "other_costs": other_costs,
                 "total_cost": total_amount,
                 "total": total_amount,
@@ -923,6 +950,7 @@ async def update_expense(
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "AI Token费用" as ai_token_cost,
+                "人力费用" as labor_cost,
                 "其他成本" as other_costs,
                 "备注" as note,
                 "附件" as attachments,
@@ -996,6 +1024,12 @@ async def update_expense(
             params["ai_token_cost"] = update_data["ai_token_cost"]
         else:
             params["ai_token_cost"] = float(getattr(row, "ai_token_cost", 0) or 0)
+
+        if "labor_cost" in update_data:
+            update_fields.append('"人力费用" = :labor_cost')
+            params["labor_cost"] = update_data["labor_cost"]
+        else:
+            params["labor_cost"] = float(getattr(row, "labor_cost", 0) or 0)
             
         if "other_costs" in update_data:
             update_fields.append('"其他成本" = :other_costs')
@@ -1021,6 +1055,7 @@ async def update_expense(
             params["marketing_fee"],
             params["utilities"],
             params["ai_token_cost"],
+            params["labor_cost"],
             params["other_costs"],
         )
         update_fields.append('"成本合计" = :total_cost')
@@ -1049,6 +1084,7 @@ async def update_expense(
                 "营销费用" as marketing_fee,
                 "水电费" as utilities,
                 "AI Token费用" as ai_token_cost,
+                "人力费用" as labor_cost,
                 "其他成本" as other_costs,
                 "成本合计" as total_cost,
                 "备注" as note,
@@ -1069,8 +1105,9 @@ async def update_expense(
         marketing_fee = float(updated_row.marketing_fee or 0)
         utilities = float(updated_row.utilities or 0)
         ai_token_cost = float(updated_row.ai_token_cost or 0)
+        labor_cost = float(updated_row.labor_cost or 0)
         other_costs = float(updated_row.other_costs or 0)
-        total_amount = float(updated_row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, other_costs))
+        total_amount = float(updated_row.total_cost or _calc_total_cost(rent, marketing_fee, utilities, ai_token_cost, labor_cost, other_costs))
         
         return {
             "success": True,
@@ -1083,6 +1120,7 @@ async def update_expense(
                 "marketing_fee": marketing_fee,
                 "utilities": utilities,
                 "ai_token_cost": ai_token_cost,
+                "labor_cost": labor_cost,
                 "other_costs": other_costs,
                 "total_cost": total_amount,
                 "total": total_amount,

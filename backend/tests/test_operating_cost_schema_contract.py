@@ -6,6 +6,9 @@ from modules.core.db.schema import Base
 operating_cost_migration = import_module(
     "migrations.versions.20260521_operating_costs_add_cost_total_note_lock"
 )
+labor_cost_migration = import_module(
+    "migrations.versions.20260609_add_labor_cost_to_operating_costs"
+)
 
 
 def test_operating_cost_metadata_includes_platform_and_extended_columns():
@@ -19,6 +22,7 @@ def test_operating_cost_metadata_includes_platform_and_extended_columns():
     assert "营销费用" in columns
     assert "水电费" in columns
     assert "AI Token费用" in columns
+    assert "人力费用" in columns
     assert "其他成本" in columns
     assert "成本合计" in columns
     assert "备注" in columns
@@ -41,3 +45,11 @@ def test_operating_cost_migration_normalizes_legacy_snapshot_columns():
     ]:
         assert old_column in migration_text
         assert new_column in migration_text
+
+
+def test_operating_cost_labor_cost_migration_adds_column_and_backfills_total():
+    source = labor_cost_migration.upgrade.__code__.co_consts
+    migration_text = "\n".join(str(item) for item in source)
+
+    assert "人力费用" in migration_text
+    assert "成本合计" in migration_text

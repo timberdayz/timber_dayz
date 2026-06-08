@@ -52,6 +52,7 @@ def test_health_check_includes_data_sync_critical_columns():
                     "营销费用",
                     "水电费",
                     "AI Token费用",
+                    "人力费用",
                     "其他成本",
                     "成本合计",
                     "创建时间",

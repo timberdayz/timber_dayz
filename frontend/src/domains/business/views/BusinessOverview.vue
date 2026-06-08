@@ -1898,7 +1898,7 @@ const comparisonTableData = ref([])
 const targetValue = ref(0)
 const achievedValue = ref(0)
 const targetAchievementRate = ref(0)
-const targetUnit = ref('')
+const targetUnit = ref("")
 
 // 根据粒度计算列标题
 const currentPeriodLabel = computed(() => {
@@ -2312,7 +2312,7 @@ const operationalExpensesTooltip = computed(() => {
     : warnings.length
       ? ` 警告：${warnings.join('；')}`
       : ''
-  return `${sourceLabel} 口径：租金+营销费用+水电费+AI Token费用+其他成本。${warningLabel}`
+  return `${sourceLabel} 口径：租金+营销费用+水电费+AI Token费用+人力费用+其他成本。${warningLabel}`
 })
 
 // 获取变化类型

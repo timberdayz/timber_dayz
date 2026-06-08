@@ -48,6 +48,7 @@ monthly_costs AS (
                 + COALESCE("营销费用", 0)
                 + COALESCE("水电费", 0)
                 + COALESCE("AI Token费用", 0)
+                + COALESCE("人力费用", 0)
                 + COALESCE("其他成本", 0)
             )
         ) AS estimated_expenses

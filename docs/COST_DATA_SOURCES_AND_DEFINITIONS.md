@@ -22,7 +22,7 @@ A 类数据为「用户配置/主数据」，成本侧即**经营成本（运营
 
 #### a_class.operating_costs（A 类唯一数据源）
 
-**总成本中的 A 类运营成本仅来自本表**。当前费用管理链路中，相关人工录入列的业务语义已统一为**营销费用**，不再作为正式员工工资录入入口。正式员工工资仅通过工资单链路计算与结算。物理列名迁移完成后，ORM 与数据库列均统一使用 `marketing_fee` / “营销费用”。
+**总成本中的 A 类运营成本仅来自本表**。当前费用管理链路中，相关人工录入列的业务语义已统一为**营销费用**，不再作为正式员工工资录入入口。正式员工工资仅通过工资单链路计算与结算。物理列名迁移完成后，ORM 与数据库列均统一使用 `marketing_fee` / “营销费用”。新增的“人力费用”用于店铺经营成本手工分摊，不从 HR 工资单自动汇总，也不影响个人收入。
 
 | 库表列名（中文） | ORM 属性名 | 类型 | 含义 |
 |-----------------|------------|------|------|
@@ -34,15 +34,16 @@ A 类数据为「用户配置/主数据」，成本侧即**经营成本（运营
 | 营销费用 | marketing_fee | numeric(15,2) | 营销费用 |
 | 水电费 | utilities | numeric(15,2) | 水电费 |
 | AI Token费用 | ai_token_cost | numeric(15,2) | AI Token费用 |
+| 人力费用 | labor_cost | numeric(15,2) | 人力费用，店铺经营成本手工分摊 |
 | 其他成本 | other_costs | numeric(15,2) | 其他成本 |
-| 成本合计 | total_cost | numeric(15,2) | 五类费用合计 |
+| 成本合计 | total_cost | numeric(15,2) | 六类费用合计 |
 | 备注 | note | text | 备注 |
 | 附件 | attachments | jsonb | 附件列表 |
 | 是否锁定 | locked | boolean | 月度锁定标记 |
 | 创建时间 | created_at | timestamp | 创建时间 |
 | 更新时间 | updated_at | timestamp | 更新时间 |
 
-- **单条运营成本** = 租金 + 营销费用 + 水电费 + AI Token费用 + 其他成本。
+- **单条运营成本** = 租金 + 营销费用 + 水电费 + AI Token费用 + 人力费用 + 其他成本。
 - **唯一约束**：`(platform_code, 店铺ID, 年月)`，名称 `uq_operating_costs_a_platform_shop_month`。
 - **索引**：`ix_operating_costs_a_shop`(店铺ID)、`ix_operating_costs_a_platform_shop`(platform_code, 店铺ID)、`ix_operating_costs_a_month`(年月)、`ix_operating_costs_locked`(是否锁定)。
 - **表位置**：`modules/core/db/schema.py` 中 `OperatingCost`，schema 为 `a_class`。
@@ -60,7 +61,7 @@ A 类数据为「用户配置/主数据」，成本侧即**经营成本（运营
   - API：`/api/expenses`（GET/POST/PUT/DELETE 等，见 `backend/routers/expense_management.py`）。
   - 前端：费用管理页，用户按「platform_code + 店铺ID + 年月」录入或导入。
 - **汇总方式**：
-  - **按周期**：按「年月」汇总 operating_costs **所有成本列之和**（当前为五列：租金、营销费用、水电费、AI Token费用、其他成本）。
+  - **按周期**：按「年月」汇总 operating_costs **所有成本列之和**（当前为六列：租金、营销费用、水电费、AI Token费用、人力费用、其他成本）。
   - **按店铺**：按 `platform_code + 店铺ID` 汇总上述金额。按店铺下钻时，A 类与订单侧店铺口径一致方案见第 5 节。
 
 ---
