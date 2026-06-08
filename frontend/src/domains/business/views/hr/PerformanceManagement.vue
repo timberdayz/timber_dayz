@@ -667,11 +667,6 @@ const adjustmentForm = reactive({
   reason: ''
 })
 
-// 总权重计算
-const totalWeight = computed(() => {
-  return configForm.sales_weight + configForm.profit_weight + 
-         configForm.key_product_weight + configForm.operation_weight
-})
 const formulaText = computed(() => {
   if (filters.groupBy === 'person') {
     return '个人绩效输入项得分 + 个人调整项 + 考勤扣分；无输入项时才回退至店铺汇总绩效'
@@ -697,21 +692,17 @@ const selectedTemplateSummary = computed(() => {
 })
 
 const configRules = {
-  sales_weight: [
-    { required: true, message: '销售额权重不能为空', trigger: 'blur' },
-    { type: 'number', min: 0, max: 100, message: '权重范围为 0-100', trigger: 'blur' }
+  sales_max_score: [
+    { required: true, message: '销售额满分不能为空', trigger: 'blur' },
+    { type: 'number', min: 0, max: 100, message: '满分范围为 0-100', trigger: 'blur' }
   ],
-  profit_weight: [
-    { required: true, message: '毛利权重不能为空', trigger: 'blur' },
-    { type: 'number', min: 0, max: 100, message: '权重范围为 0-100', trigger: 'blur' }
+  profit_max_score: [
+    { required: true, message: '毛利满分不能为空', trigger: 'blur' },
+    { type: 'number', min: 0, max: 100, message: '满分范围为 0-100', trigger: 'blur' }
   ],
-  key_product_weight: [
-    { required: true, message: '重点产品权重不能为空', trigger: 'blur' },
-    { type: 'number', min: 0, max: 100, message: '权重范围为 0-100', trigger: 'blur' }
-  ],
-  operation_weight: [
-    { required: true, message: '运营权重不能为空', trigger: 'blur' },
-    { type: 'number', min: 0, max: 100, message: '权重范围为 0-100', trigger: 'blur' }
+  operation_max_score: [
+    { required: true, message: '运营满分不能为空', trigger: 'blur' },
+    { type: 'number', min: 0, max: 100, message: '满分范围为 0-100', trigger: 'blur' }
   ]
 }
 
@@ -1224,7 +1215,7 @@ const handleRecalculate = async () => {
     if (code === 'PERF_CALC_NOT_READY') {
       ElMessage.warning('绩效计算能力未就绪，请先完成 PostgreSQL 数据链路与目标分解配置')
     } else if (code === 'PERF_CONFIG_NOT_FOUND') {
-      ElMessage.warning('当前考核周期无可用绩效配置，请先配置权重和生效周期')
+      ElMessage.warning('当前考核周期无可用绩效配置，请先配置公式和生效周期')
     } else {
       handleApiError(error, { showMessage: true, logError: true })
     }
