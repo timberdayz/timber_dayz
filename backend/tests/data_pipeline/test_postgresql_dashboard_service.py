@@ -168,7 +168,7 @@ async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(mo
     result = await service.get_business_overview_kpi(month="2026-04-01", platform=None)
 
     assert result["gmv"] == 100
-    assert len(captured) == 1
+    assert len(captured) == 2
     query, params = captured[0]
     assert "FROM api.business_overview_kpi_module" in query
     assert str(params["period_key"]) == "2026-04-01"
@@ -205,12 +205,104 @@ async def test_postgresql_dashboard_service_monthly_kpi_supports_platform_filter
     result = await service.get_business_overview_kpi(month="2026-04-01", platform="shopee")
 
     assert result["gmv"] == 100
-    assert len(captured) == 1
+    assert len(captured) == 2
     query, params = captured[0]
     assert "FROM api.business_overview_kpi_module" in query
     assert "platform_code = :platform_code" in query
     assert str(params["period_key"]) == "2026-04-01"
     assert params["platform_code"] == "shopee"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_kpi_returns_previous_period_changes(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        if str(params["period_key"]) == "2026-03-01":
+            return [
+                {
+                    "period_key": "2026-03-01",
+                    "platform_code": "shopee",
+                    "gmv": 100,
+                    "order_count": 5,
+                    "visitor_count": 100,
+                    "page_views": 200,
+                    "impressions": 500,
+                    "total_items": 5,
+                    "profit": 20,
+                }
+            ]
+        return [
+            {
+                "period_key": "2026-04-01",
+                "platform_code": "shopee",
+                "gmv": 200,
+                "order_count": 10,
+                "visitor_count": 150,
+                "page_views": 300,
+                "impressions": 750,
+                "total_items": 15,
+                "profit": 60,
+            }
+        ]
+
+    async def fake_load_active_employee_count(_period_key):
+        return 2
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+
+    result = await service.get_business_overview_kpi(month="2026-04-01", platform="shopee")
+
+    assert len(captured) == 2
+    assert result["gmv"] == 200
+    assert result["gmv_change"] == 100.0
+    assert result["order_count_change"] == 100.0
+    assert result["visitor_count_change"] == 50.0
+    assert result["labor_efficiency_change"] == 100.0
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_kpi_shop_filter_reads_shop_mart(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "period_key": params["period_key"],
+                "platform_code": "shopee",
+                "shop_id": "shop-1",
+                "gmv": 100,
+                "order_count": 10,
+                "visitor_count": 200,
+                "page_views": 400,
+                "impressions": 1000,
+                "total_items": 12,
+                "profit": 30,
+            }
+        ]
+
+    async def fake_load_active_employee_count(_period_key):
+        return 0
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+
+    result = await service.get_business_overview_kpi(
+        month="2026-04-01",
+        platform=None,
+        shop_id="shop-1",
+    )
+
+    assert result["gmv"] == 100
+    query, params = captured[0]
+    assert "FROM mart.shop_month_kpi" in query
+    assert "shop_id = :shop_id" in query
+    assert params["shop_id"] == "shop-1"
 
 
 @pytest.mark.asyncio
@@ -248,7 +340,7 @@ async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_pl
     )
 
     assert result["gmv"] == 120
-    assert len(captured) == 1
+    assert len(captured) == 2
     query, params = captured[0]
     assert "FROM mart.platform_day_kpi" in query
     assert str(params["period_key"]) == "2026-04-07"
@@ -1188,6 +1280,50 @@ async def test_postgresql_dashboard_service_operational_metrics_preserves_today_
     assert result["today_sales"] == 120
     assert result["today_order_count"] == 2
     assert result["time_gap"] == -5
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_operational_metrics_supports_shop_filter(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "monthly_target": 1000,
+                "monthly_total_achieved": 800,
+                "today_sales": 120,
+                "monthly_achievement_rate": 80,
+                "time_gap": -5,
+                "estimated_gross_profit": 200,
+                "estimated_expenses": 300,
+                "operating_result": -100,
+                "monthly_order_count": 10,
+                "today_order_count": 2,
+            }
+        ]
+
+    async def fake_load_target_summary(**kwargs):
+        captured.append(("target_summary", kwargs))
+        return {"target_amount": 1000, "target_quantity": 10}
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+
+    result = await service.get_business_overview_operational_metrics(
+        month="2026-03-01",
+        platform="shopee",
+        shop_id="shop-1",
+    )
+
+    query, params = captured[0]
+    assert result["monthly_target"] == 1000
+    assert "platform_code = :platform_code" in query
+    assert "shop_id = :shop_id" in query
+    assert params["platform_code"] == "shopee"
+    assert params["shop_id"] == "shop-1"
+    assert captured[1][1]["shop_id"] == "shop-1"
 
 
 @pytest.mark.asyncio

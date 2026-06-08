@@ -2040,6 +2040,7 @@ class SalesTargetA(Base):
     __tablename__ = "sales_targets_a"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    platform_code = Column(String(32), nullable=False, server_default="unknown")
     shop_id = Column(String(256), nullable=False)  # 迁移时将重命名为"店铺ID"
     year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月",格式:'2025-01'
     target_sales_amount = Column(Numeric(15, 2), nullable=False)  # 迁移时将重命名为"目标销售额"
@@ -2048,7 +2049,9 @@ class SalesTargetA(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)  # 迁移时将重命名为"更新时间"
     
     __table_args__ = (
-        UniqueConstraint("shop_id", "year_month", name="uq_sales_targets_a_shop_month"),
+        UniqueConstraint("platform_code", "shop_id", "year_month", name="uq_sales_targets_a_platform_shop_month"),
+        Index("ix_sales_targets_a_platform_shop", "platform_code", "shop_id"),
+        Index("ix_sales_targets_a_platform_month", "platform_code", "year_month"),
         Index("ix_sales_targets_a_shop", "shop_id"),
         Index("ix_sales_targets_a_month", "year_month"),
         {"schema": "a_class"},
@@ -3245,5 +3248,4 @@ class SystemConfig(Base):
         Index('ix_system_config_key', 'config_key'),  # 索引
         ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_system_config_updated_by'),
     )
-
 

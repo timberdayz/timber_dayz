@@ -1,5 +1,13 @@
 # 成本数据来源与口径定义
 
+## 业务概览当前口径补充
+
+- 核心 KPI：来源为 PostgreSQL-first Dashboard 链路。公司/平台汇总读取 `api.business_overview_kpi_module` 或平台 mart；带 `shop_id` 时读取 `mart.shop_day_kpi`、`mart.shop_week_kpi`、`mart.shop_month_kpi` 并按 `platform_code + shop_id` 过滤。
+- KPI 环比：后端按当前粒度自动取上一日、上一周或上一月，返回 `*_change` 字段；公式为 `(current - previous) * 100 / previous`，上一周期为空或为 0 时返回空值。
+- 经营指标：月度达成、毛利来自 `mart.shop_month_kpi`；销售目标来自 `a_class.sales_targets_a`，唯一口径为 `platform_code + 店铺ID + 年月`；运营费用来自 `a_class.operating_costs`，按同一平台/店铺/月口径关联。
+- 边界：利润缺失仍按现有 KPI 空周期约定处理，不新增“利润数据缺失”状态；费用管理不新增完整性状态机，部分费用缺失时仍按已录入费用计算经营结果。
+
+
 本文档为「成本数据来源与口径梳理」变更的权威交付物，明确 A 类与 B 类成本的包含项、数据来源、汇总方式及总成本与各比率的计算公式，供年度数据总结、按店铺下钻、趋势图等成本相关实现与验收使用。  
 **与字段映射辞典及 `backend/services/field_mapping/standard_fields.py` 中 ORDER_COST_FIELDS 列名保持一致。**
 

@@ -41,3 +41,26 @@ def test_target_completion_service_prefers_current_sales_target_columns():
     assert '"\u76ee\u6807\u9500\u552e\u989d"' in sql_text
     assert '"\u76ee\u6807\u8ba2\u5355\u6570"' in sql_text
     assert "mart.shop_month_kpi" in sql_text
+
+
+def test_sales_targets_a_contract_includes_platform_code_identity():
+    schema_text = Path("modules/core/db/schema_parts/business.py").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+    migration_text = Path("migrations/versions/20260610_add_platform_code_to_sales_targets_a.py").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+    sync_text = Path("backend/services/target_sync_service.py").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "platform_code = Column(String(32)" in schema_text
+    assert 'UniqueConstraint("platform_code", "shop_id", "year_month"' in schema_text
+    assert "20260609_operating_costs_labor_cost" in migration_text
+    assert "op.add_column" in migration_text
+    assert "platform_code" in migration_text
+    assert "uq_sales_targets_a_platform_shop_month" in migration_text
+    assert "ON CONFLICT (platform_code," in sync_text

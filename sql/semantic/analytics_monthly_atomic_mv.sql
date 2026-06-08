@@ -76,7 +76,7 @@ mapped_monthly_traffic AS MATERIALIZED (
             raw_data->>'views',
             raw_data->>'page_view'
         ) AS page_views_raw,
-        COALESCE(raw_data->>'鏇濆厜娆℃暟', raw_data->>'impressions', raw_data->>'Impressions') AS impressions_raw,
+        COALESCE(raw_data->>'曝光次数', raw_data->>'鏇濆厜娆℃暟', raw_data->>'impressions', raw_data->>'Impressions') AS impressions_raw,
         COALESCE(
             raw_data->>'订单数',
             raw_data->>'订单数量',

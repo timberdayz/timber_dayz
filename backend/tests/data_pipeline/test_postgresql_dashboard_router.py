@@ -20,8 +20,40 @@ from backend.domains.business.routers.dashboard_api_postgresql import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _bridge_compat_dashboard_service_patch(monkeypatch):
+    import backend.domains.business.routers.dashboard_api_postgresql as actual_router
+    import backend.routers.dashboard_api_postgresql as compat_router
+
+    monkeypatch.setattr(
+        actual_router,
+        "get_postgresql_dashboard_service",
+        lambda: compat_router.get_postgresql_dashboard_service(),
+    )
+
+
 def _make_request(path: str):
-    app = SimpleNamespace(state=SimpleNamespace())
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            dashboard_assets_report={
+                "ready": True,
+                "modules": {
+                    "business_overview": {
+                        "status": "ready",
+                        "ready": True,
+                    },
+                    "clearance": {
+                        "status": "ready",
+                        "ready": True,
+                    },
+                    "b_cost": {
+                        "status": "ready",
+                        "ready": True,
+                    },
+                }
+            }
+        )
+    )
     return Request(
         {
             "type": "http",
@@ -63,7 +95,14 @@ def _make_dashboard_not_ready_request(path: str):
 
 def test_postgresql_kpi_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
+        async def get_business_overview_kpi(
+            self,
+            month=None,
+            platform=None,
+            granularity="monthly",
+            target_date=None,
+            shop_id=None,
+        ):
             return {
                 "gmv": 123,
                 "order_count": 10,
@@ -76,6 +115,10 @@ def test_postgresql_kpi_route_returns_service_payload(monkeypatch):
 
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
@@ -97,7 +140,14 @@ def test_postgresql_kpi_route_accepts_granularity_and_date(monkeypatch):
     captured = {}
 
     class _ServiceStub:
-        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
+        async def get_business_overview_kpi(
+            self,
+            month=None,
+            platform=None,
+            granularity="monthly",
+            target_date=None,
+            shop_id=None,
+        ):
             captured.update(
                 {
                     "month": month,
@@ -110,6 +160,10 @@ def test_postgresql_kpi_route_accepts_granularity_and_date(monkeypatch):
 
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
@@ -132,6 +186,54 @@ def test_postgresql_kpi_route_accepts_granularity_and_date(monkeypatch):
     assert captured["target_date"] == "2026-03-16"
 
 
+def test_postgresql_kpi_route_forwards_shop_id(monkeypatch):
+    captured = {}
+
+    class _ServiceStub:
+        async def get_business_overview_kpi(
+            self,
+            month=None,
+            platform=None,
+            granularity="monthly",
+            target_date=None,
+            shop_id=None,
+        ):
+            captured.update(
+                {
+                    "month": month,
+                    "platform": platform,
+                    "granularity": granularity,
+                    "target_date": target_date,
+                    "shop_id": shop_id,
+                }
+            )
+            return {"gmv": 456}
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_kpi_postgresql(
+            request=_make_request("/api/dashboard/business-overview/kpi"),
+            granularity="monthly",
+            period_key="2026-03-01",
+            platform_code="shopee",
+            shop_id="shop-1",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert captured["platform"] == "shopee"
+    assert captured["shop_id"] == "shop-1"
+
+
 @pytest.mark.asyncio
 async def test_postgresql_kpi_route_rejects_legacy_month_param(monkeypatch):
     def _service_should_not_be_called():
@@ -143,6 +245,7 @@ async def test_postgresql_kpi_route_rejects_legacy_month_param(monkeypatch):
     )
 
     app = FastAPI()
+    app.state.dashboard_assets_report = {"ready": True}
     app.include_router(router)
 
     async with AsyncClient(
@@ -328,6 +431,7 @@ async def test_postgresql_traffic_ranking_route_rejects_legacy_date_value_alias(
     )
 
     app = FastAPI()
+    app.state.dashboard_assets_report = {"ready": True}
     app.include_router(router)
 
     async with AsyncClient(
@@ -352,7 +456,7 @@ async def test_postgresql_traffic_ranking_route_rejects_legacy_date_value_alias(
 
 def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_operational_metrics(self, month, platform):
+        async def get_business_overview_operational_metrics(self, month, platform, shop_id=None):
             return {
                 "monthly_target": 100,
                 "monthly_total_achieved": 80,
@@ -362,6 +466,10 @@ def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatc
 
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
@@ -378,6 +486,44 @@ def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatc
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert body["data"]["operating_result_text"] == "盈利"
+
+
+def test_postgresql_operational_metrics_route_forwards_shop_id(monkeypatch):
+    captured = {}
+
+    class _ServiceStub:
+        async def get_business_overview_operational_metrics(self, month, platform, shop_id=None):
+            captured.update({"month": month, "platform": platform, "shop_id": shop_id})
+            return {
+                "monthly_target": 100,
+                "monthly_total_achieved": 80,
+                "estimated_expenses": 30,
+                "operating_result_text": "盈利",
+            }
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_operational_metrics_postgresql(
+            request=_make_request("/api/dashboard/business-overview/operational-metrics"),
+            granularity="monthly",
+            period_key="2026-03-01",
+            platform_code="shopee",
+            shop_id="shop-1",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert captured["platform"] == "shopee"
+    assert captured["shop_id"] == "shop-1"
 
 
 def test_postgresql_dashboard_router_exposes_compatibility_paths():
@@ -503,6 +649,7 @@ async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_tim
     )
 
     app = FastAPI()
+    app.state.dashboard_assets_report = {"ready": True}
     app.state.cache_service = _CacheServiceStub()
     app.include_router(router)
 

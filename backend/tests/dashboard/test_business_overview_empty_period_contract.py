@@ -80,7 +80,14 @@ def test_aggregate_comparison_source_rows_empty_period_returns_additive_zeros():
 
 def test_bo_kpi_route_marks_empty_period_meta(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
+        async def get_business_overview_kpi(
+            self,
+            month=None,
+            platform=None,
+            granularity="monthly",
+            target_date=None,
+            shop_id=None,
+        ):
             return {
                 "gmv": 0,
                 "order_count": 0,
@@ -245,3 +252,45 @@ def test_bo_bootstrap_route_marks_empty_period_meta(monkeypatch):
     assert body["meta"]["data_status"] == "empty_period"
     assert body["data"]["traffic_ranking"] == []
     assert body["data"]["shop_racing"] == []
+
+
+def test_bo_bootstrap_route_forwards_shop_id_to_kpi_and_operational(monkeypatch):
+    captured = {"kpi": None, "operational": None}
+
+    class _ServiceStub:
+        async def get_business_overview_kpi(self, **kwargs):
+            captured["kpi"] = kwargs
+            return {"gmv": 1}
+
+        async def get_business_overview_comparison(self, **kwargs):
+            return {
+                "metrics": {},
+                "target": {"sales_amount": None, "sales_quantity": None, "achievement_rate": None},
+            }
+
+        async def get_business_overview_operational_metrics(self, **kwargs):
+            captured["operational"] = kwargs
+            return {"monthly_target": None}
+
+        async def get_business_overview_traffic_ranking(self, **kwargs):
+            return []
+
+        async def get_business_overview_shop_racing(self, **kwargs):
+            return []
+
+    _patch_dashboard_service(monkeypatch, _ServiceStub())
+
+    response = asyncio.run(
+        get_business_overview_bootstrap_postgresql(
+            request=_make_request("/api/dashboard/business-overview/bootstrap"),
+            granularity="monthly",
+            period_key="2026-03-01",
+            platform_code="shopee",
+            shop_id="shop-1",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert captured["kpi"]["shop_id"] == "shop-1"
+    assert captured["operational"]["shop_id"] == "shop-1"

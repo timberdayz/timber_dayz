@@ -46,11 +46,15 @@ weekly AS (
 monthly_target AS (
     SELECT
         to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
+        LOWER(TRIM(COALESCE(platform_code, ''))) AS platform_code,
         "店铺ID" AS shop_id,
         COALESCE(SUM("目标销售额"), 0) AS target_sales_amount,
         COALESCE(SUM("目标订单数"), 0) AS target_sales_quantity
     FROM a_class.sales_targets_a
-    GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
+    GROUP BY
+        to_date("年月" || '-01', 'YYYY-MM-DD'),
+        LOWER(TRIM(COALESCE(platform_code, ''))),
+        "店铺ID"
 ),
 monthly AS (
     SELECT
@@ -72,6 +76,7 @@ monthly AS (
     FROM mart.shop_month_kpi m
     LEFT JOIN monthly_target t
         ON m.period_month = t.period_month
+       AND LOWER(COALESCE(m.platform_code, '')) = COALESCE(t.platform_code, '')
        AND COALESCE(m.shop_id, '') = COALESCE(t.shop_id, '')
 )
 SELECT * FROM daily

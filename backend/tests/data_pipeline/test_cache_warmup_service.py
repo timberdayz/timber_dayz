@@ -15,7 +15,14 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
             stored.append((cache_type, response, cache_params))
 
     class _PostgresqlServiceStub:
-        async def get_business_overview_kpi(self, month, platform, granularity="monthly", target_date=None):
+        async def get_business_overview_kpi(
+            self,
+            month,
+            platform,
+            granularity="monthly",
+            target_date=None,
+            shop_id=None,
+        ):
             called.append(("kpi", month, platform, granularity, target_date))
             return {"gmv": 100}
 
@@ -31,15 +38,21 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
             called.append(("traffic_ranking", granularity, target_date, dimension))
             return []
 
-        async def get_business_overview_inventory_backlog(self, min_days, limit):
+        async def get_business_overview_inventory_backlog(
+            self,
+            min_days,
+            limit,
+            granularity=None,
+            target_date=None,
+        ):
             called.append(("inventory_backlog", min_days, limit))
             return []
 
-        async def get_business_overview_operational_metrics(self, month, platform):
+        async def get_business_overview_operational_metrics(self, month, platform, shop_id=None):
             called.append(("operational_metrics", month, platform))
             return {}
 
-        async def get_clearance_ranking(self, limit=10):
+        async def get_clearance_ranking(self, limit=10, granularity=None, target_date=None):
             called.append(("clearance_ranking", limit))
             return []
 
