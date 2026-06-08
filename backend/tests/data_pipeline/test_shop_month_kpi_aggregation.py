@@ -151,6 +151,8 @@ def test_analytics_monthly_atomic_mv_sql_asset():
             "ix_fact_analytics_monthly_atomic_mv_period_platform_shop",
         ),
     )
+    sql_text = Path("sql/semantic/analytics_monthly_atomic_mv.sql").read_text(encoding="utf-8")
+    assert "raw_data->>'曝光次数'" in sql_text
 
 
 def test_platform_month_kpi_sql_asset():

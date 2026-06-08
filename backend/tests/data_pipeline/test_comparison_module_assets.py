@@ -17,3 +17,11 @@ def test_business_overview_comparison_module_sql_asset():
     assert "avg_order_value" in sql_text
     assert "attach_rate" in sql_text
     assert "profit" in sql_text
+
+
+def test_business_overview_comparison_target_join_uses_platform_shop_month_identity():
+    sql_text = Path("sql/api_modules/business_overview_comparison_module.sql").read_text(encoding="utf-8")
+
+    assert "LOWER(TRIM(COALESCE(platform_code, '')))" in sql_text
+    assert "LOWER(COALESCE(m.platform_code, '')) = COALESCE(t.platform_code, '')" in sql_text
+    assert "COALESCE(m.shop_id, '') = COALESCE(t.shop_id, '')" in sql_text

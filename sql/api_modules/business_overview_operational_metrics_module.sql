@@ -31,10 +31,14 @@ WITH base_month_kpi AS (
 monthly_targets AS (
     SELECT
         to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
+        LOWER(TRIM(COALESCE(platform_code, ''))) AS platform_code,
         "店铺ID" AS shop_id,
         SUM("目标销售额") AS monthly_target
     FROM a_class.sales_targets_a
-    GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
+    GROUP BY
+        to_date("年月" || '-01', 'YYYY-MM-DD'),
+        LOWER(TRIM(COALESCE(platform_code, ''))),
+        "店铺ID"
 ),
 monthly_costs AS (
     SELECT
@@ -94,6 +98,7 @@ SELECT
 FROM base_month_kpi m
 LEFT JOIN monthly_targets t
     ON m.period_month = t.period_month
+   AND LOWER(COALESCE(m.platform_code, '')) = COALESCE(t.platform_code, '')
    AND COALESCE(m.shop_id, '') = COALESCE(t.shop_id, '')
 LEFT JOIN monthly_costs c
     ON m.period_month = c.period_month

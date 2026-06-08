@@ -88,16 +88,21 @@ class TargetSyncService:
             for breakdown in breakdowns:
                 if not breakdown.shop_id:
                     continue
+                platform_code = self._normalize_platform_code(breakdown.platform_code)
                     
                 try:
                     await self._upsert_sales_target_a(
+                        platform_code=platform_code,
                         shop_id=breakdown.shop_id,
                         year_month=year_month,
                         target_sales_amount=breakdown.target_amount or 0.0,
                         target_quantity=breakdown.target_quantity or 0
                     )
                     result["synced"] += 1
-                    logger.debug(f"[TargetSync] Synced: shop_id={breakdown.shop_id}, year_month={year_month}")
+                    logger.debug(
+                        f"[TargetSync] Synced: platform_code={platform_code}, "
+                        f"shop_id={breakdown.shop_id}, year_month={year_month}"
+                    )
                 except Exception as e:
                     result["errors"].append(f"Failed to sync shop {breakdown.shop_id}: {str(e)}")
                     logger.error(f"[TargetSync] Failed to sync breakdown: {e}", exc_info=True)
@@ -194,8 +199,10 @@ class TargetSyncService:
                     continue
                 
                 # 检查是否有其他目标指向同一 shop_id + year_month
+                platform_code = self._normalize_platform_code(breakdown.platform_code)
                 other_targets = await self._count_other_targets_for_shop_month(
                     target_id=target_id,
+                    platform_code=platform_code,
                     shop_id=breakdown.shop_id,
                     year_month=year_month
                 )
@@ -205,9 +212,11 @@ class TargetSyncService:
                     await self.db.execute(
                         text("""
                             DELETE FROM a_class.sales_targets_a 
-                            WHERE "店铺ID" = :shop_id AND "年月" = :year_month
+                            WHERE platform_code = :platform_code
+                              AND "店铺ID" = :shop_id
+                              AND "年月" = :year_month
                         """),
-                        {"shop_id": breakdown.shop_id, "year_month": year_month}
+                        {"platform_code": platform_code, "shop_id": breakdown.shop_id, "year_month": year_month}
                     )
                     result["deleted"] += 1
             
@@ -232,9 +241,17 @@ class TargetSyncService:
         if period_start:
             return period_start.strftime('%Y-%m')
         return datetime.now(timezone.utc).strftime('%Y-%m')
+
+    @staticmethod
+    def _normalize_platform_code(platform_code: Optional[str]) -> str:
+        value = str(platform_code or "").strip().lower()
+        if not value or value in {"none", "null"}:
+            return "unknown"
+        return value
     
     async def _upsert_sales_target_a(
         self,
+        platform_code: str,
         shop_id: str,
         year_month: str,
         target_sales_amount: float,
@@ -249,16 +266,17 @@ class TargetSyncService:
         await self.db.execute(
             text("""
                 INSERT INTO a_class.sales_targets_a 
-                    ("店铺ID", "年月", "目标销售额", "目标订单数", "创建时间", "更新时间")
+                    (platform_code, "店铺ID", "年月", "目标销售额", "目标订单数", "创建时间", "更新时间")
                 VALUES 
-                    (:shop_id, :year_month, :target_sales_amount, :target_quantity, NOW(), NOW())
-                ON CONFLICT ("店铺ID", "年月") 
+                    (:platform_code, :shop_id, :year_month, :target_sales_amount, :target_quantity, NOW(), NOW())
+                ON CONFLICT (platform_code, "店铺ID", "年月")
                 DO UPDATE SET 
                     "目标销售额" = EXCLUDED."目标销售额",
                     "目标订单数" = EXCLUDED."目标订单数",
                     "更新时间" = NOW()
             """),
             {
+                "platform_code": self._normalize_platform_code(platform_code),
                 "shop_id": shop_id,
                 "year_month": year_month,
                 "target_sales_amount": target_sales_amount,
@@ -269,6 +287,7 @@ class TargetSyncService:
     async def _count_other_targets_for_shop_month(
         self,
         target_id: int,
+        platform_code: str,
         shop_id: str,
         year_month: str
     ) -> int:
@@ -287,11 +306,13 @@ class TargetSyncService:
                 WHERE t.id != :target_id
                   AND t.status = 'active'
                   AND tb.breakdown_type = 'shop'
+                  AND LOWER(TRIM(COALESCE(tb.platform_code, 'unknown'))) = LOWER(TRIM(:platform_code))
                   AND tb.shop_id = :shop_id
                   AND DATE_TRUNC('month', t.period_start) = DATE_TRUNC('month', CAST(:period_start AS date))
             """),
             {
                 "target_id": target_id,
+                "platform_code": self._normalize_platform_code(platform_code),
                 "shop_id": shop_id,
                 "period_start": period_start
             }

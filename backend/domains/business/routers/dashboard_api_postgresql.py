@@ -405,6 +405,7 @@ async def get_business_overview_kpi_postgresql(
                 platform=effective_platform_code,
                 granularity=effective_granularity,
                 target_date=effective_date,
+                shop_id=shop_id,
             )
             return json.loads(success_response(data=result).body.decode())
 
@@ -538,6 +539,7 @@ async def get_business_overview_bootstrap_postgresql(
                 platform=effective_platform_code,
                 granularity=effective_granularity,
                 target_date=effective_date,
+                shop_id=shop_id,
             )
             kpi_ms = (time.perf_counter() - kpi_started) * 1000.0
 
@@ -553,6 +555,7 @@ async def get_business_overview_bootstrap_postgresql(
             operational_result = await service.get_business_overview_operational_metrics(
                 month=effective_operational_month,
                 platform=effective_platform_code,
+                shop_id=shop_id,
             )
             operational_ms = (time.perf_counter() - operational_started) * 1000.0
 
@@ -848,6 +851,7 @@ async def get_business_overview_operational_metrics_postgresql(
             result = await service.get_business_overview_operational_metrics(
                 month=effective_month,
                 platform=effective_platform_code,
+                shop_id=shop_id,
             )
             return json.loads(success_response(data=result).body.decode())
 

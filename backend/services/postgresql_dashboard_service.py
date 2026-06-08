@@ -893,61 +893,81 @@ class PostgresqlDashboardService:
         period_start: date_cls,
         period_end: date_cls,
         platform: str | None = None,
+        shop_id: str | None = None,
     ) -> dict[str, float]:
         async with AsyncSessionLocal() as session:
             if granularity == "monthly":
-                if platform:
+                if platform or shop_id:
                     try:
-                        result = await session.execute(
-                            text(
-                                """
-                                SELECT
-                                    SUM(tb.target_amount) AS target_amount,
-                                    SUM(tb.target_quantity) AS target_quantity
-                                FROM a_class.target_breakdown tb
-                                INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
-                                WHERE st.status = 'active'
-                                  AND st.period_start <= :period_start
-                                  AND st.period_end >= :period_end
-                                  AND tb.breakdown_type = 'shop'
-                                  AND LOWER(tb.platform_code) = LOWER(:platform)
-                                """
-                            ),
-                            {
-                                "period_start": period_start,
-                                "period_end": period_end,
-                                "platform": platform,
-                            },
-                        )
+                        query = """
+                            SELECT
+                                SUM(tb.target_amount) AS target_amount,
+                                SUM(tb.target_quantity) AS target_quantity
+                            FROM a_class.target_breakdown tb
+                            INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
+                            WHERE st.status = 'active'
+                              AND st.period_start <= :period_start
+                              AND st.period_end >= :period_end
+                              AND tb.breakdown_type = 'shop'
+                        """
+                        params: dict[str, Any] = {
+                            "period_start": period_start,
+                            "period_end": period_end,
+                        }
+                        if platform:
+                            query += " AND LOWER(COALESCE(tb.platform_code, '')) = LOWER(:platform)"
+                            params["platform"] = platform
+                        if shop_id:
+                            query += " AND tb.shop_id = :shop_id"
+                            params["shop_id"] = shop_id
+                        result = await session.execute(text(query), params)
                     except Exception:
                         await session.rollback()
                         columns = await self._get_table_columns("a_class", "sales_targets_a")
                         year_month_value = period_start.strftime("%Y-%m")
                         if {"year_month", "target_sales_amount"}.issubset(columns):
+                            target_filters = ""
+                            target_params: dict[str, Any] = {"year_month": year_month_value}
+                            if platform and "platform_code" in columns:
+                                target_filters += " AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform)"
+                                target_params["platform"] = platform
+                            if shop_id and "shop_id" in columns:
+                                target_filters += " AND shop_id = :shop_id"
+                                target_params["shop_id"] = shop_id
                             result = await session.execute(
                                 text(
-                                    """
+                                    f"""
                                     SELECT
                                         SUM(target_sales_amount) AS target_amount,
                                         SUM(target_quantity) AS target_quantity
                                     FROM a_class.sales_targets_a
                                     WHERE year_month = :year_month
+                                    {target_filters}
                                     """
                                 ),
-                                {"year_month": year_month_value},
+                                target_params,
                             )
                         else:
+                            target_filters = ""
+                            target_params = {"year_month": year_month_value}
+                            if platform and "platform_code" in columns:
+                                target_filters += " AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform)"
+                                target_params["platform"] = platform
+                            if shop_id:
+                                target_filters += ' AND "店铺ID" = :shop_id'
+                                target_params["shop_id"] = shop_id
                             result = await session.execute(
                                 text(
-                                    """
+                                    f"""
                                     SELECT
                                         COALESCE(SUM("目标销售额"), 0) AS target_amount,
                                         COALESCE(SUM("目标订单数"), 0) AS target_quantity
                                     FROM a_class.sales_targets_a
                                     WHERE "年月" = :year_month
+                                    {target_filters}
                                     """
                                 ),
-                                {"year_month": year_month_value},
+                                target_params,
                             )
                 else:
                     try:
@@ -1044,6 +1064,9 @@ class PostgresqlDashboardService:
                 if platform:
                     query += " AND LOWER(COALESCE(tb.platform_code, '')) = LOWER(:platform)"
                     params["platform"] = platform
+                if shop_id:
+                    query += " AND tb.shop_id = :shop_id"
+                    params["shop_id"] = shop_id
 
                 result = await session.execute(text(query), params)
 
@@ -1170,64 +1193,55 @@ class PostgresqlDashboardService:
             value = result.scalar_one_or_none()
             return _to_optional_float(value)
 
-    async def get_business_overview_kpi(
+    def _business_overview_kpi_period_key(self, granularity: str, period_key: date_cls) -> date_cls:
+        if granularity == "daily":
+            return period_key
+        if granularity == "weekly":
+            return period_key - timedelta(days=period_key.weekday())
+        if granularity == "monthly":
+            return date_cls(period_key.year, period_key.month, 1)
+        raise ValueError("granularity must be daily, weekly or monthly")
+
+    def _previous_business_overview_kpi_period_key(self, granularity: str, period_key: date_cls) -> date_cls:
+        current = self._business_overview_kpi_period_key(granularity, period_key)
+        if granularity == "daily":
+            return current - timedelta(days=1)
+        if granularity == "weekly":
+            return current - timedelta(days=7)
+        if granularity == "monthly":
+            return (current - timedelta(days=1)).replace(day=1)
+        raise ValueError("granularity must be daily, weekly or monthly")
+
+    def _business_overview_kpi_source(
         self,
-        month: str | None = None,
+        granularity: str,
+        shop_id: str | None = None,
+    ) -> tuple[str, str, bool]:
+        if shop_id:
+            source_table, period_column = _comparison_source_for_granularity(granularity)
+            return source_table, period_column, True
+        if granularity == "monthly":
+            return "api.business_overview_kpi_module", "period_month", False
+        source_table, period_column = _platform_kpi_source_for_granularity(granularity)
+        return source_table, period_column, False
+
+    async def _fetch_business_overview_kpi_rows(
+        self,
+        granularity: str,
+        period_key: date_cls,
         platform: str | None = None,
-        granularity: str = "monthly",
-        target_date: str | None = None,
-    ) -> dict[str, Any]:
-        effective_granularity = str(granularity or "monthly").strip().lower()
-        effective_target_date = target_date or month
-        if effective_target_date is None:
-            raise ValueError("target_date or month is required")
-        period_key = _normalize_period_start(effective_target_date)
-
-        if effective_granularity == "monthly":
-            query = """
-                SELECT
-                    period_month AS period_key,
-                    platform_code,
-                    gmv,
-                    order_count,
-                    visitor_count,
-                    page_views,
-                    impressions,
-                    conversion_rate,
-                    uv_conversion_rate,
-                    pv_conversion_rate,
-                    visit_rate,
-                    browse_depth,
-                    exposure_order_rate,
-                    avg_order_value,
-                    attach_rate,
-                    total_items,
-                    profit
-                FROM api.business_overview_kpi_module
-                WHERE period_month = :period_key
-            """
-            params: dict[str, Any] = {"period_key": period_key}
-            if platform:
-                query += " AND platform_code = :platform_code"
-                params["platform_code"] = platform
-
-            rows = await self._fetch_rows(query, params)
-            reduced = reduce_business_overview_kpi_rows(rows)
-            employee_count = await self._load_active_employee_count(period_key)
-            gmv = reduced.get("gmv")
-            if employee_count > 0 and gmv is not None:
-                reduced["labor_efficiency"] = round(float(gmv) / employee_count, 2)
-            else:
-                reduced["labor_efficiency"] = 0
-            return reduced
-
-        # Legacy monthly KPI raw JSON path removed by Online Query Policy (B).
-
-        source_table, period_column = _platform_kpi_source_for_granularity(effective_granularity)
+        shop_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        source_table, period_column, includes_shop_id = self._business_overview_kpi_source(
+            granularity,
+            shop_id=shop_id,
+        )
+        shop_select = "shop_id," if includes_shop_id else "NULL::text AS shop_id,"
         query = """
             SELECT
                 {period_column} AS period_key,
                 platform_code,
+                {shop_select}
                 gmv,
                 order_count,
                 visitor_count,
@@ -1245,13 +1259,21 @@ class PostgresqlDashboardService:
                 profit
             FROM {source_table}
             WHERE {period_column} = :period_key
-        """.format(period_column=period_column, source_table=source_table)
+        """.format(period_column=period_column, shop_select=shop_select, source_table=source_table)
         params: dict[str, Any] = {"period_key": period_key}
         if platform:
             query += " AND platform_code = :platform_code"
             params["platform_code"] = platform
+        if shop_id:
+            query += " AND shop_id = :shop_id"
+            params["shop_id"] = shop_id
+        return await self._fetch_rows(query, params)
 
-        rows = await self._fetch_rows(query, params)
+    async def _reduce_business_overview_kpi_snapshot(
+        self,
+        rows: list[dict[str, Any]],
+        period_key: date_cls,
+    ) -> dict[str, Any]:
         reduced = reduce_business_overview_kpi_rows(rows)
         employee_count = await self._load_active_employee_count(period_key)
         gmv = reduced.get("gmv")
@@ -1260,6 +1282,67 @@ class PostgresqlDashboardService:
         else:
             reduced["labor_efficiency"] = 0
         return reduced
+
+    def _attach_business_overview_kpi_changes(
+        self,
+        current: dict[str, Any],
+        previous: dict[str, Any],
+    ) -> dict[str, Any]:
+        change_fields = (
+            "gmv",
+            "order_count",
+            "impressions",
+            "page_views",
+            "visitor_count",
+            "visit_rate",
+            "browse_depth",
+            "conversion_rate",
+            "uv_conversion_rate",
+            "pv_conversion_rate",
+            "exposure_order_rate",
+            "avg_order_value",
+            "attach_rate",
+            "labor_efficiency",
+        )
+        result = dict(current)
+        for field_name in change_fields:
+            result[f"{field_name}_change"] = _change_pct(
+                _to_optional_float(current.get(field_name)),
+                _to_optional_float(previous.get(field_name)),
+            )
+        return result
+
+    async def get_business_overview_kpi(
+        self,
+        month: str | None = None,
+        platform: str | None = None,
+        granularity: str = "monthly",
+        target_date: str | None = None,
+        shop_id: str | None = None,
+    ) -> dict[str, Any]:
+        effective_granularity = str(granularity or "monthly").strip().lower()
+        effective_target_date = target_date or month
+        if effective_target_date is None:
+            raise ValueError("target_date or month is required")
+        normalized_period = _normalize_period_start(effective_target_date)
+        period_key = self._business_overview_kpi_period_key(effective_granularity, normalized_period)
+        previous_period_key = self._previous_business_overview_kpi_period_key(effective_granularity, period_key)
+
+        rows = await self._fetch_business_overview_kpi_rows(
+            effective_granularity,
+            period_key,
+            platform=platform,
+            shop_id=shop_id,
+        )
+        previous_rows = await self._fetch_business_overview_kpi_rows(
+            effective_granularity,
+            previous_period_key,
+            platform=platform,
+            shop_id=shop_id,
+        )
+        reduced = await self._reduce_business_overview_kpi_snapshot(rows, period_key)
+        previous_reduced = await self._reduce_business_overview_kpi_snapshot(previous_rows, previous_period_key)
+        return self._attach_business_overview_kpi_changes(reduced, previous_reduced)
 
     async def get_business_overview_comparison(
         self,
@@ -2121,6 +2204,7 @@ class PostgresqlDashboardService:
         self,
         month: str,
         platform: str | None = None,
+        shop_id: str | None = None,
     ) -> dict[str, Any]:
         period_month = _normalize_period_start(month)
         query = """
@@ -2132,6 +2216,9 @@ class PostgresqlDashboardService:
         if platform:
             query += " AND platform_code = :platform_code"
             params["platform_code"] = platform
+        if shop_id:
+            query += " AND shop_id = :shop_id"
+            params["shop_id"] = shop_id
 
         rows = await self._fetch_rows(query, params)
         total = {
@@ -2164,11 +2251,12 @@ class PostgresqlDashboardService:
             period_start=period_month,
             period_end=month_end,
             platform=platform,
+            shop_id=shop_id,
         )
         if target_summary["target_amount"] is not None:
             total["monthly_target"] = round(target_summary["target_amount"], 2)
         loaded_expenses: float | None = None
-        if platform is None:
+        if platform is None and shop_id is None:
             loaded_expenses = await self._load_operating_expenses_summary(period_month)
             if loaded_expenses is not None and total["estimated_expenses"] in (None, 0, 0.0):
                 total["estimated_expenses"] = round(loaded_expenses, 2)
@@ -2176,9 +2264,12 @@ class PostgresqlDashboardService:
         elif total["estimated_expenses"] in (None, 0, 0.0):
             total["estimated_expenses"] = None
             meta["expenses_source"] = None
-            meta["warnings"].append(
+            warning = (
                 "estimated_expenses_missing_for_platform: expenses fallback is disabled when platform_code is provided"
+                if platform
+                else "estimated_expenses_missing_for_shop: expenses fallback is disabled when shop_id is provided"
             )
+            meta["warnings"].append(warning)
         if total["estimated_gross_profit"] is not None and total["estimated_expenses"] is not None:
             total["operating_result"] = round(total["estimated_gross_profit"] - total["estimated_expenses"], 2)
 

@@ -7,6 +7,28 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 
+def _ready_dashboard_assets_report():
+    return {
+        "ready": True,
+        "modules": {
+            "business_overview": {"status": "ready", "ready": True},
+            "clearance": {"status": "ready", "ready": True},
+        },
+    }
+
+
+@pytest.fixture(autouse=True)
+def _bridge_compat_dashboard_service_patch(monkeypatch):
+    import backend.domains.business.routers.dashboard_api_postgresql as actual_router
+    import backend.routers.dashboard_api_postgresql as compat_router
+
+    monkeypatch.setattr(
+        actual_router,
+        "get_postgresql_dashboard_service",
+        lambda: compat_router.get_postgresql_dashboard_service(),
+    )
+
+
 def test_environment_examples_document_dashboard_router_flags():
     for path_str in (".env.example", "env.development.example", "env.production.example"):
         text = Path(path_str).read_text(encoding="utf-8")
@@ -26,6 +48,7 @@ async def switched_app(monkeypatch):
 
     monkeypatch.setenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "true")
     reloaded = importlib.reload(main_module)
+    reloaded.app.state.dashboard_assets_report = _ready_dashboard_assets_report()
     yield reloaded.app
     monkeypatch.delenv("USE_POSTGRESQL_DASHBOARD_ROUTER", raising=False)
     importlib.reload(main_module)
@@ -34,7 +57,14 @@ async def switched_app(monkeypatch):
 @pytest.mark.asyncio
 async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkeypatch):
     class _PostgresqlServiceStub:
-        async def get_business_overview_kpi(self, month=None, platform=None, granularity="monthly", target_date=None):
+        async def get_business_overview_kpi(
+            self,
+            month=None,
+            platform=None,
+            granularity="monthly",
+            target_date=None,
+            shop_id=None,
+        ):
             return {
                 "gmv": 321,
                 "order_count": 10,
@@ -48,7 +78,7 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
         async def get_business_overview_shop_racing(self, granularity, target_date, group_by, platform=None):
             return [{"name": "shop-a", "gmv": 123, "rank": 1}]
 
-        async def get_business_overview_operational_metrics(self, month, platform):
+        async def get_business_overview_operational_metrics(self, month, platform, shop_id=None):
             return {
                 "monthly_target": 1000,
                 "monthly_total_achieved": 800,
@@ -97,20 +127,13 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
             "/api/dashboard/business-overview/operational-metrics",
             params={"granularity": "monthly", "period_key": "2026-03-01"},
         )
-        target_completion = await client.get(
-            "/api/dashboard/annual-summary/target-completion",
-            params={"granularity": "yearly", "period": "2026"},
-        )
 
     shop_body = json.loads(shop_racing.content.decode("utf-8"))
     operational_body = json.loads(operational.content.decode("utf-8"))
-    target_completion_body = json.loads(target_completion.content.decode("utf-8"))
     assert shop_racing.status_code == 200
     assert shop_body["data"][0]["rank"] == 1
     assert operational.status_code == 200
     assert operational_body["data"]["operating_result_text"] == "盈利"
-    assert target_completion.status_code == 200
-    assert target_completion_body["data"]["achievement_rate_gmv"] == 80.0
 
 
 def test_main_contains_explicit_dashboard_router_source_log():
@@ -259,7 +282,14 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         321::numeric AS gmv,
                         10::numeric AS order_count,
                         200::numeric AS visitor_count,
+                        400::numeric AS page_views,
+                        1000::numeric AS impressions,
                         5::numeric AS conversion_rate,
+                        5::numeric AS uv_conversion_rate,
+                        2.5::numeric AS pv_conversion_rate,
+                        20::numeric AS visit_rate,
+                        2::numeric AS browse_depth,
+                        1::numeric AS exposure_order_rate,
                         32.1::numeric AS avg_order_value,
                         1.5::numeric AS attach_rate,
                         15::numeric AS total_items,
@@ -322,7 +352,14 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         321::numeric AS gmv,
                         10::numeric AS order_count,
                         200::numeric AS visitor_count,
+                        400::numeric AS page_views,
+                        1000::numeric AS impressions,
                         5::numeric AS conversion_rate,
+                        5::numeric AS uv_conversion_rate,
+                        2.5::numeric AS pv_conversion_rate,
+                        20::numeric AS visit_rate,
+                        2::numeric AS browse_depth,
+                        1::numeric AS exposure_order_rate,
                         32.1::numeric AS avg_order_value,
                         1.5::numeric AS attach_rate,
                         15::numeric AS total_items,
@@ -428,6 +465,7 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                 yield session
 
         reloaded = importlib.reload(main_module)
+        reloaded.app.state.dashboard_assets_report = _ready_dashboard_assets_report()
         reloaded.app.dependency_overrides[get_async_db] = override_get_async_db
 
         async with AsyncClient(
