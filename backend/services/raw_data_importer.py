@@ -442,12 +442,29 @@ class RawDataImporter:
                         if matched_key is not None:
                             raw_value = row.get(matched_key)
                             break
+            date_anchor = None
+            date_anchor_source = str(rule.get("date_anchor", "") or "").strip()
+            if date_anchor_source == "__file_date_from__":
+                date_anchor = getattr(self, "file_date_from", None)
+            elif date_anchor_source == "__file_date_to__":
+                date_anchor = getattr(self, "file_date_to", None)
+            elif date_anchor_source:
+                date_anchor = row.get(date_anchor_source)
+            elif target_field in {"period_start_time", "period_end_time"}:
+                date_anchor = (
+                    metric_date
+                    or period_start_date
+                    or period_end_date
+                    or getattr(self, "file_date_from", None)
+                    or getattr(self, "file_date_to", None)
+                )
             try:
                 parsed_date, parsed_datetime = parse_date_by_declared_format(
                     raw_value,
                     date_format=str(rule.get("date_format", "")).strip(),
                     value_kind=str(rule.get("value_kind", "single_date")).strip(),
                     range_pick=rule.get("range_pick"),
+                    date_anchor=date_anchor,
                 )
             except ValueError as exc:
                 raise ValueError(
@@ -471,6 +488,14 @@ class RawDataImporter:
                 period_end_date = parsed_date
                 if parsed_datetime is not None:
                     period_end_time = parsed_datetime
+            elif target_field == "period_start_time":
+                period_start_time = parsed_datetime
+                if period_start_date is None:
+                    period_start_date = parsed_date
+            elif target_field == "period_end_time":
+                period_end_time = parsed_datetime
+                if period_end_date is None:
+                    period_end_date = parsed_date
 
         if metric_date is None and period_start_date is not None:
             metric_date = period_start_date

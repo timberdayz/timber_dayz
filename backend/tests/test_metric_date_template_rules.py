@@ -29,6 +29,43 @@ def test_parse_date_by_declared_format_supports_single_date_and_datetime():
     assert parsed_datetime == datetime(2026, 3, 12, 12, 30, 0)
 
 
+def test_parse_date_by_declared_format_supports_time_of_day_with_anchor():
+    from modules.services.smart_date_parser import parse_date_by_declared_format
+
+    parsed_date, parsed_datetime = parse_date_by_declared_format(
+        "13:00",
+        date_format="hh:mm",
+        value_kind="time_of_day",
+        date_anchor=date(2026, 6, 8),
+    )
+
+    assert parsed_date == date(2026, 6, 8)
+    assert parsed_datetime == datetime(2026, 6, 8, 13, 0, 0)
+
+
+def test_parse_date_by_declared_format_supports_datetime_and_time_ranges():
+    from modules.services.smart_date_parser import parse_date_by_declared_format
+
+    start_date, start_datetime = parse_date_by_declared_format(
+        "2026-06-08 13:00 - 2026-06-08 14:00",
+        date_format="yyyy-mm-dd hh:mm",
+        value_kind="datetime_range",
+        range_pick="start",
+    )
+    end_date, end_datetime = parse_date_by_declared_format(
+        "13:00-14:00",
+        date_format="hh:mm",
+        value_kind="time_range",
+        range_pick="end",
+        date_anchor=date(2026, 6, 8),
+    )
+
+    assert start_date == date(2026, 6, 8)
+    assert start_datetime == datetime(2026, 6, 8, 13, 0, 0)
+    assert end_date == date(2026, 6, 8)
+    assert end_datetime == datetime(2026, 6, 8, 14, 0, 0)
+
+
 def test_parse_date_by_declared_format_supports_day_first_range_pick():
     from modules.services.smart_date_parser import parse_date_by_declared_format
 
@@ -116,6 +153,40 @@ def test_raw_data_importer_field_parse_rules_support_file_date_from_token():
     assert period_end_date == date(2026, 3, 1)
     assert period_start_time is None
     assert period_end_time is None
+
+
+def test_raw_data_importer_field_parse_rules_support_hour_target_with_file_date_anchor():
+    importer = _make_importer()
+    importer.file_date_from = date(2026, 6, 8)
+
+    metric_date, period_start_date, period_end_date, period_start_time, period_end_time = (
+        importer._extract_period_dates_by_rules(
+            row={"hour": "13:00"},
+            field_parse_rules=[
+                {
+                    "target_field": "metric_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                    "strict": True,
+                },
+                {
+                    "target_field": "period_start_time",
+                    "source_column": "hour",
+                    "value_kind": "time_of_day",
+                    "date_format": "hh:mm",
+                    "date_anchor": "__file_date_from__",
+                    "strict": True,
+                },
+            ],
+        )
+    )
+
+    assert metric_date == date(2026, 6, 8)
+    assert period_start_date == date(2026, 6, 8)
+    assert period_end_date == date(2026, 6, 8)
+    assert period_start_time == datetime(2026, 6, 8, 13, 0, 0)
+    assert period_end_time == datetime(2026, 6, 8, 13, 0, 0)
 
 
 def test_raw_data_importer_field_parse_rules_support_source_alias_fallback():

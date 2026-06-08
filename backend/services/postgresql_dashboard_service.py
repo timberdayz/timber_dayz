@@ -558,7 +558,14 @@ def summarize_inventory_backlog_rows(rows: list[dict[str, Any]]) -> dict[str, An
 
 def rank_shop_racing_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ordered = [dict(row) for row in rows]
-    ordered.sort(key=lambda row: (_sort_numeric(row.get("gmv")), _sort_numeric(row.get("order_count"))), reverse=True)
+    ordered.sort(
+        key=lambda row: (
+            _sort_numeric(row.get("gmv")),
+            _sort_numeric(row.get("profit")),
+            _sort_numeric(row.get("order_count")),
+        ),
+        reverse=True,
+    )
     for index, row in enumerate(ordered, start=1):
         row["rank"] = index
     return ordered
@@ -1624,6 +1631,7 @@ class PostgresqlDashboardService:
                         "platform_code": key,
                         "shop_id": "ALL",
                         "gmv": 0.0,
+                        "profit": 0.0,
                         "order_count": 0.0,
                         "avg_order_value": 0.0,
                         "attach_rate": 0.0,
@@ -1632,6 +1640,7 @@ class PostgresqlDashboardService:
                     },
                 )
                 grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
+                grouped[key]["profit"] += _to_optional_float(row.get("profit")) or 0.0
                 grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
                 grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
             for value in grouped.values():
@@ -1671,6 +1680,7 @@ class PostgresqlDashboardService:
                         "main_account_name": main_account_name,
                         "is_unmatched": not bool(account_id),
                         "gmv": 0.0,
+                        "profit": 0.0,
                         "order_count": 0.0,
                         "avg_order_value": 0.0,
                         "attach_rate": 0.0,
@@ -1679,6 +1689,7 @@ class PostgresqlDashboardService:
                     },
                 )
                 grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
+                grouped[key]["profit"] += _to_optional_float(row.get("profit")) or 0.0
                 grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
                 grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
             for value in grouped.values():

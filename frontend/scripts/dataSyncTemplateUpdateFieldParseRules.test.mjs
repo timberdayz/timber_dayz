@@ -99,3 +99,49 @@ test('buildTemplateUpdateFieldParseRulesPayload remaps missing source columns th
   ])
   assert.deepEqual(result.droppedRules, [])
 })
+
+test('buildTemplateUpdateFieldParseRulesPayload preserves time parse rule controls', () => {
+  const result = buildTemplateUpdateFieldParseRulesPayload({
+    currentHeaderColumns: ['小时'],
+    existingRules: [
+      {
+        target_field: 'period_start_time',
+        source_column: '小时',
+        value_kind: 'time_of_day',
+        date_format: 'hh:mm',
+        date_anchor: '__file_date_from__',
+        strict: true,
+      },
+      {
+        target_field: 'period_end_time',
+        source_column: '小时',
+        value_kind: 'time_range',
+        date_format: 'hh:mm',
+        range_pick: 'end',
+        date_anchor: '__file_date_from__',
+        strict: true,
+      },
+    ],
+  })
+
+  assert.deepEqual(result.rules, [
+    {
+      target_field: 'period_start_time',
+      source_column: '小时',
+      value_kind: 'time_of_day',
+      date_format: 'hh:mm',
+      strict: true,
+      date_anchor: '__file_date_from__',
+    },
+    {
+      target_field: 'period_end_time',
+      source_column: '小时',
+      value_kind: 'time_range',
+      date_format: 'hh:mm',
+      strict: true,
+      range_pick: 'end',
+      date_anchor: '__file_date_from__',
+    },
+  ])
+  assert.deepEqual(result.droppedRules, [])
+})

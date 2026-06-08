@@ -34,12 +34,20 @@ _DAY_FIRST_DATETIME_FORMATS = (
 _DECLARED_SINGLE_FORMATS = {
     "yyyy-mm-dd": ("%Y-%m-%d", False),
     "yyyy/mm/dd": ("%Y/%m/%d", False),
+    "yyyy-mm-dd hh:mm": ("%Y-%m-%d %H:%M", True),
     "yyyy-mm-dd hh:mm:ss": ("%Y-%m-%d %H:%M:%S", True),
+    "yyyy/mm/dd hh:mm": ("%Y/%m/%d %H:%M", True),
     "yyyy/mm/dd hh:mm:ss": ("%Y/%m/%d %H:%M:%S", True),
     "dd-mm-yyyy": ("%d-%m-%Y", False),
     "dd/mm/yyyy": ("%d/%m/%Y", False),
+    "dd-mm-yyyy hh:mm": ("%d-%m-%Y %H:%M", True),
     "dd-mm-yyyy hh:mm:ss": ("%d-%m-%Y %H:%M:%S", True),
+    "dd/mm/yyyy hh:mm": ("%d/%m/%Y %H:%M", True),
     "dd/mm/yyyy hh:mm:ss": ("%d/%m/%Y %H:%M:%S", True),
+}
+_DECLARED_TIME_FORMATS = {
+    "hh:mm": "%H:%M",
+    "hh:mm:ss": "%H:%M:%S",
 }
 _DECLARED_RANGE_BASE_FORMATS = {
     "dd-mm-yyyy-dd-mm-yyyy": "%d-%m-%Y",
@@ -135,12 +143,24 @@ def _split_declared_range_value(value: str, component_length: int) -> tuple[str,
     raise ValueError(f"unable to split declared date range: {value}")
 
 
+def _coerce_anchor_date(date_anchor: object) -> date:
+    if isinstance(date_anchor, datetime):
+        return date_anchor.date()
+    if isinstance(date_anchor, date):
+        return date_anchor
+    parsed_anchor = parse_date(date_anchor)
+    if parsed_anchor:
+        return parsed_anchor
+    raise ValueError("date_anchor is required for time-only parsing")
+
+
 def parse_date_by_declared_format(
     value: object,
     *,
     date_format: str,
     value_kind: str = "single_date",
     range_pick: Optional[str] = None,
+    date_anchor: object = None,
 ) -> tuple[Optional[date], Optional[datetime]]:
     """Parse a value strictly by its declared template format."""
     if value is None:
@@ -156,16 +176,59 @@ def parse_date_by_declared_format(
 
     normalized_format = str(date_format).strip().lower()
     normalized_kind = str(value_kind).strip().lower()
-    if normalized_kind not in {"single_date", "date_range"}:
+    if normalized_kind not in {
+        "single_date",
+        "single_datetime",
+        "time_of_day",
+        "date_range",
+        "datetime_range",
+        "time_range",
+    }:
         raise ValueError(f"unsupported value_kind: {value_kind}")
 
-    if normalized_kind == "single_date":
+    if normalized_kind in {"single_date", "single_datetime"}:
         format_spec = _DECLARED_SINGLE_FORMATS.get(normalized_format)
         if not format_spec:
             raise ValueError(f"unsupported declared date format: {date_format}")
         fmt, has_time = format_spec
         parsed = datetime.strptime(raw, fmt)
         return (parsed.date(), parsed if has_time else None)
+
+    if normalized_kind == "time_of_day":
+        fmt = _DECLARED_TIME_FORMATS.get(normalized_format)
+        if not fmt:
+            raise ValueError(f"unsupported declared time format: {date_format}")
+        anchor = _coerce_anchor_date(date_anchor)
+        parsed_time = datetime.strptime(raw, fmt).time()
+        parsed = datetime.combine(anchor, parsed_time)
+        return (parsed.date(), parsed)
+
+    if normalized_kind == "datetime_range":
+        format_spec = _DECLARED_SINGLE_FORMATS.get(normalized_format)
+        if not format_spec or not format_spec[1]:
+            raise ValueError(f"unsupported declared datetime range format: {date_format}")
+        if range_pick not in {"start", "end"}:
+            raise ValueError(f"range_pick is required for declared datetime range format: {date_format}")
+        fmt = format_spec[0]
+        component_length = len(datetime(2026, 4, 18, 13, 0, 0).strftime(fmt))
+        start_str, end_str = _split_declared_range_value(raw, component_length)
+        picked = start_str if range_pick == "start" else end_str
+        parsed = datetime.strptime(picked, fmt)
+        return (parsed.date(), parsed)
+
+    if normalized_kind == "time_range":
+        fmt = _DECLARED_TIME_FORMATS.get(normalized_format)
+        if not fmt:
+            raise ValueError(f"unsupported declared time range format: {date_format}")
+        if range_pick not in {"start", "end"}:
+            raise ValueError(f"range_pick is required for declared time range format: {date_format}")
+        anchor = _coerce_anchor_date(date_anchor)
+        component_length = len(datetime(2026, 4, 18, 13, 0, 0).strftime(fmt))
+        start_str, end_str = _split_declared_range_value(raw, component_length)
+        picked = start_str if range_pick == "start" else end_str
+        parsed_time = datetime.strptime(picked, fmt).time()
+        parsed = datetime.combine(anchor, parsed_time)
+        return (parsed.date(), parsed)
 
     base_fmt = _DECLARED_RANGE_BASE_FORMATS.get(normalized_format)
     if not base_fmt:

@@ -185,11 +185,22 @@
               @change="handleSemanticKeyChange(row.raw_name, $event)"
             >
               <el-option
-                v-for="option in semanticFieldOptions"
-                :key="option.value || '__none__'"
-                :label="option.label"
-                :value="option.value"
+                :key="semanticNonSemanticOption.value"
+                :label="semanticNonSemanticOption.label"
+                :value="semanticNonSemanticOption.value"
               />
+              <el-option-group
+                v-for="group in semanticFieldOptionGroups"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="option in group.options"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-option-group>
             </el-select>
           </template>
         </el-table-column>
@@ -286,7 +297,20 @@
               />
             </el-select>
             <el-select
-              v-if="rule.value_kind === 'date_range'"
+              v-if="fieldParseRuleNeedsDateAnchor(rule)"
+              v-model="rule.date_anchor"
+              placeholder="日期锚点"
+              @change="emitFieldParseRulesChange"
+            >
+              <el-option
+                v-for="option in dateAnchorOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-select
+              v-if="fieldParseRuleNeedsRangePick(rule)"
               v-model="rule.range_pick"
               placeholder="区间取值"
               @change="emitFieldParseRulesChange"
@@ -329,18 +353,22 @@ import { Check, Document, Refresh, View, Warning } from '@element-plus/icons-vue
 
 import DeduplicationFieldsSelector from '@/components/DeduplicationFieldsSelector.vue'
 import {
+  NON_SEMANTIC_FIELD_OPTION,
   NON_SEMANTIC_FIELD_VALUE,
-  SEMANTIC_FIELD_OPTIONS,
+  SEMANTIC_FIELD_OPTION_GROUPS,
   getSemanticFieldMeta,
   inferHeaderBindings,
   updateHeaderBindingSemantic,
 } from '@/domains/data_platform/utils/headerBindings'
 import {
+  DATE_ANCHOR_OPTIONS,
   DATE_FORMAT_OPTIONS,
   DATE_TARGET_FIELD_OPTIONS,
   DATE_VALUE_KIND_OPTIONS,
   buildCompanionDateParseRules,
   buildFieldParseSourceOptions,
+  fieldParseRuleNeedsDateAnchor,
+  fieldParseRuleNeedsRangePick,
   mergeFieldParseRules,
 } from '@/domains/data_platform/utils/templateFieldParseRules'
 
@@ -392,10 +420,12 @@ const localFieldParseRules = ref([])
 const localHeaderBindings = ref([])
 const deduplicationSelectionValid = ref(false)
 
-const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
+const semanticNonSemanticOption = NON_SEMANTIC_FIELD_OPTION
+const semanticFieldOptionGroups = SEMANTIC_FIELD_OPTION_GROUPS
 const dateTargetOptions = DATE_TARGET_FIELD_OPTIONS
 const dateValueKindOptions = DATE_VALUE_KIND_OPTIONS
 const dateFormatOptions = DATE_FORMAT_OPTIONS
+const dateAnchorOptions = DATE_ANCHOR_OPTIONS
 
 const sampleDataLookup = computed(() =>
   Object.fromEntries((props.headerColumnsWithSamples || []).map(item => [item.field, item.sample || null]))
@@ -473,7 +503,8 @@ function emitFieldParseRulesChange() {
       value_kind: rule.value_kind || 'single_date',
       date_format: rule.date_format || '',
       strict: rule.strict !== false,
-      ...(rule.value_kind === 'date_range' ? { range_pick: rule.range_pick || '' } : {}),
+      ...(fieldParseRuleNeedsRangePick(rule) ? { range_pick: rule.range_pick || '' } : {}),
+      ...(fieldParseRuleNeedsDateAnchor(rule) ? { date_anchor: rule.date_anchor || '__file_date_from__' } : {}),
     }))
   )
 }

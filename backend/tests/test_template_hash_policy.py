@@ -1,5 +1,69 @@
 from backend.services.template_hash_policy import TemplateHashPolicyService
-from backend.services.semantic_field_registry import is_hash_identity_semantic_key
+from backend.services.semantic_field_registry import (
+    get_semantic_field_meta,
+    is_canonical_semantic_key,
+    is_hash_identity_semantic_key,
+)
+
+
+def test_semantic_registry_contains_hour_identity_and_metric_contract_fields():
+    required_keys = [
+        "metric_date",
+        "period_start_date",
+        "period_end_date",
+        "period_start_time",
+        "period_end_time",
+        "order_date",
+        "order_id",
+        "line_id",
+        "product_id",
+        "platform_sku",
+        "sku_id",
+        "service_id",
+        "shop_id",
+        "warehouse_name",
+        "visitor_count",
+        "product_visitor_count",
+        "page_views",
+        "impressions",
+        "clicks",
+        "click_rate",
+        "conversion_rate",
+        "order_count",
+        "sku_order_count",
+        "gmv",
+        "total_transaction_amount",
+        "bounce_rate",
+        "sales_amount",
+        "sales_volume",
+        "paid_amount",
+        "profit",
+        "purchase_amount",
+        "platform_commission",
+        "live_gmv",
+        "live_attributed_gmv",
+        "live_indirect_gmv",
+        "video_gmv",
+        "video_attributed_gmv",
+        "video_indirect_gmv",
+    ]
+
+    assert all(is_canonical_semantic_key(key) for key in required_keys)
+
+    start_time_meta = get_semantic_field_meta("period_start_time")
+    end_time_meta = get_semantic_field_meta("period_end_time")
+    assert start_time_meta["kind"] == "time"
+    assert start_time_meta["hash_eligible"] is True
+    assert start_time_meta["default_hash"] is False
+    assert end_time_meta["kind"] == "time"
+    assert end_time_meta["hash_eligible"] is True
+    assert end_time_meta["default_hash"] is False
+
+    for metric_key in ["page_views", "gmv", "live_attributed_gmv"]:
+        meta = get_semantic_field_meta(metric_key)
+        assert meta["kind"] == "metric"
+        assert meta["hash_eligible"] is False
+        assert is_hash_identity_semantic_key(metric_key) is False
 
 
 def test_products_daily_requires_product_id_and_date_source():
@@ -257,7 +321,14 @@ def test_metric_and_attribute_fields_are_invalid_hash_identity_fields():
     result = service.validate(
         data_domain="products",
         granularity="daily",
-        deduplication_fields=["product_id", "gmv", "sales_amount", "product_name"],
+        deduplication_fields=[
+            "product_id",
+            "gmv",
+            "sales_amount",
+            "product_name",
+            "page_views",
+            "live_attributed_gmv",
+        ],
         header_bindings=[
             {
                 "source_header": "product id",
@@ -279,12 +350,88 @@ def test_metric_and_attribute_fields_are_invalid_hash_identity_fields():
                 "semantic_key": "product_name",
                 "semantic_review_status": "confirmed_semantic",
             },
+            {
+                "source_header": "page views",
+                "semantic_key": "page_views",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "source_header": "live attributed gmv",
+                "semantic_key": "live_attributed_gmv",
+                "semantic_review_status": "confirmed_semantic",
+            },
         ],
         field_parse_rules=[],
     )
 
     assert result.passed is False
-    assert result.invalid_keys == ["gmv", "product_name", "sales_amount"]
+    assert result.invalid_keys == [
+        "gmv",
+        "live_attributed_gmv",
+        "page_views",
+        "product_name",
+        "sales_amount",
+    ]
+
+
+def test_traffic_daily_allows_user_selected_hour_identity_field():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="traffic",
+        granularity="daily",
+        deduplication_fields=["metric_date", "period_start_time"],
+        header_bindings=[
+            {
+                "source_header": "date",
+                "semantic_key": "metric_date",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "source_header": "hour",
+                "semantic_key": "period_start_time",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+        field_parse_rules=[],
+    )
+
+    assert result.passed is True
+    assert result.invalid_keys == []
+    assert result.effective_components["user_identity_fields"] == [
+        "metric_date",
+        "period_start_time",
+    ]
+
+
+def test_traffic_daily_warns_when_hour_field_is_confirmed_but_not_selected_for_hash():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="traffic",
+        granularity="daily",
+        deduplication_fields=["metric_date"],
+        header_bindings=[
+            {
+                "source_header": "date",
+                "semantic_key": "metric_date",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "source_header": "hour",
+                "semantic_key": "period_start_time",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+        field_parse_rules=[],
+        sample_rows=[
+            {"date": "2026-06-08", "hour": "13:00", "page_views": 100},
+            {"date": "2026-06-08", "hour": "14:00", "page_views": 200},
+        ],
+    )
+
+    assert result.passed is True
+    assert any("period_start_time" in warning for warning in result.warnings)
 
 
 def test_gmv_band_is_hash_eligible_but_not_required_for_products():

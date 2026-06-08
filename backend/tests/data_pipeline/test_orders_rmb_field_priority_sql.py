@@ -24,9 +24,35 @@ def test_orders_atomic_sql_prefers_rmb_profit_and_amount_fields():
     )
     _assert_prefer(
         sql_text,
+        "AS paid_amount_raw",
+        "raw_data->>'实付金额(RMB)'",
+        "raw_data->>'实付金额'",
+    )
+    _assert_prefer(
+        sql_text,
         "AS platform_commission_raw",
         "raw_data->>'平台佣金(RMB)'",
         "raw_data->>'平台佣金'",
+    )
+
+
+def test_orders_monthly_atomic_sql_prefers_rmb_paid_amount_fields():
+    sql_text = Path("sql/semantic/orders_monthly_atomic_mv.sql").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    _assert_prefer(
+        sql_text,
+        "AS paid_amount_raw",
+        "raw_data->>'buyer_payment_rmb'",
+        "raw_data->>'实付金额'",
+    )
+    _assert_prefer(
+        sql_text,
+        "AS paid_amount_raw",
+        "raw_data->>'实付金额(RMB)'",
+        "raw_data->>'实付金额'",
     )
 
 

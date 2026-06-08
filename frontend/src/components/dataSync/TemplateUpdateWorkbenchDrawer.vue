@@ -138,7 +138,19 @@
               />
             </el-select>
             <el-select
-              v-if="rule.value_kind === 'date_range'"
+              v-if="fieldParseRuleNeedsDateAnchor(rule)"
+              v-model="rule.date_anchor"
+              placeholder="日期锚点"
+            >
+              <el-option
+                v-for="option in dateAnchorOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-select
+              v-if="fieldParseRuleNeedsRangePick(rule)"
               v-model="rule.range_pick"
               placeholder="区间取值"
             >
@@ -235,11 +247,22 @@
                   @change="handleSemanticKeyChange(row.raw_name, $event)"
                 >
                   <el-option
-                    v-for="option in semanticFieldOptions"
-                    :key="option.value || '__none__'"
-                    :label="option.label"
-                    :value="option.value"
+                    :key="semanticNonSemanticOption.value"
+                    :label="semanticNonSemanticOption.label"
+                    :value="semanticNonSemanticOption.value"
                   />
+                  <el-option-group
+                    v-for="group in semanticFieldOptionGroups"
+                    :key="group.label"
+                    :label="group.label"
+                  >
+                    <el-option
+                      v-for="option in group.options"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value"
+                    />
+                  </el-option-group>
                 </el-select>
                 <div v-else class="template-update-workbench-drawer__inline-display">
                   <span>{{ row.meta?.label || row.semantic_key || 'Unmapped' }}</span>
@@ -321,16 +344,20 @@ import api from '@/api'
 import {
   formatHeaderBindingLabel,
   getSemanticFieldMeta,
+  NON_SEMANTIC_FIELD_OPTION,
   NON_SEMANTIC_FIELD_VALUE,
-  SEMANTIC_FIELD_OPTIONS,
+  SEMANTIC_FIELD_OPTION_GROUPS,
   updateHeaderBindingSemantic,
 } from '@/domains/data_platform/utils/headerBindings'
 import {
+  DATE_ANCHOR_OPTIONS,
   DATE_FORMAT_OPTIONS,
   DATE_TARGET_FIELD_OPTIONS,
   DATE_VALUE_KIND_OPTIONS,
   buildCompanionDateParseRules,
   buildFieldParseSourceOptions,
+  fieldParseRuleNeedsDateAnchor,
+  fieldParseRuleNeedsRangePick,
   mergeFieldParseRules,
 } from '@/domains/data_platform/utils/templateFieldParseRules'
 
@@ -379,10 +406,12 @@ const editingBindingNames = ref([])
 const saving = ref(false)
 const hashPolicyAllowsSave = ref(false)
 const hashPolicyPreview = ref(null)
-const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
+const semanticNonSemanticOption = NON_SEMANTIC_FIELD_OPTION
+const semanticFieldOptionGroups = SEMANTIC_FIELD_OPTION_GROUPS
 const dateTargetOptions = DATE_TARGET_FIELD_OPTIONS
 const dateValueKindOptions = DATE_VALUE_KIND_OPTIONS
 const dateFormatOptions = DATE_FORMAT_OPTIONS
+const dateAnchorOptions = DATE_ANCHOR_OPTIONS
 
 const workbenchContext = computed(() => activeContext.value ?? props.context?.context ?? null)
 const templateContext = computed(() => workbenchContext.value?.template ?? props.context?.template ?? {})
@@ -697,7 +726,8 @@ function normalizeFieldParseRulesForSave() {
     value_kind: rule.value_kind || 'single_date',
     date_format: rule.date_format || '',
     strict: rule.strict !== false,
-    ...(rule.value_kind === 'date_range' ? { range_pick: rule.range_pick || '' } : {}),
+    ...(fieldParseRuleNeedsRangePick(rule) ? { range_pick: rule.range_pick || '' } : {}),
+    ...(fieldParseRuleNeedsDateAnchor(rule) ? { date_anchor: rule.date_anchor || '__file_date_from__' } : {}),
   }))
 }
 

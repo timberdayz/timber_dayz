@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from datetime import date
 from urllib.parse import urlparse, urlunparse
@@ -184,6 +185,76 @@ async def test_orders_monthly_atomic_metric_date_prefers_order_time_over_metric_
         assert row["order_id"] == "SO-METRIC-DATE-1"
         assert float(row["paid_amount"]) == 100.0
         assert float(row["profit"]) == 30.0
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_orders_monthly_atomic_prefers_rmb_paid_amount_over_local_paid_amount():
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        raw_data = {
+            "下单时间": "2026-03-08 12:00:00",
+            "订单号": "SO-RMB-PAID-1",
+            "店铺": "Shopee菲律宾2店",
+            "实付金额(RMB)": "20",
+            "实付金额": "200",
+            "产品数量": "1",
+            "利润(RMB)": "5",
+        }
+
+        async with session_factory() as session:
+            await _create_orders_b_class_tables(session)
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_monthly (
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, period_start_date, period_end_date,
+                        period_start_time, period_end_time, raw_data, header_columns,
+                        data_hash, ingest_timestamp, currency_code
+                    ) VALUES (
+                        'shopee', 'xihong', 'orders', 'monthly',
+                        DATE '2026-03-01', DATE '2026-03-01', DATE '2026-03-31',
+                        TIMESTAMP '2026-03-01 00:00:00', TIMESTAMP '2026-03-31 23:59:59',
+                        CAST(:raw_data AS jsonb),
+                        CAST(:header_columns AS jsonb),
+                        'hash-rmb-paid-priority-1', TIMESTAMP '2026-06-01 10:00:00', 'PHP'
+                    )
+                    """
+                ),
+                {
+                    "raw_data": json.dumps(raw_data, ensure_ascii=False),
+                    "header_columns": json.dumps(list(raw_data.keys()), ensure_ascii=False),
+                },
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(session, "semantic.fact_orders_monthly_atomic_mv")
+            await session.commit()
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT order_id, paid_amount, profit
+                        FROM semantic.fact_orders_monthly_atomic_mv
+                        WHERE order_id = 'SO-RMB-PAID-1'
+                        """
+                    )
+                )
+            ).mappings().first()
+
+        assert row is not None
+        assert float(row["paid_amount"]) == 20.0
+        assert float(row["profit"]) == 5.0
 
         await engine.dispose()
 

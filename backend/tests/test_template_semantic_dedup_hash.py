@@ -1,5 +1,5 @@
 from backend.services.deduplication_service import DeduplicationService
-from datetime import date
+from datetime import date, datetime
 
 
 def test_deduplication_hash_resolves_product_id_from_header_binding():
@@ -155,3 +155,35 @@ def test_deduplication_hash_uses_derived_file_date_identity_value():
     )
 
     assert first_hash != second_hash
+
+
+def test_deduplication_hash_uses_user_selected_hour_identity_value():
+    service = DeduplicationService(db=None)
+    row = {"page_views": 100}
+    scope_values = {
+        "platform_code": "shopee",
+        "shop_id": "1407964586",
+        "data_domain": "analytics",
+        "granularity": "daily",
+    }
+
+    thirteen_hash = service.calculate_data_hash(
+        row,
+        deduplication_fields=["metric_date", "period_start_time"],
+        scope_values=scope_values,
+        identity_values={
+            "metric_date": date(2026, 6, 8),
+            "period_start_time": datetime(2026, 6, 8, 13, 0, 0),
+        },
+    )
+    fourteen_hash = service.calculate_data_hash(
+        row,
+        deduplication_fields=["metric_date", "period_start_time"],
+        scope_values=scope_values,
+        identity_values={
+            "metric_date": date(2026, 6, 8),
+            "period_start_time": datetime(2026, 6, 8, 14, 0, 0),
+        },
+    )
+
+    assert thirteen_hash != fourteen_hash

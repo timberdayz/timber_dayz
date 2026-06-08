@@ -736,6 +736,23 @@ def test_rank_shop_racing_rows_desc_by_gmv():
     assert result[1]["rank"] == 2
 
 
+def test_rank_shop_racing_rows_breaks_gmv_ties_by_profit_then_orders():
+    result = rank_shop_racing_rows(
+        [
+            {"name": "shop-low-profit", "gmv": 100, "profit": 10, "order_count": 20},
+            {"name": "shop-more-orders", "gmv": 100, "profit": 30, "order_count": 5},
+            {"name": "shop-high-profit", "gmv": 100, "profit": 30, "order_count": 10},
+        ]
+    )
+
+    assert [row["name"] for row in result] == [
+        "shop-high-profit",
+        "shop-more-orders",
+        "shop-low-profit",
+    ]
+    assert [row["rank"] for row in result] == [1, 2, 3]
+
+
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_comparison_reads_from_platform_aggregate_source(monkeypatch):
     service = PostgresqlDashboardService()
@@ -1048,6 +1065,50 @@ async def test_postgresql_dashboard_service_shop_racing_account_group_uses_shop_
     assert result[0]["shop_account_id"] == "shopee_sg_hx_home"
     assert result[0]["main_account_id"] == "main_shopee_sg"
     assert result[0]["gmv"] == 160
+    assert result[0]["profit"] == 48
+    assert result[0]["target_amount"] == 200
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_platform_group_sums_profit(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "shop-a",
+                "gmv": 100,
+                "order_count": 10,
+                "profit": 30,
+                "target_amount": 120,
+            },
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "shop-b",
+                "gmv": 60,
+                "order_count": 6,
+                "profit": 18,
+                "target_amount": 80,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_shop_racing(
+        granularity="monthly",
+        target_date="2026-03-01",
+        group_by="platform",
+    )
+
+    assert len(result) == 1
+    assert result[0]["name"] == "shopee"
+    assert result[0]["gmv"] == 160
+    assert result[0]["profit"] == 48
     assert result[0]["target_amount"] == 200
 
 

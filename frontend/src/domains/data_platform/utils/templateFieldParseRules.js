@@ -15,25 +15,50 @@ export const DATE_TARGET_FIELD_OPTIONS = [
   { label: 'metric_date', value: 'metric_date' },
   { label: 'period_start_date', value: 'period_start_date' },
   { label: 'period_end_date', value: 'period_end_date' },
+  { label: 'period_start_time', value: 'period_start_time' },
+  { label: 'period_end_time', value: 'period_end_time' },
 ]
 
 export const DATE_VALUE_KIND_OPTIONS = [
   { label: 'single_date', value: 'single_date' },
+  { label: 'single_datetime', value: 'single_datetime' },
+  { label: 'time_of_day', value: 'time_of_day' },
   { label: 'date_range', value: 'date_range' },
+  { label: 'datetime_range', value: 'datetime_range' },
+  { label: 'time_range', value: 'time_range' },
 ]
 
 export const DATE_FORMAT_OPTIONS = [
   { label: 'yyyy-mm-dd', value: 'yyyy-mm-dd' },
   { label: 'yyyy/mm/dd', value: 'yyyy/mm/dd' },
+  { label: 'yyyy-mm-dd hh:mm', value: 'yyyy-mm-dd hh:mm' },
   { label: 'yyyy-mm-dd hh:mm:ss', value: 'yyyy-mm-dd hh:mm:ss' },
+  { label: 'yyyy/mm/dd hh:mm', value: 'yyyy/mm/dd hh:mm' },
   { label: 'yyyy/mm/dd hh:mm:ss', value: 'yyyy/mm/dd hh:mm:ss' },
   { label: 'dd-mm-yyyy', value: 'dd-mm-yyyy' },
   { label: 'dd/mm/yyyy', value: 'dd/mm/yyyy' },
+  { label: 'dd-mm-yyyy hh:mm', value: 'dd-mm-yyyy hh:mm' },
   { label: 'dd-mm-yyyy hh:mm:ss', value: 'dd-mm-yyyy hh:mm:ss' },
+  { label: 'dd/mm/yyyy hh:mm', value: 'dd/mm/yyyy hh:mm' },
   { label: 'dd/mm/yyyy hh:mm:ss', value: 'dd/mm/yyyy hh:mm:ss' },
+  { label: 'hh:mm', value: 'hh:mm' },
+  { label: 'hh:mm:ss', value: 'hh:mm:ss' },
   { label: 'dd-mm-yyyy-dd-mm-yyyy', value: 'dd-mm-yyyy-dd-mm-yyyy' },
   { label: 'dd/mm/yyyy-dd/mm/yyyy', value: 'dd/mm/yyyy-dd/mm/yyyy' },
 ]
+
+export const DATE_ANCHOR_OPTIONS = [
+  { label: '文件开始日期（date_from）', value: '__file_date_from__' },
+  { label: '文件结束日期（date_to）', value: '__file_date_to__' },
+]
+
+export function fieldParseRuleNeedsRangePick(rule = {}) {
+  return ['date_range', 'datetime_range', 'time_range'].includes(String(rule?.value_kind || '').trim())
+}
+
+export function fieldParseRuleNeedsDateAnchor(rule = {}) {
+  return ['time_of_day', 'time_range'].includes(String(rule?.value_kind || '').trim())
+}
 
 export function buildFieldParseSourceOptions(headerColumns = []) {
   const rawHeaderOptions = (Array.isArray(headerColumns) ? headerColumns : [])

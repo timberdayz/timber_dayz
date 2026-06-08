@@ -129,8 +129,13 @@ import {
   SYSTEM_HASH_SCOPE_FIELDS,
 } from '@/domains/data_platform/utils/headerBindings'
 
-const FILE_DATE_SOURCE_COLUMNS = new Set(['__file_date_from__', '__file_date_to__'])
-const DATE_HASH_KEYS = new Set(['metric_date', 'period_start_date', 'period_end_date'])
+const DATE_HASH_KEYS = new Set([
+  'metric_date',
+  'period_start_date',
+  'period_end_date',
+  'period_start_time',
+  'period_end_time',
+])
 
 const props = defineProps({
   modelValue: {
@@ -201,8 +206,7 @@ const derivedOptions = computed(() => {
   return (Array.isArray(props.fieldParseRules) ? props.fieldParseRules : [])
     .map((rule) => {
       const target = String(rule?.target_field || '').trim()
-      const sourceColumn = String(rule?.source_column || '').trim()
-      if (!DATE_HASH_KEYS.has(target) || !FILE_DATE_SOURCE_COLUMNS.has(sourceColumn) || seen.has(target)) {
+      if (!DATE_HASH_KEYS.has(target) || seen.has(target) || !isHashEligibleSemanticKey(target)) {
         return null
       }
       seen.add(target)

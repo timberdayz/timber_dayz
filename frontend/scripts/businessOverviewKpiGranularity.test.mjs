@@ -77,9 +77,28 @@ test('BusinessOverview operational metrics fall back to monthly fields in month 
 })
 
 test('BusinessOverview shop racing maps API fields to table fields', () => {
-  assert.equal(viewSource.includes('target: row.target_amount'), true)
-  assert.equal(viewSource.includes('achieved: row.gmv'), true)
+  assert.equal(viewSource.includes('gmv: toNullableNumber(row.gmv)'), true)
+  assert.equal(viewSource.includes('profit: toNullableNumber(row.profit)'), true)
+  assert.equal(viewSource.includes('profit_margin: calculateProfitMargin(row.profit, row.gmv)'), true)
+  assert.equal(viewSource.includes('order_count: toNullableNumber(row.order_count)'), true)
+  assert.equal(viewSource.includes('avg_order_value: toNullableNumber(row.avg_order_value)'), true)
+  assert.equal(viewSource.includes('target_amount: toNullableNumber(row.target_amount)'), true)
   assert.equal(viewSource.includes('Number(row.achievement_rate) > 1'), true)
+})
+
+test('BusinessOverview shop racing exposes lightweight operating sort controls', () => {
+  assert.equal(viewSource.includes("const shopRacingSortBy = ref('sales')"), true)
+  assert.equal(viewSource.includes('const sortedShopRacingData = computed(() => {'), true)
+  assert.equal(viewSource.includes("shopRacingSortBy.value === 'profit'"), true)
+  assert.equal(viewSource.includes("shopRacingSortBy.value === 'orders'"), true)
+  assert.equal(viewSource.includes("shopRacingSortBy.value === 'achievement'"), true)
+})
+
+test('BusinessOverview shop racing handles targetless rows without zero-percent completion', () => {
+  assert.equal(viewSource.includes('hasShopRacingTarget(row)'), true)
+  assert.equal(viewSource.includes("未设目标"), true)
+  assert.equal(viewSource.includes('getShopRacingProgressPercentage(row)'), true)
+  assert.equal(viewSource.includes('getShopRacingAchievementText(row)'), true)
 })
 
 test('BusinessOverview shop racing keeps account dimension and unmatched shop warning styling', () => {

@@ -166,27 +166,281 @@ export const SEMANTIC_FIELD_META = {
   },
 }
 
+Object.assign(SEMANTIC_FIELD_META, {
+  period_start_time: {
+    label: '周期开始时间',
+    description: '小时级或更细粒度报表的开始时间，可由用户手动加入 Data Hash。',
+    aliases: ['period_start_time', '开始时间', '小时', '时段', 'hour', 'time', 'start time'],
+    kind: 'time',
+    domain: 'common',
+    hash_eligible: true,
+    default_hash: false,
+  },
+  period_end_time: {
+    label: '周期结束时间',
+    description: '小时级或更细粒度报表的结束时间，可由用户手动加入 Data Hash。',
+    aliases: ['period_end_time', '结束时间', '结束小时', 'end hour', 'end time'],
+    kind: 'time',
+    domain: 'common',
+    hash_eligible: true,
+    default_hash: false,
+  },
+  visitor_count: {
+    label: '访客数',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['visitor_count', '访客数', 'visitors', 'visitor count'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  product_visitor_count: {
+    label: '商品访客数',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['product_visitor_count', '商品访客数', 'product visitors', 'product visitor count'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  page_views: {
+    label: '浏览量',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['page_views', '浏览量', 'pv', 'page views', 'views'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  impressions: {
+    label: '曝光量',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['impressions', '曝光量', '曝光次数', 'impression', 'impressions'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  clicks: {
+    label: '点击量',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['clicks', '点击量', '点击次数', 'click', 'clicks'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  click_rate: {
+    label: '点击率',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['click_rate', '点击率', 'click rate', 'ctr'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  conversion_rate: {
+    label: '转化率',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['conversion_rate', '转化率', 'conversion rate', 'cvr'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  sku_order_count: {
+    label: 'SKU 订单量',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['sku_order_count', 'SKU订单量', 'sku orders', 'sku order count'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  total_transaction_amount: {
+    label: '总交易金额',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['total_transaction_amount', '总交易金额', 'total transaction amount'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  bounce_rate: {
+    label: '跳失率',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['bounce_rate', '跳失率', 'bounce rate'],
+    kind: 'metric',
+    domain: 'analytics',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  paid_amount: {
+    label: '实付金额',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['paid_amount', '实付金额', 'paid amount', 'buyer paid amount'],
+    kind: 'metric',
+    domain: 'orders',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  profit: {
+    label: '利润',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['profit', '利润'],
+    kind: 'metric',
+    domain: 'orders',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  purchase_amount: {
+    label: '采购金额',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['purchase_amount', '采购金额', 'purchase amount'],
+    kind: 'metric',
+    domain: 'products',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  platform_commission: {
+    label: '平台佣金',
+    description: '系统语义指标，不参与 Data Hash。',
+    aliases: ['platform_commission', '平台佣金', 'platform commission', 'commission'],
+    kind: 'metric',
+    domain: 'orders',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  live_gmv: {
+    label: '直播 GMV',
+    description: '渠道归因系统语义指标，不参与 Data Hash。',
+    aliases: ['live_gmv', '商家直播 GMV', '直播GMV', 'live gmv'],
+    kind: 'metric',
+    domain: 'attribution',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  live_attributed_gmv: {
+    label: '直播归因 GMV',
+    description: '渠道归因系统语义指标，不参与 Data Hash。',
+    aliases: ['live_attributed_gmv', '商家直播归因 GMV', '直播归因GMV', 'live attributed gmv'],
+    kind: 'metric',
+    domain: 'attribution',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  live_indirect_gmv: {
+    label: '直播间接 GMV',
+    description: '渠道归因系统语义指标，不参与 Data Hash。',
+    aliases: ['live_indirect_gmv', '商家直播间接 GMV', '直播间接GMV', 'live indirect gmv'],
+    kind: 'metric',
+    domain: 'attribution',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  video_gmv: {
+    label: '视频 GMV',
+    description: '渠道归因系统语义指标，不参与 Data Hash。',
+    aliases: ['video_gmv', '商家视频 GMV', '视频GMV', 'video gmv'],
+    kind: 'metric',
+    domain: 'attribution',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  video_attributed_gmv: {
+    label: '视频归因 GMV',
+    description: '渠道归因系统语义指标，不参与 Data Hash。',
+    aliases: ['video_attributed_gmv', '商家视频归因 GMV', '视频归因GMV', 'video attributed gmv'],
+    kind: 'metric',
+    domain: 'attribution',
+    hash_eligible: false,
+    default_hash: false,
+  },
+  video_indirect_gmv: {
+    label: '视频间接 GMV',
+    description: '渠道归因系统语义指标，不参与 Data Hash。',
+    aliases: ['video_indirect_gmv', '商家视频间接 GMV', '视频间接GMV', 'video indirect gmv'],
+    kind: 'metric',
+    domain: 'attribution',
+    hash_eligible: false,
+    default_hash: false,
+  },
+})
+
 const SEMANTIC_FIELD_ALIASES = Object.fromEntries(
   Object.entries(SEMANTIC_FIELD_META).map(([key, meta]) => [key, meta.aliases])
 )
 
 export const NON_SEMANTIC_FIELD_VALUE = '__non_semantic__'
 
-export const SEMANTIC_FIELD_OPTIONS = [
-  {
-    value: NON_SEMANTIC_FIELD_VALUE,
-    label: '仅保留原始字段，不参与 Data Hash',
-    description: '保留 raw_data 原始值，不标定为标准语义字段，也不能参与 Data Hash。',
-  },
-  ...Object.entries(SEMANTIC_FIELD_META).map(([value, meta]) => ({
+export const NON_SEMANTIC_FIELD_OPTION = {
+  value: NON_SEMANTIC_FIELD_VALUE,
+  label: '仅保留原始字段，不作为系统语义字段',
+  description: '保留 raw_data，不参与 Data Hash。',
+}
+
+const SEMANTIC_OPTION_GROUPS = [
+  { key: 'identity', label: '身份字段' },
+  { key: 'time', label: '时间字段' },
+  { key: 'traffic_metric', label: '流量指标' },
+  { key: 'order_metric', label: '订单指标' },
+  { key: 'product_metric', label: '商品指标' },
+  { key: 'attribution_metric', label: '渠道归因指标' },
+  { key: 'attribute', label: '属性字段' },
+]
+
+const ORDER_METRIC_KEYS = new Set([
+  'order_count',
+  'sku_order_count',
+  'sales_amount',
+  'sales_volume',
+  'paid_amount',
+  'profit',
+  'platform_commission',
+])
+const PRODUCT_METRIC_KEYS = new Set(['purchase_amount'])
+const ATTRIBUTION_METRIC_KEYS = new Set([
+  'live_gmv',
+  'live_attributed_gmv',
+  'live_indirect_gmv',
+  'video_gmv',
+  'video_attributed_gmv',
+  'video_indirect_gmv',
+])
+
+function semanticOptionGroupKey(value, meta) {
+  if (meta?.kind === 'time') return 'time'
+  if (meta?.kind === 'identity' || meta?.kind === 'dimension') return 'identity'
+  if (ATTRIBUTION_METRIC_KEYS.has(value) || meta?.domain === 'attribution') return 'attribution_metric'
+  if (ORDER_METRIC_KEYS.has(value) || meta?.domain === 'orders') return 'order_metric'
+  if (PRODUCT_METRIC_KEYS.has(value) || meta?.domain === 'products') return 'product_metric'
+  if (meta?.kind === 'metric') return 'traffic_metric'
+  return 'attribute'
+}
+
+const CANONICAL_SEMANTIC_FIELD_OPTIONS = Object.entries(SEMANTIC_FIELD_META).map(([value, meta]) => ({
     value,
     label: `${meta.label} (${value})`,
     description: meta.description,
     aliases: meta.aliases,
     kind: meta.kind,
+    domain: meta.domain,
+    group: semanticOptionGroupKey(value, meta),
     hash_eligible: meta.hash_eligible,
+    default_hash: meta.default_hash === true,
     system_scope: meta.system_scope === true,
-  })),
+  }))
+
+export const SEMANTIC_FIELD_OPTION_GROUPS = SEMANTIC_OPTION_GROUPS
+  .map(group => ({
+    label: group.label,
+    options: CANONICAL_SEMANTIC_FIELD_OPTIONS.filter(option => option.group === group.key),
+  }))
+  .filter(group => group.options.length > 0)
+
+export const SEMANTIC_FIELD_OPTIONS = [
+  NON_SEMANTIC_FIELD_OPTION,
+  ...CANONICAL_SEMANTIC_FIELD_OPTIONS,
 ]
 
 export function getSemanticFieldMeta(semanticKey) {

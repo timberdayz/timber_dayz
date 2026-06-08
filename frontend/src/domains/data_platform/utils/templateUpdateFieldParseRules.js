@@ -1,4 +1,6 @@
 const FILE_DATE_SOURCE_COLUMNS = new Set(['__file_date_from__', '__file_date_to__'])
+const RANGE_VALUE_KINDS = new Set(['date_range', 'datetime_range', 'time_range'])
+const DATE_ANCHOR_VALUE_KINDS = new Set(['time_of_day', 'time_range'])
 
 function normalizeTokens(values) {
   return Array.from(
@@ -100,17 +102,22 @@ export function buildTemplateUpdateFieldParseRulesPayload({
       resolvedBinding?.semantic_role ?? rawRule.source_semantic_role ?? ''
     ).trim()
 
+    const valueKind = String(rawRule.value_kind ?? 'single_date').trim() || 'single_date'
+
     rules.push({
       target_field: targetField,
       source_column: resolvedSourceColumn,
       ...(sourceLabel ? { source_label: sourceLabel } : {}),
       ...(sourceAliases.length > 0 ? { source_aliases: sourceAliases } : {}),
       ...(sourceSemanticRole ? { source_semantic_role: sourceSemanticRole } : {}),
-      value_kind: String(rawRule.value_kind ?? 'single_date').trim() || 'single_date',
+      value_kind: valueKind,
       date_format: String(rawRule.date_format ?? '').trim(),
       strict: rawRule.strict !== false,
-      ...(rawRule.value_kind === 'date_range' && rawRule.range_pick
+      ...(RANGE_VALUE_KINDS.has(valueKind) && rawRule.range_pick
         ? { range_pick: String(rawRule.range_pick).trim() }
+        : {}),
+      ...(DATE_ANCHOR_VALUE_KINDS.has(valueKind) && rawRule.date_anchor
+        ? { date_anchor: String(rawRule.date_anchor).trim() }
         : {}),
     })
   }

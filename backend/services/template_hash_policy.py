@@ -16,6 +16,7 @@ from backend.services.semantic_field_registry import (
 SYSTEM_SCOPE_FIELDS = ["platform_code", "shop_id", "data_domain", "granularity", "sub_domain"]
 SYSTEM_SCOPE_FIELD_SET = set(SYSTEM_SCOPE_FIELDS)
 FILE_DATE_SOURCE_COLUMNS = {"__file_date_from__", "__file_date_to__"}
+HOUR_IDENTITY_KEYS = {"period_start_time", "period_end_time"}
 
 
 @dataclass(frozen=True)
@@ -404,4 +405,55 @@ class TemplateHashPolicyService:
             warnings.append(
                 "sample hash distinct count is 1 for multiple rows; duplicate/upsert collision risk is high."
             )
+        warnings.extend(
+            self._hour_identity_warnings(
+                rows=rows,
+                row_signatures=row_signatures,
+                selected_identity_fields=identity_fields,
+                header_bindings=header_bindings,
+            )
+        )
         return diagnostics, warnings
+
+    def _hour_identity_warnings(
+        self,
+        *,
+        rows: List[Dict[str, Any]],
+        row_signatures: List[tuple[str, ...]],
+        selected_identity_fields: List[str],
+        header_bindings: Iterable[Dict[str, Any]],
+    ) -> List[str]:
+        if len(rows) < 2:
+            return []
+        if len(set(row_signatures)) >= len(rows):
+            return []
+
+        selected = {
+            semantic_key
+            for semantic_key in (normalize_semantic_key(field) for field in selected_identity_fields)
+            if semantic_key
+        }
+        confirmed_hour_keys = []
+        seen: Set[str] = set()
+        for binding in header_bindings or []:
+            if binding.get("semantic_review_status") != "confirmed_semantic":
+                continue
+            semantic_key = normalize_semantic_key(binding.get("semantic_key"))
+            if semantic_key not in HOUR_IDENTITY_KEYS or semantic_key in selected or semantic_key in seen:
+                continue
+            seen.add(semantic_key)
+            confirmed_hour_keys.append(semantic_key)
+
+        warnings: List[str] = []
+        for semantic_key in confirmed_hour_keys:
+            values = []
+            for row in rows:
+                value, _source = resolve_semantic_value(row, semantic_key, header_bindings)
+                text = "" if value is None else str(value).strip()
+                if text:
+                    values.append(text)
+            if len(set(values)) > 1:
+                warnings.append(
+                    f"当前 Hash 字段无法区分同日多小时数据，请将 {semantic_key} 加入 Data Hash。"
+                )
+        return warnings

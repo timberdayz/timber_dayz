@@ -13,6 +13,9 @@ def test_orders_atomic_sql_keeps_paid_amount_sources_out_of_sales_amount_group()
     block = _block_before(sql_text, "AS sales_amount_raw")
 
     forbidden = (
+        "raw_data->>'paid_amount_rmb'",
+        "raw_data->>'实付金额_rmb'",
+        "raw_data->>'实付金额(RMB)'",
         "raw_data->>'实付金额'",
         "raw_data->>'买家实付金额'",
         "raw_data->>'买家支付(RMB)'",
@@ -32,6 +35,9 @@ def test_orders_atomic_sql_maps_paid_amount_from_payment_fields_only():
     block = _block_before(sql_text, "AS paid_amount_raw")
 
     required = (
+        "raw_data->>'paid_amount_rmb'",
+        "raw_data->>'实付金额_rmb'",
+        "raw_data->>'实付金额(RMB)'",
         "raw_data->>'实付金额'",
         "raw_data->>'买家实付金额'",
         "raw_data->>'买家支付(RMB)'",
