@@ -1303,6 +1303,125 @@ async def test_list_templates_returns_wrapped_template_collection(
 
 
 @pytest.mark.asyncio
+async def test_hash_policy_preview_returns_structured_missing_period_group(
+    template_update_context_client,
+):
+    client, _session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/hash-policy-preview",
+        json={
+            "data_domain": "products",
+            "granularity": "monthly",
+            "sub_domain": None,
+            "deduplication_fields": ["product_id"],
+            "header_bindings": [
+                {
+                    "raw_name": "Product ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                }
+            ],
+            "field_parse_rules": [],
+            "sample_rows": [],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    data = payload["data"]
+    assert data["passed"] is False
+    assert data["missing_required_groups"][0]["key"] == "products_period_date"
+    assert data["effective_components"]["system_scope_fields"] == [
+        "platform_code",
+        "shop_id",
+        "data_domain",
+        "granularity",
+        "sub_domain",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_hash_policy_preview_accepts_selected_derived_metric_date(
+    template_update_context_client,
+):
+    client, _session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/hash-policy-preview",
+        json={
+            "data_domain": "products",
+            "granularity": "monthly",
+            "deduplication_fields": ["product_id", "metric_date"],
+            "header_bindings": [
+                {
+                    "raw_name": "Product ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                }
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "metric_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                }
+            ],
+            "sample_rows": [],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    data = payload["data"]
+    assert data["passed"] is True
+    assert data["effective_components"]["derived_identity_fields"] == ["metric_date"]
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_returns_structured_hash_policy_on_failure(
+    template_update_context_client,
+):
+    client, _session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "products",
+            "granularity": "monthly",
+            "header_row": 0,
+            "header_columns": ["Product ID", "Product Name"],
+            "deduplication_fields": ["product_id"],
+            "template_name": "products_missing_period_hash_policy",
+            "created_by": "test",
+            "header_bindings": [
+                {
+                    "raw_name": "Product ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "Product Name",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["data"]["hash_policy"]["passed"] is False
+    assert payload["data"]["hash_policy"]["requirement_groups"]
+    assert payload["data"]["hash_policy"]["missing_required_groups"][0]["key"] == "products_period_date"
+
+
+@pytest.mark.asyncio
 async def test_default_deduplication_fields_endpoint_returns_wrapped_payload(
     template_update_context_client,
 ):

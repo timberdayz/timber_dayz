@@ -20,6 +20,9 @@ from backend.schemas.field_mapping_template import (
     DefaultDeduplicationFieldsResponse,
     DetectHeaderChangesRequest,
     DetectHeaderChangesResponse,
+    HashPolicyPreviewData,
+    HashPolicyPreviewRequest,
+    HashPolicyPreviewResponse,
     HeaderChangesPayload,
     TemplateApplyConfig,
     TemplateApplyRequest,
@@ -509,8 +512,16 @@ def _validate_deduplication_fields_against_bindings(
         semantic_bindings = bindings_by_semantic.get(normalized_key or "", [])
 
         candidate_bindings = [binding for binding in [raw_binding, *semantic_bindings] if binding]
-        if any(binding.get("semantic_review_status") == "confirmed_non_semantic" for binding in candidate_bindings):
-            non_semantic_fields.append(field_text)
+        non_semantic_binding = next(
+            (
+                binding
+                for binding in candidate_bindings
+                if binding.get("semantic_review_status") == "confirmed_non_semantic"
+            ),
+            None,
+        )
+        if non_semantic_binding:
+            non_semantic_fields.append(str(non_semantic_binding.get("raw_name") or field_text).strip())
             continue
 
         confirmed_semantic_bindings = [
@@ -801,6 +812,38 @@ async def _validate_template_family_hash_keys(
     )
 
 
+@router.post(
+    "/templates/hash-policy-preview",
+    response_model=HashPolicyPreviewResponse,
+)
+async def preview_template_hash_policy(
+    request: HashPolicyPreviewRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    del db
+    header_bindings = [
+        binding.model_dump(exclude_none=True)
+        for binding in request.header_bindings
+    ]
+    field_parse_rules = _enrich_field_parse_rules(
+        _normalize_field_parse_rules(request.field_parse_rules),
+        header_bindings,
+    )
+    result = TemplateHashPolicyService().validate(
+        data_domain=request.data_domain,
+        granularity=request.granularity,
+        sub_domain=request.sub_domain,
+        deduplication_fields=request.deduplication_fields,
+        header_bindings=header_bindings,
+        field_parse_rules=field_parse_rules,
+        sample_rows=request.sample_rows,
+    )
+    return HashPolicyPreviewResponse(
+        success=True,
+        data=HashPolicyPreviewData(**result.to_dict()),
+    )
+
+
 @router.post("/templates/save", response_model=TemplateSaveResponse)
 async def save_mapping_template(
     request: TemplateSaveRequest,
@@ -917,22 +960,69 @@ async def save_mapping_template(
         hash_policy_result = TemplateHashPolicyService().validate(
             data_domain=request.data_domain,
             granularity=request.granularity,
+            sub_domain=request.sub_domain,
             deduplication_fields=deduplication_fields,
             header_bindings=header_bindings,
             field_parse_rules=field_parse_rules,
+            sample_rows=[request.sample_data] if request.sample_data else [],
         )
         if not hash_policy_result.passed:
-            raise ValueError("; ".join(hash_policy_result.blocking_errors))
+            message = "; ".join(hash_policy_result.blocking_errors)
+            return error_response(
+                code=ErrorCode.PARAMETER_INVALID,
+                message=f"保存模板失败: {message}",
+                error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
+                detail=message,
+                recovery_suggestion="请补齐 Data Hash 必需的语义字段后再保存",
+                status_code=400,
+                data={"hash_policy": hash_policy_result.to_dict()},
+            )
 
-        await _validate_template_family_hash_keys(
-            db,
-            platform=request.platform,
-            data_domain=request.data_domain,
-            granularity=request.granularity,
-            sub_domain=request.sub_domain,
-            account=request.account,
-            deduplication_fields=deduplication_fields,
-        )
+        try:
+            await _validate_template_family_hash_keys(
+                db,
+                platform=request.platform,
+                data_domain=request.data_domain,
+                granularity=request.granularity,
+                sub_domain=request.sub_domain,
+                account=request.account,
+                deduplication_fields=deduplication_fields,
+            )
+        except ValueError as exc:
+            hash_policy_payload = hash_policy_result.to_dict()
+            family_group = {
+                "key": "template_family_hash_keys",
+                "label": "模板家族 Data Hash 字段一致性",
+                "severity": "blocking",
+                "requirement_type": "same_as_family",
+                "accepted_keys": hash_policy_payload.get("effective_components", {}).get("user_identity_fields", []),
+                "selected_keys": hash_policy_payload.get("effective_components", {}).get("user_identity_fields", []),
+                "missing_keys": [],
+                "passed": False,
+                "message": str(exc),
+            }
+            hash_policy_payload["blocking_errors"] = [
+                *hash_policy_payload.get("blocking_errors", []),
+                str(exc),
+            ]
+            hash_policy_payload["requirement_groups"] = [
+                *hash_policy_payload.get("requirement_groups", []),
+                family_group,
+            ]
+            hash_policy_payload["missing_required_groups"] = [
+                *hash_policy_payload.get("missing_required_groups", []),
+                family_group,
+            ]
+            hash_policy_payload["passed"] = False
+            return error_response(
+                code=ErrorCode.PARAMETER_INVALID,
+                message=f"保存模板失败: {str(exc)}",
+                error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
+                detail=str(exc),
+                recovery_suggestion="请保持同一模板家族的 Data Hash 语义字段一致",
+                status_code=400,
+                data={"hash_policy": hash_policy_payload},
+            )
 
         save_result = await template_service.save_template(
             platform=request.platform,

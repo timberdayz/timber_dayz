@@ -13,41 +13,44 @@ SEMANTIC_FIELD_ALIASES: dict[str, list[str]] = {
     "line_id": ["line_id", "order_line_id", "line id", "order line id"],
     "service_id": ["service_id", "service id", "服务ID", "服务编号"],
     "shop_id": ["shop_id", "店铺", "店铺ID", "shop id"],
+    "product_name": ["product_name", "item_name", "product name", "item name", "商品名", "商品名称", "产品名称"],
+    "item_status": ["item_status", "product_status", "listing_status", "item status", "product status", "发品状态", "商品状态"],
+    "gmv_band": ["gmv_band", "gmv band", "gmv range", "GMV区间", "GMV 区间"],
     "warehouse_name": ["warehouse_name", "warehouse", "仓库", "仓库名称", "warehouse name"],
     "metric_date": ["metric_date", "日期", "统计日期", "data_date", "date"],
     "period_start_date": ["period_start_date", "开始日期", "周期开始日期"],
     "period_end_date": ["period_end_date", "结束日期", "周期结束日期"],
     "order_date": ["order_date", "下单日期", "订单日期", "下单时间"],
+    "gmv": ["gmv", "GMV"],
+    "sales_amount": ["sales_amount", "sales amount", "sales", "销售额", "销售金额"],
+    "sales_volume": ["sales_volume", "sales volume", "units sold", "销量", "销售数量"],
+    "order_count": ["order_count", "order count", "orders", "订单量", "订单数"],
 }
 
-SEMANTIC_FIELD_REQUIREMENTS: dict[str, dict[str, Any]] = {
-    "order_id": {"required": True, "hash_participates": True},
-    "product_id": {"required": False, "hash_participates": True},
-    "platform_sku": {"required": False, "hash_participates": True},
-    "sku_id": {"required": False, "hash_participates": True},
-    "line_id": {"required": False, "hash_participates": True},
-    "service_id": {"required": False, "hash_participates": True},
-    "shop_id": {"required": False, "hash_participates": True},
-    "warehouse_name": {"required": False, "hash_participates": True},
-    "metric_date": {"required": False, "hash_participates": True},
-    "period_start_date": {"required": False, "hash_participates": True},
-    "period_end_date": {"required": False, "hash_participates": True},
-    "order_date": {"required": False, "hash_participates": True},
+SEMANTIC_FIELD_META: dict[str, dict[str, Any]] = {
+    "order_id": {"kind": "identity", "hash_eligible": True, "default_hash": True, "required": True},
+    "product_id": {"kind": "identity", "hash_eligible": True, "default_hash": True},
+    "platform_sku": {"kind": "identity", "hash_eligible": True, "default_hash": True},
+    "sku_id": {"kind": "identity", "hash_eligible": True, "default_hash": True},
+    "line_id": {"kind": "identity", "hash_eligible": True, "default_hash": True},
+    "service_id": {"kind": "identity", "hash_eligible": True, "default_hash": True},
+    "shop_id": {"kind": "identity", "hash_eligible": True, "default_hash": False, "system_scope": True},
+    "warehouse_name": {"kind": "dimension", "hash_eligible": True, "default_hash": True},
+    "gmv_band": {"kind": "dimension", "hash_eligible": True, "default_hash": False},
+    "metric_date": {"kind": "time", "hash_eligible": True, "default_hash": True},
+    "period_start_date": {"kind": "time", "hash_eligible": True, "default_hash": True},
+    "period_end_date": {"kind": "time", "hash_eligible": True, "default_hash": True},
+    "order_date": {"kind": "time", "hash_eligible": True, "default_hash": False},
+    "product_name": {"kind": "attribute", "hash_eligible": False, "default_hash": False},
+    "item_status": {"kind": "attribute", "hash_eligible": False, "default_hash": False},
+    "gmv": {"kind": "metric", "hash_eligible": False, "default_hash": False},
+    "sales_amount": {"kind": "metric", "hash_eligible": False, "default_hash": False},
+    "sales_volume": {"kind": "metric", "hash_eligible": False, "default_hash": False},
+    "order_count": {"kind": "metric", "hash_eligible": False, "default_hash": False},
 }
 
 SEMANTIC_HASH_IDENTITY_KEYS = {
-    "order_id",
-    "product_id",
-    "platform_sku",
-    "sku_id",
-    "line_id",
-    "service_id",
-    "shop_id",
-    "warehouse_name",
-    "metric_date",
-    "period_start_date",
-    "period_end_date",
-    "order_date",
+    key for key, meta in SEMANTIC_FIELD_META.items() if meta.get("hash_eligible")
 }
 
 
@@ -77,6 +80,19 @@ def is_hash_identity_semantic_key(value: Optional[str]) -> bool:
     return bool(normalized) and normalized in SEMANTIC_HASH_IDENTITY_KEYS
 
 
+def get_semantic_field_meta(semantic_key: Optional[str]) -> dict[str, Any]:
+    normalized = normalize_semantic_key(semantic_key)
+    if not normalized:
+        return {}
+    meta = SEMANTIC_FIELD_META.get(normalized, {})
+    return {"semantic_key": normalized, **meta} if meta else {}
+
+
+def is_hash_eligible_semantic_key(value: Optional[str]) -> bool:
+    normalized = normalize_semantic_key(value)
+    return bool(normalized) and bool(SEMANTIC_FIELD_META.get(normalized, {}).get("hash_eligible"))
+
+
 def infer_semantic_key(*values: Optional[str]) -> Optional[str]:
     for value in values:
         normalized = normalize_semantic_key(value)
@@ -97,11 +113,13 @@ def get_semantic_requirements(semantic_key: Optional[str]) -> dict[str, Any]:
     normalized = normalize_semantic_key(semantic_key)
     if not normalized:
         return {"required": False, "hash_participates": False}
+    meta = SEMANTIC_FIELD_META.get(normalized, {})
     return {
-        "required": bool(SEMANTIC_FIELD_REQUIREMENTS.get(normalized, {}).get("required", False)),
-        "hash_participates": bool(
-            SEMANTIC_FIELD_REQUIREMENTS.get(normalized, {}).get("hash_participates", False)
-        ),
+        "required": bool(meta.get("required", False)),
+        "hash_participates": bool(meta.get("default_hash", False)),
+        "hash_eligible": bool(meta.get("hash_eligible", False)),
+        "semantic_kind": str(meta.get("kind", "")),
+        "system_scope": bool(meta.get("system_scope", False)),
     }
 
 

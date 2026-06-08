@@ -72,6 +72,33 @@ class TemplateSaveRequest(BaseModel):
     base_template_id: Optional[int] = Field(None, description="Base template id")
 
 
+class HashPolicyPreviewRequest(BaseModel):
+    data_domain: str = Field(..., description="Data domain")
+    granularity: Optional[str] = Field(None, description="Granularity")
+    sub_domain: Optional[str] = Field(None, description="Sub domain")
+    deduplication_fields: List[str] = Field(default_factory=list, description="Canonical hash identity keys")
+    header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
+    sample_rows: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class HashPolicyPreviewData(BaseModel):
+    passed: bool
+    blocking_errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    resolved_keys: List[str] = Field(default_factory=list)
+    requirement_groups: List[Dict[str, Any]] = Field(default_factory=list)
+    effective_components: Dict[str, Any] = Field(default_factory=dict)
+    invalid_keys: List[str] = Field(default_factory=list)
+    missing_required_groups: List[Dict[str, Any]] = Field(default_factory=list)
+    sample_diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class HashPolicyPreviewResponse(BaseModel):
+    success: bool = True
+    data: HashPolicyPreviewData
+
+
 class HeaderChangesPayload(BaseModel):
     detected: bool
     added_fields: List[str]

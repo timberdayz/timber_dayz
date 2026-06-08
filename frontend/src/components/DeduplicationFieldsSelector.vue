@@ -3,20 +3,63 @@
     <el-card class="selector-card" shadow="never">
       <template #header>
         <div class="selector-header">
-          <span>Data Hash 字段</span>
-          <el-tooltip content="仅已确认语义字段可参与 data_hash" placement="top">
-            <el-icon class="selector-help"><QuestionFilled /></el-icon>
-          </el-tooltip>
+          <span>Data Hash 字段确认</span>
+          <el-tag size="small" type="info">系统字段自动参与</el-tag>
         </div>
       </template>
 
-      <div v-if="recommendedFields.length > 0" class="recommended-fields">
-        <div class="recommended-title">
-          <el-icon><Star /></el-icon>
-          推荐语义字段
+      <el-alert
+        v-if="blockingMessage"
+        :title="blockingMessage"
+        type="error"
+        :closable="false"
+        show-icon
+      />
+
+      <div class="hash-section">
+        <div class="section-title">系统自动字段</div>
+        <div class="tag-row">
+          <el-tag v-for="field in systemScopeFields" :key="field" size="small" type="info">
+            {{ field }}
+          </el-tag>
         </div>
-        <div class="recommended-values">{{ recommendedFields.join('、') }}</div>
-        <div v-if="recommendationReason" class="selector-muted">{{ recommendationReason }}</div>
+      </div>
+
+      <div class="hash-section">
+        <div class="section-title">用户已选语义字段</div>
+        <div class="tag-row">
+          <el-tag v-for="field in selectedFields" :key="field" size="small" type="primary">
+            {{ field }}
+          </el-tag>
+          <span v-if="selectedFields.length === 0" class="selector-muted">尚未选择</span>
+        </div>
+      </div>
+
+      <div v-if="passedGroups.length > 0" class="hash-section">
+        <div class="section-title">已满足要求</div>
+        <div class="tag-row">
+          <el-tag v-for="group in passedGroups" :key="group.key" size="small" type="success">
+            {{ group.label }}已满足：{{ group.selected_keys?.join(' / ') }}
+          </el-tag>
+        </div>
+      </div>
+
+      <div v-if="missingGroups.length > 0" class="hash-section hash-section--warning">
+        <div class="section-title">当前缺失要求</div>
+        <div class="requirement-list">
+          <div v-for="group in missingGroups" :key="group.key" class="requirement-item">
+            {{ group.message }}
+          </div>
+        </div>
+      </div>
+
+      <div v-if="previewWarnings.length > 0" class="hash-section hash-section--warning">
+        <div class="section-title">样本风险提示</div>
+        <div class="requirement-list">
+          <div v-for="warning in previewWarnings" :key="warning" class="requirement-item">
+            {{ warning }}
+          </div>
+        </div>
       </div>
 
       <el-checkbox-group v-model="selectedFields" @change="handleFieldChange">
@@ -27,42 +70,37 @@
             :label="option.value"
             :value="option.value"
           >
-            {{ option.label }}
+            <span>{{ option.label }}</span>
+            <span v-if="option.derived" class="derived-label">由文件名/任务周期生成</span>
           </el-checkbox>
         </div>
       </el-checkbox-group>
 
       <div v-if="selectableOptions.length === 0" class="selector-muted empty-state">
-        暂无已确认语义字段
+        暂无可参与 Data Hash 的已确认语义字段。
       </div>
 
       <div v-if="validationWarning" class="validation-warning">
         <el-icon><WarningFilled /></el-icon>
         <span>{{ validationWarning }}</span>
       </div>
-
-      <div v-if="selectedFields.length > 0" class="selected-fields">
-        <div class="selected-title">已选择 {{ selectedFields.length }} 个语义字段</div>
-        <div class="selected-tags">
-          <el-tag
-            v-for="field in selectedFields"
-            :key="field"
-            type="primary"
-            size="small"
-          >
-            {{ field }}
-          </el-tag>
-        </div>
-      </div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { QuestionFilled, Star, WarningFilled } from '@element-plus/icons-vue'
+import { WarningFilled } from '@element-plus/icons-vue'
 import api from '@/api'
+import {
+  getSemanticFieldMeta,
+  isHashEligibleSemanticKey,
+  SYSTEM_HASH_SCOPE_FIELDS,
+} from '@/domains/data_platform/utils/headerBindings'
+
+const FILE_DATE_SOURCE_COLUMNS = new Set(['__file_date_from__', '__file_date_to__'])
+const DATE_HASH_KEYS = new Set(['metric_date', 'period_start_date', 'period_end_date'])
 
 const props = defineProps({
   availableFields: {
@@ -78,6 +116,10 @@ const props = defineProps({
     type: String,
     default: null,
   },
+  granularity: {
+    type: String,
+    default: null,
+  },
   subDomain: {
     type: String,
     default: null,
@@ -86,111 +128,202 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  fieldParseRules: {
+    type: Array,
+    default: () => [],
+  },
+  sampleRows: {
+    type: Array,
+    default: () => [],
+  },
 })
 
 const emit = defineEmits(['update:selectedFields', 'validation-change'])
 
 const selectedFields = ref([])
-const recommendedFields = ref([])
-const recommendationReason = ref('')
+const hashPolicyPreview = ref(null)
+const previewLoading = ref(false)
 const validationWarning = ref('')
+let previewTimer = null
+let previewRequestId = 0
+
+const systemScopeFields = computed(
+  () => hashPolicyPreview.value?.effective_components?.system_scope_fields || SYSTEM_HASH_SCOPE_FIELDS
+)
+
+const derivedOptions = computed(() => {
+  const seen = new Set()
+  return (Array.isArray(props.fieldParseRules) ? props.fieldParseRules : [])
+    .map((rule) => {
+      const target = String(rule?.target_field || '').trim()
+      const sourceColumn = String(rule?.source_column || '').trim()
+      if (!DATE_HASH_KEYS.has(target) || !FILE_DATE_SOURCE_COLUMNS.has(sourceColumn) || seen.has(target)) {
+        return null
+      }
+      seen.add(target)
+      const meta = getSemanticFieldMeta(target)
+      return {
+        value: target,
+        label: `${meta?.label || target} (${target})`,
+        derived: true,
+      }
+    })
+    .filter(Boolean)
+})
 
 const selectableOptions = computed(() => {
-  const semanticBindings = Array.isArray(props.headerBindings)
-    ? props.headerBindings.filter(binding =>
-      binding?.semantic_review_status === 'confirmed_semantic' &&
-      String(binding?.semantic_key || '').trim()
-    )
-    : []
-
-  if (semanticBindings.length === 0) {
-    return props.availableFields.map(field => ({
-      value: String(field || '').trim(),
-      label: String(field || '').trim(),
-    })).filter(option => option.value)
-  }
-
   const seen = new Set()
-  return semanticBindings.map((binding) => {
-    const semanticKey = String(binding?.semantic_key || '').trim()
-    if (!semanticKey || seen.has(semanticKey)) return null
-    seen.add(semanticKey)
-    const rawName = String(binding?.raw_name || '').trim()
-    return {
-      value: semanticKey,
-      label: rawName ? `${semanticKey} (${rawName})` : semanticKey,
+  const semanticOptions = (Array.isArray(props.headerBindings) ? props.headerBindings : [])
+    .filter(binding =>
+      binding?.semantic_review_status === 'confirmed_semantic' &&
+      isHashEligibleSemanticKey(binding?.semantic_key)
+    )
+    .map((binding) => {
+      const semanticKey = String(binding?.semantic_key || '').trim()
+      if (!semanticKey || seen.has(semanticKey)) return null
+      seen.add(semanticKey)
+      const rawName = String(binding?.raw_name || '').trim()
+      const meta = getSemanticFieldMeta(semanticKey)
+      return {
+        value: semanticKey,
+        label: rawName ? `${meta?.label || semanticKey} (${rawName})` : `${meta?.label || semanticKey} (${semanticKey})`,
+        derived: false,
+      }
+    })
+    .filter(Boolean)
+
+  for (const option of derivedOptions.value) {
+    if (!seen.has(option.value) && isHashEligibleSemanticKey(option.value)) {
+      seen.add(option.value)
+      semanticOptions.push(option)
     }
-  }).filter(Boolean)
+  }
+  return semanticOptions
 })
 
 const selectableValues = computed(() => new Set(selectableOptions.value.map(option => option.value)))
-
-const loadRecommendedFields = async () => {
-  if (!props.dataDomain) return
-
-  try {
-    const result = await api.getDefaultDeduplicationFields({
-      dataDomain: props.dataDomain,
-      subDomain: props.subDomain,
-    })
-
-    if (result && result.success && result.data) {
-      recommendedFields.value = result.data.fields || []
-      recommendationReason.value = result.data.reason || ''
-    }
-  } catch (error) {
-    ElMessage.warning(error?.message || '获取推荐字段失败')
+const missingGroups = computed(() => hashPolicyPreview.value?.missing_required_groups || [])
+const passedGroups = computed(() =>
+  (hashPolicyPreview.value?.requirement_groups || []).filter(group => group?.passed)
+)
+const previewWarnings = computed(() => hashPolicyPreview.value?.warnings || [])
+const blockingMessage = computed(() => {
+  const group = missingGroups.value[0]
+  if (group?.message) {
+    return `不能保存：${group.message}`
   }
-}
+  const invalidKeys = hashPolicyPreview.value?.invalid_keys || []
+  if (invalidKeys.length > 0) {
+    return `不能保存：${invalidKeys.join('、')} 不能参与 Data Hash。`
+  }
+  return ''
+})
 
-const validateFields = () => {
+function validateFields() {
   validationWarning.value = ''
 
   if (selectedFields.value.length === 0) {
-    validationWarning.value = '请至少选择 1 个语义字段'
+    validationWarning.value = '请至少选择 1 个可参与 Data Hash 的语义字段。'
     emit('validation-change', false)
     return false
   }
 
   const missingFields = selectedFields.value.filter(field => !selectableValues.value.has(field))
   if (missingFields.length > 0) {
-    validationWarning.value = `以下字段不是已确认语义字段：${missingFields.join('、')}`
+    validationWarning.value = `以下字段不是可参与 Data Hash 的已确认语义字段：${missingFields.join('、')}`
+    emit('validation-change', false)
+    return false
   }
 
-  const isValid = selectedFields.value.length > 0 && missingFields.length === 0
-  emit('validation-change', isValid)
-  return isValid
+  if (previewLoading.value || hashPolicyPreview.value?.passed !== true) {
+    emit('validation-change', false)
+    return false
+  }
+
+  emit('validation-change', true)
+  return true
 }
 
-const handleFieldChange = () => {
+function handleFieldChange() {
   validateFields()
   emit('update:selectedFields', [...selectedFields.value])
+  scheduleHashPolicyPreview()
 }
 
-watch(
-  () => [props.availableFields, props.headerBindings],
-  () => {
+function scheduleHashPolicyPreview() {
+  if (previewTimer) {
+    clearTimeout(previewTimer)
+  }
+  previewTimer = setTimeout(runHashPolicyPreview, 250)
+}
+
+async function runHashPolicyPreview() {
+  if (!props.dataDomain || selectedFields.value.length === 0) {
+    hashPolicyPreview.value = null
     validateFields()
-  },
-  { deep: true },
-)
+    return
+  }
+
+  const requestId = ++previewRequestId
+  previewLoading.value = true
+  validateFields()
+  try {
+    const response = await api.previewTemplateHashPolicy({
+      dataDomain: props.dataDomain,
+      granularity: props.granularity,
+      subDomain: props.subDomain,
+      deduplicationFields: selectedFields.value,
+      headerBindings: props.headerBindings,
+      fieldParseRules: props.fieldParseRules,
+      sampleRows: props.sampleRows.slice(0, 20),
+    })
+    if (requestId !== previewRequestId) return
+    hashPolicyPreview.value = response?.data || response
+  } catch (error) {
+    if (requestId !== previewRequestId) return
+    hashPolicyPreview.value = null
+    ElMessage.warning(error?.message || 'Data Hash 预检失败')
+  } finally {
+    if (requestId === previewRequestId) {
+      previewLoading.value = false
+      validateFields()
+    }
+  }
+}
 
 watch(
   () => props.initialFields,
   (newFields) => {
-    if (newFields && newFields.length > 0 && selectedFields.value.length === 0) {
-      selectedFields.value = [...newFields]
-      validateFields()
-    }
+    selectedFields.value = Array.isArray(newFields) ? [...newFields] : []
+    validateFields()
+    scheduleHashPolicyPreview()
   },
   { immediate: true },
 )
 
-onMounted(() => {
-  loadRecommendedFields()
-  if (props.initialFields && props.initialFields.length > 0) {
-    selectedFields.value = [...props.initialFields]
+watch(
+  () => [
+    props.dataDomain,
+    props.granularity,
+    props.subDomain,
+    props.headerBindings,
+    props.fieldParseRules,
+    props.sampleRows,
+  ],
+  () => {
     validateFields()
+    scheduleHashPolicyPreview()
+  },
+  { deep: true },
+)
+
+onMounted(() => {
+  scheduleHashPolicyPreview()
+})
+
+onBeforeUnmount(() => {
+  if (previewTimer) {
+    clearTimeout(previewTimer)
   }
 })
 
@@ -214,47 +347,70 @@ defineExpose({
 }
 
 .selector-header,
-.recommended-title,
 .validation-warning {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
-.selector-help {
-  cursor: help;
+.selector-header {
+  justify-content: space-between;
 }
 
-.recommended-fields,
-.selected-fields {
-  margin-bottom: 15px;
+.hash-section {
+  margin-top: 12px;
   padding: 10px;
-  border-radius: 4px;
-  background: #f0f9ff;
+  border-radius: 6px;
+  background: #f7f8fa;
 }
 
-.recommended-title,
-.selected-title {
-  margin-bottom: 6px;
+.hash-section--warning {
+  border: 1px solid #f3d19e;
+  background: #fdf6ec;
+}
+
+.section-title {
+  margin-bottom: 8px;
+  font-size: 12px;
   font-weight: 600;
-  color: #409eff;
+  color: #606266;
 }
 
-.recommended-values,
-.selector-muted {
-  color: #606266;
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.requirement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #9a5b00;
   font-size: 13px;
 }
 
 .fields-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 10px;
   max-height: 300px;
   overflow-y: auto;
+  margin-top: 12px;
   padding: 10px;
   border: 1px solid #e4e7ed;
-  border-radius: 4px;
+  border-radius: 6px;
+}
+
+.derived-label {
+  margin-left: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.selector-muted {
+  color: #909399;
+  font-size: 12px;
 }
 
 .empty-state {
@@ -262,17 +418,11 @@ defineExpose({
 }
 
 .validation-warning {
-  margin-top: 15px;
+  margin-top: 12px;
   padding: 10px;
   border-left: 4px solid #f56c6c;
   border-radius: 4px;
   color: #f56c6c;
   background: #fef0f0;
-}
-
-.selected-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 </style>

@@ -126,7 +126,7 @@
           <el-button
             type="primary"
             :loading="savingTemplate"
-            :disabled="headerColumns.length === 0 || deduplicationFields.length === 0"
+            :disabled="headerColumns.length === 0 || deduplicationFields.length === 0 || !deduplicationSelectionValid"
             @click="$emit('save-template')"
           >
             保存为模板
@@ -152,7 +152,7 @@
     <el-card v-if="headerColumns.length > 0" class="semantic-bindings-card" style="margin-bottom: 20px;">
       <template #header>
         <div class="template-builder-workspace__header">
-          <span>语义核心字段确认</span>
+          <span>语义字段确认</span>
           <span class="template-builder-workspace__muted">
             系统会先自动推断语义字段；如判断不准，请在这里手工修正。
           </span>
@@ -162,7 +162,7 @@
       <div class="semantic-summary">
         <el-alert type="info" :closable="false" show-icon>
           <template #title>
-            核心字段决定去重逻辑。建议优先确认 `order_id / product_id / platform_sku / sku_id / shop_id` 是否映射正确。
+            用户先确认标准语义字段；只有可参与行身份的语义字段才能进入 Data Hash。
           </template>
         </el-alert>
       </div>
@@ -196,10 +196,10 @@
         <el-table-column label="中文说明" min-width="260">
           <template #default="{ row }">
             <div class="template-builder-workspace__field-name">
-              {{ row.meta?.label || '非语义核心字段' }}
+              {{ row.meta?.label || '原始保留' }}
             </div>
             <div class="template-builder-workspace__description">
-              {{ row.meta?.description || '该字段仅保留原始值，不参与语义去重。' }}
+              {{ row.meta?.description || '该字段仅保留原始值，不参与 Data Hash。' }}
             </div>
           </template>
         </el-table-column>
@@ -215,7 +215,7 @@
           <template #default="{ row }">
             <div class="template-builder-workspace__rules">
               <el-tag v-if="row.required" size="small" type="danger">必需</el-tag>
-              <el-tag v-if="row.hash_participates" size="small" type="success">参与去重</el-tag>
+              <el-tag v-if="row.hash_participates" size="small" type="success">参与 Data Hash</el-tag>
             </div>
           </template>
         </el-table-column>
@@ -293,10 +293,13 @@
       :available-fields="headerColumns"
       :header-bindings="localHeaderBindings"
       :data-domain="fileFilters.domain"
+      :granularity="fileFilters.granularity"
       :sub-domain="fileFilters.sub_domain"
       :initial-fields="deduplicationFields"
+      :field-parse-rules="localFieldParseRules"
+      :sample-rows="previewData"
       @update:selectedFields="$emit('deduplication-fields-change', $event)"
-      @validation-change="$emit('validation-change', $event)"
+      @validation-change="handleDeduplicationValidationChange"
     />
   </div>
 </template>
@@ -360,6 +363,7 @@ const headerRowModel = computed({
 
 const localFieldParseRules = ref([])
 const localHeaderBindings = ref([])
+const deduplicationSelectionValid = ref(false)
 
 const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
 
@@ -410,6 +414,11 @@ watch(
 
 function handleSemanticKeyChange(rawName, semanticKey) {
   localHeaderBindings.value = updateHeaderBindingSemantic(localHeaderBindings.value, rawName, semanticKey)
+}
+
+function handleDeduplicationValidationChange(isValid) {
+  deduplicationSelectionValid.value = isValid
+  emit('validation-change', isValid)
 }
 
 function semanticSelectValue(row) {
