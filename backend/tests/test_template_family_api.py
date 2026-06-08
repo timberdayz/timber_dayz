@@ -475,3 +475,74 @@ async def test_template_family_list_tolerates_duplicate_family_rows(template_fam
     payload = response.json()
     assert payload["success"] is True
     assert payload["data"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_family_versions_uses_requested_family_when_normalized_duplicate_is_listed(
+    template_family_client,
+):
+    _client, session_factory = template_family_client
+    now = datetime.now(timezone.utc)
+
+    async with session_factory() as session:
+        session.add_all(
+            [
+                FieldMappingTemplateFamily(
+                    id=201,
+                    platform="tiktok",
+                    data_domain="analytics",
+                    granularity="daily",
+                    sub_domain=None,
+                    account=None,
+                    governance_status="ready",
+                    display_name="tiktok analytics daily",
+                    active_version_id=301,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplateVersion(
+                    id=301,
+                    family_id=201,
+                    version_no=8,
+                    status="active",
+                    template_name="tiktok_analytics__daily_v8",
+                    deduplication_fields=["metric_date"],
+                    header_bindings=[],
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplateFamily(
+                    id=202,
+                    platform="tiktok",
+                    data_domain="analytics",
+                    granularity="daily",
+                    sub_domain="N/A",
+                    account=None,
+                    governance_status="ready",
+                    display_name="tiktok analytics N/A daily",
+                    active_version_id=302,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                FieldMappingTemplateVersion(
+                    id=302,
+                    family_id=202,
+                    version_no=2,
+                    status="active",
+                    template_name="tiktok_analytics_N/A_daily_v2",
+                    deduplication_fields=["metric_date"],
+                    header_bindings=[],
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+        from backend.services.template_family_service import TemplateFamilyService
+
+        family_payload, versions = await TemplateFamilyService(session).get_family_versions(201)
+
+    assert family_payload["id"] == 201
+    assert family_payload["sub_domain"] is None
+    assert versions[0]["id"] == 301

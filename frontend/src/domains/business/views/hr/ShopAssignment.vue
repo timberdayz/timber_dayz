@@ -47,6 +47,17 @@
           刷新
         </el-button>
       </div>
+      <div v-if="employeeCommissionSummary.length > 0" class="commission-summary-strip">
+        <div class="commission-summary-title">员工月度预计提成</div>
+        <div class="commission-summary-items">
+          <div v-for="item in employeeCommissionSummary" :key="item.employee_code" class="commission-summary-item">
+            <span class="commission-summary-name">{{ item.employee_name || item.employee_code }}</span>
+            <span class="commission-summary-role">{{ item.role === 'supervisor' ? '主管' : '操作员' }}</span>
+            <span class="commission-summary-amount">¥{{ formatNumber(item.estimated_commission) }}</span>
+            <span class="commission-summary-shops">{{ item.shop_count }}店</span>
+          </div>
+        </div>
+      </div>
       <el-card>
         <el-table
           :data="configTableRows"
@@ -108,6 +119,11 @@
               </span>
             </template>
           </el-table-column>
+          <el-table-column label="可分配利润" width="130" align="right">
+            <template #default="{ row }">
+              <span v-if="row._isFirst">¥{{ formatNumber(getRowAllocatableProfit(row)) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="人员" width="180" min-width="160">
             <template #default="{ row }">
               <template v-if="row._isAddRow">
@@ -141,6 +157,11 @@
                 />
                 <span class="allocatable-rate-suffix">%</span>
               </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="预计提成" width="130" align="right">
+            <template #default="{ row }">
+              <span v-if="row._person">¥{{ formatNumber(getRowEstimatedCommission(row)) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="80" align="center">
@@ -306,8 +327,13 @@
           </el-select>
         </el-form-item>
         <el-form-item label="员工" required>
-          <el-select v-model="form.employee_code" placeholder="选择员工" filterable style="width: 100%;">
-            <el-option v-for="e in employeesActive" :key="e.employee_code" :label="`${e.name} (${e.employee_code})`" :value="e.employee_code" />
+          <el-select v-model="form.employee_code" placeholder="选择员工" filterable style="width: 100%;" @change="handleEmployeeChange">
+            <el-option
+              v-for="e in employeesActive"
+              :key="e.employee_code"
+              :label="`${e.name} (${e.employee_code}${e.position_name ? ' / ' + e.position_name : ''})`"
+              :value="e.employee_code"
+            />
           </el-select>
         </el-form-item>
         <el-form-item v-if="!addForShopRow" label="平台" required>
@@ -354,7 +380,15 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Setting, DataAnalysis, Calendar } from '@element-plus/icons-vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { exceedsCommissionRatioLimit, setShopAllocatableProfitRate, sumCommissionRatio } from './shopAssignmentRules'
+import {
+  calculateAllocatableProfit,
+  calculateAssignmentCommission,
+  exceedsCommissionRatioLimit,
+  inferAssignmentRole,
+  setShopAllocatableProfitRate,
+  summarizeEmployeeCommissions,
+  sumCommissionRatio
+} from './shopAssignmentRules'
 import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
 
 const activeTab = ref('config')
@@ -398,6 +432,7 @@ const shopsFiltered = computed(() => {
   if (!pc) return shops.value
   return shops.value.filter((s) => (s.platform_code || '').toLowerCase() === (pc || '').toLowerCase())
 })
+const employeeCommissionSummary = computed(() => summarizeEmployeeCommissions(shopRows.value))
 
 // 配置表 flattened 行：一店多人，每行一个人员或“添加”占位
 const configTableRows = computed(() => {
@@ -439,8 +474,22 @@ function formatNumber(v) {
   return Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function getRowAllocatableProfit(row) {
+  return calculateAllocatableProfit(row?._shop || row)
+}
+
+function getRowEstimatedCommission(row) {
+  if (!row?._person) return 0
+  return calculateAssignmentCommission(row?._shop || row, row._person)
+}
+
 function onPlatformChange() {
   form.value.shop_id = ''
+}
+
+function handleEmployeeChange(employeeCode) {
+  const emp = employeesActive.value.find((e) => e.employee_code === employeeCode)
+  form.value.role = inferAssignmentRole(emp)
 }
 
 function resetForm() {
@@ -831,6 +880,51 @@ onMounted(async () => {
 }
 .person-list {
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+}
+.commission-summary-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #fafafa;
+}
+.commission-summary-title {
+  flex: 0 0 auto;
+  color: #606266;
+  font-weight: 600;
+  line-height: 24px;
+}
+.commission-summary-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.commission-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fff;
+  color: #303133;
+}
+.commission-summary-name {
+  font-weight: 600;
+}
+.commission-summary-role,
+.commission-summary-shops {
+  color: #909399;
+  font-size: 12px;
+}
+.commission-summary-amount {
+  color: #067647;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 .allocatable-rate-wrap {
   display: inline-flex;

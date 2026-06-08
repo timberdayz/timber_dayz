@@ -179,6 +179,8 @@ class HRIncomeCalculationService:
             )
             if key not in shop_keys:
                 continue
+            if not bool(getattr(row, "is_locked", False)):
+                continue
             basis_by_shop[key] = {
                 "profit_basis_amount": self._to_float(
                     getattr(row, "profit_basis_amount", 0.0),

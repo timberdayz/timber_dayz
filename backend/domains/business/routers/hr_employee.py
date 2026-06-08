@@ -27,7 +27,7 @@ from backend.utils.year_month_utils import year_month_to_first_day
 from modules.core.db import (
     Employee, DimUser, MonthlyProfitPayrollSnapshot, MonthlyProfitSettlement, PayrollRecord,
     EmployeeCommission, EmployeePerformance, EmployeePerformanceInput, EmployeePerformanceAdjustment,
-    EmployeeShopAssignment, ShopCommissionConfig, PerformanceScore, ShopProfitBasis,
+    EmployeeShopAssignment, ShopCommissionConfig, PerformanceScore, ShopProfitBasis, Position,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
@@ -552,7 +552,10 @@ async def list_employees(
 ):
     """获取员工列表(分页、筛选)"""
     try:
-        query = select(Employee)
+        query = select(Employee, Position.position_code, Position.position_name).outerjoin(
+            Position,
+            Employee.position_id == Position.id,
+        )
         conditions = []
         
         if department_id is not None:
@@ -576,11 +579,17 @@ async def list_employees(
         query = query.order_by(Employee.employee_code).offset(offset).limit(page_size)
         
         result = await db.execute(query)
-        employees = result.scalars().all()
+        employee_rows = result.all()
         out = []
-        for emp in employees:
+        for emp, position_code, position_name in employee_rows:
             resp = EmployeeResponse.model_validate(emp)
-            resp = resp.model_copy(update={"username": await _username_for_user_id(db, emp.user_id)})
+            resp = resp.model_copy(
+                update={
+                    "username": await _username_for_user_id(db, emp.user_id),
+                    "position_code": position_code,
+                    "position_name": position_name,
+                }
+            )
             out.append(resp)
         return out
     except Exception as e:

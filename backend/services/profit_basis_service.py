@@ -71,7 +71,9 @@ class ProfitBasisService:
         result = await self.db.execute(
             text(
                 """
-                SELECT COALESCE(SUM(allocated_amt), 0) AS a_class_cost_amount
+                SELECT
+                    COUNT(*) AS allocated_row_count,
+                    COALESCE(SUM(allocated_amt), 0) AS a_class_cost_amount
                 FROM finance.fact_expenses_allocated_day_shop_sku
                 WHERE allocation_date >= :period_start
                   AND allocation_date < :next_month
@@ -87,7 +89,33 @@ class ProfitBasisService:
             },
         )
         row = result.mappings().first()
-        return _to_float(row.get("a_class_cost_amount") if row else 0.0)
+        allocated_amount = _to_float(row.get("a_class_cost_amount") if row else 0.0)
+        allocated_row_count = row.get("allocated_row_count") if row else 0
+        if allocated_row_count is None:
+            if allocated_amount != 0:
+                return allocated_amount
+        elif int(allocated_row_count) > 0:
+            return allocated_amount
+
+        fallback_result = await self.db.execute(
+            text(
+                """
+                SELECT COALESCE(SUM("成本合计"), 0) AS a_class_cost_amount
+                FROM a_class.operating_costs
+                WHERE "年月" = :year_month
+                  AND "删除时间" IS NULL
+                  AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform_code)
+                  AND "店铺ID" = :shop_id
+                """
+            ),
+            {
+                "year_month": year_month,
+                "platform_code": platform_code,
+                "shop_id": shop_id,
+            },
+        )
+        fallback_row = fallback_result.mappings().first()
+        return _to_float(fallback_row.get("a_class_cost_amount") if fallback_row else 0.0)
 
     async def build_profit_basis(
         self,

@@ -316,6 +316,8 @@ class EmployeeResponse(BaseModel):
     emergency_phone: Optional[str]
     department_id: Optional[int]
     position_id: Optional[int]
+    position_code: Optional[str] = None
+    position_name: Optional[str] = None
     manager_id: Optional[int]
     hire_date: Optional[date]
     probation_end_date: Optional[date]

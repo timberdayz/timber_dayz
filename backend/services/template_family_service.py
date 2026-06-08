@@ -539,7 +539,57 @@ class TemplateFamilyService:
         if family is None:
             raise ValueError(f"template family {family_id} not found")
         families = await self.list_families(platform=family.platform, data_domain=family.data_domain)
-        family_payload = next(item for item in families if item["id"] == family_id)
+        family_payload = next((item for item in families if item["id"] == family_id), None)
+        if family_payload is None:
+            logger.debug(
+                "[TemplateFamily] requested family_id=%s hidden by normalized duplicate; using raw family row",
+                family_id,
+            )
+            version = await self._get_active_version(family_id)
+            variants: list[FieldMappingTemplateVariant] = []
+            if version:
+                variants_result = await self.db.execute(
+                    select(FieldMappingTemplateVariant).where(
+                        FieldMappingTemplateVariant.template_version_id == version.id
+                    )
+                    .order_by(FieldMappingTemplateVariant.match_priority.asc(), FieldMappingTemplateVariant.id.asc())
+                )
+                variants = list(variants_result.scalars().all())
+            primary_variant = variants[0] if variants else None
+            legacy_template_ids = list(getattr(version, "legacy_template_ids", None) or [])
+            family_payload = {
+                "id": family.id,
+                "platform": family.platform,
+                "data_domain": family.data_domain,
+                "granularity": family.granularity,
+                "account": family.account,
+                "sub_domain": family.sub_domain,
+                "display_name": family.display_name,
+                "governance_status": family.governance_status or "ready",
+                "display_governance_status": family.governance_status or "ready",
+                "variant_count": len(variants),
+                "file_count": 0,
+                "current_file_count": 0,
+                "pending_file_count": 0,
+                "historical_file_count": 0,
+                "active_template_id": (
+                    primary_variant.source_legacy_template_id
+                    if primary_variant and primary_variant.source_legacy_template_id
+                    else legacy_template_ids[0] if legacy_template_ids else None
+                ),
+                "sample_file_id": None,
+                "sample_file_name": None,
+                "active_version": (
+                    {
+                        "id": version.id,
+                        "version_no": version.version_no,
+                        "status": version.status,
+                        "template_name": version.template_name,
+                    }
+                    if version
+                    else None
+                ),
+            }
 
         versions_result = await self.db.execute(
             select(FieldMappingTemplateVersion).where(

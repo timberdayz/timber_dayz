@@ -687,14 +687,15 @@ async def _load_profit_basis_map(
             )
         )
     ).scalars().all()
-    basis_by_shop: Dict[str, Dict[str, float]] = {
-        _shop_key(row.platform_code, row.shop_id): {
+    basis_by_shop: Dict[str, Dict[str, float]] = {}
+    for row in rows:
+        if not bool(getattr(row, "is_locked", False)):
+            continue
+        basis_by_shop[_shop_key(row.platform_code, row.shop_id)] = {
             "profit_basis_amount": float(row.profit_basis_amount or 0),
             "orders_profit_amount": float(row.orders_profit_amount or 0),
             "a_class_cost_amount": float(row.a_class_cost_amount or 0),
         }
-        for row in rows
-    }
 
     service = ProfitBasisService(db)
     for shop in shop_list:
@@ -1417,11 +1418,7 @@ async def get_shop_profit_statistics(
         ]
 
         # 2. 通过 PostgreSQL 月度店铺赛马模块获取销售额/利润/达成率
-        try:
-            metrics_by_shop: Dict[str, Dict] = await load_shop_monthly_metrics(db, month)
-        except Exception as e:
-            logger.warning(f"PostgreSQL 店铺月度统计查询失败，将返回空数据: {e}")
-            metrics_by_shop = {}
+        metrics_by_shop: Dict[str, Dict] = await load_shop_monthly_metrics(db, month)
 
         # 3. 获取店铺可分配利润率配置
         config_query = select(ShopCommissionConfig).where(
@@ -1429,7 +1426,7 @@ async def get_shop_profit_statistics(
         )
         config_rows = (await db.execute(config_query)).scalars().all()
         allocatable_by_shop: Dict[str, float] = {
-            f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
+            f"{(c.platform_code or '').lower()}|{str(c.shop_id or '').lower()}": float(c.allocatable_profit_rate or 0)
             for c in config_rows
         }
         basis_by_shop = await _load_profit_basis_map(db, month, shop_list)
@@ -1445,7 +1442,7 @@ async def get_shop_profit_statistics(
         # 按店铺分组：supervisors 和 operators，各自 commission_ratio 列表
         assign_by_shop: Dict[str, Dict] = {}
         for a in assign_rows:
-            key = f"{(a.platform_code or '').lower()}|{a.shop_id}"
+            key = f"{(a.platform_code or '').lower()}|{str(a.shop_id or '').lower()}"
             if key not in assign_by_shop:
                 assign_by_shop[key] = {"supervisors": [], "operators": []}
             cr = float(a.commission_ratio or 0)
@@ -1461,28 +1458,33 @@ async def get_shop_profit_statistics(
             m = metrics_by_shop.get(key) or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}") or {}
             monthly_sales = float(m.get("monthly_sales", 0))
             monthly_profit = float(m.get("monthly_profit", 0))
-            profit_basis_amount = float(
-                basis_by_shop.get(key, {}).get("profit_basis_amount", 0)
-            )
+            basis = basis_by_shop.get(key, {})
+            profit_basis_amount = float(basis.get("profit_basis_amount", 0))
+            a_class_cost_amount = float(basis.get("a_class_cost_amount", 0))
+            orders_profit_amount = float(basis.get("orders_profit_amount", monthly_profit))
             achievement_rate = m.get("achievement_rate")
             allocatable_rate = allocatable_by_shop.get(key, 1.0)  # 无配置时默认 100% 可分配
-            allocatable_profit = monthly_profit * allocatable_rate
             allocatable_profit = profit_basis_amount * allocatable_rate
             ass = assign_by_shop.get(key, {})
             sup_ratios = ass.get("supervisors", [])
             op_ratios = ass.get("operators", [])
             supervisor_profit = allocatable_profit * sum(sup_ratios) if sup_ratios else 0
             operator_profit = allocatable_profit * sum(op_ratios) if op_ratios else 0
+            estimated_total_commission = supervisor_profit + operator_profit
             items.append({
                 "platform_code": s["platform_code"],
                 "shop_id": s["shop_id"],
                 "shop_name": s["shop_name"],
                 "monthly_sales": monthly_sales,
                 "monthly_profit": monthly_profit,
+                "orders_profit_amount": orders_profit_amount,
+                "a_class_cost_amount": a_class_cost_amount,
                 "profit_basis_amount": profit_basis_amount,
+                "allocatable_profit_amount": allocatable_profit,
                 "achievement_rate": achievement_rate,
                 "supervisor_profit": supervisor_profit,
                 "operator_profit": operator_profit,
+                "estimated_total_commission": estimated_total_commission,
             })
         result = {"success": True, "data": items}
         if request and hasattr(request.app.state, "cache_service"):
