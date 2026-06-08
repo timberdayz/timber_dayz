@@ -957,25 +957,25 @@ function getRuntimeStatusTagType(status) {
 function getQueueRunnerLabel(health) {
   const status = health?.queue_runner || 'unknown'
   const labels = {
-    running: '?????',
-    standby: '?????',
-    disabled: '??????',
-    error: '?????',
-    unknown: '???????',
+    running: '执行器在线',
+    standby: '执行器待命',
+    disabled: '执行器未启用',
+    error: '执行器异常',
+    unknown: '执行器状态未知',
   }
-  return labels[status] || `???${status}`
+  return labels[status] || `执行器${status}`
 }
 
 function getSchedulerLabel(health) {
   const status = health?.scheduler || 'unknown'
   const labels = {
-    running: '?????',
-    standby: '?????',
-    disabled: '??????',
-    error: '?????',
-    unknown: '???????',
+    running: '调度器正常',
+    standby: '调度器待命',
+    disabled: '调度器未启用',
+    error: '调度器异常',
+    unknown: '调度器状态未知',
   }
-  return labels[status] || `???${status}`
+  return labels[status] || `调度器${status}`
 }
 
 function showQueueConsumptionHint(health) {
@@ -984,20 +984,20 @@ function showQueueConsumptionHint(health) {
 }
 
 function getQueueConsumptionHint(health) {
-  if (!health) return '????????????? collector?'
+  if (!health) return '采集运行面状态未知，请检查 collector。'
   const runtimeMode = health.runtime_mode || 'unknown'
   const deploymentRole = health.deployment_role || 'unknown'
   if (health.queue_runner === 'standby' || health.leader_lock === 'standby') {
-    return `?? collector ???????mode=${runtimeMode}, role=${deploymentRole}??????????????????`
+    return `当前 collector 处于待命状态（mode=${runtimeMode}, role=${deploymentRole}），队列会保留但不会由当前实例消费。`
   }
   if (health.queue_runner === 'disabled') {
-    return `???????????????mode=${runtimeMode}, role=${deploymentRole}??`
+    return `当前实例未启用配置采集执行器（mode=${runtimeMode}, role=${deploymentRole}）。`
   }
   if (health.queue_runner === 'error') {
-    return '????????????? collector ????????'
+    return '配置采集执行器异常，请检查 collector 健康状态与日志。'
   }
   if (!health.can_consume_queue) {
-    return '???????????? collector ?????'
+    return '当前队列不可消费，请检查 collector 运行状态。'
   }
   return ''
 }

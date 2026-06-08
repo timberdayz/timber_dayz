@@ -537,6 +537,94 @@ async def test_shared_login_phase_persists_refreshed_storage_state_after_login(
 
 
 @pytest.mark.asyncio
+async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reused_persistent_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._execute_python_component = AsyncMock(return_value=True)
+    executor._ensure_login_gate_ready = AsyncMock(
+        return_value=GateResult(
+            stage="login_gate",
+            status=GateStatus.READY,
+            reason="logged-in markers confirmed",
+            current_url="https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY",
+        )
+    )
+
+    wait_capture = AsyncMock(side_effect=AssertionError("should not block on session persist"))
+    saved = AsyncMock()
+    monkeypatch.setattr(executor, "_wait_and_capture_high_quality_tiktok_session", wait_capture)
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._save_session_async",
+        saved,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
+        AsyncMock(),
+    )
+
+    page = type("Page", (), {"url": "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"})()
+    context = type(
+        "Ctx",
+        (),
+        {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+    )()
+    params = {
+        "reused_session": True,
+        "_runtime_session_mode": "persistent_profile",
+        "params": {"reused_session": True},
+    }
+
+    _, _, result = await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="tiktok",
+        account={"account_id": "acc-1", "login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+        params=params,
+        context=context,
+        browser=object(),
+        play_context=object(),
+        page=page,
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="tiktok",
+        session_account_id="main-1",
+        save_session_after_login=True,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    assert result is None
+    assert context.current_component_index == 1
+    wait_capture.assert_not_awaited()
+    saved.assert_not_awaited()
+
+
+def test_tiktok_persistent_profile_skips_post_login_session_persist_even_when_fresh() -> None:
+    assert CollectionExecutorV2._should_skip_post_login_session_persist(
+        platform="tiktok",
+        params={
+            "reused_session": False,
+            "_runtime_session_mode": "persistent_profile",
+            "params": {"reused_session": False},
+        },
+    )
+
+
+def test_tiktok_storage_state_fanout_keeps_post_login_session_persist() -> None:
+    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
+        platform="tiktok",
+        params={
+            "reused_session": True,
+            "_runtime_session_mode": "storage_state_fanout",
+            "params": {"reused_session": True},
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_wait_and_capture_high_quality_tiktok_session_waits_for_stable_quality(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

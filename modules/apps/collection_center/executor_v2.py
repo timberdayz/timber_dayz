@@ -1064,29 +1064,38 @@ class CollectionExecutorV2:
             account=account,
         )
         if save_session_after_login and session_platform and session_account_id:
-            try:
-                storage_state = await self._wait_and_capture_high_quality_tiktok_session(
-                    page=page,
-                    session_platform=session_platform,
-                    session_account_id=session_account_id,
+            if self._should_skip_post_login_session_persist(
+                platform=platform,
+                params=params,
+            ):
+                logger.info(
+                    "Task %s: skip post-login TikTok session persist for persistent profile runtime",
+                    task_id,
                 )
-                ok = await _save_session_async(session_platform, session_account_id, storage_state)
-                if ok:
-                    logger.info(
-                        "Task %s: session saved for %s/%s",
-                        task_id,
-                        session_platform,
-                        session_account_id,
+            else:
+                try:
+                    storage_state = await self._wait_and_capture_high_quality_tiktok_session(
+                        page=page,
+                        session_platform=session_platform,
+                        session_account_id=session_account_id,
                     )
-                else:
-                    logger.warning(
-                        "Task %s: session save returned False for %s/%s",
-                        task_id,
-                        session_platform,
-                        session_account_id,
-                    )
-            except Exception as e:
-                logger.warning("Task %s: save_session failed: %s", task_id, e)
+                    ok = await _save_session_async(session_platform, session_account_id, storage_state)
+                    if ok:
+                        logger.info(
+                            "Task %s: session saved for %s/%s",
+                            task_id,
+                            session_platform,
+                            session_account_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Task %s: session save returned False for %s/%s",
+                            task_id,
+                            session_platform,
+                            session_account_id,
+                        )
+                except Exception as e:
+                    logger.warning("Task %s: save_session failed: %s", task_id, e)
         context.current_component_index = 1
         return play_context, page, None
 
@@ -2294,6 +2303,25 @@ class CollectionExecutorV2:
             logger.error(f"Verification callback failed for task {task_id}: {e}")
             return None
 
+
+    @staticmethod
+    def _should_skip_post_login_session_persist(
+        *,
+        platform: str,
+        params: Dict[str, Any],
+    ) -> bool:
+        normalized_platform = str(platform or "").strip().lower()
+        nested_params = params.get("params") or {}
+        runtime_mode = str(
+            params.get("_runtime_session_mode")
+            or nested_params.get("_runtime_session_mode")
+            or ""
+        ).strip().lower()
+        return (
+            normalized_platform == "tiktok"
+            and runtime_mode == "persistent_profile"
+        )
+
     @staticmethod
     def _requires_headful_login_fallback(verification_type: str | None) -> bool:
         return verification_input_mode(verification_type) == "manual_continue"
@@ -2585,19 +2613,28 @@ class CollectionExecutorV2:
                 account=account,
                 )
             if save_session_after_login and session_platform and session_account_id:
-                try:
-                    storage_state = await self._wait_and_capture_high_quality_tiktok_session(
-                        page=page,
-                        session_platform=session_platform,
-                        session_account_id=session_account_id,
+                if self._should_skip_post_login_session_persist(
+                    platform=platform,
+                    params=params,
+                ):
+                    logger.info(
+                        "Task %s: skip post-login TikTok session persist for persistent profile runtime",
+                        task_id,
                     )
-                    ok = await _save_session_async(session_platform, session_account_id, storage_state)
-                    if ok:
-                        logger.info("Task %s: session saved for %s/%s", task_id, session_platform, session_account_id)
-                    else:
-                        logger.warning("Task %s: session save returned False for %s/%s", task_id, session_platform, session_account_id)
-                except Exception as e:
-                    logger.warning("Task %s: save_session failed: %s", task_id, e)
+                else:
+                    try:
+                        storage_state = await self._wait_and_capture_high_quality_tiktok_session(
+                            page=page,
+                            session_platform=session_platform,
+                            session_account_id=session_account_id,
+                        )
+                        ok = await _save_session_async(session_platform, session_account_id, storage_state)
+                        if ok:
+                            logger.info("Task %s: session saved for %s/%s", task_id, session_platform, session_account_id)
+                        else:
+                            logger.warning("Task %s: session save returned False for %s/%s", task_id, session_platform, session_account_id)
+                    except Exception as e:
+                        logger.warning("Task %s: save_session failed: %s", task_id, e)
             context.current_component_index = 1
         
         # 2. 循环执行各数据域导出
