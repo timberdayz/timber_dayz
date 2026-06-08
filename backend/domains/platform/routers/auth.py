@@ -472,7 +472,7 @@ async def login(
     # [*] v4.19.0: 创建会话记录
     import hashlib
     from datetime import datetime, timedelta
-    session_id = hashlib.sha256(tokens["access_token"].encode()).hexdigest()
+    session_id = tokens["session_id"]
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
     # 检查会话是否已存在(避免重复创建)
@@ -649,15 +649,19 @@ async def refresh_token(
         
         # [*] v4.19.0 P0安全要求:检查会话是否已被撤销
         import hashlib
-        # 从当前access_token(如果有)计算session_id
+        # v6.1: 优先使用 refresh token 中的稳定 sid；旧 token 回退到当前 access token hash
         current_token = None
         if "access_token" in http_request.cookies:
             current_token = http_request.cookies.get("access_token")
         elif http_request.headers.get("Authorization", "").startswith("Bearer "):
             current_token = http_request.headers.get("Authorization", "").replace("Bearer ", "")
-        
-        if current_token:
+
+        current_session_id = payload.get("sid")
+        if not current_session_id and current_token:
             current_session_id = hashlib.sha256(current_token.encode()).hexdigest()
+
+        session = None
+        if current_session_id:
             session_result = await db.execute(
                 select(UserSession).where(
                     UserSession.session_id == current_session_id,
@@ -665,8 +669,8 @@ async def refresh_token(
                 )
             )
             session = session_result.scalar_one_or_none()
-            
-            if session and not session.is_active:
+
+            if not session or not session.is_active:
                 return error_response(
                     code=ErrorCode.AUTH_TOKEN_INVALID,
                     message="Session has been revoked",
@@ -677,27 +681,18 @@ async def refresh_token(
         
         # [*] v6.0.0修复:使用 refresh_token_pair 同时生成新的 access token 和 refresh token
         # [*] v6.0.0修复:refresh_token_pair 现在是异步方法(需要访问 Redis 黑名单)
-        new_tokens = await auth_service.refresh_token_pair(refresh_token_value)
-        
-        if current_token:
-            from datetime import datetime, timedelta
-            import hashlib
+        new_tokens = await auth_service.refresh_token_pair(
+            refresh_token_value,
+            session_id=current_session_id,
+        )
 
-            current_session_id = hashlib.sha256(current_token.encode()).hexdigest()
-            new_session_id = hashlib.sha256(new_tokens["access_token"].encode()).hexdigest()
-            session_result = await db.execute(
-                select(UserSession).where(
-                    UserSession.session_id == current_session_id,
-                    UserSession.user_id == user_id,
-                )
-            )
-            session = session_result.scalar_one_or_none()
-            if session:
-                session.session_id = new_session_id
-                session.last_active_at = datetime.now(timezone.utc)
-                session.expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-                session.is_active = True
-                await db.commit()
+        if session:
+            from datetime import datetime, timedelta
+
+            session.last_active_at = datetime.now(timezone.utc)
+            session.expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            session.is_active = True
+            await db.commit()
         
         # [*] v6.0.0新增:创建响应对象,用于设置 Cookie
         from fastapi.responses import JSONResponse
@@ -757,7 +752,7 @@ async def refresh_token(
 @router.post("/logout")
 async def logout(
     request: Request,
-    current_user: DimUser = Depends(require_admin),
+    current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
