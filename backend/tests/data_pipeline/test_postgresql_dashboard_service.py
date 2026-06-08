@@ -1366,7 +1366,11 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "api.business_overview_shop_racing_module")
+            for target in (
+                "api.business_overview_shop_racing_module",
+                "api.business_overview_shop_racing_monthly_module",
+            ):
+                await execute_sql_target(session, target)
             await session.commit()
 
         monkeypatch.setattr(

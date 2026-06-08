@@ -9,6 +9,7 @@ feature flag.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date as date_cls
 from datetime import datetime, timedelta, timezone
@@ -336,6 +337,27 @@ async def _resolve_cached_payload(
     return payload, "BYPASS"
 
 
+async def _resolve_cached_data(
+    request: Request,
+    cache_type: str,
+    cache_params: Dict[str, Any],
+    producer,
+):
+    async def _produce_payload():
+        result = await producer()
+        return json.loads(success_response(data=result).body.decode())
+
+    payload, cache_status = await _resolve_cached_payload(
+        request,
+        cache_type,
+        cache_params,
+        _produce_payload,
+    )
+    if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
+        return payload["data"], cache_status
+    return payload, cache_status
+
+
 def _extract_user_role_codes(current_user: Any) -> set[str]:
     role_codes: set[str] = set()
     for role in getattr(current_user, "roles", []) or []:
@@ -533,73 +555,118 @@ async def get_business_overview_bootstrap_postgresql(
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
             started = time.perf_counter()
-            kpi_started = time.perf_counter()
-            kpi_result = await service.get_business_overview_kpi(
-                month=effective_date,
-                platform=effective_platform_code,
-                granularity=effective_granularity,
-                target_date=effective_date,
-                shop_id=shop_id,
-            )
-            kpi_ms = (time.perf_counter() - kpi_started) * 1000.0
 
-            comparison_started = time.perf_counter()
-            comparison_result = await service.get_business_overview_comparison(
-                granularity=effective_granularity,
-                target_date=effective_date,
-                platform=effective_platform_code,
-            )
-            comparison_ms = (time.perf_counter() - comparison_started) * 1000.0
+            async def _timed_module(name: str, cache_type: str, module_params: dict[str, Any], producer):
+                module_started = time.perf_counter()
+                result, module_cache_status = await _resolve_cached_data(
+                    request,
+                    cache_type,
+                    _normalize_cache_params(module_params),
+                    producer,
+                )
+                return name, result, (time.perf_counter() - module_started) * 1000.0, module_cache_status
 
-            operational_started = time.perf_counter()
-            operational_result = await service.get_business_overview_operational_metrics(
-                month=effective_operational_month,
-                platform=effective_platform_code,
-                shop_id=shop_id,
+            module_results = await asyncio.gather(
+                _timed_module(
+                    "kpi",
+                    "dashboard_kpi",
+                    {
+                        "granularity": effective_granularity,
+                        "period_key": effective_date,
+                        "platform_code": effective_platform_code,
+                        "shop_id": shop_id,
+                    },
+                    lambda: service.get_business_overview_kpi(
+                        month=effective_date,
+                        platform=effective_platform_code,
+                        granularity=effective_granularity,
+                        target_date=effective_date,
+                        shop_id=shop_id,
+                    ),
+                ),
+                _timed_module(
+                    "comparison",
+                    "dashboard_comparison",
+                    {
+                        "granularity": effective_granularity,
+                        "period_key": effective_date,
+                        "platform_code": effective_platform_code,
+                        "shop_id": shop_id,
+                    },
+                    lambda: service.get_business_overview_comparison(
+                        granularity=effective_granularity,
+                        target_date=effective_date,
+                        platform=effective_platform_code,
+                    ),
+                ),
+                _timed_module(
+                    "operational_metrics",
+                    "dashboard_operational_metrics",
+                    {
+                        "granularity": "monthly",
+                        "period_key": effective_operational_month,
+                        "platform_code": effective_platform_code,
+                        "shop_id": shop_id,
+                    },
+                    lambda: service.get_business_overview_operational_metrics(
+                        month=effective_operational_month,
+                        platform=effective_platform_code,
+                        shop_id=shop_id,
+                    ),
+                ),
+                _timed_module(
+                    "traffic_ranking",
+                    "dashboard_traffic_ranking",
+                    {
+                        "granularity": effective_granularity,
+                        "dimension": "shop",
+                        "period_key": effective_date,
+                        "platform_code": effective_platform_code,
+                        "shop_id": shop_id,
+                    },
+                    lambda: service.get_business_overview_traffic_ranking(
+                        granularity=effective_granularity,
+                        target_date=effective_date,
+                        dimension="shop",
+                        platform=effective_platform_code,
+                    ),
+                ),
+                _timed_module(
+                    "shop_racing",
+                    "dashboard_shop_racing",
+                    {
+                        "granularity": effective_granularity,
+                        "period_key": effective_date,
+                        "group_by": "shop",
+                        "platform_code": effective_platform_code,
+                        "shop_id": shop_id,
+                    },
+                    lambda: service.get_business_overview_shop_racing(
+                        granularity=effective_granularity,
+                        target_date=effective_date,
+                        group_by="shop",
+                        platform=effective_platform_code,
+                    ),
+                ),
             )
-            operational_ms = (time.perf_counter() - operational_started) * 1000.0
-
-            traffic_started = time.perf_counter()
-            traffic_ranking_result = await service.get_business_overview_traffic_ranking(
-                granularity=effective_granularity,
-                target_date=effective_date,
-                dimension="shop",
-                platform=effective_platform_code,
-            )
-            traffic_ms = (time.perf_counter() - traffic_started) * 1000.0
-
-            shop_racing_started = time.perf_counter()
-            shop_racing_result = await service.get_business_overview_shop_racing(
-                granularity=effective_granularity,
-                target_date=effective_date,
-                group_by="shop",
-                platform=effective_platform_code,
-            )
-            shop_racing_ms = (time.perf_counter() - shop_racing_started) * 1000.0
+            data = {name: result for name, result, _elapsed_ms, _cache_status in module_results}
+            elapsed_ms = {name: elapsed_ms for name, _result, elapsed_ms, _cache_status in module_results}
             total_ms = (time.perf_counter() - started) * 1000.0
 
             # Observability: break down slow bootstrap into its subcalls.
             # Keep threshold consistent with middleware's "slow request" concept.
-            if total_ms >= 1000 or max(kpi_ms, comparison_ms, operational_ms, traffic_ms, shop_racing_ms) >= 1000:
+            if total_ms >= 1000 or max(elapsed_ms.values(), default=0.0) >= 1000:
                 logger.warning(
                     "[slow_breakdown] /api/dashboard/business-overview/bootstrap "
-                    f"total={total_ms:.2f}ms kpi={kpi_ms:.2f}ms comparison={comparison_ms:.2f}ms "
-                    f"operational={operational_ms:.2f}ms traffic_ranking={traffic_ms:.2f}ms "
-                    f"shop_racing={shop_racing_ms:.2f}ms "
+                    f"total={total_ms:.2f}ms kpi={elapsed_ms['kpi']:.2f}ms "
+                    f"comparison={elapsed_ms['comparison']:.2f}ms "
+                    f"operational={elapsed_ms['operational_metrics']:.2f}ms "
+                    f"traffic_ranking={elapsed_ms['traffic_ranking']:.2f}ms "
+                    f"shop_racing={elapsed_ms['shop_racing']:.2f}ms "
                     f"granularity={effective_granularity} period_key={effective_date} month={effective_operational_month} "
                     f"platform={effective_platform_code or ''}"
                 )
-            return json.loads(
-                success_response(
-                    data={
-                        "kpi": kpi_result,
-                        "comparison": comparison_result,
-                        "operational_metrics": operational_result,
-                        "traffic_ranking": traffic_ranking_result,
-                        "shop_racing": shop_racing_result,
-                    }
-                ).body.decode()
-            )
+            return json.loads(success_response(data=data).body.decode())
 
         payload, cache_status = await _resolve_cached_payload(
             request,

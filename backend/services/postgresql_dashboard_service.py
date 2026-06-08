@@ -582,6 +582,55 @@ def rank_traffic_rows(rows: list[dict[str, Any]], dimension: str = "visitor") ->
     return ordered
 
 
+def _business_overview_identity_select_sql() -> str:
+    return """
+                sa.shop_account_id,
+                sa.main_account_id,
+                ma.main_account_name,
+                sa.store_name AS account_store_name,
+                NULLIF(
+                    TRIM(
+                        CONCAT_WS(
+                            ' / ',
+                            NULLIF(TRIM(ma.main_account_name), ''),
+                            NULLIF(TRIM(sa.store_name), '')
+                        )
+                    ),
+                    ''
+                ) AS account_display_name,
+                COALESCE(
+                    NULLIF(TRIM(ds.shop_name), ''),
+                    NULLIF(TRIM(sa.store_name), ''),
+                    CASE
+                        WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown')
+                        THEN NULL
+                        ELSE src.shop_id
+                    END
+                ) AS display_name"""
+
+
+def _business_overview_identity_join_sql() -> str:
+    return """
+            LEFT JOIN core.dim_shops ds
+              ON LOWER(COALESCE(ds.platform_code, '')) = LOWER(COALESCE(src.platform_code, ''))
+             AND COALESCE(ds.shop_id, '') = COALESCE(src.shop_id, '')
+            LEFT JOIN core.shop_accounts sa
+              ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
+             AND (
+                  COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
+                  OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
+                  OR sa.id::text = COALESCE(src.shop_id, '')
+             )
+            LEFT JOIN core.main_accounts ma
+              ON ma.main_account_id = sa.main_account_id"""
+
+
+def _business_overview_shop_racing_source_table(granularity: str) -> str:
+    if str(granularity or "").strip().lower() == "monthly":
+        return "api.business_overview_shop_racing_monthly_module"
+    return "api.business_overview_shop_racing_module"
+
+
 def reduce_annual_summary_kpi_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total_gmv = _sum_present_values(rows, "gmv")
     total_cost = _sum_present_values(rows, "total_cost")
@@ -1566,9 +1615,10 @@ class PostgresqlDashboardService:
         platform: str | None = None,
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
-        source_table = "api.business_overview_shop_racing_module"
+        normalized_granularity = str(granularity or "").strip().lower()
+        source_table = _business_overview_shop_racing_source_table(normalized_granularity)
         where_clause = "src.granularity = :granularity AND src.period_key = :period_key"
-        params: dict[str, Any] = {"granularity": granularity, "period_key": period_key}
+        params: dict[str, Any] = {"granularity": normalized_granularity, "period_key": period_key}
 
         query = f"""
             SELECT
@@ -1576,19 +1626,7 @@ class PostgresqlDashboardService:
                 src.period_key AS period_key,
                 src.platform_code,
                 src.shop_id,
-                sa.shop_account_id,
-                sa.main_account_id,
-                ma.main_account_name,
-                sa.store_name AS account_store_name,
-                COALESCE(
-                    NULLIF(TRIM(ds.shop_name), ''),
-                    NULLIF(TRIM(sa.store_name), ''),
-                    CASE
-                        WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown')
-                        THEN NULL
-                        ELSE src.shop_id
-                    END
-                ) AS display_name,
+{_business_overview_identity_select_sql()},
                 src.gmv,
                 src.order_count,
                 src.avg_order_value,
@@ -1597,18 +1635,7 @@ class PostgresqlDashboardService:
                 src.target_amount,
                 src.achievement_rate
             FROM {source_table} src
-            LEFT JOIN core.dim_shops ds
-              ON LOWER(COALESCE(ds.platform_code, '')) = LOWER(COALESCE(src.platform_code, ''))
-             AND COALESCE(ds.shop_id, '') = COALESCE(src.shop_id, '')
-            LEFT JOIN core.shop_accounts sa
-              ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
-             AND (
-                  COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
-                  OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
-                  OR sa.id::text = COALESCE(src.shop_id, '')
-             )
-            LEFT JOIN core.main_accounts ma
-              ON ma.main_account_id = sa.main_account_id
+{_business_overview_identity_join_sql()}
             WHERE {where_clause}
         """
         if platform:
@@ -1734,19 +1761,7 @@ class PostgresqlDashboardService:
                 src.period_key AS period_key,
                 src.platform_code,
                 src.shop_id,
-                sa.shop_account_id,
-                sa.main_account_id,
-                ma.main_account_name,
-                sa.store_name AS account_store_name,
-                COALESCE(
-                    NULLIF(TRIM(ds.shop_name), ''),
-                    NULLIF(TRIM(sa.store_name), ''),
-                    CASE
-                        WHEN LOWER(COALESCE(src.shop_id, '')) IN ('', 'none', 'unknown')
-                        THEN NULL
-                        ELSE src.shop_id
-                    END
-                ) AS display_name,
+{identity_select},
                 src.order_count,
                 src.visitor_count,
                 src.page_views,
@@ -1754,21 +1769,13 @@ class PostgresqlDashboardService:
                 src.uv_conversion_rate,
                 src.pv_conversion_rate
             FROM api.business_overview_traffic_ranking_module src
-            LEFT JOIN core.dim_shops ds
-              ON ds.platform_code = src.platform_code
-             AND ds.shop_id = src.shop_id
-            LEFT JOIN core.shop_accounts sa
-              ON LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(src.platform_code, ''))
-             AND (
-                  COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')
-                  OR COALESCE(sa.shop_account_id, '') = COALESCE(src.shop_id, '')
-                  OR sa.id::text = COALESCE(src.shop_id, '')
-             )
-            LEFT JOIN core.main_accounts ma
-              ON ma.main_account_id = sa.main_account_id
+{identity_join}
             WHERE src.granularity = :granularity
               AND src.period_key = :period_key
-            """
+            """.format(
+            identity_select=_business_overview_identity_select_sql(),
+            identity_join=_business_overview_identity_join_sql(),
+        )
         params = {"granularity": granularity, "period_key": period_key}
         if platform:
             query += " AND src.platform_code = :platform_code"
@@ -2278,7 +2285,10 @@ class PostgresqlDashboardService:
         }
         meta: dict[str, Any] = {
             "profit_source": "orders_raw_profit_field",
+            "target_source": "sql_operational_metrics_module",
             "expenses_source": "shop_month_rows_sum",
+            "operating_result_source": "sql_operational_metrics_module",
+            "service_enriched_fields": [],
             "warnings": [],
         }
         for row in rows:
@@ -2298,12 +2308,15 @@ class PostgresqlDashboardService:
         )
         if target_summary["target_amount"] is not None:
             total["monthly_target"] = round(target_summary["target_amount"], 2)
+            meta["target_source"] = "service_target_summary"
+            meta["service_enriched_fields"].append("monthly_target")
         loaded_expenses: float | None = None
         if platform is None and shop_id is None:
             loaded_expenses = await self._load_operating_expenses_summary(period_month)
             if loaded_expenses is not None and total["estimated_expenses"] in (None, 0, 0.0):
                 total["estimated_expenses"] = round(loaded_expenses, 2)
                 meta["expenses_source"] = "company_month_fallback_sum"
+                meta["service_enriched_fields"].append("estimated_expenses")
         elif total["estimated_expenses"] in (None, 0, 0.0):
             total["estimated_expenses"] = None
             meta["expenses_source"] = None
@@ -2315,14 +2328,18 @@ class PostgresqlDashboardService:
             meta["warnings"].append(warning)
         if total["estimated_gross_profit"] is not None and total["estimated_expenses"] is not None:
             total["operating_result"] = round(total["estimated_gross_profit"] - total["estimated_expenses"], 2)
+            meta["operating_result_source"] = "service_calculated_from_profit_and_expenses"
+            meta["service_enriched_fields"].append("operating_result")
 
         if total["monthly_total_achieved"] is not None and total["monthly_target"] is not None:
             if total["monthly_target"] > 0:
                 total["monthly_achievement_rate"] = round(
                     total["monthly_total_achieved"] * 100.0 / total["monthly_target"], 2
                 )
+                meta["service_enriched_fields"].append("monthly_achievement_rate")
             elif total["monthly_target"] == 0 and total["monthly_total_achieved"] == 0:
                 total["monthly_achievement_rate"] = 0
+                meta["service_enriched_fields"].append("monthly_achievement_rate")
             else:
                 total["monthly_achievement_rate"] = None
         else:

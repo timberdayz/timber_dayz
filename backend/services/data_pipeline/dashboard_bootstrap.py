@@ -21,6 +21,7 @@ DASHBOARD_MODULE_TARGETS: dict[str, dict[str, list[str]]] = {
             "api.business_overview_comparison_platform_module",
             "api.business_overview_comparison_module",
             "api.business_overview_shop_racing_module",
+            "api.business_overview_shop_racing_monthly_module",
             "api.business_overview_traffic_ranking_module",
             "api.business_overview_inventory_backlog_module",
             "api.inventory_backlog_summary_module",
