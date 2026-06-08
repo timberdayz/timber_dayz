@@ -8,6 +8,7 @@ import { normalizeRoleCode } from '@/config/rolePermissions'
 import { hasAnyRole } from '@/utils/authRoles'
 import {
   clearPersistedAuthState,
+  deriveAccessTokenExpiresAt,
   resetAuthRecoveryState,
   hasAnyPersistedAuthArtifact,
   readPersistedAuthState,
@@ -20,11 +21,29 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
   const isLoggedIn = computed(() => !!user.value)
   const isLoading = ref(false)
+  const accessTokenExpiresAt = ref(null)
+  const lastRefreshError = ref(null)
+
+  const persistAccessTokenExpiry = (response) => {
+    const expiresIn = response?.expires_in || response?.data?.expires_in
+    const expiresAt = deriveAccessTokenExpiresAt(expiresIn)
+    accessTokenExpiresAt.value = expiresAt
+    if (expiresAt) {
+      localStorage.setItem('accessTokenExpiresAt', String(expiresAt))
+    } else {
+      localStorage.removeItem('accessTokenExpiresAt')
+    }
+    return expiresAt
+  }
+
+  const getAuthErrorStatus = (error) => error?.response?.status || error?.status || null
 
   const clearLocalSession = () => {
     token.value = ''
     refreshToken.value = ''
     user.value = null
+    accessTokenExpiresAt.value = null
+    lastRefreshError.value = null
     clearPersistedAuthState(localStorage)
     resetAuthRecoveryState(localStorage)
 
@@ -49,8 +68,14 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = response.access_token || ''
       refreshToken.value = response.refresh_token || ''
       user.value = userInfo
-      writePersistedAuthState(localStorage, { user_info: userInfo })
+      const expiresAt = persistAccessTokenExpiry(response)
+      writePersistedAuthState(localStorage, {
+        user_info: userInfo,
+        expires_in: response.expires_in || response.data?.expires_in,
+        accessTokenExpiresAt: expiresAt,
+      })
       resetAuthRecoveryState(localStorage)
+      lastRefreshError.value = null
 
       const userStore = useUserStore()
       userStore.hydrateFromStorage()
@@ -81,13 +106,26 @@ export const useAuthStore = defineStore('auth', () => {
       if (shouldRevokeSession) {
         await authApi.logout()
       }
-    } catch (_) {
-      // ignore backend logout failure
-    } finally {
       clearLocalSession()
+      ElMessage.success('Logged out')
+    } catch (error) {
+      try {
+        await authApi.getCurrentUser()
+        ElMessage.error('Logout failed, please retry')
+        return
+      } catch (confirmError) {
+        const status = getAuthErrorStatus(confirmError)
+        if (status === 401 || status === 403) {
+          clearLocalSession()
+          ElMessage.success('Logged out')
+          return
+        }
+      }
+
+      console.error('[Auth] Server logout failed:', error)
+      ElMessage.error('Logout failed, please retry')
     }
 
-    ElMessage.success('已登出')
   }
 
   const refreshAccessToken = async () => {
@@ -95,11 +133,13 @@ export const useAuthStore = defineStore('auth', () => {
       const response = await authApi.refreshToken()
       token.value = response.access_token || token.value
       refreshToken.value = response.refresh_token || refreshToken.value
+      persistAccessTokenExpiry(response)
+      lastRefreshError.value = null
       resetAuthRecoveryState(localStorage)
       return true
     } catch (error) {
       console.error('[Auth] 刷新认证失败:', error)
-      clearLocalSession()
+      lastRefreshError.value = error
       return false
     }
   }
@@ -159,6 +199,8 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = ''
     refreshToken.value = ''
     user.value = state.authUser
+    accessTokenExpiresAt.value = state.accessTokenExpiresAt
+    lastRefreshError.value = null
 
     const userStore = useUserStore()
     userStore.hydrateFromStorage()
@@ -168,6 +210,8 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     refreshToken,
     user,
+    accessTokenExpiresAt,
+    lastRefreshError,
     isLoggedIn,
     isLoading,
     clearLocalSession,

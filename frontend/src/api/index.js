@@ -5,8 +5,14 @@ import {
   hasAuthRecoveryFailed,
   hasAnyPersistedAuthArtifact,
   markAuthRecoveryFailed,
-  readPersistedAuthState
+  readPersistedAuthState,
+  resetAuthRecoveryState
 } from '@/utils/authSession'
+import {
+  createSharedRefreshRunner,
+  handleRefreshFailureRecovery,
+  shouldRefreshAccessToken
+} from '@/utils/authRecovery'
 
 // ⭐ v6.0.0新增：现代化认证系统改进
 // 延迟导入 authStore（使用 ESM import() 避免循环依赖，Vite 浏览器环境无 require）
@@ -50,7 +56,8 @@ function clearAuthArtifacts() {
     'userInfo',
     'roles',
     'permissions',
-    'activeRole'
+    'activeRole',
+    'accessTokenExpiresAt'
   ].forEach((key) => localStorage.removeItem(key))
 }
 
@@ -210,6 +217,88 @@ const api = axios.create({
 })
 
 // 请求拦截器（async 以支持 await getAuthStore，Vite/ESM 无 require）
+const runSharedRefresh = createSharedRefreshRunner(async () => {
+  const store = getAuthStore()
+  return await store.refreshAccessToken()
+})
+
+function postRefreshMessage(type, payload = {}) {
+  if (!refreshChannel) return
+  try {
+    refreshChannel.postMessage({ type, ...payload })
+  } catch (error) {
+    console.warn('[Auth] Unable to notify refresh state:', error)
+  }
+}
+
+async function refreshAccessTokenWithBroadcast() {
+  const startedHere = !isRefreshing
+  if (startedHere) {
+    isRefreshing = true
+    postRefreshMessage('refresh_started')
+  }
+
+  try {
+    const refreshed = await runSharedRefresh()
+    if (refreshed) {
+      const store = getAuthStore()
+      postRefreshMessage('refresh_completed', {
+        accessTokenExpiresAt: store.accessTokenExpiresAt || null
+      })
+    } else {
+      postRefreshMessage('refresh_failed')
+    }
+    return refreshed
+  } finally {
+    if (startedHere) {
+      isRefreshing = false
+      if (refreshTimeout) {
+        clearTimeout(refreshTimeout)
+        refreshTimeout = null
+      }
+    }
+  }
+}
+
+async function confirmCurrentCookieSession() {
+  try {
+    await api.get('/auth/me', {
+      skipAuthRefresh: true,
+      skipAuthRecovery: true
+    })
+    resetAuthRecoveryState(localStorage)
+    return true
+  } catch (error) {
+    const status = error?.response?.status || error?.status
+    if (status === 401 || status === 403) {
+      return false
+    }
+    throw error
+  }
+}
+
+async function recoverAfterRefreshFailure(refreshError) {
+  return await handleRefreshFailureRecovery({
+    refreshError,
+    confirmCurrentSession: confirmCurrentCookieSession,
+    markRecoveryFailed: () => markAuthRecoveryFailed(localStorage),
+    clearLocalSession: forceLocalLogout,
+    redirectToLogin,
+    notifyTransientFailure: () => {
+      ElMessage.warning('Authentication service is temporarily unavailable, please retry later')
+    },
+    notifyRecovered: () => resetAuthRecoveryState(localStorage)
+  })
+}
+
+function getStoreRefreshError(fallbackError) {
+  try {
+    return getAuthStore().lastRefreshError || fallbackError
+  } catch {
+    return fallbackError
+  }
+}
+
 api.interceptors.request.use(
   async (config) => {
     // 记录请求开始时间（用于计算响应时间）
@@ -236,6 +325,29 @@ api.interceptors.request.use(
         // 如果 authStore 未初始化，从 localStorage 读取
         token = null
         token = null
+      }
+
+      const persistedState = readPersistedAuthState(localStorage)
+      let accessTokenExpiresAt = persistedState.accessTokenExpiresAt
+      try {
+        const store = getAuthStore()
+        accessTokenExpiresAt = store.accessTokenExpiresAt || accessTokenExpiresAt
+      } catch {
+        // Pinia may not be active during early bootstrap.
+      }
+
+      if (
+        !config.skipAuthRefresh &&
+        shouldRefreshAccessToken({ accessTokenExpiresAt })
+      ) {
+        const refreshed = await refreshAccessTokenWithBroadcast()
+        if (!refreshed) {
+          const refreshError = getStoreRefreshError(new Error('Token refresh failed'))
+          const recoveryResult = await recoverAfterRefreshFailure(refreshError)
+          if (recoveryResult !== 'recovered') {
+            return Promise.reject(refreshError)
+          }
+        }
       }
 
       // ⭐ v6.0.0新增：Token 刷新预检查（Phase 4: 优化 Token 过期时间）
@@ -373,7 +485,11 @@ api.interceptors.response.use(
     return data
   },
   async (error) => {
-    const config = error.config
+    const config = error.config || {}
+
+    if (config.skipAuthRecovery) {
+      return Promise.reject(error)
+    }
 
     // 初始化重试计数器
     if (!config.retryCount) {
@@ -440,8 +556,7 @@ api.interceptors.response.use(
       }
 
       if (originalRequest._retry) {
-        forceLocalLogout()
-        redirectToLogin()
+        await recoverAfterRefreshFailure(error)
         return Promise.reject(error)
       }
 
@@ -458,19 +573,9 @@ api.interceptors.response.use(
       }
 
       originalRequest._retry = true
-      isRefreshing = true
-
-      if (refreshChannel) {
-        try {
-          refreshChannel.postMessage({ type: 'refresh_started' })
-        } catch (refreshNotifyError) {
-          console.warn('[Auth] ????????????????????', refreshNotifyError)
-        }
-      }
 
       try {
-        const store = getAuthStore()
-        const refreshed = await store.refreshAccessToken()
+        const refreshed = await refreshAccessTokenWithBroadcast()
 
         if (refreshed) {
           failedQueue.forEach(({ resolve }) => {
@@ -493,30 +598,23 @@ api.interceptors.response.use(
           return api(originalRequest)
         }
 
-        const refreshError = new Error('Token refresh failed')
+        const refreshError = getStoreRefreshError(new Error('Token refresh failed'))
+        const recoveryResult = await recoverAfterRefreshFailure(refreshError)
+        if (recoveryResult === 'recovered') {
+          failedQueue.forEach(({ resolve }) => {
+            resolve()
+          })
+          failedQueue = []
+          return api(originalRequest)
+        }
+
         failedQueue.forEach(({ reject }) => {
           reject(refreshError)
         })
         failedQueue = []
-
-        if (refreshChannel) {
-          try {
-            refreshChannel.postMessage({ type: 'refresh_failed' })
-          } catch (refreshFailedError) {
-            console.warn('[Auth] ????????????????????', refreshFailedError)
-          }
-        }
-
-        markAuthRecoveryFailed(localStorage)
-        forceLocalLogout()
-        redirectToLogin()
         return Promise.reject(refreshError)
       } catch (refreshError) {
         console.error('Token refresh failed:', refreshError)
-        failedQueue.forEach(({ reject }) => {
-          reject(refreshError)
-        })
-        failedQueue = []
 
         if (refreshChannel) {
           try {
@@ -526,9 +624,18 @@ api.interceptors.response.use(
           }
         }
 
-        markAuthRecoveryFailed(localStorage)
-        forceLocalLogout()
-        redirectToLogin()
+        const recoveryResult = await recoverAfterRefreshFailure(refreshError)
+        if (recoveryResult === 'recovered') {
+          failedQueue.forEach(({ resolve }) => {
+            resolve()
+          })
+          failedQueue = []
+          return api(originalRequest)
+        }
+        failedQueue.forEach(({ reject }) => {
+          reject(refreshError)
+        })
+        failedQueue = []
         return Promise.reject(refreshError)
       } finally {
         isRefreshing = false
