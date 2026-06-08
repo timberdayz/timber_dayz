@@ -218,6 +218,11 @@ async def test_logout_revokes_current_session_and_refresh_token(monkeypatch):
     refresh_revoke = AsyncMock(return_value=True)
 
     monkeypatch.setattr(auth_router.audit_service, "log_action", audit_log)
+    monkeypatch.setattr(
+        auth_router.auth_service,
+        "verify_token",
+        lambda token: {"user_id": 101, "sid": "stable-session-id", "type": "access"},
+    )
     monkeypatch.setattr(auth_router.auth_service, "revoke_refresh_token", refresh_revoke, raising=False)
 
     response = await auth_router.logout(
@@ -228,6 +233,10 @@ async def test_logout_revokes_current_session_and_refresh_token(monkeypatch):
 
     assert session.is_active is False
     assert db.commit.await_count >= 1
+    compiled_session_query = str(
+        db.execute.await_args_list[0].args[0].compile(compile_kwargs={"literal_binds": True})
+    )
+    assert "stable-session-id" in compiled_session_query
     refresh_revoke.assert_awaited_once_with("refresh-token-value")
     set_cookie_headers = response.headers.getlist("set-cookie")
     assert any("access_token=" in header for header in set_cookie_headers)

@@ -782,7 +782,14 @@ async def logout(
     if access_token_value:
         import hashlib
 
-        session_id = hashlib.sha256(access_token_value.encode()).hexdigest()
+        try:
+            access_payload = auth_service.verify_token(access_token_value)
+            session_id = access_payload.get("sid")
+        except HTTPException:
+            session_id = None
+
+        if not session_id:
+            session_id = hashlib.sha256(access_token_value.encode()).hexdigest()
         session_result = await db.execute(
             select(UserSession).where(
                 UserSession.session_id == session_id,
