@@ -106,6 +106,7 @@ class Settings:
     # [*] v6.0.0更新:Access Token 过期时间(开发/生产统一为 1 小时，减少工作被打断)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+    REFRESH_TOKEN_ROTATION_GRACE_SECONDS: int = int(os.getenv("REFRESH_TOKEN_ROTATION_GRACE_SECONDS", "30"))
     
     # CORS配置
     # [*] 从环境变量读取 ALLOWED_ORIGINS(支持逗号分隔的多个值)
