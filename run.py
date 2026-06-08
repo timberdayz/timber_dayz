@@ -1144,7 +1144,8 @@ def _resolve_backend_runtime_mode(args):
     if getattr(args, "frontend_only", False):
         return None
     if getattr(args, "local", False):
-        return "development"
+        env_profile = os.getenv("XIHONG_ENV_PROFILE", "").strip().lower()
+        return "collector" if env_profile == "collection" else "development"
     if getattr(args, "use_docker", False):
         return "collector" if getattr(args, "collection", False) else "production"
     return "development"

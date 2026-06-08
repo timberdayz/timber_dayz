@@ -11,6 +11,7 @@ This file is the agent-facing baseline for local development environment assumpt
 - npm: current local version is npm 11.9.0.
 - Docker: Docker Desktop is available; current local Docker CLI is 28.5.1.
 - Terminal and log output must avoid emoji.
+- Repository text source files must be saved as UTF-8 with LF line endings.
 
 ## Runtime Requirements
 
@@ -37,6 +38,18 @@ Default local startup path:
 python run.py --local
 ```
 
+When `python run.py --local` is used for collection or scheduled collection on a
+Windows machine:
+
+- keep `postgres`, `redis`, `celery-worker`, and `celery-beat` in Docker
+- run backend and frontend as local processes
+- do not keep Docker `backend-api` or Docker `backend-collector` running at the
+  same time
+
+Otherwise the frontend proxy on `localhost:8001` can target the wrong backend,
+and scheduled collection may be consumed by the container runtime instead of the
+local takeover runtime.
+
 Do not invent alternative startup paths unless the task explicitly requires debugging startup infrastructure.
 
 ## Environment Variables
@@ -59,3 +72,4 @@ Do not start a duplicate manual Redis container when the repository Docker runti
 - Before adding new dependencies, verify whether they affect local, Docker, production, or collection environments.
 - For collection work, also inspect `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`.
 - For launch-period work, follow `docs/guides/PRE_LAUNCH_RULES.md` and avoid broad environment refactors.
+- Use `.editorconfig` and `.vscode/settings.json` as the local editor baseline for UTF-8 source hygiene.

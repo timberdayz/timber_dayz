@@ -1,8 +1,8 @@
 ﻿"""
-鏁版嵁閲囬泦鐩稿叧鐨?Pydantic Schemas
-鐢ㄤ簬閲囬泦閰嶇疆銆佷换鍔＄鐞嗐€佽处鍙风鐞嗙瓑 API
+??????? Pydantic Schemas?
+????????????????? API?
 
-v4.18.0: 浠?backend/routers/collection.py 杩佺Щ鍒?schemas (Contract-First 鏋舵瀯)
+v4.18.0: ? backend/routers/collection.py ??? schemas?Contract-First ????
 """
 
 from datetime import date, datetime
@@ -12,12 +12,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TimeSelectionPayload(BaseModel):
-    """缁熶竴鏃堕棿閫夋嫨妯″瀷"""
+    """????????"""
 
-    mode: Literal["preset", "custom"] = Field(..., description="鏃堕棿妯″紡")
+    mode: Literal["preset", "custom"] = Field(..., description="????")
     preset: Optional[Literal["today", "yesterday", "last_7_days", "last_30_days"]] = Field(
         None,
-        description="蹇嵎鏃堕棿棰勮",
+        description="??????",
     )
     start_date: Optional[str] = Field(None, description="鑷畾涔夊紑濮嬫棩鏈?YYYY-MM-DD")
     end_date: Optional[str] = Field(None, description="鑷畾涔夌粨鏉熸棩鏈?YYYY-MM-DD")
@@ -286,11 +286,11 @@ class TaskCreateRequest(BaseModel):
 
 
 class ResumeTaskRequest(BaseModel):
-    """缁х画浠诲姟璇锋眰(楠岃瘉鐮佹仮澶? 鎻愪氦楠岃瘉鐮併€丱TP銆佹垨鎵嬪姩瀹屾垚淇″彿)"""
+    """???????????????????OTP?????????"""
 
-    captcha_code: Optional[str] = Field(None, description="鍥惧舰楠岃瘉鐮?浜哄伐杈撳叆)")
-    otp: Optional[str] = Field(None, description="鐭俊/閭楠岃瘉鐮?OTP)")
-    manual_completed: Optional[bool] = Field(None, description="鐢ㄦ埛宸叉墜鍔ㄥ畬鎴愭粦鍧楃瓑楠岃瘉, 璇锋眰缁х画")
+    captcha_code: Optional[str] = Field(None, description="???????????")
+    otp: Optional[str] = Field(None, description="??/??????OTP?")
+    manual_completed: Optional[bool] = Field(None, description="?????????????????")
 
     @model_validator(mode="after")
     def validate_exactly_one_value(self):
@@ -304,7 +304,7 @@ class ResumeTaskRequest(BaseModel):
         self.otp = otp or None
         self.manual_completed = True if manual_completed else None
         return self
-
+    """????"""
 
 class TaskResponse(BaseModel):
     """任务响应"""
@@ -369,6 +369,12 @@ class CollectionConfigRunResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    task_count: int = 0
+    active_task_count: int = 0
+    terminal_task_count: int = 0
+    last_task_status: Optional[str] = None
+    can_cancel: bool = False
+    status_reason: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -391,7 +397,7 @@ class CollectionVerificationItem(BaseModel):
 
 
 class TaskLogResponse(BaseModel):
-    """浠诲姟鏃ュ織鍝嶅簲"""
+    """??????"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -403,7 +409,7 @@ class TaskLogResponse(BaseModel):
 
 
 class CollectionAccountResponse(BaseModel):
-    """璐﹀彿鍝嶅簲(鑴辨晱,鐢ㄤ簬閲囬泦妯″潡)"""
+    """???????????????"""
 
     id: str
     name: str
@@ -489,7 +495,7 @@ class CollectionConfigBatchRemediationResponse(BaseModel):
 
 
 class TaskHistoryResponse(BaseModel):
-    """浠诲姟鍘嗗彶鍒嗛〉鍝嶅簲"""
+    """????????"""
 
     data: List[TaskResponse]
     total: int
@@ -499,7 +505,7 @@ class TaskHistoryResponse(BaseModel):
 
 
 class DailyStats(BaseModel):
-    """姣忔棩缁熻"""
+    """????"""
 
     date: date
     total: int
@@ -509,7 +515,7 @@ class DailyStats(BaseModel):
 
 
 class TaskStatsResponse(BaseModel):
-    """浠诲姟缁熻鍝嶅簲"""
+    """??????"""
 
     total_tasks: int
     completed: int
@@ -636,4 +642,7 @@ class HealthCheckResponse(BaseModel):
     database: str
     scheduler: str
     queue_runner: str = "unknown"
+    leader_lock: str = "unknown"
+    runtime_mode: str = "unknown"
+    deployment_role: str = "unknown"
     can_consume_queue: bool = False

@@ -2,6 +2,9 @@
 Collection scheduling and health APIs.
 """
 
+import os
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,12 +27,22 @@ from backend.schemas.collection import (
     ScheduleUpdateRequest,
 )
 from backend.schemas.common import SuccessResponse
-from modules.core.db import CollectionConfig, CollectionConfigRun
+from modules.core.db import CollectionConfig, CollectionConfigRun, CollectionTask
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["collection-schedule"], dependencies=[Depends(require_admin)])
+ACTIVE_CONFIG_RUN_STATUSES = {"queued", "running"}
+ACTIVE_COLLECTION_TASK_STATUSES = {
+    "pending",
+    "queued",
+    "running",
+    "paused",
+    "verification_required",
+    "verification_submitted",
+    "manual_intervention_required",
+}
 
 GRANULARITY_SCHEDULE_PRESETS = {
     "daily": {
@@ -97,6 +110,83 @@ def _build_granularity_schedule_response(
     )
 
 
+async def _build_config_run_response_payload(
+    db: AsyncSession,
+    run: CollectionConfigRun,
+) -> dict:
+    task_rows = (
+        await db.execute(
+            select(CollectionTask).where(CollectionTask.config_run_id == run.id)
+        )
+    ).scalars().all()
+    task_statuses = [str(task.status or "") for task in task_rows]
+    active_task_count = sum(
+        1 for status in task_statuses if status in ACTIVE_COLLECTION_TASK_STATUSES
+    )
+    terminal_task_count = len(task_rows) - active_task_count
+    last_task_status = task_statuses[-1] if task_statuses else None
+
+    return {
+        "id": run.id,
+        "run_id": run.run_id,
+        "config_id": run.config_id,
+        "platform": run.platform,
+        "main_account_id": run.main_account_id,
+        "trigger_type": run.trigger_type,
+        "status": run.status,
+        "priority": run.priority,
+        "scheduled_for": run.scheduled_for,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "error_message": run.error_message,
+        "task_count": len(task_rows),
+        "active_task_count": active_task_count,
+        "terminal_task_count": terminal_task_count,
+        "last_task_status": last_task_status,
+        "can_cancel": str(run.status or "") in ACTIVE_CONFIG_RUN_STATUSES,
+        "status_reason": run.error_message,
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+    }
+
+
+async def _resolve_collection_runtime_health(request: Request) -> dict:
+    from backend.services.collection_runtime_health import (
+        collect_collection_runtime_health,
+    )
+
+    settings = getattr(request.app.state, "settings", None)
+    local_health = collect_collection_runtime_health(request.app, settings)
+    deployment_role = str(local_health.get("deployment_role", "") or "").lower()
+    runtime_mode = str(local_health.get("runtime_mode", "") or "").lower()
+
+    if runtime_mode == "collector" or deployment_role == "collector":
+        return local_health
+
+    bridge_url = os.getenv(
+        "COLLECTION_RUNTIME_HEALTH_URL",
+        "http://backend-collector:8000/healthz/ready",
+    ).strip()
+    if not bridge_url:
+        return local_health
+
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            response = await client.get(bridge_url)
+        payload = response.json()
+        if isinstance(payload, dict) and payload.get("checks"):
+            return {
+                "status": str(payload.get("status") or "unready"),
+                "runtime_mode": str(payload.get("runtime_mode") or "collector"),
+                "deployment_role": str(payload.get("deployment_role") or "collector"),
+                "checks": payload.get("checks") or {},
+            }
+    except Exception as exc:
+        logger.warning("Collection runtime bridge health fallback to local state: %s", exc)
+
+    return local_health
+
+
 @router.get("/config-runs", response_model=list[CollectionConfigRunResponse])
 async def list_config_runs(
     status: str | None = Query(None, description="Filter by config run status"),
@@ -111,7 +201,8 @@ async def list_config_runs(
         CollectionConfigRun.id.desc(),
     ).limit(limit)
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    runs = list(result.scalars().all())
+    return [await _build_config_run_response_payload(db, run) for run in runs]
 
 
 @router.get("/config-runs/{run_id}", response_model=CollectionConfigRunResponse)
@@ -125,7 +216,7 @@ async def get_config_run(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="config run not found")
-    return run
+    return await _build_config_run_response_payload(db, run)
 
 
 @router.delete("/config-runs/{run_id}", response_model=SuccessResponse[None])
@@ -142,7 +233,13 @@ async def cancel_config_run(
         detail = str(exc)
         if detail.startswith("CollectionConfigRun not found:"):
             raise HTTPException(status_code=404, detail="config run not found") from exc
-        if detail == "terminal config runs cannot be cancelled" or detail.startswith(
+        if detail == "terminal config runs cannot be cancelled":
+            return SuccessResponse(
+                success=True,
+                message="本次配置执行已结束，无需取消",
+                data=None,
+            )
+        if detail.startswith(
             "config run status cannot be cancelled:"
         ):
             raise HTTPException(status_code=409, detail=detail) from exc
@@ -340,7 +437,6 @@ async def health_check(
     db: AsyncSession = Depends(get_async_db),
 ):
     from backend.schemas.collection import BrowserPoolStatus
-    from backend.services.collection_scheduler import APSCHEDULER_AVAILABLE
     from backend.services.task_service import TaskService
 
     running_count = 0
@@ -400,21 +496,12 @@ async def health_check(
         await db.execute(text("SELECT 1"))
     except Exception:
         db_status = "error"
-
-    scheduler_status = "not_installed" if not APSCHEDULER_AVAILABLE else "ok"
-    if APSCHEDULER_AVAILABLE:
-        try:
-            from backend.services.collection_scheduler import CollectionScheduler
-
-            scheduler = CollectionScheduler.get_instance()
-            if not scheduler:
-                scheduler_status = "error"
-        except Exception:
-            scheduler_status = "error"
-
-    queue_runner = getattr(request.app.state, "collection_queue_runner", None)
-    queue_runner_task = getattr(queue_runner, "_task", None)
-    queue_runner_status = "running" if queue_runner_task and not queue_runner_task.done() else "stopped"
+    runtime_health = await _resolve_collection_runtime_health(request)
+    checks = runtime_health.get("checks") or {}
+    scheduler_status = str((checks.get("scheduler") or {}).get("status") or "error")
+    queue_runner_status = str((checks.get("queue_runner") or {}).get("status") or "error")
+    leader_lock_status = str((checks.get("leader_lock") or {}).get("status") or "unknown")
+    can_consume_queue = queue_runner_status == "running" and leader_lock_status != "standby"
 
     return HealthCheckResponse(
         status="healthy",
@@ -430,5 +517,8 @@ async def health_check(
         database=db_status,
         scheduler=scheduler_status,
         queue_runner=queue_runner_status,
-        can_consume_queue=queue_runner_status == "running",
+        leader_lock=leader_lock_status,
+        runtime_mode=str(runtime_health.get("runtime_mode") or "unknown"),
+        deployment_role=str(runtime_health.get("deployment_role") or "unknown"),
+        can_consume_queue=can_consume_queue,
     )

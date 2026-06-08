@@ -13,12 +13,18 @@ This avoids Redis port conflicts, duplicate container names, and mixed manual st
 - Celery Beat: Docker
 - Backend API: local process
 - Frontend Vite: local process
+- Docker `backend-api`: stopped
+- Docker `backend-collector`: stopped
 
 Recommended command:
 
 ```powershell
 python run.py --local
 ```
+
+If the machine is taking over collection duties, `python run.py --local` is the
+only backend runtime that should be active. Do not keep the Docker backend
+containers alive at the same time.
 
 When a Windows development machine temporarily takes over collection duties,
 keep the base developer values in `.env` or `.env.local`, and place the
@@ -61,6 +67,22 @@ Typical symptoms:
 Because of that, local development should use `16379`.
 
 ## Runtime Rules
+
+### 0. Stop conflicting Docker backends first
+
+Before local collection takeover, stop:
+
+```powershell
+docker stop xihong_erp_backend_api xihong_erp_backend_collector
+```
+
+Why:
+
+- the frontend dev proxy points to `http://localhost:8001`
+- the local backend started by `run.py --local` also expects to serve `8001`
+- Docker `backend-api` on `8001` creates split-brain API behavior
+- Docker `backend-collector` can continue consuming scheduled collection in the
+  container instead of the local takeover runtime
 
 ### 1. Let compose own Redis
 

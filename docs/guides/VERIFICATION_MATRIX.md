@@ -24,6 +24,8 @@ This file maps changed surfaces to repository-specific checks. The active verifi
 
 - Prefer targeted frontend checks for the affected module.
 - Verify API access stays under `frontend/src/api/`.
+- Run `python scripts/verify_utf8_source_hygiene.py` when editing frontend templates or other UTF-8 text-heavy source files on Windows.
+- Use a syntax-level frontend check such as `vite build` or `vue-tsc --noEmit` for Vue template changes.
 
 ## Collection Changes
 

@@ -10,6 +10,14 @@ Default local startup:
 python run.py --local
 ```
 
+For local collection takeover, stop Docker `backend-api` and
+`backend-collector` first, then use:
+
+```powershell
+docker stop xihong_erp_backend_api xihong_erp_backend_collector
+powershell -ExecutionPolicy Bypass -File .\scripts\start_local_collection_mode.ps1
+```
+
 Other supported modes:
 
 ```bash
@@ -46,11 +54,14 @@ alembic downgrade -1
 ## Validation
 
 ```bash
+python scripts/verify_utf8_source_hygiene.py
 python scripts/verify_architecture_ssot.py
 python scripts/verify_rules_completeness.py
 python scripts/verify_no_emoji.py
 python scripts/verify_api_contract_consistency.py
 ```
+
+On Windows, do not rely on editor auto-detection for source encoding. Keep source files in UTF-8 and let the repository guardrails fail fast if mojibake or template corruption is introduced.
 
 ## Testing And Quality
 

@@ -185,3 +185,12 @@ def test_run_py_local_mode_mentions_required_docker_services():
 
     assert "postgres、redis、celery-worker" in text
     assert "Docker 基础服务" in text
+
+
+def test_local_collection_mode_script_stops_conflicting_docker_backends():
+    text = Path("scripts/start_local_collection_mode.ps1").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "docker stop xihong_erp_backend_api xihong_erp_backend_collector" in text

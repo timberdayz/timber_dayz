@@ -31,6 +31,15 @@ def test_collector_mode_exposes_collection_but_not_dashboard(monkeypatch):
     assert "/api/dashboard/business-overview/kpi" not in paths
 
 
+def test_local_collector_mode_exposes_both_collection_and_dashboard(monkeypatch):
+    monkeypatch.setenv("DEPLOYMENT_ROLE", "local")
+    module = _reload_main(monkeypatch, "collector")
+    paths = _paths_for(module)
+
+    assert "/api/collection/configs" in paths
+    assert "/api/dashboard/business-overview/kpi" in paths
+
+
 def test_development_mode_exposes_both_collector_and_dashboard(monkeypatch):
     module = _reload_main(monkeypatch, "development")
     paths = _paths_for(module)

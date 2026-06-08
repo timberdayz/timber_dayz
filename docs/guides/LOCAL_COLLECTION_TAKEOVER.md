@@ -58,6 +58,36 @@ To skip the preflight check:
 powershell -ExecutionPolicy Bypass -File .\scripts\start_local_collection_mode.ps1 -SkipChecks
 ```
 
+## Required Docker Service Topology
+
+When local collection takeover is active, Docker should keep only the
+infrastructure and background queue support services:
+
+- `xihong_erp_postgres`
+- `xihong_erp_redis`
+- `xihong_erp_celery_worker`
+- `xihong_erp_celery_beat`
+
+Do not keep these containers running at the same time:
+
+- `xihong_erp_backend_api`
+- `xihong_erp_backend_collector`
+
+Reason:
+
+- `python run.py --local` starts the backend as a local Python process
+- the frontend dev proxy still targets `http://localhost:8001`
+- if Docker `backend-api` remains on `8001`, the UI and health checks can hit the
+  wrong backend instance
+- if Docker `backend-collector` remains active, scheduled collection can be
+  consumed by the container instead of the local takeover process
+
+Before starting local takeover, stop the conflicting containers:
+
+```powershell
+docker stop xihong_erp_backend_api xihong_erp_backend_collector
+```
+
 ## Verification
 
 After startup, verify:
@@ -66,6 +96,8 @@ After startup, verify:
 - `xihong_erp_redis` is healthy
 - `xihong_erp_celery_worker` is healthy
 - `xihong_erp_celery_beat` is healthy
+- `xihong_erp_backend_api` is stopped
+- `xihong_erp_backend_collector` is stopped
 - `http://localhost:8001/healthz/ready` returns `200`
 
 Check Redis port mapping:

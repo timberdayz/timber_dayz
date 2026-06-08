@@ -272,6 +272,58 @@ def test_main_local_mode_disables_backend_reload(monkeypatch):
     assert captured["enable_reload"] is False
 
 
+def test_local_collection_profile_uses_collector_runtime(monkeypatch):
+    run_module = _load_run_module()
+    captured = {}
+
+    monkeypatch.setattr(
+        run_module.argparse.ArgumentParser,
+        "parse_args",
+        lambda self: SimpleNamespace(
+            backend_only=True,
+            frontend_only=False,
+            no_browser=True,
+            no_celery=True,
+            use_docker=False,
+            collection=False,
+            local=True,
+            backend_window=False,
+            backend_headless=False,
+        ),
+    )
+    monkeypatch.setenv("XIHONG_ENV_PROFILE", "collection")
+    monkeypatch.setattr(run_module.sys_platform, "system", lambda: "Windows")
+    monkeypatch.setattr(run_module, "print_banner", lambda: None)
+    monkeypatch.setattr(run_module, "safe_print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_module, "ensure_postgres_redis_docker", lambda project_root, with_celery=True: True)
+    monkeypatch.setattr(run_module, "check_postgresql", lambda: True)
+    monkeypatch.setattr(run_module, "ensure_postgresql_dashboard_assets", lambda project_root: True)
+    monkeypatch.setattr(run_module, "cleanup_processes", lambda processes: None)
+    monkeypatch.setattr(run_module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(run_module, "warn_legacy_shop_session_artifacts", lambda project_root: None)
+    monkeypatch.setattr(run_module, "ensure_local_schema_ready", lambda: True)
+    monkeypatch.setattr(run_module, "_choose_local_backend_port", lambda port: port)
+
+    def _fake_start_backend(*, runtime_mode="development", windowed=None, enable_reload=None):
+        captured["runtime_mode"] = runtime_mode
+        return SimpleNamespace()
+
+    monkeypatch.setattr(run_module, "start_backend", _fake_start_backend)
+    monkeypatch.setattr(run_module, "wait_for_service", lambda port, name, max_wait=30: True)
+
+    sleep_calls = {"count": 0}
+
+    def _fake_sleep(seconds):
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] >= 3:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(run_module.time, "sleep", _fake_sleep)
+    run_module.main()
+
+    assert captured["runtime_mode"] == "collector"
+
+
 def test_choose_local_backend_port_falls_back_when_default_not_bindable(monkeypatch):
     run_module = _load_run_module()
 

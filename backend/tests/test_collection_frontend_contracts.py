@@ -10,6 +10,8 @@ COLLECTION_HISTORY_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/
 COMPONENT_RECORDER_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentRecorder.vue"
 COMPONENT_VERSIONS_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentVersions.vue"
 ACCOUNT_MANAGEMENT_VIEW = PROJECT_ROOT / "frontend/src/domains/platform/views/AccountManagement.vue"
+VSCODE_SETTINGS = PROJECT_ROOT / ".vscode/settings.json"
+EDITOR_CONFIG = PROJECT_ROOT / ".editorconfig"
 
 
 def test_collection_config_run_uses_sub_domains_payload():
@@ -22,9 +24,10 @@ def test_collection_config_run_uses_sub_domains_payload():
 def test_collection_config_uses_generic_domain_subtype_controls():
     text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
 
-    assert 'label="可编辑子类型"' in text
-    assert 'label="配置来源"' in text
-    assert "无子类型" in text
+    assert "sub-domain-section" in text
+    assert "sub-domain-label" in text
+    assert "shop-scope-meta" in text
+    assert "getScopeSubtypeDomains(row.scope).length" in text
     assert "Maximum recursive updates exceeded" not in text
     assert "getSelectedSubtypeDomains" in text
     assert "getScopeSubtypeDomains(row.scope)" in text
@@ -155,8 +158,49 @@ def test_collection_config_exposes_cancel_action_for_active_runs():
     api_text = (PROJECT_ROOT / "frontend/src/api/collection.js").read_text(encoding="utf-8")
 
     assert "collectionApi.cancelConfigRun(run.run_id)" in text
-    assert "['queued', 'running'].includes(run.status)" in text
+    assert "run.can_cancel" in text
     assert "cancelConfigRun" in api_text
+
+
+def test_collection_config_consumes_unified_runtime_health_states():
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
+
+    assert "runtime_mode" in text
+    assert "deployment_role" in text
+    assert "leader_lock" in text
+    assert "queue_runner" in text
+    assert "scheduler" in text
+    assert "can_consume_queue" in text
+    assert "scheduler === 'ok'" not in text
+    assert "queue_runner !== 'running'" not in text
+
+
+def test_collection_config_source_has_no_known_mojibake_tokens():
+    text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
+
+    forbidden_tokens = [
+        "鎵",
+        "鍙",
+        "閲",
+        "歿{",
+        "?/div>",
+        "?/span>",
+        "?/el-",
+        "?/p>",
+    ]
+    for token in forbidden_tokens:
+        assert token not in text
+
+
+def test_utf8_editor_guardrails_are_declared():
+    editor_text = EDITOR_CONFIG.read_text(encoding="utf-8")
+    vscode_settings = json.loads(VSCODE_SETTINGS.read_text(encoding="utf-8"))
+
+    assert "charset = utf-8" in editor_text
+    assert "end_of_line = lf" in editor_text
+    assert "insert_final_newline = true" in editor_text
+    assert vscode_settings["files.encoding"] == "utf8"
+    assert vscode_settings["files.autoGuessEncoding"] is False
 
 
 def test_collection_config_exposes_main_account_scoping_hooks():
@@ -194,10 +238,10 @@ def test_collection_history_exposes_origin_fields():
 def test_collection_tasks_mentions_main_account_coordination_steps():
     text = COLLECTION_TASKS_VIEW.read_text(encoding="utf-8")
 
-    assert "waiting_for_main_account_session" in text or "等待主账号会话" in text
-    assert "preparing_main_account_session" in text or "准备主账号会话" in text
-    assert "switching_target_shop" in text or "切换目标店铺" in text
-    assert "target_shop_ready" in text or "目标店铺已就绪" in text
+    assert "waiting_for_main_account_session" in text
+    assert "preparing_main_account_session" in text
+    assert "switching_target_shop" in text
+    assert "target_shop_ready" in text
 
 
 def test_collection_tasks_detail_drawer_shows_runtime_metadata():
@@ -211,7 +255,7 @@ def test_collection_tasks_detail_drawer_shows_runtime_metadata():
     assert "getRuntimeSessionModeLabel" in text
     assert "getSessionSourceLabel" in text
     assert "getRuntimeStrategyReasonLabel" in text
-    assert "已找到 storage_state，会先按快照恢复页面" in text
+    assert "storage_state_available" in text
     assert "storage_state 会话快照" in text
 
 

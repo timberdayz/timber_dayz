@@ -140,7 +140,8 @@ export const getConfigRun = async (runId) => {
 }
 
 export const cancelConfigRun = async (runId) => {
-  await api.delete(`/collection/config-runs/${runId}`)
+  const response = await api.delete(`/collection/config-runs/${runId}`)
+  return response
 }
 
 // ============================================================

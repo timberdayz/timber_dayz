@@ -132,14 +132,14 @@
       <div v-if="!configRuns.length" class="empty-tip">当前没有配置执行记录</div>
       <template v-else>
         <div class="queue-status-bar">
-          <el-tag size="small" :type="collectionHealth?.queue_runner === 'running' ? 'success' : 'danger'">
-            {{ collectionHealth?.queue_runner === 'running' ? '执行器在线' : '执行器未运行' }}
+          <el-tag size="small" :type="getRuntimeStatusTagType(collectionHealth?.queue_runner)">
+            {{ getQueueRunnerLabel(collectionHealth) }}
           </el-tag>
-          <el-tag size="small" :type="collectionHealth?.scheduler === 'ok' ? 'success' : 'warning'">
-            {{ collectionHealth?.scheduler === 'ok' ? '调度器正常' : '调度器不可用' }}
+          <el-tag size="small" :type="getRuntimeStatusTagType(collectionHealth?.scheduler)">
+            {{ getSchedulerLabel(collectionHealth) }}
           </el-tag>
-          <span v-if="collectionHealth?.queue_runner !== 'running'" class="shop-scope-meta">
-            当前只会入队，不会实际消费，请先检查后端 QueueRunner。
+          <span v-if="showQueueConsumptionHint(collectionHealth)" class="shop-scope-meta">
+            {{ getQueueConsumptionHint(collectionHealth) }}
           </span>
         </div>
         <div class="queue-list">
@@ -155,7 +155,7 @@
               <span class="queue-run-id">{{ run.run_id }}</span>
             </div>
             <el-button
-              v-if="['queued', 'running'].includes(run.status)"
+              v-if="run.can_cancel"
               size="small"
               type="danger"
               plain
@@ -170,7 +170,7 @@
             <span>{{ run.trigger_type === 'manual' ? '手动执行' : '定时执行' }}</span>
             <span>创建于 {{ formatDateTime(run.created_at) }}</span>
           </div>
-          <div v-if="run.error_message" class="queue-item-error">{{ run.error_message }}</div>
+          <div v-if="run.status_reason || run.error_message" class="queue-item-error">{{ run.status_reason || run.error_message }}</div>
         </div>
         </div>
       </template>
@@ -942,6 +942,66 @@ function getConfigRunTagType(status) {
   return tagMap[status] || 'info'
 }
 
+function getRuntimeStatusTagType(status) {
+  const tagMap = {
+    running: 'success',
+    acquired: 'success',
+    standby: 'warning',
+    disabled: 'info',
+    unknown: 'info',
+    error: 'danger',
+  }
+  return tagMap[status] || 'info'
+}
+
+function getQueueRunnerLabel(health) {
+  const status = health?.queue_runner || 'unknown'
+  const labels = {
+    running: '?????',
+    standby: '?????',
+    disabled: '??????',
+    error: '?????',
+    unknown: '???????',
+  }
+  return labels[status] || `???${status}`
+}
+
+function getSchedulerLabel(health) {
+  const status = health?.scheduler || 'unknown'
+  const labels = {
+    running: '?????',
+    standby: '?????',
+    disabled: '??????',
+    error: '?????',
+    unknown: '???????',
+  }
+  return labels[status] || `???${status}`
+}
+
+function showQueueConsumptionHint(health) {
+  if (!health) return true
+  return !health.can_consume_queue
+}
+
+function getQueueConsumptionHint(health) {
+  if (!health) return '????????????? collector?'
+  const runtimeMode = health.runtime_mode || 'unknown'
+  const deploymentRole = health.deployment_role || 'unknown'
+  if (health.queue_runner === 'standby' || health.leader_lock === 'standby') {
+    return `?? collector ???????mode=${runtimeMode}, role=${deploymentRole}??????????????????`
+  }
+  if (health.queue_runner === 'disabled') {
+    return `???????????????mode=${runtimeMode}, role=${deploymentRole}??`
+  }
+  if (health.queue_runner === 'error') {
+    return '????????????? collector ????????'
+  }
+  if (!health.can_consume_queue) {
+    return '???????????? collector ?????'
+  }
+  return ''
+}
+
 function formatDateTime(value) {
   if (!value) return '-'
   const date = new Date(value)
@@ -1496,8 +1556,8 @@ async function runConfig(row) {
       return
     }
     await Promise.all([loadConfigRuns(), loadCollectionHealth()])
-    if (collectionHealth.value?.queue_runner !== 'running') {
-      ElMessage.warning(`已入队 ${runResult.run_id}，但当前执行器未运行`)
+    if (!collectionHealth.value?.can_consume_queue) {
+      ElMessage.warning(`已入队 ${runResult.run_id}，但当前 collector 暂不可消费队列`)
       return
     }
     ElMessage.success(`已加入执行队列: ${runResult.run_id}`)

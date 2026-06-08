@@ -508,6 +508,11 @@ async def test_health_check_exposes_config_run_queue_status(
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["runtime_mode"] in {"api", "collector", "local", "all", "development", "production", "unknown"}
+    assert payload["deployment_role"] in {"api", "collector", "local", "all", "unknown"}
+    assert payload["leader_lock"] in {"acquired", "standby", "unknown"}
+    assert payload["scheduler"] in {"running", "standby", "disabled", "error"}
+    assert payload["queue_runner"] in {"running", "standby", "disabled", "error"}
     assert payload["running_config_runs"] == 1
     assert payload["queued_config_runs"] == 1
     assert payload["active_config_run"]["run_id"] == "run-running"
@@ -608,6 +613,74 @@ async def test_get_config_run_returns_matching_run(schedule_sync_client, schedul
 
 
 @pytest.mark.asyncio
+async def test_get_config_run_returns_task_projection(schedule_sync_client, schedule_sync_session):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    config = CollectionConfig(
+        name="run-detail-projection-config-v1",
+        platform="shopee",
+        main_account_id="main-shopee",
+        account_ids=["shop-sg-1"],
+        data_domains=["orders"],
+        sub_domains=None,
+        granularity="daily",
+        date_range_type="yesterday",
+        schedule_enabled=True,
+        schedule_cron="0 6 * * *",
+        retry_count=3,
+        execution_mode="headless",
+        is_active=True,
+    )
+    schedule_sync_session.add(config)
+    await schedule_sync_session.flush()
+    run = CollectionConfigRun(
+        run_id="run-detail-projection",
+        config_id=config.id,
+        platform="shopee",
+        main_account_id="main-shopee",
+        trigger_type="scheduled",
+        status="running",
+    )
+    schedule_sync_session.add(run)
+    await schedule_sync_session.flush()
+    schedule_sync_session.add_all(
+        [
+            CollectionTask(
+                task_id="run-detail-task-1",
+                config_id=config.id,
+                config_run_id=run.id,
+                platform="shopee",
+                account="shop-sg-1",
+                status="running",
+                trigger_type="scheduled",
+            ),
+            CollectionTask(
+                task_id="run-detail-task-2",
+                config_id=config.id,
+                config_run_id=run.id,
+                platform="shopee",
+                account="shop-my-1",
+                status="failed",
+                trigger_type="scheduled",
+                error_message="shop blocked",
+            ),
+        ]
+    )
+    await schedule_sync_session.commit()
+
+    response = await client.get("/api/collection/config-runs/run-detail-projection")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["task_count"] == 2
+    assert payload["active_task_count"] == 1
+    assert payload["terminal_task_count"] == 1
+    assert payload["last_task_status"] in {"running", "failed"}
+    assert payload["can_cancel"] is True
+
+
+@pytest.mark.asyncio
 async def test_cancel_config_run_marks_queued_run_cancelled(
     schedule_sync_client,
     schedule_sync_session,
@@ -704,3 +777,51 @@ async def test_cancel_config_run_marks_running_run_cancelled(
     assert payload["success"] is True
     await schedule_sync_session.refresh(run)
     assert run.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_config_run_is_idempotent_for_terminal_run(
+    schedule_sync_client,
+    schedule_sync_session,
+    auth_headers,
+):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    config = CollectionConfig(
+        name="cancel-terminal-config-v1",
+        platform="shopee",
+        main_account_id="main-shopee",
+        account_ids=["shop-sg-1"],
+        data_domains=["orders"],
+        sub_domains=None,
+        granularity="daily",
+        date_range_type="yesterday",
+        schedule_enabled=False,
+        schedule_cron=None,
+        retry_count=3,
+        execution_mode="headless",
+        is_active=True,
+    )
+    schedule_sync_session.add(config)
+    await schedule_sync_session.flush()
+    run = CollectionConfigRun(
+        run_id="completed-cancel-run",
+        config_id=config.id,
+        platform="shopee",
+        main_account_id="main-shopee",
+        trigger_type="manual",
+        status="completed",
+    )
+    schedule_sync_session.add(run)
+    await schedule_sync_session.commit()
+
+    response = await client.delete(
+        "/api/collection/config-runs/completed-cancel-run",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert "无需取消" in (payload.get("message") or "")

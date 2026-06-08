@@ -29,6 +29,24 @@ def test_resolve_backend_runtime_mode_prefers_local_development():
     assert module._resolve_backend_runtime_mode(args) == "development"
 
 
+def test_resolve_backend_runtime_mode_uses_collector_for_local_collection_profile(monkeypatch):
+    module = _load_run_module()
+    monkeypatch.setenv("XIHONG_ENV_PROFILE", "collection")
+
+    args = type(
+        "Args",
+        (),
+        {
+            "local": True,
+            "use_docker": False,
+            "collection": False,
+            "frontend_only": False,
+        },
+    )()
+
+    assert module._resolve_backend_runtime_mode(args) == "collector"
+
+
 def test_resolve_backend_runtime_mode_uses_collector_for_collection_docker():
     module = _load_run_module()
 

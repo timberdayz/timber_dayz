@@ -37,11 +37,18 @@ def resolve_runtime_mode(settings, runtime_mode: str | None = None) -> str:
 
 def register_mode_routes(app: FastAPI, logger, runtime_mode: str) -> None:
     register_common_routes(app, logger)
+    deployment_role = os.getenv("DEPLOYMENT_ROLE", "").strip().lower()
     if runtime_mode == "production":
         logger.info("Dashboard router source: PostgreSQL")
         register_production_routes(app)
         return
     if runtime_mode == "collector":
+        if deployment_role == "local":
+            logger.info("Dashboard router source: PostgreSQL")
+            register_collector_routes(app, logger)
+            register_production_routes(app)
+            register_development_routes(app)
+            return
         register_collector_routes(app, logger)
         return
 

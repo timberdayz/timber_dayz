@@ -30,6 +30,16 @@ docker-compose*.yml text eol=lf
 # JSON files
 *.json text eol=lf
 
+# Frontend source files
+*.vue text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.scss text eol=lf
+*.html text eol=lf
+
 # TypeScript declaration outputs (often generated)
 frontend/auto-imports.d.ts text eol=lf
 frontend/components.d.ts text eol=lf
