@@ -60,7 +60,10 @@ def test_business_overview_traffic_ranking_module_sql_asset():
             "mart.shop_month_kpi",
             "visitor_count",
             "page_views",
+            "order_count",
             "conversion_rate",
+            "uv_conversion_rate",
+            "pv_conversion_rate",
         ),
     )
     sql_text = Path("sql/api_modules/business_overview_traffic_ranking_module.sql").read_text(encoding="utf-8")

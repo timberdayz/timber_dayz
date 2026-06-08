@@ -1589,9 +1589,12 @@ class PostgresqlDashboardService:
                         ELSE src.shop_id
                     END
                 ) AS display_name,
+                src.order_count,
                 src.visitor_count,
                 src.page_views,
-                src.conversion_rate
+                src.conversion_rate,
+                src.uv_conversion_rate,
+                src.pv_conversion_rate
             FROM api.business_overview_traffic_ranking_module src
             LEFT JOIN core.dim_shops ds
               ON ds.platform_code = src.platform_code
@@ -1645,12 +1648,48 @@ class PostgresqlDashboardService:
                         "is_unmatched": not bool(account_id),
                         "visitor_count": 0.0,
                         "page_views": 0.0,
+                        "order_count": 0.0,
                         "conversion_rate": None,
+                        "uv_conversion_rate": None,
+                        "pv_conversion_rate": None,
+                        "_has_order_count": False,
+                        "_has_visitor_count": False,
+                        "_has_page_views": False,
                     },
                 )
-                grouped[key]["visitor_count"] += _to_optional_float(row.get("visitor_count")) or 0.0
-                grouped[key]["page_views"] += _to_optional_float(row.get("page_views")) or 0.0
-            normalized_rows = list(grouped.values())
+                visitor_count = _to_optional_float(row.get("visitor_count"))
+                page_views = _to_optional_float(row.get("page_views"))
+                order_count = _to_optional_float(row.get("order_count"))
+                if visitor_count is not None:
+                    grouped[key]["visitor_count"] += visitor_count
+                    grouped[key]["_has_visitor_count"] = True
+                if page_views is not None:
+                    grouped[key]["page_views"] += page_views
+                    grouped[key]["_has_page_views"] = True
+                if order_count is not None:
+                    grouped[key]["order_count"] += order_count
+                    grouped[key]["_has_order_count"] = True
+            normalized_rows = []
+            for value in grouped.values():
+                rate_order_count = (
+                    value.get("order_count") if value.pop("_has_order_count") else None
+                )
+                rate_visitor_count = (
+                    value.get("visitor_count") if value.pop("_has_visitor_count") else None
+                )
+                rate_page_views = (
+                    value.get("page_views") if value.pop("_has_page_views") else None
+                )
+                value["uv_conversion_rate"] = _percent_or_none(
+                    rate_order_count,
+                    rate_visitor_count,
+                )
+                value["pv_conversion_rate"] = _percent_or_none(
+                    rate_order_count,
+                    rate_page_views,
+                )
+                value["conversion_rate"] = value["uv_conversion_rate"]
+                normalized_rows.append(value)
         else:
             normalized_rows = [
                 {
@@ -1666,9 +1705,12 @@ class PostgresqlDashboardService:
                     "main_account_id": row.get("main_account_id"),
                     "main_account_name": row.get("main_account_name"),
                     "is_unmatched": not bool(row.get("shop_account_id")),
+                    "order_count": _to_optional_float(row.get("order_count")),
                     "visitor_count": _to_optional_float(row.get("visitor_count")),
                     "page_views": _to_optional_float(row.get("page_views")),
                     "conversion_rate": _to_optional_float(row.get("conversion_rate")),
+                    "uv_conversion_rate": _to_optional_float(row.get("uv_conversion_rate")),
+                    "pv_conversion_rate": _to_optional_float(row.get("pv_conversion_rate")),
                 }
                 for row in rows
             ]

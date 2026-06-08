@@ -728,6 +728,36 @@
             </template>
           </el-table-column>
           <el-table-column
+            prop="uv_conversion_rate"
+            label="UV转化率"
+            width="130"
+            align="right"
+            sortable
+          >
+            <template #default="{ row }">
+              {{
+                row.uv_conversion_rate != null && !Number.isNaN(Number(row.uv_conversion_rate))
+                  ? Number(row.uv_conversion_rate).toFixed(2) + '%'
+                  : '--'
+              }}
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="pv_conversion_rate"
+            label="PV转化率"
+            width="130"
+            align="right"
+            sortable
+          >
+            <template #default="{ row }">
+              {{
+                row.pv_conversion_rate != null && !Number.isNaN(Number(row.pv_conversion_rate))
+                  ? Number(row.pv_conversion_rate).toFixed(2) + '%'
+                  : '--'
+              }}
+            </template>
+          </el-table-column>
+          <el-table-column
             prop="uv_change_rate"
             label="UV环比"
             width="120"
@@ -2811,8 +2841,11 @@ const loadTrafficRanking = async () => {
         main_account_id: row.main_account_id ?? null,
         main_account_name: row.main_account_name ?? null,
         is_unmatched: Boolean(row.is_unmatched),
+        order_count: row.order_count ?? null,
         visitor_count: row.visitor_count ?? row.unique_visitors ?? row['访客数'] ?? 0,
         page_views: row.page_views ?? row['浏览量'] ?? 0,
+        uv_conversion_rate: row.uv_conversion_rate ?? row.conversion_rate ?? null,
+        pv_conversion_rate: row.pv_conversion_rate ?? null,
         uv_change_rate: row.uv_change_rate ?? null,
         pv_change_rate: row.pv_change_rate ?? null,
         compare_visitor_count: row.compare_visitor_count ?? row.compare_unique_visitors ?? null,

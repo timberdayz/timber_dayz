@@ -7,9 +7,12 @@ WITH daily AS (
         period_date AS period_key,
         platform_code,
         shop_id,
+        order_count,
         visitor_count,
         page_views,
-        conversion_rate
+        conversion_rate,
+        uv_conversion_rate,
+        pv_conversion_rate
     FROM mart.shop_day_kpi
 ),
 weekly AS (
@@ -18,9 +21,12 @@ weekly AS (
         period_week AS period_key,
         platform_code,
         shop_id,
+        order_count,
         visitor_count,
         page_views,
-        conversion_rate
+        conversion_rate,
+        uv_conversion_rate,
+        pv_conversion_rate
     FROM mart.shop_week_kpi
 ),
 monthly AS (
@@ -29,9 +35,12 @@ monthly AS (
         period_month AS period_key,
         platform_code,
         shop_id,
+        order_count,
         visitor_count,
         page_views,
-        conversion_rate
+        conversion_rate,
+        uv_conversion_rate,
+        pv_conversion_rate
     FROM mart.shop_month_kpi
 )
 SELECT * FROM daily
