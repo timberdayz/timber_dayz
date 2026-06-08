@@ -776,6 +776,49 @@ const showTemplateGovernanceSummary = (result) => {
   }
 }
 
+const getHashPolicyFailureMessage = (preview) => {
+  const missingGroup = preview?.missing_required_groups?.[0]
+  if (missingGroup?.message) {
+    return missingGroup.message
+  }
+  const invalidKeys = preview?.invalid_keys || []
+  if (invalidKeys.length > 0) {
+    return `${invalidKeys.join('、')} 不能参与 Data Hash`
+  }
+  return preview?.blocking_errors?.[0] || 'Data Hash 字段还不满足安全保存要求'
+}
+
+const ensureHashPolicyPreviewPassed = async ({
+  dataDomain,
+  granularity,
+  subDomain,
+  selectedFields,
+  selectedHeaderBindings,
+  selectedFieldParseRules,
+  sampleRows = [],
+}) => {
+  try {
+    const preview = await api.previewTemplateHashPolicy({
+      dataDomain,
+      granularity,
+      subDomain,
+      deduplicationFields: selectedFields,
+      headerBindings: selectedHeaderBindings,
+      fieldParseRules: selectedFieldParseRules,
+      sampleRows,
+    })
+    if (preview?.passed === false) {
+      ElMessage.warning(`不能保存：${getHashPolicyFailureMessage(preview)}`)
+      return false
+    }
+    return true
+  } catch (error) {
+    const preview = error?.data?.hash_policy
+    ElMessage.warning(preview ? `不能保存：${getHashPolicyFailureMessage(preview)}` : (error.message || 'Data Hash 预检失败'))
+    return false
+  }
+}
+
 const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, headerRow: selectedHeaderRow, headerBindings: selectedHeaderBindings }) => {
   const context = updateWorkbenchContext.value?.context
   const template = updateWorkbenchContext.value?.template
@@ -795,6 +838,26 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
     const templatePlatform = template.platform || context?.template?.platform || null
     const templateDataDomain =
       template.data_domain || template.domain || context?.template?.data_domain || context?.template?.domain || null
+    const nextHeaderBindings =
+      Array.isArray(selectedHeaderBindings) && selectedHeaderBindings.length > 0
+        ? selectedHeaderBindings
+        : headerBindings.value.length > 0
+        ? headerBindings.value
+        : inferHeaderBindings({
+            headerColumns: context.current_header_columns,
+            sampleData: context.sample_data || {},
+          })
+    const hashPolicyPassed = await ensureHashPolicyPreviewPassed({
+      dataDomain: templateDataDomain,
+      granularity: template.granularity,
+      subDomain: template.sub_domain,
+      selectedFields,
+      selectedHeaderBindings: nextHeaderBindings,
+      selectedFieldParseRules: nextFieldParseRules,
+      sampleRows: context.preview_data || [],
+    })
+    if (!hashPolicyPassed) return
+
     const result = await api.saveTemplate({
       platform: templatePlatform,
       dataDomain: templateDataDomain,
@@ -805,15 +868,7 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
       headerRow: selectedHeaderRow ?? context?.current_header_row ?? template.header_row ?? 0,
       headerColumns: context.current_header_columns,
       deduplicationFields: selectedFields,
-      headerBindings:
-        Array.isArray(selectedHeaderBindings) && selectedHeaderBindings.length > 0
-          ? selectedHeaderBindings
-          : headerBindings.value.length > 0
-          ? headerBindings.value
-          : inferHeaderBindings({
-              headerColumns: context.current_header_columns,
-              sampleData: context.sample_data || {},
-            }),
+      headerBindings: nextHeaderBindings,
       sampleData: context.sample_data || {},
       fieldParseRules: nextFieldParseRules,
     })
@@ -843,7 +898,8 @@ const handleWorkbenchSave = async ({ deduplicationFields: selectedFields, header
     }
   } catch (error) {
     console.error('模板更新失败:', error)
-    ElMessage.error(error.message || '模板更新失败')
+    const preview = error?.data?.hash_policy
+    ElMessage.error(preview ? getHashPolicyFailureMessage(preview) : (error.message || '模板更新失败'))
   } finally {
     savingTemplate.value = false
   }
@@ -856,7 +912,11 @@ const handleSaveVariant = async () => {
     return
   }
   if (!deduplicationFields.value || deduplicationFields.value.length === 0) {
-    ElMessage.warning('请至少选择 1 个核心字段用于去重')
+    ElMessage.warning('请至少选择 1 个可参与 Data Hash 的语义字段')
+    return
+  }
+  if (!deduplicationFieldsValid.value) {
+    ElMessage.warning('Data Hash 字段还未通过预检')
     return
   }
 
@@ -866,6 +926,23 @@ const handleSaveVariant = async () => {
     const activeVersion = context.active_version
     const templateName =
       `${family.platform}_${family.data_domain}_${family.sub_domain || 'default'}_${family.granularity}_${context.recommended_variant_key}`
+    const nextHeaderBindings =
+      headerBindings.value.length > 0
+        ? headerBindings.value
+        : inferHeaderBindings({
+            headerColumns: headerColumns.value,
+            sampleData: sampleData.value,
+          })
+    const hashPolicyPassed = await ensureHashPolicyPreviewPassed({
+      dataDomain: family.data_domain,
+      granularity: family.granularity,
+      subDomain: family.sub_domain,
+      selectedFields: deduplicationFields.value,
+      selectedHeaderBindings: nextHeaderBindings,
+      selectedFieldParseRules: fieldParseRules.value,
+      sampleRows: previewData.value,
+    })
+    if (!hashPolicyPassed) return
 
     const result = await api.saveTemplate({
       platform: family.platform,
@@ -878,13 +955,7 @@ const handleSaveVariant = async () => {
       headerRow: headerRow.value,
       headerColumns: headerColumns.value,
       deduplicationFields: deduplicationFields.value,
-      headerBindings:
-        headerBindings.value.length > 0
-          ? headerBindings.value
-          : inferHeaderBindings({
-              headerColumns: headerColumns.value,
-              sampleData: sampleData.value,
-            }),
+      headerBindings: nextHeaderBindings,
       sampleData: sampleData.value,
       fieldParseRules: fieldParseRules.value,
     })
@@ -901,7 +972,8 @@ const handleSaveVariant = async () => {
     isVariantWorkbenchVisible.value = false
   } catch (error) {
     console.error('创建变体失败:', error)
-    ElMessage.error(error.message || '创建变体失败')
+    const preview = error?.data?.hash_policy
+    ElMessage.error(preview ? getHashPolicyFailureMessage(preview) : (error.message || '创建变体失败'))
   } finally {
     savingTemplate.value = false
   }
@@ -917,12 +989,34 @@ const handleSaveTemplate = async () => {
     return
   }
   if (!deduplicationFields.value || deduplicationFields.value.length === 0) {
-    ElMessage.warning('请至少选择 1 个核心字段用于数据去重')
+    ElMessage.warning('请至少选择 1 个可参与 Data Hash 的语义字段')
+    return
+  }
+  if (!deduplicationFieldsValid.value) {
+    ElMessage.warning('Data Hash 字段还未通过预检')
     return
   }
 
   savingTemplate.value = true
   try {
+    const nextHeaderBindings =
+      headerBindings.value.length > 0
+        ? headerBindings.value
+        : inferHeaderBindings({
+            headerColumns: headerColumns.value,
+            sampleData: sampleData.value,
+          })
+    const hashPolicyPassed = await ensureHashPolicyPreviewPassed({
+      dataDomain: fileFilters.value.domain,
+      granularity: fileFilters.value.granularity,
+      subDomain: fileFilters.value.sub_domain,
+      selectedFields: deduplicationFields.value,
+      selectedHeaderBindings: nextHeaderBindings,
+      selectedFieldParseRules: fieldParseRules.value,
+      sampleRows: previewData.value,
+    })
+    if (!hashPolicyPassed) return
+
     const result = await api.saveTemplate({
       platform: fileFilters.value.platform,
       dataDomain: fileFilters.value.domain,
@@ -932,13 +1026,7 @@ const handleSaveTemplate = async () => {
       headerRow: headerRow.value,
       headerColumns: headerColumns.value,
       deduplicationFields: deduplicationFields.value,
-      headerBindings:
-        headerBindings.value.length > 0
-          ? headerBindings.value
-          : inferHeaderBindings({
-              headerColumns: headerColumns.value,
-              sampleData: sampleData.value,
-            }),
+      headerBindings: nextHeaderBindings,
       sampleData: sampleData.value,
       fieldParseRules: fieldParseRules.value,
     })
@@ -953,7 +1041,8 @@ const handleSaveTemplate = async () => {
     }
   } catch (error) {
     console.error('保存模板失败:', error)
-    ElMessage.error(error.message || '模板保存失败')
+    const preview = error?.data?.hash_policy
+    ElMessage.error(preview ? getHashPolicyFailureMessage(preview) : (error.message || '模板保存失败'))
   } finally {
     savingTemplate.value = false
   }

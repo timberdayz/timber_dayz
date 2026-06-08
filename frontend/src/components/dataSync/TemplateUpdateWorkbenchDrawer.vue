@@ -1,7 +1,7 @@
 <template>
   <el-drawer
     :model-value="visible"
-    title="Template Update Workbench"
+    title="模板更新工作台"
     size="72%"
     destroy-on-close
     @close="handleClose"
@@ -89,7 +89,13 @@
         :existing-deduplication-fields-missing="existingDeduplicationFieldsMissing"
         :recommended-deduplication-fields="recommendedDeduplicationFields"
         :current-header-columns="currentHeaderColumns"
-        :current-header-bindings="activeBindingSource"
+        :current-header-bindings="hashPolicyBindingSource"
+        :data-domain="templateContext?.data_domain || template?.data_domain || template?.domain || ''"
+        :granularity="templateContext?.granularity || template?.granularity || ''"
+        :sub-domain="templateContext?.sub_domain || template?.sub_domain || null"
+        :field-parse-rules="templateContext?.field_parse_rules || []"
+        :sample-rows="previewData"
+        @hash-policy-change="handleHashPolicyChange"
       />
 
       <div v-if="updateMode !== 'core-only'" class="template-update-workbench-drawer__section">
@@ -116,7 +122,7 @@
       <div class="template-update-workbench-drawer__section">
         <div class="template-update-workbench-drawer__section-header">
           <div>
-            <div class="template-update-workbench-drawer__section-title">Semantic Bindings</div>
+            <div class="template-update-workbench-drawer__section-title">语义字段确认</div>
             <div class="template-update-workbench-drawer__muted">
               The drawer starts with only the fields that need review. Load all bindings only when needed.
             </div>
@@ -127,8 +133,8 @@
               size="small"
               :disabled="!bindingsExpanded"
             >
-              <el-radio-button label="needs-review">Needs Review</el-radio-button>
-              <el-radio-button label="all">All Fields</el-radio-button>
+              <el-radio-button label="needs-review">待确认</el-radio-button>
+              <el-radio-button label="all">全部字段</el-radio-button>
             </el-radio-group>
             <el-button size="small" :loading="loadingBindings" @click="toggleBindingsSection">
               {{ bindingsExpanded ? 'Hide Bindings' : bindingsLoaded ? 'Show Bindings' : 'Load Bindings' }}
@@ -150,7 +156,7 @@
                   :model-value="semanticSelectValue(row)"
                   clearable
                   filterable
-                  placeholder="Select semantic field"
+                  placeholder="选择语义字段"
                   style="width: 100%;"
                   @change="handleSemanticKeyChange(row.raw_name, $event)"
                 >
@@ -173,17 +179,17 @@
                   {{ row.meta?.label || 'Non-semantic field' }}
                 </div>
                 <div class="template-update-workbench-drawer__muted">
-                  {{ row.meta?.description || 'This field keeps the raw value only and does not participate in semantic deduplication.' }}
+                  {{ row.meta?.description || '该字段仅保留原始值，不参与 Data Hash。' }}
                 </div>
               </template>
             </el-table-column>
             <el-table-column label="Rules" width="170">
               <template #default="{ row }">
                 <div class="template-update-workbench-drawer__tags">
-                  <el-tag v-if="row.needsReview" size="small" type="warning">Needs Review</el-tag>
-                  <el-tag v-if="row.semantic_review_status === 'confirmed_non_semantic'" size="small" type="info">Non-core</el-tag>
+                  <el-tag v-if="row.needsReview" size="small" type="warning">待确认</el-tag>
+                  <el-tag v-if="row.semantic_review_status === 'confirmed_non_semantic'" size="small" type="info">原始保留</el-tag>
                   <el-tag v-if="row.required" size="small" type="danger">Required</el-tag>
-                  <el-tag v-if="row.hash_participates" size="small" type="success">Hash</el-tag>
+                  <el-tag v-if="row.hash_participates" size="small" type="success">参与 Data Hash</el-tag>
                 </div>
               </template>
             </el-table-column>
@@ -215,7 +221,7 @@
         <el-button @click="handleClose">Cancel</el-button>
         <el-button
           type="primary"
-          :disabled="!workbenchContext || selectedDeduplicationFields.length === 0 || saving"
+          :disabled="!workbenchContext || selectedDeduplicationFields.length === 0 || !hashPolicyAllowsSave || saving"
           :loading="saving"
           @click="handleSave"
         >
@@ -281,6 +287,8 @@ const fullHeaderBindings = ref([])
 const localHeaderBindings = ref([])
 const editingBindingNames = ref([])
 const saving = ref(false)
+const hashPolicyAllowsSave = ref(false)
+const hashPolicyPreview = ref(null)
 const semanticFieldOptions = SEMANTIC_FIELD_OPTIONS
 
 const workbenchContext = computed(() => activeContext.value ?? props.context?.context ?? null)
@@ -328,6 +336,8 @@ watch(
     fullHeaderBindings.value = []
     editingBindingNames.value = []
     bindingsViewMode.value = 'needs-review'
+    hashPolicyAllowsSave.value = false
+    hashPolicyPreview.value = null
   },
   { immediate: true },
 )
@@ -363,6 +373,23 @@ const activeBindingSource = computed(() => {
     return fullHeaderBindings.value
   }
   return localHeaderBindings.value
+})
+
+const hashPolicyBindingSource = computed(() => {
+  const combined = []
+  const seen = new Set()
+  const pushBinding = (binding) => {
+    const rawName = String(binding?.raw_name || '').trim()
+    const semanticKey = String(binding?.semantic_key || '').trim()
+    const key = `${rawName.toLowerCase()}::${semanticKey.toLowerCase()}`
+    if (!rawName && !semanticKey) return
+    if (seen.has(key)) return
+    seen.add(key)
+    combined.push(binding)
+  }
+  activeBindingSource.value.forEach(pushBinding)
+  ;(templateContext.value?.header_bindings || []).forEach(pushBinding)
+  return combined
 })
 
 const bindingRows = computed(() => {
@@ -554,11 +581,24 @@ function handleSemanticKeyChange(rawName, semanticKey) {
   )
 }
 
+function handleHashPolicyChange({ valid, preview }) {
+  hashPolicyAllowsSave.value = Boolean(valid)
+  hashPolicyPreview.value = preview || null
+}
+
 function formatFieldLabel(field) {
   return formatHeaderBindingLabel(field, activeBindingSource.value)
 }
 
 async function handleSave() {
+  if (!hashPolicyAllowsSave.value) {
+    const message =
+      hashPolicyPreview.value?.blocking_errors?.[0] ||
+      hashPolicyPreview.value?.missing_required_groups?.[0]?.message ||
+      '请先补齐 Data Hash 必需的语义字段。'
+    ElMessage.warning(message)
+    return
+  }
   saving.value = true
   try {
     if (updateMode.value !== 'core-only') {

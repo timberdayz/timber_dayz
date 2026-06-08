@@ -556,6 +556,8 @@ api.interceptors.response.use(
         apiError.recovery_suggestion = responseData.error?.recovery_suggestion
         apiError.isApiError = true
         apiError.response = error.response
+        apiError.data = responseData.data
+        apiError.error_code = responseData.data?.error_code
         return Promise.reject(apiError)
       }
       // 非统一格式的HTTP错误：包装为统一格式
@@ -719,6 +721,29 @@ export default {
         file_id: fileId || null,
         header_row: headerRow === undefined ? null : headerRow
       }
+    })
+  },
+
+  async previewTemplateHashPolicy({
+    dataDomain,
+    granularity,
+    subDomain,
+    deduplicationFields = [],
+    headerBindings = [],
+    fieldParseRules = [],
+    sampleRows = []
+  }) {
+    if (!dataDomain) {
+      throw new Error('数据域为必填项')
+    }
+    return await this._post('/field-mapping/templates/hash-policy-preview', {
+      data_domain: dataDomain,
+      granularity: granularity || null,
+      sub_domain: subDomain || null,
+      deduplication_fields: deduplicationFields,
+      header_bindings: headerBindings,
+      field_parse_rules: fieldParseRules,
+      sample_rows: sampleRows
     })
   },
 
