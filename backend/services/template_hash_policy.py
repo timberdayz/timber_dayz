@@ -17,6 +17,14 @@ SYSTEM_SCOPE_FIELDS = ["platform_code", "shop_id", "data_domain", "granularity",
 SYSTEM_SCOPE_FIELD_SET = set(SYSTEM_SCOPE_FIELDS)
 FILE_DATE_SOURCE_COLUMNS = {"__file_date_from__", "__file_date_to__"}
 HOUR_IDENTITY_KEYS = {"period_start_time", "period_end_time"}
+DATE_IDENTITY_KEY_ORDER = [
+    "metric_date",
+    "period_start_date",
+    "period_end_date",
+    "period_start_time",
+    "period_end_time",
+]
+DATE_IDENTITY_KEYS = set(DATE_IDENTITY_KEY_ORDER)
 
 
 @dataclass(frozen=True)
@@ -72,6 +80,9 @@ class TemplateHashPolicyService:
             header_bindings,
             field_parse_rules,
         )
+        auto_date_sources = self._auto_date_identity_sources(field_parse_rules)
+        auto_date_keys = set(auto_date_sources)
+        resolved_keys.update(auto_date_keys)
         derived_sources = self._derived_selected_sources(deduplication_fields, field_parse_rules)
         derived_keys = set(derived_sources)
         invalid_keys = sorted(
@@ -226,15 +237,17 @@ class TemplateHashPolicyService:
         effective_components = self._effective_components(
             deduplication_fields=deduplication_fields,
             derived_keys=derived_keys,
+            auto_date_keys=auto_date_keys,
         )
         sample_diagnostics, sample_warnings = self._sample_diagnostics(
             sample_rows=sample_rows,
             identity_fields=[
                 *effective_components.get("user_identity_fields", []),
-                *effective_components.get("derived_identity_fields", []),
+                *effective_components.get("auto_date_identity_fields", []),
             ],
             header_bindings=header_bindings,
-            derived_sources=derived_sources,
+            derived_sources={**auto_date_sources, **derived_sources},
+            auto_date_sources=auto_date_sources,
         )
         warnings.extend(sample_warnings)
         missing_required_groups = [
@@ -298,6 +311,28 @@ class TemplateHashPolicyService:
                 derived_sources[semantic_key] = source_column
         return derived_sources
 
+    def _auto_date_identity_sources(
+        self,
+        field_parse_rules: Iterable[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        sources: Dict[str, str] = {}
+        source_rank: Dict[str, int] = {}
+        for rule in field_parse_rules or []:
+            semantic_key = normalize_semantic_key(
+                rule.get("target_field") or rule.get("semantic_key") or rule.get("field")
+            )
+            if semantic_key not in DATE_IDENTITY_KEYS or not is_hash_identity_semantic_key(semantic_key):
+                continue
+            source_column = str(rule.get("source_column") or "").strip()
+            if not source_column:
+                continue
+            # Source file columns carry row identity; companion dates are lower priority fallbacks.
+            rank = 1 if source_column in FILE_DATE_SOURCE_COLUMNS else 2
+            if rank >= source_rank.get(semantic_key, 0):
+                sources[semantic_key] = source_column
+                source_rank[semantic_key] = rank
+        return sources
+
     def _invalid_deduplication_keys(
         self,
         deduplication_fields: Iterable[str],
@@ -342,6 +377,7 @@ class TemplateHashPolicyService:
         *,
         deduplication_fields: Iterable[str],
         derived_keys: Set[str],
+        auto_date_keys: Set[str],
     ) -> Dict[str, Any]:
         user_identity_fields: List[str] = []
         seen_user: Set[str] = set()
@@ -351,6 +387,7 @@ class TemplateHashPolicyService:
                 not semantic_key
                 or semantic_key in SYSTEM_SCOPE_FIELD_SET
                 or semantic_key in derived_keys
+                or semantic_key in auto_date_keys
                 or not is_hash_identity_semantic_key(semantic_key)
             ):
                 continue
@@ -365,10 +402,16 @@ class TemplateHashPolicyService:
             if field in derived_keys
         ]
         derived_identity_fields = list(dict.fromkeys(derived_identity_fields))
-        final_fields = [*SYSTEM_SCOPE_FIELDS, *user_identity_fields, *derived_identity_fields]
+        auto_date_identity_fields = [
+            field
+            for field in DATE_IDENTITY_KEY_ORDER
+            if field in auto_date_keys
+        ]
+        final_fields = [*SYSTEM_SCOPE_FIELDS, *user_identity_fields, *auto_date_identity_fields]
         return {
             "system_scope_fields": list(SYSTEM_SCOPE_FIELDS),
             "user_identity_fields": user_identity_fields,
+            "auto_date_identity_fields": auto_date_identity_fields,
             "derived_identity_fields": derived_identity_fields,
             "final_fields": final_fields,
         }
@@ -392,12 +435,21 @@ class TemplateHashPolicyService:
         identity_fields: List[str],
         header_bindings: Iterable[Dict[str, Any]],
         derived_sources: Dict[str, str] | None = None,
+        auto_date_sources: Dict[str, str] | None = None,
     ) -> tuple[Dict[str, Any], List[str]]:
         rows = [row for row in (sample_rows or []) if isinstance(row, dict)]
         derived_sources = dict(derived_sources or {})
+        auto_date_sources = dict(auto_date_sources or {})
         diagnostics: Dict[str, Any] = {
             "row_count": len(rows),
             "field_null_rates": {},
+            "auto_date_fields": {
+                field: {
+                    "source_column": source_column,
+                    "message": "由模板日期解析规则生成",
+                }
+                for field, source_column in auto_date_sources.items()
+            },
             "derived_fields": {
                 field: {
                     "source_column": source_column,

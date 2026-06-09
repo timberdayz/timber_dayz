@@ -757,13 +757,20 @@ async def ingest_file(
                 template_deduplication_fields = list(template_identity_config.get("deduplication_fields") or [])
                 raw_data_importer.field_parse_rules = field_parse_rules
 
-                from backend.services.deduplication_fields_config import get_deduplication_fields
+                from backend.services.deduplication_fields_config import (
+                    append_auto_date_identity_fields,
+                    get_deduplication_fields,
+                )
 
                 final_deduplication_fields = get_deduplication_fields(
                     data_domain=domain,
                     template_fields=template_deduplication_fields,
                     sub_domain=sub_domain_value,
                     header_bindings=template_header_bindings,
+                )
+                final_deduplication_fields = append_auto_date_identity_fields(
+                    final_deduplication_fields,
+                    field_parse_rules,
                 )
                 hash_scope_values = {
                     "platform_code": file_record.platform_code or platform,

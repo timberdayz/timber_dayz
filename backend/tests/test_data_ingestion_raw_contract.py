@@ -329,7 +329,9 @@ async def test_ingest_data_passes_date_context_to_async_raw_importer(
         def __init__(self, _db):
             pass
 
-        def batch_calculate_data_hash(self, rows, **_kwargs):
+        def batch_calculate_data_hash(self, rows, **kwargs):
+            captured["hash_deduplication_fields"] = kwargs.get("deduplication_fields")
+            captured["hash_identity_values"] = kwargs.get("identity_values")
             return [f"hash-{index}" for index, _ in enumerate(rows)]
 
     captured = {}
@@ -413,6 +415,7 @@ async def test_ingest_data_passes_date_context_to_async_raw_importer(
         template_id=296,
         field_parse_rules=parse_rules,
         header_bindings=header_bindings,
+        deduplication_fields=["product_id"],
     )
 
     assert result["success"] is True
@@ -420,3 +423,10 @@ async def test_ingest_data_passes_date_context_to_async_raw_importer(
     assert captured["file_date_to"] == date(2026, 4, 30)
     assert captured["field_parse_rules"] == parse_rules
     assert captured["header_bindings"] == header_bindings
+    assert captured["hash_identity_values"][0]["metric_date"] == date(2026, 4, 1)
+    assert captured["hash_deduplication_fields"] == [
+        "product_id",
+        "platform_code",
+        "shop_id",
+        "metric_date",
+    ]

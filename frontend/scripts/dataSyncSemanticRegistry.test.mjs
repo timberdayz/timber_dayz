@@ -137,5 +137,7 @@ for (const valueKind of ['single_date', 'single_datetime', 'time_of_day', 'datet
 const dateFormatValues = new Set(DATE_FORMAT_OPTIONS.map(option => option.value))
 assert.ok(dateFormatValues.has('hh:mm'))
 assert.ok(dateFormatValues.has('hh:mm:ss'))
+assert.ok(dateFormatValues.has('mm/dd/yyyy'))
+assert.ok(dateFormatValues.has('mm-dd-yyyy hh:mm'))
 
 console.log('dataSyncSemanticRegistry.test.mjs passed')

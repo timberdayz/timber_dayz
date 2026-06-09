@@ -615,6 +615,9 @@ class RawDataImporter:
                     value_kind=str(rule.get("value_kind", "single_date")).strip(),
                     range_pick=rule.get("range_pick"),
                     date_anchor=date_anchor,
+                    companion_date_from=getattr(self, "file_date_from", None),
+                    companion_date_to=getattr(self, "file_date_to", None),
+                    format_candidates=rule.get("format_candidates"),
                 )
             except ValueError as exc:
                 raise ValueError(

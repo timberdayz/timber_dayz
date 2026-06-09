@@ -100,7 +100,7 @@ def test_products_daily_requires_product_id_and_date_source():
     ]
 
 
-def test_products_daily_parse_rule_does_not_replace_hash_identity_selection():
+def test_products_daily_source_date_parse_rule_satisfies_date_identity_automatically():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -129,10 +129,10 @@ def test_products_daily_parse_rule_does_not_replace_hash_identity_selection():
         ],
     )
 
-    assert result.passed is False
-    assert result.blocking_errors == [
-        "daily product metrics require product_id/platform_sku + metric_date to avoid cross-date overwrites."
-    ]
+    assert result.passed is True
+    assert result.blocking_errors == []
+    assert result.effective_components["user_identity_fields"] == ["product_id"]
+    assert result.effective_components["auto_date_identity_fields"] == ["metric_date"]
 
 
 def test_products_daily_passes_when_date_is_semantically_resolved():
@@ -263,76 +263,7 @@ def test_products_monthly_returns_structured_missing_period_group():
     assert result.effective_components["user_identity_fields"] == ["product_id"]
 
 
-def test_products_monthly_passes_when_selected_date_parse_rule_is_derived():
-    service = TemplateHashPolicyService()
-
-    result = service.validate(
-        data_domain="products",
-        granularity="monthly",
-        deduplication_fields=["product_id", "metric_date"],
-        header_bindings=[
-            {
-                "source_header": "product id",
-                "semantic_key": "product_id",
-                "semantic_review_status": "confirmed_semantic",
-            }
-        ],
-        field_parse_rules=[
-            {
-                "target_field": "metric_date",
-                "source_column": "__file_date_from__",
-                "value_kind": "single_date",
-            }
-        ],
-    )
-
-    assert result.passed is True
-    assert result.effective_components["derived_identity_fields"] == ["metric_date"]
-    assert result.effective_components["final_fields"] == [
-        "platform_code",
-        "shop_id",
-        "data_domain",
-        "granularity",
-        "sub_domain",
-        "product_id",
-        "metric_date",
-    ]
-
-
-def test_sample_diagnostics_treats_file_date_rule_as_derived_hash_field():
-    service = TemplateHashPolicyService()
-
-    result = service.validate(
-        data_domain="products",
-        granularity="daily",
-        deduplication_fields=["product_id", "metric_date"],
-        header_bindings=[
-            {
-                "source_header": "Product ID",
-                "semantic_key": "product_id",
-                "semantic_review_status": "confirmed_semantic",
-            }
-        ],
-        field_parse_rules=[
-            {
-                "target_field": "metric_date",
-                "source_column": "__file_date_from__",
-                "value_kind": "single_date",
-            }
-        ],
-        sample_rows=[
-            {"Product ID": "A-1"},
-            {"Product ID": "A-2"},
-        ],
-    )
-
-    assert result.passed is True
-    assert result.sample_diagnostics["field_null_rates"]["metric_date"] == 0.0
-    assert result.sample_diagnostics["derived_fields"]["metric_date"]["source_column"] == "__file_date_from__"
-    assert not any("metric_date null rate" in warning for warning in result.warnings)
-
-
-def test_products_monthly_parse_rule_without_user_selection_still_fails():
+def test_products_monthly_passes_when_file_date_parse_rule_is_auto_identity():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -355,8 +286,77 @@ def test_products_monthly_parse_rule_without_user_selection_still_fails():
         ],
     )
 
-    assert result.passed is False
-    assert result.missing_required_groups[0]["key"] == "products_period_date"
+    assert result.passed is True
+    assert result.effective_components["auto_date_identity_fields"] == ["metric_date"]
+    assert result.effective_components["final_fields"] == [
+        "platform_code",
+        "shop_id",
+        "data_domain",
+        "granularity",
+        "sub_domain",
+        "product_id",
+        "metric_date",
+    ]
+
+
+def test_sample_diagnostics_treats_file_date_rule_as_derived_hash_field():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="products",
+        granularity="daily",
+        deduplication_fields=["product_id"],
+        header_bindings=[
+            {
+                "source_header": "Product ID",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            }
+        ],
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            }
+        ],
+        sample_rows=[
+            {"Product ID": "A-1"},
+            {"Product ID": "A-2"},
+        ],
+    )
+
+    assert result.passed is True
+    assert result.sample_diagnostics["field_null_rates"]["metric_date"] == 0.0
+    assert result.sample_diagnostics["auto_date_fields"]["metric_date"]["source_column"] == "__file_date_from__"
+    assert not any("metric_date null rate" in warning for warning in result.warnings)
+
+
+def test_products_monthly_file_date_parse_rule_without_user_selection_passes():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="products",
+        granularity="monthly",
+        deduplication_fields=["product_id"],
+        header_bindings=[
+            {
+                "source_header": "product id",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            }
+        ],
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            }
+        ],
+    )
+
+    assert result.passed is True
+    assert result.missing_required_groups == []
 
 
 def test_metrics_and_item_status_are_invalid_hash_identity_fields():
@@ -513,6 +513,49 @@ def test_traffic_daily_allows_user_selected_hour_identity_field():
     assert result.effective_components["user_identity_fields"] == [
         "metric_date",
         "period_start_time",
+    ]
+
+
+def test_traffic_daily_time_rule_uses_file_date_and_hour_as_auto_identity():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="analytics",
+        granularity="daily",
+        deduplication_fields=[],
+        header_bindings=[],
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+                "date_format": "yyyy-mm-dd",
+            },
+            {
+                "target_field": "period_start_time",
+                "source_column": "小时",
+                "value_kind": "time_range",
+                "date_format": "hh:mm",
+                "range_pick": "start",
+                "date_anchor": "__file_date_from__",
+            },
+            {
+                "target_field": "period_end_time",
+                "source_column": "小时",
+                "value_kind": "time_range",
+                "date_format": "hh:mm",
+                "range_pick": "end",
+                "date_anchor": "__file_date_from__",
+            },
+        ],
+    )
+
+    assert result.passed is True
+    assert result.effective_components["user_identity_fields"] == []
+    assert result.effective_components["auto_date_identity_fields"] == [
+        "metric_date",
+        "period_start_time",
+        "period_end_time",
     ]
 
 

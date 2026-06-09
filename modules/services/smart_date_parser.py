@@ -44,6 +44,12 @@ _DECLARED_SINGLE_FORMATS = {
     "dd-mm-yyyy hh:mm:ss": ("%d-%m-%Y %H:%M:%S", True),
     "dd/mm/yyyy hh:mm": ("%d/%m/%Y %H:%M", True),
     "dd/mm/yyyy hh:mm:ss": ("%d/%m/%Y %H:%M:%S", True),
+    "mm-dd-yyyy": ("%m-%d-%Y", False),
+    "mm/dd/yyyy": ("%m/%d/%Y", False),
+    "mm-dd-yyyy hh:mm": ("%m-%d-%Y %H:%M", True),
+    "mm-dd-yyyy hh:mm:ss": ("%m-%d-%Y %H:%M:%S", True),
+    "mm/dd/yyyy hh:mm": ("%m/%d/%Y %H:%M", True),
+    "mm/dd/yyyy hh:mm:ss": ("%m/%d/%Y %H:%M:%S", True),
 }
 _DECLARED_TIME_FORMATS = {
     "hh:mm": "%H:%M",
@@ -55,6 +61,9 @@ _DECLARED_RANGE_BASE_FORMATS = {
     "yyyy-mm-dd-yyyy-mm-dd": "%Y-%m-%d",
     "yyyy/mm/dd-yyyy/mm/dd": "%Y/%m/%d",
 }
+_AUTO_COMPANION_FORMAT = "auto_by_companion_period"
+_DEFAULT_AUTO_SINGLE_FORMAT_CANDIDATES = tuple(_DECLARED_SINGLE_FORMATS.keys())
+_DEFAULT_AUTO_RANGE_FORMAT_CANDIDATES = tuple(_DECLARED_RANGE_BASE_FORMATS.keys())
 
 
 def _from_excel_serial(value: float) -> Optional[date]:
@@ -154,6 +163,90 @@ def _coerce_anchor_date(date_anchor: object) -> date:
     raise ValueError("date_anchor is required for time-only parsing")
 
 
+def _coerce_optional_date(value: object) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return parse_date(value)
+
+
+def _is_within_companion_period(
+    parsed_date: Optional[date],
+    companion_date_from: Optional[date],
+    companion_date_to: Optional[date],
+) -> bool:
+    if parsed_date is None:
+        return False
+    if companion_date_from and parsed_date < companion_date_from:
+        return False
+    if companion_date_to and parsed_date > companion_date_to:
+        return False
+    return True
+
+
+def _candidate_formats_for_auto(
+    *,
+    value_kind: str,
+    format_candidates: Optional[Iterable[str]],
+) -> list[str]:
+    candidates = [
+        str(candidate).strip().lower()
+        for candidate in (format_candidates or [])
+        if str(candidate).strip()
+    ]
+    if candidates:
+        return list(dict.fromkeys(candidates))
+    if value_kind in {"single_date", "single_datetime", "datetime_range"}:
+        return list(_DEFAULT_AUTO_SINGLE_FORMAT_CANDIDATES)
+    if value_kind == "date_range":
+        return list(_DEFAULT_AUTO_RANGE_FORMAT_CANDIDATES)
+    raise ValueError(f"auto companion period does not support value_kind: {value_kind}")
+
+
+def _parse_by_companion_period(
+    value: object,
+    *,
+    value_kind: str,
+    range_pick: Optional[str],
+    date_anchor: object,
+    companion_date_from: object,
+    companion_date_to: object,
+    format_candidates: Optional[Iterable[str]],
+) -> tuple[Optional[date], Optional[datetime]]:
+    start_date = _coerce_optional_date(companion_date_from)
+    end_date = _coerce_optional_date(companion_date_to)
+    if start_date is None and end_date is None:
+        raise ValueError("companion date_from/date_to is required for auto companion period parsing")
+
+    matches: list[tuple[str, Optional[date], Optional[datetime]]] = []
+    for candidate in _candidate_formats_for_auto(
+        value_kind=value_kind,
+        format_candidates=format_candidates,
+    ):
+        try:
+            parsed_date, parsed_datetime = parse_date_by_declared_format(
+                value,
+                date_format=candidate,
+                value_kind=value_kind,
+                range_pick=range_pick,
+                date_anchor=date_anchor,
+            )
+        except ValueError:
+            continue
+        if _is_within_companion_period(parsed_date, start_date, end_date):
+            matches.append((candidate, parsed_date, parsed_datetime))
+
+    if not matches:
+        raise ValueError("no companion-constrained date format matched")
+    if len(matches) > 1:
+        candidates = ", ".join(match[0] for match in matches)
+        raise ValueError(f"ambiguous companion-constrained date format: {candidates}")
+    return matches[0][1], matches[0][2]
+
+
 def parse_date_by_declared_format(
     value: object,
     *,
@@ -161,6 +254,9 @@ def parse_date_by_declared_format(
     value_kind: str = "single_date",
     range_pick: Optional[str] = None,
     date_anchor: object = None,
+    companion_date_from: object = None,
+    companion_date_to: object = None,
+    format_candidates: Optional[Iterable[str]] = None,
 ) -> tuple[Optional[date], Optional[datetime]]:
     """Parse a value strictly by its declared template format."""
     if value is None:
@@ -185,6 +281,17 @@ def parse_date_by_declared_format(
         "time_range",
     }:
         raise ValueError(f"unsupported value_kind: {value_kind}")
+
+    if normalized_format == _AUTO_COMPANION_FORMAT:
+        return _parse_by_companion_period(
+            raw,
+            value_kind=normalized_kind,
+            range_pick=range_pick,
+            date_anchor=date_anchor,
+            companion_date_from=companion_date_from,
+            companion_date_to=companion_date_to,
+            format_candidates=format_candidates,
+        )
 
     if normalized_kind in {"single_date", "single_datetime"}:
         format_spec = _DECLARED_SINGLE_FORMATS.get(normalized_format)

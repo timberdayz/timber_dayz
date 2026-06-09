@@ -25,6 +25,15 @@
         </div>
       </div>
 
+      <div v-if="autoDateIdentityFields.length > 0" class="hash-section">
+        <div class="section-title">系统自动日期身份</div>
+        <div class="tag-row">
+          <el-tag v-for="field in autoDateIdentityFields" :key="field" size="small" type="success">
+            {{ field }}
+          </el-tag>
+        </div>
+      </div>
+
       <div class="hash-section">
         <div class="section-title">用户已选语义字段</div>
         <div class="tag-row">
@@ -71,7 +80,6 @@
             :value="option.value"
           >
             <span>{{ option.label }}</span>
-            <span v-if="option.derived" class="derived-label">由文件伴生日期生成</span>
             <span v-if="option.weakIdentity" class="weak-identity-label">弱身份字段</span>
           </el-checkbox>
         </div>
@@ -157,31 +165,13 @@ const systemScopeFields = computed(
   () => hashPolicyPreview.value?.effective_components?.system_scope_fields || SYSTEM_HASH_SCOPE_FIELDS
 )
 
-const derivedOptions = computed(() => {
-  const seen = new Set()
-  return (Array.isArray(props.fieldParseRules) ? props.fieldParseRules : [])
-    .map((rule) => {
-      const target = String(rule?.target_field || '').trim()
-      if (!DATE_HASH_KEYS.has(target) || seen.has(target) || !isHashEligibleSemanticKey(target)) {
-        return null
-      }
-      seen.add(target)
-      const meta = getSemanticFieldMeta(target)
-      return {
-        value: target,
-        label: `${meta?.label || target} (${target})`,
-        derived: true,
-      }
-    })
-    .filter(Boolean)
-})
-
 const selectableOptions = computed(() => {
   const seen = new Set()
   const semanticOptions = (Array.isArray(props.headerBindings) ? props.headerBindings : [])
     .filter(binding =>
       binding?.semantic_review_status === 'confirmed_semantic' &&
-      isHashEligibleSemanticKey(binding?.semantic_key)
+      isHashEligibleSemanticKey(binding?.semantic_key) &&
+      !DATE_HASH_KEYS.has(String(binding?.semantic_key || '').trim())
     )
     .map((binding) => {
       const semanticKey = String(binding?.semantic_key || '').trim()
@@ -192,22 +182,17 @@ const selectableOptions = computed(() => {
       return {
         value: semanticKey,
         label: rawName ? `${meta?.label || semanticKey} (${rawName})` : `${meta?.label || semanticKey} (${semanticKey})`,
-        derived: false,
         weakIdentity: meta?.identity_strength === 'weak',
       }
     })
     .filter(Boolean)
-
-  for (const option of derivedOptions.value) {
-    if (!seen.has(option.value) && isHashEligibleSemanticKey(option.value)) {
-      seen.add(option.value)
-      semanticOptions.push(option)
-    }
-  }
   return semanticOptions
 })
 
 const selectableValues = computed(() => new Set(selectableOptions.value.map(option => option.value)))
+const autoDateIdentityFields = computed(
+  () => hashPolicyPreview.value?.effective_components?.auto_date_identity_fields || []
+)
 const missingGroups = computed(() => hashPolicyPreview.value?.missing_required_groups || [])
 const passedGroups = computed(() =>
   (hashPolicyPreview.value?.requirement_groups || []).filter(group => group?.passed)
@@ -227,12 +212,6 @@ const blockingMessage = computed(() => {
 
 function validateFields() {
   validationWarning.value = ''
-
-  if (selectedFields.value.length === 0) {
-    validationWarning.value = '请至少选择 1 个可参与 Data Hash 的语义字段。'
-    emit('validation-change', false)
-    return false
-  }
 
   const missingFields = selectedFields.value.filter(field => !selectableValues.value.has(field))
   if (missingFields.length > 0) {
@@ -264,7 +243,8 @@ function scheduleHashPolicyPreview() {
 }
 
 async function runHashPolicyPreview() {
-  if (!props.dataDomain || selectedFields.value.length === 0) {
+  const hasPolicyInput = selectedFields.value.length > 0 || (Array.isArray(props.fieldParseRules) && props.fieldParseRules.length > 0)
+  if (!props.dataDomain || !hasPolicyInput) {
     hashPolicyPreview.value = null
     validateFields()
     return
@@ -300,7 +280,7 @@ async function runHashPolicyPreview() {
 watch(
   () => props.initialFields,
   (newFields) => {
-    selectedFields.value = Array.isArray(newFields) ? [...newFields] : []
+    selectedFields.value = (Array.isArray(newFields) ? [...newFields] : []).filter(field => !DATE_HASH_KEYS.has(field))
     validateFields()
     scheduleHashPolicyPreview()
   },

@@ -32,6 +32,15 @@
         </div>
       </section>
 
+      <section v-if="autoDateIdentityFields.length > 0" class="template-deduplication-review-panel__group">
+        <div class="template-deduplication-review-panel__group-title">系统自动日期身份</div>
+        <div class="template-deduplication-review-panel__tags">
+          <el-tag v-for="field in autoDateIdentityFields" :key="field" size="small" type="success">
+            {{ field }}
+          </el-tag>
+        </div>
+      </section>
+
       <section class="template-deduplication-review-panel__group">
         <div class="template-deduplication-review-panel__group-title">用户已选语义字段</div>
         <div class="template-deduplication-review-panel__tags">
@@ -136,7 +145,6 @@
             :value="option.semanticKey"
           >
             <span>{{ option.label }}</span>
-            <span v-if="option.derived" class="template-deduplication-review-panel__derived">由文件伴生日期生成</span>
             <span v-if="option.weakIdentity" class="template-deduplication-review-panel__weak">弱身份字段</span>
           </el-checkbox>
         </el-checkbox-group>
@@ -234,31 +242,13 @@ const previewLoading = ref(false)
 let previewTimer = null
 let previewRequestId = 0
 
-const derivedOptions = computed(() => {
-  const seen = new Set()
-  return (Array.isArray(props.fieldParseRules) ? props.fieldParseRules : [])
-    .map((rule) => {
-      const target = String(rule?.target_field || '').trim()
-      if (!DATE_HASH_KEYS.has(target) || seen.has(target) || !isHashEligibleSemanticKey(target)) {
-        return null
-      }
-      seen.add(target)
-      const meta = getSemanticFieldMeta(target)
-      return {
-        semanticKey: target,
-        label: `${meta?.label || target} (${target})`,
-        derived: true,
-      }
-    })
-    .filter(Boolean)
-})
-
 const semanticHashOptions = computed(() => {
   const seen = new Set()
   const options = (Array.isArray(props.currentHeaderBindings) ? props.currentHeaderBindings : [])
     .filter(binding =>
       binding?.semantic_review_status === 'confirmed_semantic' &&
-      isHashEligibleSemanticKey(binding?.semantic_key)
+      isHashEligibleSemanticKey(binding?.semantic_key) &&
+      !DATE_HASH_KEYS.has(String(binding?.semantic_key || '').trim())
     )
     .map((binding) => {
       const semanticKey = String(binding?.semantic_key || '').trim()
@@ -272,18 +262,10 @@ const semanticHashOptions = computed(() => {
         label: rawName || displayName
           ? `${meta?.label || semanticKey} (${rawName || displayName})`
           : `${meta?.label || semanticKey} (${semanticKey})`,
-        derived: false,
         weakIdentity: meta?.identity_strength === 'weak',
       }
     })
     .filter(Boolean)
-
-  for (const option of derivedOptions.value) {
-    if (!seen.has(option.semanticKey) && isHashEligibleSemanticKey(option.semanticKey)) {
-      seen.add(option.semanticKey)
-      options.push(option)
-    }
-  }
   return options
 })
 
@@ -300,6 +282,9 @@ const filteredSemanticHashOptions = computed(() => {
 
 const effectiveSystemScopeFields = computed(
   () => hashPolicyPreview.value?.effective_components?.system_scope_fields || props.systemScopeFields
+)
+const autoDateIdentityFields = computed(
+  () => hashPolicyPreview.value?.effective_components?.auto_date_identity_fields || []
 )
 const missingGroups = computed(() => hashPolicyPreview.value?.missing_required_groups || [])
 const passedGroups = computed(() =>
@@ -323,14 +308,11 @@ const blockingMessage = computed(() => {
   if (invalidKeys.length > 0) {
     return `不能保存：${invalidKeys.join('、')} 不能参与 Data Hash。`
   }
-  if (props.modelValue.length === 0) {
-    return '不能保存：请至少选择 1 个可参与 Data Hash 的语义字段。'
-  }
   return ''
 })
 
 function emitPolicyState() {
-  const valid = props.modelValue.length > 0 && !previewLoading.value && hashPolicyPreview.value?.passed === true
+  const valid = !previewLoading.value && hashPolicyPreview.value?.passed === true
   emit('hash-policy-change', {
     valid,
     loading: previewLoading.value,
@@ -339,7 +321,7 @@ function emitPolicyState() {
 }
 
 function handleSelectionChange(nextValue) {
-  emit('update:modelValue', nextValue)
+  emit('update:modelValue', (Array.isArray(nextValue) ? nextValue : []).filter(field => !DATE_HASH_KEYS.has(field)))
 }
 
 function formatMatch(match) {
@@ -357,7 +339,8 @@ function scheduleHashPolicyPreview() {
 }
 
 async function runHashPolicyPreview() {
-  if (!props.dataDomain || props.modelValue.length === 0) {
+  const hasPolicyInput = props.modelValue.length > 0 || (Array.isArray(props.fieldParseRules) && props.fieldParseRules.length > 0)
+  if (!props.dataDomain || !hasPolicyInput) {
     hashPolicyPreview.value = null
     emitPolicyState()
     return

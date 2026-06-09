@@ -1,6 +1,26 @@
 const FILE_DATE_SOURCE_COLUMNS = new Set(['__file_date_from__', '__file_date_to__'])
 const RANGE_VALUE_KINDS = new Set(['date_range', 'datetime_range', 'time_range'])
 const DATE_ANCHOR_VALUE_KINDS = new Set(['time_of_day', 'time_range'])
+const COMPANION_AUTO_DATE_FORMAT_CANDIDATES = [
+  'yyyy-mm-dd',
+  'yyyy/mm/dd',
+  'dd-mm-yyyy',
+  'dd/mm/yyyy',
+  'mm-dd-yyyy',
+  'mm/dd/yyyy',
+  'yyyy-mm-dd hh:mm',
+  'yyyy-mm-dd hh:mm:ss',
+  'yyyy/mm/dd hh:mm',
+  'yyyy/mm/dd hh:mm:ss',
+  'dd-mm-yyyy hh:mm',
+  'dd-mm-yyyy hh:mm:ss',
+  'dd/mm/yyyy hh:mm',
+  'dd/mm/yyyy hh:mm:ss',
+  'mm-dd-yyyy hh:mm',
+  'mm-dd-yyyy hh:mm:ss',
+  'mm/dd/yyyy hh:mm',
+  'mm/dd/yyyy hh:mm:ss',
+]
 
 function normalizeTokens(values) {
   return Array.from(
@@ -113,6 +133,15 @@ export function buildTemplateUpdateFieldParseRulesPayload({
       value_kind: valueKind,
       date_format: String(rawRule.date_format ?? '').trim(),
       strict: rawRule.strict !== false,
+      ...(String(rawRule.date_format ?? '').trim() === 'auto_by_companion_period'
+        ? {
+            format_candidates:
+              Array.isArray(rawRule.format_candidates) && rawRule.format_candidates.length > 0
+                ? rawRule.format_candidates
+                : COMPANION_AUTO_DATE_FORMAT_CANDIDATES,
+            resolution_source: 'companion_period',
+          }
+        : {}),
       ...(RANGE_VALUE_KINDS.has(valueKind) && rawRule.range_pick
         ? { range_pick: String(rawRule.range_pick).trim() }
         : {}),

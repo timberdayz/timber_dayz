@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  COMPANION_AUTO_DATE_FORMAT_CANDIDATES,
+  DATE_FORMAT_OPTIONS,
   FILE_DATE_SOURCE_OPTIONS,
+  buildAutoCompanionFormatPayload,
   buildCompanionDateParseRules,
   buildFieldParseSourceOptions,
   mergeFieldParseRules,
@@ -86,4 +89,18 @@ test('mergeFieldParseRules replaces rules by target field', () => {
       strict: true,
     },
   ])
+})
+
+test('auto companion period format exposes candidates for save payload', () => {
+  assert.equal(
+    DATE_FORMAT_OPTIONS.some(option => option.value === 'auto_by_companion_period'),
+    true,
+  )
+  assert.deepEqual(
+    buildAutoCompanionFormatPayload({ date_format: 'auto_by_companion_period' }),
+    {
+      format_candidates: COMPANION_AUTO_DATE_FORMAT_CANDIDATES,
+      resolution_source: 'companion_period',
+    },
+  )
 })

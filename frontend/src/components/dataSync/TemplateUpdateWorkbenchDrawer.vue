@@ -355,12 +355,14 @@ import {
   DATE_FORMAT_OPTIONS,
   DATE_TARGET_FIELD_OPTIONS,
   DATE_VALUE_KIND_OPTIONS,
+  buildAutoCompanionFormatPayload,
   buildCompanionDateParseRules,
   buildFieldParseSourceOptions,
   fieldParseRuleNeedsDateAnchor,
   fieldParseRuleNeedsRangePick,
   mergeFieldParseRules,
 } from '@/domains/data_platform/utils/templateFieldParseRules'
+import { normalizeDeduplicationSelection } from '@/domains/data_platform/utils/deduplicationSelection'
 
 import HeaderDiffViewer from './HeaderDiffViewer.vue'
 import TemplateChangeSummaryCard from './TemplateChangeSummaryCard.vue'
@@ -640,63 +642,6 @@ function semanticSelectValue(row) {
   return row?.semantic_key || null
 }
 
-function normalizeDeduplicationSelection(fields, bindings, preferredSemanticKey = null) {
-  const bindingByRaw = new Map()
-  const semanticKeys = new Set()
-
-  for (const binding of Array.isArray(bindings) ? bindings : []) {
-    const rawName = String(binding?.raw_name || '').trim()
-    const semanticKey = String(binding?.semantic_key || '').trim()
-    if (rawName) {
-      bindingByRaw.set(rawName.toLowerCase(), binding)
-    }
-    if (
-      semanticKey &&
-      binding?.semantic_review_status === 'confirmed_semantic'
-    ) {
-      semanticKeys.add(semanticKey)
-    }
-  }
-
-  const normalized = []
-  const seen = new Set()
-  const pushField = (field) => {
-    const value = String(field || '').trim()
-    if (!value) return
-    const lowered = value.toLowerCase()
-    if (seen.has(lowered)) return
-    seen.add(lowered)
-    normalized.push(value)
-  }
-
-  for (const field of Array.isArray(fields) ? fields : []) {
-    const value = String(field || '').trim()
-    if (!value) continue
-
-    const rawBinding = bindingByRaw.get(value.toLowerCase())
-    if (rawBinding) {
-      if (rawBinding.semantic_review_status !== 'confirmed_semantic') {
-        continue
-      }
-      const semanticKey = String(rawBinding.semantic_key || '').trim()
-      if (semanticKey) {
-        pushField(semanticKey)
-      }
-      continue
-    }
-
-    if (semanticKeys.has(value)) {
-      pushField(value)
-    }
-  }
-
-  if (preferredSemanticKey && semanticKeys.has(preferredSemanticKey) && normalized.length === 0) {
-    pushField(preferredSemanticKey)
-  }
-
-  return normalized
-}
-
 function handleSemanticKeyChange(rawName, semanticKey) {
   const nextBindings = updateHeaderBindingSemantic(activeBindingSource.value, rawName, semanticKey)
   if (bindingsLoaded.value && fullHeaderBindings.value.length > 0) {
@@ -711,6 +656,7 @@ function handleSemanticKeyChange(rawName, semanticKey) {
   selectedDeduplicationFields.value = normalizeDeduplicationSelection(
     selectedDeduplicationFields.value,
     nextBindings,
+    localFieldParseRules.value,
     preferredSemanticKey,
   )
 }
@@ -731,6 +677,7 @@ function normalizeFieldParseRulesForSave() {
     value_kind: rule.value_kind || 'single_date',
     date_format: rule.date_format || '',
     strict: rule.strict !== false,
+    ...buildAutoCompanionFormatPayload(rule),
     ...(fieldParseRuleNeedsRangePick(rule) ? { range_pick: rule.range_pick || '' } : {}),
     ...(fieldParseRuleNeedsDateAnchor(rule) ? { date_anchor: rule.date_anchor || '__file_date_from__' } : {}),
   }))
@@ -741,7 +688,7 @@ function addFieldParseRule() {
     target_field: 'metric_date',
     source_column: '',
     value_kind: 'single_date',
-    date_format: 'yyyy-mm-dd',
+    date_format: 'auto_by_companion_period',
     strict: true,
   })
 }
@@ -774,6 +721,7 @@ async function handleSave() {
     selectedDeduplicationFields.value = normalizeDeduplicationSelection(
       selectedDeduplicationFields.value,
       activeBindingSource.value,
+      localFieldParseRules.value,
     )
     emit('save', {
       deduplicationFields: [...selectedDeduplicationFields.value],

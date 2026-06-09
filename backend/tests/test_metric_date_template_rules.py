@@ -87,6 +87,126 @@ def test_parse_date_by_declared_format_supports_day_first_range_pick():
     assert end_date == date(2026, 4, 18)
 
 
+def test_parse_date_by_declared_format_supports_month_first_regional_formats():
+    from modules.services.smart_date_parser import parse_date_by_declared_format
+
+    slash_date, _ = parse_date_by_declared_format(
+        "05/06/2026",
+        date_format="mm/dd/yyyy",
+        value_kind="single_date",
+    )
+    dash_date, dash_datetime = parse_date_by_declared_format(
+        "05-06-2026 13:45",
+        date_format="mm-dd-yyyy hh:mm",
+        value_kind="single_datetime",
+    )
+
+    assert slash_date == date(2026, 5, 6)
+    assert dash_date == date(2026, 5, 6)
+    assert dash_datetime == datetime(2026, 5, 6, 13, 45)
+
+
+def test_auto_by_companion_period_selects_day_first_format():
+    from modules.services.smart_date_parser import parse_date_by_declared_format
+
+    parsed_date, parsed_datetime = parse_date_by_declared_format(
+        "01/03/2026",
+        date_format="auto_by_companion_period",
+        value_kind="single_date",
+        companion_date_from=date(2026, 3, 1),
+        companion_date_to=date(2026, 3, 31),
+        format_candidates=["dd/mm/yyyy", "mm/dd/yyyy"],
+    )
+
+    assert parsed_date == date(2026, 3, 1)
+    assert parsed_datetime is None
+
+
+def test_auto_by_companion_period_selects_month_first_format():
+    from modules.services.smart_date_parser import parse_date_by_declared_format
+
+    parsed_date, _ = parse_date_by_declared_format(
+        "03/01/2026",
+        date_format="auto_by_companion_period",
+        value_kind="single_date",
+        companion_date_from=date(2026, 3, 1),
+        companion_date_to=date(2026, 3, 31),
+        format_candidates=["dd/mm/yyyy", "mm/dd/yyyy"],
+    )
+
+    assert parsed_date == date(2026, 3, 1)
+
+
+def test_auto_by_companion_period_rejects_ambiguous_candidates():
+    from modules.services.smart_date_parser import parse_date_by_declared_format
+
+    with pytest.raises(ValueError, match="ambiguous companion-constrained date format"):
+        parse_date_by_declared_format(
+            "03/03/2026",
+            date_format="auto_by_companion_period",
+            value_kind="single_date",
+            companion_date_from=date(2026, 3, 1),
+            companion_date_to=date(2026, 3, 31),
+            format_candidates=["dd/mm/yyyy", "mm/dd/yyyy"],
+        )
+
+
+def test_raw_data_importer_resolves_auto_metric_date_with_companion_period():
+    importer = _make_importer()
+    importer.file_date_from = date(2026, 3, 1)
+    importer.file_date_to = date(2026, 3, 31)
+    importer.field_parse_rules = [
+        {
+            "target_field": "metric_date",
+            "source_column": "Date",
+            "value_kind": "single_date",
+            "date_format": "auto_by_companion_period",
+            "format_candidates": ["dd/mm/yyyy", "mm/dd/yyyy"],
+            "strict": True,
+        }
+    ]
+
+    (
+        metric_date,
+        period_start_date,
+        period_end_date,
+        period_start_time,
+        period_end_time,
+    ) = importer._resolve_period_dates_for_insert(
+        row={"Date": "01/03/2026", "page_views": 985},
+        header_columns=["Date", "page_views"],
+        granularity="monthly",
+    )
+
+    assert metric_date == date(2026, 3, 1)
+    assert period_start_date == date(2026, 3, 1)
+    assert period_end_date == date(2026, 3, 1)
+    assert period_start_time is None
+    assert period_end_time is None
+
+
+def test_raw_data_importer_rejects_source_metric_date_outside_companion_period():
+    importer = _make_importer()
+    importer.file_date_from = date(2026, 3, 1)
+    importer.file_date_to = date(2026, 3, 31)
+    importer.field_parse_rules = [
+        {
+            "target_field": "metric_date",
+            "source_column": "Date",
+            "value_kind": "single_date",
+            "date_format": "mm/dd/yyyy",
+            "strict": True,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="earlier than file_date_from"):
+        importer._resolve_period_dates_for_insert(
+            row={"Date": "01/03/2026", "page_views": 985},
+            header_columns=["Date", "page_views"],
+            granularity="monthly",
+        )
+
+
 def test_raw_data_importer_field_parse_rules_override_heuristic_metric_date_resolution():
     importer = _make_importer()
 
@@ -317,6 +437,104 @@ def test_raw_data_importer_resolves_monthly_file_date_range_without_today_fallba
     assert period_end_date == date(2026, 4, 30)
     assert period_start_time is None
     assert period_end_time is None
+
+
+def test_raw_data_importer_keeps_source_metric_date_when_companion_period_exists():
+    importer = _make_importer()
+    importer.file_date_from = date(2026, 5, 1)
+    importer.file_date_to = date(2026, 5, 31)
+    importer.field_parse_rules = [
+        {
+            "target_field": "metric_date",
+            "source_column": "日期",
+            "value_kind": "single_date",
+            "date_format": "dd/mm/yyyy",
+            "strict": True,
+        },
+        {
+            "target_field": "period_start_date",
+            "source_column": "__file_date_from__",
+            "value_kind": "single_date",
+            "date_format": "yyyy-mm-dd",
+            "strict": True,
+        },
+        {
+            "target_field": "period_end_date",
+            "source_column": "__file_date_to__",
+            "value_kind": "single_date",
+            "date_format": "yyyy-mm-dd",
+            "strict": True,
+        },
+    ]
+
+    (
+        metric_date,
+        period_start_date,
+        period_end_date,
+        period_start_time,
+        period_end_time,
+    ) = importer._resolve_period_dates_for_insert(
+        row={"日期": "23/05/2026", "浏览量": "985"},
+        header_columns=["日期", "浏览量"],
+        granularity="monthly",
+    )
+
+    assert metric_date == date(2026, 5, 23)
+    assert period_start_date == date(2026, 5, 1)
+    assert period_end_date == date(2026, 5, 31)
+    assert period_start_time is None
+    assert period_end_time is None
+
+
+def test_raw_data_importer_resolves_hour_range_with_companion_date_anchor():
+    importer = _make_importer()
+    importer.file_date_from = date(2026, 5, 1)
+    importer.file_date_to = date(2026, 5, 1)
+    importer.field_parse_rules = [
+        {
+            "target_field": "metric_date",
+            "source_column": "__file_date_from__",
+            "value_kind": "single_date",
+            "date_format": "yyyy-mm-dd",
+            "strict": True,
+        },
+        {
+            "target_field": "period_start_time",
+            "source_column": "小时",
+            "value_kind": "time_range",
+            "date_format": "hh:mm",
+            "range_pick": "start",
+            "date_anchor": "__file_date_from__",
+            "strict": True,
+        },
+        {
+            "target_field": "period_end_time",
+            "source_column": "小时",
+            "value_kind": "time_range",
+            "date_format": "hh:mm",
+            "range_pick": "end",
+            "date_anchor": "__file_date_from__",
+            "strict": True,
+        },
+    ]
+
+    (
+        metric_date,
+        period_start_date,
+        period_end_date,
+        period_start_time,
+        period_end_time,
+    ) = importer._resolve_period_dates_for_insert(
+        row={"小时": "13:00-14:00", "浏览量": "985"},
+        header_columns=["小时", "浏览量"],
+        granularity="daily",
+    )
+
+    assert metric_date == date(2026, 5, 1)
+    assert period_start_date == date(2026, 5, 1)
+    assert period_end_date == date(2026, 5, 1)
+    assert period_start_time == datetime(2026, 5, 1, 13, 0)
+    assert period_end_time == datetime(2026, 5, 1, 14, 0)
 
 
 def test_raw_data_importer_rejects_missing_reliable_business_date():

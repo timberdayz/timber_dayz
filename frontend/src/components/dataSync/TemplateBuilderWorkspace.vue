@@ -365,6 +365,7 @@ import {
   DATE_FORMAT_OPTIONS,
   DATE_TARGET_FIELD_OPTIONS,
   DATE_VALUE_KIND_OPTIONS,
+  buildAutoCompanionFormatPayload,
   buildCompanionDateParseRules,
   buildFieldParseSourceOptions,
   fieldParseRuleNeedsDateAnchor,
@@ -503,6 +504,7 @@ function emitFieldParseRulesChange() {
       value_kind: rule.value_kind || 'single_date',
       date_format: rule.date_format || '',
       strict: rule.strict !== false,
+      ...buildAutoCompanionFormatPayload(rule),
       ...(fieldParseRuleNeedsRangePick(rule) ? { range_pick: rule.range_pick || '' } : {}),
       ...(fieldParseRuleNeedsDateAnchor(rule) ? { date_anchor: rule.date_anchor || '__file_date_from__' } : {}),
     }))
@@ -514,7 +516,7 @@ function addFieldParseRule() {
     target_field: 'metric_date',
     source_column: '',
     value_kind: 'single_date',
-    date_format: 'yyyy-mm-dd',
+    date_format: 'auto_by_companion_period',
     strict: true,
   })
   emitFieldParseRulesChange()

@@ -669,6 +669,7 @@ class DataIngestionService:
 
                     # [*] v4.14.0新增:获取核心去重字段(优先级:模板配置 > 默认配置 > 所有字段)
                     from backend.services.deduplication_fields_config import (
+                        append_auto_date_identity_fields,
                         get_deduplication_fields,
                     )
 
@@ -677,6 +678,10 @@ class DataIngestionService:
                         template_fields=deduplication_fields,
                         sub_domain=sub_domain,
                         header_bindings=getattr(raw_importer, "header_bindings", None),
+                    )
+                    final_deduplication_fields = append_auto_date_identity_fields(
+                        final_deduplication_fields,
+                        field_parse_rules,
                     )
 
                     if final_deduplication_fields:

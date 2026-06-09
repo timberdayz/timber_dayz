@@ -121,6 +121,17 @@ assert.match(changeSummaryCardText, /已语义匹配/, 'change summary should sh
 assert.match(changeSummaryCardText, /已语义匹配，但不再参与 Data Hash/, 'change summary should distinguish matched non-hashable fields')
 assert.match(deduplicationReviewPanelText, /匹配但不可参与 Data Hash/, 'deduplication review should show matched non-hashable old fields')
 
+assert.match(
+  deduplicationReviewPanelText,
+  /auto_date_identity_fields/,
+  'deduplication review should show backend-computed automatic date identity fields'
+)
+assert.doesNotMatch(
+  deduplicationReviewPanelText,
+  /for \(const option of derivedOptions\.value\)/,
+  'derived date identity fields should not be added to the user-selectable hash pool'
+)
+
 assert.match(apiText, /getTemplateUpdateContext/, 'frontend api should expose getTemplateUpdateContext')
 assert.match(apiText, /getTemplateVariantCreateContext/, 'frontend api should expose getTemplateVariantCreateContext')
 assert.match(apiText, /getTemplateVariantCreateContext/, 'frontend api should expose getTemplateVariantCreateContext')

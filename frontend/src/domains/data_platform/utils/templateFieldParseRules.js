@@ -29,6 +29,7 @@ export const DATE_VALUE_KIND_OPTIONS = [
 ]
 
 export const DATE_FORMAT_OPTIONS = [
+  { label: '系统根据伴生周期自动判断', value: 'auto_by_companion_period' },
   { label: 'yyyy-mm-dd', value: 'yyyy-mm-dd' },
   { label: 'yyyy/mm/dd', value: 'yyyy/mm/dd' },
   { label: 'yyyy-mm-dd hh:mm', value: 'yyyy-mm-dd hh:mm' },
@@ -41,11 +42,51 @@ export const DATE_FORMAT_OPTIONS = [
   { label: 'dd-mm-yyyy hh:mm:ss', value: 'dd-mm-yyyy hh:mm:ss' },
   { label: 'dd/mm/yyyy hh:mm', value: 'dd/mm/yyyy hh:mm' },
   { label: 'dd/mm/yyyy hh:mm:ss', value: 'dd/mm/yyyy hh:mm:ss' },
+  { label: 'mm-dd-yyyy', value: 'mm-dd-yyyy' },
+  { label: 'mm/dd/yyyy', value: 'mm/dd/yyyy' },
+  { label: 'mm-dd-yyyy hh:mm', value: 'mm-dd-yyyy hh:mm' },
+  { label: 'mm-dd-yyyy hh:mm:ss', value: 'mm-dd-yyyy hh:mm:ss' },
+  { label: 'mm/dd/yyyy hh:mm', value: 'mm/dd/yyyy hh:mm' },
+  { label: 'mm/dd/yyyy hh:mm:ss', value: 'mm/dd/yyyy hh:mm:ss' },
   { label: 'hh:mm', value: 'hh:mm' },
   { label: 'hh:mm:ss', value: 'hh:mm:ss' },
   { label: 'dd-mm-yyyy-dd-mm-yyyy', value: 'dd-mm-yyyy-dd-mm-yyyy' },
   { label: 'dd/mm/yyyy-dd/mm/yyyy', value: 'dd/mm/yyyy-dd/mm/yyyy' },
 ]
+
+export const COMPANION_AUTO_DATE_FORMAT_CANDIDATES = [
+  'yyyy-mm-dd',
+  'yyyy/mm/dd',
+  'dd-mm-yyyy',
+  'dd/mm/yyyy',
+  'mm-dd-yyyy',
+  'mm/dd/yyyy',
+  'yyyy-mm-dd hh:mm',
+  'yyyy-mm-dd hh:mm:ss',
+  'yyyy/mm/dd hh:mm',
+  'yyyy/mm/dd hh:mm:ss',
+  'dd-mm-yyyy hh:mm',
+  'dd-mm-yyyy hh:mm:ss',
+  'dd/mm/yyyy hh:mm',
+  'dd/mm/yyyy hh:mm:ss',
+  'mm-dd-yyyy hh:mm',
+  'mm-dd-yyyy hh:mm:ss',
+  'mm/dd/yyyy hh:mm',
+  'mm/dd/yyyy hh:mm:ss',
+]
+
+export function buildAutoCompanionFormatPayload(rule = {}) {
+  if (String(rule?.date_format || '').trim() !== 'auto_by_companion_period') {
+    return {}
+  }
+  const candidates = Array.isArray(rule?.format_candidates) && rule.format_candidates.length > 0
+    ? rule.format_candidates
+    : COMPANION_AUTO_DATE_FORMAT_CANDIDATES
+  return {
+    format_candidates: candidates,
+    resolution_source: 'companion_period',
+  }
+}
 
 export const DATE_ANCHOR_OPTIONS = [
   { label: '文件开始日期（date_from）', value: '__file_date_from__' },

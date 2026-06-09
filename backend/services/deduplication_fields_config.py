@@ -102,6 +102,15 @@ DEFAULT_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
     "analytics": ["metric_date"],
 }
 
+AUTO_DATE_IDENTITY_FIELD_ORDER = [
+    "metric_date",
+    "period_start_date",
+    "period_end_date",
+    "period_start_time",
+    "period_end_time",
+]
+AUTO_DATE_IDENTITY_FIELDS = set(AUTO_DATE_IDENTITY_FIELD_ORDER)
+
 # 子类型特定配置(sub_domain -> [核心字段列表])
 SUB_DOMAIN_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
     # 可以添加子类型特定的配置
@@ -218,6 +227,47 @@ def get_deduplication_fields(
     # 3. 如果没有配置,返回空列表(表示使用所有业务字段)
     logger.debug(f"[DedupFields] 未配置核心字段,将使用所有业务字段计算data_hash")
     return []
+
+
+def append_auto_date_identity_fields(
+    deduplication_fields: Optional[List[str]],
+    field_parse_rules: Optional[List[Dict[str, Any]]],
+) -> List[str]:
+    """
+    Append date/time identities produced by template rules to Data Hash fields.
+
+    Users select source-file business identity fields. Date and time identities
+    are system identities produced by field_parse_rules and must participate in
+    hash without requiring manual selection.
+    """
+    merged: List[str] = []
+    seen = set()
+    for field in deduplication_fields or []:
+        text = str(field or "").strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(text)
+
+    auto_fields = set()
+    for rule in field_parse_rules or []:
+        if not isinstance(rule, dict):
+            continue
+        semantic_key = normalize_semantic_key(
+            rule.get("target_field") or rule.get("semantic_key") or rule.get("field")
+        )
+        if semantic_key in AUTO_DATE_IDENTITY_FIELDS:
+            auto_fields.add(semantic_key)
+
+    for field in AUTO_DATE_IDENTITY_FIELD_ORDER:
+        if field not in auto_fields or field.lower() in seen:
+            continue
+        seen.add(field.lower())
+        merged.append(field)
+    return merged
 
 
 def get_deduplication_strategy(data_domain: str) -> str:

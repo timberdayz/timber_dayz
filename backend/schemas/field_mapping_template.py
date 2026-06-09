@@ -45,6 +45,14 @@ class TemplateFieldParseRule(BaseModel):
     source_semantic_role: Optional[str] = Field(None, description="Semantic role for source column")
     value_kind: TemplateFieldParseRuleValueKind = Field(..., description="Declared parse value kind")
     date_format: str = Field(..., description="Declared date format")
+    format_candidates: List[str] = Field(
+        default_factory=list,
+        description="Candidate formats for auto_by_companion_period parsing",
+    )
+    resolution_source: Optional[str] = Field(
+        None,
+        description="How an automatic date format should be resolved",
+    )
     date_anchor: Optional[str] = Field(
         None,
         description="Date source used to combine time-only values into full datetimes",
