@@ -60,11 +60,27 @@ def build_standard_output_root(
     )
     shop_id = (
         cfg.get("shop_id")
+        or cfg.get("cnsc_shop_id")
+        or cfg.get("platform_shop_id")
         or account.get("shop_id")
         or account.get("cnsc_shop_id")
+        or account.get("platform_shop_id")
     )
     # 平台特例:TikTok 仅在明确识别到店铺代码时才追加 shop_id;不要回退到 account_id,避免出现“__账号标签”
     platform_name = str(getattr(ctx, "platform", "")).lower()
+    if platform_name == "shopee":
+        from backend.services.shopee_shop_id_resolver import (
+            resolve_shopee_platform_shop_id,
+        )
+
+        shop_id = resolve_shopee_platform_shop_id(
+            platform=platform_name,
+            account_id=account.get("shop_account_id") or account.get("account_id"),
+            store_name=shop_name or account.get("store_name"),
+            platform_shop_id=cfg.get("platform_shop_id") or account.get("platform_shop_id"),
+            shop_id=shop_id,
+        )
+
     if not shop_id and platform_name != "tiktok":
         shop_id = account.get("account_id")
     include_shop_id = get_config_value(

@@ -489,6 +489,42 @@ async def test_shopee_login_resume_with_runtime_otp_reaches_homepage(
 
 
 @pytest.mark.asyncio
+async def test_shopee_login_reused_session_does_not_require_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = ShopeeLogin(
+        _ctx(
+            account={
+                "login_url": "https://seller.shopee.cn/account/signin?next=%2F",
+            },
+            config={"params": {"reused_session": True}},
+        )
+    )
+    page = _FakePage("about:blank")
+    cleaned: list[str] = []
+
+    async def _fake_reused_redirect(current_page):
+        current_page.url = "https://seller.shopee.cn/?cnsc_shop_id=1407964586"
+        return True
+
+    async def _fake_cleanup(current_page) -> None:
+        cleaned.append(str(current_page.url))
+
+    fill_credentials = AsyncMock()
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+    monkeypatch.setattr(component, "_wait_for_reused_session_redirect", AsyncMock(side_effect=_fake_reused_redirect))
+    monkeypatch.setattr(component, "_cleanup_after_login", _fake_cleanup)
+    monkeypatch.setattr(component, "_fill_credentials", fill_credentials)
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert result.message == "ok"
+    assert cleaned == ["https://seller.shopee.cn/?cnsc_shop_id=1407964586"]
+    fill_credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_shopee_login_manual_completed_advances_to_otp_without_restarting_login(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

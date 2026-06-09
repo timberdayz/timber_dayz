@@ -1,4 +1,6 @@
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -7,7 +9,9 @@ from modules.core.file_naming import StandardFileName
 from backend.services import file_path_resolver as resolver_module
 from backend.services.file_path_resolver import FilePathResolver
 from modules.apps.collection_center import executor_v2 as executor_module
-from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+from modules.apps.collection_center.executor_v2 import CollectionExecutorV2, TaskContext
+from modules.components.base import ExecutionContext
+from modules.components.export.base import build_standard_output_root
 
 
 def test_catalog_file_defaults_to_data_raw_source():
@@ -212,6 +216,187 @@ def test_executor_infers_analytics_from_traffic_overview_path_without_false_serv
     )
 
     assert inferred == "analytics"
+
+
+def test_shopee_standard_output_root_resolves_known_store_name_before_account_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "modules.components.export.base.get_downloads_dir",
+        lambda: tmp_path,
+        raising=False,
+    )
+
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={
+            "account_id": "shopee_sg_zewei_toys_local",
+            "store_name": "zewei_toys.sg",
+        },
+        config={"shop_name": "zewei_toys.sg", "granularity": "monthly"},
+    )
+
+    root = build_standard_output_root(ctx, data_type="analytics", granularity="monthly")
+
+    assert "zewei_toys.sg__1407964586" in str(root).replace("\\", "/")
+    assert "zewei_toys.sg__1227491331" not in str(root).replace("\\", "/")
+
+
+@pytest.mark.asyncio
+async def test_executor_rejects_shopee_raw_promotion_when_store_name_and_shop_id_disagree(
+    tmp_path,
+    monkeypatch,
+):
+    raw_dir = tmp_path / "custom-raw-root"
+    download_file = (
+        tmp_path
+        / "temp"
+        / "downloads"
+        / "task-1"
+        / "shopee"
+        / "acc"
+        / "zewei_toys.sg__1227491331"
+        / "analytics"
+        / "monthly"
+        / "traffic.xlsx"
+    )
+    download_file.parent.mkdir(parents=True, exist_ok=True)
+    download_file.write_text("demo", encoding="utf-8")
+
+    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+
+    import modules.services.catalog_scanner as catalog_scanner_module
+
+    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: "analytics"
+    executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: ""
+
+    processed = await CollectionExecutorV2._process_files(
+        executor,
+        [str(download_file)],
+        platform="shopee",
+        data_domains=["analytics"],
+        granularity="monthly",
+        account={
+            "label": "acc",
+            "store_name": "zewei_toys.sg",
+            "shop_id": "1227491331",
+        },
+        date_range={"start_date": "2026-04-01", "end_date": "2026-04-30"},
+    )
+
+    rejected_files = list((download_file.parent / "_shop_identity_rejected").glob("*.xlsx"))
+
+    assert processed == []
+    assert rejected_files
+    assert not list(raw_dir.rglob("*.xlsx"))
+    assert executor._last_file_processing_summary["shop_identity_rejected_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_executor_writes_consistent_shopee_store_name_and_resolved_shop_id_to_meta(
+    tmp_path,
+    monkeypatch,
+):
+    raw_dir = tmp_path / "custom-raw-root"
+    download_file = (
+        tmp_path
+        / "temp"
+        / "downloads"
+        / "task-1"
+        / "shopee"
+        / "acc"
+        / "zewei_toys.sg__1407964586"
+        / "products"
+        / "monthly"
+        / "parentskudetail.20260401_20260430.xlsx"
+    )
+    download_file.parent.mkdir(parents=True, exist_ok=True)
+    download_file.write_text("demo", encoding="utf-8")
+
+    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+
+    captured = {}
+
+    import modules.services.catalog_scanner as catalog_scanner_module
+    from modules.services.metadata_manager import MetadataManager
+
+    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+
+    def _capture_meta(file_path, business_metadata, collection_info):
+        captured["business_metadata"] = business_metadata
+        captured["collection_info"] = collection_info
+        return Path(str(file_path) + ".meta.json")
+
+    monkeypatch.setattr(
+        MetadataManager,
+        "create_meta_file",
+        staticmethod(_capture_meta),
+    )
+
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+
+    processed = await CollectionExecutorV2._process_files(
+        executor,
+        [str(download_file)],
+        platform="shopee",
+        data_domains=["products"],
+        granularity="monthly",
+        account={
+            "label": "acc",
+            "account_id": "shopee_sg_zewei_toys_local",
+            "store_name": "zewei_toys.sg",
+            "shop_id": "1227491331",
+        },
+        date_range={"start_date": "2026-04-01", "end_date": "2026-04-30"},
+    )
+
+    assert processed
+    assert captured["business_metadata"]["shop_id"] == "1407964586"
+    assert captured["business_metadata"]["store_name"] == "zewei_toys.sg"
+    assert captured["collection_info"]["shop_id"] == "1407964586"
+    assert captured["collection_info"]["store_name"] == "zewei_toys.sg"
+    assert "zewei_toys.sg__1407964586" in captured["collection_info"]["original_path"]
+
+
+@pytest.mark.asyncio
+async def test_executor_flushes_downloaded_files_before_verification_timeout():
+    executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+    executor._update_status = AsyncMock()
+    executor._last_file_processing_summary = {}
+    executor._process_files = AsyncMock(
+        return_value=[r"F:\Vscode\python_programme\AI_code\xihong_erp\data\raw\2026\shopee_analytics_monthly_demo.xlsx"]
+    )
+
+    context = TaskContext(
+        task_id="task-1",
+        platform="shopee",
+        account_id="shopee_sg_zewei_toys_local",
+        data_domains=["analytics"],
+        date_range={"start_date": "2026-04-01", "end_date": "2026-04-30"},
+        granularity="monthly",
+        collected_files=[r"F:\Vscode\python_programme\AI_code\xihong_erp\downloads\temp.xlsx"],
+        completed_domains=["analytics"],
+        failed_domains=[{"domain": "products", "error": "验证码等待超时"}],
+    )
+
+    result = await CollectionExecutorV2._build_verification_timeout_result_with_partial_file_flush(
+        executor,
+        task_id="task-1",
+        verification_type="graphical_captcha",
+        context=context,
+        start_time=datetime.now(),
+        total_domains_count=2,
+        platform="shopee",
+        account={"store_name": "zewei_toys.sg", "shop_id": "1407964586"},
+    )
+
+    executor._process_files.assert_awaited_once()
+    assert result.status == "paused"
+    assert result.files_collected == 1
+    assert result.collected_files == [
+        r"F:\Vscode\python_programme\AI_code\xihong_erp\data\raw\2026\shopee_analytics_monthly_demo.xlsx"
+    ]
 
 
 def test_executor_does_not_infer_orders_sub_domain_from_platform_segment_for_non_orders_domain():
