@@ -1,22 +1,22 @@
-﻿<!--
-鏁版嵁鍚屾 - 鍚屾浠诲姟绠＄悊椤甸潰
-v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
+<!--
+数据同步 - 同步任务管理页面
+v4.6.0新增：独立的数据同步系统
 -->
 
 <template>
   <div class="data-sync-tasks erp-page-container">
-    <!-- 椤甸潰鏍囬 -->
+    <!-- 页面标题 -->
     <div class="page-header">
-      <h1>鈿欙笍 鏁版嵁鍚屾 - 鍚屾浠诲姟</h1>
-      <p>鏌ョ湅鍜岀鐞嗘暟鎹悓姝ヤ换鍔?/p>
+      <h1>⚙️ 数据同步 - 同步任务</h1>
+      <p>查看和管理数据同步任务</p>
     </div>
 
-    <!-- 浠诲姟缁熻 -->
+    <!-- 任务统计 -->
     <el-row :gutter="16" style="margin-bottom: 20px;">
       <el-col :xs="24" :sm="12" :md="8" :lg="4">
         <el-card>
           <div class="stat-item">
-            <div class="stat-label">杩涜涓?/div>
+            <div class="stat-label">进行中</div>
             <div class="stat-value" style="color: #409EFF;">{{ stats.running }}</div>
           </div>
         </el-card>
@@ -24,7 +24,7 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
       <el-col :xs="24" :sm="12" :md="8" :lg="4">
         <el-card>
           <div class="stat-item">
-            <div class="stat-label">鐤戜技鍗′綇</div>
+            <div class="stat-label">疑似卡住</div>
             <div class="stat-value" style="color: #E6A23C;">{{ stats.stale_running }}</div>
           </div>
         </el-card>
@@ -32,7 +32,7 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
       <el-col :xs="24" :sm="12" :md="8" :lg="4">
         <el-card>
           <div class="stat-item">
-            <div class="stat-label">宸插畬鎴?/div>
+            <div class="stat-label">已完成</div>
             <div class="stat-value" style="color: #67C23A;">{{ stats.completed }}</div>
           </div>
         </el-card>
@@ -40,7 +40,7 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
       <el-col :xs="24" :sm="12" :md="8" :lg="4">
         <el-card>
           <div class="stat-item">
-            <div class="stat-label">澶辫触</div>
+            <div class="stat-label">失败</div>
             <div class="stat-value" style="color: #F56C6C;">{{ stats.failed }}</div>
           </div>
         </el-card>
@@ -48,21 +48,21 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
       <el-col :xs="24" :sm="24" :md="8" :lg="8">
         <el-card>
           <div class="stat-item">
-            <div class="stat-label">鎬昏</div>
+            <div class="stat-label">总计</div>
             <div class="stat-value">{{ stats.total }}</div>
           </div>
         </el-card>
       </el-col>
     </el-row>
 
-    <!-- 浠诲姟鍒楄〃 -->
+    <!-- 任务列表 -->
     <el-card>
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>浠诲姟鍒楄〃</span>
+          <span>任务列表</span>
           <el-button @click="loadTasks" :loading="loading">
             <el-icon><Refresh /></el-icon>
-            鍒锋柊
+            刷新
           </el-button>
         </div>
       </template>
@@ -73,50 +73,53 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="task_id" label="浠诲姟ID" width="200" />
-        <el-table-column prop="task_type" label="浠诲姟绫诲瀷" width="120">
+        <el-table-column prop="task_id" label="任务ID" width="200" />
+        <el-table-column prop="task_type" label="任务类型" width="120">
           <template #default="{ row }">
             <el-tag size="small" :type="getSyncTaskTypeMeta(row.task_type).tagType">
               {{ getSyncTaskTypeMeta(row.task_type).text }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="trigger_source" label="瑙﹀彂鏂瑰紡" width="110">
+        <el-table-column prop="trigger_source" label="触发方式" width="110">
           <template #default="{ row }">
             <el-tag size="small" :type="getSyncTriggerMeta(row).tagType">
               {{ getSyncTriggerMeta(row).text }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="鐘舵€? width="100">
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.isStaleRunning" type="warning" size="small">
               <el-icon><Warning /></el-icon>
-              鐤戜技鍗′綇
+              疑似卡住
             </el-tag>
             <el-tag v-else-if="row.status === 'running'" type="primary" size="small">
               <el-icon><Loading /></el-icon>
-              杩涜涓?            </el-tag>
+              进行中
+            </el-tag>
             <el-tag v-else-if="row.status === 'completed'" type="success" size="small">
               <el-icon><Check /></el-icon>
-              宸插畬鎴?            </el-tag>
+              已完成
+            </el-tag>
             <el-tag v-else-if="row.status === 'partial_success'" type="warning" size="small">
               <el-icon><Warning /></el-icon>
-              閮ㄥ垎鎴愬姛
+              部分成功
             </el-tag>
             <el-tag v-else-if="row.status === 'cancelled'" type="info" size="small">
               <el-icon><Close /></el-icon>
-              宸插彇娑?            </el-tag>
+              已取消
+            </el-tag>
             <el-tag v-else-if="row.status === 'failed'" type="danger" size="small">
               <el-icon><Close /></el-icon>
-              澶辫触
+              失败
             </el-tag>
             <el-tag v-else type="info" size="small">
               {{ row.status }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="杩涘害" width="200">
+        <el-table-column label="进度" width="200">
           <template #default="{ row }">
             <el-progress
               :percentage="row.progress || 0"
@@ -124,17 +127,17 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
             />
           </template>
         </el-table-column>
-        <el-table-column prop="processed_files" label="宸插鐞嗘枃浠? width="120" />
-        <el-table-column prop="total_files" label="鎬绘枃浠舵暟" width="120" />
-        <el-table-column prop="heartbeat_at_display" label="蹇冭烦鏃堕棿" width="180" />
-        <el-table-column prop="valid_rows" label="鎴愬姛琛屾暟" width="120" />
-        <el-table-column prop="quarantined_rows" label="闅旂琛屾暟" width="120" />
-        <el-table-column prop="created_at" label="鍒涘缓鏃堕棿" width="180" />
-        <el-table-column label="鎿嶄綔" width="220" fixed="right">
+        <el-table-column prop="processed_files" label="已处理文件" width="120" />
+        <el-table-column prop="total_files" label="总文件数" width="120" />
+        <el-table-column prop="heartbeat_at_display" label="心跳时间" width="180" />
+        <el-table-column prop="valid_rows" label="成功行数" width="120" />
+        <el-table-column prop="quarantined_rows" label="隔离行数" width="120" />
+        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="viewTaskDetail(row.task_id)">
               <el-icon><View /></el-icon>
-              鏌ョ湅璇︽儏
+              查看详情
             </el-button>
             <el-button
               v-if="row.status === 'running'"
@@ -143,7 +146,7 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
               @click="cancelTask(row)"
             >
               <el-icon><Close /></el-icon>
-              鍙栨秷
+              取消
             </el-button>
             <el-button
               v-if="row.isStaleRunning"
@@ -152,30 +155,31 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
               @click="recoverTask(row)"
             >
               <el-icon><Warning /></el-icon>
-              寮哄埗鎭㈠
+              强制恢复
             </el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <el-dialog v-model="detailDialogVisible" title="浠诲姟璇︽儏" width="900px">
+    <el-dialog v-model="detailDialogVisible" title="任务详情" width="900px">
       <div v-if="selectedTask" class="task-detail-panel">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="浠诲姟ID">{{ selectedTask.task_id }}</el-descriptions-item>
-          <el-descriptions-item label="鐘舵€?>{{ selectedTask.status }}</el-descriptions-item>
-          <el-descriptions-item label="杩涘害">{{ selectedTask.progress }}%</el-descriptions-item>
-          <el-descriptions-item label="蹇冭烦鏃堕棿">{{ selectedTask.heartbeat_at_display || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="鎵归噺鍙傛暟">
+          <el-descriptions-item label="任务ID">{{ selectedTask.task_id }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ selectedTask.status }}</el-descriptions-item>
+          <el-descriptions-item label="进度">{{ selectedTask.progress }}%</el-descriptions-item>
+          <el-descriptions-item label="心跳时间">{{ selectedTask.heartbeat_at_display || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="批量参数">
             {{ selectedTask.task_details?.max_files || '-' }} / {{ selectedTask.task_details?.max_concurrent || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="鎭㈠鏉ユ簮">
+          <el-descriptions-item label="恢复来源">
             {{ selectedTask.task_details?.recovered_by || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="閿欒鎽樿" :span="2">
+          <el-descriptions-item label="错误摘要" :span="2">
             {{ selectedTask.error_summary || selectedTask.message || '-' }}
           </el-descriptions-item>
         </el-descriptions>
+
         <el-alert
           v-if="getHeaderChangeErrors(selectedTask).length"
           title="检测到模板更新"
@@ -206,7 +210,6 @@ v4.6.0鏂板锛氱嫭绔嬬殑鏁版嵁鍚屾绯荤粺
             <el-table-column prop="message" label="说明" min-width="280" />
           </el-table>
         </div>
-
       </div>
     </el-dialog>
   </div>
@@ -264,7 +267,7 @@ const loadTasks = async () => {
     const taskList = Array.isArray(data) ? data : []
 
     if (!Array.isArray(data)) {
-      ElMessage.warning('浠诲姟鏁版嵁鏍煎紡寮傚父锛岃鍒锋柊閲嶈瘯')
+      ElMessage.warning('任务数据格式异常，请刷新重试')
       tasks.value = []
       updateStats()
       return
@@ -279,6 +282,7 @@ const loadTasks = async () => {
       const progress = Number.isFinite(progressPercent) ? Math.round(progressPercent) : fallbackProgress
       const heartbeatAt = task.heartbeat_at || task.updated_at || task.started_at || task.start_time
       const staleRunning = normalizedStatus === 'running' && isHeartbeatStale(heartbeatAt)
+      const headerChangeErrors = extractHeaderChangeErrorEntries(task)
 
       return {
         ...task,
@@ -291,8 +295,8 @@ const loadTasks = async () => {
         current_item: task.current_item || task.current_file || '',
         error_summary: task.error_summary || '',
         errors: Array.isArray(task.errors) ? task.errors : [],
-        header_change_errors: extractHeaderChangeErrorEntries(task),
-        is_header_changed: extractHeaderChangeErrorEntries(task).length > 0,
+        header_change_errors: headerChangeErrors,
+        is_header_changed: headerChangeErrors.length > 0,
         isStaleRunning: staleRunning,
         quarantined_rows: task.quarantined_rows || 0,
         valid_rows: task.valid_rows || 0,
@@ -303,8 +307,8 @@ const loadTasks = async () => {
     })
     updateStats()
   } catch (error) {
-    console.error('鍔犺浇浠诲姟鍒楄〃澶辫触:', error)
-    ElMessage.error(error.message || '鍔犺浇浠诲姟鍒楄〃澶辫触')
+    console.error('加载任务列表失败:', error)
+    ElMessage.error(error.message || '加载任务列表失败')
     tasks.value = []
     updateStats()
   } finally {
@@ -333,20 +337,20 @@ const getHeaderChangeErrors = (task) => Array.isArray(task?.header_change_errors
 const cancelTask = async (task) => {
   try {
     await api.cancelSyncTask(task.task_id)
-    ElMessage.success('浠诲姟宸插彇娑?)
+    ElMessage.success('任务已取消')
     await loadTasks()
   } catch (error) {
-    ElMessage.error(error.message || '鍙栨秷浠诲姟澶辫触')
+    ElMessage.error(error.message || '取消任务失败')
   }
 }
 
 const recoverTask = async (task) => {
   try {
     await api.recoverSyncTask(task.task_id)
-    ElMessage.success('浠诲姟宸插己鍒舵仮澶?)
+    ElMessage.success('任务已强制恢复')
     await loadTasks()
   } catch (error) {
-    ElMessage.error(error.message || '寮哄埗鎭㈠浠诲姟澶辫触')
+    ElMessage.error(error.message || '强制恢复任务失败')
   }
 }
 

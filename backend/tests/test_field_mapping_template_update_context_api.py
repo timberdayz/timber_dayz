@@ -1666,6 +1666,52 @@ async def test_save_mapping_template_returns_structured_hash_policy_on_failure(
 
 
 @pytest.mark.asyncio
+async def test_save_mapping_template_normalizes_raw_deduplication_fields_to_canonical_keys(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "shopee",
+            "data_domain": "products",
+            "granularity": "monthly",
+            "header_row": 0,
+            "header_columns": ["Product ID"],
+            "deduplication_fields": ["Product ID", "metric_date"],
+            "template_name": "products_monthly_raw_dedup_fields",
+            "created_by": "test",
+            "header_bindings": [
+                {
+                    "raw_name": "Product ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                }
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "metric_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        template = await session.get(FieldMappingTemplate, template_id)
+
+    assert template.deduplication_fields == ["product_id", "metric_date"]
+
+
+@pytest.mark.asyncio
 async def test_default_deduplication_fields_endpoint_returns_wrapped_payload(
     template_update_context_client,
 ):

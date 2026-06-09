@@ -176,7 +176,7 @@
         :existing-deduplication-field-matches="existingDeduplicationFieldMatches"
         :recommended-deduplication-fields="recommendedDeduplicationFields"
         :current-header-columns="currentHeaderColumns"
-        :current-header-bindings="hashPolicyBindingSource"
+        :current-header-bindings="submissionState.headerBindings"
         :data-domain="templateContext?.data_domain || template?.data_domain || template?.domain || ''"
         :granularity="templateContext?.granularity || template?.granularity || ''"
         :sub-domain="templateContext?.sub_domain || template?.sub_domain || null"
@@ -363,6 +363,7 @@ import {
   mergeFieldParseRules,
 } from '@/domains/data_platform/utils/templateFieldParseRules'
 import {
+  buildTemplateUpdateSubmissionState,
   mergeHeaderBindingsForSave,
   normalizeDeduplicationSelection,
 } from '@/domains/data_platform/utils/deduplicationSelection'
@@ -487,15 +488,16 @@ watch(
 watch(
   [existingDeduplicationFieldsAvailable, recommendedDeduplicationFields, currentHeaderColumns],
   ([available, recommended, currentFields]) => {
-    if (available.length > 0) {
-      selectedDeduplicationFields.value = [...available]
-      return
-    }
-    if (recommended.length > 0) {
-      selectedDeduplicationFields.value = [...recommended]
-      return
-    }
-    selectedDeduplicationFields.value = []
+    const initialSelection = available.length > 0
+      ? [...available]
+      : recommended.length > 0
+      ? [...recommended]
+      : []
+    selectedDeduplicationFields.value = normalizeDeduplicationSelection(
+      initialSelection,
+      submissionState.value.headerBindings,
+      localFieldParseRules.value,
+    )
   },
   { immediate: true },
 )
@@ -518,21 +520,13 @@ const activeBindingSource = computed(() => {
   return localHeaderBindings.value
 })
 
-const hashPolicyBindingSource = computed(() => {
-  const combined = []
-  const seen = new Set()
-  const pushBinding = (binding) => {
-    const rawName = String(binding?.raw_name || '').trim()
-    const semanticKey = String(binding?.semantic_key || '').trim()
-    const key = `${rawName.toLowerCase()}::${semanticKey.toLowerCase()}`
-    if (!rawName && !semanticKey) return
-    if (seen.has(key)) return
-    seen.add(key)
-    combined.push(binding)
-  }
-  activeBindingSource.value.forEach(pushBinding)
-  ;(templateContext.value?.header_bindings || []).forEach(pushBinding)
-  return combined
+const submissionState = computed(() => {
+  return buildTemplateUpdateSubmissionState({
+    baseBindings: activeBindingSource.value,
+    editedBindings: localHeaderBindings.value,
+    selectedFields: selectedDeduplicationFields.value,
+    fieldParseRules: localFieldParseRules.value,
+  })
 })
 
 const bindingRows = computed(() => {
@@ -564,6 +558,23 @@ const visibleBindingRows = computed(() => {
   }
   return summaryBindingRows.value
 })
+
+watch(
+  [() => submissionState.value.headerBindings, localFieldParseRules],
+  () => {
+    const normalizedSelection = normalizeDeduplicationSelection(
+      selectedDeduplicationFields.value,
+      submissionState.value.headerBindings,
+      localFieldParseRules.value,
+    )
+    const currentSignature = JSON.stringify(selectedDeduplicationFields.value)
+    const nextSignature = JSON.stringify(normalizedSelection)
+    if (currentSignature !== nextSignature) {
+      selectedDeduplicationFields.value = normalizedSelection
+    }
+  },
+  { immediate: true, deep: true },
+)
 
 async function ensurePreviewLoaded() {
   if (previewLoaded.value || loadingPreview.value || updateMode.value === 'core-only') {
@@ -655,21 +666,25 @@ function semanticSelectValue(row) {
 
 function handleSemanticKeyChange(rawName, semanticKey) {
   const nextBindings = updateHeaderBindingSemantic(activeBindingSource.value, rawName, semanticKey)
+  const nextEditedBindings = mergeHeaderBindingsForSave(
+    localHeaderBindings.value,
+    nextBindings,
+  )
   if (bindingsLoaded.value && fullHeaderBindings.value.length > 0) {
     fullHeaderBindings.value = nextBindings
-  } else {
-    localHeaderBindings.value = nextBindings
   }
+  localHeaderBindings.value = nextEditedBindings
   const updatedBinding = nextBindings.find(binding => binding?.raw_name === rawName)
   const preferredSemanticKey = updatedBinding?.hash_participates
     ? String(updatedBinding?.semantic_key || '').trim()
     : null
-  selectedDeduplicationFields.value = normalizeDeduplicationSelection(
-    selectedDeduplicationFields.value,
-    nextBindings,
-    localFieldParseRules.value,
+  selectedDeduplicationFields.value = buildTemplateUpdateSubmissionState({
+    baseBindings: nextBindings,
+    editedBindings: nextEditedBindings,
+    selectedFields: selectedDeduplicationFields.value,
+    fieldParseRules: localFieldParseRules.value,
     preferredSemanticKey,
-  )
+  }).deduplicationFields
 }
 
 function handleHashPolicyChange({ valid, preview }) {
@@ -729,19 +744,17 @@ async function handleSave() {
     if (updateMode.value !== 'core-only') {
       await ensureBindingsLoaded()
     }
-    const bindingsForSave = mergeHeaderBindingsForSave(
-      activeBindingSource.value,
-      localHeaderBindings.value,
-    )
-    selectedDeduplicationFields.value = normalizeDeduplicationSelection(
-      selectedDeduplicationFields.value,
-      bindingsForSave,
-      localFieldParseRules.value,
-    )
+    const submissionState = buildTemplateUpdateSubmissionState({
+      baseBindings: activeBindingSource.value,
+      editedBindings: localHeaderBindings.value,
+      selectedFields: selectedDeduplicationFields.value,
+      fieldParseRules: localFieldParseRules.value,
+    })
+    selectedDeduplicationFields.value = submissionState.deduplicationFields
     emit('save', {
-      deduplicationFields: [...selectedDeduplicationFields.value],
+      deduplicationFields: submissionState.deduplicationFields,
       headerRow: selectedHeaderRow.value,
-      headerBindings: bindingsForSave.map(item => ({ ...item })),
+      headerBindings: submissionState.headerBindings.map(item => ({ ...item })),
       fieldParseRules: normalizeFieldParseRulesForSave(),
     })
   } finally {

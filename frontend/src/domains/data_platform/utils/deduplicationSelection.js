@@ -106,3 +106,24 @@ export function mergeHeaderBindingsForSave(baseBindings = [], editedBindings = [
   }
   return merged
 }
+
+export function buildTemplateUpdateSubmissionState({
+  baseBindings = [],
+  editedBindings = [],
+  selectedFields = [],
+  fieldParseRules = [],
+  preferredSemanticKey = null,
+} = {}) {
+  const headerBindings = mergeHeaderBindingsForSave(baseBindings, editedBindings)
+  const deduplicationFields = normalizeDeduplicationSelection(
+    selectedFields,
+    headerBindings,
+    fieldParseRules,
+    preferredSemanticKey,
+  )
+
+  return {
+    headerBindings,
+    deduplicationFields,
+  }
+}

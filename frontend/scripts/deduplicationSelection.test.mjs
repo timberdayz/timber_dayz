@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildTemplateUpdateSubmissionState,
   mergeHeaderBindingsForSave,
   normalizeDeduplicationSelection,
 } from '../src/domains/data_platform/utils/deduplicationSelection.js'
@@ -104,4 +105,53 @@ test('preserves edited semantic bindings when full bindings are loaded for save'
     semantic_review_status: 'confirmed_semantic',
     hash_eligible: true,
   })
+})
+
+test('builds one submission state for both preview and save in template update workbench', () => {
+  const submissionState = buildTemplateUpdateSubmissionState({
+    baseBindings: [
+      {
+        raw_name: 'Product Name',
+        semantic_key: 'product_name',
+        semantic_review_status: 'confirmed_semantic',
+        hash_eligible: true,
+      },
+      {
+        raw_name: 'GMV',
+        semantic_key: 'gmv',
+        semantic_review_status: 'confirmed_semantic',
+        hash_eligible: false,
+      },
+    ],
+    editedBindings: [
+      {
+        raw_name: 'Product ID',
+        semantic_key: 'product_id',
+        semantic_review_status: 'confirmed_semantic',
+        hash_eligible: true,
+      },
+      {
+        raw_name: 'Product Name',
+        semantic_key: 'product_name',
+        semantic_review_status: 'confirmed_semantic',
+        hash_eligible: true,
+      },
+    ],
+    selectedFields: ['product_id', 'product_name', 'metric_date', 'GMV'],
+    fieldParseRules: [
+      {
+        target_field: 'metric_date',
+        source_column: '__file_date_from__',
+        value_kind: 'single_date',
+        date_format: 'yyyy-mm-dd',
+        strict: true,
+      },
+    ],
+  })
+
+  assert.deepEqual(
+    submissionState.headerBindings.map((binding) => binding.raw_name),
+    ['Product Name', 'GMV', 'Product ID'],
+  )
+  assert.deepEqual(submissionState.deduplicationFields, ['product_id', 'product_name'])
 })
