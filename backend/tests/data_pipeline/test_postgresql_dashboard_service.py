@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.exc import ProgrammingError
 from unittest.mock import AsyncMock
 
+import backend.services.postgresql_dashboard_service as dashboard_service_module
 from backend.services.postgresql_dashboard_service import (
     PostgresqlDashboardService,
     get_postgresql_dashboard_service,
@@ -1400,17 +1401,71 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_operational_metrics_preserves_today_and_time_gap(monkeypatch):
+async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_past_month(monkeypatch):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
         return [
             {
-                "monthly_target": 1000,
-                "monthly_total_achieved": 800,
+                "monthly_target": 100000,
+                "monthly_total_achieved": 60000,
                 "today_sales": 120,
-                "monthly_achievement_rate": 80,
-                "time_gap": -5,
+                "monthly_achievement_rate": 60,
+                "time_gap": -40,
+                "estimated_gross_profit": 120,
+                "estimated_expenses": 50,
+                "operating_result": 70,
+                "monthly_order_count": 10,
+                "today_order_count": 2,
+            },
+            {
+                "monthly_target": 159844,
+                "monthly_total_achieved": 77284.41,
+                "today_sales": 80,
+                "monthly_achievement_rate": 48.35,
+                "time_gap": -51.65,
+                "estimated_gross_profit": 200,
+                "estimated_expenses": 300,
+                "operating_result": -100,
+                "monthly_order_count": 4,
+                "today_order_count": 1,
+            }
+        ]
+
+    async def fake_load_target_summary(**kwargs):
+        return {"target_amount": 259844, "target_quantity": 0}
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+    monkeypatch.setattr(service, "_load_operating_expenses_summary", AsyncMock(return_value=None))
+    result = await service.get_business_overview_operational_metrics(
+        month="2026-02-01",
+        platform=None,
+    )
+
+    assert result["today_sales"] == 200
+    assert result["today_order_count"] == 3
+    assert result["monthly_achievement_rate"] == 52.83
+    assert result["time_gap"] == -47.17
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_current_month(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 6, 9)
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "monthly_target": 259844,
+                "monthly_total_achieved": 137284.41,
+                "today_sales": 120,
+                "monthly_achievement_rate": 0,
+                "time_gap": -300,
                 "estimated_gross_profit": 200,
                 "estimated_expenses": 300,
                 "operating_result": -100,
@@ -1419,15 +1474,104 @@ async def test_postgresql_dashboard_service_operational_metrics_preserves_today_
             }
         ]
 
+    async def fake_load_target_summary(**kwargs):
+        return {"target_amount": 259844, "target_quantity": 0}
+
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+    monkeypatch.setattr(service, "_load_operating_expenses_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(dashboard_service_module, "date_cls", FakeDate)
     result = await service.get_business_overview_operational_metrics(
-        month="2026-03-01",
+        month="2026-06-01",
         platform=None,
     )
 
-    assert result["today_sales"] == 120
-    assert result["today_order_count"] == 2
-    assert result["time_gap"] == -5
+    assert result["monthly_achievement_rate"] == 52.83
+    assert result["time_gap"] == 22.83
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_future_month(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 6, 9)
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "monthly_target": 259844,
+                "monthly_total_achieved": 137284.41,
+                "today_sales": 120,
+                "monthly_achievement_rate": 0,
+                "time_gap": -300,
+                "estimated_gross_profit": 200,
+                "estimated_expenses": 300,
+                "operating_result": -100,
+                "monthly_order_count": 10,
+                "today_order_count": 2,
+            }
+        ]
+
+    async def fake_load_target_summary(**kwargs):
+        return {"target_amount": 259844, "target_quantity": 0}
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+    monkeypatch.setattr(service, "_load_operating_expenses_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(dashboard_service_module, "date_cls", FakeDate)
+    result = await service.get_business_overview_operational_metrics(
+        month="2026-07-01",
+        platform=None,
+    )
+
+    assert result["monthly_achievement_rate"] == 52.83
+    assert result["time_gap"] == 52.83
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_operational_metrics_returns_none_time_gap_without_achievement_rate(
+    monkeypatch,
+):
+    service = PostgresqlDashboardService()
+
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 6, 9)
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "monthly_target": None,
+                "monthly_total_achieved": 137284.41,
+                "today_sales": 120,
+                "monthly_achievement_rate": None,
+                "time_gap": -300,
+                "estimated_gross_profit": 200,
+                "estimated_expenses": 300,
+                "operating_result": -100,
+                "monthly_order_count": 10,
+                "today_order_count": 2,
+            }
+        ]
+
+    async def fake_load_target_summary(**kwargs):
+        return {"target_amount": None, "target_quantity": 0}
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+    monkeypatch.setattr(service, "_load_operating_expenses_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(dashboard_service_module, "date_cls", FakeDate)
+    result = await service.get_business_overview_operational_metrics(
+        month="2026-06-01",
+        platform=None,
+    )
+
+    assert result["monthly_achievement_rate"] is None
+    assert result["time_gap"] is None
 
 
 @pytest.mark.asyncio

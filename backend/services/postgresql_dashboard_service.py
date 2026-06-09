@@ -64,6 +64,20 @@ def _sort_numeric(value: Any) -> float:
     return maybe_value if maybe_value is not None else float("-inf")
 
 
+def _month_time_progress_pct(period_month: date_cls, today: date_cls | None = None) -> float:
+    current_day = today or date_cls.today()
+    selected_month = (period_month.year, period_month.month)
+    current_month = (current_day.year, current_day.month)
+    if selected_month < current_month:
+        return 100.0
+    if selected_month > current_month:
+        return 0.0
+
+    next_month = (period_month + timedelta(days=31)).replace(day=1)
+    days_in_month = (next_month - period_month).days
+    return round(current_day.day * 100.0 / days_in_month, 2)
+
+
 def _is_empty_period_rows(rows: list[dict[str, Any]], *, core_keys: tuple[str, ...]) -> bool:
     if not rows:
         return True
@@ -2344,7 +2358,14 @@ class PostgresqlDashboardService:
                 total["monthly_achievement_rate"] = None
         else:
             total["monthly_achievement_rate"] = _round_or_none(total["monthly_achievement_rate"], 2)
-        total["time_gap"] = _round_or_none(total["time_gap"], 2)
+        if total["monthly_achievement_rate"] is not None:
+            total["time_gap"] = round(
+                total["monthly_achievement_rate"] - _month_time_progress_pct(period_month),
+                2,
+            )
+            meta["service_enriched_fields"].append("time_gap")
+        else:
+            total["time_gap"] = None
         operating_result_missing = total["operating_result"] is None
         if operating_result_missing:
             total["operating_result"] = float("-inf")
