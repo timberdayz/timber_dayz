@@ -107,7 +107,7 @@ def should_init_db_on_startup(environment: str) -> bool:
 def should_auto_bootstrap_dashboard_on_startup(environment: str) -> bool:
     if environment == "production":
         return False
-    return _env_flag("AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP", default=False)
+    return _env_flag("AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP", default=True)
 
 
 def resolve_background_task_role(environment: str) -> str:
@@ -148,6 +148,45 @@ os.environ.setdefault(
     "AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP",
     "true" if should_auto_bootstrap_dashboard_on_startup(settings.ENVIRONMENT) else "false",
 )
+
+
+async def collect_dashboard_bootstrap_report(
+    environment: str,
+    *,
+    session_factory=None,
+    inspect_assets=None,
+    bootstrap_assets_if_needed=None,
+) -> dict:
+    if session_factory is None or inspect_assets is None or bootstrap_assets_if_needed is None:
+        from backend.models.database import AsyncSessionLocal
+        from backend.services.data_pipeline.dashboard_bootstrap import (
+            bootstrap_dashboard_assets_if_needed,
+            inspect_dashboard_assets,
+        )
+
+        session_factory = session_factory or AsyncSessionLocal
+        inspect_assets = inspect_assets or inspect_dashboard_assets
+        bootstrap_assets_if_needed = (
+            bootstrap_assets_if_needed or bootstrap_dashboard_assets_if_needed
+        )
+
+    auto_bootstrap = should_auto_bootstrap_dashboard_on_startup(environment)
+    async with session_factory() as session:
+        if auto_bootstrap:
+            report = await bootstrap_assets_if_needed(
+                session,
+                wait_for_lock=True,
+                module="all",
+            )
+            await session.commit()
+            report["startup_policy"] = "auto_bootstrap"
+            return report
+
+        report = await inspect_assets(session)
+        report["bootstrapped"] = False
+        report["skipped"] = True
+        report["startup_policy"] = "inspect_only"
+        return report
 
 if not should_init_db_on_startup(settings.ENVIRONMENT):
     def init_db() -> None:  # type: ignore[no-redef]
@@ -403,15 +442,9 @@ async def lifespan(app: FastAPI):
         step_start = time.time()
         try:
             dashboard_bootstrap_completed = False
-            from backend.models.database import AsyncSessionLocal
-            from backend.services.data_pipeline.dashboard_bootstrap import (
-                inspect_dashboard_assets,
+            dashboard_bootstrap_report = await collect_dashboard_bootstrap_report(
+                settings.ENVIRONMENT
             )
-
-            async with AsyncSessionLocal() as session:
-                dashboard_bootstrap_report = await inspect_dashboard_assets(session)
-                dashboard_bootstrap_report["bootstrapped"] = False
-                dashboard_bootstrap_report["startup_policy"] = "inspect_only"
 
             # Expose readiness report for route-level graceful degradation.
             try:

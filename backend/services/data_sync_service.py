@@ -287,6 +287,9 @@ class DataSyncService:
         variant = resolve_result.get("variant") or {}
         legacy_template_id = variant.get("source_legacy_template_id")
         if not legacy_template_id:
+            shadow_compare = resolve_result.get("shadow_compare") or {}
+            legacy_template_id = shadow_compare.get("legacy_template_id")
+        if not legacy_template_id:
             return None
         return await self.db.get(FieldMappingTemplate, legacy_template_id)
 

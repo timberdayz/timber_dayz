@@ -16,6 +16,7 @@ from modules.core.db import (
     FieldMappingTemplateVariant,
     FieldMappingTemplateVersion,
 )
+from backend.services.template_family_service import _variant_matches_sample_rows
 
 
 @compiles(JSONB, "sqlite")
@@ -50,6 +51,35 @@ async def template_family_client():
 
     app.dependency_overrides.clear()
     await engine.dispose()
+
+
+def test_template_variant_sample_match_distinguishes_dash_and_slash_date_ranges():
+    sample_rows = [{"date_period": "01-04-2026 - 30-04-2026"}]
+
+    assert _variant_matches_sample_rows(
+        [
+            {
+                "target_field": "metric_date",
+                "source_column": "date_period",
+                "value_kind": "date_range",
+                "date_format": "dd-mm-yyyy-dd-mm-yyyy",
+                "range_pick": "start",
+            }
+        ],
+        sample_rows,
+    )
+    assert not _variant_matches_sample_rows(
+        [
+            {
+                "target_field": "metric_date",
+                "source_column": "date_period",
+                "value_kind": "date_range",
+                "date_format": "dd/mm/yyyy-dd/mm/yyyy",
+                "range_pick": "start",
+            }
+        ],
+        sample_rows,
+    )
 
 
 @pytest.mark.asyncio

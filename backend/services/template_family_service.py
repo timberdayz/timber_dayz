@@ -165,16 +165,23 @@ def _match_rule_to_row(rule: dict[str, Any], row: dict[str, Any]) -> bool:
     source_column = str(rule.get("source_column", "")).strip()
     if not source_column:
         return False
-    raw_value = str(row.get(source_column, "") or "").strip()
-    if not raw_value:
+    raw_value = row.get(source_column)
+    if not str(raw_value or "").strip():
         return False
 
-    date_format = str(rule.get("date_format", "")).lower()
-    if "/" in date_format and "/" in raw_value:
-        return True
-    if "-" in date_format and "/" not in raw_value and "-" in raw_value:
-        return True
-    return False
+    try:
+        from modules.services.smart_date_parser import parse_date_by_declared_format
+
+        parsed_date, parsed_datetime = parse_date_by_declared_format(
+            raw_value,
+            date_format=str(rule.get("date_format", "")).strip(),
+            value_kind=str(rule.get("value_kind", "single_date")).strip(),
+            range_pick=rule.get("range_pick"),
+            date_anchor=rule.get("date_anchor"),
+        )
+    except Exception:
+        return False
+    return parsed_date is not None or parsed_datetime is not None
 
 
 def _variant_matches_sample_rows(

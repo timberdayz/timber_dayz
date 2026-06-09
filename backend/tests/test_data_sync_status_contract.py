@@ -30,11 +30,24 @@ class _FakeDb:
         self.rollback_calls += 1
 
 
+class _FakeTemplateDb:
+    def __init__(self, templates):
+        self.templates = templates
+
+    async def get(self, _model, template_id):
+        return self.templates.get(template_id)
+
+
 class _TemplateStub:
     id = 1
     template_name = "demo_template"
     header_row = 0
     header_columns = ["订单编号", "金额"]
+
+
+class _ShadowTemplateStub:
+    id = 267
+    template_name = "shopee_services_agent_monthly_v1"
 
 
 class _TemplateMatcherStub:
@@ -50,6 +63,24 @@ class _TemplateMatcherStub:
             "template_columns": ["订单编号", "金额"],
             "current_columns": ["订单编号", "金额"],
         }
+
+
+@pytest.mark.asyncio
+async def test_resolve_template_uses_shadow_compare_legacy_template_when_variant_missing():
+    service = DataSyncService(_FakeTemplateDb({267: _ShadowTemplateStub()}))
+
+    template = await service._resolve_template_from_resolver_result(
+        {
+            "variant": None,
+            "shadow_compare": {
+                "legacy_template_id": 267,
+                "legacy_template_name": "shopee_services_agent_monthly_v1",
+            },
+        }
+    )
+
+    assert template is not None
+    assert template.id == 267
 
 
 class _TemplateStatusServiceStub:
