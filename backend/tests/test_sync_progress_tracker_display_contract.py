@@ -16,6 +16,7 @@ def _task_row(task_id, task_type, trigger_source=None):
         "error_rows": 0,
         "quarantined_rows": 0,
         "progress_percent": 100.0,
+        "heartbeat_at": "2026-06-09T11:00:00+00:00",
         "started_at": None,
         "finished_at": None,
         "updated_at": None,
@@ -59,3 +60,17 @@ async def test_list_tasks_returns_trigger_source_for_auto_and_manual_tasks():
         "manual",
         "sync_now",
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_exposes_canonical_progress_and_heartbeat_fields():
+    from backend.services.sync_progress_tracker import SyncProgressTracker
+
+    tracker = object.__new__(SyncProgressTracker)
+    tracker.task_center = _FakeTaskCenter([_task_row("auto_ingest_1", "auto_ingest")])
+
+    tasks = await tracker.list_tasks(limit=10)
+
+    assert tasks[0]["canonical_status"] == "completed"
+    assert tasks[0]["progress_percent"] == 100.0
+    assert tasks[0]["heartbeat_at"] == "2026-06-09T11:00:00+00:00"

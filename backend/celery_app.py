@@ -96,6 +96,10 @@ celery_app.conf.beat_schedule = {
         'task': 'backend.tasks.scheduled_tasks.auto_ingest_pending_files',
         'schedule': crontab(minute='*/15'),
     },
+    'cleanup-stale-auto-ingest-every-5min': {
+        'task': 'backend.tasks.scheduled_tasks.cleanup_stale_auto_ingest_tasks',
+        'schedule': crontab(minute='*/5'),
+    },
 
     'process-refresh-queue-every-minute': {
         'task': 'backend.tasks.refresh_queue_tasks.process_refresh_queue_task',

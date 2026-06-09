@@ -12,8 +12,8 @@ v4.6.0新增：独立的数据同步系统
     </div>
 
     <!-- 任务统计 -->
-    <el-row :gutter="20" style="margin-bottom: 20px;">
-      <el-col :span="6">
+    <el-row :gutter="16" style="margin-bottom: 20px;">
+      <el-col :xs="24" :sm="12" :md="8" :lg="4">
         <el-card>
           <div class="stat-item">
             <div class="stat-label">进行中</div>
@@ -21,7 +21,15 @@ v4.6.0新增：独立的数据同步系统
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="4">
+        <el-card>
+          <div class="stat-item">
+            <div class="stat-label">疑似卡住</div>
+            <div class="stat-value" style="color: #E6A23C;">{{ stats.stale_running }}</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="8" :lg="4">
         <el-card>
           <div class="stat-item">
             <div class="stat-label">已完成</div>
@@ -29,7 +37,7 @@ v4.6.0新增：独立的数据同步系统
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="4">
         <el-card>
           <div class="stat-item">
             <div class="stat-label">失败</div>
@@ -37,7 +45,7 @@ v4.6.0新增：独立的数据同步系统
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="24" :sm="24" :md="8" :lg="8">
         <el-card>
           <div class="stat-item">
             <div class="stat-label">总计</div>
@@ -82,19 +90,27 @@ v4.6.0新增：独立的数据同步系统
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag v-if="row.status === 'running' || row.status === 'processing'" type="primary" size="small">
+            <el-tag v-if="row.isStaleRunning" type="warning" size="small">
+              <el-icon><Warning /></el-icon>
+              疑似卡住
+            </el-tag>
+            <el-tag v-else-if="row.status === 'running'" type="primary" size="small">
               <el-icon><Loading /></el-icon>
               进行中
             </el-tag>
-            <el-tag v-else-if="row.status === 'waiting'" type="warning" size="small">
-              <el-icon><Clock /></el-icon>
-              等待中
-            </el-tag>
-            <el-tag v-else-if="row.status === 'completed' || row.status === 'success'" type="success" size="small">
+            <el-tag v-else-if="row.status === 'completed'" type="success" size="small">
               <el-icon><Check /></el-icon>
               已完成
             </el-tag>
-            <el-tag v-else-if="row.status === 'failed' || row.status === 'error'" type="danger" size="small">
+            <el-tag v-else-if="row.status === 'partial_success'" type="warning" size="small">
+              <el-icon><Warning /></el-icon>
+              部分成功
+            </el-tag>
+            <el-tag v-else-if="row.status === 'cancelled'" type="info" size="small">
+              <el-icon><Close /></el-icon>
+              已取消
+            </el-tag>
+            <el-tag v-else-if="row.status === 'failed'" type="danger" size="small">
               <el-icon><Close /></el-icon>
               失败
             </el-tag>
@@ -107,16 +123,17 @@ v4.6.0新增：独立的数据同步系统
           <template #default="{ row }">
             <el-progress
               :percentage="row.progress || 0"
-              :status="row.status === 'failed' ? 'exception' : undefined"
+              :status="row.status === 'failed' ? 'exception' : (row.isStaleRunning ? 'warning' : undefined)"
             />
           </template>
         </el-table-column>
         <el-table-column prop="processed_files" label="已处理文件" width="120" />
         <el-table-column prop="total_files" label="总文件数" width="120" />
+        <el-table-column prop="heartbeat_at_display" label="心跳时间" width="180" />
         <el-table-column prop="valid_rows" label="成功行数" width="120" />
         <el-table-column prop="quarantined_rows" label="隔离行数" width="120" />
         <el-table-column prop="created_at" label="创建时间" width="180" />
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="viewTaskDetail(row.task_id)">
               <el-icon><View /></el-icon>
@@ -126,15 +143,53 @@ v4.6.0新增：独立的数据同步系统
               v-if="row.status === 'running'"
               size="small"
               type="danger"
-              @click="cancelTask(row.task_id)"
+              @click="cancelTask(row)"
             >
               <el-icon><Close /></el-icon>
               取消
+            </el-button>
+            <el-button
+              v-if="row.isStaleRunning"
+              size="small"
+              type="warning"
+              @click="recoverTask(row)"
+            >
+              <el-icon><Warning /></el-icon>
+              强制恢复
             </el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
+
+    <el-dialog v-model="detailDialogVisible" title="任务详情" width="900px">
+      <div v-if="selectedTask" class="task-detail-panel">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="任务ID">{{ selectedTask.task_id }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ selectedTask.status }}</el-descriptions-item>
+          <el-descriptions-item label="进度">{{ selectedTask.progress }}%</el-descriptions-item>
+          <el-descriptions-item label="心跳时间">{{ selectedTask.heartbeat_at_display || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="批量参数">
+            {{ selectedTask.task_details?.max_files || '-' }} / {{ selectedTask.task_details?.max_concurrent || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="恢复来源">
+            {{ selectedTask.task_details?.recovered_by || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="错误摘要" :span="2">
+            {{ selectedTask.error_summary || selectedTask.message || '-' }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div class="task-detail-table">
+          <h3>最近文件结果</h3>
+          <el-table :data="selectedTask.task_details?.files || []" size="small" max-height="320">
+            <el-table-column prop="file_name" label="文件名" min-width="260" />
+            <el-table-column prop="status" label="状态" width="120" />
+            <el-table-column prop="message" label="说明" min-width="280" />
+          </el-table>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -144,77 +199,83 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { getSyncTaskTypeMeta, getSyncTriggerMeta } from '@/domains/data_platform/utils/syncTaskDisplay'
 
-// 状态
+const STALE_WARNING_MINUTES = 15
+
 const loading = ref(false)
 const tasks = ref([])
 const stats = ref({
   running: 0,
+  stale_running: 0,
   completed: 0,
   failed: 0,
   total: 0
 })
+const detailDialogVisible = ref(false)
+const selectedTask = ref(null)
 
 let refreshInterval = null
 
-// 加载任务列表
+const normalizeTaskStatus = (task) => {
+  const status = String(task.status || task.canonical_status || '').trim()
+  if (status === 'processing' || status === 'waiting') return 'running'
+  if (status === 'success') return 'completed'
+  if (status === 'error') return 'failed'
+  return status
+}
+
+const formatHeartbeat = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+const isHeartbeatStale = (value) => {
+  if (!value) return false
+  const heartbeatDate = new Date(value)
+  if (Number.isNaN(heartbeatDate.getTime())) return false
+  const staleMs = STALE_WARNING_MINUTES * 60 * 1000
+  return Date.now() - heartbeatDate.getTime() > staleMs
+}
+
 const loadTasks = async () => {
   loading.value = true
   try {
-    // ⭐ v4.19.8修复：添加 limit 参数，限制返回数量，避免数据量过大导致问题
-    // ⭐ v4.19.8修复：api.getSyncHistory() 通过响应拦截器后直接返回数组
-    // 响应拦截器已经处理了 { success: true, data: [...] } 格式，直接返回 data
     const data = await api.getSyncHistory({ limit: 100 })
-    
-    // ⭐ v4.19.8新增：添加调试日志（帮助排查问题）
-    console.log('[DataSyncTasks] API返回数据:', {
-      type: typeof data,
-      isArray: Array.isArray(data),
-      length: Array.isArray(data) ? data.length : 'N/A',
-      sample: Array.isArray(data) && data.length > 0 ? data[0] : null
-    })
-    
-    // 确保 data 是数组
     const taskList = Array.isArray(data) ? data : []
-    
-    // ⭐ v4.19.8新增：如果数据不是数组，显示警告
+
     if (!Array.isArray(data)) {
-      console.warn('[DataSyncTasks] API返回的不是数组:', data)
       ElMessage.warning('任务数据格式异常，请刷新重试')
       tasks.value = []
       updateStats()
       return
     }
-    
-    // 处理后端返回的任务数据
+
     tasks.value = taskList.map(task => {
-      // 计算进度百分比
-      const progress = task.total_files > 0 
-        ? Math.round((task.processed_files / task.total_files) * 100) 
+      const normalizedStatus = normalizeTaskStatus(task)
+      const progressPercent = Number(task.progress_percent ?? task.file_progress)
+      const fallbackProgress = task.total_files > 0
+        ? Math.round((task.processed_files / task.total_files) * 100)
         : 0
-      
-      // 映射状态（后端可能返回 'processing', 'waiting', 'success', 'error' 等）
-      let normalizedStatus = task.status
-      if (task.status === 'processing' || task.status === 'waiting') {
-        normalizedStatus = 'running'
-      } else if (task.status === 'success') {
-        normalizedStatus = 'completed'
-      } else if (task.status === 'error') {
-        normalizedStatus = 'failed'
-      }
-      
-      // 处理时间字段（如果没有 created_at，使用 start_time）
-      const created_at = task.created_at || task.start_time || task.updated_at
-      
+      const progress = Number.isFinite(progressPercent) ? Math.round(progressPercent) : fallbackProgress
+      const heartbeatAt = task.heartbeat_at || task.updated_at || task.started_at || task.start_time
+      const staleRunning = normalizedStatus === 'running' && isHeartbeatStale(heartbeatAt)
+
       return {
         ...task,
         progress,
         status: normalizedStatus,
-        created_at,
-        // 确保字段存在
+        progress_percent: Number.isFinite(progressPercent) ? progressPercent : fallbackProgress,
+        heartbeat_at: heartbeatAt,
+        heartbeat_at_display: formatHeartbeat(heartbeatAt),
+        created_at: task.created_at || task.start_time || task.updated_at,
+        current_item: task.current_item || task.current_file || '',
+        error_summary: task.error_summary || '',
+        isStaleRunning: staleRunning,
         quarantined_rows: task.quarantined_rows || 0,
         valid_rows: task.valid_rows || 0,
         processed_files: task.processed_files || 0,
-        total_files: task.total_files || 0
+        total_files: task.total_files || 0,
+        task_details: task.task_details || {}
       }
     })
     updateStats()
@@ -228,37 +289,24 @@ const loadTasks = async () => {
   }
 }
 
-// 更新统计
 const updateStats = () => {
   stats.value = {
-    // 包括所有可能的状态值
-    running: tasks.value.filter(t => 
-      t.status === 'running' || 
-      t.status === 'processing' || 
-      t.status === 'waiting'
-    ).length,
-    completed: tasks.value.filter(t => 
-      t.status === 'completed' || 
-      t.status === 'success'
-    ).length,
-    failed: tasks.value.filter(t => 
-      t.status === 'failed' || 
-      t.status === 'error'
-    ).length,
+    running: tasks.value.filter(t => t.status === 'running' && !t.isStaleRunning).length,
+    stale_running: tasks.value.filter(t => t.isStaleRunning).length,
+    completed: tasks.value.filter(t => t.status === 'completed').length,
+    failed: tasks.value.filter(t => ['failed', 'partial_success', 'cancelled'].includes(t.status)).length,
     total: tasks.value.length
   }
 }
 
-// 查看任务详情
 const viewTaskDetail = (taskId) => {
-  ElMessage.info(`查看任务详情: ${taskId}`)
-  // TODO: 实现任务详情页面
+  selectedTask.value = tasks.value.find(task => task.task_id === taskId) || null
+  detailDialogVisible.value = true
 }
 
-// 取消任务
-const cancelTask = async (taskId) => {
+const cancelTask = async (task) => {
   try {
-    // TODO: 实现取消任务API
+    await api.cancelSyncTask(task.task_id)
     ElMessage.success('任务已取消')
     await loadTasks()
   } catch (error) {
@@ -266,10 +314,18 @@ const cancelTask = async (taskId) => {
   }
 }
 
-// 初始化
+const recoverTask = async (task) => {
+  try {
+    await api.recoverSyncTask(task.task_id)
+    ElMessage.success('任务已强制恢复')
+    await loadTasks()
+  } catch (error) {
+    ElMessage.error(error.message || '强制恢复任务失败')
+  }
+}
+
 onMounted(() => {
   loadTasks()
-  // 每5秒刷新一次
   refreshInterval = setInterval(() => {
     loadTasks()
   }, 5000)
@@ -317,5 +373,16 @@ onUnmounted(() => {
   font-size: 32px;
   font-weight: 600;
 }
-</style>
 
+.task-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.task-detail-table h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+</style>
