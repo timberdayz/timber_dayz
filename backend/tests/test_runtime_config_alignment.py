@@ -286,6 +286,11 @@ def test_celery_app_includes_refresh_queue_task_module_and_beat_schedule():
         beat_schedule["process-refresh-queue-every-minute"]["task"]
         == "backend.tasks.refresh_queue_tasks.process_refresh_queue_task"
     )
+    assert "cleanup-stale-auto-ingest-every-5min" in beat_schedule
+    assert (
+        beat_schedule["cleanup-stale-auto-ingest-every-5min"]["task"]
+        == "backend.tasks.scheduled_tasks.cleanup_stale_auto_ingest_tasks"
+    )
 
 
 def test_dev_frontend_uses_vite_port_instead_of_nginx_port():

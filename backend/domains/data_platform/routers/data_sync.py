@@ -2469,6 +2469,20 @@ async def get_sync_progress(
         )
 
 
+def _canonical_sync_task_payload(task: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(task)
+    payload["status"] = str(payload.get("canonical_status") or payload.get("status") or "").strip()
+    payload["progress_percent"] = float(
+        payload.get("progress_percent")
+        if payload.get("progress_percent") is not None
+        else payload.get("file_progress") or 0.0
+    )
+    payload["heartbeat_at"] = payload.get("heartbeat_at") or payload.get("updated_at")
+    payload["started_at"] = payload.get("started_at") or payload.get("start_time")
+    payload["finished_at"] = payload.get("finished_at") or payload.get("end_time")
+    return payload
+
+
 @router.get("/data-sync/tasks")
 async def list_sync_tasks(
     status: Optional[str] = Query(None, description="状态筛选"),
@@ -2485,6 +2499,7 @@ async def list_sync_tasks(
     try:
         progress_tracker = SyncProgressTracker(db)
         tasks = await progress_tracker.list_tasks(status=status, limit=limit)
+        tasks = [_canonical_sync_task_payload(task) for task in tasks]
         
         return success_response(
             data=tasks,
@@ -2500,6 +2515,66 @@ async def list_sync_tasks(
             detail=str(e),
             recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
+        )
+
+
+@router.post("/data-sync/tasks/{task_id}/cancel")
+async def cancel_sync_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        progress_tracker = SyncProgressTracker(db)
+        result = await progress_tracker.cancel_auto_ingest_task(task_id)
+        return success_response(data=result, message="同步任务已取消")
+    except ValueError as exc:
+        return error_response(
+            code=ErrorCode.DATA_NOT_FOUND,
+            message="取消同步任务失败",
+            error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+            detail=str(exc),
+            recovery_suggestion="请检查任务ID是否正确，或确认该任务属于自动入库任务",
+            status_code=404,
+        )
+    except Exception as exc:
+        logger.error("[API] 取消同步任务失败: %s", exc, exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="取消同步任务失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查数据库连接和任务状态，或联系系统管理员",
+            status_code=500,
+        )
+
+
+@router.post("/data-sync/tasks/{task_id}/recover")
+async def recover_sync_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        progress_tracker = SyncProgressTracker(db)
+        result = await progress_tracker.recover_auto_ingest_task(task_id)
+        return success_response(data=result, message="同步任务已强制恢复")
+    except ValueError as exc:
+        return error_response(
+            code=ErrorCode.DATA_NOT_FOUND,
+            message="恢复同步任务失败",
+            error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+            detail=str(exc),
+            recovery_suggestion="请检查任务ID是否正确，或确认该任务属于自动入库任务",
+            status_code=404,
+        )
+    except Exception as exc:
+        logger.error("[API] 恢复同步任务失败: %s", exc, exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="恢复同步任务失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查数据库连接和任务状态，或联系系统管理员",
+            status_code=500,
         )
 
 

@@ -31,7 +31,17 @@ AUTO_INGEST_MAX_CONCURRENT = max(1, int(os.getenv("AUTO_INGEST_MAX_CONCURRENT", 
 AUTO_INGEST_STALE_TIMEOUT_MINUTES = max(
     1, int(os.getenv("AUTO_INGEST_STALE_TIMEOUT_MINUTES", "45"))
 )
+AUTO_INGEST_HEARTBEAT_INTERVAL_SECONDS = max(
+    5, int(os.getenv("AUTO_INGEST_HEARTBEAT_INTERVAL_SECONDS", "30"))
+)
+AUTO_INGEST_STALE_WARNING_MINUTES = max(
+    1, int(os.getenv("AUTO_INGEST_STALE_WARNING_MINUTES", "15"))
+)
+AUTO_INGEST_WATCHDOG_INTERVAL_MINUTES = max(
+    1, int(os.getenv("AUTO_INGEST_WATCHDOG_INTERVAL_MINUTES", "5"))
+)
 AUTO_INGEST_LOCK_KEY = int(os.getenv("AUTO_INGEST_LOCK_KEY", "928451203"))
+AUTO_INGEST_WATCHDOG_LOCK_KEY = int(os.getenv("AUTO_INGEST_WATCHDOG_LOCK_KEY", "928451204"))
 AUTO_INGEST_SOURCE = "scheduled_tasks.auto_ingest_pending_files"
 
 
@@ -97,6 +107,14 @@ def _append_auto_ingest_error(details: Dict[str, Any] | None, message: str) -> D
     return next_details
 
 
+def _auto_ingest_task_activity_at(task) -> datetime | None:
+    for attr in ("heartbeat_at", "updated_at", "started_at"):
+        parsed = _parse_auto_ingest_timestamp(getattr(task, attr, None))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _recover_stale_auto_ingest_records(
     db,
     timeout_minutes: int = AUTO_INGEST_STALE_TIMEOUT_MINUTES,
@@ -108,6 +126,7 @@ def _recover_stale_auto_ingest_records(
     timeout_message = f"auto ingest timed out after {timeout_minutes} minutes"
     recovered_tasks = 0
     recovered_files = 0
+    stale_task_ids: set[str] = set()
 
     try:
         stale_tasks = (
@@ -128,11 +147,22 @@ def _recover_stale_auto_ingest_records(
     for task in stale_tasks:
         if not all(hasattr(task, attr) for attr in ("status", "details_json")):
             continue
+        activity_at = _auto_ingest_task_activity_at(task)
+        if activity_at is None or activity_at >= cutoff:
+            continue
         task.status = "failed"
         task.finished_at = now
+        if hasattr(task, "heartbeat_at"):
+            task.heartbeat_at = now
         task.error_summary = timeout_message
-        task.details_json = _append_auto_ingest_error(task.details_json, timeout_message)
+        next_details = _append_auto_ingest_error(task.details_json, timeout_message)
+        task_details = dict(next_details.get("task_details") or {})
+        task_details["recovered_by"] = "watchdog"
+        task_details["recovered_at"] = now.isoformat()
+        next_details["task_details"] = task_details
+        task.details_json = next_details
         recovered_tasks += 1
+        stale_task_ids.add(str(getattr(task, "task_id", "") or ""))
 
     try:
         processing_files = (
@@ -150,10 +180,13 @@ def _recover_stale_auto_ingest_records(
         meta = dict(file_record.file_metadata or {})
         auto_meta = dict(meta.get("auto_ingest") or {})
         started_at = _parse_auto_ingest_timestamp(auto_meta.get("processing_started_at"))
-        if started_at is None or started_at >= cutoff:
+        claimed_task_id = str(auto_meta.get("current_task_id") or "").strip()
+        should_recover = bool(claimed_task_id and claimed_task_id in stale_task_ids)
+        if not should_recover and (started_at is None or started_at >= cutoff):
             continue
         auto_meta["last_status"] = "stale_recovered"
         auto_meta["last_recovered_at"] = now.isoformat()
+        auto_meta["current_task_id"] = None
         meta["auto_ingest"] = auto_meta
         file_record.file_metadata = meta
         file_record.status = "pending"
@@ -199,6 +232,7 @@ def _create_auto_ingest_task_record(
             quarantined_rows=0,
             progress_percent=0.0,
             started_at=started_at,
+            heartbeat_at=started_at,
             details_json={
                 "errors": [],
                 "warnings": [],
@@ -361,6 +395,7 @@ def _update_auto_ingest_task_progress(
     partial_results: List[Dict[str, Any]],
     max_files: int,
     max_concurrent: int,
+    current_item: str | None = None,
 ) -> None:
     if not task_id or total_files <= 0:
         return
@@ -382,6 +417,8 @@ def _update_auto_ingest_task_progress(
             failed_items=summary["failed"],
             skipped_items=summary["skipped"],
             progress_percent=round((summary["processed"] / total_files) * 100, 2),
+            heartbeat_at=datetime.now(timezone.utc),
+            current_item=current_item,
             details_json=details,
         )
     except Exception as exc:  # noqa: BLE001
@@ -435,6 +472,8 @@ def _complete_auto_ingest_task_record(
             failed_items=summary.get("failed", 0),
             skipped_items=summary.get("skipped", 0),
             progress_percent=100.0,
+            heartbeat_at=datetime.now(timezone.utc),
+            current_item=None,
             finished_at=datetime.now(timezone.utc),
             details_json=details,
         )
@@ -499,6 +538,8 @@ def _fail_auto_ingest_task_record(db, task_id: str | None, error: Exception) -> 
         task_center.update_task(
             task,
             status="failed",
+            heartbeat_at=datetime.now(timezone.utc),
+            current_item=None,
             finished_at=datetime.now(timezone.utc),
             error_summary=error_message,
             details_json={
@@ -524,6 +565,75 @@ def _fail_auto_ingest_task_record(db, task_id: str | None, error: Exception) -> 
             exc,
             exc_info=True,
         )
+
+
+def _heartbeat_auto_ingest_task(
+    db,
+    task_id: str | None,
+    *,
+    current_item: str | None = None,
+) -> None:
+    if not task_id:
+        return
+
+    try:
+        from backend.services.task_center_sync_service import TaskCenterSyncService
+
+        task_center = TaskCenterSyncService(db)
+        task = task_center.get_task(task_id)
+        if task is None or getattr(task, "status", None) != "running":
+            return
+        updates: Dict[str, Any] = {"heartbeat_at": datetime.now(timezone.utc)}
+        if current_item is not None:
+            updates["current_item"] = current_item
+        task_center.update_task(task, **updates)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[AutoIngest] failed to heartbeat task-center record %s: %s",
+            task_id,
+            exc,
+            exc_info=True,
+        )
+
+
+@celery_app.task(name="backend.tasks.scheduled_tasks.cleanup_stale_auto_ingest_tasks")
+def cleanup_stale_auto_ingest_tasks():
+    db = SessionLocal()
+    lock_acquired = False
+    try:
+        timeout_minutes = _int_env(
+            "AUTO_INGEST_STALE_TIMEOUT_MINUTES",
+            AUTO_INGEST_STALE_TIMEOUT_MINUTES,
+        )
+        lock_key = _int_env(
+            "AUTO_INGEST_WATCHDOG_LOCK_KEY",
+            AUTO_INGEST_WATCHDOG_LOCK_KEY,
+            minimum=1,
+        )
+        lock_acquired = _acquire_auto_ingest_lock(db, lock_key)
+        if not lock_acquired:
+            logger.info("[AutoIngest] watchdog skipped because another cleanup is running")
+            return {"status": "skipped", "reason": "auto_ingest_watchdog_already_running"}
+
+        recovered = _recover_stale_auto_ingest_records(db, timeout_minutes=timeout_minutes)
+        return {"status": "success", "recovered": recovered}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[AutoIngest] watchdog failed: %s", exc, exc_info=True)
+        return {"status": "failed", "error": str(exc)}
+    finally:
+        if lock_acquired:
+            try:
+                _release_auto_ingest_lock(
+                    db,
+                    _int_env(
+                        "AUTO_INGEST_WATCHDOG_LOCK_KEY",
+                        AUTO_INGEST_WATCHDOG_LOCK_KEY,
+                        minimum=1,
+                    ),
+                )
+            except Exception as unlock_exc:  # noqa: BLE001
+                logger.warning("[AutoIngest] failed to release watchdog advisory lock: %s", unlock_exc)
+        db.close()
 
 
 @celery_app.task(name="backend.tasks.scheduled_tasks.refresh_sales_materialized_views")
@@ -812,6 +922,7 @@ def auto_ingest_pending_files(max_files: int | None = None):
             max_files,
             max_concurrent,
         )
+        _heartbeat_auto_ingest_task(db, task_record_id)
         _claim_auto_ingest_files(db, list(pending_ids), task_record_id)
         progress_results: List[Dict[str, Any]] = []
         
@@ -885,7 +996,18 @@ def auto_ingest_pending_files(max_files: int | None = None):
                             await db_local.close()
                         except Exception:
                             pass
-            
+
+            async def heartbeat_loop(stop_event: asyncio.Event):
+                heartbeat_interval = _int_env(
+                    "AUTO_INGEST_HEARTBEAT_INTERVAL_SECONDS",
+                    AUTO_INGEST_HEARTBEAT_INTERVAL_SECONDS,
+                )
+                while not stop_event.is_set():
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout=heartbeat_interval)
+                    except asyncio.TimeoutError:
+                        _heartbeat_auto_ingest_task(db, task_record_id)
+             
             async def process_indexed(index: int, file_id: int):
                 return index, await process_single(file_id)
 
@@ -894,28 +1016,39 @@ def auto_ingest_pending_files(max_files: int | None = None):
                 for index, file_id in enumerate(ids)
             ]
             processed_results = []
-            for task in asyncio.as_completed(tasks):
-                i, result = await task
-                if isinstance(result, Exception):
-                    processed_item = {
-                        "success": False,
-                        "file_id": ids[i],
-                        "status": "failed",
-                        "message": str(result),
-                    }
-                else:
-                    processed_item = result
-                processed_results.append(processed_item)
-                progress_results.append(processed_item)
-                _update_auto_ingest_task_progress(
-                    db,
-                    task_record_id,
-                    len(ids),
-                    progress_results,
-                    max_files,
-                    max_concurrent,
-                )
-            
+            stop_event = asyncio.Event()
+            heartbeat_task = asyncio.create_task(heartbeat_loop(stop_event))
+            try:
+                for task in asyncio.as_completed(tasks):
+                    i, result = await task
+                    if isinstance(result, Exception):
+                        processed_item = {
+                            "success": False,
+                            "file_id": ids[i],
+                            "status": "failed",
+                            "message": str(result),
+                        }
+                    else:
+                        processed_item = result
+                    processed_results.append(processed_item)
+                    progress_results.append(processed_item)
+                    _update_auto_ingest_task_progress(
+                        db,
+                        task_record_id,
+                        len(ids),
+                        progress_results,
+                        max_files,
+                        max_concurrent,
+                        current_item=str(
+                            processed_item.get("file_name")
+                            or processed_item.get("file_id")
+                            or ""
+                        ),
+                    )
+            finally:
+                stop_event.set()
+                await heartbeat_task
+
             return processed_results
 
         logger.info(
@@ -937,6 +1070,9 @@ def auto_ingest_pending_files(max_files: int | None = None):
                     progress_results,
                     max_files,
                     max_concurrent,
+                    current_item=str(
+                        results[idx].get("file_name") or results[idx].get("file_id") or ""
+                    ),
                 )
 
         summary = _summarize_auto_ingest_results(results)

@@ -837,3 +837,60 @@ def test_auto_ingest_pending_files_respects_global_concurrency_cap(monkeypatch):
 
     assert result["status"] == "success"
     assert observed["max_active"] <= 2
+
+
+def test_cleanup_stale_auto_ingest_tasks_releases_watchdog_lock(monkeypatch):
+    from backend.tasks import scheduled_tasks as scheduled_module
+
+    calls = []
+
+    class _FakeSession:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def execute(self, stmt, params=None):
+            text_value = str(stmt)
+            if "pg_try_advisory_lock" in text_value:
+                calls.append("lock")
+                return SimpleNamespace(scalar=lambda: True)
+            if "pg_advisory_unlock" in text_value:
+                calls.append("unlock")
+                return SimpleNamespace(scalar=lambda: True)
+            raise AssertionError("watchdog should not issue SQL when recovery is mocked")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
+    monkeypatch.setattr(
+        scheduled_module,
+        "_recover_stale_auto_ingest_records",
+        lambda db, timeout_minutes=45: {"tasks": 2, "files": 3},
+        raising=False,
+    )
+
+    result = scheduled_module.cleanup_stale_auto_ingest_tasks()
+
+    assert result == {"status": "success", "recovered": {"tasks": 2, "files": 3}}
+    assert calls == ["lock", "unlock"]
+
+
+def test_cleanup_stale_auto_ingest_tasks_skips_when_watchdog_lock_unavailable(monkeypatch):
+    from backend.tasks import scheduled_tasks as scheduled_module
+
+    class _FakeSession:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def execute(self, stmt, params=None):
+            text_value = str(stmt)
+            if "pg_try_advisory_lock" in text_value:
+                return SimpleNamespace(scalar=lambda: False)
+            raise AssertionError("watchdog should skip recovery when lock is unavailable")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
+
+    result = scheduled_module.cleanup_stale_auto_ingest_tasks()
+
+    assert result == {"status": "skipped", "reason": "auto_ingest_watchdog_already_running"}

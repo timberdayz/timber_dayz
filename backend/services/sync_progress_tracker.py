@@ -15,11 +15,13 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.celery_app import celery_app
 from backend.services.task_center_service import TaskCenterService
 from backend.utils.data_formatter import format_datetime
+from modules.core.db import CatalogFile
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,6 +31,7 @@ class SyncProgressTracker:
     """Data-sync progress compatibility adapter backed by task center."""
 
     TASK_FAMILY = "data_sync"
+    AUTO_INGEST_TERMINAL_STATUSES = {"completed", "partial_success", "failed", "cancelled"}
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -291,6 +294,109 @@ class SyncProgressTracker:
             await self.db.rollback()
             return False
 
+    async def cancel_auto_ingest_task(self, task_id: str) -> Dict[str, Any]:
+        return await self._transition_auto_ingest_task(
+            task_id,
+            target_status="cancelled",
+            error_summary="cancelled by user",
+            recovered_by="user_cancel",
+            file_last_status="cancelled",
+            file_error_message="自动入库任务已取消，已回退等待重试",
+        )
+
+    async def recover_auto_ingest_task(self, task_id: str) -> Dict[str, Any]:
+        return await self._transition_auto_ingest_task(
+            task_id,
+            target_status="failed",
+            error_summary="force recovered by user",
+            recovered_by="user_recover",
+            file_last_status="stale_recovered",
+            file_error_message="自动入库任务已强制恢复，已回退等待重试",
+        )
+
+    async def _transition_auto_ingest_task(
+        self,
+        task_id: str,
+        *,
+        target_status: str,
+        error_summary: str,
+        recovered_by: str,
+        file_last_status: str,
+        file_error_message: str,
+    ) -> Dict[str, Any]:
+        current = await self.task_center.get_task(task_id)
+        if not current:
+            raise ValueError(f"Task {task_id} not found")
+        if current.get("task_type") != "auto_ingest":
+            raise ValueError(f"Task {task_id} is not an auto-ingest task")
+
+        status_before = str(current.get("status") or "")
+        if status_before in self.AUTO_INGEST_TERMINAL_STATUSES:
+            return {
+                "task_id": task_id,
+                "status_before": status_before,
+                "status_after": status_before,
+                "recovered_file_count": 0,
+            }
+
+        recovered_file_count = await self._requeue_auto_ingest_claimed_files(
+            task_id,
+            file_last_status=file_last_status,
+            file_error_message=file_error_message,
+        )
+        details = self._details_from_task_center(current)
+        task_details = dict(details.get("task_details", {}))
+        task_details["recovered_by"] = recovered_by
+        task_details["recovered_at"] = datetime.now(timezone.utc).isoformat()
+        task_details["recovered_file_count"] = recovered_file_count
+        details["task_details"] = task_details
+        details["message"] = error_summary
+        updated = await self.task_center.update_task(
+            task_id,
+            status=target_status,
+            finished_at=datetime.now(timezone.utc),
+            error_summary=error_summary,
+            details_json=details,
+        )
+        return {
+            "task_id": task_id,
+            "status_before": status_before,
+            "status_after": updated["status"],
+            "recovered_file_count": recovered_file_count,
+        }
+
+    async def _requeue_auto_ingest_claimed_files(
+        self,
+        task_id: str,
+        *,
+        file_last_status: str,
+        file_error_message: str,
+    ) -> int:
+        result = await self.db.execute(select(CatalogFile).where(CatalogFile.status == "processing"))
+        files = result.scalars().all()
+        recovered_count = 0
+        recovered_at = datetime.now(timezone.utc).isoformat()
+        for file_record in files:
+            meta = (
+                dict(file_record.file_metadata)
+                if isinstance(file_record.file_metadata, dict)
+                else {}
+            )
+            auto_meta = dict(meta.get("auto_ingest") or {})
+            if str(auto_meta.get("current_task_id") or "") != task_id:
+                continue
+            auto_meta["last_status"] = file_last_status
+            auto_meta["last_recovered_at"] = recovered_at
+            auto_meta["current_task_id"] = None
+            meta["auto_ingest"] = auto_meta
+            file_record.file_metadata = meta
+            file_record.status = "pending"
+            file_record.error_message = file_error_message
+            recovered_count += 1
+        if recovered_count:
+            await self.db.commit()
+        return recovered_count
+
     def _legacy_updates_to_task_center(
         self,
         current: Dict[str, Any],
@@ -366,6 +472,7 @@ class SyncProgressTracker:
             "task_id": task["task_id"],
             "task_type": task["task_type"],
             "trigger_source": self._resolve_trigger_source(task),
+            "canonical_status": task.get("status"),
             "total_files": task.get("total_items", 0) or 0,
             "processed_files": task.get("processed_items", 0) or 0,
             "current_file": task.get("current_item") or "",
@@ -375,8 +482,14 @@ class SyncProgressTracker:
             "valid_rows": task.get("valid_rows", 0) or 0,
             "error_rows": task.get("error_rows", 0) or 0,
             "quarantined_rows": task.get("quarantined_rows", 0) or 0,
+            "progress_percent": task.get("progress_percent", 0.0) or 0.0,
             "file_progress": task.get("progress_percent", 0.0) or 0.0,
             "row_progress": row_progress,
+            "heartbeat_at": task.get("heartbeat_at"),
+            "started_at": task.get("started_at"),
+            "finished_at": task.get("finished_at"),
+            "current_item": task.get("current_item"),
+            "error_summary": task.get("error_summary"),
             "start_time": format_datetime(task.get("started_at") or task.get("created_at")),
             "end_time": format_datetime(task.get("finished_at")),
             "updated_at": format_datetime(task.get("updated_at")),

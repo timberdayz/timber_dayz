@@ -1354,6 +1354,14 @@ export default {
     return await this._get('/data-sync/tasks', { params })
   },
 
+  async cancelSyncTask(taskId) {
+    return await this._post(`/data-sync/tasks/${taskId}/cancel`)
+  },
+
+  async recoverSyncTask(taskId) {
+    return await this._post(`/data-sync/tasks/${taskId}/recover`)
+  },
+
   async getRefreshQueueTasks(params = {}) {
     return await this._get('/refresh-queue/tasks', { params })
   },
