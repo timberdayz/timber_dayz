@@ -54,6 +54,8 @@ class HashPolicyResult:
 
 
 class TemplateHashPolicyService:
+    PRODUCT_REQUIRED_IDENTITY_KEYS = ["product_id"]
+    PRODUCT_OPTIONAL_IDENTITY_KEYS = ["platform_sku", "sku_id", "product_name"]
     PRODUCT_STRONG_IDENTITY_KEYS = ["product_id", "platform_sku", "sku_id"]
     PRODUCT_IDENTITY_KEYS = [*PRODUCT_STRONG_IDENTITY_KEYS]
     PRODUCT_DAILY_DATE_KEYS = ["metric_date"]
@@ -130,11 +132,11 @@ class TemplateHashPolicyService:
         if domain == "products" and grain == "daily":
             add_any_group(
                 key="products_identity",
-                label="商品身份字段",
-                accepted_keys=self.PRODUCT_IDENTITY_KEYS,
-                message="products daily 需要选择 product_id 或 platform_sku。",
+                label="商品主身份字段",
+                accepted_keys=self.PRODUCT_REQUIRED_IDENTITY_KEYS,
+                message="products daily 需要选择 product_id。",
                 legacy_error=(
-                    "products daily data requires product_id or platform_sku "
+                    "products daily data requires product_id "
                     "as a semantic hash identity field."
                 ),
             )
@@ -144,18 +146,18 @@ class TemplateHashPolicyService:
                 accepted_keys=self.PRODUCT_DAILY_DATE_KEYS,
                 message="products daily 需要选择 metric_date，避免不同日期互相覆盖。",
                 legacy_error=(
-                    "daily product metrics require product_id/platform_sku + "
+                    "daily product metrics require product_id + "
                     "metric_date to avoid cross-date overwrites."
                 ),
             )
         elif domain == "products" and grain in {"weekly", "monthly"}:
             add_any_group(
                 key="products_identity",
-                label="商品身份字段",
-                accepted_keys=self.PRODUCT_IDENTITY_KEYS,
-                message=f"products {grain} 需要选择 product_id 或 platform_sku。",
+                label="商品主身份字段",
+                accepted_keys=self.PRODUCT_REQUIRED_IDENTITY_KEYS,
+                message=f"products {grain} 需要选择 product_id。",
                 legacy_error=(
-                    "products period data requires product_id or platform_sku "
+                    "products period data requires product_id "
                     "as a semantic hash identity field."
                 ),
             )
@@ -168,7 +170,7 @@ class TemplateHashPolicyService:
                     "period_end_date，避免不同周期互相覆盖。"
                 ),
                 legacy_error=(
-                    "period product metrics require product_id/platform_sku + "
+                    "period product metrics require product_id + "
                     "period date to avoid cross-period overwrites."
                 ),
             )
@@ -416,6 +418,11 @@ class TemplateHashPolicyService:
         }
 
     def _product_identity_warnings(self, resolved_keys: Set[str]) -> List[str]:
+        required_keys = set(self.PRODUCT_REQUIRED_IDENTITY_KEYS)
+        if "product_name" in resolved_keys and not (resolved_keys & required_keys):
+            return [
+                "products 当前仅使用 product_name 参与 Data Hash。商品名可能重名或改名，必须补充 product_id。"
+            ]
         return []
 
     def _sample_diagnostics(

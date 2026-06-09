@@ -52,11 +52,11 @@ test('maps confirmed raw headers to semantic keys and drops unconfirmed fields',
 
 test('drops confirmed semantic fields that are not hash eligible', () => {
   const normalized = normalizeDeduplicationSelection(
-    ['product_name', 'product_id'],
+    ['item_status', 'product_id'],
     [
       {
-        raw_name: 'Product Name',
-        semantic_key: 'product_name',
+        raw_name: 'Item Status',
+        semantic_key: 'item_status',
         semantic_review_status: 'confirmed_semantic',
         hash_eligible: false,
       },

@@ -83,7 +83,14 @@ test('BusinessOverview shop racing maps API fields to table fields', () => {
   assert.equal(viewSource.includes('order_count: toNullableNumber(row.order_count)'), true)
   assert.equal(viewSource.includes('avg_order_value: toNullableNumber(row.avg_order_value)'), true)
   assert.equal(viewSource.includes('target_amount: toNullableNumber(row.target_amount)'), true)
-  assert.equal(viewSource.includes('Number(row.achievement_rate) > 1'), true)
+  assert.equal(viewSource.includes('achievement_rate: toNullableNumber(row.achievement_rate)'), true)
+})
+
+test('BusinessOverview shop racing keeps backend achievement_rate as percent values', () => {
+  assert.equal(viewSource.includes('Number(row.achievement_rate) > 1'), false)
+  assert.equal(viewSource.includes('Number(row.achievement_rate) / 100'), false)
+  assert.equal(viewSource.includes('Math.round(rate * 100)'), false)
+  assert.equal(viewSource.includes('Math.round(rate)}%'), true)
 })
 
 test('BusinessOverview shop racing exposes lightweight operating sort controls', () => {

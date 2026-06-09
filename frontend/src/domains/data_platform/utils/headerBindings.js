@@ -121,7 +121,7 @@ export const SEMANTIC_FIELD_META = {
     description: '弱身份字段。商品名可能重名或改名，优先使用商品 ID / SKU。',
     aliases: ['product_name', 'item_name', 'product name', 'item name', '商品', '商品名', '商品名称', '产品名称'],
     kind: 'dimension',
-    hash_eligible: false,
+    hash_eligible: true,
     default_hash: false,
     identity_strength: 'weak',
     hash_warning: '商品名可能重名或改名，优先使用商品 ID / SKU。',

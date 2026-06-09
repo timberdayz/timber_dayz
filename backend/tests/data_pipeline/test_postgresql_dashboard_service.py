@@ -1343,10 +1343,15 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
                     INSERT INTO a_class.sales_targets (
                         id, target_name, target_type, period_start, period_end,
                         target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate, status
-                    ) VALUES (
-                        1, '2025-09 target', 'shop', DATE '2025-09-01', DATE '2025-09-30',
-                        300, 30, 0, 0, 0, 'active'
-                    )
+                    ) VALUES
+                        (
+                            1, '2025-09 target', 'shop', DATE '2025-09-01', DATE '2025-09-30',
+                            300, 30, 0, 0, 0, 'active'
+                        ),
+                        (
+                            2, '2025-08 target', 'shop', DATE '2025-08-01', DATE '2025-08-31',
+                            999, 99, 0, 0, 0, 'active'
+                        )
                     """
                 )
             )
@@ -1357,6 +1362,7 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
                         target_id, breakdown_type, platform_code, shop_id, period_start, period_end,
                         target_amount, target_quantity, achievement_rate
                     ) VALUES
+                        (2, 'shop', 'shopee', 'shop-3c', DATE '2025-08-01', DATE '2025-08-31', 999, 99, 0),
                         (1, 'shop_time', 'shopee', 'shop-3c', DATE '2025-09-01', DATE '2025-09-01', 100, 10, 0),
                         (1, 'shop_time', 'shopee', 'shop-3c', DATE '2025-09-02', DATE '2025-09-02', 100, 10, 0),
                         (1, 'shop_time', 'shopee', 'shop-3c', DATE '2025-09-03', DATE '2025-09-03', 100, 10, 0)

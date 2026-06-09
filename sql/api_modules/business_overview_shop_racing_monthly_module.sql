@@ -5,6 +5,7 @@ DROP MATERIALIZED VIEW IF EXISTS api.business_overview_shop_racing_monthly_modul
 CREATE MATERIALIZED VIEW api.business_overview_shop_racing_monthly_module AS
 WITH target_summary AS (
     SELECT
+        date_trunc('month', COALESCE(tb.period_start, st.period_start))::date AS period_key,
         tb.platform_code,
         tb.shop_id,
         CASE
@@ -17,7 +18,11 @@ WITH target_summary AS (
       ON st.id = tb.target_id
      AND st.status = 'active'
     WHERE tb.breakdown_type IN ('shop', 'shop_time')
-    GROUP BY tb.platform_code, tb.shop_id
+      AND COALESCE(tb.period_start, st.period_start) IS NOT NULL
+    GROUP BY
+        date_trunc('month', COALESCE(tb.period_start, st.period_start))::date,
+        tb.platform_code,
+        tb.shop_id
 ),
 orders_agg AS (
     SELECT
@@ -56,7 +61,8 @@ SELECT
     END AS achievement_rate
 FROM orders_agg o
 LEFT JOIN target_summary t
-  ON t.platform_code = o.platform_code
+  ON t.period_key = o.period_key
+ AND t.platform_code = o.platform_code
  AND COALESCE(t.shop_id, '') = COALESCE(o.shop_id, '');
 
 CREATE INDEX IF NOT EXISTS ix_business_overview_shop_racing_monthly_period

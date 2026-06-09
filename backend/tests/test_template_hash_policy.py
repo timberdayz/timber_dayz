@@ -67,14 +67,14 @@ def test_semantic_registry_contains_hour_identity_and_metric_contract_fields():
         assert is_hash_identity_semantic_key(metric_key) is False
 
 
-def test_product_name_is_standard_field_but_not_hash_identity():
+def test_product_name_is_weak_hash_identity():
     meta = get_semantic_field_meta("product_name")
 
     assert meta["kind"] == "dimension"
-    assert meta["hash_eligible"] is False
+    assert meta["hash_eligible"] is True
     assert meta["default_hash"] is False
     assert meta["identity_strength"] == "weak"
-    assert is_hash_identity_semantic_key("product_name") is False
+    assert is_hash_identity_semantic_key("product_name") is True
 
 
 def test_products_daily_requires_product_id_and_date_source():
@@ -96,8 +96,66 @@ def test_products_daily_requires_product_id_and_date_source():
 
     assert result.passed is False
     assert result.blocking_errors == [
-        "daily product metrics require product_id/platform_sku + metric_date to avoid cross-date overwrites."
+        "daily product metrics require product_id + metric_date to avoid cross-date overwrites."
     ]
+
+
+def test_products_monthly_requires_product_id_not_optional_product_identity_fields():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="products",
+        granularity="monthly",
+        deduplication_fields=["product_name"],
+        header_bindings=[
+            {
+                "source_header": "商品名称",
+                "semantic_key": "product_name",
+                "semantic_review_status": "confirmed_semantic",
+            }
+        ],
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            }
+        ],
+    )
+
+    assert result.passed is False
+    assert result.missing_required_groups[0]["accepted_keys"] == ["product_id"]
+    assert result.missing_required_groups[0]["message"] == "products monthly 需要选择 product_id。"
+    assert result.invalid_keys == []
+
+
+def test_products_monthly_passes_with_product_id_and_auto_period_date():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="products",
+        granularity="monthly",
+        deduplication_fields=["product_id"],
+        header_bindings=[
+            {
+                "source_header": "商品 ID",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            }
+        ],
+        field_parse_rules=[
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            }
+        ],
+    )
+
+    assert result.passed is True
+    assert result.blocking_errors == []
+    assert result.effective_components["user_identity_fields"] == ["product_id"]
+    assert result.effective_components["auto_date_identity_fields"] == ["metric_date"]
 
 
 def test_products_daily_source_date_parse_rule_satisfies_date_identity_automatically():
@@ -424,7 +482,7 @@ def test_metrics_and_item_status_are_invalid_hash_identity_fields():
     ]
 
 
-def test_products_daily_rejects_product_name_as_hash_identity():
+def test_products_daily_keeps_product_name_optional_but_requires_product_id():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -448,11 +506,13 @@ def test_products_daily_rejects_product_name_as_hash_identity():
     )
 
     assert result.passed is False
-    assert result.invalid_keys == ["product_name"]
-    assert result.missing_required_groups[0]["key"] == "products_identity"
+    assert result.invalid_keys == []
+    assert result.missing_required_groups[0]["accepted_keys"] == ["product_id"]
+    assert result.missing_required_groups[0]["message"] == "products daily 需要选择 product_id。"
+    assert any("product_name" in warning for warning in result.warnings)
 
 
-def test_products_daily_rejects_product_name_even_when_strong_identity_is_selected():
+def test_products_daily_allows_product_name_when_strong_identity_is_selected():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -479,8 +539,10 @@ def test_products_daily_rejects_product_name_even_when_strong_identity_is_select
         field_parse_rules=[],
     )
 
-    assert result.passed is False
-    assert result.invalid_keys == ["product_name"]
+    assert result.passed is True
+    assert result.invalid_keys == []
+    assert "product_id" in result.effective_components["user_identity_fields"]
+    assert "product_name" in result.effective_components["user_identity_fields"]
     assert not any("product_name" in warning for warning in result.warnings)
 
 

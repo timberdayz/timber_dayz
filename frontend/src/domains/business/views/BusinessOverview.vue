@@ -2243,13 +2243,13 @@ const getShopRacingProgressPercentage = (row) => {
   if (!hasShopRacingTarget(row)) return 0
   const rate = toNullableNumber(row?.achievement_rate)
   if (rate === null) return 0
-  return Math.min(100, Math.max(0, Math.round(rate * 100)))
+  return Math.min(100, Math.max(0, Math.round(rate)))
 }
 
 const getShopRacingAchievementText = (row) => {
   if (!hasShopRacingTarget(row)) return '未设目标'
   const rate = toNullableNumber(row?.achievement_rate)
-  return rate === null ? '--' : `${Math.round(rate * 100)}%`
+  return rate === null ? '--' : `${Math.round(rate)}%`
 }
 
 const sortedShopRacingData = computed(() => {
@@ -2825,12 +2825,7 @@ const loadShopRacingData = async () => {
           order_count: toNullableNumber(row.order_count),
           avg_order_value: toNullableNumber(row.avg_order_value),
           target_amount: toNullableNumber(row.target_amount),
-          achievement_rate:
-            row.achievement_rate == null
-              ? null
-              : Number(row.achievement_rate) > 1
-                ? Number(row.achievement_rate) / 100
-                : Number(row.achievement_rate)
+          achievement_rate: toNullableNumber(row.achievement_rate)
         }
       })
     } else {
