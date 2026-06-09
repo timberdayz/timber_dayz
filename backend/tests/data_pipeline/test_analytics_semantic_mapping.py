@@ -37,7 +37,7 @@ def test_analytics_atomic_sql_exposes_core_standard_fields():
 
 def test_analytics_sql_supports_shopee_and_tiktok_page_view_aliases():
     daily_sql = Path("sql/semantic/analytics_atomic.sql").read_text(encoding="utf-8")
-    monthly_sql = Path("sql/semantic/analytics_monthly_atomic.sql").read_text(encoding="utf-8")
+    monthly_sql = Path("sql/semantic/analytics_monthly_atomic_mv.sql").read_text(encoding="utf-8")
 
     page_view_shopee = "".join(chr(c) for c in [39029, 38754, 27983, 35272, 25968])
     page_view_tiktok = "".join(chr(c) for c in [39029, 38754, 27983, 35272, 27425, 25968])
@@ -48,8 +48,17 @@ def test_analytics_sql_supports_shopee_and_tiktok_page_view_aliases():
 
 def test_analytics_sql_supports_tiktok_store_page_visit_as_unique_visitors():
     daily_sql = Path("sql/semantic/analytics_atomic.sql").read_text(encoding="utf-8")
-    monthly_sql = Path("sql/semantic/analytics_monthly_atomic.sql").read_text(encoding="utf-8")
+    monthly_sql = Path("sql/semantic/analytics_monthly_atomic_mv.sql").read_text(encoding="utf-8")
 
     tiktok_store_page_visit = "".join(chr(c) for c in [24215, 38138, 39029, 38754, 35775, 38382, 37327])
     for sql_text in (daily_sql, monthly_sql):
         assert tiktok_store_page_visit in sql_text
+
+
+def test_analytics_sql_supports_tiktok_product_visitors_as_uv():
+    daily_sql = Path("sql/semantic/analytics_atomic.sql").read_text(encoding="utf-8")
+    monthly_mv_sql = Path("sql/semantic/analytics_monthly_atomic_mv.sql").read_text(encoding="utf-8")
+
+    tiktok_product_visitors = "".join(chr(c) for c in [21830, 21697, 35775, 23458, 25968])
+    for sql_text in (daily_sql, monthly_mv_sql):
+        assert tiktok_product_visitors in sql_text

@@ -64,7 +64,7 @@ Status: Implemented in `sql/semantic/analytics_atomic.sql` and `sql/semantic/ana
 | Cross-Platform Semantic | Canonical Field | Accepted Raw Source Fields |
 |-------------------------|-----------------|----------------------------|
 | 交易总额 / GMV | `gmv` | TikTok `GMV`; Shopee analytics sales-like field explicitly confirmed as same semantic |
-| 访客数 | `visitor_count` | `访客数`, `独立访客`, `uv`, `visitor_count`, `商品访客数` only when they are cross-platform equivalents and not coexisting same-file metrics |
+| 访客数 | `visitor_count` | `访客数`, `独立访客`, `uv`, `visitor_count`; TikTok analytics explicitly maps `商品访客数` to canonical `visitor_count` |
 | 页面浏览量 | `page_views` | `浏览量`, `页面浏览数`, `页面浏览次数`, `page_views`, `views` |
 | 订单数 | `order_count` | `订单数`, `订单数量`, `order_count`, `Order Count` excluding any field explicitly split such as `SKU 订单数` |
 
@@ -72,7 +72,11 @@ Status: Implemented in `sql/semantic/analytics_atomic.sql` and `sql/semantic/ana
 
 - If TikTok analytics contains both `订单数` and `SKU 订单数` in the same file, semantic output must keep both metrics.
 - If TikTok analytics contains both `GMV` and `总成交额` in the same file, semantic output must keep both metrics.
-- `商品访客数` must not be automatically merged into `visitor_count` when it coexists with another visitor-like field in the same platform/domain/file without an explicit approved rule.
+- Approved TikTok analytics rule: `页面浏览次数` is the canonical TikTok `page_views` source.
+- Approved TikTok analytics rule: `商品访客数` is the canonical TikTok `visitor_count` source for dashboard PV/UV semantics.
+- TikTok dashboard PV/UV semantics must prioritize `页面浏览次数` and `商品访客数` even when other visitor-like aliases coexist in the same export.
+- `product_visitor_count` remains available as a compatibility field, but TikTok dashboard consumers reading canonical `visitor_count` must receive `商品访客数`.
+- Approved Shopee analytics rule: `页面浏览数` maps to canonical `page_views`, and `访客数` maps to canonical `visitor_count`.
 
 ## Orders Rules
 

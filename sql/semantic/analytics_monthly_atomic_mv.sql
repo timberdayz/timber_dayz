@@ -54,6 +54,10 @@ mapped_monthly_traffic AS MATERIALIZED (
             ''
         ) AS source_shop_account_id,
         COALESCE(
+            CASE
+                WHEN LOWER(COALESCE(platform_code, '')) = 'tiktok' THEN raw_data->>'商品访客数'
+                ELSE NULL
+            END,
             raw_data->>'访客数',
             raw_data->>'独立访客',
             raw_data->>'店铺页面访问量',

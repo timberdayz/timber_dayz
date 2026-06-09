@@ -296,10 +296,10 @@
             <div class="metric-item">
               <div class="metric-label">
                 <el-tooltip
-                  content="来源：订单导出字段（利润/毛利/profit）聚合；口径可能因平台报表不同而不一致，需业务确认。"
+                  content="来源：orders 数据域利润（RMB）字段聚合，未扣除 A 类费用，因此不等同于经营利润。"
                   placement="top"
                 >
-                  <span>预估利润</span>
+                  <span>订单利润</span>
                 </el-tooltip>
               </div>
               <div class="metric-value">

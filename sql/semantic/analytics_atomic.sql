@@ -78,6 +78,10 @@ mapped AS (
         period_start_time,
         period_end_time,
         COALESCE(
+            CASE
+                WHEN LOWER(COALESCE(platform_code, '')) = 'tiktok' THEN raw_data->>'商品访客数'
+                ELSE NULL
+            END,
             raw_data->>'访客数',
             raw_data->>'独立访客',
             raw_data->>'去重页面浏览次数',
