@@ -162,6 +162,14 @@ async def _record_platform_shop_discovery_async(
     detected_platform_shop_id = payload.get("detected_platform_shop_id")
     if not detected_platform_shop_id:
         return
+    logger.info(
+        "[PlatformShopDiscovery] platform=%s main_account_id=%s shop_account_id=%s detected_cnsc_shop_id=%s current_url=%s",
+        platform,
+        main_account_id,
+        shop_account_id,
+        detected_platform_shop_id,
+        payload.get("current_url"),
+    )
 
     detected_store_name = (
         str((account or {}).get("store_name") or params.get("shop_name") or "").strip() or None
@@ -1136,6 +1144,55 @@ class CollectionExecutorV2:
             total_domains=total_domains_count,
         )
 
+    async def _build_verification_timeout_result_with_partial_file_flush(
+        self,
+        *,
+        task_id: str,
+        verification_type: str | None,
+        context: TaskContext,
+        start_time: datetime,
+        total_domains_count: int,
+        platform: str,
+        account: Dict[str, Any],
+    ) -> CollectionResult:
+        processed_files = list(context.collected_files)
+        file_processing_summary = getattr(self, "_last_file_processing_summary", {})
+
+        if context.collected_files:
+            try:
+                await self._update_status(task_id, 95, "Processing downloaded files before pause...")
+            except Exception:
+                pass
+            try:
+                processed_files = await self._process_files(
+                    context.collected_files,
+                    platform,
+                    context.data_domains,
+                    context.granularity,
+                    account=account,
+                    date_range=context.date_range,
+                )
+                file_processing_summary = getattr(self, "_last_file_processing_summary", {})
+            except Exception as exc:
+                logger.warning(
+                    "Task %s: failed to flush downloaded files before verification timeout: %s",
+                    task_id,
+                    exc,
+                )
+
+        return CollectionResult(
+            task_id=task_id,
+            status=self._verification_timeout_status(verification_type),
+            files_collected=len(processed_files),
+            collected_files=processed_files,
+            error_message=self._verification_timeout_message(verification_type),
+            duration_seconds=(datetime.now() - start_time).total_seconds(),
+            completed_domains=context.completed_domains,
+            failed_domains=context.failed_domains,
+            total_domains=total_domains_count,
+            file_processing_summary=file_processing_summary,
+        )
+
     async def _ensure_login_gate_ready(self, page: Any, platform: str) -> GateResult:
         ok, gate_result = await runtime_session.check_login_gate_ready(
             page=page,
@@ -1978,16 +2035,14 @@ class CollectionExecutorV2:
                         )
                         if value is None:
                             context.failed_domains.append({"domain": full_domain, "error": "验证码等待超时"})
-                            return CollectionResult(
+                            return await self._build_verification_timeout_result_with_partial_file_flush(
                                 task_id=task_id,
-                                status=TASK_STATUS.FAILED,
-                                files_collected=len(context.collected_files),
-                                collected_files=context.collected_files,
-                                error_message="验证码等待超时",
-                                duration_seconds=(datetime.now() - start_time).total_seconds(),
-                                completed_domains=context.completed_domains,
-                                failed_domains=context.failed_domains,
-                                total_domains=total_domains_count,
+                                verification_type=e.verification_type,
+                                context=context,
+                                start_time=start_time,
+                                total_domains_count=total_domains_count,
+                                platform=platform,
+                                account=account,
                             )
                         if (e.verification_type or "").lower() in ("otp", "sms", "email_code"):
                             params.setdefault("params", {})["otp"] = value
@@ -2584,12 +2639,14 @@ class CollectionExecutorV2:
                         task_id, e.verification_type, e.screenshot_path, page, params, adapter, is_login=True
                     )
                     if value is None:
-                        return self._build_verification_timeout_result(
+                        return await self._build_verification_timeout_result_with_partial_file_flush(
                             task_id=task_id,
                             verification_type=e.verification_type,
                             context=context,
                             start_time=start_time,
                             total_domains_count=total_domains_count,
+                            platform=platform,
+                            account=account,
                         )
                     if value is None:
                         raise StepExecutionError("验证码等待超时")
@@ -2747,16 +2804,14 @@ class CollectionExecutorV2:
                         )
                     if value is None:
                         context.failed_domains.append({"domain": full_domain, "error": "验证码等待超时"})
-                        return CollectionResult(
+                        return await self._build_verification_timeout_result_with_partial_file_flush(
                             task_id=task_id,
-                            status=TASK_STATUS.FAILED,
-                            files_collected=len(context.collected_files),
-                            collected_files=context.collected_files,
-                            error_message="验证码等待超时",
-                            duration_seconds=(datetime.now() - start_time).total_seconds(),
-                            completed_domains=context.completed_domains,
-                            failed_domains=context.failed_domains,
-                            total_domains=total_domains_count,
+                            verification_type=e.verification_type,
+                            context=context,
+                            start_time=start_time,
+                            total_domains_count=total_domains_count,
+                            platform=platform,
+                            account=account,
                         )
                     apply_verification_result_to_params(
                         export_params,
@@ -4076,6 +4131,112 @@ class CollectionExecutorV2:
         
         return str(screenshot_path)
     
+    def _extract_shopee_path_identity(
+        self,
+        file_path: str,
+        data_domain: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        parts = list(Path(file_path).parts)
+        shop_segment = ""
+        domain_key = str(data_domain or "").strip().lower()
+        if domain_key:
+            for idx, part in enumerate(parts):
+                if str(part).strip().lower() == domain_key and idx > 0:
+                    shop_segment = str(parts[idx - 1])
+                    break
+        if not shop_segment:
+            for part in reversed(parts):
+                if "__" in str(part):
+                    shop_segment = str(part)
+                    break
+        if not shop_segment:
+            return None, None
+
+        if "__" not in shop_segment:
+            return shop_segment.strip() or None, None
+        store_name, shop_id = shop_segment.rsplit("__", 1)
+        return store_name.strip() or None, shop_id.strip() or None
+
+    def _normalized_identity_text(self, value: Any) -> str:
+        return str(value or "").strip().lower()
+
+    def _resolve_collection_store_name(self, account: Dict[str, Any]) -> str:
+        return str(
+            account.get("store_name")
+            or account.get("shop_name")
+            or account.get("selected_shop_name")
+            or account.get("display_shop_name")
+            or ""
+        ).strip()
+
+    def _resolve_collection_shop_id(self, platform: str, account: Dict[str, Any]) -> str:
+        raw_shop_id = str(
+            account.get("shop_id")
+            or account.get("cnsc_shop_id")
+            or account.get("platform_shop_id")
+            or ""
+        ).strip()
+        if str(platform or "").strip().lower() != "shopee":
+            return raw_shop_id or str(account.get("store_name") or "").strip()
+
+        from backend.services.shopee_shop_id_resolver import (
+            resolve_shopee_platform_shop_id,
+        )
+
+        store_name = self._resolve_collection_store_name(account)
+        return resolve_shopee_platform_shop_id(
+            platform="shopee",
+            account_id=account.get("shop_account_id") or account.get("account_id"),
+            store_name=store_name,
+            platform_shop_id=account.get("platform_shop_id"),
+            shop_id=raw_shop_id,
+        ) or raw_shop_id or store_name
+
+    def _shopee_shop_identity_rejection_reason(
+        self,
+        *,
+        source_path: Path,
+        data_domain: str,
+        account: Dict[str, Any],
+        resolved_shop_id: str,
+    ) -> Optional[str]:
+        path_store_name, path_shop_id = self._extract_shopee_path_identity(
+            str(source_path),
+            data_domain,
+        )
+        if not path_store_name and not path_shop_id:
+            return None
+
+        from backend.services.shopee_shop_id_resolver import (
+            resolve_shopee_platform_shop_id,
+        )
+
+        account_store_name = self._resolve_collection_store_name(account)
+        expected_shop_id = resolve_shopee_platform_shop_id(
+            platform="shopee",
+            account_id=account.get("shop_account_id") or account.get("account_id"),
+            store_name=account_store_name or path_store_name,
+            platform_shop_id=account.get("platform_shop_id"),
+            shop_id=resolved_shop_id or path_shop_id,
+        )
+
+        if path_shop_id and expected_shop_id and path_shop_id != expected_shop_id:
+            return (
+                f"path shop_id {path_shop_id} conflicts with expected "
+                f"shop_id {expected_shop_id} for store {path_store_name or account_store_name}"
+            )
+
+        if path_store_name and account_store_name:
+            left = self._normalized_identity_text(path_store_name)
+            right = self._normalized_identity_text(account_store_name)
+            if "." in account_store_name and left != right:
+                return (
+                    f"path store_name {path_store_name} conflicts with account "
+                    f"store_name {account_store_name}"
+                )
+
+        return None
+
     async def _process_files(
         self, 
         file_paths: List[str], 
@@ -4114,6 +4275,7 @@ class CollectionExecutorV2:
             "catalog_registered_count": 0,
             "registration_skipped_count": 0,
             "semantic_rejected_count": 0,
+            "shop_identity_rejected_count": 0,
             "registration_errors": [],
         }
         self._last_file_processing_summary = summary
@@ -4121,7 +4283,8 @@ class CollectionExecutorV2:
         # 提取账号信息
         account = account or {}
         account_label = account.get("label") or account.get("username") or "unknown"
-        shop_id = account.get("shop_id") or account.get("store_name")
+        shop_id = self._resolve_collection_shop_id(platform, account)
+        store_name = self._resolve_collection_store_name(account)
         
         # 提取日期范围
         date_range = date_range or {}
@@ -4138,7 +4301,37 @@ class CollectionExecutorV2:
                 # 推断数据域(从文件路径或data_domains列表)
                 data_domain = self._infer_data_domain_from_path(file_path, data_domains, idx)
                 sub_domain = self._infer_sub_domain_from_path(file_path, data_domain=data_domain)
-                
+                file_store_name = store_name
+                if str(platform or "").strip().lower() == "shopee":
+                    path_store_name, _ = self._extract_shopee_path_identity(
+                        str(source_path),
+                        data_domain,
+                    )
+                    if path_store_name and not file_store_name:
+                        file_store_name = path_store_name
+                    rejection_reason = self._shopee_shop_identity_rejection_reason(
+                        source_path=source_path,
+                        data_domain=data_domain,
+                        account=account,
+                        resolved_shop_id=shop_id,
+                    )
+                    if rejection_reason:
+                        summary["shop_identity_rejected_count"] += 1
+                        rejected_dir = source_path.parent / "_shop_identity_rejected"
+                        rejected_dir.mkdir(parents=True, exist_ok=True)
+                        rejected_path = rejected_dir / source_path.name
+                        if rejected_path.exists():
+                            rejected_path = rejected_dir / f"{source_path.stem}_{uuid.uuid4().hex[:8]}{source_path.suffix}"
+                        shutil.move(str(source_path), str(rejected_path))
+                        logger.warning(
+                            "[ShopIdentityGuard] Reject Shopee file before raw promotion: source=%s shop_id=%s reason=%s rejected_path=%s",
+                            file_path,
+                            shop_id,
+                            rejection_reason,
+                            rejected_path,
+                        )
+                        continue
+
                 landing_semantics = self._resolve_file_landing_semantics(
                     platform=platform,
                     data_domain=data_domain,
@@ -4239,14 +4432,16 @@ class CollectionExecutorV2:
                         "granularity": resolved_granularity,
                         "date_from": date_from,
                         "date_to": date_to,
-                        "shop_id": shop_id
+                        "shop_id": shop_id,
+                        "store_name": file_store_name,
                     }
-                    
+
                     collection_info = {
                         "method": "python_component",
                         "collection_platform": landing_semantics["collection_platform"],
                         "account": account_label,
                         "shop_id": shop_id,
+                        "store_name": file_store_name,
                         "original_path": str(source_path),
                         "collected_at": datetime.now().isoformat()
                     }

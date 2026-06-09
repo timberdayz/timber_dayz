@@ -506,16 +506,17 @@ class ShopeeLogin(LoginComponent):
 
             login_url = str(account.get("login_url") or get_platform_login_entry(self.platform)).strip()
 
-            username = str(account.get("username") or "").strip()
-            password = str(account.get("password") or "").strip()
-            if not username or not password:
-                return LoginResult(success=False, message="username and password are required in account")
-
             if reused_session:
                 redirected = await self._wait_for_reused_session_redirect(page)
                 if redirected:
                     await self._cleanup_after_login(page)
                     return LoginResult(success=True, message="ok")
+
+            username = str(account.get("username") or "").strip()
+            password = str(account.get("password") or "").strip()
+            if not username or not password:
+                return LoginResult(success=False, message="username and password are required in account")
+
             current_url = str(getattr(page, "url", "") or "").strip().lower()
             if current_url != "about:blank" and "/account/signin" not in current_url:
                 if self._login_looks_successful(str(getattr(page, "url", "") or "")):

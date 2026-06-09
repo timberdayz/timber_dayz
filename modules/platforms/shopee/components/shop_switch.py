@@ -48,6 +48,24 @@ class ShopeeShopSwitch:
             or account.get("shop_id")
             or ""
         ).strip()
+        from backend.services.shopee_shop_id_resolver import (
+            resolve_shopee_platform_shop_id,
+        )
+
+        resolved = resolve_shopee_platform_shop_id(
+            platform=self.ctx.platform,
+            account_id=account.get("shop_account_id") or account.get("account_id"),
+            store_name=(
+                cfg.get("shop_name")
+                or account.get("store_name")
+                or account.get("selected_shop_name")
+                or account.get("display_shop_name")
+            ),
+            platform_shop_id=cfg.get("platform_shop_id") or account.get("platform_shop_id"),
+            shop_id=shop_id,
+        )
+        if resolved:
+            return resolved
         return shop_id or None
 
     def _rewrite_cnsc_shop_id(self, url: str | None, target_shop_id: str) -> str:
@@ -179,6 +197,14 @@ class ShopeeShopSwitch:
         target_shop_id = self._target_shop_id()
         current_url = str(getattr(page, "url", "") or "")
         current_shop_id = self._current_shop_id_from_url(current_url)
+        if self.logger and target_shop_id:
+            self.logger.info(
+                "[ShopeeShopSwitch] target_shop=%s target_cnsc_shop_id=%s current_cnsc_shop_id=%s current_url=%s",
+                target_shop,
+                target_shop_id,
+                current_shop_id,
+                current_url,
+            )
 
         if target_shop_id:
             if current_shop_id == target_shop_id:
