@@ -355,7 +355,7 @@ import DeduplicationFieldsSelector from '@/components/DeduplicationFieldsSelecto
 import {
   NON_SEMANTIC_FIELD_OPTION,
   NON_SEMANTIC_FIELD_VALUE,
-  SEMANTIC_FIELD_OPTION_GROUPS,
+  getSemanticFieldOptionGroupsForDomain,
   getSemanticFieldMeta,
   inferHeaderBindings,
   updateHeaderBindingSemantic,
@@ -422,7 +422,9 @@ const localHeaderBindings = ref([])
 const deduplicationSelectionValid = ref(false)
 
 const semanticNonSemanticOption = NON_SEMANTIC_FIELD_OPTION
-const semanticFieldOptionGroups = SEMANTIC_FIELD_OPTION_GROUPS
+const semanticFieldOptionGroups = computed(() =>
+  getSemanticFieldOptionGroupsForDomain(props.fileFilters?.domain || '')
+)
 const dateTargetOptions = DATE_TARGET_FIELD_OPTIONS
 const dateValueKindOptions = DATE_VALUE_KIND_OPTIONS
 const dateFormatOptions = DATE_FORMAT_OPTIONS

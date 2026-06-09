@@ -109,7 +109,7 @@ def test_existing_deduplication_fields_match_by_semantic_key_without_raw_header_
         ],
     )
 
-    assert available == ["product_name"]
+    assert available == []
     assert missing == []
     assert matches == [
         {
@@ -117,8 +117,8 @@ def test_existing_deduplication_fields_match_by_semantic_key_without_raw_header_
             "semantic_key": "product_name",
             "current_field": "商品名称",
             "match_type": "semantic_key",
-            "hash_eligible": True,
-            "status": "matched_hashable",
+            "hash_eligible": False,
+            "status": "matched_non_hashable",
         },
         {
             "requested_field": "状态",
@@ -393,7 +393,7 @@ async def test_template_update_context_returns_semantic_equivalent_deduplication
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["existing_deduplication_fields_available"] == ["product_name"]
+    assert data["existing_deduplication_fields_available"] == []
     assert data["existing_deduplication_fields_missing"] == []
     assert data["existing_deduplication_field_matches"] == [
         {
@@ -401,8 +401,8 @@ async def test_template_update_context_returns_semantic_equivalent_deduplication
             "semantic_key": "product_name",
             "current_field": "商品名称",
             "match_type": "semantic_key",
-            "hash_eligible": True,
-            "status": "matched_hashable",
+            "hash_eligible": False,
+            "status": "matched_non_hashable",
         },
         {
             "requested_field": "状态",

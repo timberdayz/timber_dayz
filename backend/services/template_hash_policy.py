@@ -55,8 +55,7 @@ class HashPolicyResult:
 
 class TemplateHashPolicyService:
     PRODUCT_STRONG_IDENTITY_KEYS = ["product_id", "platform_sku", "sku_id"]
-    PRODUCT_WEAK_IDENTITY_KEYS = ["product_name"]
-    PRODUCT_IDENTITY_KEYS = [*PRODUCT_STRONG_IDENTITY_KEYS, *PRODUCT_WEAK_IDENTITY_KEYS]
+    PRODUCT_IDENTITY_KEYS = [*PRODUCT_STRONG_IDENTITY_KEYS]
     PRODUCT_DAILY_DATE_KEYS = ["metric_date"]
     PERIOD_DATE_KEYS = ["metric_date", "period_start_date", "period_end_date"]
     ORDER_DETAIL_SUB_DOMAINS = {"detail", "details", "line", "lines", "order_detail", "order_lines"}
@@ -417,16 +416,7 @@ class TemplateHashPolicyService:
         }
 
     def _product_identity_warnings(self, resolved_keys: Set[str]) -> List[str]:
-        if "product_name" not in resolved_keys:
-            return []
-        has_strong_identity = any(key in resolved_keys for key in self.PRODUCT_STRONG_IDENTITY_KEYS)
-        if has_strong_identity:
-            return [
-                "product_name 是弱身份字段；同时选择强身份时，商品改名会产生新的 Data Hash 身份。"
-            ]
-        return [
-            "product_name 是弱身份字段，可能重名或改名；仅在没有商品 ID / SKU 时作为 Data Hash fallback。"
-        ]
+        return []
 
     def _sample_diagnostics(
         self,

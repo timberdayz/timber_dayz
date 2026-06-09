@@ -67,14 +67,14 @@ def test_semantic_registry_contains_hour_identity_and_metric_contract_fields():
         assert is_hash_identity_semantic_key(metric_key) is False
 
 
-def test_product_name_is_weak_hash_eligible_identity_field():
+def test_product_name_is_standard_field_but_not_hash_identity():
     meta = get_semantic_field_meta("product_name")
 
     assert meta["kind"] == "dimension"
-    assert meta["hash_eligible"] is True
+    assert meta["hash_eligible"] is False
     assert meta["default_hash"] is False
     assert meta["identity_strength"] == "weak"
-    assert is_hash_identity_semantic_key("product_name") is True
+    assert is_hash_identity_semantic_key("product_name") is False
 
 
 def test_products_daily_requires_product_id_and_date_source():
@@ -424,7 +424,7 @@ def test_metrics_and_item_status_are_invalid_hash_identity_fields():
     ]
 
 
-def test_products_daily_allows_product_name_fallback_with_weak_identity_warning():
+def test_products_daily_rejects_product_name_as_hash_identity():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -447,14 +447,12 @@ def test_products_daily_allows_product_name_fallback_with_weak_identity_warning(
         ],
     )
 
-    assert result.passed is True
-    assert result.invalid_keys == []
-    assert result.requirement_groups[0]["selected_keys"] == ["product_name"]
-    assert result.effective_components["derived_identity_fields"] == ["metric_date"]
-    assert any("product_name" in warning and "弱身份" in warning for warning in result.warnings)
+    assert result.passed is False
+    assert result.invalid_keys == ["product_name"]
+    assert result.missing_required_groups[0]["key"] == "products_identity"
 
 
-def test_products_daily_warns_when_product_name_is_selected_with_strong_identity():
+def test_products_daily_rejects_product_name_even_when_strong_identity_is_selected():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -481,9 +479,9 @@ def test_products_daily_warns_when_product_name_is_selected_with_strong_identity
         field_parse_rules=[],
     )
 
-    assert result.passed is True
-    assert result.invalid_keys == []
-    assert any("改名" in warning and "product_name" in warning for warning in result.warnings)
+    assert result.passed is False
+    assert result.invalid_keys == ["product_name"]
+    assert not any("product_name" in warning for warning in result.warnings)
 
 
 def test_traffic_daily_allows_user_selected_hour_identity_field():

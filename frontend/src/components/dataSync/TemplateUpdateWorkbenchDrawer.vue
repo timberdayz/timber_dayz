@@ -344,10 +344,10 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import {
   formatHeaderBindingLabel,
+  getSemanticFieldOptionGroupsForDomain,
   getSemanticFieldMeta,
   NON_SEMANTIC_FIELD_OPTION,
   NON_SEMANTIC_FIELD_VALUE,
-  SEMANTIC_FIELD_OPTION_GROUPS,
   updateHeaderBindingSemantic,
 } from '@/domains/data_platform/utils/headerBindings'
 import {
@@ -362,7 +362,10 @@ import {
   fieldParseRuleNeedsRangePick,
   mergeFieldParseRules,
 } from '@/domains/data_platform/utils/templateFieldParseRules'
-import { normalizeDeduplicationSelection } from '@/domains/data_platform/utils/deduplicationSelection'
+import {
+  mergeHeaderBindingsForSave,
+  normalizeDeduplicationSelection,
+} from '@/domains/data_platform/utils/deduplicationSelection'
 
 import HeaderDiffViewer from './HeaderDiffViewer.vue'
 import TemplateChangeSummaryCard from './TemplateChangeSummaryCard.vue'
@@ -410,7 +413,11 @@ const saving = ref(false)
 const hashPolicyAllowsSave = ref(false)
 const hashPolicyPreview = ref(null)
 const semanticNonSemanticOption = NON_SEMANTIC_FIELD_OPTION
-const semanticFieldOptionGroups = SEMANTIC_FIELD_OPTION_GROUPS
+const semanticFieldOptionGroups = computed(() =>
+  getSemanticFieldOptionGroupsForDomain(
+    templateContext.value?.data_domain || props.template?.data_domain || props.template?.domain || ''
+  )
+)
 const dateTargetOptions = DATE_TARGET_FIELD_OPTIONS
 const dateValueKindOptions = DATE_VALUE_KIND_OPTIONS
 const dateFormatOptions = DATE_FORMAT_OPTIONS
@@ -598,9 +605,13 @@ async function ensureBindingsLoaded() {
       headerRow: selectedHeaderRow.value,
     })
     const data = payload?.data || payload
-    fullHeaderBindings.value = Array.isArray(data?.current_header_bindings)
+    const loadedBindings = Array.isArray(data?.current_header_bindings)
       ? data.current_header_bindings.map(item => ({ ...item }))
       : []
+    fullHeaderBindings.value = mergeHeaderBindingsForSave(
+      loadedBindings,
+      localHeaderBindings.value,
+    )
     bindingsLoaded.value = true
   } catch (error) {
     console.error('Failed to load bindings:', error)
@@ -718,15 +729,19 @@ async function handleSave() {
     if (updateMode.value !== 'core-only') {
       await ensureBindingsLoaded()
     }
+    const bindingsForSave = mergeHeaderBindingsForSave(
+      activeBindingSource.value,
+      localHeaderBindings.value,
+    )
     selectedDeduplicationFields.value = normalizeDeduplicationSelection(
       selectedDeduplicationFields.value,
-      activeBindingSource.value,
+      bindingsForSave,
       localFieldParseRules.value,
     )
     emit('save', {
       deduplicationFields: [...selectedDeduplicationFields.value],
       headerRow: selectedHeaderRow.value,
-      headerBindings: activeBindingSource.value.map(item => ({ ...item })),
+      headerBindings: bindingsForSave.map(item => ({ ...item })),
       fieldParseRules: normalizeFieldParseRulesForSave(),
     })
   } finally {

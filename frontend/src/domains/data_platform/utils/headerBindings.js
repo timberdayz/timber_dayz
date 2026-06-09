@@ -121,7 +121,7 @@ export const SEMANTIC_FIELD_META = {
     description: '弱身份字段。商品名可能重名或改名，优先使用商品 ID / SKU。',
     aliases: ['product_name', 'item_name', 'product name', 'item name', '商品', '商品名', '商品名称', '产品名称'],
     kind: 'dimension',
-    hash_eligible: true,
+    hash_eligible: false,
     default_hash: false,
     identity_strength: 'weak',
     hash_warning: '商品名可能重名或改名，优先使用商品 ID / SKU。',
@@ -441,6 +441,33 @@ export const SEMANTIC_FIELD_OPTION_GROUPS = SEMANTIC_OPTION_GROUPS
     options: CANONICAL_SEMANTIC_FIELD_OPTIONS.filter(option => option.group === group.key),
   }))
   .filter(group => group.options.length > 0)
+
+export function getSemanticFieldOptionGroupsForDomain(dataDomain = '') {
+  const domain = String(dataDomain || '').trim().toLowerCase()
+  const domainAliases = new Set([domain])
+  if (domain === 'traffic') {
+    domainAliases.add('analytics')
+  }
+  if (domain === 'analytics') {
+    domainAliases.add('traffic')
+  }
+
+  const isAllowedForDomain = (option) => {
+    const optionDomain = String(option?.domain || 'common').trim().toLowerCase()
+    if (!optionDomain || optionDomain === 'common') return true
+    if (!domain) return true
+    return domainAliases.has(optionDomain)
+  }
+
+  return SEMANTIC_OPTION_GROUPS
+    .map(group => ({
+      label: group.label,
+      options: CANONICAL_SEMANTIC_FIELD_OPTIONS
+        .filter(option => option.group === group.key)
+        .filter(isAllowedForDomain),
+    }))
+    .filter(group => group.options.length > 0)
+}
 
 export const SEMANTIC_FIELD_OPTIONS = [
   NON_SEMANTIC_FIELD_OPTION,

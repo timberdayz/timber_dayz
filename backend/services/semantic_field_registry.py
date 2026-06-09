@@ -43,7 +43,7 @@ SEMANTIC_FIELD_META: dict[str, dict[str, Any]] = {
     "order_date": {"kind": "time", "hash_eligible": True, "default_hash": False},
     "product_name": {
         "kind": "dimension",
-        "hash_eligible": True,
+        "hash_eligible": False,
         "default_hash": False,
         "identity_strength": "weak",
         "hash_warning": "商品名可能重名或改名，优先使用商品 ID / SKU。",
@@ -374,7 +374,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "label": "商品名称",
         "kind": "dimension",
         "domain": "products",
-        "hash_eligible": True,
+        "hash_eligible": False,
         "default_hash": False,
         "identity_strength": "weak",
         "hash_warning": "商品名可能重名或改名，优先使用商品 ID / SKU。",

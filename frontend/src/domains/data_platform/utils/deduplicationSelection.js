@@ -14,7 +14,11 @@ export function normalizeDeduplicationSelection(
     if (rawName) {
       bindingByRaw.set(rawName.toLowerCase(), binding)
     }
-    if (semanticKey && binding?.semantic_review_status === 'confirmed_semantic') {
+    if (
+      semanticKey &&
+      binding?.semantic_review_status === 'confirmed_semantic' &&
+      binding?.hash_eligible !== false
+    ) {
       semanticKeys.add(semanticKey)
     }
   }
@@ -43,7 +47,10 @@ export function normalizeDeduplicationSelection(
 
     const rawBinding = bindingByRaw.get(value.toLowerCase())
     if (rawBinding) {
-      if (rawBinding.semantic_review_status !== 'confirmed_semantic') {
+      if (
+        rawBinding.semantic_review_status !== 'confirmed_semantic' ||
+        rawBinding.hash_eligible === false
+      ) {
         continue
       }
       const semanticKey = String(rawBinding.semantic_key || '').trim()
@@ -72,4 +79,30 @@ export function normalizeDeduplicationSelection(
   }
 
   return normalized
+}
+
+export function mergeHeaderBindingsForSave(baseBindings = [], editedBindings = []) {
+  const editedByRaw = new Map()
+  for (const binding of Array.isArray(editedBindings) ? editedBindings : []) {
+    const rawName = String(binding?.raw_name || '').trim()
+    if (!rawName) continue
+    editedByRaw.set(rawName.toLowerCase(), binding)
+  }
+
+  const merged = []
+  const seen = new Set()
+  for (const binding of Array.isArray(baseBindings) ? baseBindings : []) {
+    const rawName = String(binding?.raw_name || '').trim()
+    const key = rawName.toLowerCase()
+    if (!rawName || seen.has(key)) continue
+    seen.add(key)
+    merged.push({ ...binding, ...(editedByRaw.get(key) || {}) })
+  }
+
+  for (const [key, binding] of editedByRaw.entries()) {
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push({ ...binding })
+  }
+  return merged
 }
