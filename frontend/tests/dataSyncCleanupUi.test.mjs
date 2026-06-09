@@ -21,6 +21,14 @@ test('data sync cleanup button previews rebuildable reset impact before execute'
   assert.match(viewSource, /source_missing_count/)
 })
 
+test('data sync cleanup preview shows controlled rebuild recommendation', () => {
+  assert.match(viewSource, /recommended_rebuild_mode/)
+  assert.match(viewSource, /recommended_batch_size/)
+  assert.match(viewSource, /recommended_max_concurrent/)
+  assert.match(viewSource, /skipped_processing_count/)
+  assert.match(viewSource, /controlled_auto_ingest/)
+})
+
 test('data sync files view treats source_missing as an anomaly status', () => {
   assert.match(viewSource, /el-option label="源文件缺失" value="source_missing"/)
   assert.match(viewSource, /row\.status === 'source_missing'/)

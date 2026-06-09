@@ -6,7 +6,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 from uuid import uuid4
@@ -24,8 +24,146 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-AUTO_INGEST_MAX_FILES_PER_RUN = 50
-AUTO_INGEST_MAX_CONCURRENT = max(1, int(os.getenv("AUTO_INGEST_MAX_CONCURRENT", "2")))
+AUTO_INGEST_MAX_FILES_PER_RUN = max(
+    1, int(os.getenv("AUTO_INGEST_MAX_FILES_PER_RUN", "20"))
+)
+AUTO_INGEST_MAX_CONCURRENT = max(1, int(os.getenv("AUTO_INGEST_MAX_CONCURRENT", "1")))
+AUTO_INGEST_STALE_TIMEOUT_MINUTES = max(
+    1, int(os.getenv("AUTO_INGEST_STALE_TIMEOUT_MINUTES", "45"))
+)
+AUTO_INGEST_LOCK_KEY = int(os.getenv("AUTO_INGEST_LOCK_KEY", "928451203"))
+AUTO_INGEST_SOURCE = "scheduled_tasks.auto_ingest_pending_files"
+
+
+def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return max(minimum, default)
+
+
+def _get_session_dialect_name(db) -> str:
+    bind = getattr(db, "bind", None)
+    if bind is None and hasattr(db, "get_bind"):
+        try:
+            bind = db.get_bind()
+        except Exception:
+            bind = None
+    return str(getattr(getattr(bind, "dialect", None), "name", "") or "").lower()
+
+
+def _acquire_auto_ingest_lock(db, lock_key: int = AUTO_INGEST_LOCK_KEY) -> bool:
+    if _get_session_dialect_name(db) != "postgresql":
+        return True
+    result = db.execute(
+        text("SELECT pg_try_advisory_lock(:lock_key)"),
+        {"lock_key": lock_key},
+    )
+    return bool(result.scalar())
+
+
+def _release_auto_ingest_lock(db, lock_key: int = AUTO_INGEST_LOCK_KEY) -> None:
+    if _get_session_dialect_name(db) != "postgresql":
+        return
+    db.execute(
+        text("SELECT pg_advisory_unlock(:lock_key)"),
+        {"lock_key": lock_key},
+    )
+
+
+def _parse_auto_ingest_timestamp(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _append_auto_ingest_error(details: Dict[str, Any] | None, message: str) -> Dict[str, Any]:
+    next_details = dict(details or {})
+    errors = list(next_details.get("errors") or [])
+    errors.append({"message": message})
+    next_details["errors"] = errors
+    next_details.setdefault("warnings", [])
+    next_details["message"] = message
+    next_details.setdefault("task_details", {})
+    return next_details
+
+
+def _recover_stale_auto_ingest_records(
+    db,
+    timeout_minutes: int = AUTO_INGEST_STALE_TIMEOUT_MINUTES,
+) -> Dict[str, int]:
+    from modules.core.db import TaskCenterTask
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=timeout_minutes)
+    timeout_message = f"auto ingest timed out after {timeout_minutes} minutes"
+    recovered_tasks = 0
+    recovered_files = 0
+
+    try:
+        stale_tasks = (
+            db.execute(
+                select(TaskCenterTask).where(
+                    TaskCenterTask.task_type == "auto_ingest",
+                    TaskCenterTask.status == "running",
+                    TaskCenterTask.started_at < cutoff,
+                )
+            )
+            .scalars()
+            .all()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[AutoIngest] stale task recovery skipped: %s", exc)
+        stale_tasks = []
+
+    for task in stale_tasks:
+        if not all(hasattr(task, attr) for attr in ("status", "details_json")):
+            continue
+        task.status = "failed"
+        task.finished_at = now
+        task.error_summary = timeout_message
+        task.details_json = _append_auto_ingest_error(task.details_json, timeout_message)
+        recovered_tasks += 1
+
+    try:
+        processing_files = (
+            db.execute(select(CatalogFile).where(CatalogFile.status == "processing"))
+            .scalars()
+            .all()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[AutoIngest] stale file recovery skipped: %s", exc)
+        processing_files = []
+
+    for file_record in processing_files:
+        if not all(hasattr(file_record, attr) for attr in ("file_metadata", "status")):
+            continue
+        meta = dict(file_record.file_metadata or {})
+        auto_meta = dict(meta.get("auto_ingest") or {})
+        started_at = _parse_auto_ingest_timestamp(auto_meta.get("processing_started_at"))
+        if started_at is None or started_at >= cutoff:
+            continue
+        auto_meta["last_status"] = "stale_recovered"
+        auto_meta["last_recovered_at"] = now.isoformat()
+        meta["auto_ingest"] = auto_meta
+        file_record.file_metadata = meta
+        file_record.status = "pending"
+        file_record.error_message = "自动入库任务超时，已回退等待重试"
+        recovered_files += 1
+
+    if recovered_tasks or recovered_files:
+        db.commit()
+
+    return {"tasks": recovered_tasks, "files": recovered_files}
 
 
 def _create_auto_ingest_task_record(
@@ -67,7 +205,7 @@ def _create_auto_ingest_task_record(
                 "message": "auto ingest running",
                 "row_progress": 0.0,
                 "task_details": {
-                    "source": "scheduled_tasks.auto_ingest_pending_files",
+                    "source": AUTO_INGEST_SOURCE,
                     "max_files": max_files,
                     "max_concurrent": max_concurrent,
                     "file_ids": list(pending_ids),
@@ -180,12 +318,88 @@ def _build_auto_ingest_task_details(
     }
 
 
+def _summarize_auto_ingest_results(results: List[Dict[str, Any]]) -> Dict[str, int]:
+    summary = {
+        "processed": len(results),
+        "succeeded": 0,
+        "quarantined": 0,
+        "failed": 0,
+        "skipped": 0,
+        "skipped_no_template": 0,
+        "skipped_template_update": 0,
+    }
+    for item in results:
+        safe_item = item if isinstance(item, dict) else {"status": "failed", "message": str(item)}
+        status = _auto_ingest_result_status(safe_item)
+        if status == "success":
+            summary["succeeded"] += 1
+        elif status == "quarantined":
+            summary["quarantined"] += 1
+        elif status == "failed":
+            summary["failed"] += 1
+        elif status == "skipped":
+            summary["skipped"] += 1
+            message = safe_item.get("message", "")
+            message_lower = str(message).lower()
+            if (
+                safe_item.get("error_code") == "NO_TEMPLATE"
+                or safe_item.get("skip_reason") == "no_template"
+                or "no_template" in message_lower
+                or "no template" in message_lower
+                or "无模板" in str(message)
+            ):
+                summary["skipped_no_template"] += 1
+            if safe_item.get("error_code") == "TEMPLATE_UPDATE_REQUIRED":
+                summary["skipped_template_update"] += 1
+    return summary
+
+
+def _update_auto_ingest_task_progress(
+    db,
+    task_id: str | None,
+    total_files: int,
+    partial_results: List[Dict[str, Any]],
+    max_files: int,
+    max_concurrent: int,
+) -> None:
+    if not task_id or total_files <= 0:
+        return
+    try:
+        from backend.services.task_center_sync_service import TaskCenterSyncService
+
+        task_center = TaskCenterSyncService(db)
+        task = task_center.get_task(task_id)
+        if task is None:
+            return
+        summary = _summarize_auto_ingest_results(partial_results)
+        details = _build_auto_ingest_task_details(summary, partial_results[-20:])
+        details["task_details"]["max_files"] = max_files
+        details["task_details"]["max_concurrent"] = max_concurrent
+        task_center.update_task(
+            task,
+            processed_items=summary["processed"],
+            success_items=summary["succeeded"],
+            failed_items=summary["failed"],
+            skipped_items=summary["skipped"],
+            progress_percent=round((summary["processed"] / total_files) * 100, 2),
+            details_json=details,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[AutoIngest] failed to update task progress %s: %s",
+            task_id,
+            exc,
+            exc_info=True,
+        )
+
+
 def _resolve_auto_ingest_task_status(summary: Dict[str, int]) -> str:
     processed = int(summary.get("processed", 0) or 0)
     failed = int(summary.get("failed", 0) or 0)
+    skipped = int(summary.get("skipped", 0) or 0)
     if processed > 0 and failed >= processed:
         return "failed"
-    if failed > 0:
+    if failed > 0 or skipped > 0:
         return "partial_success"
     return "completed"
 
@@ -195,6 +409,8 @@ def _complete_auto_ingest_task_record(
     task_id: str | None,
     summary: Dict[str, int],
     results: List[Dict[str, Any]],
+    max_files: int | None = None,
+    max_concurrent: int | None = None,
 ) -> None:
     if not task_id:
         return
@@ -206,6 +422,11 @@ def _complete_auto_ingest_task_record(
         task = task_center.get_task(task_id)
         if task is None:
             return
+        details = _build_auto_ingest_task_details(summary, results)
+        if max_files is not None:
+            details["task_details"]["max_files"] = max_files
+        if max_concurrent is not None:
+            details["task_details"]["max_concurrent"] = max_concurrent
         task_center.update_task(
             task,
             status=_resolve_auto_ingest_task_status(summary),
@@ -215,7 +436,7 @@ def _complete_auto_ingest_task_record(
             skipped_items=summary.get("skipped", 0),
             progress_percent=100.0,
             finished_at=datetime.now(timezone.utc),
-            details_json=_build_auto_ingest_task_details(summary, results),
+            details_json=details,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -224,6 +445,43 @@ def _complete_auto_ingest_task_record(
             exc,
             exc_info=True,
         )
+
+
+def _claim_auto_ingest_files(
+    db,
+    pending_ids: List[int],
+    task_id: str | None,
+) -> None:
+    if not pending_ids:
+        return
+    now = datetime.now(timezone.utc)
+    try:
+        files = (
+            db.execute(select(CatalogFile).where(CatalogFile.id.in_(pending_ids)))
+            .scalars()
+            .all()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[AutoIngest] failed to load files for claim: %s", exc)
+        return
+
+    claimed_count = 0
+    for file_record in files:
+        if getattr(file_record, "status", None) != "pending":
+            continue
+        meta = dict(file_record.file_metadata or {})
+        auto_meta = dict(meta.get("auto_ingest") or {})
+        auto_meta["current_task_id"] = task_id
+        auto_meta["processing_started_at"] = now.isoformat()
+        auto_meta["claimed_by"] = AUTO_INGEST_SOURCE
+        auto_meta["last_status"] = "claimed"
+        meta["auto_ingest"] = auto_meta
+        file_record.file_metadata = meta
+        file_record.status = "processing"
+        claimed_count += 1
+
+    if claimed_count:
+        db.commit()
 
 
 def _fail_auto_ingest_task_record(db, task_id: str | None, error: Exception) -> None:
@@ -507,7 +765,7 @@ def check_overdue_accounts_receivable():
 
 
 @celery_app.task(name="backend.tasks.scheduled_tasks.auto_ingest_pending_files")
-def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
+def auto_ingest_pending_files(max_files: int | None = None):
     """
     自动处理待入库文件(兜底机制)
     执行频率:每15分钟(由Celery Beat配置)
@@ -516,7 +774,21 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
     """
     db = SessionLocal()
     task_record_id = None
+    lock_acquired = False
     try:
+        max_files = max(1, int(max_files or _int_env("AUTO_INGEST_MAX_FILES_PER_RUN", AUTO_INGEST_MAX_FILES_PER_RUN)))
+        stale_timeout_minutes = _int_env(
+            "AUTO_INGEST_STALE_TIMEOUT_MINUTES",
+            AUTO_INGEST_STALE_TIMEOUT_MINUTES,
+        )
+        lock_key = _int_env("AUTO_INGEST_LOCK_KEY", AUTO_INGEST_LOCK_KEY, minimum=1)
+        lock_acquired = _acquire_auto_ingest_lock(db, lock_key)
+        if not lock_acquired:
+            logger.info("[AutoIngest] skipped because another auto-ingest task is running")
+            return {"status": "skipped", "reason": "auto_ingest_already_running"}
+
+        _recover_stale_auto_ingest_records(db, timeout_minutes=stale_timeout_minutes)
+
         pending_ids = db.execute(
             select(CatalogFile.id)
             .where(CatalogFile.status == 'pending')
@@ -532,13 +804,16 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
         from backend.services.data_sync_service import DataSyncService
         
         # 预发布阶段优先稳定性，限制 auto-ingest 并发，避免 worker 被 OOM/SIGKILL。
-        max_concurrent = min(AUTO_INGEST_MAX_CONCURRENT, max(1, len(pending_ids) // 10 + 1))
+        configured_max_concurrent = _int_env("AUTO_INGEST_MAX_CONCURRENT", AUTO_INGEST_MAX_CONCURRENT)
+        max_concurrent = min(configured_max_concurrent, len(pending_ids))
         task_record_id = _create_auto_ingest_task_record(
             db,
             list(pending_ids),
             max_files,
             max_concurrent,
         )
+        _claim_auto_ingest_files(db, list(pending_ids), task_record_id)
+        progress_results: List[Dict[str, Any]] = []
         
         async def _process_ids_concurrent(ids: List[int]) -> List[Dict[str, Any]]:
             """并发处理文件(使用信号量控制并发数)
@@ -584,7 +859,8 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
                         result = await sync_service.sync_single_file(
                             file_id=file_id,
                             only_with_template=True,
-                            allow_quarantine=True
+                            allow_quarantine=True,
+                            task_id=task_record_id,
                         )
                         return result
                     except Exception as exc:
@@ -610,22 +886,35 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
                         except Exception:
                             pass
             
-            # 并发执行所有任务
-            tasks = [process_single(file_id) for file_id in ids]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # 处理异常结果
+            async def process_indexed(index: int, file_id: int):
+                return index, await process_single(file_id)
+
+            tasks = [
+                asyncio.create_task(process_indexed(index, file_id))
+                for index, file_id in enumerate(ids)
+            ]
             processed_results = []
-            for i, result in enumerate(results):
+            for task in asyncio.as_completed(tasks):
+                i, result = await task
                 if isinstance(result, Exception):
-                    processed_results.append({
+                    processed_item = {
                         "success": False,
                         "file_id": ids[i],
                         "status": "failed",
                         "message": str(result),
-                    })
+                    }
                 else:
-                    processed_results.append(result)
+                    processed_item = result
+                processed_results.append(processed_item)
+                progress_results.append(processed_item)
+                _update_auto_ingest_task_progress(
+                    db,
+                    task_record_id,
+                    len(ids),
+                    progress_results,
+                    max_files,
+                    max_concurrent,
+                )
             
             return processed_results
 
@@ -638,38 +927,19 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
         reset_async_engine_pool_for_new_loop()
         results = asyncio.run(_process_ids_concurrent(pending_ids))
 
-        summary = {
-            "processed": len(results),
-            "succeeded": 0,
-            "quarantined": 0,
-            "failed": 0,
-            "skipped": 0,
-            "skipped_no_template": 0,
-            "skipped_template_update": 0,
-        }
+        if not progress_results:
+            for idx in range(len(results)):
+                progress_results.append(results[idx])
+                _update_auto_ingest_task_progress(
+                    db,
+                    task_record_id,
+                    len(results),
+                    progress_results,
+                    max_files,
+                    max_concurrent,
+                )
 
-        for item in results:
-            status = _auto_ingest_result_status(item)
-            if status == "success":
-                summary["succeeded"] += 1
-            elif status == "quarantined":
-                summary["quarantined"] += 1
-            elif status == "failed":
-                summary["failed"] += 1
-            elif status == "skipped":
-                summary["skipped"] += 1
-                message = item.get("message", "")
-                message_lower = message.lower()
-                if (
-                    item.get("error_code") == "NO_TEMPLATE"
-                    or item.get("skip_reason") == "no_template"
-                    or "no_template" in message_lower
-                    or "no template" in message_lower
-                    or "无模板" in message
-                ):
-                    summary["skipped_no_template"] += 1
-                if item.get("error_code") == "TEMPLATE_UPDATE_REQUIRED":
-                    summary["skipped_template_update"] += 1
+        summary = _summarize_auto_ingest_results(results)
 
         logger.info(
             "[AutoIngest] 定时任务完成: processed=%s, success=%s, quarantined=%s, failed=%s, skipped=%s",
@@ -679,7 +949,14 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
             summary["failed"],
             summary["skipped"],
         )
-        _complete_auto_ingest_task_record(db, task_record_id, summary, results)
+        _complete_auto_ingest_task_record(
+            db,
+            task_record_id,
+            summary,
+            results,
+            max_files=max_files,
+            max_concurrent=max_concurrent,
+        )
 
         return {
             "status": "success",
@@ -692,6 +969,11 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
         logger.error(f"[AutoIngest] 定时任务执行失败: {exc}", exc_info=True)
         return {"status": "failed", "error": str(exc)}
     finally:
+        if lock_acquired:
+            try:
+                _release_auto_ingest_lock(db, _int_env("AUTO_INGEST_LOCK_KEY", AUTO_INGEST_LOCK_KEY, minimum=1))
+            except Exception as unlock_exc:  # noqa: BLE001
+                logger.warning("[AutoIngest] failed to release advisory lock: %s", unlock_exc)
         db.close()
 
 

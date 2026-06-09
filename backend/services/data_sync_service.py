@@ -570,13 +570,23 @@ class DataSyncService:
                 }
 
             if catalog_file.status == "processing":
-                return {
-                    "success": False,
-                    "file_id": file_id,
-                    "file_name": catalog_file.file_name,
-                    "status": "skipped",
-                    "message": "文件正在处理中",
-                }
+                file_meta = catalog_file.file_metadata if isinstance(catalog_file.file_metadata, dict) else {}
+                auto_meta = file_meta.get("auto_ingest") if isinstance(file_meta.get("auto_ingest"), dict) else {}
+                claimed_task_id = auto_meta.get("current_task_id")
+                if task_id and claimed_task_id == task_id:
+                    logger.info(
+                        "[DataSync] continuing claimed auto-ingest file: file_id=%s, task_id=%s",
+                        file_id,
+                        task_id,
+                    )
+                else:
+                    return {
+                        "success": False,
+                        "file_id": file_id,
+                        "file_name": catalog_file.file_name,
+                        "status": "skipped",
+                        "message": "文件正在处理中",
+                    }
 
             if catalog_file.status in ["ingested", "partial_success"]:
                 # [*] v4.17.0修复:UPSERT策略下,允许已入库文件重新同步(更新数据)

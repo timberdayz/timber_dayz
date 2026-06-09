@@ -219,6 +219,24 @@ async def test_cleanup_database_deletes_facts_and_only_resets_rebuildable_files(
 
 
 @pytest.mark.asyncio
+async def test_cleanup_database_returns_rebuild_recommendation(
+    cleanup_sqlite_session,
+    tmp_path,
+):
+    from backend.services.data_sync_cleanup_service import DataSyncCleanupService
+
+    await _seed_cleanup_records(cleanup_sqlite_session, tmp_path)
+    service = DataSyncCleanupService(cleanup_sqlite_session)
+
+    result = await service.cleanup_database()
+
+    assert result["recommended_rebuild_mode"] == "controlled_auto_ingest"
+    assert result["recommended_batch_size"] == 20
+    assert result["recommended_max_concurrent"] == 1
+    assert result["skipped_processing_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_cleanup_database_impact_endpoint_returns_preview_counts(
     cleanup_client,
     tmp_path,

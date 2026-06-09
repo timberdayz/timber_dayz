@@ -14,6 +14,11 @@ from modules.core.path_manager import to_absolute_path
 _SAFE_IDENTIFIER_RE = re.compile(r"^[a-z0-9_]+$")
 _RESETTABLE_STATUSES = {"ingested", "partial_success"}
 _INSPECTED_STATUSES = {"ingested", "partial_success", "failed", "processing"}
+_REBUILD_RECOMMENDATION = {
+    "recommended_rebuild_mode": "controlled_auto_ingest",
+    "recommended_batch_size": 20,
+    "recommended_max_concurrent": 1,
+}
 
 
 class DataSyncCleanupService:
@@ -28,6 +33,7 @@ class DataSyncCleanupService:
         return {
             "fact_table_counts": fact_table_counts,
             "total_fact_rows": sum(fact_table_counts.values()),
+            **_REBUILD_RECOMMENDATION,
             **file_impact,
         }
 

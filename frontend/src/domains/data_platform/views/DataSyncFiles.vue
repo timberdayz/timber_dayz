@@ -26,6 +26,20 @@ v4.6.0新增：独立的数据同步系统
           </el-button>
         </div>
       </template>
+      <el-alert
+        v-if="governanceStatsState === 'failed'"
+        class="governance-status-alert"
+        type="error"
+        :closable="false"
+        :title="governanceStatsError || '数据治理统计加载失败'"
+      />
+      <el-alert
+        v-else-if="governanceStatsStale"
+        class="governance-status-alert"
+        type="warning"
+        :closable="false"
+        :title="governanceStatsError || '数据治理统计部分超时，当前展示的是快速估算结果'"
+      />
       <div class="governance-stats">
         <div class="stat-item" @click="setFileView('recent')">
           <div class="stat-icon stat-icon-primary">
@@ -34,7 +48,7 @@ v4.6.0新增：独立的数据同步系统
           <div class="stat-content">
             <div class="stat-label">最近采集</div>
             <div class="stat-value">
-              {{ governanceStats.recent_collected_count || 0 }}
+              {{ displayGovernanceStat('recent_collected_count') }}
             </div>
           </div>
         </div>
@@ -45,7 +59,7 @@ v4.6.0新增：独立的数据同步系统
           <div class="stat-content">
             <div class="stat-label">待同步文件</div>
             <div class="stat-value">
-              {{ governanceStats.pending_count || 0 }}
+              {{ displayGovernanceStat('pending_count') }}
             </div>
           </div>
         </div>
@@ -56,7 +70,7 @@ v4.6.0新增：独立的数据同步系统
           <div class="stat-content">
             <div class="stat-label">已入库文件</div>
             <div class="stat-value">
-              {{ governanceStats.ingested_count || 0 }}
+              {{ displayGovernanceStat('ingested_count') }}
             </div>
           </div>
         </div>
@@ -67,7 +81,7 @@ v4.6.0新增：独立的数据同步系统
           <div class="stat-content">
             <div class="stat-label">可同步文件</div>
             <div class="stat-value">
-              {{ governanceStats.ready_to_sync_count || 0 }}
+              {{ displayGovernanceStat('ready_to_sync_count') }}
             </div>
           </div>
         </div>
@@ -78,7 +92,7 @@ v4.6.0新增：独立的数据同步系统
           <div class="stat-content">
             <div class="stat-label">历史遗留</div>
             <div class="stat-value">
-              {{ governanceStats.legacy_file_count || 0 }}
+              {{ displayGovernanceStat('legacy_file_count') }}
             </div>
           </div>
         </div>
@@ -89,7 +103,7 @@ v4.6.0新增：独立的数据同步系统
           <div class="stat-content">
             <div class="stat-label">需更新模板</div>
             <div class="stat-value">
-              {{ governanceStats.template_update_required_count || 0 }}
+              {{ displayGovernanceStat('template_update_required_count') }}
             </div>
           </div>
         </div>
@@ -100,7 +114,7 @@ v4.6.0新增：独立的数据同步系统
           <div class="stat-content">
             <div class="stat-label">失败文件</div>
             <div class="stat-value">
-              {{ governanceStats.failed_count || 0 }}
+              {{ displayGovernanceStat('failed_count') }}
             </div>
           </div>
         </div>
@@ -111,7 +125,7 @@ v4.6.0新增：独立的数据同步系统
           <div class="stat-content">
             <div class="stat-label">源文件缺失</div>
             <div class="stat-value">
-              {{ governanceStats.source_missing_count || 0 }}
+              {{ displayGovernanceStat('source_missing_count') }}
             </div>
           </div>
         </div>
@@ -129,7 +143,7 @@ v4.6.0新增：独立的数据同步系统
           type="success"
           @click="handleSyncAll"
           :loading="syncingAll"
-          :disabled="(governanceStats.ready_to_sync_count || 0) === 0"
+          :disabled="governanceStatsActionDisabled || (governanceStats.ready_to_sync_count || 0) === 0"
         >
           <el-icon><Upload /></el-icon>
           同步全部可同步文件
@@ -138,7 +152,7 @@ v4.6.0新增：独立的数据同步系统
           type="warning"
           @click="retryAllFailed"
           :loading="syncing"
-          :disabled="(governanceStats.failed_count || 0) === 0"
+          :disabled="governanceStatsActionDisabled || (governanceStats.failed_count || 0) === 0"
         >
           <el-icon><RefreshRight /></el-icon>
           重试当前列表失败项
@@ -907,6 +921,8 @@ const cleaning = ref(false)
 const fileDiagnostics = ref(null)
 const hiddenSemanticInvalidCount = ref(0)
 const rawUnregisteredHint = ref(null)
+const governanceStatsState = ref('loading')
+const governanceStatsError = ref('')
 const governanceStats = ref({
   pending_count: 0,
   ready_to_sync_count: 0,
@@ -938,7 +954,7 @@ const fileViewOptions = [
   { label: '异常文件', value: 'anomaly', status: null },
   { label: '历史遗留', value: 'legacy', status: null }
 ]
-const activeFileView = ref('ready')
+const activeFileView = ref('pending')
 
 // v4.18.0新增：分页相关
 const pagination = ref({
@@ -966,10 +982,21 @@ const activeFileViewOption = computed(() => {
 })
 
 const activeFileViewLabel = computed(() => activeFileViewOption.value.label)
+const governanceStatsStale = computed(() => Boolean(governanceStats.value?.stats_stale))
+const governanceStatsActionDisabled = computed(
+  () => governanceStatsState.value !== 'loaded' || governanceStatsStale.value
+)
 
 const rawOfficialUnregisteredCount = computed(() => {
   return rawUnregisteredHint.value?.official_unregistered_count || 0
 })
+
+const displayGovernanceStat = (field) => {
+  if (governanceStatsState.value !== 'loaded') {
+    return '--'
+  }
+  return governanceStats.value?.[field] ?? 0
+}
 
 const displayFiles = computed(() => {
   if (activeFileView.value === 'ready') {
@@ -1341,7 +1368,7 @@ const calculateDuration = (startTime, endTime) => {
 
 // 重置筛选器
 const resetFilters = () => {
-  activeFileView.value = 'ready'
+  activeFileView.value = 'pending'
   filters.value = {
     platform: null,
     domain: null,
@@ -1472,6 +1499,9 @@ const buildCleanupImpactHtml = (impact) => {
     Object.keys(impact.fact_table_counts || {}).length - 8,
     0
   )
+  const rebuildMode = impact.recommended_rebuild_mode || 'controlled_auto_ingest'
+  const recommendedBatchSize = impact.recommended_batch_size || 20
+  const recommendedMaxConcurrent = impact.recommended_max_concurrent || 1
 
   return `
     <div style="line-height:1.7;">
@@ -1482,6 +1512,9 @@ const buildCleanupImpactHtml = (impact) => {
       <div><strong>伴生文件缺失：</strong>${impact.meta_missing_files_count || 0} 个</div>
       <div><strong>失败文件跳过：</strong>${impact.skipped_failed_count || 0} 个</div>
       <div><strong>处理中跳过：</strong>${impact.skipped_processing_count || 0} 个</div>
+      <div style="margin-top:8px;"><strong>推荐重建模式：</strong>${rebuildMode}</div>
+      <div><strong>推荐分批数量：</strong>${recommendedBatchSize} 个/轮</div>
+      <div><strong>推荐并发：</strong>${recommendedMaxConcurrent}</div>
       ${
         factTables
           ? `<div style="margin-top:8px;"><strong>事实表：</strong><ul style="margin:4px 0 0 20px;">${factTables}${
@@ -1489,7 +1522,7 @@ const buildCleanupImpactHtml = (impact) => {
             }</ul></div>`
           : ''
       }
-      <div style="margin-top:10px;color:#c45656;"><strong>此操作不可恢复；缺失源文件不会进入待同步队列。</strong></div>
+      <div style="margin-top:10px;color:#c45656;"><strong>此操作不可恢复；缺失源文件不会进入待同步队列，处理中跳过项需等待超时恢复或人工重试。</strong></div>
     </div>
   `
 }
@@ -2054,7 +2087,10 @@ const formatFileSize = (bytes) => {
 
 // 加载数据治理统计
 // ⭐ v4.19.0修复：支持后台刷新，避免阻塞UI
-const loadGovernanceStats = async (showLoading = false) => {
+const loadGovernanceStats = async (showLoading = true) => {
+  governanceStatsState.value = 'loading'
+  governanceStatsError.value = ''
+
   if (showLoading) {
     statsLoading.value = true
   }
@@ -2063,12 +2099,18 @@ const loadGovernanceStats = async (showLoading = false) => {
     const data = await api.getDataSyncGovernanceStats()
     if (data) {
       governanceStats.value = data
+      governanceStatsState.value = 'loaded'
+      governanceStatsError.value = data.error_summary || ''
+    } else {
+      governanceStatsState.value = 'failed'
+      governanceStatsError.value = '数据治理统计返回为空'
     }
   } catch (error) {
     console.error('加载数据治理统计失败:', error)
-    // 后台刷新失败不显示错误提示
+    governanceStatsState.value = 'failed'
+    governanceStatsError.value = error.message || '加载数据治理统计失败'
     if (showLoading) {
-      ElMessage.error(error.message || '加载数据治理统计失败')
+      ElMessage.error(governanceStatsError.value)
     }
   } finally {
     if (showLoading) {
@@ -2478,6 +2520,10 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.governance-status-alert {
+  margin-bottom: 16px;
 }
 
 .filter-select {
