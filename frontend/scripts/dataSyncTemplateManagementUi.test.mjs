@@ -135,6 +135,11 @@ assert.match(
   /hashPolicyPreviewSignature|lastPreviewSignature|pendingPreviewSignature/,
   'deduplication review should dedupe hash policy previews by a stable signature'
 )
+assert.match(
+  deduplicationReviewPanelText,
+  /<el-checkbox-group\s+v-model="selectedFieldsProxy"[\s\S]*@change="handleSelectionChange"/,
+  'deduplication review should use a v-model checkbox group so Data Hash options remain selectable'
+)
 assert.doesNotMatch(
   deduplicationReviewPanelText,
   /props\.sampleRows\.slice\(0,\s*20\)/,
@@ -164,6 +169,11 @@ assert.match(
   workbenchDrawerText,
   /if\s*\(loadingPreview\.value\)\s*\{[\s\S]*return/,
   'preview toggle should ignore repeated clicks while preview data is loading'
+)
+assert.match(
+  workbenchDrawerText,
+  /bindingsViewMode === 'needs-review' && visibleBindingRows\.length === 0[\s\S]*No key fields currently require manual review/,
+  'workbench drawer should show an explicit empty state instead of a blank needs-review table'
 )
 assert.doesNotMatch(
   deduplicationReviewPanelText,

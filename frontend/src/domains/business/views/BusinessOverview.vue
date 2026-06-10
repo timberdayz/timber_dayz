@@ -478,7 +478,7 @@
     <div class="overview-pair-section overview-rank-section">
       <el-row :gutter="16" class="overview-half-table-row">
         <el-col :xs="24" :lg="12">
-          <el-card class="chart-card" shadow="hover">
+          <el-card class="chart-card ranking-card" shadow="hover">
             <template #header>
               <div class="card-header">
                 <span>店铺赛马</span>
@@ -664,7 +664,7 @@
         </el-col>
 
         <el-col :xs="24" :lg="12">
-          <el-card class="chart-card" shadow="hover">
+          <el-card class="chart-card ranking-card" shadow="hover">
             <template #header>
           <div class="card-header">
             <span>流量排名</span>
@@ -719,19 +719,19 @@
             </div>
           </div>
         </template>
-        <div
-          v-if="trafficRankingData.length && trafficRankingData.every((r) => (r.name === r.platform_code) || r.name === '平台汇总')"
-          class="traffic-ranking-hint"
-        >
-          当前数据未关联店铺，显示为平台汇总；关联店铺后可按店铺查看排名。
-        </div>
-        <el-table
-          :data="trafficRankingData"
-          stripe
-          class="erp-w-full erp-table"
-          size="small"
-          v-loading="loadingTrafficRanking"
-        >
+        <div class="traffic-ranking-container" v-loading="loadingTrafficRanking">
+          <div
+            v-if="trafficRankingData.length && trafficRankingData.every((r) => (r.name === r.platform_code) || r.name === '平台汇总')"
+            class="traffic-ranking-hint"
+          >
+            当前数据未关联店铺，显示为平台汇总；关联店铺后可按店铺查看排名。
+          </div>
+          <el-table
+            :data="trafficRankingData"
+            stripe
+            class="erp-w-full erp-table"
+            size="small"
+          >
           <el-table-column
             prop="rank"
             label="排名"
@@ -876,7 +876,8 @@
               </div>
             </template>
           </el-table-column>
-        </el-table>
+          </el-table>
+        </div>
           </el-card>
         </el-col>
       </el-row>
@@ -3558,6 +3559,10 @@ watch(
   row-gap: 16px;
 }
 
+.overview-rank-section :deep(.el-col) {
+  display: flex;
+}
+
 .overview-pair-section :deep(.el-card__header) {
   padding: 10px 14px;
 }
@@ -3578,6 +3583,19 @@ watch(
   border: none;
   border-radius: 12px;
   overflow: hidden;
+}
+
+.ranking-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.ranking-card :deep(.el-card__body) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
 }
 
 .traffic-ranking-hint {
@@ -3677,8 +3695,11 @@ watch(
   height: 100%;
 }
 
-.racing-container {
-  max-height: 360px;
+.racing-container,
+.traffic-ranking-container {
+  flex: 1;
+  min-height: 720px;
+  max-height: 720px;
   overflow: auto;
 }
 
@@ -3811,6 +3832,12 @@ watch(
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .racing-container,
+  .traffic-ranking-container {
+    min-height: 600px;
+    max-height: 600px;
+  }
+
   .operational-metrics-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -3834,6 +3861,13 @@ watch(
   .operational-metrics-grid {
     grid-template-columns: 1fr;
   }
+
+  .racing-container,
+  .traffic-ranking-container {
+    min-height: auto;
+    max-height: none;
+  }
+
   .metric-item.metric-result-vertical {
     grid-column: 1;
     grid-row: auto;

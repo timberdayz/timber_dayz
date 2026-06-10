@@ -242,7 +242,13 @@
         </div>
 
         <template v-else>
-          <el-table :data="visibleBindingRows" stripe border style="margin-top: 12px;">
+          <div
+            v-if="bindingsViewMode === 'needs-review' && visibleBindingRows.length === 0"
+            class="template-update-workbench-drawer__empty"
+          >
+            No key fields currently require manual review. Switch to `All Fields` to inspect the full binding set.
+          </div>
+          <el-table v-else :data="visibleBindingRows" stripe border style="margin-top: 12px;">
             <el-table-column prop="raw_name" label="Source Field" min-width="180" />
             <el-table-column label="Semantic Field" min-width="260">
               <template #default="{ row }">

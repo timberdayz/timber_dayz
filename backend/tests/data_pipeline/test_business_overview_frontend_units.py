@@ -126,11 +126,24 @@ def test_business_overview_frontend_compacts_spacing_and_controls():
     assert 'flex-wrap: wrap;' in text
     assert '.target-progress-section {\n  margin-bottom: 10px;\n  padding: 10px 12px;' in text
     assert '.comparison-table-container {\n  padding: 2px 0;' in text
-    assert '.racing-container {\n  max-height: 360px;' in text
     assert '.racing-table {\n  min-width: 762px;' in text
     assert '.metric-stack {\n  display: inline-flex;\n  flex-direction: column;\n  align-items: flex-end;\n  gap: 1px;' in text
     assert '.metric-previous {\n  color: #909399;\n  font-size: 10px;' in text
     assert '.metric-delta {\n  font-size: 10px;' in text
+
+
+def test_business_overview_frontend_rank_cards_share_equal_height_scroll_area():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert 'class="chart-card ranking-card"' in text
+    assert '<div class="traffic-ranking-container" v-loading="loadingTrafficRanking">' in text
+    assert '.overview-rank-section :deep(.el-col) {\n  display: flex;' in text
+    assert '.ranking-card {\n  display: flex;\n  flex-direction: column;\n  width: 100%;\n  height: 100%;' in text
+    assert '.racing-container,\n.traffic-ranking-container {\n  flex: 1;\n  min-height: 720px;\n  max-height: 720px;\n  overflow: auto;' in text
+    assert "600px" in text
 
 
 def test_business_overview_frontend_groups_kpis_and_allows_wrapping():

@@ -143,15 +143,14 @@
           placeholder="搜索语义字段"
         />
         <el-checkbox-group
-          :model-value="modelValue"
+          v-model="selectedFieldsProxy"
           class="template-deduplication-review-panel__checkboxes"
-          @update:model-value="handleSelectionChange"
+          @change="handleSelectionChange"
         >
           <el-checkbox
             v-for="option in filteredSemanticHashOptions"
             :key="option.semanticKey"
             :label="option.semanticKey"
-            :value="option.semanticKey"
           >
             <span>{{ option.label }}</span>
             <span v-if="option.weakIdentity" class="template-deduplication-review-panel__weak">弱身份字段</span>
@@ -333,6 +332,16 @@ const blockingMessage = computed(() => {
   return ''
 })
 
+const selectedFieldsProxy = computed({
+  get: () => (Array.isArray(props.modelValue) ? props.modelValue : []),
+  set: (nextValue) => {
+    emit(
+      'update:modelValue',
+      (Array.isArray(nextValue) ? nextValue : []).filter(field => !DATE_HASH_KEYS.has(field))
+    )
+  },
+})
+
 function emitPolicyState() {
   const valid =
     !previewLoading.value &&
@@ -346,7 +355,10 @@ function emitPolicyState() {
 }
 
 function handleSelectionChange(nextValue) {
-  emit('update:modelValue', (Array.isArray(nextValue) ? nextValue : []).filter(field => !DATE_HASH_KEYS.has(field)))
+  emit(
+    'update:modelValue',
+    (Array.isArray(nextValue) ? nextValue : []).filter(field => !DATE_HASH_KEYS.has(field))
+  )
 }
 
 function formatMatch(match) {
