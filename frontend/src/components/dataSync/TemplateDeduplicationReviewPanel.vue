@@ -240,6 +240,10 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  sampleRowsVersion: {
+    type: [Number, String],
+    default: 0
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'hash-policy-change'])
@@ -250,6 +254,8 @@ const hashPolicyPreview = ref(null)
 const previewLoading = ref(false)
 let previewTimer = null
 let previewRequestId = 0
+let lastPreviewSignature = ''
+let pendingPreviewSignature = ''
 
 const semanticHashOptions = computed(() => {
   const seen = new Set()
@@ -328,7 +334,10 @@ const blockingMessage = computed(() => {
 })
 
 function emitPolicyState() {
-  const valid = !previewLoading.value && hashPolicyPreview.value?.can_save === true
+  const valid =
+    !previewLoading.value &&
+    hashPolicyPreview.value?.can_save === true &&
+    hashPolicyPreviewSignature.value === lastPreviewSignature
   emit('hash-policy-change', {
     valid,
     loading: previewLoading.value,
@@ -347,14 +356,64 @@ function formatMatch(match) {
   return `${requested} -> ${current}${semanticKey}`
 }
 
-function scheduleHashPolicyPreview() {
+function scheduleHashPolicyPreview(nextSignature = hashPolicyPreviewSignature.value) {
   if (previewTimer) {
     clearTimeout(previewTimer)
   }
-  previewTimer = setTimeout(runHashPolicyPreview, 250)
+  const signature = nextSignature
+  if (signature === lastPreviewSignature) {
+    return
+  }
+  if (previewLoading.value) {
+    pendingPreviewSignature = signature
+    return
+  }
+  previewTimer = setTimeout(() => runHashPolicyPreview(signature), 250)
 }
 
-async function runHashPolicyPreview() {
+function normalizeBindingsForPreviewSignature(bindings) {
+  return (Array.isArray(bindings) ? bindings : []).map(binding => ({
+    raw_name: String(binding?.raw_name || '').trim(),
+    semantic_key: String(binding?.semantic_key || '').trim(),
+    semantic_review_status: String(binding?.semantic_review_status || '').trim(),
+    hash_eligible: Boolean(binding?.hash_eligible),
+  }))
+}
+
+function normalizeFieldParseRulesForPreviewSignature(rules) {
+  return (Array.isArray(rules) ? rules : []).map(rule => ({
+    target_field: String(rule?.target_field || '').trim(),
+    source_column: String(rule?.source_column || '').trim(),
+    value_kind: String(rule?.value_kind || '').trim(),
+    date_format: String(rule?.date_format || '').trim(),
+    strict: rule?.strict !== false,
+    range_pick: String(rule?.range_pick || '').trim(),
+    date_anchor: String(rule?.date_anchor || '').trim(),
+  }))
+}
+
+const hashPolicyPreviewSignature = computed(() => JSON.stringify({
+  modelValue: (Array.isArray(props.modelValue) ? props.modelValue : []).map(field => String(field || '').trim()),
+  currentHeaderBindings: normalizeBindingsForPreviewSignature(props.currentHeaderBindings),
+  fieldParseRules: normalizeFieldParseRulesForPreviewSignature(props.fieldParseRules),
+  dataDomain: props.dataDomain || '',
+  granularity: props.granularity || '',
+  subDomain: props.subDomain || '',
+  sampleRowsVersion: props.sampleRowsVersion || 0,
+}))
+
+function getSampleRowsForPreview() {
+  if (!props.sampleRowsVersion) {
+    return []
+  }
+  const rows = Array.isArray(props.sampleRows) ? props.sampleRows : []
+  return rows.slice(0, 20)
+}
+
+async function runHashPolicyPreview(signature = hashPolicyPreviewSignature.value) {
+  if (signature === lastPreviewSignature) {
+    return
+  }
   const hasPolicyInput = props.modelValue.length > 0 || (Array.isArray(props.fieldParseRules) && props.fieldParseRules.length > 0)
   if (!props.dataDomain || !hasPolicyInput) {
     hashPolicyPreview.value = null
@@ -373,10 +432,11 @@ async function runHashPolicyPreview() {
       deduplicationFields: props.modelValue,
       headerBindings: props.currentHeaderBindings,
       fieldParseRules: props.fieldParseRules,
-      sampleRows: props.sampleRows.slice(0, 20),
+      sampleRows: getSampleRowsForPreview(),
     })
     if (requestId !== previewRequestId) return
     hashPolicyPreview.value = response?.data || response
+    lastPreviewSignature = signature
   } catch (error) {
     if (requestId !== previewRequestId) return
     hashPolicyPreview.value = error?.data?.hash_policy || null
@@ -389,25 +449,24 @@ async function runHashPolicyPreview() {
     if (requestId === previewRequestId) {
       previewLoading.value = false
       emitPolicyState()
+      if (pendingPreviewSignature && pendingPreviewSignature !== lastPreviewSignature) {
+        const nextSignature = pendingPreviewSignature
+        pendingPreviewSignature = ''
+        scheduleHashPolicyPreview(nextSignature)
+      } else {
+        pendingPreviewSignature = ''
+      }
     }
   }
 }
 
 watch(
-  () => [
-    props.modelValue,
-    props.currentHeaderBindings,
-    props.fieldParseRules,
-    props.sampleRows,
-    props.dataDomain,
-    props.granularity,
-    props.subDomain,
-  ],
+  () => hashPolicyPreviewSignature.value,
   () => {
     emitPolicyState()
     scheduleHashPolicyPreview()
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 )
 
 onBeforeUnmount(() => {

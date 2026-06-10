@@ -68,13 +68,43 @@ def test_confirmed_non_semantic_binding_is_not_returned_for_manual_review():
             "display_name": "发品状态",
             "semantic_key": None,
             "semantic_review_status": "pending",
-            "hash_participates": False,
+            "hash_participates": True,
+            "hash_eligible": True,
         },
     ]
 
     filtered = _filter_bindings_for_manual_review(bindings)
 
     assert [item["raw_name"] for item in filtered] == ["发品状态"]
+
+
+def test_manual_review_filter_excludes_ordinary_pending_raw_fields():
+    from backend.routers.field_mapping_templates import _filter_bindings_for_manual_review
+
+    bindings = [
+        {
+            "raw_name": "ordinary_raw_column",
+            "display_name": "ordinary_raw_column",
+            "semantic_key": None,
+            "semantic_review_status": "pending",
+            "hash_participates": False,
+            "required": False,
+            "hash_eligible": False,
+        },
+        {
+            "raw_name": "identity_candidate",
+            "display_name": "identity_candidate",
+            "semantic_key": None,
+            "semantic_review_status": "pending",
+            "hash_participates": True,
+            "required": False,
+            "hash_eligible": True,
+        },
+    ]
+
+    filtered = _filter_bindings_for_manual_review(bindings)
+
+    assert [item["raw_name"] for item in filtered] == ["identity_candidate"]
 
 
 def test_existing_deduplication_fields_match_by_semantic_key_without_raw_header_match():
@@ -277,8 +307,7 @@ async def test_template_update_context_returns_lightweight_summary_for_with_samp
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["shop_id"]
     assert data["recommended_deduplication_fields"] == ["order_id"]
-    assert {item["raw_name"] for item in data["review_header_bindings"]} >= {"new_metric"}
-    assert all(item["semantic_review_status"] == "pending" for item in data["review_header_bindings"])
+    assert data["review_header_bindings"] == []
     full_bindings_by_raw = {item["raw_name"]: item for item in data["full_header_bindings"]}
     assert full_bindings_by_raw["order_id"]["semantic_key"] == "order_id"
     assert full_bindings_by_raw["order_id"]["semantic_review_status"] == "confirmed_semantic"
@@ -638,10 +667,11 @@ async def test_template_update_bindings_returns_full_bindings_payload(
     assert payload["success"] is True
     assert len(payload["data"]["current_header_bindings"]) == 3
     assert len(payload["data"]["full_header_bindings"]) == 3
-    assert len(payload["data"]["review_header_bindings"]) == 1
+    assert payload["data"]["review_header_bindings"] == []
     assert payload["data"]["required_semantic_keys"] == ["order_id"]
     assert payload["data"]["hash_participating_semantic_keys"] == ["order_id", "metric_date"]
-    assert payload["data"]["review_header_bindings"][0]["raw_name"] == "amount"
+    assert payload["data"]["full_header_bindings"][2]["raw_name"] == "amount"
+    assert payload["data"]["full_header_bindings"][2]["semantic_review_status"] == "pending"
 
 
 @pytest.mark.asyncio

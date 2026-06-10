@@ -130,6 +130,41 @@ assert.match(
   /auto_date_identity_fields|normalized_deduplication_fields|can_save|unresolved_deduplication_fields/,
   'deduplication review should show backend-computed save readiness fields'
 )
+assert.match(
+  deduplicationReviewPanelText,
+  /hashPolicyPreviewSignature|lastPreviewSignature|pendingPreviewSignature/,
+  'deduplication review should dedupe hash policy previews by a stable signature'
+)
+assert.doesNotMatch(
+  deduplicationReviewPanelText,
+  /props\.sampleRows\.slice\(0,\s*20\)/,
+  'deduplication review should not automatically send full sample rows on every preview check'
+)
+assert.doesNotMatch(
+  deduplicationReviewPanelText,
+  /\{\s*immediate:\s*true,\s*deep:\s*true\s*\}/,
+  'deduplication review should not deep-watch the full binding and sample payloads'
+)
+assert.match(
+  workbenchDrawerText,
+  /lastSaveReadinessPreview/,
+  'workbench drawer should store the last backend save-readiness preview'
+)
+assert.doesNotMatch(
+  workbenchDrawerText,
+  /fullHeaderBindings\.value\s*=\s*mergeHeaderBindingsForSave\(\s*normalizedBindings/,
+  'workbench drawer should not feed normalized preview bindings back into the watched full binding state'
+)
+assert.match(
+  workbenchDrawerText,
+  /if\s*\(previewExpanded\.value\)\s*\{[\s\S]*previewExpanded\.value\s*=\s*false/,
+  'preview toggle should explicitly collapse when already expanded'
+)
+assert.match(
+  workbenchDrawerText,
+  /if\s*\(loadingPreview\.value\)\s*\{[\s\S]*return/,
+  'preview toggle should ignore repeated clicks while preview data is loading'
+)
 assert.doesNotMatch(
   deduplicationReviewPanelText,
   /for \(const option of derivedOptions\.value\)/,

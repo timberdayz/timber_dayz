@@ -527,7 +527,7 @@
                     :value-format="shopRacingDatePickerValueFormat"
                     :placeholder="shopRacingDatePickerPlaceholder"
                     size="small"
-                    class="control-offset control-w-150"
+                    class="control-offset control-w-140"
                     @change="onShopRacingDateChange"
                   />
                   <el-button
@@ -552,7 +552,7 @@
                 <el-table-column
                   prop="rank"
                   label="排名"
-                  width="64"
+                  width="56"
                   align="center"
                   fixed="left"
                 >
@@ -565,7 +565,7 @@
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="name" label="名称" min-width="200" fixed="left" show-overflow-tooltip>
+                <el-table-column prop="name" label="名称" min-width="150" fixed="left" show-overflow-tooltip>
                   <template #default="{ row }">
                     <div class="shop-display-cell" :class="{ 'shop-display-cell--unmatched': isUnmatchedShopRow(row) }">
                       <div>{{ row.name }}</div>
@@ -573,8 +573,8 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="platform_code" label="平台" min-width="90" />
-                <el-table-column prop="gmv" label="销售额" min-width="140" align="right">
+                <el-table-column prop="platform_code" label="平台" min-width="72" />
+                <el-table-column prop="gmv" label="销售额" min-width="112" align="right">
                   <template #default="{ row }">
                     <div class="metric-stack">
                       <span>{{ row.gmv == null ? '--' : formatCurrency(row.gmv) }}</span>
@@ -587,7 +587,7 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="profit" label="利润" min-width="140" align="right">
+                <el-table-column prop="profit" label="利润" min-width="112" align="right">
                   <template #default="{ row }">
                     <div class="metric-stack">
                       <span :class="{ 'metric-negative': Number(row.profit) < 0 }">
@@ -602,12 +602,12 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="profit_margin" label="利润率" min-width="90" align="right">
+                <el-table-column prop="profit_margin" label="利润率" min-width="76" align="right">
                   <template #default="{ row }">
                     {{ row.profit_margin == null ? '--' : formatPercent(row.profit_margin) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="order_count" label="订单数" min-width="120" align="right">
+                <el-table-column prop="order_count" label="订单数" min-width="96" align="right">
                   <template #default="{ row }">
                     <div class="metric-stack">
                       <span>{{ row.order_count == null ? '--' : formatInteger(row.order_count) }}</span>
@@ -620,18 +620,18 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="avg_order_value" label="客单价" min-width="100" align="right">
+                <el-table-column prop="avg_order_value" label="客单价" min-width="88" align="right">
                   <template #default="{ row }">
                     {{ row.avg_order_value == null ? '--' : formatCurrency(row.avg_order_value) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="target_amount" label="目标" min-width="120" align="right">
+                <el-table-column prop="target_amount" label="目标" min-width="96" align="right">
                   <template #default="{ row }">
                     <el-tag v-if="!hasShopRacingTarget(row)" type="info" size="small">未设目标</el-tag>
                     <span v-else>{{ formatCurrency(row.target_amount) }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="achievement_rate" label="完成率" min-width="180">
+                <el-table-column prop="achievement_rate" label="完成率" min-width="128">
                   <template #default="{ row }">
                     <el-tag v-if="!hasShopRacingTarget(row)" type="info" size="small">未设目标</el-tag>
                     <div v-else class="racing-achievement-cell">
@@ -705,7 +705,7 @@
                 :value-format="trafficRankingDatePickerValueFormat"
                 :placeholder="trafficRankingDatePickerPlaceholder"
                 size="small"
-                class="control-offset control-w-150"
+                class="control-offset control-w-140"
                 @change="onTrafficRankingDateChange"
               />
               <el-button
@@ -735,7 +735,7 @@
           <el-table-column
             prop="rank"
             label="排名"
-            width="80"
+            width="56"
             fixed="left"
             align="center"
           >
@@ -759,7 +759,7 @@
           <el-table-column
             prop="name"
             label="名称"
-            min-width="220"
+            min-width="150"
             fixed="left"
             show-overflow-tooltip
           >
@@ -773,13 +773,13 @@
           <el-table-column
             prop="platform_code"
             label="平台"
-            min-width="120"
+            min-width="72"
             v-if="trafficRankingDimension === 'shop'"
           />
           <el-table-column
             prop="visitor_count"
             label="访客数(UV)"
-            min-width="180"
+            min-width="112"
             align="right"
             sortable
           >
@@ -798,7 +798,7 @@
           <el-table-column
             prop="page_views"
             label="浏览量(PV)"
-            min-width="180"
+            min-width="112"
             align="right"
             sortable
           >
@@ -817,7 +817,7 @@
           <el-table-column
             prop="uv_conversion_rate"
             label="UV转化率"
-            min-width="170"
+            min-width="104"
             align="right"
             sortable
           >
@@ -848,7 +848,7 @@
           <el-table-column
             prop="pv_conversion_rate"
             label="PV转化率"
-            min-width="170"
+            min-width="104"
             align="right"
             sortable
           >
@@ -3572,7 +3572,7 @@ watch(
 .header-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .chart-container {
@@ -3580,8 +3580,8 @@ watch(
 }
 
 .target-progress-section {
-  margin-bottom: 20px;
-  padding: 16px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
   background: #f8f9fa;
   border-radius: 8px;
 }
@@ -3606,7 +3606,7 @@ watch(
 }
 
 .comparison-table-container {
-  padding: 10px 0;
+  padding: 4px 0;
 }
 
 .change-indicator {
@@ -3651,12 +3651,12 @@ watch(
 }
 
 .racing-container {
-  max-height: 400px;
+  max-height: 360px;
   overflow: auto;
 }
 
 .racing-table {
-  min-width: 1080px;
+  min-width: 920px;
 }
 
 .shop-display-cell {
@@ -3675,8 +3675,8 @@ watch(
 .racing-achievement-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 120px;
+  gap: 6px;
+  min-width: 108px;
 }
 
 .racing-achievement-cell .el-progress {
@@ -3691,9 +3691,9 @@ watch(
   display: inline-flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
-  line-height: 1.25;
+  line-height: 1.15;
   white-space: nowrap;
 }
 
@@ -3706,18 +3706,18 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
 .metric-previous {
   color: #909399;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.2;
 }
 
 .metric-delta {
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.2;
 }
 

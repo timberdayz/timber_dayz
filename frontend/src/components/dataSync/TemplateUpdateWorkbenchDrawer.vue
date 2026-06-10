@@ -182,6 +182,7 @@
         :sub-domain="templateContext?.sub_domain || template?.sub_domain || null"
         :field-parse-rules="localFieldParseRules"
         :sample-rows="previewData"
+        :sample-rows-version="sampleRowsVersion"
         @hash-policy-change="handleHashPolicyChange"
       />
 
@@ -230,7 +231,14 @@
         </div>
 
         <div v-if="!bindingsExpanded" class="template-update-workbench-drawer__muted">
-          {{ summaryBindingRows.length > 0 ? `There are ${summaryBindingRows.length} fields that need review.` : 'No fields currently require manual review.' }}
+          {{
+            summaryBindingRows.length > 0
+              ? `There are ${summaryBindingRows.length} key fields that need review.`
+              : 'No key fields currently require manual review.'
+          }}
+          <span v-if="ordinaryPendingFieldCount > 0">
+            {{ ordinaryPendingFieldCount }} unrecognized fields will be preserved as raw fields.
+          </span>
         </div>
 
         <template v-else>
@@ -326,7 +334,7 @@
         <el-button @click="handleClose">Cancel</el-button>
         <el-button
           type="primary"
-          :disabled="!workbenchContext || selectedDeduplicationFields.length === 0 || !hashPolicyAllowsSave || saving"
+          :disabled="!workbenchContext || selectedDeduplicationFields.length === 0 || !hashPolicyAllowsSave || saveReadinessLoading || saving"
           :loading="saving"
           @click="handleSave"
         >
@@ -406,13 +414,16 @@ const bindingsLoaded = ref(false)
 const loadingBindings = ref(false)
 const bindingsViewMode = ref('needs-review')
 const previewData = ref([])
+const sampleRowsVersion = ref(0)
 const fullHeaderBindings = ref([])
 const localHeaderBindings = ref([])
 const localFieldParseRules = ref([])
 const editingBindingNames = ref([])
 const saving = ref(false)
 const hashPolicyAllowsSave = ref(false)
+const saveReadinessLoading = ref(false)
 const hashPolicyPreview = ref(null)
+const lastSaveReadinessPreview = ref(null)
 const semanticNonSemanticOption = NON_SEMANTIC_FIELD_OPTION
 const semanticFieldOptionGroups = computed(() =>
   getSemanticFieldOptionGroupsForDomain(
@@ -480,17 +491,16 @@ watch(
     previewExpanded.value = false
     previewLoaded.value = false
     previewData.value = []
+    sampleRowsVersion.value = 0
     bindingsExpanded.value = false
     bindingsLoaded.value = false
-    fullHeaderBindings.value = Array.isArray(next?.full_header_bindings)
-      ? next.full_header_bindings.map(item => ({ ...item }))
-      : Array.isArray(next?.current_header_bindings)
-      ? next.current_header_bindings.map(item => ({ ...item }))
-      : []
+    fullHeaderBindings.value = []
     editingBindingNames.value = []
     bindingsViewMode.value = 'needs-review'
     hashPolicyAllowsSave.value = false
+    saveReadinessLoading.value = false
     hashPolicyPreview.value = null
+    lastSaveReadinessPreview.value = null
   },
   { immediate: true },
 )
@@ -572,6 +582,21 @@ const bindingRows = computed(() => {
 })
 
 const summaryBindingRows = computed(() => bindingRows.value.filter(row => row.needsReview))
+const ordinaryPendingFieldCount = computed(() => {
+  const reviewed = new Set(summaryBindingRows.value.map(row => String(row?.raw_name || '').trim()).filter(Boolean))
+  return saveReadyBindingBase.value.filter((binding) => {
+    const rawName = String(binding?.raw_name || '').trim()
+    const reviewStatus = binding?.semantic_review_status || (binding?.semantic_key ? 'confirmed_semantic' : 'pending')
+    return (
+      rawName &&
+      !reviewed.has(rawName) &&
+      reviewStatus === 'pending' &&
+      !binding?.required &&
+      !binding?.hash_participates &&
+      !binding?.hash_eligible
+    )
+  }).length
+})
 
 const visibleBindingRows = computed(() => {
   if (bindingsViewMode.value === 'all') {
@@ -613,6 +638,7 @@ async function ensurePreviewLoaded() {
     })
     const data = payload?.data || payload
     previewData.value = data?.preview_data || []
+    sampleRowsVersion.value += 1
     previewLoaded.value = true
   } catch (error) {
     console.error('Failed to load preview:', error)
@@ -656,10 +682,19 @@ async function ensureBindingsLoaded() {
 }
 
 async function togglePreviewSection() {
-  if (!previewExpanded.value) {
+  if (previewExpanded.value) {
+    previewExpanded.value = false
+    return
+  }
+  if (loadingPreview.value) {
+    return
+  }
+  if (!previewLoaded.value) {
     await ensurePreviewLoaded()
   }
-  previewExpanded.value = !previewExpanded.value
+  if (previewLoaded.value) {
+    previewExpanded.value = true
+  }
 }
 
 async function toggleBindingsSection() {
@@ -710,9 +745,13 @@ function handleSemanticKeyChange(rawName, semanticKey) {
   }).deduplicationFields
 }
 
-function handleHashPolicyChange({ valid, preview }) {
+function handleHashPolicyChange({ valid, loading, preview }) {
+  saveReadinessLoading.value = Boolean(loading)
   hashPolicyAllowsSave.value = Boolean(valid)
   hashPolicyPreview.value = preview || null
+  if (preview) {
+    lastSaveReadinessPreview.value = preview
+  }
   const normalizedFields = Array.isArray(preview?.normalized_deduplication_fields)
     ? preview.normalized_deduplication_fields
     : null
@@ -722,15 +761,6 @@ function handleHashPolicyChange({ valid, preview }) {
     if (currentSignature !== nextSignature) {
       selectedDeduplicationFields.value = [...normalizedFields]
     }
-  }
-  const normalizedBindings = Array.isArray(preview?.normalized_header_bindings)
-    ? preview.normalized_header_bindings.map(item => ({ ...item }))
-    : null
-  if (normalizedBindings && normalizedBindings.length > 0) {
-    fullHeaderBindings.value = mergeHeaderBindingsForSave(
-      normalizedBindings,
-      localHeaderBindings.value,
-    )
   }
 }
 
@@ -787,9 +817,11 @@ async function handleSave() {
       await ensureBindingsLoaded()
     }
     const submissionState = buildTemplateUpdateSubmissionState({
-      baseBindings: activeBindingSource.value,
+      baseBindings: saveReadyBindingBase.value,
       editedBindings: localHeaderBindings.value,
-      selectedFields: selectedDeduplicationFields.value,
+      selectedFields: Array.isArray(lastSaveReadinessPreview.value?.normalized_deduplication_fields)
+        ? lastSaveReadinessPreview.value.normalized_deduplication_fields
+        : selectedDeduplicationFields.value,
       fieldParseRules: localFieldParseRules.value,
     })
     selectedDeduplicationFields.value = submissionState.deduplicationFields

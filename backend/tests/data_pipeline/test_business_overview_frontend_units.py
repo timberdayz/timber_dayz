@@ -100,9 +100,27 @@ def test_business_overview_frontend_keeps_module_positions_and_uses_adaptive_tab
     assert '<div class="traffic-ranking-section">' in text
     assert 'label="\u5bf9\u6bd4\u671fUV"' not in text
     assert 'label="\u5bf9\u6bd4\u671fPV"' not in text
-    assert 'prop="visitor_count"\n            label="\u8bbf\u5ba2\u6570(UV)"\n            min-width=' in text
-    assert 'prop="page_views"\n            label="\u6d4f\u89c8\u91cf(PV)"\n            min-width=' in text
-    assert 'prop="gmv" label="\u9500\u552e\u989d" min-width=' in text
+    assert 'prop="visitor_count"\n            label="\u8bbf\u5ba2\u6570(UV)"\n            min-width="112"' in text
+    assert 'prop="page_views"\n            label="\u6d4f\u89c8\u91cf(PV)"\n            min-width="112"' in text
+    assert 'prop="gmv" label="\u9500\u552e\u989d" min-width="112"' in text
+    assert 'prop="profit" label="\u5229\u6da6" min-width="112"' in text
+    assert 'prop="order_count" label="\u8ba2\u5355\u6570" min-width="96"' in text
+    assert 'prop="achievement_rate" label="\u5b8c\u6210\u7387" min-width="128"' in text
+
+
+def test_business_overview_frontend_compacts_spacing_and_controls():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert '.header-controls {\n  display: flex;\n  align-items: center;\n  gap: 8px;' in text
+    assert '.target-progress-section {\n  margin-bottom: 12px;\n  padding: 12px 14px;' in text
+    assert '.comparison-table-container {\n  padding: 4px 0;' in text
+    assert '.racing-container {\n  max-height: 360px;' in text
+    assert '.metric-stack {\n  display: inline-flex;\n  flex-direction: column;\n  align-items: flex-end;\n  gap: 1px;' in text
+    assert '.metric-previous {\n  color: #909399;\n  font-size: 10px;' in text
+    assert '.metric-delta {\n  font-size: 10px;' in text
 
 
 def test_business_overview_frontend_groups_kpis_and_allows_wrapping():

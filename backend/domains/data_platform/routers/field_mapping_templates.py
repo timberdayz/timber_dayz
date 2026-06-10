@@ -241,9 +241,15 @@ def _filter_bindings_for_manual_review(
         if not review_status:
             review_status = "confirmed_semantic" if semantic_key else "pending"
         has_conflict = bool(semantic_key and semantic_counts.get(semantic_key, 0) > 1)
+        is_key_review_candidate = bool(
+            binding.get("required")
+            or binding.get("hash_participates")
+            or binding.get("hash_eligible")
+            or semantic_key
+        )
         if review_status == "confirmed_non_semantic" and not has_conflict:
             continue
-        if review_status == "pending" or has_conflict:
+        if (review_status == "pending" and is_key_review_candidate) or has_conflict:
             filtered.append({**binding, "semantic_review_status": review_status})
     return filtered
 
