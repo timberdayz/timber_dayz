@@ -189,9 +189,11 @@
       </div>
     </div>
 
-    <!-- 经营指标表格（门店经营） -->
-    <div class="operational-metrics-section">
-      <el-card class="chart-card" shadow="hover">
+    <!-- 经营指标 + 数据对比分析 -->
+    <div class="overview-pair-section overview-top-section">
+      <el-row :gutter="16" class="overview-pair-row">
+        <el-col :xs="24" :lg="16">
+          <el-card class="chart-card" shadow="hover">
             <template #header>
           <div class="card-header">
             <span>经营指标</span>
@@ -327,13 +329,10 @@
             </div>
           </div>
         </div>
-      </el-card>
-    </div>
+          </el-card>
+        </el-col>
 
-    <!-- 数据对比和店铺赛马区域 -->
-    <div class="comparison-section">
-      <el-row :gutter="20">
-        <!-- 左侧：数据对比图表 -->
+        <!-- 右侧：数据对比图表 -->
         <el-col :xs="24" :lg="8">
           <el-card class="chart-card" shadow="hover">
             <template #header>
@@ -367,7 +366,7 @@
                     :value-format="datePickerValueFormat"
                     :placeholder="datePickerPlaceholder"
                     size="small"
-                    class="control-offset control-w-150"
+                    class="control-offset control-w-140"
                     @change="onComparisonDateChange"
                   />
                 </div>
@@ -414,13 +413,13 @@
                   <el-table-column
                     prop="metric"
                     label="指标"
-                    width="120"
+                    width="88"
                     align="left"
                     fixed="left"
                   />
                   <el-table-column
                     :label="currentPeriodLabel"
-                    width="100"
+                    width="78"
                     align="right"
                   >
                     <template #default="{ row }">
@@ -429,7 +428,7 @@
                   </el-table-column>
                   <el-table-column
                     :label="previousPeriodLabel"
-                    width="100"
+                    width="78"
                     align="right"
                   >
                     <template #default="{ row }">
@@ -438,14 +437,14 @@
                   </el-table-column>
                   <el-table-column
                     :label="averageLabel"
-                    width="100"
+                    width="78"
                     align="right"
                   >
                     <template #default="{ row }">
                       {{ row.average }}
                     </template>
                   </el-table-column>
-                  <el-table-column label="环比" width="100" align="center">
+                  <el-table-column label="环比" width="74" align="center">
                     <template #default="{ row }">
                       <div class="change-indicator">
                         <el-icon
@@ -472,9 +471,13 @@
             </div>
           </el-card>
         </el-col>
+      </el-row>
+    </div>
 
-        <!-- 右侧：店铺赛马（日/周/月 + 日期 + 筛选维度：店铺或账号） -->
-        <el-col :xs="24" :lg="16">
+    <!-- 店铺赛马 + 流量排名 -->
+    <div class="overview-pair-section overview-rank-section">
+      <el-row :gutter="16" class="overview-half-table-row">
+        <el-col :xs="24" :lg="12">
           <el-card class="chart-card" shadow="hover">
             <template #header>
               <div class="card-header">
@@ -552,7 +555,7 @@
                 <el-table-column
                   prop="rank"
                   label="排名"
-                  width="56"
+                  width="48"
                   align="center"
                   fixed="left"
                 >
@@ -565,7 +568,7 @@
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="name" label="名称" min-width="150" fixed="left" show-overflow-tooltip>
+                <el-table-column prop="name" label="名称" min-width="118" fixed="left" show-overflow-tooltip>
                   <template #default="{ row }">
                     <div class="shop-display-cell" :class="{ 'shop-display-cell--unmatched': isUnmatchedShopRow(row) }">
                       <div>{{ row.name }}</div>
@@ -573,8 +576,8 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="platform_code" label="平台" min-width="72" />
-                <el-table-column prop="gmv" label="销售额" min-width="112" align="right">
+                <el-table-column prop="platform_code" label="平台" min-width="54" />
+                <el-table-column prop="gmv" label="销售额" min-width="86" align="right">
                   <template #default="{ row }">
                     <div class="metric-stack">
                       <span>{{ row.gmv == null ? '--' : formatCurrency(row.gmv) }}</span>
@@ -587,7 +590,7 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="profit" label="利润" min-width="112" align="right">
+                <el-table-column prop="profit" label="利润" min-width="86" align="right">
                   <template #default="{ row }">
                     <div class="metric-stack">
                       <span :class="{ 'metric-negative': Number(row.profit) < 0 }">
@@ -602,12 +605,12 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="profit_margin" label="利润率" min-width="76" align="right">
+                <el-table-column prop="profit_margin" label="利润率" min-width="60" align="right">
                   <template #default="{ row }">
                     {{ row.profit_margin == null ? '--' : formatPercent(row.profit_margin) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="order_count" label="订单数" min-width="96" align="right">
+                <el-table-column prop="order_count" label="订单数" min-width="72" align="right">
                   <template #default="{ row }">
                     <div class="metric-stack">
                       <span>{{ row.order_count == null ? '--' : formatInteger(row.order_count) }}</span>
@@ -620,18 +623,18 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="avg_order_value" label="客单价" min-width="88" align="right">
+                <el-table-column prop="avg_order_value" label="客单价" min-width="68" align="right">
                   <template #default="{ row }">
                     {{ row.avg_order_value == null ? '--' : formatCurrency(row.avg_order_value) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="target_amount" label="目标" min-width="96" align="right">
+                <el-table-column prop="target_amount" label="目标" min-width="74" align="right">
                   <template #default="{ row }">
                     <el-tag v-if="!hasShopRacingTarget(row)" type="info" size="small">未设目标</el-tag>
                     <span v-else>{{ formatCurrency(row.target_amount) }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="achievement_rate" label="完成率" min-width="128">
+                <el-table-column prop="achievement_rate" label="完成率" min-width="96">
                   <template #default="{ row }">
                     <el-tag v-if="!hasShopRacingTarget(row)" type="info" size="small">未设目标</el-tag>
                     <div v-else class="racing-achievement-cell">
@@ -659,12 +662,9 @@
             </div>
           </el-card>
         </el-col>
-      </el-row>
-    </div>
 
-    <!-- 流量排名模块 -->
-    <div class="traffic-ranking-section">
-      <el-card class="chart-card" shadow="hover">
+        <el-col :xs="24" :lg="12">
+          <el-card class="chart-card" shadow="hover">
             <template #header>
           <div class="card-header">
             <span>流量排名</span>
@@ -735,7 +735,7 @@
           <el-table-column
             prop="rank"
             label="排名"
-            width="56"
+            width="48"
             fixed="left"
             align="center"
           >
@@ -759,7 +759,7 @@
           <el-table-column
             prop="name"
             label="名称"
-            min-width="150"
+            min-width="124"
             fixed="left"
             show-overflow-tooltip
           >
@@ -773,13 +773,13 @@
           <el-table-column
             prop="platform_code"
             label="平台"
-            min-width="72"
+            min-width="54"
             v-if="trafficRankingDimension === 'shop'"
           />
           <el-table-column
             prop="visitor_count"
             label="访客数(UV)"
-            min-width="112"
+            min-width="92"
             align="right"
             sortable
           >
@@ -798,7 +798,7 @@
           <el-table-column
             prop="page_views"
             label="浏览量(PV)"
-            min-width="112"
+            min-width="92"
             align="right"
             sortable
           >
@@ -817,7 +817,7 @@
           <el-table-column
             prop="uv_conversion_rate"
             label="UV转化率"
-            min-width="104"
+            min-width="86"
             align="right"
             sortable
           >
@@ -848,7 +848,7 @@
           <el-table-column
             prop="pv_conversion_rate"
             label="PV转化率"
-            min-width="104"
+            min-width="86"
             align="right"
             sortable
           >
@@ -877,7 +877,9 @@
             </template>
           </el-table-column>
         </el-table>
-      </el-card>
+          </el-card>
+        </el-col>
+      </el-row>
     </div>
 
     <!-- 库存滞销情况 -->
@@ -3297,7 +3299,7 @@ watch(
 }
 
 .control-offset {
-  margin-left: 12px;
+  margin-left: 0;
 }
 
 .kpi-section {
@@ -3547,8 +3549,29 @@ watch(
   color: #334155;
 }
 
-.comparison-section {
-  margin-bottom: 24px;
+.overview-pair-section {
+  margin-bottom: 18px;
+}
+
+.overview-pair-row,
+.overview-half-table-row {
+  row-gap: 16px;
+}
+
+.overview-pair-section :deep(.el-card__header) {
+  padding: 10px 14px;
+}
+
+.overview-pair-section :deep(.el-card__body) {
+  padding: 12px 14px;
+}
+
+.overview-pair-section :deep(.el-table .cell) {
+  padding: 0 6px;
+}
+
+.overview-pair-section :deep(.el-table--small .el-table__cell) {
+  padding: 5px 0;
 }
 
 .chart-card {
@@ -3566,13 +3589,17 @@ watch(
 .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .header-controls {
   display: flex;
   align-items: center;
   gap: 8px;
+  row-gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .chart-container {
@@ -3580,8 +3607,8 @@ watch(
 }
 
 .target-progress-section {
-  margin-bottom: 12px;
-  padding: 12px 14px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
   background: #f8f9fa;
   border-radius: 8px;
 }
@@ -3591,22 +3618,22 @@ watch(
 }
 
 .target-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #303133;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .target-details {
   display: flex;
   justify-content: space-between;
-  margin-top: 8px;
-  font-size: 12px;
+  margin-top: 6px;
+  font-size: 11px;
   color: #909399;
 }
 
 .comparison-table-container {
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .change-indicator {
@@ -3656,7 +3683,7 @@ watch(
 }
 
 .racing-table {
-  min-width: 920px;
+  min-width: 762px;
 }
 
 .shop-display-cell {
@@ -3675,8 +3702,8 @@ watch(
 .racing-achievement-cell {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 108px;
+  gap: 4px;
+  min-width: 82px;
 }
 
 .racing-achievement-cell .el-progress {
@@ -3706,7 +3733,7 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -3733,16 +3760,12 @@ watch(
   color: #909399;
 }
 
-.operational-metrics-section {
-  margin-bottom: 24px;
-}
-
 .operational-metrics-grid {
-  padding: 10px 0;
+  padding: 8px 0;
   display: grid;
   grid-template-columns: repeat(4, 1fr) 88px;
   grid-template-rows: auto auto;
-  gap: 16px;
+  gap: 10px;
 }
 
 .metrics-row {
@@ -3754,7 +3777,7 @@ watch(
 }
 
 .metric-item {
-  padding: 12px;
+  padding: 10px;
   background: #f8f9fa;
   border-radius: 8px;
   text-align: center;
@@ -3772,13 +3795,13 @@ watch(
 }
 
 .metric-label {
-  font-size: 13px;
+  font-size: 12px;
   color: #909399;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .metric-value {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: #303133;
 }

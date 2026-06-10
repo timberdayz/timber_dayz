@@ -76,8 +76,9 @@ def test_business_overview_frontend_shop_racing_embeds_metric_changes_and_expand
         errors="replace",
     )
 
-    assert '<el-col :xs="24" :lg="8">' in text
     assert '<el-col :xs="24" :lg="16">' in text
+    assert '<el-col :xs="24" :lg="8">' in text
+    assert '<el-col :xs="24" :lg="12">' in text
     assert "gmv_change_rate" in text
     assert "profit_change_rate" in text
     assert "order_count_change_rate" in text
@@ -95,17 +96,22 @@ def test_business_overview_frontend_keeps_module_positions_and_uses_adaptive_tab
         errors="replace",
     )
 
+    assert '<div class="overview-pair-section overview-top-section">' in text
+    assert '<el-row :gutter="16" class="overview-pair-row">' in text
+    assert '<div class="overview-pair-section overview-rank-section">' in text
+    assert '<el-row :gutter="16" class="overview-half-table-row">' in text
     assert '<el-col :xs="24" :lg="8">' in text
     assert '<el-col :xs="24" :lg="16">' in text
-    assert '<div class="traffic-ranking-section">' in text
+    assert text.count('<el-col :xs="24" :lg="12">') == 2
+    assert '<div class="traffic-ranking-section">' not in text
     assert 'label="\u5bf9\u6bd4\u671fUV"' not in text
     assert 'label="\u5bf9\u6bd4\u671fPV"' not in text
-    assert 'prop="visitor_count"\n            label="\u8bbf\u5ba2\u6570(UV)"\n            min-width="112"' in text
-    assert 'prop="page_views"\n            label="\u6d4f\u89c8\u91cf(PV)"\n            min-width="112"' in text
-    assert 'prop="gmv" label="\u9500\u552e\u989d" min-width="112"' in text
-    assert 'prop="profit" label="\u5229\u6da6" min-width="112"' in text
-    assert 'prop="order_count" label="\u8ba2\u5355\u6570" min-width="96"' in text
-    assert 'prop="achievement_rate" label="\u5b8c\u6210\u7387" min-width="128"' in text
+    assert 'prop="visitor_count"\n            label="\u8bbf\u5ba2\u6570(UV)"\n            min-width="92"' in text
+    assert 'prop="page_views"\n            label="\u6d4f\u89c8\u91cf(PV)"\n            min-width="92"' in text
+    assert 'prop="gmv" label="\u9500\u552e\u989d" min-width="86"' in text
+    assert 'prop="profit" label="\u5229\u6da6" min-width="86"' in text
+    assert 'prop="order_count" label="\u8ba2\u5355\u6570" min-width="72"' in text
+    assert 'prop="achievement_rate" label="\u5b8c\u6210\u7387" min-width="96"' in text
 
 
 def test_business_overview_frontend_compacts_spacing_and_controls():
@@ -114,10 +120,14 @@ def test_business_overview_frontend_compacts_spacing_and_controls():
         errors="replace",
     )
 
+    assert '.overview-pair-section {\n  margin-bottom: 18px;' in text
+    assert '.overview-pair-section :deep(.el-table .cell) {\n  padding: 0 6px;' in text
     assert '.header-controls {\n  display: flex;\n  align-items: center;\n  gap: 8px;' in text
-    assert '.target-progress-section {\n  margin-bottom: 12px;\n  padding: 12px 14px;' in text
-    assert '.comparison-table-container {\n  padding: 4px 0;' in text
+    assert 'flex-wrap: wrap;' in text
+    assert '.target-progress-section {\n  margin-bottom: 10px;\n  padding: 10px 12px;' in text
+    assert '.comparison-table-container {\n  padding: 2px 0;' in text
     assert '.racing-container {\n  max-height: 360px;' in text
+    assert '.racing-table {\n  min-width: 762px;' in text
     assert '.metric-stack {\n  display: inline-flex;\n  flex-direction: column;\n  align-items: flex-end;\n  gap: 1px;' in text
     assert '.metric-previous {\n  color: #909399;\n  font-size: 10px;' in text
     assert '.metric-delta {\n  font-size: 10px;' in text
