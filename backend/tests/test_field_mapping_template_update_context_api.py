@@ -109,7 +109,7 @@ def test_existing_deduplication_fields_match_by_semantic_key_without_raw_header_
         ],
     )
 
-    assert available == []
+    assert available == ["product_name"]
     assert missing == []
     assert matches == [
         {
@@ -117,8 +117,8 @@ def test_existing_deduplication_fields_match_by_semantic_key_without_raw_header_
             "semantic_key": "product_name",
             "current_field": "商品名称",
             "match_type": "semantic_key",
-            "hash_eligible": False,
-            "status": "matched_non_hashable",
+            "hash_eligible": True,
+            "status": "matched_hashable",
         },
         {
             "requested_field": "状态",
@@ -277,21 +277,13 @@ async def test_template_update_context_returns_lightweight_summary_for_with_samp
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["shop_id"]
     assert data["recommended_deduplication_fields"] == ["order_id"]
-    assert data["current_header_bindings"] == [
-        {
-            "raw_name": "new_metric",
-            "display_name": "new_metric",
-            "semantic_key": None,
-            "semantic_role": None,
-            "aliases": [],
-            "required": False,
-            "hash_participates": False,
-            "semantic_review_status": "pending",
-            "position": 3,
-            "sample_type": "number",
-            "confidence": 0.7,
-        }
-    ]
+    assert {item["raw_name"] for item in data["review_header_bindings"]} >= {"new_metric"}
+    assert all(item["semantic_review_status"] == "pending" for item in data["review_header_bindings"])
+    full_bindings_by_raw = {item["raw_name"]: item for item in data["full_header_bindings"]}
+    assert full_bindings_by_raw["order_id"]["semantic_key"] == "order_id"
+    assert full_bindings_by_raw["order_id"]["semantic_review_status"] == "confirmed_semantic"
+    assert full_bindings_by_raw["new_metric"]["semantic_review_status"] == "pending"
+    assert data["current_header_bindings"] == data["full_header_bindings"]
     assert data["update_mode"] == "with-sample"
 
 
@@ -393,7 +385,7 @@ async def test_template_update_context_returns_semantic_equivalent_deduplication
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["existing_deduplication_fields_available"] == []
+    assert data["existing_deduplication_fields_available"] == ["product_name"]
     assert data["existing_deduplication_fields_missing"] == []
     assert data["existing_deduplication_field_matches"] == [
         {
@@ -401,8 +393,8 @@ async def test_template_update_context_returns_semantic_equivalent_deduplication
             "semantic_key": "product_name",
             "current_field": "商品名称",
             "match_type": "semantic_key",
-            "hash_eligible": False,
-            "status": "matched_non_hashable",
+            "hash_eligible": True,
+            "status": "matched_hashable",
         },
         {
             "requested_field": "状态",
@@ -644,9 +636,12 @@ async def test_template_update_bindings_returns_full_bindings_payload(
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert len(payload["data"]["current_header_bindings"]) == 2
+    assert len(payload["data"]["current_header_bindings"]) == 3
+    assert len(payload["data"]["full_header_bindings"]) == 3
+    assert len(payload["data"]["review_header_bindings"]) == 1
     assert payload["data"]["required_semantic_keys"] == ["order_id"]
     assert payload["data"]["hash_participating_semantic_keys"] == ["order_id", "metric_date"]
+    assert payload["data"]["review_header_bindings"][0]["raw_name"] == "amount"
 
 
 @pytest.mark.asyncio
@@ -1068,17 +1063,15 @@ async def test_save_mapping_template_accepts_file_date_token_parse_rules(
         "/api/field-mapping/templates/save",
         json={
             "platform": "shopee",
-            "data_domain": "products",
-            "granularity": "monthly",
+            "data_domain": "analytics",
+            "granularity": "daily",
             "header_row": 0,
             "header_columns": ["商品编号", "商品", "销售额（已下订单） (SGD)"],
-            "deduplication_fields": ["商品编号", "metric_date"],
-            "template_name": "products_file_date_rule",
+            "deduplication_fields": ["metric_date"],
+            "template_name": "analytics_file_date_rule",
             "created_by": "test",
             "mappings": {
-                "商品编号": {"standard_field": "platform_sku", "confidence": 1.0},
                 "商品": {"standard_field": "product_name", "confidence": 1.0},
-                "sales": {"standard_field": "metric_date", "confidence": 1.0},
             },
             "field_parse_rules": parse_rules,
         },
@@ -1187,11 +1180,11 @@ async def test_save_mapping_template_preserves_raw_non_orders_headers(
         "/api/field-mapping/templates/save",
         json={
             "platform": "shopee",
-            "data_domain": "products",
+            "data_domain": "analytics",
             "granularity": "monthly",
             "header_row": 1,
             "header_columns": ["platform_sku", "period_start_date", "Current Item Status", "销售额（已下订单） (COP)"],
-            "deduplication_fields": ["platform_sku", "period_start_date"],
+            "deduplication_fields": ["period_start_date"],
             "template_name": "raw_header_preserve_test",
             "created_by": "test",
         },
@@ -1622,6 +1615,10 @@ async def test_hash_policy_preview_accepts_selected_derived_metric_date(
     assert payload["success"] is True
     data = payload["data"]
     assert data["passed"] is True
+    assert data["can_save"] is True
+    assert data["normalized_deduplication_fields"] == ["product_id", "metric_date"]
+    assert data["blocking_errors"] == []
+    assert data["normalized_header_bindings"][0]["semantic_key"] == "product_id"
     assert data["effective_components"]["derived_identity_fields"] == ["metric_date"]
 
 
@@ -1663,6 +1660,106 @@ async def test_save_mapping_template_returns_structured_hash_policy_on_failure(
     assert payload["data"]["hash_policy"]["passed"] is False
     assert payload["data"]["hash_policy"]["requirement_groups"]
     assert payload["data"]["hash_policy"]["missing_required_groups"][0]["key"] == "products_period_date"
+    assert payload["data"]["hash_policy"]["can_save"] is False
+    assert payload["data"]["hash_policy"]["blocking_errors"]
+
+
+@pytest.mark.asyncio
+async def test_hash_policy_preview_rejects_unresolved_deduplication_field_with_save_readiness_shape(
+    template_update_context_client,
+):
+    client, _session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/hash-policy-preview",
+        json={
+            "data_domain": "products",
+            "granularity": "monthly",
+            "deduplication_fields": ["product_id", "metric_date"],
+            "header_bindings": [
+                {
+                    "raw_name": "Product Name",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                }
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "metric_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                }
+            ],
+            "sample_rows": [],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    data = payload["data"]
+    assert data["passed"] is False
+    assert data["can_save"] is False
+    assert data["unresolved_deduplication_fields"] == ["product_id"]
+    assert "product_id" in data["blocking_errors"][0]
+
+
+@pytest.mark.asyncio
+async def test_hash_policy_preview_and_save_share_same_binding_resolution_for_save_readiness(
+    template_update_context_client,
+):
+    client, _session_factory = template_update_context_client
+
+    request_payload = {
+        "platform": "shopee",
+        "data_domain": "products",
+        "granularity": "monthly",
+        "header_row": 0,
+        "header_columns": ["Product Name"],
+        "deduplication_fields": ["product_id", "metric_date"],
+        "created_by": "test",
+        "header_bindings": [
+            {
+                "raw_name": "Product Name",
+                "semantic_key": "product_name",
+                "semantic_review_status": "confirmed_semantic",
+            }
+        ],
+        "field_parse_rules": [
+            {
+                "target_field": "metric_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+                "date_format": "yyyy-mm-dd",
+            }
+        ],
+    }
+
+    preview_response = await client.post(
+        "/api/field-mapping/templates/hash-policy-preview",
+        json={
+            "data_domain": request_payload["data_domain"],
+            "granularity": request_payload["granularity"],
+            "deduplication_fields": request_payload["deduplication_fields"],
+            "header_bindings": request_payload["header_bindings"],
+            "field_parse_rules": request_payload["field_parse_rules"],
+            "sample_rows": [],
+        },
+    )
+    assert preview_response.status_code == 200
+    preview_data = preview_response.json()["data"]
+    assert preview_data["can_save"] is False
+
+    save_response = await client.post("/api/field-mapping/templates/save", json=request_payload)
+    assert save_response.status_code == 400
+    save_payload = save_response.json()
+    assert save_payload["data"]["hash_policy"]["can_save"] is False
+    assert save_payload["data"]["hash_policy"]["blocking_errors"] == preview_data["blocking_errors"]
+    assert (
+        save_payload["data"]["hash_policy"]["unresolved_deduplication_fields"]
+        == preview_data["unresolved_deduplication_fields"]
+    )
 
 
 @pytest.mark.asyncio

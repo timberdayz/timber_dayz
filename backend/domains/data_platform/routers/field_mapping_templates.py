@@ -66,7 +66,12 @@ from backend.services.semantic_field_registry import (
     normalize_semantic_key,
 )
 from backend.services.semantic_alias_registry import SemanticAliasRegistryService
-from backend.services.template_hash_policy import TemplateHashPolicyService
+from backend.services.template_save_readiness_service import (
+    TemplateSaveReadinessService,
+    normalize_deduplication_fields_for_template as service_normalize_deduplication_fields_for_template,
+    sync_hash_participation_from_deduplication_fields as service_sync_hash_participation_from_deduplication_fields,
+    validate_deduplication_fields_against_bindings as service_validate_deduplication_fields_against_bindings,
+)
 from backend.services.template_semantic_coverage_checker import TemplateSemanticCoverageChecker
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
@@ -582,106 +587,22 @@ def _validate_deduplication_fields_against_bindings(
     header_bindings: list[dict[str, Any]],
     field_parse_rules: list[dict[str, Any]] | None = None,
 ) -> None:
-    binding_by_raw = {
-        str(binding.get("raw_name", "")).strip().lower(): binding
-        for binding in header_bindings
-        if str(binding.get("raw_name", "")).strip()
-    }
-    bindings_by_semantic: dict[str, list[dict[str, Any]]] = {}
-    for binding in header_bindings:
-        semantic_key = normalize_semantic_key(
-            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
-        )
-        if semantic_key:
-            bindings_by_semantic.setdefault(semantic_key, []).append(binding)
-    derived_semantic_keys = {
-        semantic_key
-        for semantic_key in (
-            normalize_semantic_key(rule.get("target_field") or rule.get("semantic_key") or rule.get("field"))
-            for rule in (field_parse_rules or [])
-        )
-        if semantic_key and is_canonical_semantic_key(semantic_key)
-    }
-
-    header_lookup = {str(column).strip().lower() for column in header_columns}
-    invalid_fields: list[str] = []
-    non_semantic_fields: list[str] = []
-
-    for field in deduplication_fields:
-        field_text = str(field).strip()
-        field_key = field_text.lower()
-        normalized_key = normalize_semantic_key(field_text)
-        raw_binding = binding_by_raw.get(field_key)
-        semantic_bindings = bindings_by_semantic.get(normalized_key or "", [])
-
-        candidate_bindings = [binding for binding in [raw_binding, *semantic_bindings] if binding]
-        non_semantic_binding = next(
-            (
-                binding
-                for binding in candidate_bindings
-                if binding.get("semantic_review_status") == "confirmed_non_semantic"
-            ),
-            None,
-        )
-        if non_semantic_binding:
-            non_semantic_fields.append(str(non_semantic_binding.get("raw_name") or field_text).strip())
-            continue
-
-        confirmed_semantic_bindings = [
-            binding
-            for binding in semantic_bindings
-            if binding.get("semantic_review_status") == "confirmed_semantic"
-        ]
-        if normalized_key and is_canonical_semantic_key(normalized_key) and confirmed_semantic_bindings:
-            continue
-        if normalized_key and normalized_key in derived_semantic_keys:
-            continue
-        raw_semantic_key = None
-        if raw_binding:
-            raw_semantic_key = normalize_semantic_key(
-                raw_binding.get("semantic_key") or raw_binding.get("semantic_role")
-            )
-        if (
-            field_key in header_lookup
-            and raw_binding
-            and raw_binding.get("semantic_review_status") == "confirmed_semantic"
-            and raw_semantic_key
-            and is_canonical_semantic_key(raw_semantic_key)
-        ):
-            continue
-        invalid_fields.append(field_text)
-
-    if non_semantic_fields:
-        raise ValueError(
-            "deduplication_fields包含已确认非核心语义字段，不能参与Hash: "
-            + ", ".join(non_semantic_fields)
-        )
-    if invalid_fields:
-        raise ValueError(
-            "deduplication_fields必须能通过表头或语义绑定解析到真实字段: "
-            + ", ".join(invalid_fields)
-        )
+    service_validate_deduplication_fields_against_bindings(
+        deduplication_fields,
+        header_columns,
+        header_bindings,
+        field_parse_rules,
+    )
 
 
 def _sync_hash_participation_from_deduplication_fields(
     header_bindings: list[dict[str, Any]],
     deduplication_fields: list[str],
 ) -> list[dict[str, Any]]:
-    selected_hash_keys = {
-        normalize_semantic_key(field)
-        for field in deduplication_fields or []
-        if normalize_semantic_key(field)
-    }
-    synced: list[dict[str, Any]] = []
-    for binding in header_bindings or []:
-        next_binding = dict(binding)
-        semantic_key = normalize_semantic_key(next_binding.get("semantic_key"))
-        if next_binding.get("semantic_review_status") != "confirmed_semantic" or not semantic_key:
-            next_binding["hash_participates"] = False
-        else:
-            next_binding["hash_participates"] = semantic_key in selected_hash_keys
-        synced.append(next_binding)
-    return synced
+    return service_sync_hash_participation_from_deduplication_fields(
+        header_bindings,
+        deduplication_fields,
+    )
 
 
 def _extract_semantic_key_sets(
@@ -719,32 +640,10 @@ def _normalize_deduplication_fields_for_template(
     deduplication_fields: list[str] | None,
     header_bindings: list[dict[str, Any]] | None,
 ) -> list[str]:
-    normalized_fields: list[str] = []
-    binding_by_raw = {
-        str(binding.get("raw_name", "")).strip().lower(): binding
-        for binding in (header_bindings or [])
-        if str(binding.get("raw_name", "")).strip()
-    }
-    seen = set()
-
-    for field in deduplication_fields or []:
-        if is_canonical_semantic_key(field):
-            normalized_field = normalize_semantic_key(field) or str(field).strip()
-        else:
-            normalized_field = str(field).strip()
-        binding = binding_by_raw.get(str(field).strip().lower())
-        if binding:
-            candidate_semantic_key = normalize_semantic_key(
-                binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
-            )
-            if is_canonical_semantic_key(candidate_semantic_key):
-                normalized_field = candidate_semantic_key or normalized_field
-        lowered = normalized_field.lower()
-        if lowered in seen:
-            continue
-        seen.add(lowered)
-        normalized_fields.append(normalized_field)
-    return normalized_fields
+    return service_normalize_deduplication_fields_for_template(
+        deduplication_fields,
+        header_bindings,
+    )
 
 
 def _recommended_deduplication_fields(
@@ -772,6 +671,29 @@ def _recommended_deduplication_fields(
             seen.add(semantic_key)
             recommended.append(semantic_key)
     return recommended
+
+
+def _build_template_save_readiness(
+    *,
+    data_domain: str,
+    granularity: str | None,
+    sub_domain: str | None,
+    header_columns: list[str],
+    deduplication_fields: list[str],
+    header_bindings: list[dict[str, Any]],
+    field_parse_rules: list[dict[str, Any]],
+    sample_rows: list[dict[str, Any]] | None = None,
+):
+    return TemplateSaveReadinessService().assess(
+        data_domain=data_domain,
+        granularity=granularity,
+        sub_domain=sub_domain,
+        header_columns=header_columns,
+        deduplication_fields=deduplication_fields,
+        header_bindings=header_bindings,
+        field_parse_rules=field_parse_rules,
+        sample_rows=sample_rows,
+    )
 
 
 def _enrich_field_parse_rules(
@@ -929,18 +851,25 @@ async def preview_template_hash_policy(
     db: AsyncSession = Depends(get_async_db),
 ):
     del db
-    header_bindings = [
-        binding.model_dump(exclude_none=True)
+    preview_header_columns = [
+        str(binding.raw_name).strip()
         for binding in request.header_bindings
+        if str(binding.raw_name).strip()
     ]
+    header_bindings = _normalize_header_bindings(
+        request.header_bindings,
+        preview_header_columns,
+        {},
+    )
     field_parse_rules = _enrich_field_parse_rules(
         _normalize_field_parse_rules(request.field_parse_rules),
         header_bindings,
     )
-    result = TemplateHashPolicyService().validate(
+    readiness = _build_template_save_readiness(
         data_domain=request.data_domain,
         granularity=request.granularity,
         sub_domain=request.sub_domain,
+        header_columns=preview_header_columns,
         deduplication_fields=request.deduplication_fields,
         header_bindings=header_bindings,
         field_parse_rules=field_parse_rules,
@@ -948,7 +877,7 @@ async def preview_template_hash_policy(
     )
     return HashPolicyPreviewResponse(
         success=True,
-        data=HashPolicyPreviewData(**result.to_dict()),
+        data=HashPolicyPreviewData(**readiness.to_dict()),
     )
 
 
@@ -1018,20 +947,18 @@ async def save_mapping_template(
             raise ValueError("deduplication_fields不能为空列表, 至少需要选择1个核心字段")
         elif not all(isinstance(field, str) for field in deduplication_fields):
             raise ValueError("deduplication_fields列表中的元素必须是字符串")
-        deduplication_fields = _normalize_deduplication_fields_for_template(
-            deduplication_fields,
-            header_bindings,
+        readiness = _build_template_save_readiness(
+            data_domain=request.data_domain,
+            granularity=request.granularity,
+            sub_domain=request.sub_domain,
+            header_columns=header_columns,
+            deduplication_fields=deduplication_fields,
+            header_bindings=header_bindings,
+            field_parse_rules=field_parse_rules,
+            sample_rows=[request.sample_data] if request.sample_data else [],
         )
-        _validate_deduplication_fields_against_bindings(
-            deduplication_fields,
-            header_columns,
-            header_bindings,
-            field_parse_rules,
-        )
-        header_bindings = _sync_hash_participation_from_deduplication_fields(
-            header_bindings,
-            deduplication_fields,
-        )
+        deduplication_fields = readiness.normalized_deduplication_fields
+        header_bindings = readiness.normalized_header_bindings
 
         if header_columns:
             missing_fields = []
@@ -1065,17 +992,9 @@ async def save_mapping_template(
             header_columns=header_columns,
             field_parse_rules=field_parse_rules,
         )
-        hash_policy_result = TemplateHashPolicyService().validate(
-            data_domain=request.data_domain,
-            granularity=request.granularity,
-            sub_domain=request.sub_domain,
-            deduplication_fields=deduplication_fields,
-            header_bindings=header_bindings,
-            field_parse_rules=field_parse_rules,
-            sample_rows=[request.sample_data] if request.sample_data else [],
-        )
-        if not hash_policy_result.passed:
-            message = "; ".join(hash_policy_result.blocking_errors)
+        hash_policy_result = readiness.hash_policy
+        if not readiness.can_save:
+            message = "; ".join(readiness.blocking_errors)
             return error_response(
                 code=ErrorCode.PARAMETER_INVALID,
                 message=f"保存模板失败: {message}",
@@ -1083,7 +1002,7 @@ async def save_mapping_template(
                 detail=message,
                 recovery_suggestion="请补齐 Data Hash 必需的语义字段后再保存",
                 status_code=400,
-                data={"hash_policy": hash_policy_result.to_dict()},
+                data={"hash_policy": readiness.to_dict()},
             )
 
         try:
@@ -1097,7 +1016,7 @@ async def save_mapping_template(
                 deduplication_fields=deduplication_fields,
             )
         except ValueError as exc:
-            hash_policy_payload = hash_policy_result.to_dict()
+            hash_policy_payload = readiness.to_dict()
             family_group = {
                 "key": "template_family_hash_keys",
                 "label": "模板家族 Data Hash 字段一致性",
@@ -1122,6 +1041,7 @@ async def save_mapping_template(
                 family_group,
             ]
             hash_policy_payload["passed"] = False
+            hash_policy_payload["can_save"] = False
             return error_response(
                 code=ErrorCode.PARAMETER_INVALID,
                 message=f"保存模板失败: {str(exc)}",
@@ -1331,6 +1251,8 @@ async def get_template_update_context(
             "sample_data": {},
             "preview_data": [],
             "current_header_bindings": [],
+            "review_header_bindings": [],
+            "full_header_bindings": [],
             "update_mode": mode,
             "header_source": "template" if mode == "core-only" else "sample-file",
             "header_changes": {
@@ -1379,6 +1301,8 @@ async def get_template_update_context(
                 {
                     "current_header_columns": template_header_columns,
                     "current_header_bindings": normalized_template_bindings,
+                    "review_header_bindings": _filter_bindings_for_manual_review(normalized_template_bindings),
+                    "full_header_bindings": normalized_template_bindings,
                     "header_changes": {
                         "detected": False,
                         "added_fields": [],
@@ -1397,7 +1321,11 @@ async def get_template_update_context(
         elif file_id is not None:
             file_summary = await _load_file_update_summary(db, file_id, effective_header_row)
             current_header_columns = file_summary["header_columns"]
-            current_header_bindings = file_summary.get("header_bindings", [])
+            current_header_bindings = _normalize_header_bindings(
+                file_summary.get("header_bindings", []),
+                current_header_columns,
+                {},
+            )
             matcher = get_template_matcher(db)
             header_changes = await matcher.detect_header_changes(
                 template_id,
@@ -1421,7 +1349,9 @@ async def get_template_update_context(
                 {
                     "current_file": file_summary["file"],
                     "current_header_columns": current_header_columns,
-                    "current_header_bindings": _filter_bindings_for_manual_review(current_header_bindings),
+                    "current_header_bindings": current_header_bindings,
+                    "review_header_bindings": _filter_bindings_for_manual_review(current_header_bindings),
+                    "full_header_bindings": current_header_bindings,
                     "current_header_row": effective_header_row,
                     "sample_data": {},
                     "preview_data": [],
@@ -1550,7 +1480,11 @@ async def get_template_update_bindings(
 
         effective_header_row = header_row if header_row is not None else (template.header_row or 0)
         file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
-        current_header_bindings = file_preview.get("header_bindings", [])
+        current_header_bindings = _normalize_header_bindings(
+            file_preview.get("header_bindings", []),
+            file_preview.get("header_columns", []),
+            file_preview.get("sample_data", {}),
+        )
         required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
             template.deduplication_fields or [],
             current_header_bindings,
@@ -1562,6 +1496,8 @@ async def get_template_update_bindings(
                 current_header_columns=file_preview.get("header_columns", []),
                 current_header_row=effective_header_row,
                 current_header_bindings=current_header_bindings,
+                review_header_bindings=_filter_bindings_for_manual_review(current_header_bindings),
+                full_header_bindings=current_header_bindings,
                 required_semantic_keys=required_semantic_keys,
                 hash_participating_semantic_keys=hash_participating_semantic_keys,
             ),

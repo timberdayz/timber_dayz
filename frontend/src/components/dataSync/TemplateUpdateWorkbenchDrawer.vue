@@ -176,7 +176,7 @@
         :existing-deduplication-field-matches="existingDeduplicationFieldMatches"
         :recommended-deduplication-fields="recommendedDeduplicationFields"
         :current-header-columns="currentHeaderColumns"
-        :current-header-bindings="submissionState.headerBindings"
+        :current-header-bindings="saveReadyHeaderBindings"
         :data-domain="templateContext?.data_domain || template?.data_domain || template?.domain || ''"
         :granularity="templateContext?.granularity || template?.granularity || ''"
         :sub-domain="templateContext?.sub_domain || template?.sub_domain || null"
@@ -427,6 +427,10 @@ const dateAnchorOptions = DATE_ANCHOR_OPTIONS
 const workbenchContext = computed(() => activeContext.value ?? props.context?.context ?? null)
 const templateContext = computed(() => workbenchContext.value?.template ?? props.context?.template ?? {})
 const currentHeaderColumns = computed(() => workbenchContext.value?.current_header_columns ?? [])
+const reviewHeaderBindings = computed(() => workbenchContext.value?.review_header_bindings ?? [])
+const fullContextHeaderBindings = computed(
+  () => workbenchContext.value?.full_header_bindings ?? workbenchContext.value?.current_header_bindings ?? [],
+)
 const templateHeaderColumns = computed(() => workbenchContext.value?.template_header_columns ?? [])
 const addedFields = computed(() => workbenchContext.value?.added_fields ?? [])
 const removedFields = computed(() => workbenchContext.value?.removed_fields ?? [])
@@ -465,7 +469,9 @@ watch(
   workbenchContext,
   (next) => {
     selectedHeaderRow.value = next?.current_header_row ?? next?.template?.header_row ?? 0
-    localHeaderBindings.value = Array.isArray(next?.current_header_bindings)
+    localHeaderBindings.value = Array.isArray(next?.review_header_bindings)
+      ? next.review_header_bindings.map(item => ({ ...item }))
+      : Array.isArray(next?.current_header_bindings)
       ? next.current_header_bindings.map(item => ({ ...item }))
       : []
     localFieldParseRules.value = Array.isArray(next?.template?.field_parse_rules)
@@ -476,7 +482,11 @@ watch(
     previewData.value = []
     bindingsExpanded.value = false
     bindingsLoaded.value = false
-    fullHeaderBindings.value = []
+    fullHeaderBindings.value = Array.isArray(next?.full_header_bindings)
+      ? next.full_header_bindings.map(item => ({ ...item }))
+      : Array.isArray(next?.current_header_bindings)
+      ? next.current_header_bindings.map(item => ({ ...item }))
+      : []
     editingBindingNames.value = []
     bindingsViewMode.value = 'needs-review'
     hashPolicyAllowsSave.value = false
@@ -514,20 +524,31 @@ const changeSummary = computed(() => ({
 }))
 
 const activeBindingSource = computed(() => {
-  if (bindingsLoaded.value && fullHeaderBindings.value.length > 0) {
+  if (bindingsLoaded.value && fullHeaderBindings.value.length > 0 && bindingsViewMode.value === 'all') {
     return fullHeaderBindings.value
   }
   return localHeaderBindings.value
 })
 
+const saveReadyBindingBase = computed(() => {
+  if (fullHeaderBindings.value.length > 0) {
+    return fullHeaderBindings.value
+  }
+  if (Array.isArray(fullContextHeaderBindings.value) && fullContextHeaderBindings.value.length > 0) {
+    return fullContextHeaderBindings.value
+  }
+  return activeBindingSource.value
+})
+
 const submissionState = computed(() => {
   return buildTemplateUpdateSubmissionState({
-    baseBindings: activeBindingSource.value,
+    baseBindings: saveReadyBindingBase.value,
     editedBindings: localHeaderBindings.value,
     selectedFields: selectedDeduplicationFields.value,
     fieldParseRules: localFieldParseRules.value,
   })
 })
+const saveReadyHeaderBindings = computed(() => submissionState.value.headerBindings)
 
 const bindingRows = computed(() => {
   const counts = new Map()
@@ -564,7 +585,7 @@ watch(
   () => {
     const normalizedSelection = normalizeDeduplicationSelection(
       selectedDeduplicationFields.value,
-      submissionState.value.headerBindings,
+      saveReadyHeaderBindings.value,
       localFieldParseRules.value,
     )
     const currentSignature = JSON.stringify(selectedDeduplicationFields.value)
@@ -616,7 +637,9 @@ async function ensureBindingsLoaded() {
       headerRow: selectedHeaderRow.value,
     })
     const data = payload?.data || payload
-    const loadedBindings = Array.isArray(data?.current_header_bindings)
+    const loadedBindings = Array.isArray(data?.full_header_bindings)
+      ? data.full_header_bindings.map(item => ({ ...item }))
+      : Array.isArray(data?.current_header_bindings)
       ? data.current_header_bindings.map(item => ({ ...item }))
       : []
     fullHeaderBindings.value = mergeHeaderBindingsForSave(
@@ -690,10 +713,29 @@ function handleSemanticKeyChange(rawName, semanticKey) {
 function handleHashPolicyChange({ valid, preview }) {
   hashPolicyAllowsSave.value = Boolean(valid)
   hashPolicyPreview.value = preview || null
+  const normalizedFields = Array.isArray(preview?.normalized_deduplication_fields)
+    ? preview.normalized_deduplication_fields
+    : null
+  if (normalizedFields) {
+    const currentSignature = JSON.stringify(selectedDeduplicationFields.value)
+    const nextSignature = JSON.stringify(normalizedFields)
+    if (currentSignature !== nextSignature) {
+      selectedDeduplicationFields.value = [...normalizedFields]
+    }
+  }
+  const normalizedBindings = Array.isArray(preview?.normalized_header_bindings)
+    ? preview.normalized_header_bindings.map(item => ({ ...item }))
+    : null
+  if (normalizedBindings && normalizedBindings.length > 0) {
+    fullHeaderBindings.value = mergeHeaderBindingsForSave(
+      normalizedBindings,
+      localHeaderBindings.value,
+    )
+  }
 }
 
 function formatFieldLabel(field) {
-  return formatHeaderBindingLabel(field, activeBindingSource.value)
+  return formatHeaderBindingLabel(field, saveReadyHeaderBindings.value)
 }
 
 function normalizeFieldParseRulesForSave() {

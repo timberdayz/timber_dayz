@@ -115,10 +115,11 @@ assert.match(workbenchDrawerText, /TemplateRawPreviewPanel/, 'workbench drawer s
 assert.match(workbenchDrawerText, /match_rate|added_fields|removed_fields|update_reason/, 'workbench drawer should surface core change summary fields')
 assert.match(workbenchDrawerText, /existing_deduplication_fields_missing|deduplication_fields/, 'workbench drawer should surface old deduplication field impact')
 assert.match(workbenchDrawerText, /existing_deduplication_field_matches/, 'workbench drawer should pass semantic-equivalent deduplication matches')
+assert.match(workbenchDrawerText, /full_header_bindings|review_header_bindings/, 'workbench drawer should consume separated full and review binding sets')
 assert.match(workbenchDrawerText, /recommended_deduplication_fields|current_header_columns/, 'workbench drawer should surface recommended and current-field context')
 assert.match(workbenchDrawerText, /preview_data|sample_data/, 'workbench drawer should surface raw preview context')
 assert.match(workbenchDrawerText, /buildTemplateUpdateSubmissionState/, 'workbench drawer should build one submission state for preview and save')
-assert.match(workbenchDrawerText, /:current-header-bindings="submissionState\.headerBindings"/, 'deduplication review should use the same binding set that save submits')
+assert.match(workbenchDrawerText, /:current-header-bindings="saveReadyHeaderBindings"/, 'deduplication review should use the same binding set that save submits')
 assert.match(workbenchDrawerText, /deduplicationFields: submissionState\.deduplicationFields/, 'save should submit normalized deduplication fields from the shared submission state')
 assert.match(changeSummaryCardText, /已语义匹配/, 'change summary should show semantic-equivalent old fields')
 assert.match(changeSummaryCardText, /已语义匹配，但不再参与 Data Hash/, 'change summary should distinguish matched non-hashable fields')
@@ -126,8 +127,8 @@ assert.match(deduplicationReviewPanelText, /匹配但不可参与 Data Hash/, 'd
 
 assert.match(
   deduplicationReviewPanelText,
-  /auto_date_identity_fields/,
-  'deduplication review should show backend-computed automatic date identity fields'
+  /auto_date_identity_fields|normalized_deduplication_fields|can_save|unresolved_deduplication_fields/,
+  'deduplication review should show backend-computed save readiness fields'
 )
 assert.doesNotMatch(
   deduplicationReviewPanelText,

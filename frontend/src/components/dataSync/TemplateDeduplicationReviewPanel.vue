@@ -78,6 +78,15 @@
         </div>
       </section>
 
+      <section v-if="unresolvedDeduplicationFields.length > 0" class="template-deduplication-review-panel__group template-deduplication-review-panel__group--warning">
+        <div class="template-deduplication-review-panel__group-title">未绑定到真实字段</div>
+        <div class="template-deduplication-review-panel__tags">
+          <el-tag v-for="field in unresolvedDeduplicationFields" :key="field" size="small" type="danger">
+            {{ field }}
+          </el-tag>
+        </div>
+      </section>
+
       <section class="template-deduplication-review-panel__group">
         <div class="template-deduplication-review-panel__group-title">当前模板保留字段</div>
         <div class="template-deduplication-review-panel__tags">
@@ -291,6 +300,9 @@ const passedGroups = computed(() =>
   (hashPolicyPreview.value?.requirement_groups || []).filter(group => group?.passed)
 )
 const previewWarnings = computed(() => hashPolicyPreview.value?.warnings || [])
+const unresolvedDeduplicationFields = computed(
+  () => hashPolicyPreview.value?.unresolved_deduplication_fields || []
+)
 const semanticMatchedHashableFields = computed(() =>
   (Array.isArray(props.existingDeduplicationFieldMatches) ? props.existingDeduplicationFieldMatches : [])
     .filter(match => match?.status === 'matched_hashable' && match?.match_type === 'semantic_key')
@@ -300,6 +312,10 @@ const semanticMatchedNonHashableFields = computed(() =>
     .filter(match => match?.status === 'matched_non_hashable')
 )
 const blockingMessage = computed(() => {
+  const blockingError = hashPolicyPreview.value?.blocking_errors?.[0]
+  if (blockingError) {
+    return `不能保存：${blockingError}`
+  }
   const group = missingGroups.value[0]
   if (group?.message) {
     return `不能保存：${group.message}`
@@ -312,7 +328,7 @@ const blockingMessage = computed(() => {
 })
 
 function emitPolicyState() {
-  const valid = !previewLoading.value && hashPolicyPreview.value?.passed === true
+  const valid = !previewLoading.value && hashPolicyPreview.value?.can_save === true
   emit('hash-policy-change', {
     valid,
     loading: previewLoading.value,
@@ -363,8 +379,12 @@ async function runHashPolicyPreview() {
     hashPolicyPreview.value = response?.data || response
   } catch (error) {
     if (requestId !== previewRequestId) return
-    hashPolicyPreview.value = null
-    ElMessage.warning(error?.message || 'Data Hash 预检失败')
+    hashPolicyPreview.value = error?.data?.hash_policy || null
+    ElMessage.warning(
+      hashPolicyPreview.value?.blocking_errors?.[0] ||
+      error?.message ||
+      'Data Hash 预检失败'
+    )
   } finally {
     if (requestId === previewRequestId) {
       previewLoading.value = false

@@ -103,6 +103,7 @@ class HashPolicyPreviewRequest(BaseModel):
 
 class HashPolicyPreviewData(BaseModel):
     passed: bool
+    can_save: bool = False
     blocking_errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     resolved_keys: List[str] = Field(default_factory=list)
@@ -111,6 +112,9 @@ class HashPolicyPreviewData(BaseModel):
     invalid_keys: List[str] = Field(default_factory=list)
     missing_required_groups: List[Dict[str, Any]] = Field(default_factory=list)
     sample_diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    normalized_deduplication_fields: List[str] = Field(default_factory=list)
+    normalized_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    unresolved_deduplication_fields: List[str] = Field(default_factory=list)
 
 
 class HashPolicyPreviewResponse(BaseModel):
@@ -206,6 +210,8 @@ class TemplateUpdateContextData(BaseModel):
     sample_data: Dict[str, Any] = Field(default_factory=dict)
     preview_data: List[Dict[str, Any]] = Field(default_factory=list)
     current_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    review_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    full_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     update_mode: TemplateUpdateMode
     header_source: str
     header_changes: HeaderChangesPayload
@@ -247,6 +253,8 @@ class TemplateUpdateBindingsData(BaseModel):
     current_header_columns: List[str] = Field(default_factory=list)
     current_header_row: int = 0
     current_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    review_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    full_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     required_semantic_keys: List[str] = Field(default_factory=list)
     hash_participating_semantic_keys: List[str] = Field(default_factory=list)
 

@@ -777,6 +777,9 @@ const showTemplateGovernanceSummary = (result) => {
 }
 
 const getHashPolicyFailureMessage = (preview) => {
+  if (preview?.blocking_errors?.[0]) {
+    return preview.blocking_errors[0]
+  }
   const missingGroup = preview?.missing_required_groups?.[0]
   if (missingGroup?.message) {
     return missingGroup.message
@@ -807,7 +810,7 @@ const ensureHashPolicyPreviewPassed = async ({
       fieldParseRules: selectedFieldParseRules,
       sampleRows,
     })
-    if (preview?.passed === false) {
+    if (preview?.can_save === false || preview?.passed === false) {
       ElMessage.warning(`不能保存：${getHashPolicyFailureMessage(preview)}`)
       return false
     }
