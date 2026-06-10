@@ -251,6 +251,14 @@ def _point_change(current: Any, previous: Any) -> float | None:
     return round(current_value - previous_value, 2)
 
 
+def _profit_margin_value(profit: Any, gmv: Any) -> float | None:
+    profit_value = _to_optional_float(profit)
+    gmv_value = _to_optional_float(gmv)
+    if profit_value is None or gmv_value is None or gmv_value == 0:
+        return None
+    return round((profit_value * 100.0) / gmv_value, 2)
+
+
 def _row_period_key(row: dict[str, Any]) -> date_cls | None:
     value = row.get("period_key")
     if value is None:
@@ -275,9 +283,13 @@ def _attach_shop_racing_change_fields(
     previous: dict[str, Any] | None,
 ) -> dict[str, Any]:
     previous = previous or {}
+    current_profit_margin = _profit_margin_value(current.get("profit"), current.get("gmv"))
+    previous_profit_margin = _profit_margin_value(previous.get("profit"), previous.get("gmv"))
     current["gmv_previous"] = _to_optional_float(previous.get("gmv"))
     current["profit_previous"] = _to_optional_float(previous.get("profit"))
     current["order_count_previous"] = _to_optional_float(previous.get("order_count"))
+    current["avg_order_value_previous"] = _to_optional_float(previous.get("avg_order_value"))
+    current["profit_margin_previous"] = previous_profit_margin
     current["achievement_rate_previous"] = _to_optional_float(previous.get("achievement_rate"))
     current["gmv_change_rate"] = _change_pct(
         _to_optional_float(current.get("gmv")),
@@ -290,6 +302,14 @@ def _attach_shop_racing_change_fields(
     current["order_count_change_rate"] = _change_pct(
         _to_optional_float(current.get("order_count")),
         _to_optional_float(previous.get("order_count")),
+    )
+    current["avg_order_value_change_rate"] = _change_pct(
+        _to_optional_float(current.get("avg_order_value")),
+        _to_optional_float(previous.get("avg_order_value")),
+    )
+    current["profit_margin_change_value"] = _point_change(
+        current_profit_margin,
+        previous_profit_margin,
     )
     current["achievement_rate_change_value"] = _point_change(
         current.get("achievement_rate"),
@@ -1852,6 +1872,7 @@ class PostgresqlDashboardService:
                 "shop_id": row.get("shop_id") or "unknown",
                 "gmv": _to_optional_float(row.get("gmv")),
                 "order_count": _to_optional_float(row.get("order_count")),
+                "avg_order_value": _to_optional_float(row.get("avg_order_value")),
                 "profit": _to_optional_float(row.get("profit")),
                 "achievement_rate": _to_optional_float(row.get("achievement_rate")),
             }

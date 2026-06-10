@@ -1038,20 +1038,28 @@ async def test_postgresql_dashboard_service_shop_racing_returns_previous_period_
     shop_a = next(row for row in result if row["shop_id"] == "shop-a")
     assert shop_a["gmv_previous"] == 100
     assert shop_a["profit_previous"] == 20
+    assert shop_a["avg_order_value_previous"] == 10
+    assert shop_a["profit_margin_previous"] == 20
     assert shop_a["order_count_previous"] == 10
     assert shop_a["achievement_rate_previous"] == 70
     assert shop_a["gmv_change_rate"] == 20
     assert shop_a["profit_change_rate"] == 50
+    assert shop_a["avg_order_value_change_rate"] == 0
+    assert shop_a["profit_margin_change_value"] == 5
     assert shop_a["order_count_change_rate"] == 20
     assert shop_a["achievement_rate_change_value"] == 10
 
     shop_b = next(row for row in result if row["shop_id"] == "shop-b")
     assert shop_b["gmv_previous"] is None
     assert shop_b["profit_previous"] is None
+    assert shop_b["avg_order_value_previous"] is None
+    assert shop_b["profit_margin_previous"] is None
     assert shop_b["order_count_previous"] is None
     assert shop_b["achievement_rate_previous"] is None
     assert shop_b["gmv_change_rate"] is None
     assert shop_b["profit_change_rate"] is None
+    assert shop_b["avg_order_value_change_rate"] is None
+    assert shop_b["profit_margin_change_value"] is None
     assert shop_b["order_count_change_rate"] is None
     assert shop_b["achievement_rate_change_value"] is None
     assert captured[0][1]["period_key"] == date(2026, 5, 1)
@@ -1131,13 +1139,66 @@ async def test_postgresql_dashboard_service_shop_racing_account_group_calculates
     assert result[0]["gmv"] == 200
     assert result[0]["gmv_previous"] == 150
     assert result[0]["profit_previous"] == 30
+    assert result[0]["avg_order_value_previous"] == 10
+    assert result[0]["profit_margin_previous"] == 20
     assert result[0]["order_count_previous"] == 15
     assert result[0]["achievement_rate_previous"] == 85.71
     assert result[0]["gmv_change_rate"] == 33.33
     assert result[0]["profit_change_rate"] == 33.33
+    assert result[0]["avg_order_value_change_rate"] == 0
+    assert result[0]["profit_margin_change_value"] == 0
     assert result[0]["order_count_change_rate"] == 33.33
     assert result[0]["achievement_rate"] == 100
     assert result[0]["achievement_rate_change_value"] == 14.29
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_rate_fields_handle_zero_or_missing_previous(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": date(2026, 5, 1),
+                "platform_code": "shopee",
+                "shop_id": "shop-a",
+                "display_name": "Shop A",
+                "gmv": 100,
+                "order_count": 2,
+                "avg_order_value": 50,
+                "profit": 10,
+                "target_amount": 100,
+                "achievement_rate": 100,
+            },
+            {
+                "granularity": "monthly",
+                "period_key": date(2026, 4, 1),
+                "platform_code": "shopee",
+                "shop_id": "shop-a",
+                "display_name": "Shop A",
+                "gmv": 0,
+                "order_count": 0,
+                "avg_order_value": 0,
+                "profit": 0,
+                "target_amount": 100,
+                "achievement_rate": 0,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_shop_racing(
+        granularity="monthly",
+        target_date="2026-05-01",
+        group_by="shop",
+    )
+
+    row = result[0]
+    assert row["avg_order_value_previous"] == 0
+    assert row["avg_order_value_change_rate"] is None
+    assert row["profit_margin_previous"] is None
+    assert row["profit_margin_change_value"] is None
 
 
 @pytest.mark.asyncio

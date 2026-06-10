@@ -85,8 +85,12 @@ def test_business_overview_frontend_shop_racing_embeds_metric_changes_and_expand
     assert "achievement_rate_change_value" in text
     assert "gmv_previous" in text
     assert "profit_previous" in text
+    assert "avg_order_value_previous" in text
+    assert "profit_margin_previous" in text
     assert "order_count_previous" in text
     assert "achievement_rate_previous" in text
+    assert "avg_order_value_change_rate" in text
+    assert "profit_margin_change_value" in text
     assert "min-height: 400px" not in text
 
 
@@ -110,7 +114,11 @@ def test_business_overview_frontend_keeps_module_positions_and_uses_adaptive_tab
     assert 'prop="page_views"\n            label="\u6d4f\u89c8\u91cf(PV)"\n            min-width="92"' in text
     assert 'prop="gmv" label="\u9500\u552e\u989d" min-width="86"' in text
     assert 'prop="profit" label="\u5229\u6da6" min-width="86"' in text
+    assert 'prop="profit_margin" min-width="60" align="right">' in text
+    assert '<span>利润率</span>' in text
     assert 'prop="order_count" label="\u8ba2\u5355\u6570" min-width="72"' in text
+    assert 'prop="avg_order_value" min-width="68" align="right">' in text
+    assert '<span>客单价</span>' in text
     assert 'prop="achievement_rate" label="\u5b8c\u6210\u7387" min-width="96"' in text
 
 
@@ -128,7 +136,7 @@ def test_business_overview_frontend_compacts_spacing_and_controls():
     assert '.comparison-table-container {\n  padding: 2px 0;' in text
     assert '.racing-table {\n  min-width: 762px;' in text
     assert '.metric-stack {\n  display: inline-flex;\n  flex-direction: column;\n  align-items: flex-end;\n  gap: 1px;' in text
-    assert '.metric-previous {\n  color: #909399;\n  font-size: 10px;' in text
+    assert '.metric-previous {\n  color: #909399;\n  font-size: 9px;' in text
     assert '.metric-delta {\n  font-size: 10px;' in text
 
 

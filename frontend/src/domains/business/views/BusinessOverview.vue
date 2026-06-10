@@ -605,9 +605,27 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="profit_margin" label="利润率" min-width="60" align="right">
+                <el-table-column prop="profit_margin" min-width="60" align="right">
+                  <template #header>
+                    <div class="metric-header-with-tip">
+                      <span>利润率</span>
+                      <el-tooltip content="主值为本期，次行为上期与环比">
+                        <el-icon class="metric-header-tip"><QuestionFilled /></el-icon>
+                      </el-tooltip>
+                    </div>
+                  </template>
                   <template #default="{ row }">
-                    {{ row.profit_margin == null ? '--' : formatPercent(row.profit_margin) }}
+                    <div class="metric-stack">
+                      <span>{{ row.profit_margin == null ? '--' : formatPercent(row.profit_margin) }}</span>
+                      <span class="metric-previous-line">
+                        <span class="metric-previous">
+                          {{ row.profit_margin_previous == null ? '--' : formatPercent(row.profit_margin_previous) }}
+                        </span>
+                        <span class="metric-delta" :class="getDeltaClass(row.profit_margin_change_value)">
+                          {{ formatPointChange(row.profit_margin_change_value) }}
+                        </span>
+                      </span>
+                    </div>
                   </template>
                 </el-table-column>
                 <el-table-column prop="order_count" label="订单数" min-width="72" align="right">
@@ -623,9 +641,27 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="avg_order_value" label="客单价" min-width="68" align="right">
+                <el-table-column prop="avg_order_value" min-width="68" align="right">
+                  <template #header>
+                    <div class="metric-header-with-tip">
+                      <span>客单价</span>
+                      <el-tooltip content="主值为本期，次行为上期与环比">
+                        <el-icon class="metric-header-tip"><QuestionFilled /></el-icon>
+                      </el-tooltip>
+                    </div>
+                  </template>
                   <template #default="{ row }">
-                    {{ row.avg_order_value == null ? '--' : formatCurrency(row.avg_order_value) }}
+                    <div class="metric-stack">
+                      <span>{{ row.avg_order_value == null ? '--' : formatCurrency(row.avg_order_value) }}</span>
+                      <span class="metric-previous-line">
+                        <span class="metric-previous">
+                          {{ row.avg_order_value_previous == null ? '--' : formatCurrency(row.avg_order_value_previous) }}
+                        </span>
+                        <span class="metric-delta" :class="getDeltaClass(row.avg_order_value_change_rate)">
+                          {{ formatChangeRate(row.avg_order_value_change_rate) }}
+                        </span>
+                      </span>
+                    </div>
                   </template>
                 </el-table-column>
                 <el-table-column prop="target_amount" label="目标" min-width="74" align="right">
@@ -2872,11 +2908,15 @@ const loadShopRacingData = async () => {
           achievement_rate: toNullableNumber(row.achievement_rate),
           gmv_previous: toNullableNumber(row.gmv_previous),
           profit_previous: toNullableNumber(row.profit_previous),
+          profit_margin_previous: toNullableNumber(row.profit_margin_previous),
           order_count_previous: toNullableNumber(row.order_count_previous),
+          avg_order_value_previous: toNullableNumber(row.avg_order_value_previous),
           achievement_rate_previous: toNullableNumber(row.achievement_rate_previous),
           gmv_change_rate: toNullableNumber(row.gmv_change_rate),
           profit_change_rate: toNullableNumber(row.profit_change_rate),
+          profit_margin_change_value: toNullableNumber(row.profit_margin_change_value),
           order_count_change_rate: toNullableNumber(row.order_count_change_rate),
+          avg_order_value_change_rate: toNullableNumber(row.avg_order_value_change_rate),
           achievement_rate_change_value: toNullableNumber(row.achievement_rate_change_value)
         }
       })
@@ -3604,6 +3644,17 @@ watch(
   margin-bottom: 8px;
 }
 
+.metric-header-with-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.metric-header-tip {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -3760,12 +3811,13 @@ watch(
 
 .metric-previous {
   color: #909399;
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1.2;
 }
 
 .metric-delta {
   font-size: 10px;
+  font-weight: 500;
   line-height: 1.2;
 }
 
