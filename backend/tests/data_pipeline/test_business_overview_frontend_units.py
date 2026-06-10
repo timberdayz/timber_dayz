@@ -48,6 +48,63 @@ def test_business_overview_frontend_traffic_ranking_shows_pv_uv_conversion_colum
     assert "pv_conversion_rate: row.pv_conversion_rate" in text
 
 
+def test_business_overview_frontend_traffic_ranking_embeds_changes_without_compare_columns():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert 'label="\u5bf9\u6bd4\u671fUV"' not in text
+    assert 'label="\u5bf9\u6bd4\u671fPV"' not in text
+    assert "visitor_count_change_rate" in text
+    assert "page_views_change_rate" in text
+    assert "uv_conversion_rate_change_value" in text
+    assert "pv_conversion_rate_change_value" in text
+    assert "visitor_count_previous" in text
+    assert "page_views_previous" in text
+    assert "uv_conversion_rate_previous" in text
+    assert "pv_conversion_rate_previous" in text
+    assert "\u73af\u6bd4 {{" not in text
+    assert "\u8f83\u4e0a\u671f {{" not in text
+    assert "\u2191" in text
+    assert "\u2193" in text
+
+
+def test_business_overview_frontend_shop_racing_embeds_metric_changes_and_expands_layout():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert '<el-col :xs="24" :lg="8">' in text
+    assert '<el-col :xs="24" :lg="16">' in text
+    assert "gmv_change_rate" in text
+    assert "profit_change_rate" in text
+    assert "order_count_change_rate" in text
+    assert "achievement_rate_change_value" in text
+    assert "gmv_previous" in text
+    assert "profit_previous" in text
+    assert "order_count_previous" in text
+    assert "achievement_rate_previous" in text
+    assert "min-height: 400px" not in text
+
+
+def test_business_overview_frontend_keeps_module_positions_and_uses_adaptive_table_widths():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert '<el-col :xs="24" :lg="8">' in text
+    assert '<el-col :xs="24" :lg="16">' in text
+    assert '<div class="traffic-ranking-section">' in text
+    assert 'label="\u5bf9\u6bd4\u671fUV"' not in text
+    assert 'label="\u5bf9\u6bd4\u671fPV"' not in text
+    assert 'prop="visitor_count"\n            label="\u8bbf\u5ba2\u6570(UV)"\n            min-width=' in text
+    assert 'prop="page_views"\n            label="\u6d4f\u89c8\u91cf(PV)"\n            min-width=' in text
+    assert 'prop="gmv" label="\u9500\u552e\u989d" min-width=' in text
+
+
 def test_business_overview_frontend_groups_kpis_and_allows_wrapping():
     text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
         encoding="utf-8",
