@@ -976,6 +976,171 @@ async def test_postgresql_dashboard_service_shop_racing_daily_keeps_generic_modu
 
 
 @pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_returns_previous_period_changes(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": date(2026, 5, 1),
+                "platform_code": "tiktok",
+                "shop_id": "shop-a",
+                "display_name": "Shop A",
+                "gmv": 120,
+                "order_count": 12,
+                "avg_order_value": 10,
+                "attach_rate": 1.2,
+                "profit": 30,
+                "target_amount": 150,
+                "achievement_rate": 80,
+            },
+            {
+                "granularity": "monthly",
+                "period_key": date(2026, 4, 1),
+                "platform_code": "tiktok",
+                "shop_id": "shop-a",
+                "display_name": "Shop A",
+                "gmv": 100,
+                "order_count": 10,
+                "avg_order_value": 10,
+                "attach_rate": 1.1,
+                "profit": 20,
+                "target_amount": 125,
+                "achievement_rate": 70,
+            },
+            {
+                "granularity": "monthly",
+                "period_key": date(2026, 5, 1),
+                "platform_code": "tiktok",
+                "shop_id": "shop-b",
+                "display_name": "Shop B",
+                "gmv": 50,
+                "order_count": 5,
+                "avg_order_value": 10,
+                "attach_rate": 1.0,
+                "profit": 0,
+                "target_amount": 0,
+                "achievement_rate": 0,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_shop_racing(
+        granularity="monthly",
+        target_date="2026-05-01",
+        group_by="shop",
+    )
+
+    shop_a = next(row for row in result if row["shop_id"] == "shop-a")
+    assert shop_a["gmv_previous"] == 100
+    assert shop_a["profit_previous"] == 20
+    assert shop_a["order_count_previous"] == 10
+    assert shop_a["achievement_rate_previous"] == 70
+    assert shop_a["gmv_change_rate"] == 20
+    assert shop_a["profit_change_rate"] == 50
+    assert shop_a["order_count_change_rate"] == 20
+    assert shop_a["achievement_rate_change_value"] == 10
+
+    shop_b = next(row for row in result if row["shop_id"] == "shop-b")
+    assert shop_b["gmv_previous"] is None
+    assert shop_b["profit_previous"] is None
+    assert shop_b["order_count_previous"] is None
+    assert shop_b["achievement_rate_previous"] is None
+    assert shop_b["gmv_change_rate"] is None
+    assert shop_b["profit_change_rate"] is None
+    assert shop_b["order_count_change_rate"] is None
+    assert shop_b["achievement_rate_change_value"] is None
+    assert captured[0][1]["period_key"] == date(2026, 5, 1)
+    assert captured[0][1]["previous_period_key"] == date(2026, 4, 1)
+    assert "src.period_key IN (:period_key, :previous_period_key)" in captured[0][0]
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_account_group_calculates_changes_after_aggregation(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "weekly",
+                "period_key": date(2026, 5, 4),
+                "platform_code": "tiktok",
+                "shop_id": "shop-a",
+                "shop_account_id": "account-1",
+                "account_display_name": "Account 1",
+                "gmv": 120,
+                "order_count": 12,
+                "profit": 30,
+                "target_amount": 150,
+                "achievement_rate": 80,
+            },
+            {
+                "granularity": "weekly",
+                "period_key": date(2026, 5, 4),
+                "platform_code": "tiktok",
+                "shop_id": "shop-b",
+                "shop_account_id": "account-1",
+                "account_display_name": "Account 1",
+                "gmv": 80,
+                "order_count": 8,
+                "profit": 10,
+                "target_amount": 50,
+                "achievement_rate": 160,
+            },
+            {
+                "granularity": "weekly",
+                "period_key": date(2026, 4, 27),
+                "platform_code": "tiktok",
+                "shop_id": "shop-a",
+                "shop_account_id": "account-1",
+                "account_display_name": "Account 1",
+                "gmv": 100,
+                "order_count": 10,
+                "profit": 20,
+                "target_amount": 125,
+                "achievement_rate": 80,
+            },
+            {
+                "granularity": "weekly",
+                "period_key": date(2026, 4, 27),
+                "platform_code": "tiktok",
+                "shop_id": "shop-b",
+                "shop_account_id": "account-1",
+                "account_display_name": "Account 1",
+                "gmv": 50,
+                "order_count": 5,
+                "profit": 10,
+                "target_amount": 50,
+                "achievement_rate": 100,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_shop_racing(
+        granularity="weekly",
+        target_date="2026-05-07",
+        group_by="account",
+    )
+
+    assert len(result) == 1
+    assert result[0]["gmv"] == 200
+    assert result[0]["gmv_previous"] == 150
+    assert result[0]["profit_previous"] == 30
+    assert result[0]["order_count_previous"] == 15
+    assert result[0]["achievement_rate_previous"] == 85.71
+    assert result[0]["gmv_change_rate"] == 33.33
+    assert result[0]["profit_change_rate"] == 33.33
+    assert result[0]["order_count_change_rate"] == 33.33
+    assert result[0]["achievement_rate"] == 100
+    assert result[0]["achievement_rate_change_value"] == 14.29
+
+
+@pytest.mark.asyncio
 async def test_postgresql_dashboard_service_shop_racing_prefers_resolved_display_name(monkeypatch):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
@@ -2493,6 +2658,59 @@ async def test_postgresql_dashboard_service_traffic_ranking_prefers_resolved_dis
     )
 
     assert result[0]["name"] == "Singapore(HX Home)"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_traffic_ranking_returns_previous_period_changes(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        return [
+            {
+                "granularity": "daily",
+                "period_key": date(2026, 5, 10),
+                "platform_code": "tiktok",
+                "shop_id": "shop-a",
+                "visitor_count": 120,
+                "page_views": 260,
+                "order_count": 12,
+                "uv_conversion_rate": 10,
+                "pv_conversion_rate": 4.62,
+            },
+            {
+                "granularity": "daily",
+                "period_key": date(2026, 5, 9),
+                "platform_code": "tiktok",
+                "shop_id": "shop-a",
+                "visitor_count": 100,
+                "page_views": 200,
+                "order_count": 8,
+                "uv_conversion_rate": 8,
+                "pv_conversion_rate": 4,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_traffic_ranking(
+        granularity="daily",
+        target_date="2026-05-10",
+        dimension="shop",
+    )
+
+    assert result[0]["visitor_count_previous"] == 100
+    assert result[0]["page_views_previous"] == 200
+    assert result[0]["uv_conversion_rate_previous"] == 8
+    assert result[0]["pv_conversion_rate_previous"] == 4
+    assert result[0]["visitor_count_change_rate"] == 20
+    assert result[0]["page_views_change_rate"] == 30
+    assert result[0]["uv_conversion_rate_change_value"] == 2
+    assert result[0]["pv_conversion_rate_change_value"] == 0.62
+    assert captured[0][1]["period_key"] == date(2026, 5, 10)
+    assert captured[0][1]["previous_period_key"] == date(2026, 5, 9)
+    assert "src.period_key IN (:period_key, :previous_period_key)" in captured[0][0]
 
 
 @pytest.mark.asyncio

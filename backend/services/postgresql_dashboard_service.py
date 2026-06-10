@@ -243,6 +243,89 @@ def _change_pct(current: float, previous: float) -> float | None:
     return round((current - previous) * 100.0 / previous, 2)
 
 
+def _point_change(current: Any, previous: Any) -> float | None:
+    current_value = _to_optional_float(current)
+    previous_value = _to_optional_float(previous)
+    if current_value is None or previous_value is None:
+        return None
+    return round(current_value - previous_value, 2)
+
+
+def _row_period_key(row: dict[str, Any]) -> date_cls | None:
+    value = row.get("period_key")
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date_cls):
+        return value
+    return _normalize_period_start(str(value))
+
+
+def _shop_racing_identity_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return (row.get("platform_code"), row.get("shop_id"))
+
+
+def _traffic_identity_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return (row.get("platform_code"), row.get("shop_id"))
+
+
+def _attach_shop_racing_change_fields(
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+) -> dict[str, Any]:
+    previous = previous or {}
+    current["gmv_previous"] = _to_optional_float(previous.get("gmv"))
+    current["profit_previous"] = _to_optional_float(previous.get("profit"))
+    current["order_count_previous"] = _to_optional_float(previous.get("order_count"))
+    current["achievement_rate_previous"] = _to_optional_float(previous.get("achievement_rate"))
+    current["gmv_change_rate"] = _change_pct(
+        _to_optional_float(current.get("gmv")),
+        _to_optional_float(previous.get("gmv")),
+    )
+    current["profit_change_rate"] = _change_pct(
+        _to_optional_float(current.get("profit")),
+        _to_optional_float(previous.get("profit")),
+    )
+    current["order_count_change_rate"] = _change_pct(
+        _to_optional_float(current.get("order_count")),
+        _to_optional_float(previous.get("order_count")),
+    )
+    current["achievement_rate_change_value"] = _point_change(
+        current.get("achievement_rate"),
+        previous.get("achievement_rate"),
+    )
+    return current
+
+
+def _attach_traffic_change_fields(
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+) -> dict[str, Any]:
+    previous = previous or {}
+    current["visitor_count_previous"] = _to_optional_float(previous.get("visitor_count"))
+    current["page_views_previous"] = _to_optional_float(previous.get("page_views"))
+    current["uv_conversion_rate_previous"] = _to_optional_float(previous.get("uv_conversion_rate"))
+    current["pv_conversion_rate_previous"] = _to_optional_float(previous.get("pv_conversion_rate"))
+    current["visitor_count_change_rate"] = _change_pct(
+        _to_optional_float(current.get("visitor_count")),
+        _to_optional_float(previous.get("visitor_count")),
+    )
+    current["page_views_change_rate"] = _change_pct(
+        _to_optional_float(current.get("page_views")),
+        _to_optional_float(previous.get("page_views")),
+    )
+    current["uv_conversion_rate_change_value"] = _point_change(
+        current.get("uv_conversion_rate"),
+        previous.get("uv_conversion_rate"),
+    )
+    current["pv_conversion_rate_change_value"] = _point_change(
+        current.get("pv_conversion_rate"),
+        previous.get("pv_conversion_rate"),
+    )
+    return current
+
+
 def reduce_business_overview_comparison_rows(
     current_row: dict[str, Any],
     previous_row: dict[str, Any],
@@ -1628,11 +1711,17 @@ class PostgresqlDashboardService:
         group_by: str = "shop",
         platform: str | None = None,
     ) -> list[dict[str, Any]]:
-        period_key = _normalize_period_start(target_date)
+        normalized_target_date = _normalize_period_start(target_date)
         normalized_granularity = str(granularity or "").strip().lower()
+        period_key = self._business_overview_kpi_period_key(normalized_granularity, normalized_target_date)
+        previous_period_key = self._previous_business_overview_kpi_period_key(normalized_granularity, period_key)
         source_table = _business_overview_shop_racing_source_table(normalized_granularity)
-        where_clause = "src.granularity = :granularity AND src.period_key = :period_key"
-        params: dict[str, Any] = {"granularity": normalized_granularity, "period_key": period_key}
+        where_clause = "src.granularity = :granularity AND src.period_key IN (:period_key, :previous_period_key)"
+        params: dict[str, Any] = {
+            "granularity": normalized_granularity,
+            "period_key": period_key,
+            "previous_period_key": previous_period_key,
+        }
 
         query = f"""
             SELECT
@@ -1661,87 +1750,118 @@ class PostgresqlDashboardService:
         except Exception:
             rows = await self._fetch_rows_with_statement_timeout(query, params, timeout_ms=120000)
 
+        current_rows = [row for row in rows if _row_period_key(row) == period_key]
+        previous_rows = [row for row in rows if _row_period_key(row) == previous_period_key]
+
         if group_by == "platform":
-            grouped: dict[str, dict[str, Any]] = {}
-            for row in rows:
-                key = row["platform_code"]
-                grouped.setdefault(
-                    key,
-                    {
-                        "name": key,
-                        "platform_code": key,
-                        "shop_id": "ALL",
-                        "gmv": 0.0,
-                        "profit": 0.0,
-                        "order_count": 0.0,
-                        "avg_order_value": 0.0,
-                        "attach_rate": 0.0,
-                        "target_amount": 0.0,
-                        "achievement_rate": 0.0,
-                    },
-                )
-                grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
-                grouped[key]["profit"] += _to_optional_float(row.get("profit")) or 0.0
-                grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
-                grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
-            for value in grouped.values():
-                if value["order_count"]:
-                    value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
-                if value["target_amount"]:
-                    value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+            def group_platform(source_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+                grouped: dict[str, dict[str, Any]] = {}
+                for row in source_rows:
+                    key = row["platform_code"]
+                    grouped.setdefault(
+                        key,
+                        {
+                            "name": key,
+                            "platform_code": key,
+                            "shop_id": "ALL",
+                            "gmv": 0.0,
+                            "profit": 0.0,
+                            "order_count": 0.0,
+                            "avg_order_value": 0.0,
+                            "attach_rate": 0.0,
+                            "target_amount": 0.0,
+                            "achievement_rate": 0.0,
+                        },
+                    )
+                    grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
+                    grouped[key]["profit"] += _to_optional_float(row.get("profit")) or 0.0
+                    grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
+                    grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
+                for value in grouped.values():
+                    if value["order_count"]:
+                        value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+                    if value["target_amount"]:
+                        value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+                return grouped
+
+            grouped = group_platform(current_rows)
+            previous_grouped = group_platform(previous_rows)
+            for key, value in grouped.items():
+                _attach_shop_racing_change_fields(value, previous_grouped.get(key))
             return rank_shop_racing_rows(list(grouped.values()))
 
         if group_by == "account":
-            grouped: dict[str, dict[str, Any]] = {}
-            for row in rows:
-                account_id = row.get("shop_account_id")
-                main_account_id = row.get("main_account_id")
-                account_store_name = row.get("account_store_name")
-                main_account_name = row.get("main_account_name")
-                display_name = row.get("account_display_name") or " / ".join(
-                    [
-                        part
-                        for part in (
-                            (str(main_account_name).strip() if main_account_name else None),
-                            (str(account_store_name).strip() if account_store_name else None),
-                        )
-                        if part
-                    ]
-                )
-                fallback_name = display_name or account_store_name or account_id or "未匹配账号"
-                key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
-                grouped.setdefault(
-                    key,
-                    {
-                        "name": fallback_name,
-                        "platform_code": row.get("platform_code"),
-                        "shop_id": "ALL",
-                        "shop_account_id": account_id,
-                        "main_account_id": main_account_id,
-                        "main_account_name": main_account_name,
-                        "is_unmatched": not bool(account_id),
-                        "gmv": 0.0,
-                        "profit": 0.0,
-                        "order_count": 0.0,
-                        "avg_order_value": 0.0,
-                        "attach_rate": 0.0,
-                        "target_amount": 0.0,
-                        "achievement_rate": 0.0,
-                    },
-                )
-                grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
-                grouped[key]["profit"] += _to_optional_float(row.get("profit")) or 0.0
-                grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
-                grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
-            for value in grouped.values():
-                if value["order_count"]:
-                    value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
-                if value["target_amount"]:
-                    value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+            def group_account(source_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+                grouped: dict[str, dict[str, Any]] = {}
+                for row in source_rows:
+                    account_id = row.get("shop_account_id")
+                    main_account_id = row.get("main_account_id")
+                    account_store_name = row.get("account_store_name")
+                    main_account_name = row.get("main_account_name")
+                    display_name = row.get("account_display_name") or " / ".join(
+                        [
+                            part
+                            for part in (
+                                (str(main_account_name).strip() if main_account_name else None),
+                                (str(account_store_name).strip() if account_store_name else None),
+                            )
+                            if part
+                        ]
+                    )
+                    fallback_name = display_name or account_store_name or account_id or "未匹配账号"
+                    key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                    grouped.setdefault(
+                        key,
+                        {
+                            "name": fallback_name,
+                            "platform_code": row.get("platform_code"),
+                            "shop_id": "ALL",
+                            "shop_account_id": account_id,
+                            "main_account_id": main_account_id,
+                            "main_account_name": main_account_name,
+                            "is_unmatched": not bool(account_id),
+                            "gmv": 0.0,
+                            "profit": 0.0,
+                            "order_count": 0.0,
+                            "avg_order_value": 0.0,
+                            "attach_rate": 0.0,
+                            "target_amount": 0.0,
+                            "achievement_rate": 0.0,
+                        },
+                    )
+                    grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
+                    grouped[key]["profit"] += _to_optional_float(row.get("profit")) or 0.0
+                    grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
+                    grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
+                for value in grouped.values():
+                    if value["order_count"]:
+                        value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+                    if value["target_amount"]:
+                        value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+                return grouped
+
+            grouped = group_account(current_rows)
+            previous_grouped = group_account(previous_rows)
+            for key, value in grouped.items():
+                _attach_shop_racing_change_fields(value, previous_grouped.get(key))
             return rank_shop_racing_rows(list(grouped.values()))
 
-        normalized_rows = [
+        previous_normalized_rows = [
             {
+                "platform_code": row.get("platform_code"),
+                "shop_id": row.get("shop_id") or "unknown",
+                "gmv": _to_optional_float(row.get("gmv")),
+                "order_count": _to_optional_float(row.get("order_count")),
+                "profit": _to_optional_float(row.get("profit")),
+                "achievement_rate": _to_optional_float(row.get("achievement_rate")),
+            }
+            for row in previous_rows
+        ]
+        previous_by_key = {_shop_racing_identity_key(row): row for row in previous_normalized_rows}
+
+        normalized_rows = []
+        for row in current_rows:
+            normalized = {
                 "name": row.get("display_name") or "未匹配店铺",
                 "platform_code": row.get("platform_code"),
                 "shop_id": row.get("shop_id") or "unknown",
@@ -1757,8 +1877,12 @@ class PostgresqlDashboardService:
                 "target_amount": _to_optional_float(row.get("target_amount")),
                 "achievement_rate": _to_optional_float(row.get("achievement_rate")),
             }
-            for row in rows
-        ]
+            normalized_rows.append(
+                _attach_shop_racing_change_fields(
+                    normalized,
+                    previous_by_key.get(_shop_racing_identity_key(normalized)),
+                )
+            )
         return rank_shop_racing_rows(normalized_rows)
 
     async def get_business_overview_traffic_ranking(
@@ -1768,7 +1892,10 @@ class PostgresqlDashboardService:
         dimension: str = "visitor",
         platform: str | None = None,
     ) -> list[dict[str, Any]]:
-        period_key = _normalize_period_start(target_date)
+        normalized_granularity = str(granularity or "").strip().lower()
+        normalized_target_date = _normalize_period_start(target_date)
+        period_key = self._business_overview_kpi_period_key(normalized_granularity, normalized_target_date)
+        previous_period_key = self._previous_business_overview_kpi_period_key(normalized_granularity, period_key)
         query = """
             SELECT
                 :granularity AS granularity,
@@ -1785,93 +1912,108 @@ class PostgresqlDashboardService:
             FROM api.business_overview_traffic_ranking_module src
 {identity_join}
             WHERE src.granularity = :granularity
-              AND src.period_key = :period_key
+              AND src.period_key IN (:period_key, :previous_period_key)
             """.format(
             identity_select=_business_overview_identity_select_sql(),
             identity_join=_business_overview_identity_join_sql(),
         )
-        params = {"granularity": granularity, "period_key": period_key}
+        params = {
+            "granularity": normalized_granularity,
+            "period_key": period_key,
+            "previous_period_key": previous_period_key,
+        }
         if platform:
             query += " AND src.platform_code = :platform_code"
             params["platform_code"] = platform
         rows = await self._fetch_rows(query, params)
 
+        current_rows = [row for row in rows if _row_period_key(row) == period_key]
+        previous_rows = [row for row in rows if _row_period_key(row) == previous_period_key]
+
         if dimension == "account":
-            grouped: dict[str, dict[str, Any]] = {}
-            for row in rows:
-                account_id = row.get("shop_account_id")
-                main_account_id = row.get("main_account_id")
-                account_store_name = row.get("account_store_name")
-                main_account_name = row.get("main_account_name")
-                display_name = row.get("account_display_name") or " / ".join(
-                    [
-                        part
-                        for part in (
-                            (str(main_account_name).strip() if main_account_name else None),
-                            (str(account_store_name).strip() if account_store_name else None),
-                        )
-                        if part
-                    ]
-                )
-                fallback_name = display_name or account_store_name or account_id or "未匹配账号"
-                key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
-                grouped.setdefault(
-                    key,
-                    {
-                        "name": fallback_name,
-                        "platform_code": row.get("platform_code"),
-                        "shop_id": "ALL",
-                        "shop_account_id": account_id,
-                        "main_account_id": main_account_id,
-                        "main_account_name": main_account_name,
-                        "is_unmatched": not bool(account_id),
-                        "visitor_count": 0.0,
-                        "page_views": 0.0,
-                        "order_count": 0.0,
-                        "conversion_rate": None,
-                        "uv_conversion_rate": None,
-                        "pv_conversion_rate": None,
-                        "_has_order_count": False,
-                        "_has_visitor_count": False,
-                        "_has_page_views": False,
-                    },
-                )
-                visitor_count = _to_optional_float(row.get("visitor_count"))
-                page_views = _to_optional_float(row.get("page_views"))
-                order_count = _to_optional_float(row.get("order_count"))
-                if visitor_count is not None:
-                    grouped[key]["visitor_count"] += visitor_count
-                    grouped[key]["_has_visitor_count"] = True
-                if page_views is not None:
-                    grouped[key]["page_views"] += page_views
-                    grouped[key]["_has_page_views"] = True
-                if order_count is not None:
-                    grouped[key]["order_count"] += order_count
-                    grouped[key]["_has_order_count"] = True
-            normalized_rows = []
-            for value in grouped.values():
-                rate_order_count = (
-                    value.get("order_count") if value.pop("_has_order_count") else None
-                )
-                rate_visitor_count = (
-                    value.get("visitor_count") if value.pop("_has_visitor_count") else None
-                )
-                rate_page_views = (
-                    value.get("page_views") if value.pop("_has_page_views") else None
-                )
-                value["uv_conversion_rate"] = _percent_or_none(
-                    rate_order_count,
-                    rate_visitor_count,
-                )
-                value["pv_conversion_rate"] = _percent_or_none(
-                    rate_order_count,
-                    rate_page_views,
-                )
-                value["conversion_rate"] = value["uv_conversion_rate"]
-                normalized_rows.append(value)
-        else:
+            def group_account(source_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+                grouped: dict[str, dict[str, Any]] = {}
+                for row in source_rows:
+                    account_id = row.get("shop_account_id")
+                    main_account_id = row.get("main_account_id")
+                    account_store_name = row.get("account_store_name")
+                    main_account_name = row.get("main_account_name")
+                    display_name = row.get("account_display_name") or " / ".join(
+                        [
+                            part
+                            for part in (
+                                (str(main_account_name).strip() if main_account_name else None),
+                                (str(account_store_name).strip() if account_store_name else None),
+                            )
+                            if part
+                        ]
+                    )
+                    fallback_name = display_name or account_store_name or account_id or "未匹配账号"
+                    key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                    grouped.setdefault(
+                        key,
+                        {
+                            "name": fallback_name,
+                            "platform_code": row.get("platform_code"),
+                            "shop_id": "ALL",
+                            "shop_account_id": account_id,
+                            "main_account_id": main_account_id,
+                            "main_account_name": main_account_name,
+                            "is_unmatched": not bool(account_id),
+                            "visitor_count": 0.0,
+                            "page_views": 0.0,
+                            "order_count": 0.0,
+                            "conversion_rate": None,
+                            "uv_conversion_rate": None,
+                            "pv_conversion_rate": None,
+                            "_has_order_count": False,
+                            "_has_visitor_count": False,
+                            "_has_page_views": False,
+                        },
+                    )
+                    visitor_count = _to_optional_float(row.get("visitor_count"))
+                    page_views = _to_optional_float(row.get("page_views"))
+                    order_count = _to_optional_float(row.get("order_count"))
+                    if visitor_count is not None:
+                        grouped[key]["visitor_count"] += visitor_count
+                        grouped[key]["_has_visitor_count"] = True
+                    if page_views is not None:
+                        grouped[key]["page_views"] += page_views
+                        grouped[key]["_has_page_views"] = True
+                    if order_count is not None:
+                        grouped[key]["order_count"] += order_count
+                        grouped[key]["_has_order_count"] = True
+                for value in grouped.values():
+                    rate_order_count = value.get("order_count") if value.pop("_has_order_count") else None
+                    rate_visitor_count = value.get("visitor_count") if value.pop("_has_visitor_count") else None
+                    rate_page_views = value.get("page_views") if value.pop("_has_page_views") else None
+                    value["uv_conversion_rate"] = _percent_or_none(rate_order_count, rate_visitor_count)
+                    value["pv_conversion_rate"] = _percent_or_none(rate_order_count, rate_page_views)
+                    value["conversion_rate"] = value["uv_conversion_rate"]
+                return grouped
+
+            grouped = group_account(current_rows)
+            previous_grouped = group_account(previous_rows)
             normalized_rows = [
+                _attach_traffic_change_fields(value, previous_grouped.get(key))
+                for key, value in grouped.items()
+            ]
+        else:
+            previous_normalized_rows = [
                 {
+                    "platform_code": row.get("platform_code"),
+                    "shop_id": row.get("shop_id") or "unknown",
+                    "visitor_count": _to_optional_float(row.get("visitor_count")),
+                    "page_views": _to_optional_float(row.get("page_views")),
+                    "uv_conversion_rate": _to_optional_float(row.get("uv_conversion_rate")),
+                    "pv_conversion_rate": _to_optional_float(row.get("pv_conversion_rate")),
+                }
+                for row in previous_rows
+            ]
+            previous_by_key = {_traffic_identity_key(row): row for row in previous_normalized_rows}
+            normalized_rows = []
+            for row in current_rows:
+                normalized = {
                     "name": row.get("display_name")
                     or (
                         row.get("shop_id")
@@ -1891,8 +2033,12 @@ class PostgresqlDashboardService:
                     "uv_conversion_rate": _to_optional_float(row.get("uv_conversion_rate")),
                     "pv_conversion_rate": _to_optional_float(row.get("pv_conversion_rate")),
                 }
-                for row in rows
-            ]
+                normalized_rows.append(
+                    _attach_traffic_change_fields(
+                        normalized,
+                        previous_by_key.get(_traffic_identity_key(normalized)),
+                    )
+                )
         return rank_traffic_rows(normalized_rows, dimension="pv")
 
     async def get_store_analysis_capabilities(

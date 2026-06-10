@@ -334,7 +334,7 @@
     <div class="comparison-section">
       <el-row :gutter="20">
         <!-- 左侧：数据对比图表 -->
-        <el-col :xs="24" :lg="14">
+        <el-col :xs="24" :lg="8">
           <el-card class="chart-card" shadow="hover">
             <template #header>
                 <div class="card-header">
@@ -474,7 +474,7 @@
         </el-col>
 
         <!-- 右侧：店铺赛马（日/周/月 + 日期 + 筛选维度：店铺或账号） -->
-        <el-col :xs="24" :lg="10">
+        <el-col :xs="24" :lg="16">
           <el-card class="chart-card" shadow="hover">
             <template #header>
               <div class="card-header">
@@ -565,7 +565,7 @@
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="name" label="名称" width="180" fixed="left" show-overflow-tooltip>
+                <el-table-column prop="name" label="名称" min-width="200" fixed="left" show-overflow-tooltip>
                   <template #default="{ row }">
                     <div class="shop-display-cell" :class="{ 'shop-display-cell--unmatched': isUnmatchedShopRow(row) }">
                       <div>{{ row.name }}</div>
@@ -573,41 +573,65 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="platform_code" label="平台" width="90" />
-                <el-table-column prop="gmv" label="销售额" width="120" align="right">
+                <el-table-column prop="platform_code" label="平台" min-width="90" />
+                <el-table-column prop="gmv" label="销售额" min-width="140" align="right">
                   <template #default="{ row }">
-                    {{ row.gmv == null ? '--' : formatCurrency(row.gmv) }}
+                    <div class="metric-stack">
+                      <span>{{ row.gmv == null ? '--' : formatCurrency(row.gmv) }}</span>
+                      <span class="metric-previous-line">
+                        <span class="metric-previous">{{ row.gmv_previous == null ? '--' : formatCurrency(row.gmv_previous) }}</span>
+                        <span class="metric-delta" :class="getDeltaClass(row.gmv_change_rate)">
+                          {{ formatChangeRate(row.gmv_change_rate) }}
+                        </span>
+                      </span>
+                    </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="profit" label="利润" width="120" align="right">
+                <el-table-column prop="profit" label="利润" min-width="140" align="right">
                   <template #default="{ row }">
-                    <span :class="{ 'metric-negative': Number(row.profit) < 0 }">
-                      {{ row.profit == null ? '--' : formatCurrency(row.profit) }}
-                    </span>
+                    <div class="metric-stack">
+                      <span :class="{ 'metric-negative': Number(row.profit) < 0 }">
+                        {{ row.profit == null ? '--' : formatCurrency(row.profit) }}
+                      </span>
+                      <span class="metric-previous-line">
+                        <span class="metric-previous">{{ row.profit_previous == null ? '--' : formatCurrency(row.profit_previous) }}</span>
+                        <span class="metric-delta" :class="getDeltaClass(row.profit_change_rate)">
+                          {{ formatChangeRate(row.profit_change_rate) }}
+                        </span>
+                      </span>
+                    </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="profit_margin" label="利润率" width="90" align="right">
+                <el-table-column prop="profit_margin" label="利润率" min-width="90" align="right">
                   <template #default="{ row }">
                     {{ row.profit_margin == null ? '--' : formatPercent(row.profit_margin) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="order_count" label="订单数" width="90" align="right">
+                <el-table-column prop="order_count" label="订单数" min-width="120" align="right">
                   <template #default="{ row }">
-                    {{ row.order_count == null ? '--' : formatInteger(row.order_count) }}
+                    <div class="metric-stack">
+                      <span>{{ row.order_count == null ? '--' : formatInteger(row.order_count) }}</span>
+                      <span class="metric-previous-line">
+                        <span class="metric-previous">{{ row.order_count_previous == null ? '--' : formatInteger(row.order_count_previous) }}</span>
+                        <span class="metric-delta" :class="getDeltaClass(row.order_count_change_rate)">
+                          {{ formatChangeRate(row.order_count_change_rate) }}
+                        </span>
+                      </span>
+                    </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="avg_order_value" label="客单价" width="100" align="right">
+                <el-table-column prop="avg_order_value" label="客单价" min-width="100" align="right">
                   <template #default="{ row }">
                     {{ row.avg_order_value == null ? '--' : formatCurrency(row.avg_order_value) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="target_amount" label="目标" width="120" align="right">
+                <el-table-column prop="target_amount" label="目标" min-width="120" align="right">
                   <template #default="{ row }">
                     <el-tag v-if="!hasShopRacingTarget(row)" type="info" size="small">未设目标</el-tag>
                     <span v-else>{{ formatCurrency(row.target_amount) }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="achievement_rate" label="完成率" width="150">
+                <el-table-column prop="achievement_rate" label="完成率" min-width="180">
                   <template #default="{ row }">
                     <el-tag v-if="!hasShopRacingTarget(row)" type="info" size="small">未设目标</el-tag>
                     <div v-else class="racing-achievement-cell">
@@ -617,7 +641,17 @@
                         :stroke-width="8"
                         :show-text="false"
                       />
-                      <span>{{ getShopRacingAchievementText(row) }}</span>
+                      <div class="metric-stack metric-stack--achievement">
+                        <span>{{ getShopRacingAchievementText(row) }}</span>
+                        <span class="metric-previous-line">
+                          <span class="metric-previous">
+                            {{ row.achievement_rate_previous == null ? '--' : `${Math.round(row.achievement_rate_previous)}%` }}
+                          </span>
+                          <span class="metric-delta" :class="getDeltaClass(row.achievement_rate_change_value)">
+                            {{ formatPointChange(row.achievement_rate_change_value) }}
+                          </span>
+                        </span>
+                      </div>
                     </div>
                   </template>
                 </el-table-column>
@@ -725,7 +759,7 @@
           <el-table-column
             prop="name"
             label="名称"
-            width="200"
+            min-width="220"
             fixed="left"
             show-overflow-tooltip
           >
@@ -739,121 +773,107 @@
           <el-table-column
             prop="platform_code"
             label="平台"
-            width="120"
+            min-width="120"
             v-if="trafficRankingDimension === 'shop'"
           />
           <el-table-column
             prop="visitor_count"
             label="访客数(UV)"
-            width="150"
+            min-width="180"
             align="right"
             sortable
           >
             <template #default="{ row }">
-              {{ formatNumber(row.visitor_count) }}
+              <div class="metric-stack">
+                <span>{{ formatNumber(row.visitor_count) }}</span>
+                <span class="metric-previous-line">
+                  <span class="metric-previous">{{ row.visitor_count_previous == null ? '--' : formatNumber(row.visitor_count_previous) }}</span>
+                  <span class="metric-delta" :class="getDeltaClass(row.visitor_count_change_rate)">
+                    {{ formatChangeRate(row.visitor_count_change_rate) }}
+                  </span>
+                </span>
+              </div>
             </template>
           </el-table-column>
           <el-table-column
             prop="page_views"
             label="浏览量(PV)"
-            width="150"
+            min-width="180"
             align="right"
             sortable
           >
             <template #default="{ row }">
-              {{ formatNumber(row.page_views) }}
+              <div class="metric-stack">
+                <span>{{ formatNumber(row.page_views) }}</span>
+                <span class="metric-previous-line">
+                  <span class="metric-previous">{{ row.page_views_previous == null ? '--' : formatNumber(row.page_views_previous) }}</span>
+                  <span class="metric-delta" :class="getDeltaClass(row.page_views_change_rate)">
+                    {{ formatChangeRate(row.page_views_change_rate) }}
+                  </span>
+                </span>
+              </div>
             </template>
           </el-table-column>
           <el-table-column
             prop="uv_conversion_rate"
             label="UV转化率"
-            width="130"
+            min-width="170"
             align="right"
             sortable
           >
             <template #default="{ row }">
-              {{
-                row.uv_conversion_rate != null && !Number.isNaN(Number(row.uv_conversion_rate))
-                  ? Number(row.uv_conversion_rate).toFixed(2) + '%'
-                  : '--'
-              }}
+              <div class="metric-stack">
+                <span>
+                  {{
+                    row.uv_conversion_rate != null && !Number.isNaN(Number(row.uv_conversion_rate))
+                      ? Number(row.uv_conversion_rate).toFixed(2) + '%'
+                      : '--'
+                  }}
+                </span>
+                <span class="metric-previous-line">
+                  <span class="metric-previous">
+                    {{
+                      row.uv_conversion_rate_previous != null && !Number.isNaN(Number(row.uv_conversion_rate_previous))
+                        ? Number(row.uv_conversion_rate_previous).toFixed(2) + '%'
+                        : '--'
+                    }}
+                  </span>
+                  <span class="metric-delta" :class="getDeltaClass(row.uv_conversion_rate_change_value)">
+                    {{ formatPointChange(row.uv_conversion_rate_change_value) }}
+                  </span>
+                </span>
+              </div>
             </template>
           </el-table-column>
           <el-table-column
             prop="pv_conversion_rate"
             label="PV转化率"
-            width="130"
+            min-width="170"
             align="right"
             sortable
           >
             <template #default="{ row }">
-              {{
-                row.pv_conversion_rate != null && !Number.isNaN(Number(row.pv_conversion_rate))
-                  ? Number(row.pv_conversion_rate).toFixed(2) + '%'
-                  : '--'
-              }}
-            </template>
-          </el-table-column>
-          <el-table-column
-            prop="uv_change_rate"
-            label="UV环比"
-            width="120"
-            align="right"
-            sortable
-          >
-            <template #default="{ row }">
-              <span
-                :class="
-                  (row.uv_change_rate ?? 0) >= 0 ? 'text-success' : 'text-danger'
-                "
-              >
-                {{
-                  row.uv_change_rate != null && !Number.isNaN(Number(row.uv_change_rate))
-                    ? (row.uv_change_rate >= 0 ? '+' : '') + Number(row.uv_change_rate).toFixed(2) + '%'
-                    : '--'
-                }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column
-            prop="pv_change_rate"
-            label="PV环比"
-            width="120"
-            align="right"
-            sortable
-          >
-            <template #default="{ row }">
-              <span
-                :class="
-                  (row.pv_change_rate ?? 0) >= 0 ? 'text-success' : 'text-danger'
-                "
-              >
-                {{
-                  row.pv_change_rate != null && !Number.isNaN(Number(row.pv_change_rate))
-                    ? (row.pv_change_rate >= 0 ? '+' : '') + Number(row.pv_change_rate).toFixed(2) + '%'
-                    : '--'
-                }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column
-            prop="compare_visitor_count"
-            label="对比期UV"
-            width="150"
-            align="right"
-          >
-            <template #default="{ row }">
-              {{ row.compare_visitor_count != null ? formatNumber(row.compare_visitor_count) : '--' }}
-            </template>
-          </el-table-column>
-          <el-table-column
-            prop="compare_page_views"
-            label="对比期PV"
-            width="150"
-            align="right"
-          >
-            <template #default="{ row }">
-              {{ row.compare_page_views != null ? formatNumber(row.compare_page_views) : '--' }}
+              <div class="metric-stack">
+                <span>
+                  {{
+                    row.pv_conversion_rate != null && !Number.isNaN(Number(row.pv_conversion_rate))
+                      ? Number(row.pv_conversion_rate).toFixed(2) + '%'
+                      : '--'
+                  }}
+                </span>
+                <span class="metric-previous-line">
+                  <span class="metric-previous">
+                    {{
+                      row.pv_conversion_rate_previous != null && !Number.isNaN(Number(row.pv_conversion_rate_previous))
+                        ? Number(row.pv_conversion_rate_previous).toFixed(2) + '%'
+                        : '--'
+                    }}
+                  </span>
+                  <span class="metric-delta" :class="getDeltaClass(row.pv_conversion_rate_change_value)">
+                    {{ formatPointChange(row.pv_conversion_rate_change_value) }}
+                  </span>
+                </span>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -2539,6 +2559,27 @@ const getOperatingResultTagType = (value) => {
 const formatNullablePercent = (value, decimals = 2) =>
   value != null && !Number.isNaN(Number(value)) ? `${Number(value).toFixed(decimals)}%` : '--'
 
+const formatChangeRate = (value, decimals = 2) => {
+  if (value == null || Number.isNaN(Number(value))) return '--'
+  const numericValue = Number(value)
+  if (numericValue > 0) return `↑${numericValue.toFixed(decimals)}%`
+  if (numericValue < 0) return `↓${Math.abs(numericValue).toFixed(decimals)}%`
+  return `${numericValue.toFixed(decimals)}%`
+}
+
+const formatPointChange = (value, decimals = 2) => {
+  if (value == null || Number.isNaN(Number(value))) return '--'
+  const numericValue = Number(value)
+  if (numericValue > 0) return `↑${numericValue.toFixed(decimals)}pp`
+  if (numericValue < 0) return `↓${Math.abs(numericValue).toFixed(decimals)}pp`
+  return `${numericValue.toFixed(decimals)}pp`
+}
+
+const getDeltaClass = (value) => {
+  if (value == null || Number.isNaN(Number(value)) || Number(value) === 0) return 'metric-delta--neutral'
+  return Number(value) > 0 ? 'metric-delta--positive' : 'metric-delta--negative'
+}
+
 // 核心KPI 筛选变化时刷新所有依赖平台口径的模块
 const onKpiMonthChange = () => {
   if (!_syncingFromGlobal.value) useGlobalDate.value.kpi = false
@@ -2825,7 +2866,15 @@ const loadShopRacingData = async () => {
           order_count: toNullableNumber(row.order_count),
           avg_order_value: toNullableNumber(row.avg_order_value),
           target_amount: toNullableNumber(row.target_amount),
-          achievement_rate: toNullableNumber(row.achievement_rate)
+          achievement_rate: toNullableNumber(row.achievement_rate),
+          gmv_previous: toNullableNumber(row.gmv_previous),
+          profit_previous: toNullableNumber(row.profit_previous),
+          order_count_previous: toNullableNumber(row.order_count_previous),
+          achievement_rate_previous: toNullableNumber(row.achievement_rate_previous),
+          gmv_change_rate: toNullableNumber(row.gmv_change_rate),
+          profit_change_rate: toNullableNumber(row.profit_change_rate),
+          order_count_change_rate: toNullableNumber(row.order_count_change_rate),
+          achievement_rate_change_value: toNullableNumber(row.achievement_rate_change_value)
         }
       })
     } else {
@@ -2958,8 +3007,14 @@ const loadTrafficRanking = async () => {
         page_views: row.page_views ?? row['浏览量'] ?? 0,
         uv_conversion_rate: row.uv_conversion_rate ?? row.conversion_rate ?? null,
         pv_conversion_rate: row.pv_conversion_rate ?? null,
-        uv_change_rate: row.uv_change_rate ?? null,
-        pv_change_rate: row.pv_change_rate ?? null,
+        visitor_count_previous: row.visitor_count_previous ?? null,
+        page_views_previous: row.page_views_previous ?? null,
+        uv_conversion_rate_previous: row.uv_conversion_rate_previous ?? null,
+        pv_conversion_rate_previous: row.pv_conversion_rate_previous ?? null,
+        visitor_count_change_rate: row.visitor_count_change_rate ?? row.uv_change_rate ?? null,
+        page_views_change_rate: row.page_views_change_rate ?? row.pv_change_rate ?? null,
+        uv_conversion_rate_change_value: row.uv_conversion_rate_change_value ?? null,
+        pv_conversion_rate_change_value: row.pv_conversion_rate_change_value ?? null,
         compare_visitor_count: row.compare_visitor_count ?? row.compare_unique_visitors ?? null,
         compare_page_views: row.compare_page_views ?? null
       }
@@ -3521,7 +3576,7 @@ watch(
 }
 
 .chart-container {
-  min-height: 400px;
+  min-height: 0;
 }
 
 .target-progress-section {
@@ -3630,6 +3685,52 @@ watch(
 
 .metric-negative {
   color: #f56c6c;
+}
+
+.metric-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.metric-stack--achievement {
+  align-items: flex-start;
+  min-width: 58px;
+}
+
+.metric-previous-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.metric-previous {
+  color: #909399;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.metric-delta {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.metric-delta--positive {
+  color: #67c23a;
+}
+
+.metric-delta--negative {
+  color: #f56c6c;
+}
+
+.metric-delta--neutral {
+  color: #909399;
 }
 
 .operational-metrics-section {
