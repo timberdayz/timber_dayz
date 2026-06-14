@@ -8,7 +8,7 @@ This avoids Redis port conflicts, duplicate container names, and mixed manual st
 ## Recommended Topology
 
 - PostgreSQL: Docker
-- Redis: Docker
+- Redis: Docker temporary broker/cache
 - Celery Worker: Docker
 - Celery Beat: Docker
 - Backend API: local process
@@ -54,6 +54,10 @@ REDIS_URL=redis://:redis_pass_2025@localhost:16379/0
 CELERY_BROKER_URL=redis://:redis_pass_2025@localhost:16379/0
 CELERY_RESULT_BACKEND=redis://:redis_pass_2025@localhost:16379/0
 ```
+
+Local Redis in this topology is intentionally treated as disposable runtime
+state. Queue messages, beat state, and cache entries may be lost after Redis
+rebuilds or abnormal machine shutdowns.
 
 ## Why Not 6379
 
@@ -107,6 +111,18 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-ful
 ```
 
 In normal usage, `python run.py --local` should handle this for you.
+
+### 2.2 Stop services cleanly before Windows shutdown
+
+Prefer one of these commands before shutting down the machine:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml stop
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full down
+```
+
+This reduces the chance of leaving Redis persistence files in an incomplete
+state after Docker Desktop or WSL is interrupted.
 
 ### 2.1 Keep the scheduler alive
 
@@ -192,6 +208,24 @@ This usually means:
 
 - Redis was restarted, but the local backend was not
 - the backend process is still using the old `REDIS_URL`
+
+### 4. Redis reports AOF or appendonly corruption after abnormal shutdown
+
+If startup logs mention `Bad file format reading the append only file`, first
+try repairing the local Redis volume:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\repair_local_redis.ps1 -FixAof
+```
+
+If repair does not work, rebuild the local Redis volume:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\repair_local_redis.ps1 -Rebuild
+```
+
+`-Rebuild` clears local Redis queue and cache data. It is only intended for the
+local development volume `xihong_erp_redis_data`.
 
 ## Recommended Recovery Order
 

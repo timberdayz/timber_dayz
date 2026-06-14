@@ -22,6 +22,7 @@ class CloudSyncDependencyHealth(BaseModel):
 class CloudSyncQueueSummary(BaseModel):
     pending: int = 0
     running: int = 0
+    stale_running: int = 0
     retry_waiting: int = 0
     failed: int = 0
     partial_success: int = 0
@@ -120,11 +121,15 @@ class CloudSyncOverviewSummary(BaseModel):
     exception_task_count: int = 0
     failed_task_count: int = 0
     partial_success_task_count: int = 0
+    stale_running_task_count: int = 0
     pending_task_count: int = 0
     running_task_count: int = 0
     retry_waiting_task_count: int = 0
     last_success_at: str | None = None
     latest_error: str | None = None
+    error_code: str | None = None
+    error_summary: str | None = None
+    error_action_hint: str | None = None
     auto_sync_enabled: bool = True
 
 
@@ -133,10 +138,14 @@ class CloudSyncRuntimeSummary(BaseModel):
     worker_id: str | None = None
     is_running: bool = False
     active_task_count: int = 0
+    stale_running_count: int = 0
     current_job_id: str | None = None
     current_source_table_name: str | None = None
     last_heartbeat_at: str | None = None
     last_error: str | None = None
+    error_code: str | None = None
+    error_summary: str | None = None
+    error_action_hint: str | None = None
 
 
 class CloudSyncHistoryRow(BaseModel):

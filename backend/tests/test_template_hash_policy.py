@@ -145,8 +145,13 @@ def test_products_monthly_passes_with_product_id_and_auto_period_date():
         ],
         field_parse_rules=[
             {
-                "target_field": "metric_date",
+                "target_field": "period_start_date",
                 "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            },
+            {
+                "target_field": "period_end_date",
+                "source_column": "__file_date_to__",
                 "value_kind": "single_date",
             }
         ],
@@ -155,7 +160,10 @@ def test_products_monthly_passes_with_product_id_and_auto_period_date():
     assert result.passed is True
     assert result.blocking_errors == []
     assert result.effective_components["user_identity_fields"] == ["product_id"]
-    assert result.effective_components["auto_date_identity_fields"] == ["metric_date"]
+    assert result.effective_components["auto_date_identity_fields"] == [
+        "period_start_date",
+        "period_end_date",
+    ]
 
 
 def test_products_daily_source_date_parse_rule_satisfies_date_identity_automatically():
@@ -305,7 +313,6 @@ def test_products_monthly_returns_structured_missing_period_group():
     assert result.passed is False
     assert result.missing_required_groups[0]["key"] == "products_period_date"
     assert result.missing_required_groups[0]["accepted_keys"] == [
-        "metric_date",
         "period_start_date",
         "period_end_date",
     ]
@@ -321,7 +328,7 @@ def test_products_monthly_returns_structured_missing_period_group():
     assert result.effective_components["user_identity_fields"] == ["product_id"]
 
 
-def test_products_monthly_passes_when_file_date_parse_rule_is_auto_identity():
+def test_products_monthly_requires_period_boundaries_not_metric_date_only():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -344,7 +351,11 @@ def test_products_monthly_passes_when_file_date_parse_rule_is_auto_identity():
         ],
     )
 
-    assert result.passed is True
+    assert result.passed is False
+    assert result.missing_required_groups[0]["accepted_keys"] == [
+        "period_start_date",
+        "period_end_date",
+    ]
     assert result.effective_components["auto_date_identity_fields"] == ["metric_date"]
     assert result.effective_components["final_fields"] == [
         "platform_code",
@@ -390,7 +401,7 @@ def test_sample_diagnostics_treats_file_date_rule_as_derived_hash_field():
     assert not any("metric_date null rate" in warning for warning in result.warnings)
 
 
-def test_products_monthly_file_date_parse_rule_without_user_selection_passes():
+def test_products_monthly_period_parse_rules_without_user_selection_passes():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -406,8 +417,13 @@ def test_products_monthly_file_date_parse_rule_without_user_selection_passes():
         ],
         field_parse_rules=[
             {
-                "target_field": "metric_date",
+                "target_field": "period_start_date",
                 "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            },
+            {
+                "target_field": "period_end_date",
+                "source_column": "__file_date_to__",
                 "value_kind": "single_date",
             }
         ],
@@ -415,6 +431,35 @@ def test_products_monthly_file_date_parse_rule_without_user_selection_passes():
 
     assert result.passed is True
     assert result.missing_required_groups == []
+
+
+def test_products_monthly_requires_both_period_boundaries():
+    service = TemplateHashPolicyService()
+
+    result = service.validate(
+        data_domain="products",
+        granularity="monthly",
+        deduplication_fields=["product_id"],
+        header_bindings=[
+            {
+                "source_header": "product id",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            }
+        ],
+        field_parse_rules=[
+            {
+                "target_field": "period_start_date",
+                "source_column": "__file_date_from__",
+                "value_kind": "single_date",
+            }
+        ],
+    )
+
+    assert result.passed is False
+    assert result.missing_required_groups[0]["key"] == "products_period_date"
+    assert result.missing_required_groups[0]["requirement_type"] == "all_of"
+    assert result.missing_required_groups[0]["missing_keys"] == ["period_end_date"]
 
 
 def test_metrics_and_item_status_are_invalid_hash_identity_fields():
@@ -655,16 +700,11 @@ def test_gmv_band_is_hash_eligible_but_not_required_for_products():
     result = service.validate(
         data_domain="products",
         granularity="monthly",
-        deduplication_fields=["product_id", "metric_date", "gmv_band"],
+        deduplication_fields=["product_id", "gmv_band"],
         header_bindings=[
             {
                 "source_header": "product id",
                 "semantic_key": "product_id",
-                "semantic_review_status": "confirmed_semantic",
-            },
-            {
-                "source_header": "metric date",
-                "semantic_key": "metric_date",
                 "semantic_review_status": "confirmed_semantic",
             },
             {
@@ -673,14 +713,24 @@ def test_gmv_band_is_hash_eligible_but_not_required_for_products():
                 "semantic_review_status": "confirmed_semantic",
             },
         ],
-        field_parse_rules=[],
+        field_parse_rules=[
+            {
+                "source_column": "__file_date_from__",
+                "target_field": "period_start_date",
+                "parse_type": "date",
+            },
+            {
+                "source_column": "__file_date_to__",
+                "target_field": "period_end_date",
+                "parse_type": "date",
+            },
+        ],
     )
 
     assert is_hash_identity_semantic_key("gmv_band") is True
     assert result.passed is True
     assert result.effective_components["user_identity_fields"] == [
         "product_id",
-        "metric_date",
         "gmv_band",
     ]
 

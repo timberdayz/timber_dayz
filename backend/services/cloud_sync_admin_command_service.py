@@ -145,8 +145,7 @@ class CloudSyncAdminCommandService:
         if task is None:
             return CloudSyncCommandResponse(job_id=job_id, status="not_found").model_dump()
 
-        task.status = "pending"
-        task.next_retry_at = None
+        self._reset_task_for_retry(task)
         await self.db.commit()
         await self.db.refresh(task)
         return CloudSyncCommandResponse(
@@ -178,8 +177,7 @@ class CloudSyncAdminCommandService:
         tasks = (await self.db.execute(stmt)).scalars().all()
 
         for task in tasks:
-            task.status = "pending"
-            task.next_retry_at = None
+            self._reset_task_for_retry(task)
 
         await self.db.commit()
 
@@ -188,6 +186,18 @@ class CloudSyncAdminCommandService:
             detail="retry_failed",
             metadata={"retried_count": len(tasks)},
         ).model_dump()
+
+    def _reset_task_for_retry(self, task: CloudBClassSyncTask) -> None:
+        task.status = "pending"
+        task.next_retry_at = None
+        task.claimed_by = None
+        task.lease_expires_at = None
+        task.heartbeat_at = None
+        task.last_error = None
+        task.error_code = None
+        metadata = dict(task.metadata_json or {})
+        metadata["retry_requested_at"] = datetime.now(timezone.utc).isoformat()
+        task.metadata_json = metadata
 
     async def update_settings(self, enabled: bool) -> dict:
         os.environ["CLOUD_SYNC_AUTO_SYNC_ENABLED"] = "true" if enabled else "false"

@@ -16,6 +16,16 @@ function normalizeErrorMessage(error, fallback) {
   return error?.response?.data?.detail || error?.message || fallback
 }
 
+function summarizedError(state) {
+  return (
+    state.runtime?.error_summary ||
+    state.overview?.error_summary ||
+    state.runtime?.last_error ||
+    state.overview?.latest_error ||
+    null
+  )
+}
+
 export const useCloudSyncStore = defineStore('cloudSync', {
   state: () => ({
     overview: null,
@@ -45,13 +55,28 @@ export const useCloudSyncStore = defineStore('cloudSync', {
       state.overview?.running_task_count ?? state.health?.queue?.running ?? 0,
     retryWaitingTaskCount: (state) =>
       state.overview?.retry_waiting_task_count ?? state.health?.queue?.retry_waiting ?? 0,
+    staleRunningTaskCount: (state) =>
+      state.overview?.stale_running_task_count ?? state.runtime?.stale_running_count ?? state.health?.queue?.stale_running ?? 0,
     workerSummaryStatus: (state) =>
       state.overview?.worker_status ||
       state.runtime?.worker_status ||
       state.health?.worker?.status ||
       'unknown',
+    displayWorkerStatus: (state) =>
+      (state.overview?.stale_running_task_count ?? state.runtime?.stale_running_count ?? state.health?.queue?.stale_running ?? 0) > 0
+        ? 'stale'
+        : (
+            state.overview?.worker_status ||
+            state.runtime?.worker_status ||
+            state.health?.worker?.status ||
+            'unknown'
+          ),
     lastSuccessAt: (state) => state.overview?.last_success_at || null,
     runtimeRunning: (state) => state.runtime?.is_running || false,
+    latestErrorSummary: (state) => summarizedError(state) || '暂无',
+    latestErrorCode: (state) => state.runtime?.error_code || state.overview?.error_code || null,
+    latestErrorActionHint: (state) =>
+      state.runtime?.error_action_hint || state.overview?.error_action_hint || '',
     hasHistory: (state) => state.history.length > 0 || Boolean(state.overview?.last_success_at),
     selectedTableState: (state) =>
       state.tableStates.find((row) => row.source_table_name === state.selectedTableName) || null,

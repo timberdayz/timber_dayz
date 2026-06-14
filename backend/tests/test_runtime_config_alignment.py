@@ -101,6 +101,18 @@ def test_dev_celery_healthcheck_does_not_depend_on_ps_binary():
     assert "ps aux" not in " ".join(str(part) for part in health_test)
 
 
+def test_dev_redis_disables_aof_and_uses_temporary_broker_defaults():
+    compose = _read_yaml("docker-compose.dev.yml")
+    redis_service = compose["services"]["redis"]
+
+    command = redis_service["command"]
+    command_joined = " ".join(command) if isinstance(command, list) else str(command)
+
+    assert "--appendonly no" in command_joined
+    assert '--save ""' in command_joined
+    assert redis_service["stop_grace_period"] == "30s"
+
+
 def test_dev_compose_uses_dedicated_migrate_service_and_disables_runtime_migrations():
     compose = _read_yaml("docker-compose.dev.yml")
     services = compose["services"]

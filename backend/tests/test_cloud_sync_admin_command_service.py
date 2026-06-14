@@ -68,6 +68,10 @@ async def test_command_service_can_retry_and_cancel_task(cloud_sync_sqlite_sessi
         source_table_name="fact_shopee_orders_daily",
         status="failed",
         attempt_count=2,
+        claimed_by="worker-1",
+        heartbeat_at=datetime.now(timezone.utc),
+        lease_expires_at=datetime.now(timezone.utc),
+        next_retry_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc),
     )
     cloud_sync_sqlite_session.add(task)
@@ -76,9 +80,14 @@ async def test_command_service_can_retry_and_cancel_task(cloud_sync_sqlite_sessi
     service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
 
     retried = await service.retry_task("job-1")
+    await cloud_sync_sqlite_session.refresh(task)
     cancelled = await service.cancel_task("job-1")
 
     assert retried["status"] == "pending"
+    assert task.claimed_by is None
+    assert task.heartbeat_at is None
+    assert task.lease_expires_at is None
+    assert task.next_retry_at is None
     assert cancelled["status"] == "cancelled"
 
 
@@ -393,6 +402,12 @@ async def test_command_service_retry_failed_only_retries_failed_and_partial_succ
         source_table_name="fact_shopee_orders_monthly",
         status="completed",
     )
+    failed_task.claimed_by = "worker-a"
+    failed_task.heartbeat_at = datetime.now(timezone.utc)
+    failed_task.lease_expires_at = datetime.now(timezone.utc)
+    partial_task.claimed_by = "worker-b"
+    partial_task.heartbeat_at = datetime.now(timezone.utc)
+    partial_task.lease_expires_at = datetime.now(timezone.utc)
     cloud_sync_sqlite_session.add_all([failed_task, partial_task, completed_task])
     await cloud_sync_sqlite_session.commit()
 
@@ -407,6 +422,12 @@ async def test_command_service_retry_failed_only_retries_failed_and_partial_succ
     assert payload["metadata"]["retried_count"] == 2
     assert failed_task.status == "pending"
     assert partial_task.status == "pending"
+    assert failed_task.claimed_by is None
+    assert partial_task.claimed_by is None
+    assert failed_task.heartbeat_at is None
+    assert partial_task.heartbeat_at is None
+    assert failed_task.lease_expires_at is None
+    assert partial_task.lease_expires_at is None
     assert completed_task.status == "completed"
 
 

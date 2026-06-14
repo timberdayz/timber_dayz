@@ -60,6 +60,7 @@ class TemplateHashPolicyService:
     PRODUCT_IDENTITY_KEYS = [*PRODUCT_STRONG_IDENTITY_KEYS]
     PRODUCT_DAILY_DATE_KEYS = ["metric_date"]
     PERIOD_DATE_KEYS = ["metric_date", "period_start_date", "period_end_date"]
+    PRODUCT_PERIOD_BOUNDARY_KEYS = ["period_start_date", "period_end_date"]
     ORDER_DETAIL_SUB_DOMAINS = {"detail", "details", "line", "lines", "order_detail", "order_lines"}
 
     def validate(
@@ -129,6 +130,32 @@ class TemplateHashPolicyService:
             if not passed:
                 errors.append(legacy_error or message)
 
+        def add_all_group(
+            *,
+            key: str,
+            label: str,
+            accepted_keys: List[str],
+            message: str,
+            legacy_error: str | None = None,
+        ) -> None:
+            selected_keys = [item for item in accepted_keys if item in resolved_keys]
+            missing_keys = [item for item in accepted_keys if item not in resolved_keys]
+            passed = not missing_keys
+            group = {
+                "key": key,
+                "label": label,
+                "severity": "blocking",
+                "requirement_type": "all_of",
+                "accepted_keys": list(accepted_keys),
+                "selected_keys": selected_keys,
+                "missing_keys": missing_keys,
+                "passed": passed,
+                "message": message,
+            }
+            requirement_groups.append(group)
+            if not passed:
+                errors.append(legacy_error or message)
+
         if domain == "products" and grain == "daily":
             add_any_group(
                 key="products_identity",
@@ -161,13 +188,13 @@ class TemplateHashPolicyService:
                     "as a semantic hash identity field."
                 ),
             )
-            add_any_group(
+            add_all_group(
                 key="products_period_date",
                 label="周期字段",
-                accepted_keys=self.PERIOD_DATE_KEYS,
+                accepted_keys=self.PRODUCT_PERIOD_BOUNDARY_KEYS,
                 message=(
-                    f"products {grain} 需要选择 metric_date、period_start_date 或 "
-                    "period_end_date，避免不同周期互相覆盖。"
+                    f"products {grain} 需要周期开始日期 period_start_date 和 "
+                    "周期结束日期 period_end_date，避免不同周期互相覆盖。"
                 ),
                 legacy_error=(
                     "period product metrics require product_id + "

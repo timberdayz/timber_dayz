@@ -144,6 +144,54 @@ export function buildCompanionDateParseRules(mode = 'single') {
   ]
 }
 
+export function hasHeaderDateOrTimeSource(headerBindings = [], headerColumns = []) {
+  const dateTargets = new Set(DATE_TARGET_FIELD_OPTIONS.map(option => option.value))
+  const bindings = Array.isArray(headerBindings) ? headerBindings : []
+  if (bindings.some((binding) => {
+    const source = String(binding?.raw_name || binding?.display_name || '').trim()
+    const semanticKey = String(binding?.semantic_key || '').trim()
+    const sampleType = String(binding?.sample_type || '').trim()
+    return source && (dateTargets.has(semanticKey) || sampleType === 'date' || sampleType === 'datetime')
+  })) {
+    return true
+  }
+
+  return (Array.isArray(headerColumns) ? headerColumns : []).some((column) => {
+    const text = String(column || '').trim().toLowerCase()
+    return /date|time|日期|时间|周期|期间/.test(text)
+  })
+}
+
+export function buildAutoCompanionDateParseRules({
+  dataDomain = '',
+  granularity = '',
+  headerBindings = [],
+  headerColumns = [],
+  currentRules = [],
+} = {}) {
+  const domain = String(dataDomain || '').trim().toLowerCase()
+  if (domain !== 'products') {
+    return []
+  }
+  if (hasHeaderDateOrTimeSource(headerBindings, headerColumns)) {
+    return []
+  }
+  const existingTargets = new Set(
+    (Array.isArray(currentRules) ? currentRules : [])
+      .map(rule => String(rule?.target_field || '').trim())
+      .filter(Boolean)
+  )
+  const grain = String(granularity || '').trim().toLowerCase()
+  const requiredTargets = grain === 'daily'
+    ? ['metric_date']
+    : ['period_start_date', 'period_end_date']
+  if (requiredTargets.every(target => existingTargets.has(target))) {
+    return []
+  }
+  const mode = grain === 'daily' ? 'single' : 'period'
+  return buildCompanionDateParseRules(mode).filter(rule => !existingTargets.has(rule.target_field))
+}
+
 export function mergeFieldParseRules(existingRules = [], incomingRules = []) {
   const incomingTargets = new Set(
     (Array.isArray(incomingRules) ? incomingRules : [])

@@ -194,3 +194,70 @@ def test_local_collection_mode_script_stops_conflicting_docker_backends():
     )
 
     assert "docker stop xihong_erp_backend_api xihong_erp_backend_collector" in text
+
+
+def test_run_py_reports_redis_aof_corruption_diagnostics(monkeypatch):
+    module = _load_run_module()
+    messages = []
+
+    monkeypatch.setattr(module, "safe_print", messages.append)
+    monkeypatch.setattr(
+        module,
+        "_docker_container_health",
+        lambda name: {
+            "xihong_erp_postgres": "healthy",
+            "xihong_erp_redis": "restarting",
+            "xihong_erp_celery_worker": "starting",
+        }.get(name, "unknown"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_get_docker_container_logs",
+        lambda name, lines=80: (
+            "Bad file format reading the append only file appendonly.aof.6.incr.aof\n"
+            "make a backup of your AOF file, then use ./redis-check-aof --fix <filename.manifest>"
+        ),
+    )
+    monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+
+    result = module._wait_for_local_docker_infra(
+        ["xihong_erp_postgres", "xihong_erp_redis", "xihong_erp_celery_worker"],
+        max_wait=1,
+    )
+
+    assert result is False
+    joined = "\n".join(messages)
+    assert "Redis AOF/持久化文件损坏" in joined
+    assert "repair_local_redis.ps1 -FixAof" in joined
+    assert "repair_local_redis.ps1 -Rebuild" in joined
+
+
+def test_run_py_reports_generic_redis_unhealthy_without_aof_hint(monkeypatch):
+    module = _load_run_module()
+    messages = []
+
+    monkeypatch.setattr(module, "safe_print", messages.append)
+    monkeypatch.setattr(
+        module,
+        "_docker_container_health",
+        lambda name: {
+            "xihong_erp_postgres": "healthy",
+            "xihong_erp_redis": "unhealthy",
+        }.get(name, "healthy"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_get_docker_container_logs",
+        lambda name, lines=80: "Redis connection refused",
+    )
+    monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+
+    result = module._wait_for_local_docker_infra(
+        ["xihong_erp_postgres", "xihong_erp_redis"],
+        max_wait=1,
+    )
+
+    assert result is False
+    joined = "\n".join(messages)
+    assert "Redis 容器当前不健康" in joined
+    assert "AOF/持久化文件损坏" not in joined

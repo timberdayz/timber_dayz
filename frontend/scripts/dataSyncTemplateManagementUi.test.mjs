@@ -119,8 +119,44 @@ assert.match(workbenchDrawerText, /full_header_bindings|review_header_bindings/,
 assert.match(workbenchDrawerText, /recommended_deduplication_fields|current_header_columns/, 'workbench drawer should surface recommended and current-field context')
 assert.match(workbenchDrawerText, /preview_data|sample_data/, 'workbench drawer should surface raw preview context')
 assert.match(workbenchDrawerText, /buildTemplateUpdateSubmissionState/, 'workbench drawer should build one submission state for preview and save')
+assert.match(workbenchDrawerText, /buildAutoCompanionDateParseRules/, 'workbench drawer should auto-add companion date rules when source files have no date columns')
+assert.match(workbenchDrawerText, /applyAutoCompanionDateRulesForContext/, 'workbench drawer should re-apply auto companion date rules after full bindings load')
 assert.match(workbenchDrawerText, /:current-header-bindings="saveReadyHeaderBindings"/, 'deduplication review should use the same binding set that save submits')
+assert.match(
+  workbenchDrawerText,
+  /fullContextHeaderBindings\.value[\s\S]*activeBindingSource\.value/,
+  'save-ready bindings should prefer backend full_header_bindings before the lazy review binding source'
+)
 assert.match(workbenchDrawerText, /deduplicationFields: submissionState\.deduplicationFields/, 'save should submit normalized deduplication fields from the shared submission state')
+assert.match(workbenchDrawerText, /headerColumns: \[\.\.\.currentHeaderColumns\.value\]/, 'workbench save should submit the header columns that match the active drawer context')
+assert.match(workbenchDrawerText, /sampleData: \{ \.\.\.\(workbenchContext\.value\?\.sample_data \|\| \{\}\) \}/, 'workbench save should submit sample data from the active drawer context')
+assert.match(workbenchDrawerText, /fieldParseRules: normalizeFieldParseRulesForSave\(\)/, 'workbench save should persist active date parse rules')
+assert.match(
+  viewText,
+  /headerColumns: selectedHeaderColumns[\s\S]*currentHeaderColumns[\s\S]*selectedHeaderColumns[\s\S]*context\?\.current_header_columns/,
+  'template update save should prefer drawer-submitted header columns over stale parent context columns'
+)
+assert.match(
+  viewText,
+  /sampleRows: currentPreviewData/,
+  'template update hash preview should use preview rows from the active drawer context'
+)
+const submissionStateDeclarationIndex = workbenchDrawerText.indexOf('const submissionState = computed')
+const firstSubmissionStateReadIndex = workbenchDrawerText.indexOf('submissionState.value')
+assert.notEqual(
+  submissionStateDeclarationIndex,
+  -1,
+  'workbench drawer should declare submissionState'
+)
+assert.notEqual(
+  firstSubmissionStateReadIndex,
+  -1,
+  'workbench drawer should read submissionState'
+)
+assert.ok(
+  submissionStateDeclarationIndex < firstSubmissionStateReadIndex,
+  'submissionState must be declared before immediate watchers read it during setup'
+)
 assert.match(changeSummaryCardText, /已语义匹配/, 'change summary should show semantic-equivalent old fields')
 assert.match(changeSummaryCardText, /已语义匹配，但不再参与 Data Hash/, 'change summary should distinguish matched non-hashable fields')
 assert.match(deduplicationReviewPanelText, /匹配但不可参与 Data Hash/, 'deduplication review should show matched non-hashable old fields')
@@ -134,6 +170,11 @@ assert.match(
   deduplicationReviewPanelText,
   /hashPolicyPreviewSignature|lastPreviewSignature|pendingPreviewSignature/,
   'deduplication review should dedupe hash policy previews by a stable signature'
+)
+assert.match(
+  deduplicationReviewPanelText,
+  /const preview =[\s\S]*hashPolicyPreviewSignature\.value === lastPreviewSignature[\s\S]*hashPolicyPreview\.value[\s\S]*: null[\s\S]*preview,/,
+  'deduplication review should not emit stale hash-policy previews that can overwrite a new checkbox selection'
 )
 assert.match(
   deduplicationReviewPanelText,

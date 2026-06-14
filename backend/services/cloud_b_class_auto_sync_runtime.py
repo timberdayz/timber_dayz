@@ -44,6 +44,7 @@ class CloudBClassAutoSyncRuntime:
             return True
 
         self._stop_event.clear()
+        self._recover_stale_running_tasks()
         self._status = "running"
         self._task = asyncio.create_task(self._run_loop())
         return True
@@ -86,6 +87,14 @@ class CloudBClassAutoSyncRuntime:
         result = worker.run_one(self.worker_id)
         if inspect.isawaitable(result):
             asyncio.run(result)
+
+    def _recover_stale_running_tasks(self) -> None:
+        if self.worker_factory is None:
+            return
+        recover = getattr(self.worker_factory, "recover_stale_running_tasks", None)
+        if recover is None:
+            return
+        recover(self.worker_id)
 
     def get_health(self) -> dict:
         return {

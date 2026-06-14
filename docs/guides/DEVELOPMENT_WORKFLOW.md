@@ -18,6 +18,22 @@ docker stop xihong_erp_backend_api xihong_erp_backend_collector
 powershell -ExecutionPolicy Bypass -File .\scripts\start_local_collection_mode.ps1
 ```
 
+Local Redis in this mode is a temporary broker/cache for development. It is
+not intended to preserve long-lived queue state across abnormal Windows
+shutdowns. If Redis startup fails after an unexpected shutdown, repair it
+before rebuilding the local volume:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\repair_local_redis.ps1 -FixAof
+powershell -ExecutionPolicy Bypass -File .\scripts\repair_local_redis.ps1 -Rebuild
+```
+
+Before shutting down the machine, prefer:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml stop
+```
+
 Other supported modes:
 
 ```bash

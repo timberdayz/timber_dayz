@@ -618,8 +618,15 @@
                     <div class="metric-stack">
                       <span>{{ row.profit_margin == null ? '--' : formatPercent(row.profit_margin) }}</span>
                       <span class="metric-previous-line">
-                        <span class="metric-previous">
-                          {{ row.profit_margin_previous == null ? '--' : formatPercent(row.profit_margin_previous) }}
+                        <span
+                          class="metric-previous"
+                          :class="{ 'metric-previous--negative': Number(calculateProfitMargin(row.profit_previous, row.gmv_previous)) < 0 }"
+                        >
+                          {{
+                            calculateProfitMargin(row.profit_previous, row.gmv_previous) == null
+                              ? '--'
+                              : formatPercent(calculateProfitMargin(row.profit_previous, row.gmv_previous))
+                          }}
                         </span>
                         <span class="metric-delta" :class="getDeltaClass(row.profit_margin_change_value)">
                           {{ formatPointChange(row.profit_margin_change_value) }}
@@ -3813,6 +3820,10 @@ watch(
   color: #909399;
   font-size: 9px;
   line-height: 1.2;
+}
+
+.metric-previous--negative {
+  color: #f56c6c;
 }
 
 .metric-delta {

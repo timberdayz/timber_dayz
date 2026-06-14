@@ -73,6 +73,10 @@ Do not keep these containers running at the same time:
 - `xihong_erp_backend_api`
 - `xihong_erp_backend_collector`
 
+Local Redis in this mode is a temporary broker/cache for the takeover runtime.
+It should not be treated as durable queue storage. Production Redis persistence
+requirements remain separate.
+
 Reason:
 
 - `python run.py --local` starts the backend as a local Python process
@@ -86,6 +90,12 @@ Before starting local takeover, stop the conflicting containers:
 
 ```powershell
 docker stop xihong_erp_backend_api xihong_erp_backend_collector
+```
+
+Before shutting down the Windows machine, stop local Docker infra cleanly:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml stop
 ```
 
 ## Verification
@@ -111,6 +121,25 @@ Expected:
 ```text
 0.0.0.0:16379->6379/tcp
 ```
+
+## Redis Recovery
+
+If `start_local_collection_mode.ps1` or `python run.py --local` reports Redis
+AOF or appendonly corruption after an abnormal shutdown, recover the local Redis
+volume before retrying startup:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\repair_local_redis.ps1 -FixAof
+```
+
+If repair fails, rebuild the local Redis volume:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\repair_local_redis.ps1 -Rebuild
+```
+
+`-Rebuild` clears local Redis queue and cache data and is only intended for the
+local development volume `xihong_erp_redis_data`.
 
 ## Session Rules
 

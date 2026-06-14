@@ -88,6 +88,7 @@ async def test_health_summary_contains_worker_tunnel_cloud_db_queue(seeded_cloud
     assert set(payload.keys()) == {"worker", "tunnel", "cloud_db", "queue"}
     assert payload["worker"]["status"] == "running"
     assert payload["queue"]["pending"] == 1
+    assert payload["queue"]["stale_running"] == 0
 
 
 @pytest.mark.asyncio
@@ -264,6 +265,50 @@ async def test_runtime_summary_includes_is_running_and_progress_fields(seeded_cl
     assert payload["worker_status"] == "running"
     assert "is_running" in payload
     assert "active_task_count" in payload
+
+
+@pytest.mark.asyncio
+async def test_query_service_marks_stale_running_as_degraded(monkeypatch, cloud_sync_sqlite_session):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL",
+        "postgresql://erp_user:secret-pass@127.0.0.1:15433/xihong_erp",
+    )
+    current_scope = _build_checkpoint_scope_key(
+        "postgresql://erp_user:secret-pass@127.0.0.1:15433/xihong_erp",
+        dry_run=False,
+    )
+    cloud_sync_sqlite_session.add(
+        CloudBClassSyncTask(
+            job_id="job-stale",
+            dedupe_key="fact_stale",
+            source_table_name="fact_stale",
+            status="running",
+            claimed_by="worker-1",
+            lease_expires_at=now - timedelta(minutes=2),
+            heartbeat_at=now - timedelta(minutes=3),
+            metadata_json={"checkpoint_scope": current_scope},
+            created_at=now - timedelta(minutes=10),
+        )
+    )
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+    health = await service.get_health_summary(
+        runtime_health={"status": "running", "worker_id": "worker-1"}
+    )
+    overview = await service.get_overview_summary(
+        runtime_health={"status": "running", "worker_id": "worker-1"}
+    )
+    runtime = await service.get_runtime_summary(
+        runtime_health={"status": "running", "worker_id": "worker-1"}
+    )
+
+    assert health["queue"]["stale_running"] == 1
+    assert overview["catch_up_status"] == "degraded"
+    assert overview["exception_task_count"] == 1
+    assert runtime["active_task_count"] == 0
+    assert runtime["is_running"] is False
 
 
 @pytest.mark.asyncio

@@ -410,9 +410,7 @@ const isAnyLoading = computed(() => Object.values(store.loading).some(Boolean))
 const lastHeartbeatAt = computed(
   () => store.runtime?.last_heartbeat_at || store.health?.worker?.last_heartbeat_at || null,
 )
-const latestErrorText = computed(
-  () => store.runtime?.last_error || store.overview?.latest_error || '无',
-)
+const latestErrorText = computed(() => store.latestErrorSummary || '暂无')
 const runtimeStatusText = computed(() =>
   store.runtimeRunning ? '正在追平' : formatCatchUpStatus(store.catchUpStatus),
 )
@@ -432,6 +430,12 @@ const operationalHint = computed(() => {
       description: '请先检查采集机环境变量、backend-collector 角色配置以及云库地址。',
     }
   }
+  if (store.staleRunningTaskCount > 0) {
+    return {
+      title: '存在待恢复的历史运行任务',
+      description: store.latestErrorActionHint || '系统检测到上次关闭后遗留的运行任务，建议先刷新状态或重试异常任务。',
+    }
+  }
   if (store.health?.cloud_db?.status === 'unreachable') {
     return {
       title: '云库当前不可达',
@@ -441,7 +445,7 @@ const operationalHint = computed(() => {
   if (store.exceptionTaskCount > 0) {
     return {
       title: '当前存在异常任务',
-      description: '可先查看最近错误摘要；若判断为环境瞬时异常，可直接重试异常任务。',
+      description: store.latestErrorActionHint || '可先查看最近错误摘要；若判断为环境瞬时异常，可直接重试异常任务。',
     }
   }
   if (store.pendingTaskCount > 0 || store.retryWaitingTaskCount > 0) {
@@ -475,9 +479,9 @@ const statusCards = computed(() => [
   {
     key: 'worker',
     label: 'Worker 状态',
-    value: formatWorkerStatus(store.workerSummaryStatus),
+    value: formatWorkerStatus(store.displayWorkerStatus),
     meta: formatTime(lastHeartbeatAt.value) || '暂无心跳记录',
-    tone: statusTone(store.workerSummaryStatus),
+    tone: statusTone(store.displayWorkerStatus),
   },
   {
     key: 'cloud-db',
@@ -490,14 +494,14 @@ const statusCards = computed(() => [
     key: 'catch-up',
     label: '当前追平状态',
     value: formatCatchUpStatus(store.catchUpStatus),
-    meta: `待处理 ${store.pendingTaskCount} / 运行中 ${store.runningTaskCount}`,
+    meta: `待处理 ${store.pendingTaskCount} / 运行中 ${store.runningTaskCount} / 过期 ${store.staleRunningTaskCount}`,
     tone: statusTone(store.catchUpStatus),
   },
   {
     key: 'exceptions',
     label: '异常任务',
     value: String(store.exceptionTaskCount),
-    meta: `失败 ${store.failedTaskCount} / 部分成功 ${store.partialSuccessTaskCount}`,
+    meta: `失败 ${store.failedTaskCount} / 部分成功 ${store.partialSuccessTaskCount} / 过期 ${store.staleRunningTaskCount}`,
     tone: store.exceptionTaskCount > 0 ? 'is-danger' : 'is-success',
   },
   {
@@ -521,6 +525,7 @@ function formatWorkerStatus(status) {
     not_started: '未启动',
     not_configured: '未配置',
     error: '异常',
+    stale: '待恢复',
   }
   return mapping[status] || '未知'
 }
@@ -595,7 +600,7 @@ function statusTag(status) {
 function statusTone(status) {
   if (['running', 'reachable', 'healthy', 'up_to_date'].includes(status)) return 'is-success'
   if (['backlog', 'catching_up', 'not_started', 'unknown'].includes(status)) return 'is-warning'
-  if (['failed', 'degraded', 'unreachable', 'unhealthy', 'error', 'not_configured'].includes(status)) {
+  if (['failed', 'degraded', 'unreachable', 'unhealthy', 'error', 'not_configured', 'stale'].includes(status)) {
     return 'is-danger'
   }
   return ''

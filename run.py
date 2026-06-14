@@ -460,6 +460,52 @@ def _docker_container_health(container_name):
         return "unknown"
 
 
+def _get_docker_container_logs(container_name, lines=80):
+    """读取 Docker 容器最近日志，失败时返回空字符串。"""
+    try:
+        result = subprocess.run(
+            ["docker", "logs", "--tail", str(lines), container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding="utf-8",
+            errors="ignore",
+        )
+        if result.returncode != 0:
+            return (result.stderr or result.stdout or "").strip()
+        return (result.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def _report_local_redis_container_issue(redis_container_name="xihong_erp_redis"):
+    """输出本地 Redis 容器异常的针对性诊断。"""
+    redis_status = _docker_container_health(redis_container_name)
+    redis_logs = _get_docker_container_logs(redis_container_name, lines=80)
+    logs_lower = redis_logs.lower()
+    aof_corrupted = (
+        "bad file format reading the append only file" in logs_lower
+        or "redis-check-aof" in logs_lower
+    )
+
+    safe_print(f"  [诊断] Redis 容器状态: {redis_status}")
+    if aof_corrupted:
+        safe_print("  [诊断] 当前是 Redis AOF/持久化文件损坏，不是 PostgreSQL 问题。")
+        safe_print("  恢复路径:")
+        safe_print("    1. 先修复 AOF: powershell -ExecutionPolicy Bypass -File .\\scripts\\repair_local_redis.ps1 -FixAof")
+        safe_print("    2. 修不好再重建: powershell -ExecutionPolicy Bypass -File .\\scripts\\repair_local_redis.ps1 -Rebuild")
+        safe_print("  提示: 本地开发 Redis 仅作为临时 broker/cache，重建会清空本地 Redis 队列与缓存。")
+    elif redis_status in ("unhealthy", "restarting", "starting", "unknown"):
+        safe_print("  [诊断] Redis 容器当前不健康，请先检查最近日志。")
+        safe_print("  提示: docker logs xihong_erp_redis --tail 80")
+
+    if redis_logs:
+        safe_print("  Redis 容器日志（最后20行）:")
+        for line in redis_logs.splitlines()[-20:]:
+            if line.strip():
+                safe_print(f"    {line}")
+
+
 def _wait_for_local_docker_infra(container_names, max_wait=60):
     """等待本地模式所需的 Docker 依赖容器进入健康状态。"""
     safe_print("  [等待] Docker 基础服务健康检查...")
@@ -478,6 +524,8 @@ def _wait_for_local_docker_infra(container_names, max_wait=60):
         f"{name}={_docker_container_health(name)}" for name in container_names
     )
     safe_print(f"  [ERROR] Docker 基础服务等待超时: {status_text}")
+    if "xihong_erp_redis" in container_names:
+        _report_local_redis_container_issue("xihong_erp_redis")
     return False
 
 

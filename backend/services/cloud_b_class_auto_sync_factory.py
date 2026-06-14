@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import socket
+from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, inspect as sa_inspect
+from sqlalchemy import create_engine, inspect as sa_inspect, or_, select
 from sqlalchemy.engine import make_url
 
 from backend.models.database import DATABASE_URL, SessionLocal
@@ -22,6 +24,10 @@ from backend.services.cloud_b_class_sync_service import (
     SQLAlchemyBClassSourceReader,
     SQLAlchemyCloudWriter,
 )
+from modules.core.db import CloudBClassSyncTask
+
+
+logger = logging.getLogger(__name__)
 
 
 class NoOpCloudBClassMirrorManager:
@@ -253,6 +259,52 @@ class CloudSyncWorkerFactory:
             sync_executor=service,
             batch_size=self.batch_size,
         )
+
+    def recover_stale_running_tasks(self, worker_id: str) -> dict:
+        db = self.session_factory()
+        now = datetime.now(timezone.utc)
+        recovered: list[CloudBClassSyncTask] = []
+        try:
+            stmt = (
+                select(CloudBClassSyncTask)
+                .where(
+                    CloudBClassSyncTask.status == "running",
+                    CloudBClassSyncTask.lease_expires_at.is_not(None),
+                    CloudBClassSyncTask.lease_expires_at < now,
+                    or_(
+                        CloudBClassSyncTask.metadata_json.is_(None),
+                        CloudBClassSyncTask.metadata_json["checkpoint_scope"].as_string() == self.checkpoint_scope,
+                    ),
+                )
+                .order_by(CloudBClassSyncTask.id.asc())
+            )
+            tasks = db.execute(stmt).scalars().all()
+            for task in tasks:
+                task.status = "pending"
+                task.claimed_by = None
+                task.lease_expires_at = None
+                task.heartbeat_at = None
+                task.next_retry_at = None
+                task.last_attempt_finished_at = now
+                metadata = dict(task.metadata_json or {})
+                metadata["recovery_reason"] = "stale_running_recovered_on_startup"
+                metadata["recovered_at"] = now.isoformat()
+                task.metadata_json = metadata
+                recovered.append(task)
+            if recovered:
+                db.commit()
+                for task in recovered:
+                    logger.warning(
+                        "[CloudSyncRecovery] recovered stale running task job_id=%s table=%s reason=stale_running_recovered_on_startup worker_id=%s",
+                        task.job_id,
+                        task.source_table_name,
+                        worker_id,
+                    )
+            else:
+                db.rollback()
+            return {"recovered_count": len(recovered)}
+        finally:
+            db.close()
 
     def close(self) -> None:
         try:

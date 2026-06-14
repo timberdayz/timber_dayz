@@ -57,6 +57,36 @@ def _probe_tcp_target(host: str, port: int, timeout_seconds: float = 1.0) -> tup
         return False, _sanitize_error_text(str(exc))
 
 
+def _classify_cloud_sync_error(raw_error: str | None) -> tuple[str | None, str | None, str | None]:
+    if not raw_error:
+        return None, None, None
+
+    lowered = raw_error.lower()
+    if "stale_running_recovered_on_startup" in lowered:
+        return (
+            "stale_running_detected",
+            "检测到历史遗留运行任务，系统已在启动时回收。",
+            "刷新页面后确认任务已回到待处理状态。",
+        )
+    if "could not receive data from server" in lowered or "software caused connection abort" in lowered:
+        return (
+            "local_db_connection_aborted",
+            "本地数据库连接曾中断，任务状态未正常收尾。",
+            "确认本地后端与数据库稳定后，重试异常任务。",
+        )
+    if "connection refused" in lowered or "timed out" in lowered:
+        return (
+            "cloud_db_unreachable",
+            "云端数据库当前不可达。",
+            "检查 SSH tunnel 和 CLOUD_DATABASE_URL 配置。",
+        )
+    return (
+        "unknown_runtime_error",
+        "Cloud Sync worker 出现未分类异常。",
+        "查看后端日志并按需重试异常任务。",
+    )
+
+
 class CloudSyncAdminQueryService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -83,6 +113,14 @@ class CloudSyncAdminQueryService:
     async def get_health_summary(self, runtime_health: dict | None = None) -> dict:
         tasks = (await self.db.execute(select(CloudBClassSyncTask))).scalars().all()
         now = datetime.now(timezone.utc)
+        stale_running = [
+            task
+            for task in tasks
+            if task.status == "running"
+            and task.lease_expires_at is not None
+            and _as_utc(task.lease_expires_at) is not None
+            and _as_utc(task.lease_expires_at) < now
+        ]
         oldest_pending = min(
             (
                 int((now - _as_utc(task.created_at)).total_seconds())
@@ -109,7 +147,17 @@ class CloudSyncAdminQueryService:
             cloud_db=CloudSyncDependencyHealth(**cloud_db_health),
             queue=CloudSyncQueueSummary(
                 pending=sum(1 for task in tasks if task.status == "pending"),
-                running=sum(1 for task in tasks if task.status == "running"),
+                running=sum(
+                    1
+                    for task in tasks
+                    if task.status == "running"
+                    and (
+                        task.lease_expires_at is None
+                        or _as_utc(task.lease_expires_at) is None
+                        or _as_utc(task.lease_expires_at) >= now
+                    )
+                ),
+                stale_running=len(stale_running),
                 retry_waiting=sum(1 for task in tasks if task.status == "retry_waiting"),
                 failed=sum(1 for task in tasks if task.status == "failed"),
                 partial_success=sum(1 for task in tasks if task.status == "partial_success"),
@@ -204,15 +252,53 @@ class CloudSyncAdminQueryService:
 
     async def get_overview_summary(self, runtime_health: dict | None = None) -> dict:
         tasks = (await self.db.execute(select(CloudBClassSyncTask).order_by(CloudBClassSyncTask.id.desc()))).scalars().all()
+        now = datetime.now(timezone.utc)
         failed = sum(1 for task in tasks if task.status == "failed")
         partial_success = sum(1 for task in tasks if task.status == "partial_success")
         pending = sum(1 for task in tasks if task.status == "pending")
-        running = sum(1 for task in tasks if task.status == "running")
+        stale_running = sum(
+            1
+            for task in tasks
+            if task.status == "running"
+            and task.lease_expires_at is not None
+            and _as_utc(task.lease_expires_at) is not None
+            and _as_utc(task.lease_expires_at) < now
+        )
+        running = sum(
+            1
+            for task in tasks
+            if task.status == "running"
+            and (
+                task.lease_expires_at is None
+                or _as_utc(task.lease_expires_at) is None
+                or _as_utc(task.lease_expires_at) >= now
+            )
+        )
         retry_waiting = sum(1 for task in tasks if task.status == "retry_waiting")
         latest_success = next((task for task in tasks if task.status == "completed" and task.finished_at is not None), None)
         latest_error_task = next((task for task in tasks if task.last_error), None)
+        if latest_error_task is None and stale_running:
+            latest_error_task = next(
+                (
+                    task
+                    for task in tasks
+                    if task.status == "running"
+                    and task.lease_expires_at is not None
+                    and _as_utc(task.lease_expires_at) is not None
+                    and _as_utc(task.lease_expires_at) < now
+                ),
+                None,
+            )
+        error_code, error_summary, error_action_hint = _classify_cloud_sync_error(
+            getattr(latest_error_task, "last_error", None)
+            or (
+                "stale_running_recovered_on_startup"
+                if latest_error_task is not None and stale_running and not getattr(latest_error_task, "last_error", None)
+                else None
+            )
+        )
 
-        if failed or partial_success:
+        if failed or partial_success or stale_running:
             catch_up_status = "degraded"
         elif running:
             catch_up_status = "catching_up"
@@ -224,14 +310,18 @@ class CloudSyncAdminQueryService:
         payload = CloudSyncOverviewSummary(
             worker_status=(runtime_health or {}).get("status", "not_started"),
             catch_up_status=catch_up_status,
-            exception_task_count=failed + partial_success,
+            exception_task_count=failed + partial_success + stale_running,
             failed_task_count=failed,
             partial_success_task_count=partial_success,
+            stale_running_task_count=stale_running,
             pending_task_count=pending,
             running_task_count=running,
             retry_waiting_task_count=retry_waiting,
             last_success_at=_iso(getattr(latest_success, "finished_at", None)),
             latest_error=_sanitize_error_text(getattr(latest_error_task, "last_error", None)),
+            error_code=error_code,
+            error_summary=error_summary,
+            error_action_hint=error_action_hint,
             auto_sync_enabled=await self._auto_sync_enabled(),
         )
         return payload.model_dump()
@@ -285,6 +375,7 @@ class CloudSyncAdminQueryService:
         return task_scope == checkpoint_scope
 
     async def get_runtime_summary(self, runtime_health: dict | None = None) -> dict:
+        now = datetime.now(timezone.utc)
         running_task = (
             await self.db.execute(
                 select(CloudBClassSyncTask)
@@ -292,22 +383,45 @@ class CloudSyncAdminQueryService:
                 .order_by(CloudBClassSyncTask.id.desc())
             )
         ).scalars().first()
-        active_count = len(
-            (
-                await self.db.execute(
-                    select(CloudBClassSyncTask).where(CloudBClassSyncTask.status == "running")
-                )
-            ).scalars().all()
-        )
+        running_tasks = (
+            await self.db.execute(
+                select(CloudBClassSyncTask).where(CloudBClassSyncTask.status == "running")
+            )
+        ).scalars().all()
+        active_tasks = [
+            task
+            for task in running_tasks
+            if (
+                task.lease_expires_at is None
+                or _as_utc(task.lease_expires_at) is None
+                or _as_utc(task.lease_expires_at) >= now
+            )
+        ]
+        stale_tasks = [
+            task
+            for task in running_tasks
+            if task.lease_expires_at is not None
+            and _as_utc(task.lease_expires_at) is not None
+            and _as_utc(task.lease_expires_at) < now
+        ]
+        active_count = len(active_tasks)
+        running_task = active_tasks[0] if active_tasks else None
+        runtime_error = (runtime_health or {}).get("last_error")
+        stale_error = "stale_running_recovered_on_startup" if stale_tasks else None
+        error_code, error_summary, error_action_hint = _classify_cloud_sync_error(runtime_error or stale_error)
         payload = CloudSyncRuntimeSummary(
             worker_status=(runtime_health or {}).get("status", "not_started"),
             worker_id=(runtime_health or {}).get("worker_id"),
             is_running=active_count > 0,
             active_task_count=active_count,
+            stale_running_count=len(stale_tasks),
             current_job_id=getattr(running_task, "job_id", None),
             current_source_table_name=getattr(running_task, "source_table_name", None),
             last_heartbeat_at=(runtime_health or {}).get("last_heartbeat_at"),
             last_error=_sanitize_error_text((runtime_health or {}).get("last_error")),
+            error_code=error_code,
+            error_summary=error_summary,
+            error_action_hint=error_action_hint,
         )
         return payload.model_dump()
 

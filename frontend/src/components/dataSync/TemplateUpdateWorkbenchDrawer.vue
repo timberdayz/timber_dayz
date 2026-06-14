@@ -369,6 +369,7 @@ import {
   DATE_FORMAT_OPTIONS,
   DATE_TARGET_FIELD_OPTIONS,
   DATE_VALUE_KIND_OPTIONS,
+  buildAutoCompanionDateParseRules,
   buildAutoCompanionFormatPayload,
   buildCompanionDateParseRules,
   buildFieldParseSourceOptions,
@@ -474,6 +475,40 @@ const fallbackFileId = computed(() => props.context?.row?.sample_file_id ?? null
 const currentFileId = computed(() => workbenchContext.value?.current_file?.id ?? fallbackFileId.value)
 const showHeaderRowControl = computed(() => updateMode.value !== 'core-only' && !!currentFileId.value)
 
+function buildFieldParseRulesForContext(context, headerBindings = null) {
+  const baseRules = Array.isArray(context?.template?.field_parse_rules)
+    ? context.template.field_parse_rules.map(rule => ({ strict: true, ...rule }))
+    : []
+  const bindings = Array.isArray(headerBindings)
+    ? headerBindings
+    : Array.isArray(context?.full_header_bindings)
+    ? context.full_header_bindings
+    : Array.isArray(context?.current_header_bindings)
+    ? context.current_header_bindings
+    : []
+  const autoRules = buildAutoCompanionDateParseRules({
+    dataDomain: context?.template?.data_domain || props.template?.data_domain || props.template?.domain || '',
+    granularity: context?.template?.granularity || props.template?.granularity || '',
+    headerBindings: bindings,
+    headerColumns: context?.current_header_columns || [],
+    currentRules: baseRules,
+  })
+  return autoRules.length > 0 ? mergeFieldParseRules(baseRules, autoRules) : baseRules
+}
+
+function applyAutoCompanionDateRulesForContext(context, headerBindings = null) {
+  const autoRules = buildAutoCompanionDateParseRules({
+    dataDomain: context?.template?.data_domain || props.template?.data_domain || props.template?.domain || '',
+    granularity: context?.template?.granularity || props.template?.granularity || '',
+    headerBindings: Array.isArray(headerBindings) ? headerBindings : [],
+    headerColumns: context?.current_header_columns || [],
+    currentRules: localFieldParseRules.value,
+  })
+  if (autoRules.length > 0) {
+    localFieldParseRules.value = mergeFieldParseRules(localFieldParseRules.value, autoRules)
+  }
+}
+
 watch(
   () => props.context,
   (next) => {
@@ -491,9 +526,7 @@ watch(
       : Array.isArray(next?.current_header_bindings)
       ? next.current_header_bindings.map(item => ({ ...item }))
       : []
-    localFieldParseRules.value = Array.isArray(next?.template?.field_parse_rules)
-      ? next.template.field_parse_rules.map(rule => ({ strict: true, ...rule }))
-      : []
+    localFieldParseRules.value = buildFieldParseRulesForContext(next)
     previewExpanded.value = false
     previewLoaded.value = false
     previewData.value = []
@@ -507,23 +540,6 @@ watch(
     saveReadinessLoading.value = false
     hashPolicyPreview.value = null
     lastSaveReadinessPreview.value = null
-  },
-  { immediate: true },
-)
-
-watch(
-  [existingDeduplicationFieldsAvailable, recommendedDeduplicationFields, currentHeaderColumns],
-  ([available, recommended, currentFields]) => {
-    const initialSelection = available.length > 0
-      ? [...available]
-      : recommended.length > 0
-      ? [...recommended]
-      : []
-    selectedDeduplicationFields.value = normalizeDeduplicationSelection(
-      initialSelection,
-      submissionState.value.headerBindings,
-      localFieldParseRules.value,
-    )
   },
   { immediate: true },
 )
@@ -565,6 +581,23 @@ const submissionState = computed(() => {
   })
 })
 const saveReadyHeaderBindings = computed(() => submissionState.value.headerBindings)
+
+watch(
+  [existingDeduplicationFieldsAvailable, recommendedDeduplicationFields, currentHeaderColumns],
+  ([available, recommended, currentFields]) => {
+    const initialSelection = available.length > 0
+      ? [...available]
+      : recommended.length > 0
+      ? [...recommended]
+      : []
+    selectedDeduplicationFields.value = normalizeDeduplicationSelection(
+      initialSelection,
+      submissionState.value.headerBindings,
+      localFieldParseRules.value,
+    )
+  },
+  { immediate: true },
+)
 
 const bindingRows = computed(() => {
   const counts = new Map()
@@ -678,6 +711,7 @@ async function ensureBindingsLoaded() {
       loadedBindings,
       localHeaderBindings.value,
     )
+    applyAutoCompanionDateRulesForContext(workbenchContext.value, fullHeaderBindings.value)
     bindingsLoaded.value = true
   } catch (error) {
     console.error('Failed to load bindings:', error)
@@ -834,7 +868,12 @@ async function handleSave() {
     emit('save', {
       deduplicationFields: submissionState.deduplicationFields,
       headerRow: selectedHeaderRow.value,
+      headerColumns: [...currentHeaderColumns.value],
       headerBindings: submissionState.headerBindings.map(item => ({ ...item })),
+      sampleData: { ...(workbenchContext.value?.sample_data || {}) },
+      previewData: Array.isArray(workbenchContext.value?.preview_data)
+        ? workbenchContext.value.preview_data.map(row => ({ ...row }))
+        : [],
       fieldParseRules: normalizeFieldParseRulesForSave(),
     })
   } finally {

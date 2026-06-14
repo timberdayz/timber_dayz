@@ -825,12 +825,22 @@ const ensureHashPolicyPreviewPassed = async ({
 const handleWorkbenchSave = async ({
   deduplicationFields: selectedFields,
   headerRow: selectedHeaderRow,
+  headerColumns: selectedHeaderColumns,
   headerBindings: selectedHeaderBindings,
+  sampleData: selectedSampleData,
+  previewData: selectedPreviewData,
   fieldParseRules: selectedFieldParseRules,
 }) => {
   const context = updateWorkbenchContext.value?.context
   const template = updateWorkbenchContext.value?.template
-  if (!template || !context?.current_header_columns?.length) {
+  const currentHeaderColumns = Array.isArray(selectedHeaderColumns) && selectedHeaderColumns.length > 0
+    ? selectedHeaderColumns
+    : context?.current_header_columns || []
+  const currentSampleData = selectedSampleData || context?.sample_data || {}
+  const currentPreviewData = Array.isArray(selectedPreviewData)
+    ? selectedPreviewData
+    : context?.preview_data || []
+  if (!template || !currentHeaderColumns.length) {
     ElMessage.warning('当前缺少模板或表头上下文，无法保存')
     return
   }
@@ -838,7 +848,7 @@ const handleWorkbenchSave = async ({
   savingTemplate.value = true
   try {
     const { rules: nextFieldParseRules, droppedRules } = buildTemplateUpdateFieldParseRulesPayload({
-      currentHeaderColumns: context.current_header_columns,
+      currentHeaderColumns,
       currentHeaderBindings: selectedHeaderBindings || [],
       templateHeaderBindings: template.header_bindings || [],
       existingRules: Array.isArray(selectedFieldParseRules)
@@ -854,8 +864,8 @@ const handleWorkbenchSave = async ({
         : headerBindings.value.length > 0
         ? headerBindings.value
         : inferHeaderBindings({
-            headerColumns: context.current_header_columns,
-            sampleData: context.sample_data || {},
+            headerColumns: currentHeaderColumns,
+            sampleData: currentSampleData,
           })
     const hashPolicyPassed = await ensureHashPolicyPreviewPassed({
       dataDomain: templateDataDomain,
@@ -864,7 +874,7 @@ const handleWorkbenchSave = async ({
       selectedFields,
       selectedHeaderBindings: nextHeaderBindings,
       selectedFieldParseRules: nextFieldParseRules,
-      sampleRows: context.preview_data || [],
+      sampleRows: currentPreviewData,
     })
     if (!hashPolicyPassed) return
 
@@ -876,10 +886,10 @@ const handleWorkbenchSave = async ({
       saveMode: 'new_version',
       baseTemplateId: template.template_id || template.id,
       headerRow: selectedHeaderRow ?? context?.current_header_row ?? template.header_row ?? 0,
-      headerColumns: context.current_header_columns,
+      headerColumns: currentHeaderColumns,
       deduplicationFields: selectedFields,
       headerBindings: nextHeaderBindings,
-      sampleData: context.sample_data || {},
+      sampleData: currentSampleData,
       fieldParseRules: nextFieldParseRules,
     })
 

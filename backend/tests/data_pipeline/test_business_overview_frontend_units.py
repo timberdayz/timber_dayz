@@ -140,6 +140,17 @@ def test_business_overview_frontend_compacts_spacing_and_controls():
     assert '.metric-delta {\n  font-size: 10px;' in text
 
 
+def test_business_overview_frontend_profit_margin_previous_uses_shared_formula_and_negative_state():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "calculateProfitMargin(row.profit_previous, row.gmv_previous)" in text
+    assert "metric-previous--negative" in text
+    assert ":class=\"{ 'metric-previous--negative': Number(calculateProfitMargin(row.profit_previous, row.gmv_previous)) < 0 }\"" in text
+
+
 def test_business_overview_frontend_rank_cards_share_equal_height_scroll_area():
     text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
         encoding="utf-8",

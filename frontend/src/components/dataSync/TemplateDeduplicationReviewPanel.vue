@@ -343,14 +343,18 @@ const selectedFieldsProxy = computed({
 })
 
 function emitPolicyState() {
+  const preview =
+    hashPolicyPreviewSignature.value === lastPreviewSignature
+      ? hashPolicyPreview.value
+      : null
   const valid =
     !previewLoading.value &&
-    hashPolicyPreview.value?.can_save === true &&
+    preview?.can_save === true &&
     hashPolicyPreviewSignature.value === lastPreviewSignature
   emit('hash-policy-change', {
     valid,
     loading: previewLoading.value,
-    preview: hashPolicyPreview.value,
+    preview,
   })
 }
 

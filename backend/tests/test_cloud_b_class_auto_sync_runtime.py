@@ -119,3 +119,32 @@ async def test_runtime_reports_error_when_worker_loop_crashes():
 
     assert health["status"] == "error"
     assert health["last_error"] == "worker_crashed"
+
+
+@pytest.mark.asyncio
+async def test_runtime_start_recovers_stale_running_tasks_before_loop():
+    recovered = []
+
+    class FakeWorker:
+        def run_one(self, worker_id: str):
+            return None
+
+    class FakeFactory:
+        def __call__(self):
+            return FakeWorker()
+
+        def recover_stale_running_tasks(self, worker_id: str):
+            recovered.append(worker_id)
+            return {"recovered_count": 2}
+
+    runtime = CloudBClassAutoSyncRuntime(
+        worker_factory=FakeFactory(),
+        poll_interval_seconds=0.01,
+        worker_id="worker-1",
+    )
+
+    await runtime.start()
+    await asyncio.sleep(0.03)
+    await runtime.stop()
+
+    assert recovered == ["worker-1"]

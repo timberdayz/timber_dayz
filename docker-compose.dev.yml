@@ -176,7 +176,8 @@ services:
     image: redis:7-alpine
     container_name: xihong_erp_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_pass_2025}
+    command: redis-server --save "" --appendonly no --requirepass ${REDIS_PASSWORD:-redis_pass_2025}
+    stop_grace_period: 30s
     volumes:
       - redis_data_dev:/data
     ports:
