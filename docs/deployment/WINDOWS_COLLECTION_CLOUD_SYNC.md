@@ -63,6 +63,11 @@ Required cloud sync variables:
 - `CLOUD_SYNC_TUNNEL_ENABLED=true`
 - `CLOUD_SYNC_TUNNEL_HOST=127.0.0.1`
 - `CLOUD_SYNC_TUNNEL_PORT=15433`
+- `CLOUD_SYNC_SSH_HOST=134.175.222.171`
+- `CLOUD_SYNC_SSH_USER=deploy`
+- `CLOUD_SYNC_SSH_KEY=C:\Users\18689\.ssh\github_actions_deploy`
+- `CLOUD_SYNC_REMOTE_DB_HOST=127.0.0.1`
+- `CLOUD_SYNC_REMOTE_DB_PORT=5432`
 
 Keep `DATABASE_URL` pointed at the local business database.
 Keep `CLOUD_DATABASE_URL` pointed at the remote cloud target through the SSH
@@ -70,21 +75,20 @@ tunnel. Do not reuse one for the other.
 
 ## Startup
 
-1. Start the SSH tunnel on the Windows host and confirm `127.0.0.1:15433` is listening.
-2. Start Docker Desktop.
-3. Start formal headed collection mode:
+1. Start Docker Desktop.
+2. Start formal headed collection mode. The script starts the SSH tunnel when it is not already reachable:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start_collection_formal.ps1
 ```
 
-4. Check the local backend:
+3. Check the local backend:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8001/healthz/ready
 ```
 
-5. Check Docker infrastructure:
+4. Check Docker infrastructure:
 
 ```powershell
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"

@@ -58,6 +58,16 @@ If the cloud database is reached through a host tunnel, also set:
 - `CLOUD_SYNC_TUNNEL_HOST=127.0.0.1`
 - `CLOUD_SYNC_TUNNEL_PORT=15433`
 
+Formal mode can start that tunnel automatically when these non-secret SSH
+settings are present. Use key-based SSH only; do not store passwords in env
+files or scripts.
+
+- `CLOUD_SYNC_SSH_HOST=134.175.222.171`
+- `CLOUD_SYNC_SSH_USER=deploy`
+- `CLOUD_SYNC_SSH_KEY=C:\Users\18689\.ssh\github_actions_deploy`
+- `CLOUD_SYNC_REMOTE_DB_HOST=127.0.0.1`
+- `CLOUD_SYNC_REMOTE_DB_PORT=5432`
+
 ## Startup
 
 For formal collection, use the strict wrapper:
@@ -70,8 +80,9 @@ The formal wrapper:
 
 1. sets `XIHONG_ENV_PROFILE=collection`
 2. stops Docker `backend-api` and Docker `backend-collector`
-3. runs `python scripts/check_local_run_env.py --profile collection --require-cloud-tunnel`
-4. starts `python run.py --local`
+3. starts the SSH tunnel if `CLOUD_SYNC_TUNNEL_HOST:CLOUD_SYNC_TUNNEL_PORT` is not reachable
+4. runs `python scripts/check_local_run_env.py --profile collection --require-cloud-tunnel`
+5. starts `python run.py --local`
 
 For development, use the flexible wrapper:
 
@@ -127,6 +138,15 @@ is missing. For the current Windows laptop topology, the expected listener is:
 
 Development mode validates the variables but does not require the tunnel TCP
 probe to succeed before startup.
+
+If the listener is missing, `start_collection_formal.ps1` attempts to start:
+
+```powershell
+ssh -N -L 15433:127.0.0.1:5432 -i <CLOUD_SYNC_SSH_KEY> deploy@134.175.222.171
+```
+
+The SSH process is started in the background with `BatchMode=yes`, so startup
+fails fast if key-based login is not configured.
 
 ## Verification
 

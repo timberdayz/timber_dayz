@@ -15,6 +15,13 @@ def test_formal_collection_start_script_uses_strict_tunnel_check():
     assert "--require-cloud-tunnel" in text
     assert "run.py" in text
     assert "--local" in text
+    assert "Ensure-CloudSyncTunnel" in text
+    assert "CLOUD_SYNC_SSH_HOST" in text
+    assert "CLOUD_SYNC_SSH_KEY" in text
+    assert "Start-Process" in text
+    assert "Import-EnvFile" in text
+    assert "BatchMode=yes" in text
+    assert "TunnelOnly" in text
 
 
 def test_local_collection_start_script_keeps_development_preflight():
