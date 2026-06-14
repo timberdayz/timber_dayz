@@ -111,11 +111,13 @@ class CloudSyncAdminQueryService:
         return self._parse_bool(os.getenv("CLOUD_SYNC_AUTO_SYNC_ENABLED", "true"), default=True)
 
     async def get_health_summary(self, runtime_health: dict | None = None) -> dict:
+        current_scope = self._current_checkpoint_scope()
         tasks = (await self.db.execute(select(CloudBClassSyncTask))).scalars().all()
+        scoped_tasks = [task for task in tasks if self._task_matches_scope(task, current_scope)]
         now = datetime.now(timezone.utc)
         stale_running = [
             task
-            for task in tasks
+            for task in scoped_tasks
             if task.status == "running"
             and task.lease_expires_at is not None
             and _as_utc(task.lease_expires_at) is not None
@@ -124,14 +126,14 @@ class CloudSyncAdminQueryService:
         oldest_pending = min(
             (
                 int((now - _as_utc(task.created_at)).total_seconds())
-                for task in tasks
+                for task in scoped_tasks
                 if task.status in {"pending", "retry_waiting"} and task.created_at is not None
             ),
             default=None,
         )
         completed_recent_24h = sum(
             1
-            for task in tasks
+            for task in scoped_tasks
             if task.status == "completed"
             and task.finished_at is not None
             and _as_utc(task.finished_at) >= now - timedelta(hours=24)
@@ -149,7 +151,7 @@ class CloudSyncAdminQueryService:
                 pending=sum(1 for task in tasks if task.status == "pending"),
                 running=sum(
                     1
-                    for task in tasks
+                    for task in scoped_tasks
                     if task.status == "running"
                     and (
                         task.lease_expires_at is None
@@ -158,9 +160,9 @@ class CloudSyncAdminQueryService:
                     )
                 ),
                 stale_running=len(stale_running),
-                retry_waiting=sum(1 for task in tasks if task.status == "retry_waiting"),
-                failed=sum(1 for task in tasks if task.status == "failed"),
-                partial_success=sum(1 for task in tasks if task.status == "partial_success"),
+                retry_waiting=sum(1 for task in scoped_tasks if task.status == "retry_waiting"),
+                failed=sum(1 for task in scoped_tasks if task.status == "failed"),
+                partial_success=sum(1 for task in scoped_tasks if task.status == "partial_success"),
                 completed_recent_24h=completed_recent_24h,
                 oldest_pending_age_seconds=oldest_pending,
             ),
@@ -251,14 +253,17 @@ class CloudSyncAdminQueryService:
         return events
 
     async def get_overview_summary(self, runtime_health: dict | None = None) -> dict:
+        current_scope = self._current_checkpoint_scope()
         tasks = (await self.db.execute(select(CloudBClassSyncTask).order_by(CloudBClassSyncTask.id.desc()))).scalars().all()
+        scoped_tasks = [task for task in tasks if self._task_matches_scope(task, current_scope)]
+        legacy_scope_tasks = [task for task in tasks if not self._task_matches_scope(task, current_scope)]
         now = datetime.now(timezone.utc)
-        failed = sum(1 for task in tasks if task.status == "failed")
-        partial_success = sum(1 for task in tasks if task.status == "partial_success")
-        pending = sum(1 for task in tasks if task.status == "pending")
+        failed = sum(1 for task in scoped_tasks if task.status == "failed")
+        partial_success = sum(1 for task in scoped_tasks if task.status == "partial_success")
+        pending = sum(1 for task in scoped_tasks if task.status == "pending")
         stale_running = sum(
             1
-            for task in tasks
+            for task in scoped_tasks
             if task.status == "running"
             and task.lease_expires_at is not None
             and _as_utc(task.lease_expires_at) is not None
@@ -266,7 +271,7 @@ class CloudSyncAdminQueryService:
         )
         running = sum(
             1
-            for task in tasks
+            for task in scoped_tasks
             if task.status == "running"
             and (
                 task.lease_expires_at is None
@@ -274,14 +279,17 @@ class CloudSyncAdminQueryService:
                 or _as_utc(task.lease_expires_at) >= now
             )
         )
-        retry_waiting = sum(1 for task in tasks if task.status == "retry_waiting")
-        latest_success = next((task for task in tasks if task.status == "completed" and task.finished_at is not None), None)
-        latest_error_task = next((task for task in tasks if task.last_error), None)
+        retry_waiting = sum(1 for task in scoped_tasks if task.status == "retry_waiting")
+        legacy_scope_exception_count = sum(
+            1 for task in legacy_scope_tasks if task.status in {"failed", "partial_success", "running"}
+        )
+        latest_success = next((task for task in scoped_tasks if task.status == "completed" and task.finished_at is not None), None)
+        latest_error_task = next((task for task in scoped_tasks if task.last_error), None)
         if latest_error_task is None and stale_running:
             latest_error_task = next(
                 (
                     task
-                    for task in tasks
+                    for task in scoped_tasks
                     if task.status == "running"
                     and task.lease_expires_at is not None
                     and _as_utc(task.lease_expires_at) is not None
@@ -323,6 +331,8 @@ class CloudSyncAdminQueryService:
             error_summary=error_summary,
             error_action_hint=error_action_hint,
             auto_sync_enabled=await self._auto_sync_enabled(),
+            current_checkpoint_scope=current_scope,
+            legacy_scope_exception_count=legacy_scope_exception_count,
         )
         return payload.model_dump()
 
@@ -376,18 +386,21 @@ class CloudSyncAdminQueryService:
 
     async def get_runtime_summary(self, runtime_health: dict | None = None) -> dict:
         now = datetime.now(timezone.utc)
-        running_task = (
-            await self.db.execute(
-                select(CloudBClassSyncTask)
-                .where(CloudBClassSyncTask.status == "running")
-                .order_by(CloudBClassSyncTask.id.desc())
-            )
-        ).scalars().first()
+        current_scope = self._current_checkpoint_scope()
         running_tasks = (
             await self.db.execute(
                 select(CloudBClassSyncTask).where(CloudBClassSyncTask.status == "running")
             )
         ).scalars().all()
+        legacy_scope_stale_count = sum(
+            1
+            for task in running_tasks
+            if not self._task_matches_scope(task, current_scope)
+            and task.lease_expires_at is not None
+            and _as_utc(task.lease_expires_at) is not None
+            and _as_utc(task.lease_expires_at) < now
+        )
+        running_tasks = [task for task in running_tasks if self._task_matches_scope(task, current_scope)]
         active_tasks = [
             task
             for task in running_tasks
@@ -422,6 +435,8 @@ class CloudSyncAdminQueryService:
             error_code=error_code,
             error_summary=error_summary,
             error_action_hint=error_action_hint,
+            current_checkpoint_scope=current_scope,
+            legacy_scope_stale_count=legacy_scope_stale_count,
         )
         return payload.model_dump()
 

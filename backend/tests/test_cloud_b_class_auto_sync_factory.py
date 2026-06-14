@@ -186,3 +186,77 @@ def test_run_cloud_sync_startup_checks_reports_ok_when_tunnel_and_cloud_db_are_r
     assert payload["status"] == "ok"
     assert payload["checks"]["cloud_database_tcp"]["ok"] is True
     assert payload["checks"]["cloud_sync_tunnel"]["ok"] is True
+
+
+def test_worker_factory_recover_stale_running_tasks_recovers_legacy_scope(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("DATABASE_URL", "sqlite://")
+    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:pass@127.0.0.1:15433/xihong_erp")
+
+    recovered = []
+
+    class FakeTask:
+        def __init__(self, status, scope):
+            self.status = status
+            self.job_id = f"job-{scope}"
+            self.source_table_name = "fact_demo"
+            self.claimed_by = "worker-1"
+            self.lease_expires_at = argparse.Namespace()
+            self.heartbeat_at = "hb"
+            self.next_retry_at = "next"
+            self.last_attempt_finished_at = None
+            self.metadata_json = {"checkpoint_scope": scope}
+            self.error_code = None
+            self.last_error = None
+
+    current_scope = _build_checkpoint_scope_key(
+        "postgresql://erp_user:pass@127.0.0.1:15433/xihong_erp",
+        dry_run=False,
+    )
+    legacy_scope = _build_checkpoint_scope_key(
+        "postgresql://erp_user:pass@127.0.0.1:15434/xihong_erp",
+        dry_run=False,
+    )
+    tasks = [
+        FakeTask("running", current_scope),
+        FakeTask("running", legacy_scope),
+    ]
+
+    class FakeResult:
+        def __init__(self, values):
+            self._values = values
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._values
+
+    class FakeSession:
+        def execute(self, stmt):
+            return FakeResult(tasks)
+
+        def commit(self):
+            recovered.extend(tasks)
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    factory = CloudSyncWorkerFactory(
+        local_engine=object(),
+        cloud_engine=argparse.Namespace(url="postgresql://erp_user:pass@127.0.0.1:15433/xihong_erp"),
+        session_factory=lambda: FakeSession(),
+        dry_run=False,
+    )
+
+    result = factory.recover_stale_running_tasks("worker-a")
+
+    assert result["recovered_count"] == 2
+    assert tasks[0].status == "pending"
+    assert tasks[1].status == "failed"
+    assert tasks[1].error_code == "legacy_scope_stale_recovered"

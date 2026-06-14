@@ -53,6 +53,10 @@ export default {
     return await api.post('/cloud-sync/retry-failed')
   },
 
+  async recoverStaleTasks() {
+    return await api.post('/cloud-sync/tasks/recover-stale')
+  },
+
   async retryTask(jobId) {
     return await api.post(`/cloud-sync/tasks/${jobId}/retry`)
   },

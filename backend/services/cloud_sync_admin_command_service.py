@@ -187,6 +187,60 @@ class CloudSyncAdminCommandService:
             metadata={"retried_count": len(tasks)},
         ).model_dump()
 
+    async def recover_stale_tasks(self) -> dict:
+        current_scope = self._current_checkpoint_scope()
+        now = datetime.now(timezone.utc)
+        stmt = select(CloudBClassSyncTask).where(
+            CloudBClassSyncTask.status == "running",
+            CloudBClassSyncTask.lease_expires_at.is_not(None),
+            CloudBClassSyncTask.lease_expires_at < now,
+        )
+        tasks = (await self.db.execute(stmt)).scalars().all()
+
+        current_scope_recovered = 0
+        legacy_scope_recovered = 0
+
+        for task in tasks:
+            metadata = dict(task.metadata_json or {})
+            task_scope = metadata.get("checkpoint_scope")
+            is_current_scope = task_scope in {None, current_scope}
+
+            task.claimed_by = None
+            task.lease_expires_at = None
+            task.heartbeat_at = None
+            task.next_retry_at = None
+            task.last_attempt_finished_at = now
+            metadata["recovered_at"] = now.isoformat()
+
+            if is_current_scope:
+                task.status = "pending"
+                task.last_error = None
+                task.error_code = None
+                metadata["recovery_reason"] = "stale_running_recovered_on_demand"
+                current_scope_recovered += 1
+            else:
+                task.status = "failed"
+                task.last_error = "legacy scope stale running task recovered"
+                task.error_code = "legacy_scope_stale_recovered"
+                metadata["recovery_reason"] = "legacy_scope_stale_recovered"
+                metadata["original_checkpoint_scope"] = task_scope
+                metadata["recovered_by_scope"] = current_scope
+                legacy_scope_recovered += 1
+
+            task.metadata_json = metadata
+
+        await self.db.commit()
+
+        return CloudSyncCommandResponse(
+            status="submitted",
+            detail="recover_stale",
+            metadata={
+                "recovered_count": len(tasks),
+                "recovered_current_scope_count": current_scope_recovered,
+                "recovered_legacy_scope_count": legacy_scope_recovered,
+            },
+        ).model_dump()
+
     def _reset_task_for_retry(self, task: CloudBClassSyncTask) -> None:
         task.status = "pending"
         task.next_retry_at = None

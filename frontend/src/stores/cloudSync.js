@@ -80,6 +80,7 @@ export const useCloudSyncStore = defineStore('cloudSync', {
     hasHistory: (state) => state.history.length > 0 || Boolean(state.overview?.last_success_at),
     selectedTableState: (state) =>
       state.tableStates.find((row) => row.source_table_name === state.selectedTableName) || null,
+    legacyScopeExceptionCount: (state) => state.overview?.legacy_scope_exception_count || 0,
   },
 
   actions: {
@@ -242,6 +243,10 @@ export const useCloudSyncStore = defineStore('cloudSync', {
 
     async retryFailed() {
       return await this.runAction(() => cloudSyncApi.retryFailed(), '已提交异常任务重试')
+    },
+
+    async recoverStaleTasks() {
+      return await this.runAction(() => cloudSyncApi.recoverStaleTasks(), '已提交遗留运行任务恢复')
     },
 
     async retryTask(jobId) {

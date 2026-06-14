@@ -131,6 +131,8 @@ class CloudSyncOverviewSummary(BaseModel):
     error_summary: str | None = None
     error_action_hint: str | None = None
     auto_sync_enabled: bool = True
+    current_checkpoint_scope: str | None = None
+    legacy_scope_exception_count: int = 0
 
 
 class CloudSyncRuntimeSummary(BaseModel):
@@ -146,6 +148,8 @@ class CloudSyncRuntimeSummary(BaseModel):
     error_code: str | None = None
     error_summary: str | None = None
     error_action_hint: str | None = None
+    current_checkpoint_scope: str | None = None
+    legacy_scope_stale_count: int = 0
 
 
 class CloudSyncHistoryRow(BaseModel):

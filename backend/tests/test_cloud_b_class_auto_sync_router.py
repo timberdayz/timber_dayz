@@ -318,3 +318,31 @@ async def test_sync_now_retry_failed_and_update_settings_endpoints(monkeypatch):
         assert retry_failed_response.json()["detail"] == "retry_failed"
         assert settings_update_response.status_code == 200
         assert settings_update_response.json()["metadata"]["auto_sync_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_endpoint(monkeypatch):
+    from backend.domains.data_platform.routers import cloud_sync
+
+    class FakeCommandService:
+        async def recover_stale_tasks(self):
+            return {
+                "status": "submitted",
+                "detail": "recover_stale",
+                "metadata": {
+                    "recovered_count": 2,
+                    "recovered_current_scope_count": 1,
+                    "recovered_legacy_scope_count": 1,
+                },
+            }
+
+    monkeypatch.setattr(cloud_sync, "build_command_service", lambda *args, **kwargs: FakeCommandService())
+
+    app = _build_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.post("/api/cloud-sync/tasks/recover-stale")
+
+        assert response.status_code == 200
+        assert response.json()["detail"] == "recover_stale"
+        assert response.json()["metadata"]["recovered_legacy_scope_count"] == 1

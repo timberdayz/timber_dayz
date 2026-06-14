@@ -264,6 +264,8 @@ class CloudSyncWorkerFactory:
         db = self.session_factory()
         now = datetime.now(timezone.utc)
         recovered: list[CloudBClassSyncTask] = []
+        current_scope_recovered = 0
+        legacy_scope_recovered = 0
         try:
             stmt = (
                 select(CloudBClassSyncTask)
@@ -271,23 +273,34 @@ class CloudSyncWorkerFactory:
                     CloudBClassSyncTask.status == "running",
                     CloudBClassSyncTask.lease_expires_at.is_not(None),
                     CloudBClassSyncTask.lease_expires_at < now,
-                    or_(
-                        CloudBClassSyncTask.metadata_json.is_(None),
-                        CloudBClassSyncTask.metadata_json["checkpoint_scope"].as_string() == self.checkpoint_scope,
-                    ),
                 )
                 .order_by(CloudBClassSyncTask.id.asc())
             )
             tasks = db.execute(stmt).scalars().all()
             for task in tasks:
-                task.status = "pending"
+                metadata = dict(task.metadata_json or {})
+                task_scope = metadata.get("checkpoint_scope")
+                is_current_scope = task_scope in {None, self.checkpoint_scope}
+
+                task.status = "pending" if is_current_scope else "failed"
                 task.claimed_by = None
                 task.lease_expires_at = None
                 task.heartbeat_at = None
                 task.next_retry_at = None
                 task.last_attempt_finished_at = now
-                metadata = dict(task.metadata_json or {})
-                metadata["recovery_reason"] = "stale_running_recovered_on_startup"
+                metadata["recovered_at"] = now.isoformat()
+                if is_current_scope:
+                    metadata["recovery_reason"] = "stale_running_recovered_on_startup"
+                    task.last_error = None
+                    task.error_code = None
+                    current_scope_recovered += 1
+                else:
+                    metadata["recovery_reason"] = "legacy_scope_stale_recovered"
+                    metadata["original_checkpoint_scope"] = task_scope
+                    metadata["recovered_by_scope"] = self.checkpoint_scope
+                    task.last_error = "legacy scope stale running task recovered"
+                    task.error_code = "legacy_scope_stale_recovered"
+                    legacy_scope_recovered += 1
                 metadata["recovered_at"] = now.isoformat()
                 task.metadata_json = metadata
                 recovered.append(task)
@@ -302,7 +315,11 @@ class CloudSyncWorkerFactory:
                     )
             else:
                 db.rollback()
-            return {"recovered_count": len(recovered)}
+            return {
+                "recovered_count": len(recovered),
+                "recovered_current_scope_count": current_scope_recovered,
+                "recovered_legacy_scope_count": legacy_scope_recovered,
+            }
         finally:
             db.close()
 

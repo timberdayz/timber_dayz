@@ -151,6 +151,16 @@ async def retry_failed_cloud_sync_tasks(
     return await _maybe_await(service.retry_failed())
 
 
+@router.post("/api/cloud-sync/tasks/recover-stale")
+async def recover_stale_cloud_sync_tasks(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=recover_stale", _actor_repr(current_user))
+    return await _maybe_await(service.recover_stale_tasks())
+
+
 @router.put("/api/cloud-sync/settings")
 async def update_cloud_sync_settings(
     payload: CloudSyncSettingsRequest,

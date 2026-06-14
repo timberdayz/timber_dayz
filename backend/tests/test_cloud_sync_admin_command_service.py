@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 
 import pytest
@@ -429,6 +429,65 @@ async def test_command_service_retry_failed_only_retries_failed_and_partial_succ
     assert failed_task.lease_expires_at is None
     assert partial_task.lease_expires_at is None
     assert completed_task.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_command_service_recover_stale_tasks_handles_current_and_legacy_scope(
+    monkeypatch,
+    cloud_sync_sqlite_session,
+):
+    now = datetime.now(timezone.utc)
+    current_cloud_url = "postgresql://erp_user:erp_pass_2025@127.0.0.1:15433/xihong_erp"
+    other_cloud_url = "postgresql://erp_user:erp_pass_2025@127.0.0.1:15434/xihong_erp"
+    monkeypatch.setenv("CLOUD_DATABASE_URL", current_cloud_url)
+    current_scope = _build_checkpoint_scope_key(current_cloud_url, dry_run=False)
+    other_scope = _build_checkpoint_scope_key(other_cloud_url, dry_run=False)
+
+    current_task = CloudBClassSyncTask(
+        job_id="job-current-stale",
+        dedupe_key="fact_current",
+        source_table_name="fact_current",
+        status="running",
+        claimed_by="worker-current",
+        lease_expires_at=now - timedelta(minutes=2),
+        heartbeat_at=now - timedelta(minutes=3),
+        metadata_json={"checkpoint_scope": current_scope},
+    )
+    legacy_task = CloudBClassSyncTask(
+        job_id="job-legacy-stale",
+        dedupe_key="fact_legacy",
+        source_table_name="fact_legacy",
+        status="running",
+        claimed_by="worker-legacy",
+        lease_expires_at=now - timedelta(minutes=4),
+        heartbeat_at=now - timedelta(minutes=5),
+        metadata_json={"checkpoint_scope": other_scope},
+    )
+    cloud_sync_sqlite_session.add_all([current_task, legacy_task])
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
+    payload = await service.recover_stale_tasks()
+
+    await cloud_sync_sqlite_session.refresh(current_task)
+    await cloud_sync_sqlite_session.refresh(legacy_task)
+
+    assert payload["status"] == "submitted"
+    assert payload["metadata"]["recovered_current_scope_count"] == 1
+    assert payload["metadata"]["recovered_legacy_scope_count"] == 1
+
+    assert current_task.status == "pending"
+    assert current_task.claimed_by is None
+    assert current_task.lease_expires_at is None
+    assert current_task.metadata_json["recovery_reason"] == "stale_running_recovered_on_demand"
+
+    assert legacy_task.status == "failed"
+    assert legacy_task.claimed_by is None
+    assert legacy_task.lease_expires_at is None
+    assert legacy_task.metadata_json["recovery_reason"] == "legacy_scope_stale_recovered"
+    assert legacy_task.metadata_json["original_checkpoint_scope"] == other_scope
+    assert legacy_task.metadata_json["recovered_by_scope"] == current_scope
+    assert legacy_task.error_code == "legacy_scope_stale_recovered"
 
 
 @pytest.mark.asyncio

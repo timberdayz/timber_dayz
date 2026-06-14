@@ -312,6 +312,63 @@ async def test_query_service_marks_stale_running_as_degraded(monkeypatch, cloud_
 
 
 @pytest.mark.asyncio
+async def test_query_service_excludes_legacy_scope_stale_from_current_overview(
+    monkeypatch,
+    cloud_sync_sqlite_session,
+):
+    now = datetime.now(timezone.utc)
+    current_cloud_url = "postgresql://erp_user:secret-pass@127.0.0.1:15433/xihong_erp"
+    other_cloud_url = "postgresql://erp_user:secret-pass@127.0.0.1:15434/xihong_erp"
+    monkeypatch.setenv("CLOUD_DATABASE_URL", current_cloud_url)
+    current_scope = _build_checkpoint_scope_key(current_cloud_url, dry_run=False)
+    other_scope = _build_checkpoint_scope_key(other_cloud_url, dry_run=False)
+
+    cloud_sync_sqlite_session.add_all(
+        [
+            CloudBClassSyncTask(
+                job_id="job-current-pending",
+                dedupe_key="fact_current",
+                source_table_name="fact_current",
+                status="pending",
+                metadata_json={"checkpoint_scope": current_scope},
+                created_at=now - timedelta(minutes=1),
+            ),
+            CloudBClassSyncTask(
+                job_id="job-legacy-stale",
+                dedupe_key="fact_legacy",
+                source_table_name="fact_legacy",
+                status="running",
+                claimed_by="worker-legacy",
+                lease_expires_at=now - timedelta(minutes=3),
+                heartbeat_at=now - timedelta(minutes=4),
+                last_error="legacy-scope-error",
+                metadata_json={"checkpoint_scope": other_scope},
+                created_at=now - timedelta(minutes=10),
+            ),
+        ]
+    )
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+    health = await service.get_health_summary(runtime_health={"status": "running", "worker_id": "worker-1"})
+    overview = await service.get_overview_summary(runtime_health={"status": "running", "worker_id": "worker-1"})
+    runtime = await service.get_runtime_summary(runtime_health={"status": "running", "worker_id": "worker-1"})
+
+    assert health["queue"]["pending"] == 1
+    assert health["queue"]["stale_running"] == 0
+    assert overview["exception_task_count"] == 0
+    assert overview["failed_task_count"] == 0
+    assert overview["stale_running_task_count"] == 0
+    assert overview["latest_error"] is None
+    assert overview["catch_up_status"] == "backlog"
+    assert overview["legacy_scope_exception_count"] == 1
+    assert overview["current_checkpoint_scope"] == current_scope
+    assert runtime["stale_running_count"] == 0
+    assert runtime["error_summary"] is None
+    assert runtime["legacy_scope_stale_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_history_summary_returns_recent_sync_rows(seeded_cloud_sync_query_data):
     service = CloudSyncAdminQueryService(seeded_cloud_sync_query_data)
 
