@@ -7,7 +7,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 
 $env:XIHONG_ENV_PROFILE = "collection"
 
-Write-Host "[Mode] Development collection takeover: local headed backend, Docker infrastructure only"
+Write-Host "[Mode] Formal collection laptop mode: local headed backend, Docker infrastructure only"
 Write-Host "[Guard] Docker backend-api/backend-collector will be stopped before startup"
 
 try {
@@ -17,8 +17,9 @@ try {
 }
 
 if (-not $SkipChecks) {
-    & python "$repoRoot\scripts\check_local_run_env.py" --profile collection
+    & python "$repoRoot\scripts\check_local_run_env.py" --profile collection --require-cloud-tunnel
     if ($LASTEXITCODE -ne 0) {
+        Write-Host "[FAIL] Formal collection preflight failed. Confirm the SSH tunnel is running and CLOUD_SYNC_TUNNEL_HOST:CLOUD_SYNC_TUNNEL_PORT is reachable."
         exit $LASTEXITCODE
     }
 }

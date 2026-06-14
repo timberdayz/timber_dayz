@@ -10,15 +10,27 @@ Default local startup:
 python run.py --local
 ```
 
-For local collection takeover, stop Docker `backend-api` and
-`backend-collector` first, then use:
+For headed collection and cloud sync on a Windows laptop, use the mode-specific
+wrappers documented in `docs/guides/LOCAL_COLLECTION_TAKEOVER.md`.
+
+Formal collection laptop mode:
 
 ```powershell
-docker stop xihong_erp_backend_api xihong_erp_backend_collector
+powershell -ExecutionPolicy Bypass -File .\scripts\start_collection_formal.ps1
+```
+
+Development collection takeover mode:
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start_local_collection_mode.ps1
 ```
 
-Local Redis in this mode is a temporary broker/cache for development. It is
+Both collection modes keep Docker `backend-api` and Docker `backend-collector`
+stopped. Docker should run only the infrastructure and background queue support
+services: `postgres`, `redis`, `celery-worker`, and `celery-beat`. The Windows
+host owns the local backend process and visible Playwright browser.
+
+Local Redis in these modes is a temporary broker/cache for development. It is
 not intended to preserve long-lived queue state across abnormal Windows
 shutdowns. If Redis startup fails after an unexpected shutdown, repair it
 before rebuilding the local volume:
@@ -42,11 +54,13 @@ python run.py --backend-only
 python run.py --frontend-only
 ```
 
-Legacy or specialized launchers may exist in the repository. Do not present them as the default path unless the task specifically requires them.
+Legacy or specialized launchers may exist in the repository. Do not present them
+as the default path unless the task specifically requires them.
 
 ### Dashboard Asset Check
 
-Before manually validating Business Overview or other PostgreSQL dashboard pages locally, verify dashboard assets first:
+Before manually validating Business Overview or other PostgreSQL dashboard pages
+locally, verify dashboard assets first:
 
 ```bash
 python scripts/bootstrap_postgresql_dashboard.py --module business_overview --check --json
@@ -77,11 +91,14 @@ python scripts/verify_no_emoji.py
 python scripts/verify_api_contract_consistency.py
 ```
 
-On Windows, do not rely on editor auto-detection for source encoding. Keep source files in UTF-8 and let the repository guardrails fail fast if mojibake or template corruption is introduced.
+On Windows, do not rely on editor auto-detection for source encoding. Keep source
+files in UTF-8 and let the repository guardrails fail fast if mojibake or
+template corruption is introduced.
 
 ## Testing And Quality
 
-Run the narrowest relevant tests first, then broaden when the change touches shared behavior.
+Run the narrowest relevant tests first, then broaden when the change touches
+shared behavior.
 
 ```bash
 pytest

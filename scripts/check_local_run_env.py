@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-本地启动环境检查。
-
-默认检查当前 `.env` / `.env.local` 是否满足本地后端启动要求。
-当传入 `--profile collection` 时，还会加载 `.env.collection.local`
-并额外校验临时采集顶替模式所需的关键开关。
-"""
+"""Validate local startup requirements for default and collection profiles."""
 
 from __future__ import annotations
 
@@ -80,91 +74,112 @@ def _is_truthy(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def validate_collection_profile() -> Tuple[bool, list[str]]:
+def validate_collection_profile(require_tunnel_reachable: bool = False) -> Tuple[bool, list[str]]:
     errors: list[str] = []
 
     if not _is_truthy(os.getenv("ENABLE_COLLECTION")):
-        errors.append("ENABLE_COLLECTION 必须为 true")
+        errors.append("ENABLE_COLLECTION must be true")
 
     if not _is_truthy(os.getenv("CLOUD_SYNC_WORKER_ENABLED")):
-        errors.append("CLOUD_SYNC_WORKER_ENABLED 必须为 true")
+        errors.append("CLOUD_SYNC_WORKER_ENABLED must be true")
 
     if not os.getenv("CLOUD_DATABASE_URL", "").strip():
-        errors.append("CLOUD_DATABASE_URL 未配置，自动云端同步无法启用")
+        errors.append("CLOUD_DATABASE_URL is required for cloud sync")
 
-    if _is_truthy(os.getenv("CLOUD_SYNC_TUNNEL_ENABLED")):
-        if not os.getenv("CLOUD_SYNC_TUNNEL_HOST", "").strip():
-            errors.append("CLOUD_SYNC_TUNNEL_HOST 未配置")
-        if not os.getenv("CLOUD_SYNC_TUNNEL_PORT", "").strip():
-            errors.append("CLOUD_SYNC_TUNNEL_PORT 未配置")
+    tunnel_enabled = _is_truthy(os.getenv("CLOUD_SYNC_TUNNEL_ENABLED"))
+    tunnel_host = os.getenv("CLOUD_SYNC_TUNNEL_HOST", "").strip()
+    tunnel_port = os.getenv("CLOUD_SYNC_TUNNEL_PORT", "").strip()
+
+    if tunnel_enabled:
+        if not tunnel_host:
+            errors.append("CLOUD_SYNC_TUNNEL_HOST is required when tunnel is enabled")
+        if not tunnel_port:
+            errors.append("CLOUD_SYNC_TUNNEL_PORT is required when tunnel is enabled")
+
+    if require_tunnel_reachable:
+        if not tunnel_enabled:
+            errors.append("CLOUD_SYNC_TUNNEL_ENABLED must be true in formal collection mode")
+        elif tunnel_host and tunnel_port:
+            try:
+                parsed_tunnel_port = int(tunnel_port)
+            except ValueError:
+                errors.append("CLOUD_SYNC_TUNNEL_PORT must be an integer")
+            else:
+                if not check_tcp(tunnel_host, parsed_tunnel_port):
+                    errors.append(f"CLOUD_SYNC_TUNNEL {tunnel_host}:{parsed_tunnel_port} is not reachable")
 
     return not errors, errors
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="检查本地运行环境")
+    parser = argparse.ArgumentParser(description="Check local runtime environment")
     parser.add_argument(
         "--profile",
         choices=["default", "collection"],
         default="default",
-        help="collection 会额外校验本机顶替采集机所需配置",
+        help="collection also loads .env.collection.local and validates collection/cloud-sync settings",
+    )
+    parser.add_argument(
+        "--require-cloud-tunnel",
+        action="store_true",
+        help="require CLOUD_SYNC_TUNNEL_HOST:PORT to be reachable before startup",
     )
     args = parser.parse_args()
 
     load_project_env(project_root, profile=None if args.profile == "default" else args.profile)
 
     safe_print("=" * 60)
-    safe_print("本地启动环境检查")
+    safe_print("Local startup environment check")
     safe_print("=" * 60)
 
     url = os.getenv("DATABASE_URL", "").strip()
     if not url:
-        safe_print("[FAIL] 未设置 DATABASE_URL")
-        safe_print("  建议: 在项目根目录 .env 中配置 DATABASE_URL=postgresql://...")
+        safe_print("[FAIL] DATABASE_URL is not set")
+        safe_print("  Hint: configure DATABASE_URL=postgresql://... in .env")
         sys.exit(1)
 
     if not url.startswith("postgresql"):
-        safe_print(f"[FAIL] 当前 DATABASE_URL 不是 PostgreSQL: {url[:50]}...")
+        safe_print(f"[FAIL] DATABASE_URL is not PostgreSQL: {url[:50]}...")
         sys.exit(1)
 
     info = parse_pg_url(url)
     if not info:
-        safe_print("[FAIL] 无法解析 DATABASE_URL")
+        safe_print("[FAIL] DATABASE_URL could not be parsed")
         sys.exit(1)
 
-    safe_print("\n[配置] 当前数据库配置")
-    safe_print(f"  主机: {info['host']}")
-    safe_print(f"  端口: {info['port']}")
-    safe_print(f"  用户: {info['user']}")
-    safe_print(f"  数据库: {info['dbname']}")
-    safe_print("  密码: ****")
+    safe_print("\n[Config] Current database")
+    safe_print(f"  Host: {info['host']}")
+    safe_print(f"  Port: {info['port']}")
+    safe_print(f"  User: {info['user']}")
+    safe_print(f"  Database: {info['dbname']}")
+    safe_print("  Password: ****")
 
-    safe_print("\n[检查] TCP 连接 ...")
+    safe_print("\n[Check] TCP connectivity ...")
     if not check_tcp(info["host"], info["port"]):
-        safe_print(f"  [FAIL] 无法连接到 {info['host']}:{info['port']}")
+        safe_print(f"  [FAIL] Cannot connect to {info['host']}:{info['port']}")
         if info["port"] == 15432:
-            safe_print("  提示: 如使用 Docker PostgreSQL，请先启动 dev profile 的 postgres。")
+            safe_print("  Hint: start the Docker postgres dev service first.")
         sys.exit(1)
-    safe_print("  [OK] 端口可达")
+    safe_print("  [OK] Port reachable")
 
-    safe_print("\n[检查] 数据库连接与认证 ...")
+    safe_print("\n[Check] PostgreSQL auth ...")
     ok, err = check_postgres_connect(url)
     if not ok:
-        safe_print(f"  [FAIL] 连接失败: {err}")
+        safe_print(f"  [FAIL] Connection failed: {err}")
         sys.exit(1)
-    safe_print("  [OK] 数据库连接成功")
+    safe_print("  [OK] Database connection succeeded")
 
     if args.profile == "collection":
-        safe_print("\n[检查] 采集顶替模式关键开关 ...")
-        ok, errors = validate_collection_profile()
+        safe_print("\n[Check] Collection/cloud-sync switches ...")
+        ok, errors = validate_collection_profile(require_tunnel_reachable=args.require_cloud_tunnel)
         if not ok:
             for error in errors:
                 safe_print(f"  [FAIL] {error}")
             sys.exit(1)
-        safe_print("  [OK] 采集/云端同步关键配置已启用")
+        safe_print("  [OK] Collection/cloud-sync settings are enabled")
 
     safe_print("\n" + "=" * 60)
-    safe_print("[OK] 本地运行环境检查通过")
+    safe_print("[OK] Local runtime environment check passed")
     safe_print("=" * 60)
 
 

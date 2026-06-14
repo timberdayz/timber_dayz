@@ -2,91 +2,108 @@
 
 ## Scope
 
-This runbook defines the formal Windows collection-machine topology for B-class cloud sync.
+This runbook defines the Windows collection-machine topology for B-class cloud
+sync.
 
-Formal always-on role:
-- `backend-collector` only
+Current pre-launch formal mode:
+- Windows host Python backend process
+- visible/headed Playwright browser on the laptop desktop
+- Docker infrastructure only: `postgres`, `redis`, `celery-worker`, `celery-beat`
 
-Not part of the formal always-on topology:
-- local frontend
-- local business API for interactive development
+Future unattended mode:
+- Docker `backend-collector` as the always-on owner
+- use only after collection no longer needs a browser window visible on the
+  Windows desktop
 
-Development-time local API is allowed temporarily, but it must not take over cloud sync ownership.
+The current operational source of truth is
+[`docs/guides/LOCAL_COLLECTION_TAKEOVER.md`](/F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/LOCAL_COLLECTION_TAKEOVER.md).
 
-## Runtime Topology
+## Current Runtime Topology
 
 Host:
 - Windows laptop
 - Docker Desktop
 - a host-managed SSH tunnel that forwards the cloud PostgreSQL port to `127.0.0.1:15433`
+- local Python backend process started by `python run.py --local`
+- local Vite frontend
+- visible Playwright browser
 
-Containers:
+Docker containers:
 - `postgres`
 - `redis`
-- `migrate`
+- `celery-worker`
+- `celery-beat`
+
+Do not keep these Docker backend containers running in current headed mode:
+- `backend-api`
 - `backend-collector`
 
 Cloud sync data path:
 1. collection work writes B-class rows into the local database
 2. `DATA_INGESTED` enqueues cloud sync tasks
-3. `backend-collector` claims tasks
+3. the host backend cloud-sync runtime claims tasks
 4. canonical rows are upserted into `cloud_b_class.*` in the cloud database
 5. the current checkpoint scope advances only for the active cloud target
 
 ## Required Configuration
 
-Use:
-- [docker-compose.collection-cloud-sync.yml](/F:/Vscode/python_programme/AI_code/xihong_erp/docker-compose.collection-cloud-sync.yml)
-- [env.collection.cloud-sync.example](/F:/Vscode/python_programme/AI_code/xihong_erp/env.collection.cloud-sync.example)
+Current headed formal mode uses:
+- `.env`
+- optional `.env.local`
+- `.env.collection.local`
 
 Required cloud sync variables:
-- `DEPLOYMENT_ROLE=collector`
+- `DEPLOYMENT_ROLE=local`
 - `APP_RUNTIME_MODE=collector`
 - `ENABLE_COLLECTION=true`
 - `CLOUD_SYNC_WORKER_ENABLED=true`
 - `CLOUD_SYNC_WORKER_ID=<stable collector id>`
 - `CLOUD_SYNC_POLL_INTERVAL_SECONDS=5`
-- `CLOUD_DATABASE_URL=postgresql://...@host.docker.internal:15433/xihong_erp`
+- `CLOUD_DATABASE_URL=postgresql://...@127.0.0.1:15433/xihong_erp`
 - `CLOUD_SYNC_TUNNEL_ENABLED=true`
-- `CLOUD_SYNC_TUNNEL_HOST=host.docker.internal`
+- `CLOUD_SYNC_TUNNEL_HOST=127.0.0.1`
 - `CLOUD_SYNC_TUNNEL_PORT=15433`
 
 Keep `DATABASE_URL` pointed at the local business database.
-Keep `CLOUD_DATABASE_URL` pointed at the remote cloud target through the SSH tunnel.
-Do not reuse one for the other.
+Keep `CLOUD_DATABASE_URL` pointed at the remote cloud target through the SSH
+tunnel. Do not reuse one for the other.
 
 ## Startup
 
 1. Start the SSH tunnel on the Windows host and confirm `127.0.0.1:15433` is listening.
 2. Start Docker Desktop.
-3. Start the collector stack:
+3. Start formal headed collection mode:
 
 ```powershell
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-cloud-sync.yml --profile collection-cloud-sync up -d postgres redis migrate backend-collector
+powershell -ExecutionPolicy Bypass -File .\scripts\start_collection_formal.ps1
 ```
 
-4. Check collector container status:
+4. Check the local backend:
 
 ```powershell
-docker ps --filter name=xihong_erp_backend_collector
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8001/healthz/ready
 ```
 
-5. Check startup logs:
+5. Check Docker infrastructure:
 
 ```powershell
-docker logs xihong_erp_backend_collector --tail 200
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ```
 
-The collector now runs cloud sync startup checks at boot. Logs should include:
-- local database connectivity
-- cloud sync state table availability
-- cloud database URL validation
-- tunnel/cloud TCP reachability
+Expected Docker services:
+- `xihong_erp_postgres`
+- `xihong_erp_redis`
+- `xihong_erp_celery_worker`
+- `xihong_erp_celery_beat`
+
+Unexpected in current headed mode:
+- `xihong_erp_backend_api`
+- `xihong_erp_backend_collector`
 
 ## Health And Recovery
 
 Container health:
-- use `/healthz/ready` for Docker healthcheck only
+- use Docker health status for infrastructure containers only
 
 Cloud sync operational health:
 - use the admin-only `/api/cloud-sync/health`
@@ -100,6 +117,7 @@ Expected degraded conditions:
 
 Recovery actions:
 - restore the SSH tunnel
+- restart with `scripts/start_collection_formal.ps1`
 - use retry for failed tasks
 - use checkpoint repair only for the current active cloud target
 
@@ -110,10 +128,14 @@ Recovery actions:
 - table state queries only show checkpoints for the current scope
 - replay is safe because cloud writes remain idempotent upserts
 
-## Development Exception
+## Future Docker Collector Mode
 
-You may temporarily run a local API process on the collection laptop for debugging or development.
+When headed browser visibility is no longer required, the Docker collector path
+can become the formal always-on topology again:
 
-That exception does not change the formal ownership rules:
-- `backend-collector` remains the only always-on cloud sync owner
-- development API processes must not become the cloud sync worker host
+```powershell
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-cloud-sync.yml --profile collection-cloud-sync up -d postgres redis migrate backend-collector
+```
+
+For that future mode, use `host.docker.internal:15433` in `CLOUD_DATABASE_URL`
+and `CLOUD_SYNC_TUNNEL_HOST`.
