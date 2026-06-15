@@ -265,6 +265,9 @@ async def test_runtime_summary_includes_is_running_and_progress_fields(seeded_cl
     assert payload["worker_status"] == "running"
     assert "is_running" in payload
     assert "active_task_count" in payload
+    assert "last_runtime_heartbeat_at" in payload
+    assert "task_heartbeat_at" in payload
+    assert "task_lease_expired" in payload
 
 
 @pytest.mark.asyncio
@@ -309,6 +312,7 @@ async def test_query_service_marks_stale_running_as_degraded(monkeypatch, cloud_
     assert overview["exception_task_count"] == 1
     assert runtime["active_task_count"] == 0
     assert runtime["is_running"] is False
+    assert runtime["worker_status"] == "degraded"
 
 
 @pytest.mark.asyncio
@@ -366,6 +370,52 @@ async def test_query_service_excludes_legacy_scope_stale_from_current_overview(
     assert runtime["stale_running_count"] == 0
     assert runtime["error_summary"] is None
     assert runtime["legacy_scope_stale_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_summary_exposes_task_heartbeat_and_runtime_heartbeat(
+    monkeypatch,
+    cloud_sync_sqlite_session,
+):
+    now = datetime.now(timezone.utc)
+    current_cloud_url = "postgresql://erp_user:secret-pass@127.0.0.1:15433/xihong_erp"
+    monkeypatch.setenv("CLOUD_DATABASE_URL", current_cloud_url)
+    current_scope = _build_checkpoint_scope_key(current_cloud_url, dry_run=False)
+
+    cloud_sync_sqlite_session.add(
+        CloudBClassSyncTask(
+            job_id="job-runtime-heartbeat",
+            dedupe_key="fact_runtime_heartbeat",
+            source_table_name="fact_runtime_heartbeat",
+            status="running",
+            claimed_by="worker-1",
+            lease_expires_at=now + timedelta(minutes=2),
+            heartbeat_at=now - timedelta(seconds=15),
+            last_attempt_started_at=now - timedelta(minutes=1),
+            metadata_json={"checkpoint_scope": current_scope},
+            created_at=now - timedelta(minutes=2),
+        )
+    )
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+    runtime = await service.get_runtime_summary(
+        runtime_health={
+            "status": "running",
+            "worker_id": "worker-1",
+            "last_heartbeat_at": now.isoformat(),
+            "last_runtime_heartbeat_at": (now - timedelta(seconds=2)).isoformat(),
+            "last_recovered_count": 0,
+        }
+    )
+
+    assert runtime["worker_status"] == "running"
+    assert runtime["task_heartbeat_at"] is not None
+    assert runtime["task_lease_expires_at"] is not None
+    assert runtime["last_runtime_heartbeat_at"] is not None
+    assert runtime["current_task_run_seconds"] is not None
+    assert runtime["seconds_since_task_heartbeat"] is not None
+    assert runtime["task_lease_expired"] is False
 
 
 @pytest.mark.asyncio

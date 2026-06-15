@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, select
@@ -115,40 +116,40 @@ class CloudBClassAutoSyncWorker:
                 lease_expires_at=task.lease_expires_at,
             )
 
-    async def _maybe_await(self, value):
-        if inspect.isawaitable(value):
-            return await value
-        return value
+    def _heartbeat_interval_seconds(self) -> float:
+        configured = os.getenv("CLOUD_SYNC_HEARTBEAT_INTERVAL_SECONDS")
+        if configured:
+            try:
+                return max(float(configured), 0.05)
+            except ValueError:
+                pass
+        return max(float(self.lease_seconds) / 2.0, 0.05)
 
-    async def _run_with_lease_heartbeat(self, task_id: int, worker_id: str, operation):
-        if not inspect.isawaitable(operation):
-            return operation
+    async def _run_with_lease_heartbeat(self, task_id: int, worker_id: str, operation_factory):
+        stop_event = threading.Event()
 
-        stop_event = asyncio.Event()
-
-        async def _heartbeat_loop() -> None:
-            interval_seconds = max(float(self.lease_seconds) / 2.0, 0.05)
-            while not stop_event.is_set():
+        def _heartbeat_loop() -> None:
+            interval_seconds = self._heartbeat_interval_seconds()
+            while not stop_event.wait(interval_seconds):
                 try:
-                    await asyncio.sleep(interval_seconds)
-                    if stop_event.is_set():
-                        break
                     self.heartbeat(task_id, worker_id)
-                except asyncio.CancelledError:
-                    raise
                 except Exception:
                     break
 
-        heartbeat_task = asyncio.create_task(_heartbeat_loop())
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            name=f"cloud-sync-heartbeat-{task_id}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
         try:
+            operation = operation_factory()
+            if not inspect.isawaitable(operation):
+                return operation
             return await operation
         finally:
             stop_event.set()
-            heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except asyncio.CancelledError:
-                pass
+            heartbeat_thread.join(timeout=max(self._heartbeat_interval_seconds(), 0.1))
 
     @staticmethod
     def _result_error_code(result: dict) -> str:
@@ -169,7 +170,7 @@ class CloudBClassAutoSyncWorker:
             result = await self._run_with_lease_heartbeat(
                 task.id,
                 worker_id,
-                self.sync_executor.sync_table(task.source_table_name, batch_size=self.batch_size),
+                lambda: self.sync_executor.sync_table(task.source_table_name, batch_size=self.batch_size),
             )
             sync_status = result.get("status", "completed")
             projection_status = result.get("projection_status", "completed")

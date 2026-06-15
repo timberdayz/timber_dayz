@@ -119,8 +119,28 @@
             <span class="runtime-value">{{ store.runtime?.active_task_count ?? 0 }}</span>
           </div>
           <div class="runtime-item">
-            <span class="runtime-label">最近心跳</span>
+            <span class="runtime-label">最近 Runtime 心跳</span>
             <span class="runtime-value">{{ formatTime(lastHeartbeatAt) || '暂无' }}</span>
+          </div>
+          <div class="runtime-item">
+            <span class="runtime-label">最近任务心跳</span>
+            <span class="runtime-value">{{ formatTime(lastTaskHeartbeatAt) || '暂无' }}</span>
+          </div>
+          <div class="runtime-item">
+            <span class="runtime-label">任务租约</span>
+            <span class="runtime-value">
+              {{
+                store.taskLeaseExpiresAt
+                  ? `${formatTime(store.taskLeaseExpiresAt)}${store.taskLeaseExpired ? '（已过期）' : ''}`
+                  : '暂无'
+              }}
+            </span>
+          </div>
+          <div class="runtime-item">
+            <span class="runtime-label">当前任务已运行</span>
+            <span class="runtime-value">
+              {{ store.currentTaskRunSeconds != null ? `${store.currentTaskRunSeconds} 秒` : '暂无' }}
+            </span>
           </div>
           <div class="runtime-item">
             <span class="runtime-label">最近错误</span>
@@ -407,12 +427,13 @@ const selectedTableName = ref('')
 let refreshTimer = null
 
 const isAnyLoading = computed(() => Object.values(store.loading).some(Boolean))
-const lastHeartbeatAt = computed(
-  () => store.runtime?.last_heartbeat_at || store.health?.worker?.last_heartbeat_at || null,
-)
+const lastHeartbeatAt = computed(() => store.runtimeHeartbeatAt)
+const lastTaskHeartbeatAt = computed(() => store.taskHeartbeatAt)
 const latestErrorText = computed(() => store.latestErrorSummary || '暂无')
 const runtimeStatusText = computed(() =>
-  store.runtimeRunning ? '正在追平' : formatCatchUpStatus(store.catchUpStatus),
+  store.runtimeRunning
+    ? (store.taskLeaseExpired ? '任务租约已过期' : '正在追平')
+    : formatCatchUpStatus(store.catchUpStatus),
 )
 const showHistoryEmpty = computed(() => !store.loading.summary && store.history.length === 0)
 const filteredTableStates = computed(() => {
@@ -432,8 +453,8 @@ const operationalHint = computed(() => {
   }
   if (store.staleRunningTaskCount > 0) {
     return {
-      title: '存在待恢复的历史运行任务',
-      description: store.latestErrorActionHint || '系统检测到上次关闭后遗留的运行任务，建议先刷新状态或重试异常任务。',
+      title: '存在过期任务，等待自动恢复',
+      description: store.latestErrorActionHint || '当前任务租约已过期，系统应自动回收；若长时间不恢复，再手动重试异常任务。',
     }
   }
   if (store.health?.cloud_db?.status === 'unreachable') {
@@ -480,7 +501,7 @@ const statusCards = computed(() => [
     key: 'worker',
     label: 'Worker 状态',
     value: formatWorkerStatus(store.displayWorkerStatus),
-    meta: formatTime(lastHeartbeatAt.value) || '暂无心跳记录',
+    meta: `Runtime 心跳 ${formatTime(lastHeartbeatAt.value) || '暂无'} / 任务心跳 ${formatTime(lastTaskHeartbeatAt.value) || '暂无'}`,
     tone: statusTone(store.displayWorkerStatus),
   },
   {
@@ -500,9 +521,9 @@ const statusCards = computed(() => [
   {
     key: 'exceptions',
     label: '异常任务',
-    value: String(store.exceptionTaskCount),
-    meta: `失败 ${store.failedTaskCount} / 部分成功 ${store.partialSuccessTaskCount} / 过期 ${store.staleRunningTaskCount}`,
-    tone: store.exceptionTaskCount > 0 ? 'is-danger' : 'is-success',
+    value: String(Math.max(store.activeScopeExceptionTaskCount, 0)),
+    meta: `失败 ${store.failedTaskCount} / 部分成功 ${store.partialSuccessTaskCount} / 遗留恢复 ${store.legacyScopeExceptionCount}`,
+    tone: store.activeScopeExceptionTaskCount > 0 ? 'is-danger' : 'is-success',
   },
   {
     key: 'last-success',
@@ -525,6 +546,7 @@ function formatWorkerStatus(status) {
     not_started: '未启动',
     not_configured: '未配置',
     error: '异常',
+    degraded: '降级',
     stale: '待恢复',
   }
   return mapping[status] || '未知'
@@ -599,8 +621,8 @@ function statusTag(status) {
 
 function statusTone(status) {
   if (['running', 'reachable', 'healthy', 'up_to_date'].includes(status)) return 'is-success'
-  if (['backlog', 'catching_up', 'not_started', 'unknown'].includes(status)) return 'is-warning'
-  if (['failed', 'degraded', 'unreachable', 'unhealthy', 'error', 'not_configured', 'stale'].includes(status)) {
+  if (['backlog', 'catching_up', 'not_started', 'unknown', 'degraded'].includes(status)) return 'is-warning'
+  if (['failed', 'unreachable', 'unhealthy', 'error', 'not_configured', 'stale'].includes(status)) {
     return 'is-danger'
   }
   return ''

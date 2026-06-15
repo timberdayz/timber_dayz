@@ -34,6 +34,9 @@ class CloudBClassAutoSyncRuntime:
         self._status = "not_started"
         self._last_error: str | None = None
         self._last_heartbeat_at: str | None = None
+        self._last_runtime_heartbeat_at: str | None = None
+        self._last_recovered_at: str | None = None
+        self._last_recovered_count: int = 0
 
     async def start(self) -> bool:
         if self.worker_factory is None:
@@ -65,6 +68,8 @@ class CloudBClassAutoSyncRuntime:
     async def _run_loop(self) -> None:
         try:
             while not self._stop_event.is_set():
+                self._last_runtime_heartbeat_at = datetime.now(timezone.utc).isoformat()
+                self._recover_stale_running_tasks()
                 worker = self.worker_factory()
                 try:
                     # NOTE:
@@ -94,7 +99,13 @@ class CloudBClassAutoSyncRuntime:
         recover = getattr(self.worker_factory, "recover_stale_running_tasks", None)
         if recover is None:
             return
-        recover(self.worker_id)
+        result = recover(self.worker_id)
+        if isinstance(result, dict):
+            recovered_count = int(result.get("recovered_current_scope_count") or result.get("recovered_count") or 0)
+            if recovered_count > 0:
+                self._status = "degraded"
+                self._last_recovered_count = recovered_count
+                self._last_recovered_at = datetime.now(timezone.utc).isoformat()
 
     def get_health(self) -> dict:
         return {
@@ -103,4 +114,7 @@ class CloudBClassAutoSyncRuntime:
             "poll_interval_seconds": self.poll_interval_seconds,
             "last_error": self._last_error,
             "last_heartbeat_at": self._last_heartbeat_at,
+            "last_runtime_heartbeat_at": self._last_runtime_heartbeat_at,
+            "last_recovered_at": self._last_recovered_at,
+            "last_recovered_count": self._last_recovered_count,
         }

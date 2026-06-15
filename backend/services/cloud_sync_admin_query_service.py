@@ -315,8 +315,15 @@ class CloudSyncAdminQueryService:
         else:
             catch_up_status = "up_to_date"
 
+        worker_status = (runtime_health or {}).get("status", "not_started")
+        if worker_status == "running":
+            if stale_running:
+                worker_status = "degraded"
+            elif (runtime_health or {}).get("last_error"):
+                worker_status = "error"
+
         payload = CloudSyncOverviewSummary(
-            worker_status=(runtime_health or {}).get("status", "not_started"),
+            worker_status=worker_status,
             catch_up_status=catch_up_status,
             exception_task_count=failed + partial_success + stale_running,
             failed_task_count=failed,
@@ -344,6 +351,9 @@ class CloudSyncAdminQueryService:
                 "poll_interval_seconds": runtime_health.get("poll_interval_seconds"),
                 "last_error": _sanitize_error_text(runtime_health.get("last_error")),
                 "last_heartbeat_at": runtime_health.get("last_heartbeat_at"),
+                "last_runtime_heartbeat_at": runtime_health.get("last_runtime_heartbeat_at"),
+                "last_recovered_at": runtime_health.get("last_recovered_at"),
+                "last_recovered_count": int(runtime_health.get("last_recovered_count") or 0),
             }
 
         if self._worker_prereqs_missing():
@@ -353,6 +363,9 @@ class CloudSyncAdminQueryService:
                 "poll_interval_seconds": None,
                 "last_error": None,
                 "last_heartbeat_at": None,
+                "last_runtime_heartbeat_at": None,
+                "last_recovered_at": None,
+                "last_recovered_count": 0,
             }
 
         return {
@@ -361,6 +374,9 @@ class CloudSyncAdminQueryService:
             "poll_interval_seconds": None,
             "last_error": None,
             "last_heartbeat_at": None,
+            "last_runtime_heartbeat_at": None,
+            "last_recovered_at": None,
+            "last_recovered_count": 0,
         }
 
     def _worker_prereqs_missing(self) -> bool:
@@ -422,8 +438,26 @@ class CloudSyncAdminQueryService:
         runtime_error = (runtime_health or {}).get("last_error")
         stale_error = "stale_running_recovered_on_startup" if stale_tasks else None
         error_code, error_summary, error_action_hint = _classify_cloud_sync_error(runtime_error or stale_error)
+        task_started_at = _as_utc(getattr(running_task, "last_attempt_started_at", None))
+        task_heartbeat_at = _as_utc(getattr(running_task, "heartbeat_at", None))
+        task_lease_expires_at = _as_utc(getattr(running_task, "lease_expires_at", None))
+        current_task_run_seconds = (
+            int((now - task_started_at).total_seconds()) if task_started_at is not None else None
+        )
+        seconds_since_task_heartbeat = (
+            int((now - task_heartbeat_at).total_seconds()) if task_heartbeat_at is not None else None
+        )
+        task_lease_expired = (
+            task_lease_expires_at is not None and task_lease_expires_at < now
+        )
+        worker_status = (runtime_health or {}).get("status", "not_started")
+        if worker_status == "running":
+            if stale_tasks or task_lease_expired:
+                worker_status = "degraded"
+            elif runtime_error:
+                worker_status = "error"
         payload = CloudSyncRuntimeSummary(
-            worker_status=(runtime_health or {}).get("status", "not_started"),
+            worker_status=worker_status,
             worker_id=(runtime_health or {}).get("worker_id"),
             is_running=active_count > 0,
             active_task_count=active_count,
@@ -431,6 +465,15 @@ class CloudSyncAdminQueryService:
             current_job_id=getattr(running_task, "job_id", None),
             current_source_table_name=getattr(running_task, "source_table_name", None),
             last_heartbeat_at=(runtime_health or {}).get("last_heartbeat_at"),
+            last_runtime_heartbeat_at=(runtime_health or {}).get("last_runtime_heartbeat_at"),
+            task_heartbeat_at=_iso(task_heartbeat_at),
+            task_lease_expires_at=_iso(task_lease_expires_at),
+            task_started_at=_iso(task_started_at),
+            current_task_run_seconds=current_task_run_seconds,
+            seconds_since_task_heartbeat=seconds_since_task_heartbeat,
+            task_lease_expired=task_lease_expired,
+            recent_recovery_at=(runtime_health or {}).get("last_recovered_at"),
+            recent_recovery_count=int((runtime_health or {}).get("last_recovered_count") or 0),
             last_error=_sanitize_error_text((runtime_health or {}).get("last_error")),
             error_code=error_code,
             error_summary=error_summary,

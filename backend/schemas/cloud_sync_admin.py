@@ -11,6 +11,9 @@ class CloudSyncWorkerHealth(BaseModel):
     poll_interval_seconds: float | None = None
     last_error: str | None = None
     last_heartbeat_at: str | None = None
+    last_runtime_heartbeat_at: str | None = None
+    last_recovered_at: str | None = None
+    last_recovered_count: int = 0
 
 
 class CloudSyncDependencyHealth(BaseModel):
@@ -144,6 +147,15 @@ class CloudSyncRuntimeSummary(BaseModel):
     current_job_id: str | None = None
     current_source_table_name: str | None = None
     last_heartbeat_at: str | None = None
+    last_runtime_heartbeat_at: str | None = None
+    task_heartbeat_at: str | None = None
+    task_lease_expires_at: str | None = None
+    task_started_at: str | None = None
+    current_task_run_seconds: int | None = None
+    seconds_since_task_heartbeat: int | None = None
+    task_lease_expired: bool = False
+    recent_recovery_at: str | None = None
+    recent_recovery_count: int = 0
     last_error: str | None = None
     error_code: str | None = None
     error_summary: str | None = None

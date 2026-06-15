@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -135,7 +136,7 @@ async def test_runtime_start_recovers_stale_running_tasks_before_loop():
 
         def recover_stale_running_tasks(self, worker_id: str):
             recovered.append(worker_id)
-            return {"recovered_count": 2}
+            return {"recovered_count": 0}
 
     runtime = CloudBClassAutoSyncRuntime(
         worker_factory=FakeFactory(),
@@ -147,4 +148,58 @@ async def test_runtime_start_recovers_stale_running_tasks_before_loop():
     await asyncio.sleep(0.03)
     await runtime.stop()
 
-    assert recovered == ["worker-1"]
+    assert recovered[0] == "worker-1"
+    assert len(recovered) >= 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_updates_runtime_heartbeat_even_while_worker_run_is_long():
+    class SlowWorker:
+        def run_one(self, worker_id: str):
+            import time
+
+            time.sleep(0.08)
+            return None
+
+    runtime = CloudBClassAutoSyncRuntime(
+        worker_factory=lambda: SlowWorker(),
+        poll_interval_seconds=0.01,
+        worker_id="worker-1",
+    )
+
+    await runtime.start()
+    await asyncio.sleep(0.03)
+    health = runtime.get_health()
+    await runtime.stop()
+
+    assert health["status"] == "running"
+    assert health["last_runtime_heartbeat_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_runtime_performs_stale_recovery_during_loop():
+    recovered = []
+
+    class FakeWorker:
+        def run_one(self, worker_id: str):
+            return None
+
+    class FakeFactory:
+        def __call__(self):
+            return FakeWorker()
+
+        def recover_stale_running_tasks(self, worker_id: str):
+            recovered.append((worker_id, datetime.now(timezone.utc)))
+            return {"recovered_count": 1}
+
+    runtime = CloudBClassAutoSyncRuntime(
+        worker_factory=FakeFactory(),
+        poll_interval_seconds=0.01,
+        worker_id="worker-1",
+    )
+
+    await runtime.start()
+    await asyncio.sleep(0.05)
+    await runtime.stop()
+
+    assert len(recovered) >= 2

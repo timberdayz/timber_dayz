@@ -57,26 +57,33 @@ export const useCloudSyncStore = defineStore('cloudSync', {
       state.overview?.retry_waiting_task_count ?? state.health?.queue?.retry_waiting ?? 0,
     staleRunningTaskCount: (state) =>
       state.overview?.stale_running_task_count ?? state.runtime?.stale_running_count ?? state.health?.queue?.stale_running ?? 0,
+    activeScopeExceptionTaskCount: (state) =>
+      (state.overview?.exception_task_count || 0) - (state.overview?.legacy_scope_exception_count || 0),
     workerSummaryStatus: (state) =>
       state.overview?.worker_status ||
       state.runtime?.worker_status ||
       state.health?.worker?.status ||
       'unknown',
-    displayWorkerStatus: (state) =>
-      (state.overview?.stale_running_task_count ?? state.runtime?.stale_running_count ?? state.health?.queue?.stale_running ?? 0) > 0
-        ? 'stale'
-        : (
-            state.overview?.worker_status ||
-            state.runtime?.worker_status ||
-            state.health?.worker?.status ||
-            'unknown'
-          ),
+    displayWorkerStatus: (state) => (
+      state.runtime?.worker_status ||
+      state.overview?.worker_status ||
+      state.health?.worker?.status ||
+      'unknown'
+    ),
     lastSuccessAt: (state) => state.overview?.last_success_at || null,
     runtimeRunning: (state) => state.runtime?.is_running || false,
     latestErrorSummary: (state) => summarizedError(state) || '暂无',
     latestErrorCode: (state) => state.runtime?.error_code || state.overview?.error_code || null,
     latestErrorActionHint: (state) =>
       state.runtime?.error_action_hint || state.overview?.error_action_hint || '',
+    runtimeHeartbeatAt: (state) =>
+      state.runtime?.last_runtime_heartbeat_at || state.health?.worker?.last_runtime_heartbeat_at || null,
+    taskHeartbeatAt: (state) => state.runtime?.task_heartbeat_at || null,
+    taskLeaseExpiresAt: (state) => state.runtime?.task_lease_expires_at || null,
+    taskLeaseExpired: (state) => Boolean(state.runtime?.task_lease_expired),
+    currentTaskRunSeconds: (state) => state.runtime?.current_task_run_seconds ?? null,
+    secondsSinceTaskHeartbeat: (state) => state.runtime?.seconds_since_task_heartbeat ?? null,
+    recentRecoveryCount: (state) => state.runtime?.recent_recovery_count || state.health?.worker?.last_recovered_count || 0,
     hasHistory: (state) => state.history.length > 0 || Boolean(state.overview?.last_success_at),
     selectedTableState: (state) =>
       state.tableStates.find((row) => row.source_table_name === state.selectedTableName) || null,
