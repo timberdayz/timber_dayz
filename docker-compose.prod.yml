@@ -15,7 +15,9 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/init:/docker-entrypoint-initdb.d:ro
       - ./backups:/backups
-    # 生产最小端口暴露：postgres 不映射宿主机端口（仅容器网络可访问）
+    ports:
+      - "127.0.0.1:15435:5432"
+    # 生产最小端口暴露：仅绑定宿主机回环，供 SSH tunnel / 运维调试使用。
     networks:
       - erp_network
     healthcheck:

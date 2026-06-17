@@ -72,7 +72,7 @@ function Ensure-CloudSyncTunnel {
     $sshUser = Get-EnvOrDefault "CLOUD_SYNC_SSH_USER" "deploy"
     $sshKey = Get-EnvOrDefault "CLOUD_SYNC_SSH_KEY" "$env:USERPROFILE\.ssh\github_actions_deploy"
     $remoteDbHost = Get-EnvOrDefault "CLOUD_SYNC_REMOTE_DB_HOST" "127.0.0.1"
-    $remoteDbPortRaw = Get-EnvOrDefault "CLOUD_SYNC_REMOTE_DB_PORT" "5432"
+    $remoteDbPortRaw = Get-EnvOrDefault "CLOUD_SYNC_REMOTE_DB_PORT" "15435"
 
     $localPort = [int]$localPortRaw
     $remoteDbPort = [int]$remoteDbPortRaw

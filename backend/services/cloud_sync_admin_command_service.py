@@ -17,6 +17,7 @@ from backend.services.cloud_b_class_auto_sync_factory import (
     build_cloud_sync_service_from_env,
     get_current_checkpoint_scope_from_env,
 )
+from backend.services.task_center_sync_service import TaskCenterSyncService
 from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, extract_run_id
 from backend.services.cloud_b_class_sync_utils import validate_b_class_table_name
@@ -147,6 +148,7 @@ class CloudSyncAdminCommandService:
 
         self._reset_task_for_retry(task)
         await self.db.commit()
+        await self._sync_task_center_projection(task.id)
         await self.db.refresh(task)
         return CloudSyncCommandResponse(
             job_id=task.job_id,
@@ -163,6 +165,7 @@ class CloudSyncAdminCommandService:
         task.next_retry_at = None
         task.lease_expires_at = None
         await self.db.commit()
+        await self._sync_task_center_projection(task.id)
         await self.db.refresh(task)
         return CloudSyncCommandResponse(
             job_id=task.job_id,
@@ -180,6 +183,8 @@ class CloudSyncAdminCommandService:
             self._reset_task_for_retry(task)
 
         await self.db.commit()
+        for task in tasks:
+            await self._sync_task_center_projection(task.id)
 
         return CloudSyncCommandResponse(
             status="submitted",
@@ -230,6 +235,8 @@ class CloudSyncAdminCommandService:
             task.metadata_json = metadata
 
         await self.db.commit()
+        for task in tasks:
+            await self._sync_task_center_projection(task.id)
 
         return CloudSyncCommandResponse(
             status="submitted",
@@ -444,3 +451,12 @@ class CloudSyncAdminCommandService:
     @staticmethod
     def _current_checkpoint_scope() -> str:
         return get_current_checkpoint_scope_from_env(dry_run=False)
+
+    async def _sync_task_center_projection(self, task_id: int) -> None:
+        def _sync(sync_session):
+            task = sync_session.get(CloudBClassSyncTask, task_id)
+            if task is None:
+                return None
+            return TaskCenterSyncService(sync_session).sync_cloud_task(task)
+
+        await self.db.run_sync(_sync)

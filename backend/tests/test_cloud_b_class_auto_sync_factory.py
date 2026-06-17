@@ -1,4 +1,6 @@
 import argparse
+from pathlib import Path
+
 import pytest
 
 from backend.services.cloud_b_class_auto_sync_factory import (
@@ -9,6 +11,8 @@ from backend.services.cloud_b_class_auto_sync_factory import (
     build_cloud_sync_worker_factory_from_env,
     run_cloud_sync_startup_checks_from_env,
 )
+from backend.services.cloud_b_class_mirror_manager import CloudBClassMirrorManager
+from backend.services.cloud_b_class_sync_service import SQLAlchemyCloudWriter, build_sync_payload
 from backend.services.cloud_b_class_auto_sync_runtime import CloudBClassAutoSyncRuntime
 
 
@@ -22,6 +26,81 @@ def test_build_cloud_sync_service_from_env_supports_dry_run(monkeypatch):
     assert service.remote_writer.dry_run is True
     assert type(service.mirror_manager).__name__ == "NoOpCloudBClassMirrorManager"
     assert service.checkpoint_scope == "cloud_sync:dry_run"
+
+
+def test_cloud_sync_writer_targets_b_class_schema():
+    sql = SQLAlchemyCloudWriter._build_upsert_sql(
+        table_name="fact_shopee_orders_monthly",
+        data_domain="orders",
+    )
+
+    assert 'INSERT INTO b_class."fact_shopee_orders_monthly"' in sql
+    assert "cloud_b_class" not in sql
+
+
+def test_runtime_cloud_sync_service_no_longer_writes_cloud_b_class_schema():
+    source = Path("backend/services/cloud_b_class_sync_service.py").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "INSERT INTO cloud_b_class" not in source
+
+
+def test_build_sync_payload_drops_local_foreign_keys_for_cloud_write():
+    payload = build_sync_payload(
+        {
+            "platform_code": "shopee",
+            "shop_id": "shop-1",
+            "data_domain": "orders",
+            "granularity": "monthly",
+            "file_id": 2875,
+            "template_id": 91,
+            "data_hash": "hash-1",
+        }
+    )
+
+    assert payload["file_id"] is None
+    assert payload["template_id"] is None
+
+
+def test_cloud_sync_mirror_manager_defaults_to_b_class_schema():
+    manager = CloudBClassMirrorManager(engine=object())
+
+    assert manager.schema_name == "b_class"
+
+
+def test_cloud_sync_mirror_manager_rejects_existing_table_missing_canonical_columns(monkeypatch):
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, stmt):
+            return None
+
+    class FakeEngine:
+        def begin(self):
+            return FakeConnection()
+
+    class FakeInspector:
+        def has_table(self, table_name, schema=None):
+            return True
+
+        def get_columns(self, table_name, schema=None):
+            return [{"name": "platform_code"}, {"name": "data_hash"}]
+
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_mirror_manager.inspect",
+        lambda engine: FakeInspector(),
+    )
+
+    manager = CloudBClassMirrorManager(engine=FakeEngine())
+
+    with pytest.raises(RuntimeError, match="missing canonical columns"):
+        manager.ensure_cloud_mirror_table("fact_shopee_orders_monthly", "orders")
 
 
 def test_build_cloud_sync_worker_factory_returns_worker(monkeypatch):

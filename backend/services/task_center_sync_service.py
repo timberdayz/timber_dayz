@@ -63,6 +63,44 @@ class TaskCenterSyncService:
             self.db.rollback()
         return task
 
+    def sync_cloud_task(self, cloud_task) -> TaskCenterTask | None:
+        details = dict(getattr(cloud_task, "metadata_json", {}) or {})
+        cloud_sync_details = {
+            "metadata": details,
+            "projection_preset": getattr(cloud_task, "projection_preset", None),
+            "projection_status": getattr(cloud_task, "projection_status", None),
+            "error_code": getattr(cloud_task, "error_code", None),
+            "attempt_count": int(getattr(cloud_task, "attempt_count", 0) or 0),
+        }
+
+        mirrored = self.get_task(getattr(cloud_task, "job_id"))
+        payload = {
+            "status": getattr(cloud_task, "status", None),
+            "trigger_source": getattr(cloud_task, "trigger_source", None),
+            "platform_code": getattr(cloud_task, "platform_code", None),
+            "source_file_id": getattr(cloud_task, "source_file_id", None),
+            "source_table_name": getattr(cloud_task, "source_table_name", None),
+            "claimed_by": getattr(cloud_task, "claimed_by", None),
+            "heartbeat_at": getattr(cloud_task, "heartbeat_at", None),
+            "lease_expires_at": getattr(cloud_task, "lease_expires_at", None),
+            "next_retry_at": getattr(cloud_task, "next_retry_at", None),
+            "attempt_count": int(getattr(cloud_task, "attempt_count", 0) or 0),
+            "started_at": getattr(cloud_task, "last_attempt_started_at", None),
+            "finished_at": getattr(cloud_task, "finished_at", None) or getattr(cloud_task, "last_attempt_finished_at", None),
+            "error_summary": getattr(cloud_task, "last_error", None),
+            "details_json": {"cloud_sync": cloud_sync_details},
+        }
+        if mirrored is not None:
+            return self.update_task(mirrored, **payload)
+
+        return self.create_task(
+            task_id=getattr(cloud_task, "job_id"),
+            task_family="cloud_sync",
+            task_type="auto_sync",
+            created_at=getattr(cloud_task, "created_at", None) or datetime.now(timezone.utc),
+            **payload,
+        )
+
     def append_log(
         self,
         task_id: str,

@@ -170,6 +170,11 @@ If tasks end in `partial_success`:
 - projection refresh did not
 - inspect projection status and run projection refresh manually
 
+Current production raw-data contract:
+- cloud sync writes canonical fact rows into cloud `b_class.fact_*`
+- admin console state tables remain `cloud_b_class_sync_*`
+- `cloud_b_class.*` business-data mirror tables are historical-only and should not be used for active dashboard reads
+
 If tasks end in `failed`:
 - inspect `last_error`
 - retry only after understanding whether the failure is environmental or data-related

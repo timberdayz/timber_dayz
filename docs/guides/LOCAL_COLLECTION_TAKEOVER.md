@@ -66,7 +66,7 @@ files or scripts.
 - `CLOUD_SYNC_SSH_USER=deploy`
 - `CLOUD_SYNC_SSH_KEY=C:\Users\18689\.ssh\github_actions_deploy`
 - `CLOUD_SYNC_REMOTE_DB_HOST=127.0.0.1`
-- `CLOUD_SYNC_REMOTE_DB_PORT=5432`
+- `CLOUD_SYNC_REMOTE_DB_PORT=15435`
 
 ## Startup
 

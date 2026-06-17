@@ -1,15 +1,19 @@
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 from backend.services.cloud_b_class_auto_sync_dispatch_service import (
     CloudBClassAutoSyncDispatchService,
 )
-from backend.models.database import SessionLocal
-from modules.core.db import CloudBClassSyncTask
+from modules.core.db import CloudBClassSyncTask, TaskCenterLink, TaskCenterTask
 from backend.utils.events import DataIngestedEvent
 
 
 def _build_session():
-    session = SessionLocal()
-    CloudBClassSyncTask.__table__.create(bind=session.bind, checkfirst=True)
-    return session
+    engine = create_engine("sqlite://", future=True)
+    CloudBClassSyncTask.__table__.create(bind=engine, checkfirst=True)
+    TaskCenterTask.__table__.create(bind=engine, checkfirst=True)
+    TaskCenterLink.__table__.create(bind=engine, checkfirst=True)
+    return sessionmaker(bind=engine, expire_on_commit=False)()
 
 
 def _build_event(source_table_name: str):

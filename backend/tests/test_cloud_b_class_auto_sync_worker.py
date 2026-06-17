@@ -4,9 +4,12 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from backend.models.database import SessionLocal
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from backend.services.cloud_b_class_auto_sync_worker import CloudBClassAutoSyncWorker
-from modules.core.db import CloudBClassSyncTask
+from modules.core.db import CloudBClassSyncTask, SystemConfig, TaskCenterTask
 
 
 class FakeSyncExecutor:
@@ -30,9 +33,24 @@ class FakeSyncExecutor:
 
 def _build_session():
     os.environ["CLOUD_SYNC_AUTO_SYNC_ENABLED"] = "true"
-    session = SessionLocal()
-    CloudBClassSyncTask.__table__.create(bind=session.bind, checkfirst=True)
-    return session
+    engine = create_engine(
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    CloudBClassSyncTask.__table__.create(bind=engine, checkfirst=True)
+    SystemConfig.__table__.create(bind=engine, checkfirst=True)
+    TaskCenterTask.__table__.create(bind=engine, checkfirst=True)
+    return sessionmaker(bind=engine, expire_on_commit=False)()
+
+
+def _as_utc(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _create_task(db, source_table_name: str = "fact_shopee_orders_daily", status: str = "pending"):
@@ -135,6 +153,42 @@ def test_worker_marks_failed_when_sync_executor_returns_failed_status():
         db.close()
 
 
+def test_worker_stores_long_sync_failure_with_short_error_code():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db)
+        long_error = (
+            '(psycopg2.OperationalError) connection to server at "127.0.0.1", '
+            "port 15433 failed: server closed the connection unexpectedly\n"
+            "This probably means the server terminated abnormally before or while "
+            "processing the request."
+        )
+
+        class FailingExecutor:
+            def sync_table(self, source_table_name: str, batch_size: int = 1000):
+                return {
+                    "status": "failed",
+                    "error": long_error,
+                }
+
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=FailingExecutor())
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert refreshed.status == "retry_waiting"
+        assert refreshed.last_error == long_error
+        assert refreshed.error_code == "cloud_db_connection_closed"
+        assert len(refreshed.error_code) <= 64
+        assert refreshed.next_retry_at is not None
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
 def test_stale_lease_can_be_reclaimed():
     db = _build_session()
     try:
@@ -219,7 +273,7 @@ def test_worker_heartbeat_extends_lease():
         refreshed = db.get(type(task), task.id)
 
         assert refreshed.heartbeat_at is not None
-        assert refreshed.lease_expires_at >= original_lease
+        assert _as_utc(refreshed.lease_expires_at) >= _as_utc(original_lease)
     finally:
         db.rollback()
         db.query(CloudBClassSyncTask).delete()
@@ -290,7 +344,7 @@ def test_worker_renews_lease_while_blocking_sync_is_running():
 
         assert refreshed.status == "completed"
         assert observed["mid_heartbeat"] is not None
-        assert observed["mid_heartbeat"] > refreshed.last_attempt_started_at
+        assert _as_utc(observed["mid_heartbeat"]) > _as_utc(refreshed.last_attempt_started_at)
         assert observed["mid_lease"] is not None
         assert refreshed.heartbeat_at is not None
     finally:

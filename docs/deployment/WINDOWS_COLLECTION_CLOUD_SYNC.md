@@ -42,7 +42,7 @@ Cloud sync data path:
 1. collection work writes B-class rows into the local database
 2. `DATA_INGESTED` enqueues cloud sync tasks
 3. the host backend cloud-sync runtime claims tasks
-4. canonical rows are upserted into `cloud_b_class.*` in the cloud database
+4. canonical rows are upserted into `b_class.*` in the cloud database
 5. the current checkpoint scope advances only for the active cloud target
 
 ## Required Configuration
@@ -67,7 +67,7 @@ Required cloud sync variables:
 - `CLOUD_SYNC_SSH_USER=deploy`
 - `CLOUD_SYNC_SSH_KEY=C:\Users\18689\.ssh\github_actions_deploy`
 - `CLOUD_SYNC_REMOTE_DB_HOST=127.0.0.1`
-- `CLOUD_SYNC_REMOTE_DB_PORT=5432`
+- `CLOUD_SYNC_REMOTE_DB_PORT=15435`
 
 Keep `DATABASE_URL` pointed at the local business database.
 Keep `CLOUD_DATABASE_URL` pointed at the remote cloud target through the SSH

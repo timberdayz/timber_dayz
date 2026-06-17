@@ -16,6 +16,9 @@ def build_sync_payload(row: dict[str, Any]) -> dict[str, Any]:
     payload = {column: row.get(column) for column in build_canonical_columns()}
     if payload.get("data_domain") != "services" and payload.get("shop_id") is None:
         payload["shop_id"] = ""
+    # Cloud-side raw facts do not own the local file/template dimension rows.
+    payload["file_id"] = None
+    payload["template_id"] = None
     return payload
 
 
@@ -64,6 +67,8 @@ class SQLAlchemyBClassSourceReader:
 class SQLAlchemyCloudWriter:
     """Write canonical rows to cloud mirror tables via PostgreSQL upsert."""
 
+    TARGET_SCHEMA = "b_class"
+
     def __init__(self, engine, dry_run: bool = False):
         self.engine = engine
         self.dry_run = dry_run
@@ -83,7 +88,7 @@ class SQLAlchemyCloudWriter:
         else:
             conflict_clause = "(platform_code, shop_id, data_domain, granularity, data_hash)"
         return (
-            f'INSERT INTO cloud_b_class."{table_name}" ({column_list}) '
+            f'INSERT INTO {SQLAlchemyCloudWriter.TARGET_SCHEMA}."{table_name}" ({column_list}) '
             f"VALUES ({bind_list}) "
             f"ON CONFLICT {conflict_clause} DO UPDATE SET {update_fields}"
         )

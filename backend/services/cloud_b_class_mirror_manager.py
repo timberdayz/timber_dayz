@@ -52,9 +52,9 @@ def get_conflict_key_columns(data_domain: str) -> tuple[str, ...]:
 
 
 class CloudBClassMirrorManager:
-    """Manage remote canonical mirror schema and tables."""
+    """Ensure the remote canonical raw tables exist and have the required key contract."""
 
-    def __init__(self, engine, schema_name: str = "cloud_b_class") -> None:
+    def __init__(self, engine, schema_name: str = "b_class") -> None:
         self.engine = engine
         self.schema_name = schema_name
 
@@ -68,6 +68,8 @@ class CloudBClassMirrorManager:
 
         inspector = inspect(self.engine)
         if inspector.has_table(table_name, schema=self.schema_name):
+            self._validate_existing_table_contract(inspector, table_name)
+            self._ensure_conflict_index(table_name, data_domain)
             return
 
         columns_sql = ",\n".join(self._column_definitions())
@@ -76,7 +78,7 @@ class CloudBClassMirrorManager:
 
         with self.engine.begin() as conn:
             conn.execute(text(create_table_sql))
-            conn.execute(text(self._build_conflict_index_sql(table_name, data_domain)))
+        self._ensure_conflict_index(table_name, data_domain)
 
     def _column_definitions(self) -> Sequence[str]:
         return (
@@ -114,3 +116,22 @@ class CloudBClassMirrorManager:
             f"CREATE UNIQUE INDEX IF NOT EXISTS {quoted_index_name} "
             f"ON {full_table_name} (platform_code, shop_id, data_domain, granularity, data_hash)"
         )
+
+    def _validate_existing_table_contract(self, inspector, table_name: str) -> None:
+        actual_columns = {
+            column["name"]
+            for column in inspector.get_columns(table_name, schema=self.schema_name)
+        }
+        expected_columns = {
+            definition.split('"')[1]
+            for definition in self._column_definitions()
+        }
+        missing_columns = sorted(expected_columns - actual_columns)
+        if missing_columns:
+            raise RuntimeError(
+                f"remote table {self.schema_name}.{table_name} missing canonical columns: {', '.join(missing_columns)}"
+            )
+
+    def _ensure_conflict_index(self, table_name: str, data_domain: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(text(self._build_conflict_index_sql(table_name, data_domain)))

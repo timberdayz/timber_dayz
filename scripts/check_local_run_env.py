@@ -107,6 +107,12 @@ def validate_collection_profile(require_tunnel_reachable: bool = False) -> Tuple
             else:
                 if not check_tcp(tunnel_host, parsed_tunnel_port):
                     errors.append(f"CLOUD_SYNC_TUNNEL {tunnel_host}:{parsed_tunnel_port} is not reachable")
+                else:
+                    cloud_database_url = os.getenv("CLOUD_DATABASE_URL", "").strip()
+                    if cloud_database_url:
+                        ok, err = check_postgres_connect(cloud_database_url)
+                        if not ok:
+                            errors.append(f"CLOUD_DATABASE_URL connection failed via tunnel: {err}")
 
     return not errors, errors
 

@@ -168,8 +168,8 @@ Show-PwcliPaths -Platform shopee -AccountId 'shopee KR' -WorkTag shopee-shopee-k
 
 打开:
 
-```powershell同意
-
+```powershell
+Open-PwcliTiktok -WorkTag tiktok-tiktok-1-inspect -AccountId 'Tiktok 1店'
 ```
 
 保存:

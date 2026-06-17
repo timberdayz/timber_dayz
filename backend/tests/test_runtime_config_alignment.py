@@ -61,6 +61,13 @@ def test_prod_compose_uses_container_internal_database_urls():
     assert worker_env["DATABASE_URL"] == "${DATABASE_URL}"
 
 
+def test_prod_postgres_exposes_only_loopback_debug_port():
+    compose = _read_yaml("docker-compose.prod.yml")
+    postgres = compose["services"]["postgres"]
+
+    assert postgres["ports"] == ["127.0.0.1:15435:5432"]
+
+
 def test_prod_compose_does_not_keep_legacy_secret_fallbacks():
     compose_text = (PROJECT_ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
 

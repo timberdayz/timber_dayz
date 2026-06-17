@@ -61,3 +61,21 @@ def test_validate_collection_profile_requires_reachable_tunnel_in_formal_mode(mo
 
     assert ok is False
     assert "CLOUD_SYNC_TUNNEL 127.0.0.1:15433 is not reachable" in errors
+
+
+def test_validate_collection_profile_requires_cloud_database_connection_in_formal_mode(monkeypatch):
+    module = _load_check_local_run_env_module()
+
+    monkeypatch.setenv("ENABLE_COLLECTION", "true")
+    monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "true")
+    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://example")
+    monkeypatch.setenv("CLOUD_SYNC_TUNNEL_ENABLED", "true")
+    monkeypatch.setenv("CLOUD_SYNC_TUNNEL_HOST", "127.0.0.1")
+    monkeypatch.setenv("CLOUD_SYNC_TUNNEL_PORT", "15433")
+    monkeypatch.setattr(module, "check_tcp", lambda host, port: True)
+    monkeypatch.setattr(module, "check_postgres_connect", lambda url: (False, "server closed the connection unexpectedly"))
+
+    ok, errors = module.validate_collection_profile(require_tunnel_reachable=True)
+
+    assert ok is False
+    assert any("CLOUD_DATABASE_URL connection failed" in error for error in errors)

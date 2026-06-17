@@ -7,6 +7,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.services.cloud_sync_admin_command_service import CloudSyncAdminCommandService
+from backend.services.task_center_sync_service import TaskCenterSyncService
 from backend.services.cloud_b_class_auto_sync_factory import _build_checkpoint_scope_key
 from modules.core.db import Base
 from modules.core.db import (
@@ -14,6 +15,7 @@ from modules.core.db import (
     CloudBClassSyncRun,
     CloudBClassSyncTask,
     SystemConfig,
+    TaskCenterTask,
 )
 
 
@@ -32,6 +34,7 @@ async def cloud_sync_sqlite_session():
                 CloudBClassSyncRun.__table__,
                 CloudBClassSyncTask.__table__,
                 SystemConfig.__table__,
+                TaskCenterTask.__table__,
             ],
         )
 
@@ -488,6 +491,99 @@ async def test_command_service_recover_stale_tasks_handles_current_and_legacy_sc
     assert legacy_task.metadata_json["original_checkpoint_scope"] == other_scope
     assert legacy_task.metadata_json["recovered_by_scope"] == current_scope
     assert legacy_task.error_code == "legacy_scope_stale_recovered"
+
+
+@pytest.mark.asyncio
+async def test_command_service_repair_checkpoint_does_not_touch_task_center_by_itself(
+    cloud_sync_sqlite_session,
+):
+    service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
+
+    payload = await service.repair_checkpoint("fact_shopee_orders_daily")
+
+    assert payload["status"] == "repaired"
+
+
+@pytest.mark.asyncio
+async def test_task_center_sync_service_can_project_cloud_sync_task_state(
+    cloud_sync_sqlite_session,
+):
+    task = CloudBClassSyncTask(
+        job_id="job-project",
+        dedupe_key="fact_shopee_orders_daily",
+        source_table_name="fact_shopee_orders_daily",
+        status="running",
+        claimed_by="worker-1",
+        heartbeat_at=datetime.now(timezone.utc),
+        lease_expires_at=datetime.now(timezone.utc),
+        attempt_count=3,
+        projection_status="completed",
+        last_error="boom",
+        error_code="cloud_db_connection_closed",
+        finished_at=None,
+        metadata_json={"checkpoint_scope": _build_checkpoint_scope_key(os.getenv("CLOUD_DATABASE_URL"), dry_run=False)},
+    )
+    cloud_sync_sqlite_session.add(task)
+    await cloud_sync_sqlite_session.commit()
+
+    projected = await cloud_sync_sqlite_session.run_sync(
+        lambda sync_session: TaskCenterSyncService(sync_session).sync_cloud_task(
+            sync_session.get(CloudBClassSyncTask, task.id)
+        )
+    )
+    mirrored = (
+        await cloud_sync_sqlite_session.execute(
+            select(TaskCenterTask).where(TaskCenterTask.task_id == "job-project")
+        )
+    ).scalar_one()
+
+    assert projected is mirrored
+    assert mirrored.status == "running"
+    assert mirrored.claimed_by == "worker-1"
+    assert mirrored.error_summary == "boom"
+    assert mirrored.details_json["cloud_sync"]["error_code"] == "cloud_db_connection_closed"
+
+
+@pytest.mark.asyncio
+async def test_command_service_retry_task_updates_task_center_projection(
+    cloud_sync_sqlite_session,
+):
+    task = CloudBClassSyncTask(
+        job_id="job-retry-projection",
+        dedupe_key="fact_shopee_orders_daily",
+        source_table_name="fact_shopee_orders_daily",
+        status="failed",
+        attempt_count=2,
+        claimed_by="worker-1",
+        heartbeat_at=datetime.now(timezone.utc),
+        lease_expires_at=datetime.now(timezone.utc),
+        next_retry_at=datetime.now(timezone.utc),
+        last_error="boom",
+        error_code="cloud_db_connection_closed",
+    )
+    cloud_sync_sqlite_session.add(task)
+    await cloud_sync_sqlite_session.commit()
+    await cloud_sync_sqlite_session.run_sync(
+        lambda sync_session: TaskCenterSyncService(sync_session).sync_cloud_task(
+            sync_session.get(CloudBClassSyncTask, task.id)
+        )
+    )
+
+    service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
+    payload = await service.retry_task("job-retry-projection")
+
+    mirrored = (
+        await cloud_sync_sqlite_session.execute(
+            select(TaskCenterTask).where(TaskCenterTask.task_id == "job-retry-projection")
+        )
+    ).scalar_one()
+
+    assert payload["status"] == "pending"
+    assert mirrored.status == "pending"
+    assert mirrored.claimed_by is None
+    assert mirrored.heartbeat_at is None
+    assert mirrored.lease_expires_at is None
+    assert mirrored.error_summary is None
 
 
 @pytest.mark.asyncio

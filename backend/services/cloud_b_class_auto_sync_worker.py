@@ -18,6 +18,7 @@ class CloudBClassAutoSyncWorker:
     MAX_RETRY_ATTEMPTS = 4
     RETRYABLE_ERROR_CODES = {
         "cloud_db_unavailable",
+        "cloud_db_connection_closed",
         "tunnel_unhealthy",
         "ssh_process_failed",
         "projection_runtime_failure",
@@ -153,12 +154,31 @@ class CloudBClassAutoSyncWorker:
 
     @staticmethod
     def _result_error_code(result: dict) -> str:
-        return (
+        return CloudBClassAutoSyncWorker._normalize_error_code(
             result.get("error_code")
             or result.get("error")
             or result.get("detail")
             or "sync_failed"
         )
+
+    @staticmethod
+    def _normalize_error_code(raw_error: object) -> str:
+        message = str(raw_error or "sync_failed")
+        lowered = message.lower()
+        if "server closed the connection unexpectedly" in lowered or "could not receive data from server" in lowered:
+            return "cloud_db_connection_closed"
+        if "connection refused" in lowered or "timed out" in lowered or "timeout" in lowered:
+            return "cloud_db_unavailable"
+        if "software caused connection abort" in lowered:
+            return "local_db_connection_aborted"
+        if message in CloudBClassAutoSyncWorker.RETRYABLE_ERROR_CODES:
+            return message
+        if len(message) <= 64:
+            return message
+        return "sync_failed"
+
+    def _is_retryable_error(self, error_code: str | None) -> bool:
+        return str(error_code or "") in self.RETRYABLE_ERROR_CODES
 
     async def run_one(self, worker_id: str) -> CloudBClassSyncTask | None:
         task_center = TaskCenterSyncService(self.db)
@@ -175,11 +195,18 @@ class CloudBClassAutoSyncWorker:
             sync_status = result.get("status", "completed")
             projection_status = result.get("projection_status", "completed")
             if sync_status != "completed":
-                task.status = "failed"
                 task.projection_status = projection_status
                 task.last_error = result.get("error") or result.get("detail") or "sync_failed"
                 task.error_code = self._result_error_code(result)
-                task.next_retry_at = None
+                if (
+                    self._is_retryable_error(task.error_code)
+                    and int(task.attempt_count or 0) <= self.MAX_RETRY_ATTEMPTS
+                ):
+                    task.status = "retry_waiting"
+                    task.next_retry_at = self._compute_next_retry_at(task.attempt_count, task.error_code)
+                else:
+                    task.status = "failed"
+                    task.next_retry_at = None
             else:
                 final_status = "completed" if projection_status == "completed" else "partial_success"
                 task.status = final_status
@@ -188,11 +215,11 @@ class CloudBClassAutoSyncWorker:
                 task.error_code = None
                 task.next_retry_at = None
         except Exception as exc:
-            error_code = str(exc)
+            error_code = self._normalize_error_code(exc)
             task.last_error = str(exc)
             task.error_code = error_code
             if (
-                error_code in self.RETRYABLE_ERROR_CODES
+                self._is_retryable_error(error_code)
                 and int(task.attempt_count or 0) <= self.MAX_RETRY_ATTEMPTS
             ):
                 task.status = "retry_waiting"
