@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import inspect
 import json
+import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import create_engine, inspect as sa_inspect, text
+from sqlalchemy import create_engine, insert, inspect as sa_inspect, select, text, update
 
 from backend.services.cloud_b_class_mirror_manager import build_canonical_columns
 from backend.services.cloud_b_class_sync_utils import quote_ident, validate_b_class_table_name
+from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
+from modules.core.db import RefreshQueueTask
 
 
 def build_sync_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -116,6 +119,96 @@ class SQLAlchemyCloudWriter:
         return prepared_rows
 
 
+class CloudRefreshQueueEnqueuer:
+    """Write post-sync refresh intents into the target database refresh queue."""
+
+    PIPELINE_NAME = "data_ingested_refresh"
+    TRIGGER_TYPE = "cloud_sync"
+
+    def __init__(self, engine):
+        self.engine = engine
+
+    def enqueue_after_sync(
+        self,
+        *,
+        source_table_name: str,
+        data_domain: str,
+        written_rows: int,
+        checkpoint_scope: str,
+    ) -> dict[str, Any]:
+        from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
+        from backend.utils.events import DataIngestedEvent
+
+        event = DataIngestedEvent(
+            file_id=None,
+            platform_code=None,
+            data_domain=data_domain,
+            sub_domain=None,
+            granularity=None,
+            source_table_name=source_table_name,
+            row_count=written_rows,
+        )
+        targets = determine_pipeline_targets_for_data_ingested(event)
+        if not targets:
+            return {"status": "not_required", "targets": []}
+
+        context = {
+            "source_table_name": source_table_name,
+            "data_domain": data_domain,
+            "written_rows": written_rows,
+            "checkpoint_scope": checkpoint_scope,
+            "trigger_source": self.TRIGGER_TYPE,
+            "related_table_names": [source_table_name],
+        }
+        dedupe_key = RefreshQueueService.build_dedupe_key(self.PIPELINE_NAME, targets)
+        table = RefreshQueueTask.__table__
+
+        with self.engine.begin() as conn:
+            existing = conn.execute(
+                select(table.c.id, table.c.job_id, table.c.context_json)
+                .where(table.c.dedupe_key == dedupe_key, table.c.status == "pending")
+                .order_by(table.c.id.asc())
+                .limit(1)
+            ).mappings().first()
+
+            if existing is not None:
+                merged_context = RefreshQueueService._merge_context(
+                    dict(existing.get("context_json") or {}),
+                    context,
+                )
+                conn.execute(
+                    update(table)
+                    .where(table.c.id == existing["id"])
+                    .values(context_json=merged_context)
+                )
+                return {
+                    "status": "queued",
+                    "job_id": existing["job_id"],
+                    "targets": sorted(set(targets)),
+                    "coalesced": True,
+                }
+
+            job_id = f"refresh-{uuid.uuid4().hex}"
+            conn.execute(
+                insert(table).values(
+                    job_id=job_id,
+                    trigger_type=self.TRIGGER_TYPE,
+                    pipeline_name=self.PIPELINE_NAME,
+                    dedupe_key=dedupe_key,
+                    targets_json=sorted(str(target).strip() for target in targets if str(target).strip()),
+                    context_json=context,
+                    status="pending",
+                    attempt_count=0,
+                )
+            )
+            return {
+                "status": "queued",
+                "job_id": job_id,
+                "targets": sorted(set(targets)),
+                "coalesced": False,
+            }
+
+
 class CloudBClassSyncService:
     """Checkpointed local-to-cloud B-class sync orchestration."""
 
@@ -132,6 +225,7 @@ class CloudBClassSyncService:
         cloud_engine=None,
         owns_engines: bool = False,
         checkpoint_scope: str = "b_class",
+        projection_enqueuer=None,
     ) -> None:
         self.checkpoint_service = checkpoint_service
         self.mirror_manager = mirror_manager
@@ -144,6 +238,9 @@ class CloudBClassSyncService:
         self.cloud_engine = cloud_engine
         self.owns_engines = owns_engines
         self.checkpoint_scope = checkpoint_scope
+        self.projection_enqueuer = projection_enqueuer
+        if self.projection_enqueuer is None and cloud_engine is not None:
+            self.projection_enqueuer = CloudRefreshQueueEnqueuer(cloud_engine)
 
     @staticmethod
     def _should_advance_checkpoint(write_succeeded: bool, dry_run: bool = False) -> bool:
@@ -254,6 +351,36 @@ class CloudBClassSyncService:
             data_domain = self._infer_data_domain(table_name)
             self.mirror_manager.ensure_cloud_mirror_table(table_name, data_domain)
             total_written_rows = 0
+            dry_run_seen = False
+
+            def _projection_result() -> dict[str, Any]:
+                if total_written_rows <= 0 or dry_run_seen:
+                    return {"projection_status": "not_required"}
+                if self.projection_enqueuer is None:
+                    return {"projection_status": "not_required"}
+                try:
+                    enqueue_result = self.projection_enqueuer.enqueue_after_sync(
+                        source_table_name=table_name,
+                        data_domain=data_domain,
+                        written_rows=total_written_rows,
+                        checkpoint_scope=self.checkpoint_scope,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    return {
+                        "projection_status": "failed",
+                        "projection_error": str(exc),
+                        "error_code": "projection_runtime_failure",
+                    }
+
+                status = enqueue_result.get("status", "not_required")
+                payload = {
+                    "projection_status": status,
+                    "refresh_queue_job_id": enqueue_result.get("job_id"),
+                    "refresh_targets": enqueue_result.get("targets", []),
+                }
+                if status == "not_required":
+                    payload["projection_status"] = "not_required"
+                return payload
 
             while True:
                 rows = await self._maybe_await(
@@ -271,6 +398,7 @@ class CloudBClassSyncService:
                         "status": "completed",
                         "table_name": table_name,
                         "written_rows": total_written_rows,
+                        **_projection_result(),
                     }
 
                 write_result = await self._maybe_await(
@@ -292,6 +420,7 @@ class CloudBClassSyncService:
                     }
 
                 total_written_rows += int(write_result.get("written_rows", len(rows)))
+                dry_run_seen = dry_run_seen or bool(write_result.get("dry_run"))
                 if self._should_advance_checkpoint(write_succeeded, dry_run=bool(write_result.get("dry_run"))):
                     last_row = rows[-1]
                     self.checkpoint_service.advance_checkpoint(
@@ -306,6 +435,7 @@ class CloudBClassSyncService:
                         "status": "completed",
                         "table_name": table_name,
                         "written_rows": total_written_rows,
+                        **_projection_result(),
                     }
 
                 if len(rows) < batch_size:
@@ -313,6 +443,7 @@ class CloudBClassSyncService:
                         "status": "completed",
                         "table_name": table_name,
                         "written_rows": total_written_rows,
+                        **_projection_result(),
                     }
         except Exception as exc:
             self.checkpoint_service.mark_failure(

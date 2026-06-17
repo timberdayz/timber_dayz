@@ -132,6 +132,37 @@ def test_worker_marks_partial_success_when_projection_fails():
         db.close()
 
 
+def test_worker_marks_completed_when_projection_refresh_is_queued():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db)
+
+        class QueuedProjectionExecutor:
+            def sync_table(self, source_table_name: str, batch_size: int = 1000):
+                return {
+                    "status": "completed",
+                    "projection_status": "queued",
+                    "refresh_queue_job_id": "refresh-job-1",
+                    "source_table_name": source_table_name,
+                }
+
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=QueuedProjectionExecutor())
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert refreshed.status == "completed"
+        assert refreshed.projection_status == "queued"
+        assert refreshed.last_error is None
+        assert refreshed.error_code is None
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
 def test_worker_marks_failed_when_sync_executor_returns_failed_status():
     db = _build_session()
     try:

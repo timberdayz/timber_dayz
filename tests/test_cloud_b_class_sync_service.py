@@ -2,10 +2,14 @@ import asyncio
 from datetime import datetime, timezone
 
 from backend.services.cloud_b_class_sync_service import (
+    CloudRefreshQueueEnqueuer,
     CloudBClassSyncService,
     SQLAlchemyBClassSourceReader,
     SQLAlchemyCloudWriter,
 )
+from modules.core.db import RefreshQueueTask
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.pool import StaticPool
 
 
 class FakeCheckpoint:
@@ -40,6 +44,29 @@ class FakeMirrorManager:
 
     def ensure_cloud_mirror_table(self, table_name, data_domain):
         self.ensured.append((table_name, data_domain))
+
+
+class FakeProjectionEnqueuer:
+    def __init__(self, *, should_fail=False):
+        self.should_fail = should_fail
+        self.calls = []
+
+    def enqueue_after_sync(self, *, source_table_name, data_domain, written_rows, checkpoint_scope):
+        self.calls.append(
+            {
+                "source_table_name": source_table_name,
+                "data_domain": data_domain,
+                "written_rows": written_rows,
+                "checkpoint_scope": checkpoint_scope,
+            }
+        )
+        if self.should_fail:
+            raise RuntimeError("queue unavailable")
+        return {
+            "status": "queued",
+            "job_id": "refresh-job-1",
+            "targets": ["api.business_overview_kpi_module"],
+        }
 
 
 def test_checkpoint_advances_only_after_successful_write():
@@ -118,6 +145,117 @@ def test_sync_table_advances_checkpoint_after_successful_write():
         ("fact_shopee_orders_daily", rows[-1]["ingest_timestamp"], rows[-1]["id"], "completed", "b_class")
     ]
     assert mirror_manager.ensured == [("fact_shopee_orders_daily", "orders")]
+
+
+def test_sync_table_enqueues_cloud_projection_refresh_after_successful_write():
+    checkpoint_service = FakeCheckpointService()
+    projection_enqueuer = FakeProjectionEnqueuer()
+    rows = [
+        {"id": 1, "ingest_timestamp": datetime(2026, 3, 24, 0, 0, tzinfo=timezone.utc)},
+    ]
+
+    service = CloudBClassSyncService(
+        checkpoint_service=checkpoint_service,
+        mirror_manager=FakeMirrorManager(),
+        source_batch_reader=lambda *args, **kwargs: rows,
+        remote_writer=lambda *args, **kwargs: {"success": True, "written_rows": len(rows)},
+        checkpoint_scope="cloud_sync:target_a",
+        projection_enqueuer=projection_enqueuer,
+    )
+
+    result = asyncio.run(service.sync_table("fact_shopee_orders_daily"))
+
+    assert result["status"] == "completed"
+    assert result["projection_status"] == "queued"
+    assert result["refresh_queue_job_id"] == "refresh-job-1"
+    assert projection_enqueuer.calls == [
+        {
+            "source_table_name": "fact_shopee_orders_daily",
+            "data_domain": "orders",
+            "written_rows": 1,
+            "checkpoint_scope": "cloud_sync:target_a",
+        }
+    ]
+
+
+def test_sync_table_marks_projection_not_required_when_no_refresh_targets_match():
+    rows = [
+        {"id": 1, "ingest_timestamp": datetime(2026, 3, 24, 0, 0, tzinfo=timezone.utc)},
+    ]
+
+    service = CloudBClassSyncService(
+        checkpoint_service=FakeCheckpointService(),
+        mirror_manager=FakeMirrorManager(),
+        source_batch_reader=lambda *args, **kwargs: rows,
+        remote_writer=lambda *args, **kwargs: {"success": True, "written_rows": len(rows)},
+    )
+
+    result = asyncio.run(service.sync_table("fact_shopee_unknown_daily"))
+
+    assert result["status"] == "completed"
+    assert result["projection_status"] == "not_required"
+
+
+def test_sync_table_reports_projection_failure_when_refresh_queue_enqueue_fails():
+    rows = [
+        {"id": 1, "ingest_timestamp": datetime(2026, 3, 24, 0, 0, tzinfo=timezone.utc)},
+    ]
+
+    service = CloudBClassSyncService(
+        checkpoint_service=FakeCheckpointService(),
+        mirror_manager=FakeMirrorManager(),
+        source_batch_reader=lambda *args, **kwargs: rows,
+        remote_writer=lambda *args, **kwargs: {"success": True, "written_rows": len(rows)},
+        projection_enqueuer=FakeProjectionEnqueuer(should_fail=True),
+    )
+
+    result = asyncio.run(service.sync_table("fact_shopee_orders_daily"))
+
+    assert result["status"] == "completed"
+    assert result["projection_status"] == "failed"
+    assert result["error_code"] == "projection_runtime_failure"
+    assert "queue unavailable" in result["projection_error"]
+
+
+def test_cloud_refresh_queue_enqueuer_inserts_and_coalesces_target_queue_rows():
+    engine = create_engine(
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.execute(text("ATTACH DATABASE ':memory:' AS core"))
+        RefreshQueueTask.__table__.create(bind=conn, checkfirst=True)
+
+    enqueuer = CloudRefreshQueueEnqueuer(engine)
+    first = enqueuer.enqueue_after_sync(
+        source_table_name="fact_shopee_orders_daily",
+        data_domain="orders",
+        written_rows=5,
+        checkpoint_scope="cloud_sync:target_a",
+    )
+    second = enqueuer.enqueue_after_sync(
+        source_table_name="fact_tiktok_orders_daily",
+        data_domain="orders",
+        written_rows=7,
+        checkpoint_scope="cloud_sync:target_a",
+    )
+
+    with engine.begin() as conn:
+        rows = conn.execute(select(RefreshQueueTask.__table__)).mappings().all()
+
+    assert first["status"] == "queued"
+    assert second["status"] == "queued"
+    assert second["coalesced"] is True
+    assert len(rows) == 1
+    assert rows[0]["trigger_type"] == "cloud_sync"
+    assert rows[0]["pipeline_name"] == "data_ingested_refresh"
+    assert "api.business_overview_kpi_module" in rows[0]["targets_json"]
+    assert rows[0]["context_json"]["related_table_names"] == [
+        "fact_shopee_orders_daily",
+        "fact_tiktok_orders_daily",
+    ]
 
 
 def test_sync_table_does_not_advance_checkpoint_in_dry_run():

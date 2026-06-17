@@ -208,11 +208,17 @@ class CloudBClassAutoSyncWorker:
                     task.status = "failed"
                     task.next_retry_at = None
             else:
-                final_status = "completed" if projection_status == "completed" else "partial_success"
+                projection_terminal_success = {"completed", "queued", "not_required"}
+                final_status = "completed" if projection_status in projection_terminal_success else "partial_success"
                 task.status = final_status
                 task.projection_status = projection_status
-                task.last_error = None
-                task.error_code = None
+                task.last_error = None if final_status == "completed" else (
+                    result.get("projection_error")
+                    or result.get("error")
+                    or result.get("detail")
+                    or "projection_failed"
+                )
+                task.error_code = None if final_status == "completed" else self._result_error_code(result)
                 task.next_retry_at = None
         except Exception as exc:
             error_code = self._normalize_error_code(exc)
