@@ -197,3 +197,14 @@ def test_business_overview_frontend_expense_tooltip_includes_labor_cost():
     )
 
     assert "人力费用" in text
+
+
+def test_business_overview_frontend_renders_freshness_alert():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "businessOverviewFreshnessAlert" in text
+    assert "businessOverviewDataFreshness.value = payload?.meta?.data_freshness || null" in text
+    assert "订单/流量数据新鲜度不一致" in text

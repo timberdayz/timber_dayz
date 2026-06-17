@@ -303,6 +303,40 @@ def _build_business_overview_meta(
     }
 
 
+async def _try_attach_business_overview_freshness(
+    meta: dict[str, Any],
+    *,
+    platform_code: Optional[str],
+    shop_id: Optional[str],
+) -> dict[str, Any]:
+    try:
+        service = get_postgresql_dashboard_service()
+        freshness = await service.get_business_overview_data_freshness(
+            platform=platform_code,
+            shop_id=shop_id,
+        )
+    except Exception as exc:
+        logger.warning("Business Overview freshness query failed: %s", exc, exc_info=True)
+        warnings = meta.get("warnings")
+        if not isinstance(warnings, list):
+            warnings = []
+            meta["warnings"] = warnings
+        warnings.append("data_freshness_unavailable")
+        return meta
+
+    meta["data_freshness"] = freshness
+    if isinstance(freshness, dict) and freshness.get("is_stale"):
+        meta["data_status"] = "stale"
+        warnings = meta.get("warnings")
+        if not isinstance(warnings, list):
+            warnings = []
+            meta["warnings"] = warnings
+        for warning in freshness.get("warnings") or []:
+            if warning not in warnings:
+                warnings.append(warning)
+    return meta
+
+
 def _normalize_period_month_for_cache(period_month: Optional[str]) -> Optional[str]:
     if period_month is None:
         return None
@@ -448,6 +482,13 @@ async def get_business_overview_kpi_postgresql(
             )
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                await _try_attach_business_overview_freshness(
+                    payload["meta"],
+                    platform_code=effective_platform_code,
+                    shop_id=shop_id,
+                )
+                if isinstance(payload.get("data"), dict):
+                    payload["data"]["meta"] = payload["meta"]
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except HTTPException:
         raise
@@ -685,6 +726,13 @@ async def get_business_overview_bootstrap_postgresql(
             )
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                await _try_attach_business_overview_freshness(
+                    payload["meta"],
+                    platform_code=effective_platform_code,
+                    shop_id=shop_id,
+                )
+                if isinstance(payload.get("data"), dict):
+                    payload["data"]["meta"] = payload["meta"]
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except HTTPException:
         raise

@@ -411,6 +411,9 @@ async def test_postgresql_business_overview_bootstrap_runs_module_calls_concurre
         async def get_business_overview_shop_racing(self, **_kwargs):
             return await tracked([{"name": "shop-a", "rank": 1}])
 
+        async def get_business_overview_data_freshness(self, **_kwargs):
+            return await tracked({"orders": {}, "traffic": {}, "is_stale": False, "warnings": []})
+
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
@@ -430,13 +433,14 @@ async def test_postgresql_business_overview_bootstrap_runs_module_calls_concurre
 
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
-    assert set(body["data"]) == {
+    assert {
         "kpi",
         "comparison",
         "operational_metrics",
         "traffic_ranking",
         "shop_racing",
-    }
+    }.issubset(set(body["data"]))
+    assert body["data"]["meta"]["data_freshness"]["is_stale"] is False
     assert max_active > 1
 
 
@@ -468,6 +472,9 @@ async def test_postgresql_business_overview_bootstrap_miss_reuses_module_caches(
 
         async def get_business_overview_shop_racing(self, **_kwargs):
             return []
+
+        async def get_business_overview_data_freshness(self, **_kwargs):
+            return {"orders": {}, "traffic": {}, "is_stale": False, "warnings": []}
 
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",

@@ -218,6 +218,51 @@ async def test_postgresql_dashboard_service_monthly_kpi_supports_platform_filter
 
 
 @pytest.mark.asyncio
+async def test_business_overview_data_freshness_flags_orders_lagging_traffic(monkeypatch):
+    service = PostgresqlDashboardService()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_fetch_rows(query, params):
+        captured.append((query, params))
+        if "information_schema.tables" in query:
+            return [
+                {"table_name": "fact_shopee_orders_monthly"},
+                {"table_name": "fact_shopee_analytics_monthly"},
+            ]
+        if "fact_shopee_orders_monthly" in query:
+            return [
+                {
+                    "row_count": 100,
+                    "period_start_date": date(2026, 6, 1),
+                    "period_end_date": date(2026, 6, 10),
+                    "latest_metric_date": date(2026, 6, 1),
+                    "latest_ingest_timestamp": "2026-06-11T13:35:41",
+                }
+            ]
+        if "fact_shopee_analytics_monthly" in query:
+            return [
+                {
+                    "row_count": 100,
+                    "period_start_date": date(2026, 6, 1),
+                    "period_end_date": date(2026, 6, 16),
+                    "latest_metric_date": date(2026, 6, 1),
+                    "latest_ingest_timestamp": "2026-06-17T10:46:34",
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    result = await service.get_business_overview_data_freshness(platform="shopee")
+
+    assert result["is_stale"] is True
+    assert result["orders"]["period_end_date"] == date(2026, 6, 10)
+    assert result["traffic"]["period_end_date"] == date(2026, 6, 16)
+    assert "orders period_end_date 2026-06-10 lags traffic 2026-06-16" in result["warnings"]
+    assert captured[-1][1]["platform_code"] == "shopee"
+
+
+@pytest.mark.asyncio
 async def test_postgresql_dashboard_service_kpi_returns_previous_period_changes(monkeypatch):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []

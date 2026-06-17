@@ -1517,6 +1517,138 @@ class PostgresqlDashboardService:
             )
         return result
 
+    async def _fetch_existing_b_class_tables(self, table_names: list[str]) -> set[str]:
+        if not table_names:
+            return set()
+        rows = await self._fetch_rows(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'b_class'
+              AND table_name = ANY(:table_names)
+            """,
+            {"table_names": table_names},
+        )
+        return {
+            str(row.get("table_name"))
+            for row in rows
+            if row.get("table_name")
+        }
+
+    async def _load_business_overview_freshness_side(
+        self,
+        *,
+        side_name: str,
+        table_names: list[str],
+        platform: str | None = None,
+        shop_id: str | None = None,
+    ) -> dict[str, Any]:
+        existing_tables = await self._fetch_existing_b_class_tables(table_names)
+        selected_tables = [table_name for table_name in table_names if table_name in existing_tables]
+        if platform:
+            platform_prefix = f"fact_{platform.lower()}_"
+            selected_tables = [table_name for table_name in selected_tables if table_name.startswith(platform_prefix)]
+        if not selected_tables:
+            return {
+                "side": side_name,
+                "tables": [],
+                "row_count": 0,
+                "period_start_date": None,
+                "period_end_date": None,
+                "latest_ingest_timestamp": None,
+                "latest_metric_date": None,
+            }
+
+        params: dict[str, Any] = {}
+        if platform:
+            params["platform_code"] = platform
+        if shop_id:
+            params["shop_id"] = shop_id
+        union_parts: list[str] = []
+        for table_name in selected_tables:
+            conditions: list[str] = []
+            if platform:
+                conditions.append("platform_code = :platform_code")
+            if shop_id:
+                conditions.append("shop_id = :shop_id")
+            where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+            union_parts.append(
+                f"""
+                SELECT
+                    period_start_date,
+                    period_end_date,
+                    metric_date,
+                    ingest_timestamp
+                FROM b_class.{table_name}
+                {where_clause}
+                """
+            )
+        aggregate_sql = f"""
+            SELECT
+                COUNT(*) AS row_count,
+                MIN(period_start_date) AS period_start_date,
+                MAX(period_end_date) AS period_end_date,
+                MAX(metric_date) AS latest_metric_date,
+                MAX(ingest_timestamp) AS latest_ingest_timestamp
+            FROM (
+                {' UNION ALL '.join(part.strip() for part in union_parts)}
+            ) {side_name}_rows
+        """
+        rows = await self._fetch_rows(aggregate_sql, params)
+        row = rows[0] if rows else {}
+        return {
+            "side": side_name,
+            "tables": selected_tables,
+            "row_count": int(row.get("row_count") or 0),
+            "period_start_date": row.get("period_start_date"),
+            "period_end_date": row.get("period_end_date"),
+            "latest_ingest_timestamp": row.get("latest_ingest_timestamp"),
+            "latest_metric_date": row.get("latest_metric_date"),
+        }
+
+    async def get_business_overview_data_freshness(
+        self,
+        platform: str | None = None,
+        shop_id: str | None = None,
+    ) -> dict[str, Any]:
+        orders = await self._load_business_overview_freshness_side(
+            side_name="orders",
+            table_names=[
+                "fact_shopee_orders_monthly",
+                "fact_tiktok_orders_monthly",
+                "fact_miaoshou_orders_monthly",
+            ],
+            platform=platform,
+            shop_id=shop_id,
+        )
+        traffic = await self._load_business_overview_freshness_side(
+            side_name="traffic",
+            table_names=[
+                "fact_shopee_analytics_monthly",
+                "fact_tiktok_analytics_monthly",
+                "fact_miaoshou_analytics_monthly",
+            ],
+            platform=platform,
+            shop_id=shop_id,
+        )
+
+        warnings: list[str] = []
+        orders_end = orders.get("period_end_date")
+        traffic_end = traffic.get("period_end_date")
+        if orders_end is None:
+            warnings.append("orders freshness unavailable")
+        if traffic_end is None:
+            warnings.append("traffic freshness unavailable")
+        if orders_end is not None and traffic_end is not None and orders_end != traffic_end:
+            warnings.append(f"orders period_end_date {orders_end} lags traffic {traffic_end}")
+
+        return {
+            "orders": orders,
+            "traffic": traffic,
+            "is_stale": bool(warnings),
+            "warnings": warnings,
+        }
+
     async def get_business_overview_kpi(
         self,
         month: str | None = None,

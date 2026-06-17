@@ -87,12 +87,23 @@ class DataSyncTemplateStatusService:
             current_columns,
         )
 
+        blocking_changes = header_changes.get("blocking_changes")
+        if not isinstance(blocking_changes, list):
+            blocking_changes = []
+        non_blocking_changes = header_changes.get("non_blocking_changes")
+        if not isinstance(non_blocking_changes, list):
+            non_blocking_changes = []
+
         if header_changes.get("is_exact_match", False):
             status = "ready"
             governance_status = "ready"
             should_auto_sync = True
             update_required = False
-        elif header_changes.get("is_semantic_match", False):
+        elif header_changes.get("is_semantic_match", False) or (
+            header_changes.get("detected", False)
+            and not blocking_changes
+            and bool(non_blocking_changes)
+        ):
             status = "alias_only"
             governance_status = "non_breaking_drift"
             should_auto_sync = True

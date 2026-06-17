@@ -45,6 +45,22 @@ AUTO_INGEST_WATCHDOG_LOCK_KEY = int(os.getenv("AUTO_INGEST_WATCHDOG_LOCK_KEY", "
 AUTO_INGEST_SOURCE = "scheduled_tasks.auto_ingest_pending_files"
 
 
+def _mark_file_template_update_required(
+    file_record: CatalogFile,
+    *,
+    message: str | None,
+) -> None:
+    meta = dict(file_record.file_metadata or {})
+    auto_meta = dict(meta.get("auto_ingest") or {})
+    auto_meta["last_status"] = "template_update_required"
+    auto_meta["last_reason"] = message or "template update required before ingest"
+    auto_meta["current_task_id"] = None
+    meta["auto_ingest"] = auto_meta
+    file_record.file_metadata = meta
+    file_record.status = "template_update_required"
+    file_record.error_message = message or "template update required before ingest"
+
+
 def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
     try:
         return max(minimum, int(os.getenv(name, str(default))))
@@ -183,6 +199,8 @@ def _recover_stale_auto_ingest_records(
         claimed_task_id = str(auto_meta.get("current_task_id") or "").strip()
         should_recover = bool(claimed_task_id and claimed_task_id in stale_task_ids)
         if not should_recover and (started_at is None or started_at >= cutoff):
+            continue
+        if auto_meta.get("last_status") == "template_update_required":
             continue
         auto_meta["last_status"] = "stale_recovered"
         auto_meta["last_recovered_at"] = now.isoformat()
@@ -950,13 +968,24 @@ def auto_ingest_pending_files(max_files: int | None = None):
                         if not readiness.get("should_auto_sync", True):
                             template_status = readiness.get("template_status")
                             if template_status == "update_required":
+                                update_message = readiness.get("update_reason") or "模板需要更新后再同步"
+                                async_get = getattr(db_local, "get", None)
+                                async_commit = getattr(db_local, "commit", None)
+                                if callable(async_get) and callable(async_commit):
+                                    file_record = await async_get(CatalogFile, file_id)
+                                    if file_record is not None:
+                                        _mark_file_template_update_required(
+                                            file_record,
+                                            message=update_message,
+                                        )
+                                        await async_commit()
                                 return {
                                     "success": False,
                                     "file_id": file_id,
                                     "file_name": readiness.get("file_name"),
                                     "status": "skipped",
                                     "error_code": "TEMPLATE_UPDATE_REQUIRED",
-                                    "message": readiness.get("update_reason") or "模板需要更新后再同步",
+                                    "message": update_message,
                                 }
                             if template_status == "missing":
                                 return {

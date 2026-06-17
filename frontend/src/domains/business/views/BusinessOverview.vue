@@ -23,6 +23,16 @@
       class="dashboard-asset-alert"
     />
 
+    <el-alert
+      v-if="businessOverviewFreshnessAlert"
+      :title="businessOverviewFreshnessAlert.title"
+      :description="businessOverviewFreshnessAlert.description"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="dashboard-freshness-alert"
+    />
+
     <!-- 全局日期（页面级主控，各模块可跟随或手动覆盖） -->
     <div class="global-date-bar">
       <span class="global-date-label">全局日期</span>
@@ -1371,6 +1381,7 @@ import PageHeader from '@/components/common/PageHeader.vue'
 // 响应式数据
 const loading = ref(false)
 const dashboardAssetNotice = ref(null)
+const businessOverviewDataFreshness = ref(null)
 const loadingKPI = ref(false)
 const loadingComparison = ref(false)
 const loadingInventory = ref(false)
@@ -1417,6 +1428,32 @@ function consumeDashboardAssetError(error, fallbackModuleName = 'business_overvi
   })
   return true
 }
+
+const formatFreshnessDate = (value) => {
+  if (!value) return '--'
+  return String(value).slice(0, 10)
+}
+
+const formatFreshnessTime = (value) => {
+  if (!value) return '--'
+  return String(value).replace('T', ' ').slice(0, 19)
+}
+
+const businessOverviewFreshnessAlert = computed(() => {
+  const freshness = businessOverviewDataFreshness.value
+  if (!freshness || !freshness.is_stale) return null
+  const orders = freshness.orders || {}
+  const traffic = freshness.traffic || {}
+  return {
+    title: '订单/流量数据新鲜度不一致',
+    description:
+      `订单数据覆盖到 ${formatFreshnessDate(orders.period_end_date)}，` +
+      `流量数据覆盖到 ${formatFreshnessDate(traffic.period_end_date)}。` +
+      `订单最新入库 ${formatFreshnessTime(orders.latest_ingest_timestamp)}，` +
+      `流量最新入库 ${formatFreshnessTime(traffic.latest_ingest_timestamp)}。` +
+      '请检查是否存在模板变更阻断或待确认文件。'
+  }
+})
 
 async function refreshDashboardAssetNotice() {
   try {
@@ -2697,6 +2734,7 @@ const loadKPIData = async () => {
 
     if (response) {
       const data = response
+      businessOverviewDataFreshness.value = data.meta?.data_freshness || null
       applyKpiCards(data)
     }
   } catch (error) {
@@ -3205,6 +3243,7 @@ const loadCriticalTierBootstrap = async () => {
     applyKpiPayload(payload?.kpi)
     applyComparisonPayload(payload?.comparison)
     applyOperationalPayload(payload?.operational_metrics)
+    businessOverviewDataFreshness.value = payload?.meta?.data_freshness || null
   } catch (error) {
     console.error('[BusinessOverview] bootstrap 加载失败:', error)
     if (!consumeDashboardAssetError(error, 'business_overview')) {
@@ -3316,6 +3355,10 @@ watch(
 }
 
 .dashboard-asset-alert {
+  margin-bottom: 16px;
+}
+
+.dashboard-freshness-alert {
   margin-bottom: 16px;
 }
 

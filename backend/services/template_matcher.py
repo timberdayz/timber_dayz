@@ -31,6 +31,22 @@ from backend.services.template_alias_registry import get_header_alias_mapping
 logger = get_logger(__name__)
 
 
+ORDER_CORE_REQUIRED_FIELDS = {
+    "订单编号",
+    "订单号",
+    "店铺",
+    "下单时间",
+    "销售数量",
+    "买家支付",
+    "实付金额",
+    "利润",
+}
+
+ORDER_OPTIONAL_FIELDS = {
+    "预估回款金额",
+}
+
+
 class TemplateMatcher:
     """
     统一模板匹配服务
@@ -100,6 +116,46 @@ class TemplateMatcher:
         if not alias_mapping:
             return list(columns)
         return [alias_mapping.get(column, column) for column in columns]
+
+    @staticmethod
+    def _classify_header_changes(
+        platform: str,
+        data_domain: str,
+        granularity: str,
+        removed_fields: List[str],
+        normalized_removed_fields: List[str],
+        added_fields: List[str],
+    ) -> Dict[str, List[str]]:
+        normalized_platform = str(platform or "").strip().lower()
+        normalized_domain = str(data_domain or "").strip().lower()
+        normalized_granularity = str(granularity or "").strip().lower()
+        if not (
+            normalized_platform == "shopee"
+            and normalized_domain == "orders"
+            and normalized_granularity == "monthly"
+        ):
+            return {
+                "blocking_changes": list(removed_fields) + list(added_fields),
+                "non_blocking_changes": [],
+            }
+
+        blocking_changes: List[str] = []
+        non_blocking_changes: List[str] = []
+        for field in normalized_removed_fields:
+            if field in ORDER_CORE_REQUIRED_FIELDS:
+                blocking_changes.append(field)
+            elif field in ORDER_OPTIONAL_FIELDS:
+                non_blocking_changes.append(field)
+            else:
+                blocking_changes.append(field)
+
+        # New fields are not needed by existing ingestion mappings. Keep them visible
+        # for template review, but do not block the current import.
+        non_blocking_changes.extend(added_fields)
+        return {
+            "blocking_changes": blocking_changes,
+            "non_blocking_changes": non_blocking_changes,
+        }
 
     async def find_best_template(
         self, 
@@ -525,6 +581,14 @@ class TemplateMatcher:
             removed_fields = list(template_set - current_set)
             normalized_added_fields = list(semantic_current_set - semantic_template_set)
             normalized_removed_fields = list(semantic_template_set - semantic_current_set)
+            change_classification = self._classify_header_changes(
+                template.platform,
+                template.data_domain,
+                template.granularity or "",
+                removed_fields,
+                normalized_removed_fields,
+                added_fields,
+            )
             
             # [*] v4.14.0安全版本:移除相似度匹配逻辑
             # 任何字段名变化都需要用户手动确认
@@ -566,6 +630,8 @@ class TemplateMatcher:
                 'semantic_current_columns': semantic_current,
                 'normalized_added_fields': normalized_added_fields,
                 'normalized_removed_fields': normalized_removed_fields,
+                'blocking_changes': change_classification["blocking_changes"],
+                'non_blocking_changes': change_classification["non_blocking_changes"],
             }
             
             if detected:
