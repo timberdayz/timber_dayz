@@ -18,6 +18,7 @@ import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -324,6 +325,7 @@ async def _try_attach_business_overview_freshness(
         warnings.append("data_freshness_unavailable")
         return meta
 
+    freshness = jsonable_encoder(freshness)
     meta["data_freshness"] = freshness
     if isinstance(freshness, dict) and freshness.get("is_stale"):
         meta["data_status"] = "stale"

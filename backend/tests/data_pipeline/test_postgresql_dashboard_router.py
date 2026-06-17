@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -155,6 +156,68 @@ def test_postgresql_kpi_route_returns_service_payload(monkeypatch):
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert body["data"]["gmv"] == 123
+
+
+def test_postgresql_kpi_route_serializes_freshness_dates(monkeypatch):
+    class _ServiceStub:
+        async def get_business_overview_kpi(
+            self,
+            month=None,
+            platform=None,
+            granularity="monthly",
+            target_date=None,
+            shop_id=None,
+        ):
+            return {
+                "gmv": 123,
+                "order_count": 10,
+                "visitor_count": 200,
+                "conversion_rate": 5,
+                "avg_order_value": 12.3,
+                "attach_rate": 1.2,
+                "labor_efficiency": 0,
+            }
+
+        async def get_business_overview_data_freshness(self, **_kwargs):
+            return {
+                "orders": {
+                    "period_start_date": date(2026, 6, 1),
+                    "period_end_date": date(2026, 6, 30),
+                    "latest_ingest_timestamp": datetime(2026, 6, 17, 12, 30, tzinfo=timezone.utc),
+                },
+                "traffic": {
+                    "period_start_date": date(2026, 6, 1),
+                    "period_end_date": date(2026, 6, 30),
+                    "latest_metric_date": date(2026, 6, 30),
+                },
+                "is_stale": False,
+                "warnings": [],
+            }
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_kpi_postgresql(
+            request=_make_request("/api/dashboard/business-overview/kpi"),
+            period_key="2026-06-01",
+            platform_code=None,
+            shop_id=None,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    freshness = body["meta"]["data_freshness"]
+    assert freshness["orders"]["period_start_date"] == "2026-06-01"
+    assert freshness["orders"]["period_end_date"] == "2026-06-30"
+    assert freshness["orders"]["latest_ingest_timestamp"] == "2026-06-17T12:30:00+00:00"
 
 
 def test_postgresql_kpi_route_accepts_granularity_and_date(monkeypatch):
