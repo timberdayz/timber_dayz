@@ -57,10 +57,27 @@ test('data sync files view shows semantic contract drift details', () => {
 })
 
 test('template update workbench uses backend hash options for Data Hash choices', () => {
-  assert.match(templateUpdateWorkbenchSource, /:hash-options="hashOptions"/)
+  assert.match(templateUpdateWorkbenchSource, /:hash-options="effectiveHashOptions"/)
   assert.match(templateUpdateWorkbenchSource, /workbenchContext\.value\?\.hash_options/)
+  assert.match(templateUpdateWorkbenchSource, /const effectiveHashOptions = computed/)
+  assert.match(templateUpdateWorkbenchSource, /buildHashOptionsFromHeaderBindings/)
+  assert.match(templateUpdateWorkbenchSource, /recommendedStrongIdentityKeys/)
   assert.match(templateDeduplicationPanelSource, /hashOptions/)
   assert.match(templateDeduplicationPanelSource, /legacy_compatible/)
   assert.match(templateDeduplicationPanelSource, /weak_identity/)
   assert.doesNotMatch(templateDeduplicationPanelSource, /isHashEligibleSemanticKey\(binding\?\.semantic_key\)/)
+})
+
+test('template update workbench auto-selects newly confirmed strong hash identities', () => {
+  assert.match(templateUpdateWorkbenchSource, /function mergeRecommendedIdentityFields/)
+  assert.match(templateUpdateWorkbenchSource, /preferredSemanticKey = isRecommendedStrongIdentityKey/)
+  assert.match(templateUpdateWorkbenchSource, /selectedDeduplicationFields\.value = mergeRecommendedIdentityFields/)
+  assert.doesNotMatch(templateUpdateWorkbenchSource, /:hash-options="hashOptions"/)
+})
+
+test('template hash panel merges backend options with edited bindings', () => {
+  assert.match(templateDeduplicationPanelSource, /mergeHashOptionsWithCurrentBindings/)
+  assert.match(templateDeduplicationPanelSource, /props\.currentHeaderBindings/)
+  assert.match(templateDeduplicationPanelSource, /blocked_reason/)
+  assert.match(templateDeduplicationPanelSource, /legacyCompatible/)
 })

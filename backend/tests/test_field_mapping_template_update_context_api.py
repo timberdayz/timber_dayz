@@ -1773,6 +1773,64 @@ async def test_hash_policy_preview_accepts_selected_derived_metric_date(
     assert data["blocking_errors"] == []
     assert data["normalized_header_bindings"][0]["semantic_key"] == "product_id"
     assert data["effective_components"]["derived_identity_fields"] == ["metric_date"]
+    by_key = {option["semantic_key"]: option for option in data["hash_options"]}
+    assert by_key["product_id"]["eligible"] is True
+    assert by_key["product_id"]["recommended"] is True
+
+
+@pytest.mark.asyncio
+async def test_hash_policy_preview_returns_dynamic_hash_options_for_edited_bindings(
+    template_update_context_client,
+):
+    client, _session_factory = template_update_context_client
+
+    response = await client.post(
+        "/api/field-mapping/templates/hash-policy-preview",
+        json={
+            "data_domain": "products",
+            "granularity": "monthly",
+            "deduplication_fields": ["item_status"],
+            "header_bindings": [
+                {
+                    "raw_name": "商品 ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "发品状态",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "GMV",
+                    "semantic_key": "gmv",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "metric_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                }
+            ],
+            "sample_rows": [],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["can_save"] is False
+    assert data["missing_required_groups"][0]["key"] == "products_identity"
+    by_key = {option["semantic_key"]: option for option in data["hash_options"]}
+    assert by_key["product_id"]["eligible"] is True
+    assert by_key["product_id"]["recommended"] is True
+    assert by_key["item_status"]["eligible"] is True
+    assert by_key["item_status"]["weak_identity"] is True
+    assert by_key["item_status"]["legacy_compatible"] is True
+    assert by_key["gmv"]["eligible"] is False
+    assert by_key["gmv"]["blocked_reason"]
 
 
 @pytest.mark.asyncio

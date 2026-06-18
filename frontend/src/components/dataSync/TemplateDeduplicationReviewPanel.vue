@@ -154,6 +154,7 @@
           >
             <span>{{ option.label }}</span>
             <span v-if="option.weakIdentity" class="template-deduplication-review-panel__weak">弱身份字段</span>
+            <span v-if="option.legacyCompatible" class="template-deduplication-review-panel__weak">历史兼容</span>
           </el-checkbox>
         </el-checkbox-group>
         <div v-if="filteredSemanticHashOptions.length === 0" class="template-deduplication-review-panel__muted">
@@ -259,10 +260,50 @@ let previewRequestId = 0
 let lastPreviewSignature = ''
 let pendingPreviewSignature = ''
 
+function hashOptionFromBinding(binding) {
+  if (binding?.semantic_review_status !== 'confirmed_semantic') return null
+  const semanticKey = String(binding?.semantic_key || '').trim()
+  if (!semanticKey) return null
+  const meta = getSemanticFieldMeta(semanticKey) || {}
+  const isProductsLegacyStatus =
+    String(props.dataDomain || '').trim().toLowerCase() === 'products' &&
+    semanticKey === 'item_status'
+  const eligible = Boolean(meta.hash_eligible) || isProductsLegacyStatus
+  return {
+    semantic_key: semanticKey,
+    label: meta.label || semanticKey,
+    kind: meta.kind || '',
+    raw_name: binding?.raw_name || binding?.display_name || null,
+    eligible,
+    recommended: Boolean(eligible && meta.default_hash),
+    weak_identity: meta.identity_strength === 'weak' || isProductsLegacyStatus,
+    legacy_compatible: isProductsLegacyStatus,
+    blocked_reason: eligible ? null : 'This semantic field is not configured as a Data Hash identity field.',
+    warning: isProductsLegacyStatus
+      ? 'item_status is allowed only for products template legacy compatibility; prefer product_id/SKU for new templates.'
+      : meta.hash_warning || null,
+  }
+}
+
+function mergeHashOptionsWithCurrentBindings() {
+  const byKey = new Map()
+  for (const option of Array.isArray(props.hashOptions) ? props.hashOptions : []) {
+    const semanticKey = String(option?.semantic_key || '').trim()
+    if (semanticKey) byKey.set(semanticKey, { ...option })
+  }
+  for (const binding of Array.isArray(props.currentHeaderBindings) ? props.currentHeaderBindings : []) {
+    const option = hashOptionFromBinding(binding)
+    const semanticKey = String(option?.semantic_key || '').trim()
+    if (semanticKey) byKey.set(semanticKey, { ...(byKey.get(semanticKey) || {}), ...option })
+  }
+  return [...byKey.values()]
+}
+
 const semanticHashOptions = computed(() => {
   const seen = new Set()
-  if (Array.isArray(props.hashOptions) && props.hashOptions.length > 0) {
-    return props.hashOptions
+  const mergedOptions = mergeHashOptionsWithCurrentBindings()
+  if (mergedOptions.length > 0) {
+    return mergedOptions
       .filter(option =>
         option?.eligible === true &&
         !DATE_HASH_KEYS.has(String(option?.semantic_key || '').trim())
@@ -278,6 +319,7 @@ const semanticHashOptions = computed(() => {
           label: rawName ? `${label} (${rawName})` : `${label} (${semanticKey})`,
           weakIdentity: option?.weak_identity === true,
           legacyCompatible: option?.legacy_compatible === true,
+          blockedReason: option?.blocked_reason || '',
           warning: option?.warning || '',
         }
       })
