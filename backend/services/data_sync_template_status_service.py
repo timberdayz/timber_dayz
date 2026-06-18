@@ -126,6 +126,13 @@ class DataSyncTemplateStatusService:
             "should_auto_sync": should_auto_sync,
             "exact_match": header_changes.get("is_exact_match", False),
             "semantic_match": header_changes.get("is_semantic_match", False),
+            "semantic_contract_status": header_changes.get("semantic_contract_status"),
+            "missing_required_keys": header_changes.get("missing_required_keys", []),
+            "missing_optional_keys": header_changes.get("missing_optional_keys", []),
+            "resolved_required_keys": header_changes.get("resolved_required_keys", []),
+            "resolved_optional_keys": header_changes.get("resolved_optional_keys", []),
+            "extra_raw_fields": header_changes.get("extra_raw_fields", []),
+            "impact_descriptions": header_changes.get("impact_descriptions", []),
             "header_changes": header_changes,
             "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
         }

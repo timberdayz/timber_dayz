@@ -324,7 +324,7 @@ class CatalogFile(Base):
 
     file_metadata = Column(JSON, nullable=True)
 
-    status = Column(String(32), nullable=False, default="pending")  # pending/validated/ingested/quarantined/failed
+    status = Column(String(64), nullable=False, default="pending")  # pending/validated/ingested/quarantined/failed/template_update_required
     error_message = Column(Text, nullable=True)
 
     first_seen_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -341,5 +341,4 @@ class CatalogFile(Base):
         Index("ix_catalog_quality_score", "quality_score"),  # 质量筛选
         UniqueConstraint("file_hash", name="uq_catalog_files_hash"),
     )
-
 

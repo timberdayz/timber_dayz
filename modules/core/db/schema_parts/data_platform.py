@@ -556,6 +556,52 @@ class FieldMappingTemplateItem(Base):
         {"schema": "core"},
     )
 
+
+class SemanticFieldContract(Base):
+    """Consumer-level semantic field requirements for safe auto-ingest."""
+
+    __tablename__ = "semantic_field_contracts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform = Column(String(32), nullable=True)
+    data_domain = Column(String(64), nullable=False)
+    granularity = Column(String(32), nullable=True)
+    sub_domain = Column(String(64), nullable=True)
+    semantic_key = Column(String(128), nullable=False)
+    importance = Column(String(16), nullable=False)
+    consumer = Column(String(128), nullable=False, server_default=text("'business_overview'"))
+    impact_description = Column(Text, nullable=True)
+    enabled = Column(Boolean, nullable=False, server_default=text("true"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "importance IN ('required', 'optional', 'ignored')",
+            name="ck_semantic_field_contract_importance",
+        ),
+        UniqueConstraint(
+            "platform",
+            "data_domain",
+            "granularity",
+            "sub_domain",
+            "semantic_key",
+            "consumer",
+            name="uq_semantic_field_contract_dimension",
+        ),
+        Index(
+            "ix_semantic_field_contract_lookup",
+            "platform",
+            "data_domain",
+            "granularity",
+            "sub_domain",
+            "consumer",
+            "enabled",
+        ),
+        {"schema": "core"},
+    )
+
+
 class FieldMappingAudit(Base):
     """字段映射审计日志表"""
     __tablename__ = "field_mapping_audit"

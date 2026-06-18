@@ -26,6 +26,7 @@ from modules.core.db import FieldMappingTemplate
 # FieldMappingTemplateItem,  # v4.6.0移除:不再使用明细表,改用header_columns JSONB
 from modules.core.logger import get_logger
 from backend.services.currency_extractor import get_currency_extractor  # [*] v4.15.0新增
+from backend.services.semantic_field_contract_service import SemanticFieldContractService
 from backend.services.template_alias_registry import get_header_alias_mapping
 
 logger = get_logger(__name__)
@@ -589,6 +590,31 @@ class TemplateMatcher:
                 normalized_removed_fields,
                 added_fields,
             )
+            semantic_contract = await SemanticFieldContractService(self.db).evaluate(
+                platform=template.platform,
+                data_domain=template.data_domain,
+                granularity=template.granularity,
+                sub_domain=template.sub_domain,
+                header_bindings=template.header_bindings or [],
+                current_columns=current_columns,
+                template_columns=template_columns,
+            )
+            if semantic_contract.has_contract:
+                semantic_summary = semantic_contract.to_dict()
+                if semantic_contract.should_block:
+                    change_classification = {
+                        "blocking_changes": semantic_contract.missing_required_keys,
+                        "non_blocking_changes": semantic_contract.missing_optional_keys
+                        + semantic_contract.extra_raw_fields,
+                    }
+                else:
+                    change_classification = {
+                        "blocking_changes": [],
+                        "non_blocking_changes": semantic_contract.missing_optional_keys
+                        + semantic_contract.extra_raw_fields,
+                    }
+            else:
+                semantic_summary = semantic_contract.to_dict()
             
             # [*] v4.14.0安全版本:移除相似度匹配逻辑
             # 任何字段名变化都需要用户手动确认
@@ -632,6 +658,7 @@ class TemplateMatcher:
                 'normalized_removed_fields': normalized_removed_fields,
                 'blocking_changes': change_classification["blocking_changes"],
                 'non_blocking_changes': change_classification["non_blocking_changes"],
+                **semantic_summary,
             }
             
             if detected:

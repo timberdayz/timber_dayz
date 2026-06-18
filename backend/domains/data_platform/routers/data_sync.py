@@ -499,6 +499,8 @@ def _infer_miaoshou_orders_business_platform(catalog_file: CatalogFile) -> str |
 def _build_template_status_cache_key(file_record: CatalogFile, template) -> tuple[Any, ...]:
     return (
         getattr(file_record, "id", None),
+        getattr(file_record, "file_name", None),
+        getattr(file_record, "file_path", None),
         getattr(template, "id", None),
         getattr(template, "version", None),
         getattr(template, "header_row", None),
@@ -901,6 +903,13 @@ async def list_files(
                 "template_name": template_status_info["template_name"],
                 "template_header_row": template_status_info["template_header_row"],
                 "shadow_compare": template_status_info.get("shadow_compare"),
+                "semantic_contract_status": template_status_info.get("semantic_contract_status"),
+                "missing_required_keys": template_status_info.get("missing_required_keys", []),
+                "missing_optional_keys": template_status_info.get("missing_optional_keys", []),
+                "resolved_required_keys": template_status_info.get("resolved_required_keys", []),
+                "resolved_optional_keys": template_status_info.get("resolved_optional_keys", []),
+                "extra_raw_fields": template_status_info.get("extra_raw_fields", []),
+                "impact_descriptions": template_status_info.get("impact_descriptions", []),
                 "semantic_anomaly_type": template_status_info.get("semantic_anomaly_type"),
                 "semantic_repair_action": template_status_info.get("semantic_repair_action"),
                 "status": file_record.status
@@ -3194,7 +3203,10 @@ async def get_governance_stats(
         ]
         pending_count = len(pending_files)
         ready_to_sync_count = 0
-        template_update_required_count = 0
+        template_update_required_result = await db.execute(
+            select(func.count(CatalogFile.id)).where(CatalogFile.status == 'template_update_required')
+        )
+        template_update_required_count = template_update_required_result.scalar() or 0
         missing_template_count = 0
         semantic_anomaly_count = 0
         data_sync_service = DataSyncService(db)
@@ -3239,7 +3251,7 @@ async def get_governance_stats(
         
         # [*] v4.17.2新增:统计各状态的详细数量(用于调试和显示)
         status_counts = {}
-        for status_name in ['pending', 'partial_success', 'failed', 'quarantined', 'needs_shop', 'ingested', 'processing', 'source_missing']:
+        for status_name in ['pending', 'partial_success', 'failed', 'quarantined', 'needs_shop', 'ingested', 'processing', 'source_missing', 'template_update_required']:
             count_result = await db.execute(
                 select(func.count(CatalogFile.id)).where(CatalogFile.status == status_name)
             )

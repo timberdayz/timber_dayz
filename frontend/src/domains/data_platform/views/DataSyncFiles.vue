@@ -237,6 +237,7 @@ v4.6.0新增：独立的数据同步系统
             <el-option label="已同步" value="ingested" />
             <el-option label="处理中" value="processing" />
             <el-option label="源文件缺失" value="source_missing" />
+            <el-option label="模板待确认" value="template_update_required" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -441,11 +442,11 @@ v4.6.0新增：独立的数据同步系统
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="模板状态" width="120">
+        <el-table-column label="模板状态" width="140">
           <template #default="{ row }">
             <el-tooltip
-              v-if="row.template_status === 'update_required' && row.update_reason"
-              :content="row.update_reason"
+              v-if="row.template_status === 'update_required' && getTemplateStatusTooltip(row)"
+              :content="getTemplateStatusTooltip(row)"
               placement="top"
             >
               <el-tag type="danger" size="small">
@@ -493,6 +494,16 @@ v4.6.0新增：独立的数据同步系统
               <el-icon><Warning /></el-icon>
               需更新
             </el-tag>
+            <el-tooltip
+              v-else-if="row.semantic_contract_status === 'non_breaking_drift'"
+              :content="getTemplateStatusTooltip(row)"
+              placement="top"
+            >
+              <el-tag type="warning" size="small">
+                <el-icon><Warning /></el-icon>
+                降级同步
+              </el-tag>
+            </el-tooltip>
             <el-tag v-else-if="row.has_template" type="success" size="small">
               <el-icon><Check /></el-icon>
               可同步
@@ -505,43 +516,8 @@ v4.6.0新增：独立的数据同步系统
         </el-table-column>
         <el-table-column prop="status" label="同步状态" width="100">
           <template #default="{ row }">
-            <el-tag
-              :type="
-                row.status === 'pending'
-                  ? 'warning'
-                  : row.status === 'ingested'
-                  ? 'success'
-                  : row.status === 'failed'
-                  ? 'danger'
-                  : row.status === 'processing'
-                  ? 'primary'
-                  : row.status === 'needs_shop'
-                  ? 'info'
-                  : row.status === 'partial_success'
-                  ? 'warning'
-                  : row.status === 'source_missing'
-                  ? 'warning'
-                  : 'info'
-              "
-              size="small"
-            >
-              {{
-                row.status === "pending"
-                  ? "待同步"
-                  : row.status === "ingested"
-                  ? "已同步"
-                  : row.status === "failed"
-                  ? "失败"
-                  : row.status === "processing"
-                  ? "处理中"
-                  : row.status === "needs_shop"
-                  ? "需指派店铺"
-                  : row.status === "partial_success"
-                  ? "部分成功"
-                  : row.status === "source_missing"
-                  ? "源文件缺失"
-                  : row.status || "未知"
-              }}
+            <el-tag :type="getFileStatusType(row.status)" size="small">
+              {{ getFileStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -713,7 +689,13 @@ v4.6.0新增：独立的数据同步系统
         </el-table-column>
         <el-table-column label="失败原因" width="300" min-width="200">
           <template #default="{ row }">
-            <div v-if="row.status === 'failed' && row.message">
+            <span
+              v-if="isTemplateUpdateRequiredHistory(row)"
+              class="history-warning-text"
+            >
+              模板待确认
+            </span>
+            <div v-else-if="row.status === 'failed' && row.message">
               <el-tooltip
                 :content="row.message"
                 placement="top"
@@ -949,6 +931,7 @@ const fileViewOptions = [
   { label: '待治理', value: 'pending', status: 'pending' },
   { label: '可同步', value: 'ready', status: 'pending' },
   { label: '同步失败', value: 'failed', status: 'failed' },
+  { label: '模板待确认', value: 'template_update_required', status: 'template_update_required' },
   { label: '已入库', value: 'ingested', status: 'ingested' },
   { label: '源文件缺失', value: 'source_missing', status: 'source_missing' },
   { label: '异常文件', value: 'anomaly', status: null },
@@ -1027,6 +1010,34 @@ const listTotalCount = computed(() => {
   return pagination.value.total
 })
 
+const getFileStatusType = (status) => {
+  const types = {
+    pending: 'warning',
+    ingested: 'success',
+    failed: 'danger',
+    processing: 'primary',
+    needs_shop: 'info',
+    partial_success: 'warning',
+    source_missing: 'warning',
+    template_update_required: 'warning'
+  }
+  return types[status] || 'info'
+}
+
+const getFileStatusText = (status) => {
+  const texts = {
+    pending: '待同步',
+    ingested: '已同步',
+    failed: '失败',
+    processing: '处理中',
+    needs_shop: '需指派店铺',
+    partial_success: '部分成功',
+    source_missing: '源文件缺失',
+    template_update_required: '模板待确认'
+  }
+  return texts[status] || status || '未知'
+}
+
 // 获取任务状态类型
 const getTaskStatusType = (status) => {
   const types = {
@@ -1062,6 +1073,36 @@ const truncateText = (text, maxLength = 50) => {
   return text.substring(0, maxLength) + '...'
 }
 
+const getTemplateStatusTooltip = (row) => {
+  const parts = []
+  const missingRequired = Array.isArray(row?.missing_required_keys) ? row.missing_required_keys : []
+  const missingOptional = Array.isArray(row?.missing_optional_keys) ? row.missing_optional_keys : []
+  const extraRawFields = Array.isArray(row?.extra_raw_fields) ? row.extra_raw_fields : []
+  const impacts = Array.isArray(row?.impact_descriptions) ? row.impact_descriptions : []
+
+  if (row?.semantic_contract_status === 'breaking_drift') {
+    parts.push('模板待确认：缺少业务概览 required 语义字段')
+  } else if (row?.semantic_contract_status === 'non_breaking_drift') {
+    parts.push('非破坏性变更：核心语义字段完整，允许降级同步')
+  }
+  if (missingRequired.length) {
+    parts.push(`缺少核心字段：${missingRequired.join(', ')}`)
+  }
+  if (missingOptional.length) {
+    parts.push(`缺少可选字段：${missingOptional.join(', ')}`)
+  }
+  if (extraRawFields.length) {
+    parts.push(`新增原始字段：${extraRawFields.join(', ')}`)
+  }
+  if (impacts.length) {
+    parts.push(`影响：${impacts.join('；')}`)
+  }
+  if (row?.update_reason) {
+    parts.push(row.update_reason)
+  }
+  return parts.join('；')
+}
+
 const normalizeWarningMessage = (warning) => {
   if (!warning) return ''
   if (typeof warning === 'string') return warning
@@ -1077,6 +1118,19 @@ const getTaskWarnings = (row) => {
     ? standardizationChecks.flatMap((check) => check.warnings || []).filter(Boolean)
     : []
   return [...directWarnings, ...standardizationWarnings]
+}
+
+const isTemplateUpdateRequiredHistory = (row) => {
+  const message = String(row?.message || '')
+  const details = row?.task_details || {}
+  const failedFiles = Array.isArray(details.failed_files) ? details.failed_files : []
+  const skippedFiles = Array.isArray(details.skipped_files) ? details.skipped_files : []
+  const detailFiles = [...failedFiles, ...skippedFiles]
+  return (
+    row?.status === 'blocked_template_update' ||
+    message.includes('TEMPLATE_UPDATE_REQUIRED') ||
+    detailFiles.some((item) => item?.error_code === 'TEMPLATE_UPDATE_REQUIRED')
+  )
 }
 
 // 截断文件名
@@ -2619,6 +2673,11 @@ onMounted(() => {
 
 .history-success-text {
   color: #67c23a;
+  font-size: 12px;
+}
+
+.history-warning-text {
+  color: #e6a23c;
   font-size: 12px;
 }
 
