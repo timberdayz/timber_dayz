@@ -122,6 +122,154 @@ def test_calculate_month_upsert_writes():
     assert commission.commission_rate == pytest.approx(0.12)
 
 
+def test_calculate_month_floors_negative_profit_basis_before_commission():
+    db = AsyncMock()
+    added = []
+
+    assignment = SimpleNamespace(
+        employee_code="E_NEG",
+        platform_code="Shopee",
+        shop_id="S_NEG",
+        commission_ratio=0.25,
+        status="active",
+        year_month="2026-04",
+    )
+    cfg = SimpleNamespace(
+        year_month="2026-04",
+        platform_code="Shopee",
+        shop_id="S_NEG",
+        allocatable_profit_rate=0.25,
+    )
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=[assignment])
+            if entity is ShopCommissionConfig:
+                return _MockResult(rows=[cfg])
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=None)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+            return _MockResult(rows=[])
+        return _MockResult(
+            mapping_rows=[
+                {
+                    "platform_code": "Shopee",
+                    "shop_id": "S_NEG",
+                    "gmv": 1000.0,
+                    "profit": -1000.0,
+                    "achievement_rate": 80.0,
+                }
+            ]
+        )
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+
+    service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|s_neg": {"profit_basis_amount": -1000.0}}
+    )
+    result = asyncio.run(service.calculate_month("2026-04"))
+
+    assert result["commission_upserts"] == 1
+    commission = next(x for x in added if isinstance(x, EmployeeCommission))
+    assert commission.sales_amount == pytest.approx(250.0)
+    assert commission.commission_amount == pytest.approx(0.0)
+    assert commission.commission_rate == pytest.approx(0.0)
+
+
+def test_calculate_month_mixed_profit_only_counts_positive_profit_basis_for_commission():
+    db = AsyncMock()
+    added = []
+
+    assignments = [
+        SimpleNamespace(
+            employee_code="E_MIX",
+            platform_code="Shopee",
+            shop_id="S_POS",
+            commission_ratio=0.25,
+            status="active",
+            year_month="2026-04",
+        ),
+        SimpleNamespace(
+            employee_code="E_MIX",
+            platform_code="Shopee",
+            shop_id="S_NEG",
+            commission_ratio=0.25,
+            status="active",
+            year_month="2026-04",
+        ),
+    ]
+    cfg_rows = [
+        SimpleNamespace(
+            year_month="2026-04",
+            platform_code="Shopee",
+            shop_id="S_POS",
+            allocatable_profit_rate=0.25,
+        ),
+        SimpleNamespace(
+            year_month="2026-04",
+            platform_code="Shopee",
+            shop_id="S_NEG",
+            allocatable_profit_rate=0.25,
+        ),
+    ]
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=assignments)
+            if entity is ShopCommissionConfig:
+                return _MockResult(rows=cfg_rows)
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=None)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+            return _MockResult(rows=[])
+        return _MockResult(
+            mapping_rows=[
+                {
+                    "platform_code": "Shopee",
+                    "shop_id": "S_POS",
+                    "gmv": 1000.0,
+                    "profit": 1000.0,
+                    "achievement_rate": 80.0,
+                },
+                {
+                    "platform_code": "Shopee",
+                    "shop_id": "S_NEG",
+                    "gmv": 1000.0,
+                    "profit": -1000.0,
+                    "achievement_rate": 80.0,
+                },
+            ]
+        )
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+
+    service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={
+            "shopee|s_pos": {"profit_basis_amount": 1000.0},
+            "shopee|s_neg": {"profit_basis_amount": -1000.0},
+        }
+    )
+    result = asyncio.run(service.calculate_month("2026-04"))
+
+    assert result["commission_upserts"] == 1
+    commission = next(x for x in added if isinstance(x, EmployeeCommission))
+    assert commission.sales_amount == pytest.approx(500.0)
+    assert commission.commission_amount == pytest.approx(62.5)
+    assert commission.commission_rate == pytest.approx(0.125)
+
+
 def test_calculate_month_prefers_english_orm_writes_when_available():
     db = AsyncMock()
     added = []

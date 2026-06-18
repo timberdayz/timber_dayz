@@ -26,6 +26,7 @@ from backend.schemas.hr import (
     SalaryStructureResponse,
 )
 from backend.services.audit_service import audit_service
+from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
@@ -305,6 +306,7 @@ async def refresh_payroll_record(
         if not _employee_identity_allows_salary(employee):
             return _salary_identity_rejection()
 
+        await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
         result = await PayrollGenerationService(db).generate_employee_month(employee_code, year_month)
         record = result.get("payroll_record")
         if record is not None and result.get("payroll_upserts", 0) > 0:

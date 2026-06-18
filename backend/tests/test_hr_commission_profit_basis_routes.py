@@ -114,6 +114,84 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     assert row["operator_profit"] == 0
 
 
+def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commission():
+    module = _load_module()
+    domain_module = module.domain_module
+    db = AsyncMock()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    current_user = SimpleNamespace(user_id=1)
+
+    shop_row = SimpleNamespace(
+        platform="shopee",
+        store_name="Shop Negative",
+        platform_shop_id="s_neg",
+        shop_account_id="s_neg",
+        shop_id="s_neg",
+        account_id="s_neg",
+        enabled=True,
+    )
+    config_row = SimpleNamespace(platform_code="shopee", shop_id="s_neg", allocatable_profit_rate=0.25)
+    assign_row = SimpleNamespace(
+        employee_code="E_NEG",
+        platform_code="shopee",
+        shop_id="s_neg",
+        commission_ratio=0.25,
+        role="supervisor",
+        status="active",
+        year_month="2026-04",
+    )
+
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarResult([shop_row]),
+            _ScalarResult([config_row]),
+            _ScalarResult([]),
+            _ScalarResult([assign_row]),
+        ]
+    )
+    domain_module.load_shop_monthly_metrics = AsyncMock(
+        return_value={
+            "shopee|s_neg": {
+                "monthly_sales": 1000.0,
+                "monthly_profit": -1000.0,
+                "achievement_rate": 80.0,
+            }
+        }
+    )
+
+    class _FakeProfitBasisService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_profit_basis(self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"):
+            return {
+                "period_month": year_month,
+                "platform_code": platform_code,
+                "shop_id": shop_id,
+                "orders_profit_amount": -1000.0,
+                "a_class_cost_amount": 0.0,
+                "profit_basis_amount": -1000.0,
+                "basis_version": basis_version,
+            }
+
+    domain_module.ProfitBasisService = _FakeProfitBasisService
+
+    resp = asyncio.run(
+        domain_module.get_shop_profit_statistics(
+            request=request,
+            month="2026-04",
+            db=db,
+            current_user=current_user,
+        )
+    )
+
+    row = _body(resp)["data"][0]
+    assert row["profit_basis_amount"] == -1000.0
+    assert row["allocatable_profit_amount"] == 0.0
+    assert row["estimated_total_commission"] == 0.0
+    assert row["supervisor_profit"] == 0.0
+
+
 def test_load_profit_basis_map_rebuilds_unlocked_snapshot_for_statistics():
     module = _load_module()
     domain_module = module.domain_module

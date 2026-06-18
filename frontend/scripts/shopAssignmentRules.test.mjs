@@ -73,6 +73,13 @@ test('calculateAllocatableProfit uses net profit times allocatable rate', () => 
   )
 })
 
+test('calculateAllocatableProfit floors negative net profit at zero', () => {
+  assert.equal(
+    calculateAllocatableProfit({ profit_basis_amount: -1000, allocatable_profit_rate: 0.25 }),
+    0
+  )
+})
+
 test('calculateAssignmentCommission uses net profit, allocatable rate, and person ratio', () => {
   assert.equal(
     calculateAssignmentCommission(
@@ -81,6 +88,35 @@ test('calculateAssignmentCommission uses net profit, allocatable rate, and perso
     ),
     150
   )
+})
+
+test('summarizeEmployeeCommissions does not let negative net profit reduce employee total', () => {
+  const rows = [
+    {
+      profit_basis_amount: 1000,
+      allocatable_profit_rate: 0.25,
+      assignments: [
+        { employee_code: 'E001', employee_name: 'Alice', role: 'supervisor', commission_ratio: 0.25 }
+      ]
+    },
+    {
+      profit_basis_amount: -1000,
+      allocatable_profit_rate: 0.25,
+      assignments: [
+        { employee_code: 'E001', employee_name: 'Alice', role: 'supervisor', commission_ratio: 0.25 }
+      ]
+    }
+  ]
+
+  assert.deepEqual(summarizeEmployeeCommissions(rows), [
+    {
+      employee_code: 'E001',
+      employee_name: 'Alice',
+      role: 'supervisor',
+      shop_count: 2,
+      estimated_commission: 62.5
+    }
+  ])
 })
 
 test('summarizeEmployeeCommissions totals estimated monthly commission by employee', () => {

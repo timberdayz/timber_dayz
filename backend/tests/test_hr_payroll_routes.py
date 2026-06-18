@@ -399,6 +399,7 @@ def test_mark_payroll_record_paid_rejects_non_admin_user():
 def test_refresh_payroll_record_returns_latest_payload():
     module = _load_hr_salary_module()
     db = AsyncMock()
+    calls = []
     record = SimpleNamespace(
         id=51,
         employee_code="EMP200",
@@ -432,6 +433,7 @@ def test_refresh_payroll_record_returns_latest_payload():
             self.db = db
 
         async def generate_employee_month(self, employee_code, year_month):
+            calls.append(("payroll", employee_code, year_month))
             return {
                 "employee_code": employee_code,
                 "year_month": year_month,
@@ -441,7 +443,20 @@ def test_refresh_payroll_record_returns_latest_payload():
                 "payroll_record": record,
             }
 
+    class _FakeIncomeService:
+        def __init__(self, db):
+            self.db = db
+
+        async def calculate_month(self, year_month, commit=True):
+            calls.append(("income", year_month, commit))
+            return {
+                "year_month": year_month,
+                "commission_upserts": 1,
+                "performance_upserts": 1,
+            }
+
     module.PayrollGenerationService = _FakeService
+    module.HRIncomeCalculationService = _FakeIncomeService
 
     resp = asyncio.run(module.refresh_payroll_record("EMP200", "2025-04", db=db))
 
@@ -450,6 +465,10 @@ def test_refresh_payroll_record_returns_latest_payload():
     assert resp["locked_conflicts"] == 0
     assert "is_stale_against_latest_calc" in resp
     assert "latest_calculated_at" in resp
+    assert calls == [
+        ("income", "2025-04", False),
+        ("payroll", "EMP200", "2025-04"),
+    ]
 
 
 def test_refresh_payroll_record_returns_locked_conflicts():
