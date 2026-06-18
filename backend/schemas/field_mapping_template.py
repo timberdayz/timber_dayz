@@ -222,6 +222,7 @@ class TemplateUpdateContextData(BaseModel):
     existing_deduplication_fields_missing: List[str] = Field(default_factory=list)
     existing_deduplication_field_matches: List[Dict[str, Any]] = Field(default_factory=list)
     recommended_deduplication_fields: List[str] = Field(default_factory=list)
+    hash_options: List[Dict[str, Any]] = Field(default_factory=list)
     required_semantic_keys: List[str] = Field(default_factory=list)
     hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     update_semantics: TemplateSaveOperation = "new_version"

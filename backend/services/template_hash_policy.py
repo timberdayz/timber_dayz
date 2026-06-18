@@ -11,6 +11,7 @@ from backend.services.semantic_field_registry import (
     normalize_semantic_key,
     resolve_semantic_value,
 )
+from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
 
 
 SYSTEM_SCOPE_FIELDS = ["platform_code", "shop_id", "data_domain", "granularity", "sub_domain"]
@@ -63,6 +64,9 @@ class TemplateHashPolicyService:
     PRODUCT_PERIOD_BOUNDARY_KEYS = ["period_start_date", "period_end_date"]
     ORDER_DETAIL_SUB_DOMAINS = {"detail", "details", "line", "lines", "order_detail", "order_lines"}
 
+    def __init__(self) -> None:
+        self.semantic_hash_policy = SemanticHashPolicyService()
+
     def validate(
         self,
         *,
@@ -89,9 +93,12 @@ class TemplateHashPolicyService:
         derived_keys = set(derived_sources)
         invalid_keys = sorted(
             self._invalid_deduplication_keys(
-                deduplication_fields,
-                header_bindings,
-                field_parse_rules,
+                data_domain=domain,
+                granularity=grain,
+                sub_domain=sub_domain_key,
+                deduplication_fields=deduplication_fields,
+                header_bindings=header_bindings,
+                field_parse_rules=field_parse_rules,
             )
         )
 
@@ -188,19 +195,34 @@ class TemplateHashPolicyService:
                     "as a semantic hash identity field."
                 ),
             )
-            add_all_group(
-                key="products_period_date",
-                label="周期字段",
-                accepted_keys=self.PRODUCT_PERIOD_BOUNDARY_KEYS,
-                message=(
-                    f"products {grain} 需要周期开始日期 period_start_date 和 "
-                    "周期结束日期 period_end_date，避免不同周期互相覆盖。"
-                ),
-                legacy_error=(
-                    "period product metrics require product_id + "
-                    "period date to avoid cross-period overwrites."
-                ),
-            )
+            if "metric_date" in derived_keys:
+                requirement_groups.append(
+                    {
+                        "key": "products_period_date",
+                        "label": "周期字段",
+                        "severity": "blocking",
+                        "requirement_type": "any_of",
+                        "accepted_keys": ["metric_date", *self.PRODUCT_PERIOD_BOUNDARY_KEYS],
+                        "selected_keys": ["metric_date"],
+                        "missing_keys": [],
+                        "passed": True,
+                        "message": f"products {grain} uses metric_date as period identity.",
+                    }
+                )
+            else:
+                add_all_group(
+                    key="products_period_date",
+                    label="周期字段",
+                    accepted_keys=self.PRODUCT_PERIOD_BOUNDARY_KEYS,
+                    message=(
+                        f"products {grain} 需要周期开始日期 period_start_date 和 "
+                        "周期结束日期 period_end_date，避免不同周期互相覆盖。"
+                    ),
+                    legacy_error=(
+                        "period product metrics require product_id + "
+                        "period date to avoid cross-period overwrites."
+                    ),
+                )
         elif domain == "orders":
             add_any_group(
                 key="orders_identity",
@@ -261,8 +283,20 @@ class TemplateHashPolicyService:
 
         if domain == "products":
             warnings.extend(self._product_identity_warnings(resolved_keys))
+        warnings.extend(
+            self._semantic_hash_policy_warnings(
+                data_domain=domain,
+                granularity=grain,
+                sub_domain=sub_domain_key,
+                deduplication_fields=deduplication_fields,
+                header_bindings=header_bindings,
+            )
+        )
 
         effective_components = self._effective_components(
+            data_domain=domain,
+            granularity=grain,
+            sub_domain=sub_domain_key,
             deduplication_fields=deduplication_fields,
             derived_keys=derived_keys,
             auto_date_keys=auto_date_keys,
@@ -363,6 +397,10 @@ class TemplateHashPolicyService:
 
     def _invalid_deduplication_keys(
         self,
+        *,
+        data_domain: str,
+        granularity: str | None,
+        sub_domain: str | None,
         deduplication_fields: Iterable[str],
         header_bindings: Iterable[Dict[str, Any]],
         field_parse_rules: Iterable[Dict[str, Any]],
@@ -393,7 +431,13 @@ class TemplateHashPolicyService:
                 continue
             if semantic_key in SYSTEM_SCOPE_FIELD_SET:
                 continue
-            if not is_hash_identity_semantic_key(semantic_key):
+            option = self.semantic_hash_policy.evaluate_option(
+                data_domain=data_domain,
+                granularity=granularity,
+                sub_domain=sub_domain,
+                semantic_key=semantic_key,
+            )
+            if not option.eligible:
                 invalid.add(semantic_key)
                 continue
             if semantic_key not in confirmed_semantic_keys and semantic_key not in derived_semantic_keys:
@@ -403,6 +447,9 @@ class TemplateHashPolicyService:
     def _effective_components(
         self,
         *,
+        data_domain: str,
+        granularity: str | None,
+        sub_domain: str | None,
         deduplication_fields: Iterable[str],
         derived_keys: Set[str],
         auto_date_keys: Set[str],
@@ -416,8 +463,15 @@ class TemplateHashPolicyService:
                 or semantic_key in SYSTEM_SCOPE_FIELD_SET
                 or semantic_key in derived_keys
                 or semantic_key in auto_date_keys
-                or not is_hash_identity_semantic_key(semantic_key)
             ):
+                continue
+            option = self.semantic_hash_policy.evaluate_option(
+                data_domain=data_domain,
+                granularity=granularity,
+                sub_domain=sub_domain,
+                semantic_key=semantic_key,
+            )
+            if not option.eligible:
                 continue
             if semantic_key in seen_user:
                 continue
@@ -443,6 +497,40 @@ class TemplateHashPolicyService:
             "derived_identity_fields": derived_identity_fields,
             "final_fields": final_fields,
         }
+
+    def _semantic_hash_policy_warnings(
+        self,
+        *,
+        data_domain: str,
+        granularity: str | None,
+        sub_domain: str | None,
+        deduplication_fields: Iterable[str],
+        header_bindings: Iterable[Dict[str, Any]],
+    ) -> List[str]:
+        confirmed_keys = {
+            normalize_semantic_key(binding.get("semantic_key"))
+            for binding in header_bindings or []
+            if binding.get("semantic_review_status") == "confirmed_semantic"
+        }
+        confirmed_keys = {key for key in confirmed_keys if key}
+        warnings: List[str] = []
+        seen: Set[str] = set()
+        for field in deduplication_fields or []:
+            semantic_key = normalize_semantic_key(field)
+            if not semantic_key or semantic_key in seen:
+                continue
+            if semantic_key not in confirmed_keys and semantic_key not in DATE_IDENTITY_KEYS:
+                continue
+            seen.add(semantic_key)
+            option = self.semantic_hash_policy.evaluate_option(
+                data_domain=data_domain,
+                granularity=granularity,
+                sub_domain=sub_domain,
+                semantic_key=semantic_key,
+            )
+            if option.warning:
+                warnings.append(option.warning)
+        return warnings
 
     def _product_identity_warnings(self, resolved_keys: Set[str]) -> List[str]:
         required_keys = set(self.PRODUCT_REQUIRED_IDENTITY_KEYS)

@@ -62,9 +62,9 @@ from backend.services.semantic_field_registry import (
     get_semantic_requirements,
     infer_semantic_key,
     is_canonical_semantic_key,
-    is_hash_eligible_semantic_key,
     normalize_semantic_key,
 )
+from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
 from backend.services.semantic_alias_registry import SemanticAliasRegistryService
 from backend.services.template_save_readiness_service import (
     TemplateSaveReadinessService,
@@ -259,6 +259,10 @@ def _split_existing_deduplication_fields(
     current_header_columns: list[str],
     current_header_bindings: list[dict[str, Any]] | None = None,
     existing_header_bindings: list[dict[str, Any]] | None = None,
+    *,
+    data_domain: str = "",
+    granularity: Optional[str] = None,
+    sub_domain: Optional[str] = None,
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     current_lookup = {str(field).strip().lower(): field for field in current_header_columns}
     current_bindings = list(current_header_bindings or [])
@@ -302,6 +306,7 @@ def _split_existing_deduplication_fields(
     missing: list[str] = []
     matches: list[dict[str, Any]] = []
     seen_available: set[str] = set()
+    hash_policy = SemanticHashPolicyService()
 
     for field in existing_fields:
         requested_field = str(field).strip()
@@ -325,7 +330,17 @@ def _split_existing_deduplication_fields(
             match_type = "raw_header"
 
         if current_field:
-            hash_eligible = bool(old_semantic_key and is_hash_eligible_semantic_key(old_semantic_key))
+            hash_option = (
+                hash_policy.evaluate_option(
+                    data_domain=data_domain,
+                    granularity=granularity,
+                    sub_domain=sub_domain,
+                    semantic_key=old_semantic_key,
+                )
+                if old_semantic_key
+                else None
+            )
+            hash_eligible = bool(hash_option and hash_option.eligible)
             if hash_eligible:
                 status = "matched_hashable"
                 available_field = old_semantic_key or requested_field
@@ -1277,6 +1292,7 @@ async def get_template_update_context(
             "existing_deduplication_fields_missing": [],
             "existing_deduplication_field_matches": [],
             "recommended_deduplication_fields": [],
+            "hash_options": [],
             "required_semantic_keys": required_semantic_keys,
             "hash_participating_semantic_keys": hash_participating_semantic_keys,
             "update_semantics": "new_version",
@@ -1297,6 +1313,9 @@ async def get_template_update_context(
                 template_header_columns,
                 normalized_template_bindings,
                 existing_header_bindings=normalized_template_bindings,
+                data_domain=template.data_domain,
+                granularity=template.granularity,
+                sub_domain=template.sub_domain,
             )
             recommended_fields = _recommended_deduplication_fields(
                 default_fields,
@@ -1322,6 +1341,12 @@ async def get_template_update_context(
                     "existing_deduplication_fields_missing": missing_fields,
                     "existing_deduplication_field_matches": field_matches,
                     "recommended_deduplication_fields": recommended_fields,
+                    "hash_options": SemanticHashPolicyService().build_options(
+                        data_domain=template.data_domain,
+                        granularity=template.granularity,
+                        sub_domain=template.sub_domain,
+                        header_bindings=normalized_template_bindings,
+                    ),
                 }
             )
         elif file_id is not None:
@@ -1345,6 +1370,9 @@ async def get_template_update_context(
                 current_header_columns,
                 current_header_bindings,
                 existing_header_bindings=normalized_template_bindings,
+                data_domain=template.data_domain,
+                granularity=template.granularity,
+                sub_domain=template.sub_domain,
             )
             recommended_fields = _recommended_deduplication_fields(
                 default_fields,
@@ -1369,6 +1397,12 @@ async def get_template_update_context(
                     "existing_deduplication_fields_missing": missing_fields,
                     "existing_deduplication_field_matches": field_matches,
                     "recommended_deduplication_fields": recommended_fields,
+                    "hash_options": SemanticHashPolicyService().build_options(
+                        data_domain=template.data_domain,
+                        granularity=template.granularity,
+                        sub_domain=template.sub_domain,
+                        header_bindings=current_header_bindings,
+                    ),
                 }
             )
 
