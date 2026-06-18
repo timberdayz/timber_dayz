@@ -224,6 +224,9 @@
                   <el-button size="small" @click="refreshPayrollResult" :loading="refreshingPayroll" :disabled="!selectedEmployee">
                     按当前配置刷新结果
                   </el-button>
+                  <el-button size="small" type="warning" @click="handleBatchRefreshPayroll" :loading="batchRefreshingPayroll" :disabled="!selectedMonth">
+                    按月份批量刷新全部工资单
+                  </el-button>
                   <el-button size="small" type="primary" @click="saveMonthlyDraft" :loading="savingPayroll" :disabled="!selectedEmployee">
                     保存月度草稿
                   </el-button>
@@ -370,6 +373,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api'
+import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
 
 const authStore = useAuthStore()
 
@@ -378,6 +382,7 @@ const loadingEmployees = ref(false)
 const savingSalaryStructure = ref(false)
 const savingPayroll = ref(false)
 const refreshingPayroll = ref(false)
+const batchRefreshingPayroll = ref(false)
 
 const employees = ref([])
 const departments = ref([])
@@ -696,6 +701,46 @@ const refreshPayrollResult = async () => {
     ElMessage.error(error.response?.data?.message || error.message || '刷新工资单结果失败')
   } finally {
     refreshingPayroll.value = false
+  }
+}
+
+const handleBatchRefreshPayroll = async () => {
+  if (!selectedMonth.value) return
+  try {
+    await ElMessageBox.confirm(
+      `将重算 ${selectedMonth.value} 全部员工提成并刷新该月工资单，已确认或已发放工资单不会自动覆盖。是否继续？`,
+      '按月份批量刷新全部工资单',
+      { type: 'warning' }
+    )
+  } catch (error) {
+    if (error === 'cancel') return
+    throw error
+  }
+
+  batchRefreshingPayroll.value = true
+  try {
+    const response = await api.refreshAllHrPayrollRecords(selectedMonth.value)
+    const lockedConflictCount = response?.locked_conflicts || 0
+    const conflictDetails = response?.locked_conflict_details || []
+    if (selectedEmployee.value) {
+      await loadPayrollRecord()
+    }
+    ElMessage.success(
+      `${selectedMonth.value} 批量刷新完成：更新 ${response?.payroll_upserts || 0} 份工资单，重算 ${response?.commission_upserts || 0} 条提成`
+    )
+    if (lockedConflictCount > 0) {
+      await ElMessageBox.alert(
+        formatPayrollLockedConflictSummary(conflictDetails, lockedConflictCount),
+        `有 ${lockedConflictCount} 份已锁定工资单未覆盖`,
+        { type: 'warning' }
+      )
+    }
+  } catch (error) {
+    if (error === 'cancel') return
+    console.error('批量刷新工资单失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '批量刷新工资单失败')
+  } finally {
+    batchRefreshingPayroll.value = false
   }
 }
 

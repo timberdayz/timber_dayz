@@ -891,11 +891,12 @@ async def get_business_overview_traffic_ranking_postgresql(
             )
             if isinstance(payload.get("meta"), dict):
                 service = get_postgresql_dashboard_service()
-                payload["meta"]["identity_health"] = await service.get_business_overview_identity_health(
+                identity_health = await service.get_business_overview_identity_health(
                     granularity=granularity,
                     target_date=target_date,
                     platform=effective_platform,
                 )
+                payload["meta"]["identity_health"] = jsonable_encoder(identity_health)
                 _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except HTTPException:

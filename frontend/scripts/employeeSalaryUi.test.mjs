@@ -36,3 +36,11 @@ test('EmployeeSalary page filters salary chain to employee identity', () => {
     'EmployeeSalary.vue should only expose employee identity rows in salary page'
   )
 })
+
+test('EmployeeSalary page exposes batch payroll refresh action', () => {
+  assert.equal(
+    source.includes('handleBatchRefreshPayroll') && source.includes('按月份批量刷新全部工资单'),
+    true,
+    'EmployeeSalary.vue should contain month-level batch payroll refresh action'
+  )
+})

@@ -330,6 +330,37 @@ async def refresh_payroll_record(
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? {str(e)}", status_code=500)
 
 
+@router.post("/payroll-records/{year_month}/refresh-all")
+async def refresh_payroll_records_for_month(
+    year_month: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        income_result = await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
+        payroll_result = await PayrollGenerationService(db).generate_month(year_month)
+
+        if (
+            income_result.get("commission_upserts", 0) > 0
+            or income_result.get("performance_upserts", 0) > 0
+            or payroll_result.get("payroll_upserts", 0) > 0
+        ):
+            await db.commit()
+
+        return {
+            "success": True,
+            "year_month": year_month,
+            "commission_upserts": income_result.get("commission_upserts", 0),
+            "performance_upserts": income_result.get("performance_upserts", 0),
+            "employee_count": payroll_result.get("employee_count", 0),
+            "payroll_upserts": payroll_result.get("payroll_upserts", 0),
+            "locked_conflicts": payroll_result.get("locked_conflicts", 0),
+            "locked_conflict_details": payroll_result.get("locked_conflict_details", []),
+        }
+    except Exception as e:
+        logger.error("鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: {str(e)}", status_code=500)
+
+
 @router.get("/payroll-records", response_model=List[PayrollRecordResponse])
 async def list_payroll_records(
     employee_code: Optional[str] = Query(None, description="员工编号筛选"),

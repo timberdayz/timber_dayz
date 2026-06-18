@@ -1,5 +1,6 @@
 import asyncio
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 
 from starlette.requests import Request
@@ -68,6 +69,8 @@ class _PostgresqlServiceStub:
                     "platform_code": "shopee",
                     "shop_id": "1308200832",
                     "shop_account_id": "shopee_sg_xhkj33_local",
+                    "order_count": Decimal("1"),
+                    "visitor_count": Decimal("200"),
                 }
             ],
         }
@@ -252,3 +255,4 @@ def test_business_overview_traffic_ranking_meta_includes_identity_health(monkeyp
         body["meta"]["identity_health"]["warnings"][0]["warning_code"]
         == "traffic_without_order_match_due_to_identity"
     )
+    assert body["meta"]["identity_health"]["warnings"][0]["visitor_count"] == 200

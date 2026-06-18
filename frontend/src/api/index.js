@@ -1995,6 +1995,9 @@ export default {
   async refreshHrPayrollRecord(employeeCode, yearMonth) {
     return await this._post(`/hr/payroll-records/${employeeCode}/${yearMonth}/refresh`);
   },
+  async refreshAllHrPayrollRecords(yearMonth) {
+    return await this._post(`/hr/payroll-records/${yearMonth}/refresh-all`);
+  },
   async confirmHrPayrollRecord(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/confirm`)
   },

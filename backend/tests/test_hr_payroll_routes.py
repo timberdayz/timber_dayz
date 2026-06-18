@@ -498,6 +498,58 @@ def test_refresh_payroll_record_returns_locked_conflicts():
     assert resp["locked_conflict_details"] == [{"employee_code": "EMP201"}]
 
 
+def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_payrolls():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    calls = []
+
+    class _FakeIncomeService:
+        def __init__(self, db):
+            self.db = db
+
+        async def calculate_month(self, year_month, commit=True):
+            calls.append(("income", year_month, commit))
+            return {
+                "year_month": year_month,
+                "commission_upserts": 3,
+                "performance_upserts": 3,
+            }
+
+    class _FakePayrollService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_month(self, year_month):
+            calls.append(("payroll", year_month))
+            return {
+                "year_month": year_month,
+                "employee_count": 4,
+                "payroll_upserts": 3,
+                "locked_conflicts": 1,
+                "locked_conflict_details": [{"employee_code": "EMP900", "payroll_status": "confirmed"}],
+            }
+
+    module.HRIncomeCalculationService = _FakeIncomeService
+    module.PayrollGenerationService = _FakePayrollService
+    db.commit = AsyncMock()
+
+    resp = asyncio.run(module.refresh_payroll_records_for_month("2025-04", db=db))
+
+    assert resp["success"] is True
+    assert resp["year_month"] == "2025-04"
+    assert resp["commission_upserts"] == 3
+    assert resp["performance_upserts"] == 3
+    assert resp["employee_count"] == 4
+    assert resp["payroll_upserts"] == 3
+    assert resp["locked_conflicts"] == 1
+    assert resp["locked_conflict_details"] == [{"employee_code": "EMP900", "payroll_status": "confirmed"}]
+    assert calls == [
+        ("income", "2025-04", False),
+        ("payroll", "2025-04"),
+    ]
+    assert db.commit.await_count == 1
+
+
 def test_refresh_payroll_record_persists_new_record_before_serializing():
     module = _load_hr_salary_module()
     db = AsyncMock()
