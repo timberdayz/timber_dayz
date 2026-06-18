@@ -462,7 +462,7 @@ def test_products_monthly_requires_both_period_boundaries():
     assert result.missing_required_groups[0]["missing_keys"] == ["period_end_date"]
 
 
-def test_metrics_and_item_status_are_invalid_hash_identity_fields():
+def test_metrics_are_invalid_but_products_item_status_is_legacy_hash_identity_field():
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -520,11 +520,12 @@ def test_metrics_and_item_status_are_invalid_hash_identity_fields():
     assert result.passed is False
     assert result.invalid_keys == [
         "gmv",
-        "item_status",
         "live_attributed_gmv",
         "page_views",
         "sales_amount",
     ]
+    assert any("item_status" in warning for warning in result.warnings)
+    assert "item_status" in result.effective_components["user_identity_fields"]
 
 
 def test_products_daily_keeps_product_name_optional_but_requires_product_id():

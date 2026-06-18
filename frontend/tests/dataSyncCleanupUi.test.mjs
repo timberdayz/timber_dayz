@@ -6,6 +6,14 @@ import { resolve } from 'node:path'
 const repoRoot = resolve(import.meta.dirname, '..')
 const apiSource = readFileSync(resolve(repoRoot, 'src/api/index.js'), 'utf8')
 const viewSource = readFileSync(resolve(repoRoot, 'src/domains/data_platform/views/DataSyncFiles.vue'), 'utf8')
+const templateDeduplicationPanelSource = readFileSync(
+  resolve(repoRoot, 'src/components/dataSync/TemplateDeduplicationReviewPanel.vue'),
+  'utf8',
+)
+const templateUpdateWorkbenchSource = readFileSync(
+  resolve(repoRoot, 'src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'),
+  'utf8',
+)
 
 test('data sync cleanup API exposes impact preview endpoint', () => {
   assert.match(
@@ -46,4 +54,13 @@ test('data sync files view shows semantic contract drift details', () => {
   assert.match(viewSource, /模板待确认：缺少业务概览 required 语义字段/)
   assert.match(viewSource, /非破坏性变更：核心语义字段完整，允许降级同步/)
   assert.match(viewSource, /降级同步/)
+})
+
+test('template update workbench uses backend hash options for Data Hash choices', () => {
+  assert.match(templateUpdateWorkbenchSource, /:hash-options="hashOptions"/)
+  assert.match(templateUpdateWorkbenchSource, /workbenchContext\.value\?\.hash_options/)
+  assert.match(templateDeduplicationPanelSource, /hashOptions/)
+  assert.match(templateDeduplicationPanelSource, /legacy_compatible/)
+  assert.match(templateDeduplicationPanelSource, /weak_identity/)
+  assert.doesNotMatch(templateDeduplicationPanelSource, /isHashEligibleSemanticKey\(binding\?\.semantic_key\)/)
 })

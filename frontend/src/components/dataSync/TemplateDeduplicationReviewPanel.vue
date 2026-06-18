@@ -170,7 +170,6 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import {
   getSemanticFieldMeta,
-  isHashEligibleSemanticKey,
   SYSTEM_HASH_SCOPE_FIELDS,
 } from '@/domains/data_platform/utils/headerBindings'
 
@@ -212,6 +211,10 @@ const props = defineProps({
     default: () => []
   },
   currentHeaderBindings: {
+    type: Array,
+    default: () => []
+  },
+  hashOptions: {
     type: Array,
     default: () => []
   },
@@ -258,10 +261,32 @@ let pendingPreviewSignature = ''
 
 const semanticHashOptions = computed(() => {
   const seen = new Set()
+  if (Array.isArray(props.hashOptions) && props.hashOptions.length > 0) {
+    return props.hashOptions
+      .filter(option =>
+        option?.eligible === true &&
+        !DATE_HASH_KEYS.has(String(option?.semantic_key || '').trim())
+      )
+      .map((option) => {
+        const semanticKey = String(option?.semantic_key || '').trim()
+        if (!semanticKey || seen.has(semanticKey)) return null
+        seen.add(semanticKey)
+        const rawName = String(option?.raw_name || '').trim()
+        const label = String(option?.label || semanticKey).trim()
+        return {
+          semanticKey,
+          label: rawName ? `${label} (${rawName})` : `${label} (${semanticKey})`,
+          weakIdentity: option?.weak_identity === true,
+          legacyCompatible: option?.legacy_compatible === true,
+          warning: option?.warning || '',
+        }
+      })
+      .filter(Boolean)
+  }
   const options = (Array.isArray(props.currentHeaderBindings) ? props.currentHeaderBindings : [])
     .filter(binding =>
       binding?.semantic_review_status === 'confirmed_semantic' &&
-      isHashEligibleSemanticKey(binding?.semantic_key) &&
+      getSemanticFieldMeta(binding?.semantic_key)?.hash_eligible === true &&
       !DATE_HASH_KEYS.has(String(binding?.semantic_key || '').trim())
     )
     .map((binding) => {

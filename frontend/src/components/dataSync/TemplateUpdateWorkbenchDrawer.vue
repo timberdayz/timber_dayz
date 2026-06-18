@@ -175,6 +175,7 @@
         :existing-deduplication-fields-missing="existingDeduplicationFieldsMissing"
         :existing-deduplication-field-matches="existingDeduplicationFieldMatches"
         :recommended-deduplication-fields="recommendedDeduplicationFields"
+        :hash-options="hashOptions"
         :current-header-columns="currentHeaderColumns"
         :current-header-bindings="saveReadyHeaderBindings"
         :data-domain="templateContext?.data_domain || template?.data_domain || template?.domain || ''"
@@ -464,6 +465,7 @@ const existingDeduplicationFieldMatches = computed(
 const recommendedDeduplicationFields = computed(
   () => workbenchContext.value?.recommended_deduplication_fields ?? [],
 )
+const hashOptions = computed(() => workbenchContext.value?.hash_options ?? [])
 const updateMode = computed(() => workbenchContext.value?.update_mode ?? 'with-sample')
 const headerSource = computed(() => workbenchContext.value?.header_source ?? 'sample-file')
 const selectedDeduplicationFieldSet = computed(

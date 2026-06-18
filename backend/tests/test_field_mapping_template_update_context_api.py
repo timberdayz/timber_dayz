@@ -414,7 +414,7 @@ async def test_template_update_context_returns_semantic_equivalent_deduplication
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["existing_deduplication_fields_available"] == ["product_name"]
+    assert data["existing_deduplication_fields_available"] == ["product_name", "item_status"]
     assert data["existing_deduplication_fields_missing"] == []
     assert data["existing_deduplication_field_matches"] == [
         {
@@ -430,10 +430,133 @@ async def test_template_update_context_returns_semantic_equivalent_deduplication
             "semantic_key": "item_status",
             "current_field": "发品状态",
             "match_type": "semantic_key",
-            "hash_eligible": False,
-            "status": "matched_non_hashable",
+            "hash_eligible": True,
+            "status": "matched_hashable",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_template_update_context_returns_backend_hash_options_for_item_status(
+    template_update_context_client,
+    monkeypatch,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="products",
+            granularity="daily",
+            sub_domain=None,
+            header_row=0,
+            header_columns=["商品", "状态", "浏览量"],
+            deduplication_fields=["商品", "状态"],
+            header_bindings=[
+                {
+                    "raw_name": "商品",
+                    "display_name": "商品",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "状态",
+                    "display_name": "状态",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+            template_name="shopee_products_daily_legacy_status_hash",
+            version=1,
+            status="published",
+            field_count=3,
+            created_by="test",
+        )
+        file_record = CatalogFile(
+            file_path="data/raw/shopee/products/products_daily_status_demo.xlsx",
+            file_name="products_daily_status_demo.xlsx",
+            source="data/raw",
+            platform_code="shopee",
+            source_platform="shopee",
+            data_domain="products",
+            granularity="daily",
+            status="pending",
+            first_seen_at=datetime.now(timezone.utc),
+        )
+        session.add_all([template, file_record])
+        await session.commit()
+        await session.refresh(template)
+        await session.refresh(file_record)
+
+    from backend.routers import field_mapping_templates as router_module
+
+    async def fake_load_file_update_summary(*_, **__):
+        return {
+            "file": {
+                "id": file_record.id,
+                "file_name": file_record.file_name,
+                "platform": "shopee",
+                "domain": "products",
+                "granularity": "daily",
+                "sub_domain": None,
+            },
+            "header_columns": ["商品 ID", "商品名称", "发品状态", "GMV"],
+            "header_bindings": [
+                {
+                    "raw_name": "商品 ID",
+                    "display_name": "商品 ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                    "position": 0,
+                },
+                {
+                    "raw_name": "商品名称",
+                    "display_name": "商品名称",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                    "position": 1,
+                },
+                {
+                    "raw_name": "发品状态",
+                    "display_name": "发品状态",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                    "position": 2,
+                },
+                {
+                    "raw_name": "GMV",
+                    "display_name": "GMV",
+                    "semantic_key": "gmv",
+                    "semantic_review_status": "confirmed_semantic",
+                    "position": 3,
+                },
+            ],
+        }
+
+    monkeypatch.setattr(
+        router_module,
+        "_load_file_update_summary",
+        fake_load_file_update_summary,
+        raising=False,
+    )
+
+    response = await client.get(
+        f"/api/field-mapping/templates/{template.id}/update-context",
+        params={"mode": "with-sample", "file_id": file_record.id},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["existing_deduplication_fields_available"] == ["product_name", "item_status"]
+    assert data["existing_deduplication_fields_missing"] == []
+    by_key = {option["semantic_key"]: option for option in data["hash_options"]}
+    assert by_key["product_id"]["eligible"] is True
+    assert by_key["product_id"]["recommended"] is True
+    assert by_key["item_status"]["eligible"] is True
+    assert by_key["item_status"]["weak_identity"] is True
+    assert by_key["item_status"]["legacy_compatible"] is True
+    assert by_key["gmv"]["eligible"] is False
+    assert by_key["gmv"]["blocked_reason"]
 
 
 @pytest.mark.asyncio
