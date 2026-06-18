@@ -175,7 +175,7 @@
         :existing-deduplication-fields-missing="existingDeduplicationFieldsMissing"
         :existing-deduplication-field-matches="existingDeduplicationFieldMatches"
         :recommended-deduplication-fields="recommendedDeduplicationFields"
-        :hash-options="hashOptions"
+        :hash-options="effectiveHashOptions"
         :current-header-columns="currentHeaderColumns"
         :current-header-bindings="saveReadyHeaderBindings"
         :data-domain="templateContext?.data_domain || template?.data_domain || template?.domain || ''"
@@ -477,6 +477,88 @@ const fallbackFileId = computed(() => props.context?.row?.sample_file_id ?? null
 const currentFileId = computed(() => workbenchContext.value?.current_file?.id ?? fallbackFileId.value)
 const showHeaderRowControl = computed(() => updateMode.value !== 'core-only' && !!currentFileId.value)
 
+const PRODUCTS_STRONG_IDENTITY_KEYS = new Set(['product_id'])
+
+const recommendedStrongIdentityKeys = computed(() => {
+  const domain = String(templateContext.value?.data_domain || props.template?.data_domain || props.template?.domain || '').trim().toLowerCase()
+  if (domain === 'products') {
+    return PRODUCTS_STRONG_IDENTITY_KEYS
+  }
+  return new Set()
+})
+
+function isRecommendedStrongIdentityKey(semanticKey) {
+  return recommendedStrongIdentityKeys.value.has(String(semanticKey || '').trim())
+}
+
+function buildHashOptionsFromHeaderBindings(headerBindings = []) {
+  const domain = String(templateContext.value?.data_domain || props.template?.data_domain || props.template?.domain || '').trim().toLowerCase()
+  const seen = new Set()
+  return (Array.isArray(headerBindings) ? headerBindings : [])
+    .filter(binding => binding?.semantic_review_status === 'confirmed_semantic')
+    .map((binding) => {
+      const semanticKey = String(binding?.semantic_key || '').trim()
+      if (!semanticKey || seen.has(semanticKey)) return null
+      seen.add(semanticKey)
+      const meta = getSemanticFieldMeta(semanticKey) || {}
+      const isProductsLegacyStatus = domain === 'products' && semanticKey === 'item_status'
+      const eligible = Boolean(meta.hash_eligible) || isProductsLegacyStatus
+      return {
+        semantic_key: semanticKey,
+        label: meta.label || semanticKey,
+        kind: meta.kind || '',
+        raw_name: binding?.raw_name || binding?.source_header || binding?.display_name || null,
+        eligible,
+        recommended: isRecommendedStrongIdentityKey(semanticKey) || Boolean(eligible && meta.default_hash),
+        weak_identity: meta.identity_strength === 'weak' || isProductsLegacyStatus,
+        legacy_compatible: isProductsLegacyStatus,
+        blocked_reason: eligible ? null : 'This semantic field is not configured as a Data Hash identity field.',
+        warning: isProductsLegacyStatus
+          ? 'item_status is allowed only for products template legacy compatibility; prefer product_id/SKU for new templates.'
+          : meta.hash_warning || null,
+      }
+    })
+    .filter(Boolean)
+}
+
+const effectiveHashOptions = computed(() => {
+  const byKey = new Map()
+  for (const option of Array.isArray(hashOptions.value) ? hashOptions.value : []) {
+    const key = String(option?.semantic_key || '').trim()
+    if (key) byKey.set(key, { ...option })
+  }
+  for (const option of buildHashOptionsFromHeaderBindings(saveReadyHeaderBindings.value)) {
+    const key = String(option?.semantic_key || '').trim()
+    if (!key) continue
+    byKey.set(key, { ...(byKey.get(key) || {}), ...option })
+  }
+  return [...byKey.values()]
+})
+
+const eligibleHashSemanticKeys = computed(() =>
+  effectiveHashOptions.value
+    .filter(option => option?.eligible === true)
+    .map(option => String(option?.semantic_key || '').trim())
+    .filter(Boolean)
+)
+
+function mergeRecommendedIdentityFields(fields = [], headerBindings = saveReadyHeaderBindings.value) {
+  const next = Array.isArray(fields) ? [...fields] : []
+  const seen = new Set(next.map(field => String(field || '').trim()).filter(Boolean))
+  for (const binding of Array.isArray(headerBindings) ? headerBindings : []) {
+    const semanticKey = String(binding?.semantic_key || '').trim()
+    if (
+      binding?.semantic_review_status === 'confirmed_semantic' &&
+      isRecommendedStrongIdentityKey(semanticKey) &&
+      !seen.has(semanticKey)
+    ) {
+      seen.add(semanticKey)
+      next.push(semanticKey)
+    }
+  }
+  return next
+}
+
 function buildFieldParseRulesForContext(context, headerBindings = null) {
   const baseRules = Array.isArray(context?.template?.field_parse_rules)
     ? context.template.field_parse_rules.map(rule => ({ strict: true, ...rule }))
@@ -593,9 +675,11 @@ watch(
       ? [...recommended]
       : []
     selectedDeduplicationFields.value = normalizeDeduplicationSelection(
-      initialSelection,
+      mergeRecommendedIdentityFields(initialSelection, submissionState.value.headerBindings),
       submissionState.value.headerBindings,
       localFieldParseRules.value,
+      null,
+      eligibleHashSemanticKeys.value,
     )
   },
   { immediate: true },
@@ -653,6 +737,8 @@ watch(
       selectedDeduplicationFields.value,
       saveReadyHeaderBindings.value,
       localFieldParseRules.value,
+      null,
+      eligibleHashSemanticKeys.value,
     )
     const currentSignature = JSON.stringify(selectedDeduplicationFields.value)
     const nextSignature = JSON.stringify(normalizedSelection)
@@ -775,16 +861,21 @@ function handleSemanticKeyChange(rawName, semanticKey) {
   }
   localHeaderBindings.value = nextEditedBindings
   const updatedBinding = nextBindings.find(binding => binding?.raw_name === rawName)
-  const preferredSemanticKey = updatedBinding?.hash_participates
+  const preferredSemanticKey = isRecommendedStrongIdentityKey(updatedBinding?.semantic_key)
     ? String(updatedBinding?.semantic_key || '').trim()
     : null
-  selectedDeduplicationFields.value = buildTemplateUpdateSubmissionState({
+  const nextDeduplicationFields = buildTemplateUpdateSubmissionState({
     baseBindings: nextBindings,
     editedBindings: nextEditedBindings,
     selectedFields: selectedDeduplicationFields.value,
     fieldParseRules: localFieldParseRules.value,
     preferredSemanticKey,
+    eligibleSemanticKeys: eligibleHashSemanticKeys.value,
   }).deduplicationFields
+  selectedDeduplicationFields.value = mergeRecommendedIdentityFields(
+    nextDeduplicationFields,
+    nextEditedBindings,
+  )
 }
 
 function handleHashPolicyChange({ valid, loading, preview }) {
@@ -865,6 +956,7 @@ async function handleSave() {
         ? lastSaveReadinessPreview.value.normalized_deduplication_fields
         : selectedDeduplicationFields.value,
       fieldParseRules: localFieldParseRules.value,
+      eligibleSemanticKeys: eligibleHashSemanticKeys.value,
     })
     selectedDeduplicationFields.value = submissionState.deduplicationFields
     emit('save', {

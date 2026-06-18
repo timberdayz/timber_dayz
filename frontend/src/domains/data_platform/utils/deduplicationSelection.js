@@ -3,10 +3,16 @@ export function normalizeDeduplicationSelection(
   bindings,
   fieldParseRules = [],
   preferredSemanticKey = null,
+  eligibleSemanticKeys = [],
 ) {
   const bindingByRaw = new Map()
   const semanticKeys = new Set()
   const derivedKeys = new Set()
+  const policyEligibleKeys = new Set(
+    (Array.isArray(eligibleSemanticKeys) ? eligibleSemanticKeys : [])
+      .map(field => String(field || '').trim())
+      .filter(Boolean)
+  )
 
   for (const binding of Array.isArray(bindings) ? bindings : []) {
     const rawName = String(binding?.raw_name || '').trim()
@@ -17,7 +23,7 @@ export function normalizeDeduplicationSelection(
     if (
       semanticKey &&
       binding?.semantic_review_status === 'confirmed_semantic' &&
-      binding?.hash_eligible !== false
+      (binding?.hash_eligible !== false || policyEligibleKeys.has(semanticKey))
     ) {
       semanticKeys.add(semanticKey)
     }
@@ -49,7 +55,7 @@ export function normalizeDeduplicationSelection(
     if (rawBinding) {
       if (
         rawBinding.semantic_review_status !== 'confirmed_semantic' ||
-        rawBinding.hash_eligible === false
+        (rawBinding.hash_eligible === false && !policyEligibleKeys.has(String(rawBinding.semantic_key || '').trim()))
       ) {
         continue
       }
@@ -113,6 +119,7 @@ export function buildTemplateUpdateSubmissionState({
   selectedFields = [],
   fieldParseRules = [],
   preferredSemanticKey = null,
+  eligibleSemanticKeys = [],
 } = {}) {
   const headerBindings = mergeHeaderBindingsForSave(baseBindings, editedBindings)
   const deduplicationFields = normalizeDeduplicationSelection(
@@ -120,6 +127,7 @@ export function buildTemplateUpdateSubmissionState({
     headerBindings,
     fieldParseRules,
     preferredSemanticKey,
+    eligibleSemanticKeys,
   )
 
   return {

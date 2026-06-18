@@ -8,6 +8,7 @@ from backend.services.semantic_field_registry import (
     normalize_semantic_key,
 )
 from backend.services.template_hash_policy import HashPolicyResult, TemplateHashPolicyService
+from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class TemplateSaveReadinessResult:
     blocking_errors: List[str]
     warnings: List[str]
     unresolved_deduplication_fields: List[str]
+    hash_options: List[Dict[str, Any]]
 
     def to_dict(self) -> Dict[str, Any]:
         payload = self.hash_policy.to_dict()
@@ -31,6 +33,7 @@ class TemplateSaveReadinessResult:
                 "normalized_deduplication_fields": list(self.normalized_deduplication_fields),
                 "normalized_header_bindings": [dict(binding) for binding in self.normalized_header_bindings],
                 "unresolved_deduplication_fields": list(self.unresolved_deduplication_fields),
+                "hash_options": [dict(option) for option in self.hash_options],
             }
         )
         return payload
@@ -180,6 +183,7 @@ def sync_hash_participation_from_deduplication_fields(
 class TemplateSaveReadinessService:
     def __init__(self) -> None:
         self._hash_policy_service = TemplateHashPolicyService()
+        self._semantic_hash_policy_service = SemanticHashPolicyService()
 
     def assess(
         self,
@@ -220,6 +224,12 @@ class TemplateSaveReadinessService:
             header_bindings,
             normalized_deduplication_fields,
         )
+        hash_options = self._semantic_hash_policy_service.build_options(
+            data_domain=data_domain,
+            granularity=granularity,
+            sub_domain=sub_domain,
+            header_bindings=normalized_header_bindings,
+        )
         hash_policy = self._hash_policy_service.validate(
             data_domain=data_domain,
             granularity=granularity,
@@ -240,4 +250,5 @@ class TemplateSaveReadinessService:
             blocking_errors=blocking_errors,
             warnings=warnings,
             unresolved_deduplication_fields=unresolved_deduplication_fields,
+            hash_options=hash_options,
         )
