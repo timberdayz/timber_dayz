@@ -31,7 +31,19 @@ test('data sync cleanup preview shows controlled rebuild recommendation', () => 
 
 test('data sync files view treats source_missing as an anomaly status', () => {
   assert.match(viewSource, /el-option label="源文件缺失" value="source_missing"/)
-  assert.match(viewSource, /row\.status === 'source_missing'/)
+  assert.match(viewSource, /source_missing:\s*'warning'/)
+  assert.match(viewSource, /source_missing:\s*'源文件缺失'/)
   assert.match(viewSource, /源文件缺失/)
   assert.match(viewSource, /file\.status === 'source_missing'/)
+})
+
+test('data sync files view shows semantic contract drift details', () => {
+  assert.match(viewSource, /getTemplateStatusTooltip/)
+  assert.match(viewSource, /semantic_contract_status/)
+  assert.match(viewSource, /missing_required_keys/)
+  assert.match(viewSource, /missing_optional_keys/)
+  assert.match(viewSource, /impact_descriptions/)
+  assert.match(viewSource, /模板待确认：缺少业务概览 required 语义字段/)
+  assert.match(viewSource, /非破坏性变更：核心语义字段完整，允许降级同步/)
+  assert.match(viewSource, /降级同步/)
 })

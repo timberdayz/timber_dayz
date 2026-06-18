@@ -363,6 +363,113 @@ async def test_list_files_marks_template_as_update_required_when_headers_changed
 
 
 @pytest.mark.asyncio
+async def test_list_files_returns_semantic_contract_summary_for_required_field_gap(
+    file_list_client,
+    monkeypatch,
+    tmp_path,
+):
+    client, session_factory = file_list_client
+
+    excel_path = tmp_path / "shopee_orders_weekly_sample.xlsx"
+    excel_path.write_text("placeholder", encoding="utf-8")
+
+    async with session_factory() as session:
+        session.add(
+            FieldMappingTemplate(
+                platform="shopee",
+                data_domain="orders",
+                granularity="weekly",
+                sub_domain=None,
+                template_name="shopee_orders__weekly_v1",
+                version=1,
+                status="published",
+                header_row=0,
+                header_columns=["order_no", "shop_name", "order_created_at", "sold_qty", "buyer_paid", "profit_amount"],
+                header_bindings=[
+                    {"raw_name": "order_no", "semantic_key": "order_id"},
+                    {"raw_name": "shop_name", "semantic_key": "shop_id"},
+                    {"raw_name": "order_created_at", "semantic_key": "order_date"},
+                    {"raw_name": "sold_qty", "semantic_key": "sales_volume"},
+                    {"raw_name": "buyer_paid", "semantic_key": "paid_amount"},
+                    {"raw_name": "profit_amount", "semantic_key": "profit"},
+                ],
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        session.add(
+            CatalogFile(
+                file_path=str(excel_path),
+                file_name=excel_path.name,
+                source="data/raw",
+                platform_code="shopee",
+                source_platform="shopee",
+                data_domain="orders",
+                granularity="weekly",
+                sub_domain=None,
+                status="pending",
+                first_seen_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    class _FakeDf:
+        class _Cols(list):
+            def tolist(self):
+                return list(self)
+
+        @property
+        def columns(self):
+            return self._Cols(["order_no", "shop_name", "order_created_at", "sold_qty", "profit_amount"])
+
+    async def _fake_detect_header_changes(*args, **kwargs):
+        return {
+            "detected": True,
+            "added_fields": [],
+            "removed_fields": ["buyer_paid"],
+            "match_rate": 83.3,
+            "is_exact_match": False,
+            "is_semantic_match": False,
+            "template_columns": ["order_no", "shop_name", "order_created_at", "sold_qty", "buyer_paid", "profit_amount"],
+            "current_columns": ["order_no", "shop_name", "order_created_at", "sold_qty", "profit_amount"],
+            "blocking_changes": ["paid_amount"],
+            "non_blocking_changes": [],
+            "semantic_contract_status": "breaking_drift",
+            "missing_required_keys": ["paid_amount"],
+            "missing_optional_keys": [],
+            "impact_descriptions": ["业务概览订单销售额/转化率无法计算"],
+        }
+
+    class _FakeExecutorManager:
+        async def run_cpu_intensive(self, *args, **kwargs):
+            return _FakeDf()
+
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.get_executor_manager",
+        lambda: _FakeExecutorManager(),
+    )
+    monkeypatch.setattr(
+        "backend.services.template_matcher.TemplateMatcher.detect_header_changes",
+        _fake_detect_header_changes,
+    )
+
+    response = await client.get(
+        "/api/data-sync/files",
+        params={"platform": "shopee", "domain": "orders", "granularity": "weekly"},
+    )
+
+    assert response.status_code == 200
+    file_row = response.json()["data"]["files"][0]
+    assert file_row["template_status"] == "update_required"
+    assert file_row["governance_status"] == "breaking_drift"
+    assert file_row["semantic_contract_status"] == "breaking_drift"
+    assert file_row["missing_required_keys"] == ["paid_amount"]
+    assert file_row["missing_optional_keys"] == []
+    assert file_row["impact_descriptions"] == ["业务概览订单销售额/转化率无法计算"]
+    assert file_row["template_update_required"] is True
+
+
+@pytest.mark.asyncio
 async def test_list_files_marks_file_as_parse_failed_when_template_status_evaluation_cannot_read_file(
     file_list_client,
     monkeypatch,

@@ -158,6 +158,53 @@ async def test_template_status_service_allows_optional_field_drop_for_shopee_ord
     assert status["header_changes"]["non_blocking_changes"]
 
 
+@pytest.mark.asyncio
+async def test_template_matcher_uses_semantic_contract_for_orders_weekly_optional_drop(
+    grading_session_factory,
+):
+    from backend.services.template_matcher import TemplateMatcher
+
+    now = datetime.now(timezone.utc)
+    async with grading_session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="orders",
+            granularity="weekly",
+            sub_domain=None,
+            template_name="shopee_orders__weekly_v1",
+            version=1,
+            status="published",
+            header_row=0,
+            header_columns=["订单编号", "店铺", "下单时间", "销售数量", "买家支付", "利润", "预估回款金额"],
+            header_bindings=[
+                {"raw_name": "订单编号", "semantic_key": "order_id"},
+                {"raw_name": "店铺", "semantic_key": "shop_id"},
+                {"raw_name": "下单时间", "semantic_key": "order_date"},
+                {"raw_name": "销售数量", "semantic_key": "sales_volume"},
+                {"raw_name": "买家支付", "semantic_key": "paid_amount"},
+                {"raw_name": "利润", "semantic_key": "profit"},
+                {"raw_name": "预估回款金额", "semantic_key": "estimated_settlement_amount"},
+            ],
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(template)
+        await session.commit()
+        await session.refresh(template)
+
+        matcher = TemplateMatcher(session)
+        header_changes = await matcher.detect_header_changes(
+            template.id,
+            ["订单编号", "店铺", "下单时间", "销售数量", "买家支付", "利润"],
+        )
+
+    assert header_changes["detected"] is True
+    assert header_changes["semantic_contract_status"] == "non_breaking_drift"
+    assert header_changes["blocking_changes"] == []
+    assert header_changes["missing_required_keys"] == []
+    assert header_changes["missing_optional_keys"] == ["estimated_settlement_amount"]
+
+
 def test_auto_ingest_marks_template_update_required_when_readiness_blocks(
     monkeypatch,
 ):

@@ -263,6 +263,74 @@ async def test_data_sync_governance_stats_reports_ready_update_required_and_miss
 
 
 @pytest.mark.asyncio
+async def test_data_sync_governance_stats_counts_persisted_template_update_required_files(governance_client, monkeypatch):
+    client, session_factory = governance_client
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        session.add_all(
+            [
+                CatalogFile(
+                    file_path="data/raw/2026/orders-pending.xlsx",
+                    file_name="orders-pending.xlsx",
+                    source="data/raw",
+                    platform_code="shopee",
+                    source_platform="shopee",
+                    data_domain="orders",
+                    granularity="weekly",
+                    status="pending",
+                    first_seen_at=now,
+                ),
+                CatalogFile(
+                    file_path="data/raw/2026/orders-template-blocked.xlsx",
+                    file_name="orders-template-blocked.xlsx",
+                    source="data/raw",
+                    platform_code="shopee",
+                    source_platform="shopee",
+                    data_domain="orders",
+                    granularity="weekly",
+                    status="template_update_required",
+                    first_seen_at=now,
+                    file_metadata={
+                        "auto_ingest": {
+                            "last_status": "template_update_required",
+                            "last_reason": "TEMPLATE_UPDATE_REQUIRED: removed optional field",
+                        }
+                    },
+                ),
+            ]
+        )
+        await session.commit()
+
+    async def _fake_readiness(self, file_id, use_template_header_row=True):
+        return {
+            "file_id": file_id,
+            "file_name": f"file-{file_id}.xlsx",
+            "template_update_required": False,
+            "update_reason": None,
+            "ready": True,
+            "template_status": "ready",
+            "should_auto_sync": True,
+        }
+
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.DataSyncService.get_file_sync_readiness",
+        _fake_readiness,
+    )
+
+    response = await client.get("/api/data-sync/governance/stats")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["pending_count"] == 1
+    assert payload["data"]["ready_to_sync_count"] == 1
+    assert payload["data"]["template_update_required_count"] == 1
+    assert payload["data"]["failed_count"] == 0
+    assert payload["data"]["status_counts"]["template_update_required"] == 1
+
+
+@pytest.mark.asyncio
 async def test_data_sync_governance_stats_excludes_semantic_anomaly_pending_files(governance_client, monkeypatch):
     client, session_factory = governance_client
 
