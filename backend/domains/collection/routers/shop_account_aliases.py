@@ -12,8 +12,11 @@ from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.schemas.account import UnmatchedShopAliasItem, UnmatchedShopAliasResponse
 from backend.schemas.shop_account_alias import ShopAccountAliasCreate, ShopAccountAliasResponse
+from backend.services.cache_service import get_cache_service
+from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 from backend.utils.text_normalization import normalize_alias_key, normalize_alias_text
 from modules.core.db import ShopAccount, ShopAccountAlias
+from modules.core.logger import get_logger
 
 
 router = APIRouter(
@@ -21,6 +24,13 @@ router = APIRouter(
     tags=["Shop Account Aliases"],
     dependencies=[Depends(require_admin)],
 )
+
+logger = get_logger(__name__)
+
+_SHOP_IDENTITY_REFRESH_TARGETS = [
+    "semantic.fact_orders_monthly_atomic_mv",
+    "semantic.fact_analytics_monthly_atomic_mv",
+]
 
 
 def _u(value: str) -> str:
@@ -170,6 +180,55 @@ async def _clear_primary_aliases(
             alias.is_active = False
 
 
+async def _enqueue_shop_identity_refresh(
+    db: AsyncSession,
+    *,
+    shop_account: ShopAccount | None = None,
+    shop_account_db_id: int | None = None,
+    platform: str | None = None,
+    changed_fields: list[str] | None = None,
+) -> None:
+    context = {
+        "changed_fields": changed_fields or ["alias"],
+    }
+    if shop_account is not None:
+        context.update(
+            {
+                "shop_account_id": shop_account.shop_account_id,
+                "shop_account_db_id": shop_account.id,
+                "platform": shop_account.platform,
+            }
+        )
+    else:
+        context.update(
+            {
+                "shop_account_db_id": shop_account_db_id,
+                "platform": platform,
+            }
+        )
+    try:
+        await RefreshQueueService(db).enqueue_refresh(
+            trigger_type="shop_identity_changed",
+            pipeline_name="postgresql_dashboard",
+            targets=_SHOP_IDENTITY_REFRESH_TARGETS,
+            context=context,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[ShopIdentity] failed to enqueue dashboard refresh for alias change: %s",
+            exc,
+            exc_info=True,
+        )
+    try:
+        await get_cache_service().invalidate_dashboard_business_overview()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[ShopIdentity] failed to invalidate business overview cache for alias change: %s",
+            exc,
+            exc_info=True,
+        )
+
+
 @router.get("", response_model=List[ShopAccountAliasResponse])
 async def list_shop_account_aliases(db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
@@ -200,6 +259,12 @@ async def create_shop_account_alias(
     db.add(record)
     await db.commit()
     await db.refresh(record)
+    await _enqueue_shop_identity_refresh(
+        db,
+        shop_account_db_id=payload.shop_account_id,
+        platform=payload.platform,
+        changed_fields=["alias"],
+    )
     return _serialize_alias(record)
 
 
@@ -254,6 +319,11 @@ async def claim_shop_account_alias(
         existing.is_active = True
         await db.commit()
         await db.refresh(existing)
+        await _enqueue_shop_identity_refresh(
+            db,
+            shop_account=shop_account,
+            changed_fields=["alias"],
+        )
         return _serialize_alias(existing)
 
     record = ShopAccountAlias(
@@ -269,6 +339,11 @@ async def claim_shop_account_alias(
     db.add(record)
     await db.commit()
     await db.refresh(record)
+    await _enqueue_shop_identity_refresh(
+        db,
+        shop_account=shop_account,
+        changed_fields=["alias"],
+    )
     return _serialize_alias(record)
 
 
@@ -280,6 +355,11 @@ async def clear_shop_account_primary_alias(
     shop_account = await _get_shop_account_or_404(db, shop_account_id)
     await _clear_primary_aliases(db, shop_account.id, deactivate=True)
     await db.commit()
+    await _enqueue_shop_identity_refresh(
+        db,
+        shop_account=shop_account,
+        changed_fields=["alias"],
+    )
     return {"message": f"primary alias cleared for '{shop_account_id}'"}
 
 

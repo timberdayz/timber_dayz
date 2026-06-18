@@ -135,3 +135,79 @@ def test_register_single_file_rejects_invalid_services_platform_sub_domain(
         rows = session.execute(select(CatalogFile)).scalars().all()
 
     assert rows == []
+
+
+def test_register_single_file_persists_standard_shop_identity_metadata(
+    tmp_path,
+    monkeypatch,
+):
+    import backend.services.platform_table_manager as platform_table_manager_module
+    from modules.services import catalog_scanner as catalog_scanner_module
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.db'}", future=True)
+    CatalogFile.__table__.create(engine)
+    monkeypatch.setattr(catalog_scanner_module, "_get_engine", lambda: engine)
+    monkeypatch.setattr(
+        platform_table_manager_module,
+        "get_platform_table_manager",
+        lambda _session: type(
+            "_NoopTableManager",
+            (),
+            {"ensure_table_exists": staticmethod(lambda **_kwargs: "fact_tiktok_orders_monthly")},
+        )(),
+    )
+
+    raw_dir = tmp_path / "data" / "raw" / "2026"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = raw_dir / StandardFileName.generate(
+        source_platform="tiktok",
+        data_domain="orders",
+        granularity="monthly",
+        timestamp="20260618_120000",
+        ext="xlsx",
+    )
+    file_path.write_text("demo", encoding="utf-8")
+
+    MetadataManager.create_meta_file(
+        file_path,
+        business_metadata={
+            "source_platform": "tiktok",
+            "data_domain": "orders",
+            "granularity": "monthly",
+            "date_from": "2026-06-01",
+            "date_to": "2026-06-30",
+            "main_account_id": "tiktok_sg_main",
+            "shop_account_id": "tiktok_sg_daone_mall_local",
+            "store_name": "DAONE Mall",
+            "platform_shop_id": None,
+            "shop_id": "DAONE Mall",
+        },
+        collection_info={
+            "method": "python_component",
+            "collection_platform": "tiktok",
+            "account": "TK新加坡1店",
+            "main_account_id": "tiktok_sg_main",
+            "shop_account_id": "tiktok_sg_daone_mall_local",
+            "store_name": "DAONE Mall",
+            "platform_shop_id": None,
+            "shop_id": "DAONE Mall",
+            "original_path": r"temp\downloads\task-1\tiktok\acc\shop\orders\monthly\orders.xlsx",
+            "collected_at": datetime.now().isoformat(),
+        },
+    )
+
+    file_id = register_single_file(str(file_path))
+
+    assert file_id is not None
+
+    with Session(engine) as session:
+        record = session.execute(
+            select(CatalogFile).where(CatalogFile.id == file_id)
+        ).scalar_one()
+
+    assert record.main_account_id == "tiktok_sg_main"
+    assert record.shop_account_id == "tiktok_sg_daone_mall_local"
+    assert record.store_name == "DAONE Mall"
+    assert record.platform_shop_id is None
+    assert record.shop_id == "DAONE Mall"

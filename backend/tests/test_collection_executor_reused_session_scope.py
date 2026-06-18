@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -32,6 +33,57 @@ def test_resolve_session_scope_prefers_main_account_id_over_shop_account_id():
     assert session_owner_id == "hongxikeji:main"
     assert shop_account_id == "shopee_sg_hongxi_local"
     assert use_scope is True
+
+
+def test_process_files_writes_standard_shop_identity_metadata(tmp_path, monkeypatch):
+    from modules.apps.collection_center import executor_v2 as executor_module
+
+    raw_root = tmp_path / "data" / "raw"
+    source_dir = tmp_path / "downloads"
+    source_dir.mkdir(parents=True)
+    source_file = source_dir / "orders_export.xlsx"
+    source_file.write_text("demo", encoding="utf-8")
+
+    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_root)
+    monkeypatch.setattr(
+        "modules.services.catalog_scanner.register_single_file",
+        lambda _path: 1,
+    )
+
+    executor = CollectionExecutorV2()
+
+    processed = asyncio.run(
+        executor._process_files(
+            [str(source_file)],
+            "tiktok",
+            ["orders"],
+            "monthly",
+            account={
+                "label": "TK新加坡1店",
+                "account_id": "tiktok_sg_daone_mall_local",
+                "shop_account_id": "tiktok_sg_daone_mall_local",
+                "main_account_id": "tiktok_sg_main",
+                "store_name": "DAONE Mall",
+                "platform_shop_id": "",
+            },
+            date_range={"start_date": "2026-06-01", "end_date": "2026-06-30"},
+        )
+    )
+
+    assert len(processed) == 1
+    meta_path = Path(processed[0]).with_suffix(".meta.json")
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    collection_info = metadata["collection_info"]
+    assert collection_info["main_account_id"] == "tiktok_sg_main"
+    assert collection_info["shop_account_id"] == "tiktok_sg_daone_mall_local"
+    assert collection_info["store_name"] == "DAONE Mall"
+    assert collection_info["platform_shop_id"] is None
+    assert "shop_id" in collection_info
+
+    business_metadata = metadata["business_metadata"]
+    assert business_metadata["shop_account_id"] == "tiktok_sg_daone_mall_local"
+    assert business_metadata["store_name"] == "DAONE Mall"
 
 
 def test_extract_platform_shop_context_reads_known_query_keys():

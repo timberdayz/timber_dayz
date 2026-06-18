@@ -307,6 +307,10 @@ class CatalogFile(Base):
     platform_code = Column(String(32), nullable=True)
     account = Column(String(128), nullable=True)  # [*] 账号信息(从.meta.json提取)
     shop_id = Column(String(256), nullable=True)  # v4.3.4: 扩展到256以支持长shop_id
+    main_account_id = Column(String(100), nullable=True)
+    shop_account_id = Column(String(100), nullable=True)
+    store_name = Column(String(200), nullable=True)
+    platform_shop_id = Column(String(256), nullable=True)
     data_domain = Column(String(64), nullable=True)  # orders/products/metrics
     granularity = Column(String(16), nullable=True)   # daily/weekly/monthly
     date_from = Column(Date, nullable=True)
@@ -333,6 +337,7 @@ class CatalogFile(Base):
     __table_args__ = (
         Index("ix_catalog_files_status", "status"),
         Index("ix_catalog_files_platform_shop", "platform_code", "shop_id"),
+        Index("ix_catalog_files_shop_account_id", "shop_account_id"),
         Index("ix_catalog_files_dates", "date_from", "date_to"),
         # 方案B+新索引
         Index("ix_catalog_source_domain", "source_platform", "data_domain"),  # 模板匹配加速
@@ -341,4 +346,3 @@ class CatalogFile(Base):
         Index("ix_catalog_quality_score", "quality_score"),  # 质量筛选
         UniqueConstraint("file_hash", name="uq_catalog_files_hash"),
     )
-

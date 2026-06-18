@@ -14,8 +14,11 @@ from backend.schemas.shop_account import (
     ShopAccountResponse,
     ShopAccountUpdate,
 )
+from backend.services.cache_service import get_cache_service
+from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 from backend.utils.text_normalization import normalize_alias_text
 from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
+from modules.core.logger import get_logger
 
 
 router = APIRouter(
@@ -23,6 +26,19 @@ router = APIRouter(
     tags=["shop account management"],
     dependencies=[Depends(require_admin)],
 )
+
+logger = get_logger(__name__)
+
+_SHOP_IDENTITY_REFRESH_TARGETS = [
+    "semantic.fact_orders_monthly_atomic_mv",
+    "semantic.fact_analytics_monthly_atomic_mv",
+]
+_SHOP_IDENTITY_FIELDS = {
+    "main_account_id",
+    "store_name",
+    "platform_shop_id",
+    "platform_shop_id_status",
+}
 
 
 def _default_capabilities_for(shop_type: str | None) -> dict[str, bool]:
@@ -182,6 +198,44 @@ async def _assert_main_account_exists(
         raise HTTPException(status_code=400, detail=f"main_account_id '{main_account_id}' not found")
 
 
+async def _enqueue_shop_identity_refresh(
+    db: AsyncSession,
+    *,
+    shop_account: ShopAccount,
+    changed_fields: list[str],
+) -> None:
+    if not changed_fields:
+        return
+    try:
+        await RefreshQueueService(db).enqueue_refresh(
+            trigger_type="shop_identity_changed",
+            pipeline_name="postgresql_dashboard",
+            targets=_SHOP_IDENTITY_REFRESH_TARGETS,
+            context={
+                "shop_account_id": shop_account.shop_account_id,
+                "shop_account_db_id": shop_account.id,
+                "platform": shop_account.platform,
+                "changed_fields": changed_fields,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[ShopIdentity] failed to enqueue dashboard refresh for shop_account_id=%s: %s",
+            shop_account.shop_account_id,
+            exc,
+            exc_info=True,
+        )
+    try:
+        await get_cache_service().invalidate_dashboard_business_overview()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[ShopIdentity] failed to invalidate business overview cache for shop_account_id=%s: %s",
+            shop_account.shop_account_id,
+            exc,
+            exc_info=True,
+        )
+
+
 @router.get("", response_model=List[ShopAccountResponse])
 async def list_shop_accounts(
     platform: Optional[str] = Query(None),
@@ -325,6 +379,14 @@ async def update_shop_account(
         await db.rollback()
         raise
     await db.refresh(record)
+    changed_identity_fields = [
+        field for field in update_data.keys() if field in _SHOP_IDENTITY_FIELDS
+    ]
+    await _enqueue_shop_identity_refresh(
+        db,
+        shop_account=record,
+        changed_fields=changed_identity_fields,
+    )
     return await _serialize_shop_account(db, record)
 
 

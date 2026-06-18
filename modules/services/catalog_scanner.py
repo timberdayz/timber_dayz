@@ -280,6 +280,29 @@ def _resolve_catalog_dimensions(
     }
 
 
+def _resolve_standard_shop_identity(
+    *,
+    business_metadata: Optional[dict] = None,
+    collection_info: Optional[dict] = None,
+) -> dict:
+    business_metadata = business_metadata or {}
+    collection_info = collection_info or {}
+
+    def _text(key: str) -> Optional[str]:
+        value = collection_info.get(key)
+        if value is None:
+            value = business_metadata.get(key)
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    return {
+        "main_account_id": _text("main_account_id"),
+        "shop_account_id": _text("shop_account_id"),
+        "store_name": _text("store_name") or _text("shop_name"),
+        "platform_shop_id": _text("platform_shop_id"),
+    }
+
+
 def _is_repaired_cache(file_path: Path) -> bool:
     """判断是否为自动修复缓存目录下的文件(data/raw/repaired/**)。"""
     parts = [p.lower() for p in file_path.parts]
@@ -588,6 +611,10 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                     norm_domain = resolved_dimensions['data_domain']
                     norm_granularity = resolved_dimensions['granularity']
                     norm_sub_domain = resolved_dimensions['sub_domain']
+                    standard_identity = _resolve_standard_shop_identity(
+                        business_metadata=business_metadata,
+                        collection_info=collection_info,
+                    )
                     resolver = get_shop_resolver()
                     # 如果.meta.json提供了shop_id,直接以最高置信度使用,不再推断
                     if meta_for_resolver.get('shop_id'):
@@ -694,6 +721,10 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         # [*] 账号和店铺归属(从.meta.json提取)
                         account=meta_for_resolver.get('account'),
                         shop_id=initial_shop_id,
+                        main_account_id=standard_identity.get("main_account_id"),
+                        shop_account_id=standard_identity.get("shop_account_id"),
+                        store_name=standard_identity.get("store_name"),
+                        platform_shop_id=standard_identity.get("platform_shop_id"),
                         
                         # 时间范围(从.meta.json读取)
                         date_from=date_from,
@@ -738,6 +769,10 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         existing.platform_code = norm_platform  # v4.3.5: 兼容性字段同步
                         existing.storage_layer = 'raw'
                         existing.quality_score = quality_score
+                        existing.main_account_id = standard_identity.get("main_account_id")
+                        existing.shop_account_id = standard_identity.get("shop_account_id")
+                        existing.store_name = standard_identity.get("store_name")
+                        existing.platform_shop_id = standard_identity.get("platform_shop_id")
                         existing.meta_file_path = relative_meta_path  # v4.18.0: 存储相对路径
                         
                         # [*] 账号信息更新(从.meta.json提取)
@@ -980,6 +1015,10 @@ def register_single_file(file_path: str) -> Optional[int]:
         norm_domain = resolved_dimensions['data_domain']
         norm_granularity = resolved_dimensions['granularity']
         norm_sub_domain = resolved_dimensions['sub_domain']
+        standard_identity = _resolve_standard_shop_identity(
+            business_metadata=business_metadata,
+            collection_info=collection_info,
+        )
         resolver = get_shop_resolver()
         if meta_for_resolver.get('shop_id'):
             resolved_shop = type('RS', (), {
@@ -1083,6 +1122,10 @@ def register_single_file(file_path: str) -> Optional[int]:
             existing.platform_code = norm_platform
             existing.storage_layer = 'raw'
             existing.quality_score = quality_score
+            existing.main_account_id = standard_identity.get("main_account_id")
+            existing.shop_account_id = standard_identity.get("shop_account_id")
+            existing.store_name = standard_identity.get("store_name")
+            existing.platform_shop_id = standard_identity.get("platform_shop_id")
             existing.meta_file_path = relative_meta_path  # v4.18.0: 存储相对路径
             if meta_for_resolver.get('account'):
                 existing.account = meta_for_resolver['account']
@@ -1159,6 +1202,10 @@ def register_single_file(file_path: str) -> Optional[int]:
                 granularity=norm_granularity,
                 account=meta_for_resolver.get('account'),
                 shop_id=initial_shop_id,
+                main_account_id=standard_identity.get("main_account_id"),
+                shop_account_id=standard_identity.get("shop_account_id"),
+                store_name=standard_identity.get("store_name"),
+                platform_shop_id=standard_identity.get("platform_shop_id"),
                 date_from=date_from,
                 date_to=date_to,
                 storage_layer='raw',

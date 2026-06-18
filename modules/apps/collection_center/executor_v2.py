@@ -772,12 +772,24 @@ class CollectionExecutorV2:
                 session_owner_id and runtime_session.runtime_profile_exists(platform, session_owner_id)
             )
             if not has_persistent_profile and effective_storage_state is None and session_owner_id:
-                session_candidate = await runtime_session.load_runtime_session_candidate(
+                session_data = await _load_or_bootstrap_session_async(
                     platform=platform,
-                    session_owner_id=session_owner_id,
-                    account=runtime_account,
+                    account_id=session_owner_id,
+                    account_config=runtime_account,
                 )
-                effective_storage_state = session_candidate.storage_state
+                if session_data and isinstance(session_data.get("storage_state"), dict):
+                    effective_storage_state = session_data["storage_state"]
+                    session_candidate = runtime_session.RuntimeSessionCandidate(
+                        storage_state=effective_storage_state,
+                        metadata={"source": "session_manager"},
+                    )
+                else:
+                    session_candidate = await runtime_session.load_runtime_session_candidate(
+                        platform=platform,
+                        session_owner_id=session_owner_id,
+                        account=runtime_account,
+                    )
+                    effective_storage_state = session_candidate.storage_state
             strategy = runtime_session.choose_runtime_strategy(
                 platform=platform,
                 session_owner_id=session_owner_id,
@@ -816,13 +828,25 @@ class CollectionExecutorV2:
             return bundle
 
         if normalized_mode != "persistent_profile" and effective_storage_state is None and session_owner_id:
-            session_candidate = await runtime_session.load_runtime_session_candidate(
+            session_data = await _load_or_bootstrap_session_async(
                 platform=platform,
-                session_owner_id=session_owner_id,
-                account=runtime_account,
+                account_id=session_owner_id,
+                account_config=runtime_account,
             )
-            if isinstance(session_candidate.storage_state, dict):
-                effective_storage_state = session_candidate.storage_state
+            if session_data and isinstance(session_data.get("storage_state"), dict):
+                effective_storage_state = session_data["storage_state"]
+                session_candidate = runtime_session.RuntimeSessionCandidate(
+                    storage_state=effective_storage_state,
+                    metadata={"source": "session_manager"},
+                )
+            else:
+                session_candidate = await runtime_session.load_runtime_session_candidate(
+                    platform=platform,
+                    session_owner_id=session_owner_id,
+                    account=runtime_account,
+                )
+                if isinstance(session_candidate.storage_state, dict):
+                    effective_storage_state = session_candidate.storage_state
 
         bundle = await runtime_session.open_storage_state_runtime_bundle(
             browser=browser,
@@ -4283,6 +4307,13 @@ class CollectionExecutorV2:
         # 提取账号信息
         account = account or {}
         account_label = account.get("label") or account.get("username") or "unknown"
+        shop_account_id = str(account.get("shop_account_id") or account.get("account_id") or "").strip() or None
+        main_account_id = str(account.get("main_account_id") or account.get("parent_account") or "").strip() or None
+        platform_shop_id = str(
+            account.get("platform_shop_id")
+            or account.get("cnsc_shop_id")
+            or ""
+        ).strip() or None
         shop_id = self._resolve_collection_shop_id(platform, account)
         store_name = self._resolve_collection_store_name(account)
         
@@ -4432,16 +4463,22 @@ class CollectionExecutorV2:
                         "granularity": resolved_granularity,
                         "date_from": date_from,
                         "date_to": date_to,
+                        "main_account_id": main_account_id,
+                        "shop_account_id": shop_account_id,
                         "shop_id": shop_id,
                         "store_name": file_store_name,
+                        "platform_shop_id": platform_shop_id,
                     }
 
                     collection_info = {
                         "method": "python_component",
                         "collection_platform": landing_semantics["collection_platform"],
                         "account": account_label,
+                        "main_account_id": main_account_id,
+                        "shop_account_id": shop_account_id,
                         "shop_id": shop_id,
                         "store_name": file_store_name,
+                        "platform_shop_id": platform_shop_id,
                         "original_path": str(source_path),
                         "collected_at": datetime.now().isoformat()
                     }

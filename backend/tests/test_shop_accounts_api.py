@@ -9,6 +9,26 @@ from backend.routers import main_accounts, shop_accounts
 from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
 
 
+class _FakeBusinessOverviewCache:
+    def __init__(self, calls):
+        self.calls = calls
+
+    async def invalidate_dashboard_business_overview(self):
+        self.calls.append("invalidate_dashboard_business_overview")
+        return 0
+
+
+class _FakeRefreshQueueService:
+    calls = []
+
+    def __init__(self, db):
+        self.db = db
+
+    async def enqueue_refresh(self, **kwargs):
+        self.calls.append(kwargs)
+        return type("Task", (), {"job_id": "refresh-test"})()
+
+
 @pytest_asyncio.fixture
 async def shop_account_client(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
@@ -263,3 +283,72 @@ async def test_update_shop_account_returns_409_when_platform_shop_id_conflicts(s
 
     assert update_response.status_code == 409
     assert "platform_shop_id 'xihong'" in update_response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_shop_identity_enqueues_business_overview_refresh_and_invalidates_cache(
+    shop_account_client,
+    monkeypatch,
+):
+    refresh_calls = []
+    cache_calls = []
+
+    class FakeRefreshQueueService(_FakeRefreshQueueService):
+        calls = refresh_calls
+
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_accounts.RefreshQueueService",
+        FakeRefreshQueueService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_accounts.get_cache_service",
+        lambda: _FakeBusinessOverviewCache(cache_calls),
+        raising=False,
+    )
+
+    create_main = await shop_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "hongxikeji:main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    assert create_main.status_code == 200
+    create_shop = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_sg_hongxi_local",
+            "main_account_id": "hongxikeji:main",
+            "store_name": "HongXi SG",
+            "enabled": True,
+        },
+    )
+    assert create_shop.status_code == 200
+
+    update_response = await shop_account_client.put(
+        "/api/shop-accounts/shopee_sg_hongxi_local",
+        json={
+            "store_name": "HongXi SG Official",
+            "platform_shop_id": "1227492331",
+            "platform_shop_id_status": "manual_confirmed",
+        },
+    )
+
+    assert update_response.status_code == 200
+    assert len(refresh_calls) == 1
+    assert refresh_calls[0]["trigger_type"] == "shop_identity_changed"
+    assert refresh_calls[0]["pipeline_name"] == "postgresql_dashboard"
+    assert "semantic.fact_orders_monthly_atomic_mv" in refresh_calls[0]["targets"]
+    assert "semantic.fact_analytics_monthly_atomic_mv" in refresh_calls[0]["targets"]
+    assert refresh_calls[0]["context"]["shop_account_id"] == "shopee_sg_hongxi_local"
+    assert refresh_calls[0]["context"]["changed_fields"] == [
+        "store_name",
+        "platform_shop_id",
+        "platform_shop_id_status",
+    ]
+    assert cache_calls == ["invalidate_dashboard_business_overview"]

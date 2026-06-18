@@ -245,10 +245,16 @@ resolved_monthly_orders AS MATERIALIZED (
             THEN COALESCE(NULLIF(TRIM(canonical.platform_shop_id), ''), resolved.resolved_shop_id)
         END AS canonical_shop_id,
         CASE
+            WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL
+            THEN 'missing_identity'
+            WHEN resolved.resolved_shop_account_id IS NULL
+            THEN 'unresolved_shop_account'
             WHEN resolved.resolved_shop_account_id IS NOT NULL AND canonical.shop_account_id IS NULL
-            THEN 'missing_shop_account_authority'
-            WHEN resolved.resolved_shop_account_id IS NOT NULL AND NULLIF(TRIM(canonical.platform_shop_id), '') IS NULL
-            THEN 'missing_canonical_shop_id'
+            THEN 'unresolved_shop_account'
+            WHEN resolved.resolved_shop_account_id IS NOT NULL
+             AND LOWER(COALESCE(m.platform_code, '')) IN ('shopee')
+             AND NULLIF(TRIM(canonical.platform_shop_id), '') IS NULL
+            THEN 'missing_required_platform_shop_id'
             ELSE NULL
         END AS identity_warning_code,
         m.order_id,

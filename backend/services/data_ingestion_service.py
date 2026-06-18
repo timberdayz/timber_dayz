@@ -590,6 +590,11 @@ class DataIngestionService:
                 # 文件级别确定shop_id(从伴生JSON文件获取,没有则为'none')
                 # [*] v4.18.1重构:shop_id完全从文件元数据获取,不再逐行检查
                 file_shop_id = file_record.shop_id or "none"
+                file_main_account_id = getattr(file_record, "main_account_id", None)
+                file_shop_account_id = getattr(file_record, "shop_account_id", None)
+                file_store_name = getattr(file_record, "store_name", None)
+                file_platform_shop_id = getattr(file_record, "platform_shop_id", None)
+
                 if not file_record.shop_id:
                     logger.info(
                         f"[Ingest] [v4.18.1] 文件级别shop_id为空,设为'none'(将使用数据库账号主数据进行关联)"
@@ -601,6 +606,14 @@ class DataIngestionService:
                         row["platform_code"] = file_platform_code
                     if not row.get("shop_id"):
                         row["shop_id"] = file_shop_id
+                    if file_main_account_id and not row.get("main_account_id"):
+                        row["main_account_id"] = file_main_account_id
+                    if file_shop_account_id and not row.get("shop_account_id"):
+                        row["shop_account_id"] = file_shop_account_id
+                    if file_store_name and not row.get("store_name"):
+                        row["store_name"] = file_store_name
+                    if file_platform_shop_id and not row.get("platform_shop_id"):
+                        row["platform_shop_id"] = file_platform_shop_id
 
             # [*] DSS架构:跳过数据标准化,保留原始数据
             # DSS架构原则:数据同步只做数据采集和存储,数据标准化在 PostgreSQL semantic/api 层完成

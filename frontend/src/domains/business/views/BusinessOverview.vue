@@ -1503,7 +1503,7 @@ const getTrafficConversionMissingReason = (row) => {
   if (matched.warning_code === 'traffic_without_order_match_due_to_identity') {
     return '店铺身份未对齐：流量已入库，但订单落在同一账号的其他 shop_id，暂无法计算转化率。'
   }
-  if (matched.warning_code === 'canonical_shop_id_conflict') {
+  if (matched.warning_code === 'identity_conflict' || matched.warning_code === 'canonical_shop_id_conflict') {
     return '店铺身份未对齐：同一店铺账号出现多个 shop_id，请检查账号管理中的平台店铺ID。'
   }
   return '店铺身份未对齐：请检查账号管理中的店铺别名和平台店铺ID。'

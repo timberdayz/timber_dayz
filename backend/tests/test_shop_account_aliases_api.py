@@ -9,6 +9,26 @@ from backend.routers import main_accounts, shop_account_aliases, shop_accounts
 from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
 
 
+class _FakeBusinessOverviewCache:
+    def __init__(self, calls):
+        self.calls = calls
+
+    async def invalidate_dashboard_business_overview(self):
+        self.calls.append("invalidate_dashboard_business_overview")
+        return 0
+
+
+class _FakeRefreshQueueService:
+    calls = []
+
+    def __init__(self, db):
+        self.db = db
+
+    async def enqueue_refresh(self, **kwargs):
+        self.calls.append(kwargs)
+        return type("Task", (), {"job_id": "refresh-test"})()
+
+
 @pytest_asyncio.fixture
 async def alias_client(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
@@ -243,6 +263,140 @@ async def test_shop_accounts_list_falls_back_to_active_alias_when_primary_missin
     refreshed_shop_accounts = await alias_client.get("/api/shop-accounts")
     assert refreshed_shop_accounts.status_code == 200
     assert refreshed_shop_accounts.json()[0]["account_alias"] == "Legacy Alias"
+
+
+@pytest.mark.asyncio
+async def test_create_shop_account_alias_enqueues_identity_refresh_and_invalidates_cache(
+    alias_client,
+    monkeypatch,
+):
+    await _seed_shop_account(alias_client)
+    refresh_calls = []
+    cache_calls = []
+
+    class FakeRefreshQueueService(_FakeRefreshQueueService):
+        calls = refresh_calls
+
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_account_aliases.RefreshQueueService",
+        FakeRefreshQueueService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_account_aliases.get_cache_service",
+        lambda: _FakeBusinessOverviewCache(cache_calls),
+        raising=False,
+    )
+
+    shop_accounts_response = await alias_client.get("/api/shop-accounts")
+    assert shop_accounts_response.status_code == 200
+    shop_account_db_id = shop_accounts_response.json()[0]["id"]
+
+    response = await alias_client.post(
+        "/api/shop-account-aliases",
+        json={
+            "shop_account_id": shop_account_db_id,
+            "platform": "shopee",
+            "alias_value": "HongXi SG Raw",
+            "alias_type": "manual",
+            "source": "operator",
+            "is_primary": False,
+            "is_active": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(refresh_calls) == 1
+    assert refresh_calls[0]["trigger_type"] == "shop_identity_changed"
+    assert refresh_calls[0]["pipeline_name"] == "postgresql_dashboard"
+    assert refresh_calls[0]["context"]["changed_fields"] == ["alias"]
+    assert refresh_calls[0]["context"]["shop_account_db_id"] == shop_account_db_id
+    assert cache_calls == ["invalidate_dashboard_business_overview"]
+
+
+@pytest.mark.asyncio
+async def test_claim_shop_account_alias_enqueues_identity_refresh_and_invalidates_cache(
+    alias_client,
+    monkeypatch,
+):
+    await _seed_shop_account(alias_client)
+    refresh_calls = []
+    cache_calls = []
+
+    class FakeRefreshQueueService(_FakeRefreshQueueService):
+        calls = refresh_calls
+
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_account_aliases.RefreshQueueService",
+        FakeRefreshQueueService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_account_aliases.get_cache_service",
+        lambda: _FakeBusinessOverviewCache(cache_calls),
+        raising=False,
+    )
+
+    response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": "HongXi SG Raw",
+            "shop_account_id": "shopee_sg_hongxi_local",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(refresh_calls) == 1
+    assert refresh_calls[0]["trigger_type"] == "shop_identity_changed"
+    assert refresh_calls[0]["pipeline_name"] == "postgresql_dashboard"
+    assert refresh_calls[0]["context"]["shop_account_id"] == "shopee_sg_hongxi_local"
+    assert refresh_calls[0]["context"]["changed_fields"] == ["alias"]
+    assert cache_calls == ["invalidate_dashboard_business_overview"]
+
+
+@pytest.mark.asyncio
+async def test_clear_shop_account_primary_alias_enqueues_identity_refresh_and_invalidates_cache(
+    alias_client,
+    monkeypatch,
+):
+    await _seed_shop_account(alias_client)
+    claim_response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": "HongXi SG Raw",
+            "shop_account_id": "shopee_sg_hongxi_local",
+        },
+    )
+    assert claim_response.status_code == 200
+
+    refresh_calls = []
+    cache_calls = []
+
+    class FakeRefreshQueueService(_FakeRefreshQueueService):
+        calls = refresh_calls
+
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_account_aliases.RefreshQueueService",
+        FakeRefreshQueueService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_account_aliases.get_cache_service",
+        lambda: _FakeBusinessOverviewCache(cache_calls),
+        raising=False,
+    )
+
+    response = await alias_client.delete("/api/shop-account-aliases/primary/shopee_sg_hongxi_local")
+
+    assert response.status_code == 200
+    assert len(refresh_calls) == 1
+    assert refresh_calls[0]["trigger_type"] == "shop_identity_changed"
+    assert refresh_calls[0]["pipeline_name"] == "postgresql_dashboard"
+    assert refresh_calls[0]["context"]["shop_account_id"] == "shopee_sg_hongxi_local"
+    assert refresh_calls[0]["context"]["changed_fields"] == ["alias"]
+    assert cache_calls == ["invalidate_dashboard_business_overview"]
 
 
 def test_shop_account_aliases_router_exposes_unmatched_route():

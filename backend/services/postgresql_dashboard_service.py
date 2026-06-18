@@ -2261,7 +2261,7 @@ class PostgresqlDashboardService:
             ),
             warnings AS (
                 SELECT
-                    'canonical_shop_id_conflict'::varchar AS warning_code,
+                    'identity_conflict'::varchar AS warning_code,
                     platform_code,
                     resolved_shop_account_id AS shop_account_id,
                     NULL::text AS shop_id,
