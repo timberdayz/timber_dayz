@@ -1464,7 +1464,7 @@ async def get_shop_profit_statistics(
             orders_profit_amount = float(basis.get("orders_profit_amount", monthly_profit))
             achievement_rate = m.get("achievement_rate")
             allocatable_rate = allocatable_by_shop.get(key, 1.0)  # 无配置时默认 100% 可分配
-            allocatable_profit = profit_basis_amount * allocatable_rate
+            allocatable_profit = max(profit_basis_amount, 0.0) * allocatable_rate
             ass = assign_by_shop.get(key, {})
             sup_ratios = ass.get("supervisors", [])
             op_ratios = ass.get("operators", [])
@@ -1610,7 +1610,7 @@ async def get_annual_profit_statistics(
                 )
                 achievement_rate = m.get("achievement_rate")
                 allocatable_rate = allocatable_by_shop.get(key, 1.0)
-                allocatable_profit = profit_basis_amount * allocatable_rate
+                allocatable_profit = max(profit_basis_amount, 0.0) * allocatable_rate
                 ass = assign_by_shop.get(key, {})
                 sup_list = ass.get("supervisors", [])
                 op_list = ass.get("operators", [])

@@ -46,7 +46,7 @@ export function inferAssignmentRole(employee) {
 export function calculateAllocatableProfit(row) {
   const profitBasisAmount = toFiniteNumber(row?.profit_basis_amount, 0)
   const allocatableProfitRate = toFiniteNumber(row?.allocatable_profit_rate, 0)
-  return Math.round(profitBasisAmount * allocatableProfitRate * 100) / 100
+  return Math.round(Math.max(profitBasisAmount, 0) * allocatableProfitRate * 100) / 100
 }
 
 export function calculateAssignmentCommission(row, assignment) {

@@ -557,7 +557,7 @@ class HRIncomeCalculationService:
                 basis.get("profit_basis_amount"), 0.0
             )
             alloc_rate = self._to_float(allocatable_by_shop.get(shop_key, 1.0), 1.0)
-            alloc_profit = profit_basis_amount * alloc_rate
+            alloc_profit = max(profit_basis_amount, 0.0) * alloc_rate
 
             # Performance aggregation: assignment means full responsibility for the shop.
             perf_rec = performance_agg.setdefault(
