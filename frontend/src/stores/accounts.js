@@ -85,11 +85,14 @@ export const useAccountsStore = defineStore('accounts', {
 
       try {
         const mergedParams = { ...this.filters, ...params }
-        const defaultEnabled = mergedParams.include_disabled ? mergedParams.enabled : true
+        const shouldIncludeDisabled = Boolean(mergedParams.include_disabled)
+        const resolvedEnabled = shouldIncludeDisabled
+          ? mergedParams.enabled
+          : (mergedParams.enabled === false ? false : true)
         const [shopAccounts, mainAccounts, pendingDiscoveries] = await Promise.all([
           accountsApi.listShopAccounts({
             ...mergedParams,
-            enabled: defaultEnabled,
+            enabled: resolvedEnabled,
           }),
           accountsApi.listMainAccounts(),
           accountsApi.listPlatformShopDiscoveries(),

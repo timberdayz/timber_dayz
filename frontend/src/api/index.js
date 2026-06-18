@@ -2325,7 +2325,8 @@ export default {
     return await this._get(
       `/dashboard/business-overview/traffic-ranking${
         queryString ? '?' + queryString : ''
-      }`
+      }`,
+      { returnRawResponse: true }
     )
   },
 

@@ -33,6 +33,16 @@
       class="dashboard-freshness-alert"
     />
 
+    <el-alert
+      v-if="businessOverviewIdentityHealthAlert"
+      :title="businessOverviewIdentityHealthAlert.title"
+      :description="businessOverviewIdentityHealthAlert.description"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="dashboard-freshness-alert"
+    />
+
     <!-- 全局日期（页面级主控，各模块可跟随或手动覆盖） -->
     <div class="global-date-bar">
       <span class="global-date-label">全局日期</span>
@@ -877,11 +887,13 @@
             <template #default="{ row }">
               <div class="metric-stack">
                 <span>
-                  {{
-                    row.uv_conversion_rate != null && !Number.isNaN(Number(row.uv_conversion_rate))
-                      ? Number(row.uv_conversion_rate).toFixed(2) + '%'
-                      : '--'
-                  }}
+                  <template v-if="row.uv_conversion_rate != null && !Number.isNaN(Number(row.uv_conversion_rate))">
+                    {{ Number(row.uv_conversion_rate).toFixed(2) + '%' }}
+                  </template>
+                  <el-tooltip v-else-if="getTrafficConversionMissingReason(row)" :content="getTrafficConversionMissingReason(row)">
+                    <span class="metric-missing">--</span>
+                  </el-tooltip>
+                  <template v-else>--</template>
                 </span>
                 <span class="metric-previous-line">
                   <span class="metric-previous">
@@ -908,11 +920,13 @@
             <template #default="{ row }">
               <div class="metric-stack">
                 <span>
-                  {{
-                    row.pv_conversion_rate != null && !Number.isNaN(Number(row.pv_conversion_rate))
-                      ? Number(row.pv_conversion_rate).toFixed(2) + '%'
-                      : '--'
-                  }}
+                  <template v-if="row.pv_conversion_rate != null && !Number.isNaN(Number(row.pv_conversion_rate))">
+                    {{ Number(row.pv_conversion_rate).toFixed(2) + '%' }}
+                  </template>
+                  <el-tooltip v-else-if="getTrafficConversionMissingReason(row)" :content="getTrafficConversionMissingReason(row)">
+                    <span class="metric-missing">--</span>
+                  </el-tooltip>
+                  <template v-else>--</template>
                 </span>
                 <span class="metric-previous-line">
                   <span class="metric-previous">
@@ -1382,6 +1396,7 @@ import PageHeader from '@/components/common/PageHeader.vue'
 const loading = ref(false)
 const dashboardAssetNotice = ref(null)
 const businessOverviewDataFreshness = ref(null)
+const trafficRankingIdentityHealth = ref(null)
 const loadingKPI = ref(false)
 const loadingComparison = ref(false)
 const loadingInventory = ref(false)
@@ -1454,6 +1469,45 @@ const businessOverviewFreshnessAlert = computed(() => {
       '请检查是否存在模板变更阻断或待确认文件。'
   }
 })
+
+const businessOverviewIdentityHealthAlert = computed(() => {
+  const health = trafficRankingIdentityHealth.value
+  if (!health || health.status !== 'warning' || !health.warning_count) return null
+  return {
+    title: '店铺身份未对齐',
+    description:
+      `发现 ${health.warning_count} 个订单/流量店铺身份异常。` +
+      '账号管理是权威来源，请检查店铺别名、平台店铺ID，并重新触发身份重算。'
+  }
+})
+
+const getTrafficConversionMissingReason = (row) => {
+  if (!row) return ''
+  const hasConversion =
+    row.uv_conversion_rate != null ||
+    row.pv_conversion_rate != null ||
+    row.conversion_rate != null
+  if (hasConversion) return ''
+  const warnings = trafficRankingIdentityHealth.value?.warnings || []
+  const matched = warnings.find((item) => {
+    if (!item) return false
+    const samePlatform = String(item.platform_code || '') === String(row.platform_code || '')
+    const sameShop = String(item.shop_id || '') === String(row.shop_id || '')
+    const sameAccount =
+      item.shop_account_id &&
+      row.shop_account_id &&
+      String(item.shop_account_id) === String(row.shop_account_id)
+    return samePlatform && (sameShop || sameAccount)
+  })
+  if (!matched) return ''
+  if (matched.warning_code === 'traffic_without_order_match_due_to_identity') {
+    return '店铺身份未对齐：流量已入库，但订单落在同一账号的其他 shop_id，暂无法计算转化率。'
+  }
+  if (matched.warning_code === 'canonical_shop_id_conflict') {
+    return '店铺身份未对齐：同一店铺账号出现多个 shop_id，请检查账号管理中的平台店铺ID。'
+  }
+  return '店铺身份未对齐：请检查账号管理中的店铺别名和平台店铺ID。'
+}
 
 async function refreshDashboardAssetNotice() {
   try {
@@ -3063,6 +3117,7 @@ const loadTrafficRanking = async () => {
     }
     if (!dateStr) {
       trafficRankingData.value = []
+      trafficRankingIdentityHealth.value = null
       return
     }
 
@@ -3074,6 +3129,7 @@ const loadTrafficRanking = async () => {
     if (kpiPlatform.value) params.platform_code = kpiPlatform.value
 
     const response = await api.getBusinessOverviewTrafficRanking(params)
+    trafficRankingIdentityHealth.value = response?.meta?.identity_health || null
 
     // 响应拦截器已处理 success 字段，后端已转英文 key；兜底映射兼容中文列名
     const raw = response || []
@@ -3109,6 +3165,7 @@ const loadTrafficRanking = async () => {
     })
   } catch (error) {
     console.error('加载流量排名失败:', error)
+    trafficRankingIdentityHealth.value = null
     if (!consumeDashboardAssetError(error, 'business_overview')) {
       handleApiError(error, { showMessage: true, logError: true })
     }
@@ -3867,6 +3924,12 @@ watch(
 
 .metric-previous--negative {
   color: #f56c6c;
+}
+
+.metric-missing {
+  color: #e6a23c;
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
 }
 
 .metric-delta {

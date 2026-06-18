@@ -208,3 +208,15 @@ def test_business_overview_frontend_renders_freshness_alert():
     assert "businessOverviewFreshnessAlert" in text
     assert "businessOverviewDataFreshness.value = payload?.meta?.data_freshness || null" in text
     assert "订单/流量数据新鲜度不一致" in text
+
+
+def test_business_overview_frontend_renders_identity_health_alert_and_conversion_tooltips():
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "businessOverviewIdentityHealthAlert" in text
+    assert "trafficRankingIdentityHealth.value = response?.meta?.identity_health || null" in text
+    assert "getTrafficConversionMissingReason(row)" in text
+    assert "店铺身份未对齐" in text

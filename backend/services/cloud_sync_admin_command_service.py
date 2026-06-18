@@ -21,6 +21,7 @@ from backend.services.task_center_sync_service import TaskCenterSyncService
 from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, extract_run_id
 from backend.services.cloud_b_class_sync_utils import validate_b_class_table_name
+from backend.services.cloud_b_class_sync_service import CloudBClassSyncService
 from backend.utils.events import DataIngestedEvent
 from modules.core.db import (
     CloudBClassSyncCheckpoint,
@@ -389,11 +390,7 @@ class CloudSyncAdminCommandService:
             if bind is None:
                 return []
             inspector = sa_inspect(bind)
-            return sorted(
-                table_name
-                for table_name in inspector.get_table_names(schema="b_class")
-                if table_name.startswith("fact_")
-            )
+            return sorted(CloudBClassSyncService._filter_b_class_tables(inspector.get_table_names(schema="b_class")))
 
         return await self.db.run_sync(_inspect_tables)
 

@@ -74,7 +74,7 @@ export default {
   },
 
   async getStats() {
-    const shopAccounts = await this.listShopAccounts()
+    const shopAccounts = await this.listShopAccounts({ include_disabled: true })
     const platformBreakdown = {}
     for (const item of shopAccounts || []) {
       const key = item.platform || 'unknown'

@@ -2194,6 +2194,154 @@ class PostgresqlDashboardService:
                 )
         return rank_traffic_rows(normalized_rows, dimension="pv")
 
+    async def get_business_overview_identity_health(
+        self,
+        granularity: str,
+        target_date: str,
+        platform: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_granularity = str(granularity or "").strip().lower()
+        if normalized_granularity != "monthly":
+            return {"status": "ok", "warning_count": 0, "warnings": []}
+
+        period_key = self._business_overview_kpi_period_key(
+            normalized_granularity,
+            _normalize_period_start(target_date),
+        )
+        params: dict[str, Any] = {"period_key": period_key}
+        platform_filter = ""
+        if platform:
+            platform_filter = "AND platform_code = :platform_code"
+            params["platform_code"] = platform
+
+        query = f"""
+            WITH orders AS (
+                SELECT
+                    date_trunc('month', metric_date)::date AS period_month,
+                    platform_code,
+                    shop_id,
+                    resolved_shop_account_id,
+                    MAX(identity_warning_code) AS identity_warning_code,
+                    COUNT(DISTINCT order_id)::numeric AS order_count
+                FROM semantic.fact_orders_monthly_atomic
+                WHERE metric_date >= :period_key
+                  AND metric_date < (:period_key + INTERVAL '1 month')
+                  {platform_filter}
+                GROUP BY date_trunc('month', metric_date)::date, platform_code, shop_id, resolved_shop_account_id
+            ),
+            traffic AS (
+                SELECT
+                    date_trunc('month', metric_date)::date AS period_month,
+                    platform_code,
+                    shop_id,
+                    resolved_shop_account_id,
+                    MAX(identity_warning_code) AS identity_warning_code,
+                    SUM(visitor_count) AS visitor_count,
+                    SUM(page_views) AS page_views
+                FROM semantic.fact_analytics_monthly_atomic
+                WHERE metric_date >= :period_key
+                  AND metric_date < (:period_key + INTERVAL '1 month')
+                  {platform_filter}
+                GROUP BY date_trunc('month', metric_date)::date, platform_code, shop_id, resolved_shop_account_id
+            ),
+            identity_conflicts AS (
+                SELECT
+                    period_month,
+                    platform_code,
+                    resolved_shop_account_id,
+                    ARRAY_AGG(DISTINCT shop_id ORDER BY shop_id) AS shop_ids
+                FROM (
+                    SELECT period_month, platform_code, shop_id, resolved_shop_account_id FROM orders
+                    UNION ALL
+                    SELECT period_month, platform_code, shop_id, resolved_shop_account_id FROM traffic
+                ) unioned
+                WHERE resolved_shop_account_id IS NOT NULL
+                GROUP BY period_month, platform_code, resolved_shop_account_id
+                HAVING COUNT(DISTINCT shop_id) > 1
+            ),
+            warnings AS (
+                SELECT
+                    'canonical_shop_id_conflict'::varchar AS warning_code,
+                    platform_code,
+                    resolved_shop_account_id AS shop_account_id,
+                    NULL::text AS shop_id,
+                    shop_ids::text AS related_shop_ids,
+                    NULL::numeric AS order_count,
+                    NULL::numeric AS visitor_count,
+                    NULL::numeric AS page_views
+                FROM identity_conflicts
+
+                UNION ALL
+
+                SELECT
+                    'traffic_without_order_match_due_to_identity'::varchar AS warning_code,
+                    t.platform_code,
+                    t.resolved_shop_account_id AS shop_account_id,
+                    t.shop_id,
+                    ARRAY_AGG(DISTINCT o.shop_id ORDER BY o.shop_id)::text AS related_shop_ids,
+                    SUM(o.order_count) AS order_count,
+                    t.visitor_count,
+                    t.page_views
+                FROM traffic t
+                INNER JOIN orders o
+                  ON o.platform_code = t.platform_code
+                 AND o.period_month = t.period_month
+                 AND o.resolved_shop_account_id = t.resolved_shop_account_id
+                 AND COALESCE(o.shop_id, '') <> COALESCE(t.shop_id, '')
+                LEFT JOIN orders exact_o
+                  ON exact_o.platform_code = t.platform_code
+                 AND exact_o.period_month = t.period_month
+                 AND COALESCE(exact_o.shop_id, '') = COALESCE(t.shop_id, '')
+                WHERE t.resolved_shop_account_id IS NOT NULL
+                  AND exact_o.shop_id IS NULL
+                  AND COALESCE(t.visitor_count, 0) > 0
+                GROUP BY t.platform_code, t.resolved_shop_account_id, t.shop_id, t.visitor_count, t.page_views
+
+                UNION ALL
+
+                SELECT
+                    COALESCE(identity_warning_code, 'identity_warning')::varchar AS warning_code,
+                    platform_code,
+                    resolved_shop_account_id AS shop_account_id,
+                    shop_id,
+                    NULL::text AS related_shop_ids,
+                    order_count,
+                    NULL::numeric AS visitor_count,
+                    NULL::numeric AS page_views
+                FROM orders
+                WHERE identity_warning_code IS NOT NULL
+
+                UNION ALL
+
+                SELECT
+                    COALESCE(identity_warning_code, 'identity_warning')::varchar AS warning_code,
+                    platform_code,
+                    resolved_shop_account_id AS shop_account_id,
+                    shop_id,
+                    NULL::text AS related_shop_ids,
+                    NULL::numeric AS order_count,
+                    visitor_count,
+                    page_views
+                FROM traffic
+                WHERE identity_warning_code IS NOT NULL
+            )
+            SELECT *
+            FROM warnings
+            ORDER BY warning_code, platform_code, shop_account_id NULLS LAST, shop_id NULLS LAST
+            LIMIT 50
+        """
+        try:
+            rows = await self._fetch_rows(query, params)
+        except ProgrammingError:
+            return {"status": "unavailable", "warning_count": 0, "warnings": []}
+
+        warnings = [dict(row) for row in rows]
+        return {
+            "status": "warning" if warnings else "ok",
+            "warning_count": len(warnings),
+            "warnings": warnings,
+        }
+
     async def get_store_analysis_capabilities(
         self,
         platform: str,

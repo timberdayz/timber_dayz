@@ -252,6 +252,8 @@ class CloudBClassSyncService:
         for table_name in table_names:
             if "." in table_name:
                 continue
+            if table_name.startswith("fact_test_"):
+                continue
             if table_name.startswith("fact_"):
                 filtered.append(table_name)
         return filtered

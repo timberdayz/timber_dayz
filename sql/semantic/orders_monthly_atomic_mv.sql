@@ -37,7 +37,6 @@ mapped_monthly_orders AS MATERIALIZED (
             TRIM(
                 COALESCE(
                     raw_data->>'platform_shop_id',
-                    raw_data->>'shop_id',
                     raw_data->>'平台店铺ID',
                     raw_data->>'店铺ID'
                 )
@@ -205,8 +204,14 @@ prepared_identity_monthly_orders AS MATERIALIZED (
             ARRAY[
                 n.normalized_source_platform_shop_id,
                 n.normalized_source_shop_account_id,
-                n.normalized_source_shop_id,
-                n.normalized_source_shop_id_compact,
+                CASE
+                    WHEN n.normalized_source_shop_id NOT IN ('xihong', 'unknown', 'none')
+                    THEN n.normalized_source_shop_id
+                END,
+                CASE
+                    WHEN n.normalized_source_shop_id NOT IN ('xihong', 'unknown', 'none')
+                    THEN n.normalized_source_shop_id_compact
+                END,
                 n.normalized_store_label_raw
             ],
             ''
@@ -218,7 +223,8 @@ resolved_monthly_orders AS MATERIALIZED (
         m.metric_date,
         m.platform_code,
         CASE
-            WHEN resolved.resolved_shop_id IS NOT NULL THEN resolved.resolved_shop_id
+            WHEN resolved.resolved_shop_id IS NOT NULL
+            THEN COALESCE(NULLIF(TRIM(canonical.platform_shop_id), ''), resolved.resolved_shop_id)
             WHEN LOWER(COALESCE(m.source_shop_id, '')) IN ('', 'none', 'unknown', 'xihong') THEN 'unknown'
             ELSE COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id, 'unknown')
         END AS shop_id,
@@ -230,7 +236,21 @@ resolved_monthly_orders AS MATERIALIZED (
             WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL THEN 'missing_identity'
             ELSE 'unclaimed_identity'
         END AS resolution_method,
-        COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) AS identity_source_value,
+        CASE
+            WHEN resolved.resolved_shop_id IS NOT NULL THEN resolved.identity_source_value
+            ELSE COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id)
+        END AS identity_source_value,
+        CASE
+            WHEN resolved.resolved_shop_account_id IS NOT NULL
+            THEN COALESCE(NULLIF(TRIM(canonical.platform_shop_id), ''), resolved.resolved_shop_id)
+        END AS canonical_shop_id,
+        CASE
+            WHEN resolved.resolved_shop_account_id IS NOT NULL AND canonical.shop_account_id IS NULL
+            THEN 'missing_shop_account_authority'
+            WHEN resolved.resolved_shop_account_id IS NOT NULL AND NULLIF(TRIM(canonical.platform_shop_id), '') IS NULL
+            THEN 'missing_canonical_shop_id'
+            ELSE NULL
+        END AS identity_warning_code,
         m.order_id,
         m.paid_amount,
         m.product_quantity,
@@ -243,13 +263,17 @@ resolved_monthly_orders AS MATERIALIZED (
             c.resolved_shop_id,
             c.resolved_shop_account_id,
             c.resolution_method,
-            c.resolution_priority
+            c.resolution_priority,
+            c.identity_source_value
         FROM semantic.shop_identity_resolution_candidates c
         WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
           AND c.identity_value_normalized = ANY (m.normalized_identity_candidates)
         ORDER BY c.resolution_priority, c.resolved_shop_id
         LIMIT 1
     ) resolved ON TRUE
+    LEFT JOIN core.shop_accounts canonical
+      ON LOWER(COALESCE(canonical.platform, '')) = LOWER(COALESCE(m.platform_code, ''))
+     AND canonical.shop_account_id = resolved.resolved_shop_account_id
 ),
 deduplicated_monthly_orders AS (
     SELECT
@@ -269,6 +293,8 @@ SELECT
     resolved_shop_account_id,
     resolution_method,
     identity_source_value,
+    canonical_shop_id,
+    identity_warning_code,
     order_id,
     COALESCE(paid_amount, 0) AS paid_amount,
     COALESCE(product_quantity, 0) AS product_quantity,

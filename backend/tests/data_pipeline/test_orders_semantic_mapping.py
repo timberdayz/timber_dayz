@@ -672,3 +672,244 @@ async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id(
         assert float(rows[0]["profit"]) == 18.0
 
         await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_orders_monthly_atomic_uses_account_authority_over_generic_source_shop_id():
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        store_key = "\u5e97\u94fa"
+        store_label = "Shopee\u65b0\u52a0\u57613\u5e97"
+        alias_value = "\u65b0\u52a0\u57613\u5e97"
+        raw_data = {
+            store_key: store_label,
+            "shop_id": "xihong",
+            "order_id": "SO-SG-3-1",
+            "buyer_payment_rmb": "100",
+            "product_quantity": "1",
+            "profit_rmb": "10",
+        }
+
+        async with session_factory() as session:
+            await _create_orders_b_class_tables(session)
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_accounts (
+                        platform, shop_account_id, store_name, platform_shop_id
+                    ) VALUES
+                    ('shopee', 'xihong', 'legacy account placeholder', 'legacy-shop-id'),
+                    ('shopee', 'shopee_sg_xhkj33_local', 'xhkj33.sg', '1308200832')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_account_aliases (
+                        shop_account_id, platform, alias_value, alias_normalized, is_primary, is_active
+                    ) VALUES (
+                        2, 'shopee', :alias_value, :alias_value, true, true
+                    )
+                    """
+                ),
+                {"alias_value": alias_value},
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_monthly (
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, period_start_date, period_end_date,
+                        period_start_time, period_end_time, raw_data, header_columns,
+                        data_hash, ingest_timestamp, currency_code
+                    ) VALUES (
+                        'shopee', 'xihong', 'orders', 'monthly',
+                        DATE '2026-06-01', DATE '2026-06-01', DATE '2026-06-30',
+                        TIMESTAMP '2026-06-01 00:00:00', TIMESTAMP '2026-06-30 23:59:59',
+                        CAST(:raw_data AS jsonb),
+                        CAST(:header_columns AS jsonb),
+                        'hash-sg-3-authority-1', TIMESTAMP '2026-06-18 10:00:00', 'SGD'
+                    )
+                    """
+                ),
+                {
+                    "raw_data": json.dumps(raw_data, ensure_ascii=False),
+                    "header_columns": json.dumps(list(raw_data.keys()), ensure_ascii=False),
+                },
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(session, "semantic.fact_orders_monthly_atomic_mv")
+            await session.commit()
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT shop_id, resolved_shop_account_id, resolution_method, identity_source_value
+                        FROM semantic.fact_orders_monthly_atomic_mv
+                        WHERE order_id = 'SO-SG-3-1'
+                        """
+                    )
+                )
+            ).mappings().one()
+
+        assert row["shop_id"] == "1308200832"
+        assert row["resolved_shop_account_id"] == "shopee_sg_xhkj33_local"
+        assert row["resolution_method"] == "alias_match"
+        assert row["identity_source_value"] == alias_value
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id():
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        store_key = "\u5e97\u94fa"
+        alias_value = "\u65b0\u52a0\u57613\u5e97"
+        order_raw = {
+            store_key: f"Shopee{alias_value}",
+            "shop_id": "xihong",
+            "order_id": "SO-SG-3-1",
+            "buyer_payment_rmb": "100",
+            "product_quantity": "1",
+            "profit_rmb": "10",
+        }
+        traffic_raw = {
+            "visitor_count": "200",
+            "page_views": "400",
+            "impressions": "1000",
+        }
+
+        async with session_factory() as session:
+            await _create_orders_b_class_tables(session)
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
+            for table_name in (
+                "fact_shopee_analytics_monthly",
+                "fact_tiktok_analytics_monthly",
+                "fact_miaoshou_analytics_monthly",
+            ):
+                await session.execute(
+                    text(
+                        f"""
+                        CREATE TABLE b_class.{table_name} (
+                            platform_code VARCHAR(32),
+                            shop_id VARCHAR(256),
+                            metric_date DATE,
+                            raw_data JSONB,
+                            data_hash VARCHAR(128),
+                            ingest_timestamp TIMESTAMP
+                        )
+                        """
+                    )
+                )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_accounts (
+                        platform, shop_account_id, store_name, platform_shop_id
+                    ) VALUES
+                    ('shopee', 'xihong', 'legacy account placeholder', 'legacy-shop-id'),
+                    ('shopee', 'shopee_sg_xhkj33_local', 'xhkj33.sg', '1308200832')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_account_aliases (
+                        shop_account_id, platform, alias_value, alias_normalized, is_primary, is_active
+                    ) VALUES (
+                        2, 'shopee', :alias_value, :alias_value, true, true
+                    )
+                    """
+                ),
+                {"alias_value": alias_value},
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_orders_monthly (
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, period_start_date, period_end_date,
+                        period_start_time, period_end_time, raw_data, header_columns,
+                        data_hash, ingest_timestamp, currency_code
+                    ) VALUES (
+                        'shopee', 'xihong', 'orders', 'monthly',
+                        DATE '2026-06-01', DATE '2026-06-01', DATE '2026-06-30',
+                        TIMESTAMP '2026-06-01 00:00:00', TIMESTAMP '2026-06-30 23:59:59',
+                        CAST(:order_raw AS jsonb),
+                        CAST(:order_headers AS jsonb),
+                        'hash-sg-3-order-1', TIMESTAMP '2026-06-18 10:00:00', 'SGD'
+                    )
+                    """
+                ),
+                {
+                    "order_raw": json.dumps(order_raw, ensure_ascii=False),
+                    "order_headers": json.dumps(list(order_raw.keys()), ensure_ascii=False),
+                },
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_class.fact_shopee_analytics_monthly (
+                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                    ) VALUES (
+                        'shopee', '1308200832', DATE '2026-06-01',
+                        CAST(:traffic_raw AS jsonb),
+                        'hash-sg-3-traffic-1', TIMESTAMP '2026-06-18 10:05:00'
+                    )
+                    """
+                ),
+                {"traffic_raw": json.dumps(traffic_raw, ensure_ascii=False)},
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            for target in (
+                "semantic.shop_identity_resolution_candidates",
+                "semantic.fact_orders_monthly_atomic_mv",
+                "semantic.fact_orders_monthly_atomic",
+                "semantic.fact_analytics_monthly_atomic_mv",
+                "semantic.fact_analytics_monthly_atomic",
+                "mart.shop_month_kpi",
+            ):
+                await execute_sql_target(session, target)
+            await session.commit()
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT shop_id, order_count, visitor_count, page_views, uv_conversion_rate, pv_conversion_rate
+                        FROM mart.shop_month_kpi
+                        WHERE period_month = DATE '2026-06-01'
+                          AND platform_code = 'shopee'
+                          AND shop_id = '1308200832'
+                        """
+                    )
+                )
+            ).mappings().one()
+
+        assert row["shop_id"] == "1308200832"
+        assert float(row["order_count"]) == 1.0
+        assert float(row["visitor_count"]) == 200.0
+        assert float(row["page_views"]) == 400.0
+        assert float(row["uv_conversion_rate"]) == 0.5
+        assert float(row["pv_conversion_rate"]) == 0.25
+
+        await engine.dispose()

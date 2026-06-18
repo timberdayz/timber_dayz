@@ -45,6 +45,20 @@ def _build_session():
     return sessionmaker(bind=engine, expire_on_commit=False)()
 
 
+def _build_session_factory():
+    os.environ["CLOUD_SYNC_AUTO_SYNC_ENABLED"] = "true"
+    engine = create_engine(
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    CloudBClassSyncTask.__table__.create(bind=engine, checkfirst=True)
+    SystemConfig.__table__.create(bind=engine, checkfirst=True)
+    TaskCenterTask.__table__.create(bind=engine, checkfirst=True)
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
 def _as_utc(value):
     if value is None:
         return None
@@ -378,6 +392,96 @@ def test_worker_renews_lease_while_blocking_sync_is_running():
         assert _as_utc(observed["mid_heartbeat"]) > _as_utc(refreshed.last_attempt_started_at)
         assert observed["mid_lease"] is not None
         assert refreshed.heartbeat_at is not None
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
+def test_worker_uses_dedicated_session_for_background_heartbeat():
+    session_factory = _build_session_factory()
+    db = session_factory()
+    heartbeat_session_count = 0
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db, source_table_name="fact_shopee_orders_daily_dedicated_heartbeat")
+
+        class BlockingExecutor:
+            def sync_table(self, source_table_name: str, batch_size: int = 1000):
+                time.sleep(0.12)
+                return {
+                    "status": "completed",
+                    "projection_status": "completed",
+                    "source_table_name": source_table_name,
+                }
+
+        def heartbeat_session_factory():
+            nonlocal heartbeat_session_count
+            heartbeat_session_count += 1
+            return session_factory()
+
+        worker = CloudBClassAutoSyncWorker(
+            db,
+            sync_executor=BlockingExecutor(),
+            lease_seconds=0.05,
+            heartbeat_session_factory=heartbeat_session_factory,
+        )
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert refreshed.status == "completed"
+        assert refreshed.heartbeat_at is not None
+        assert heartbeat_session_count > 0
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
+def test_worker_releases_main_session_before_running_sync_executor():
+    session_factory = _build_session_factory()
+    close_calls = 0
+
+    class TrackingSession(session_factory.class_):
+        def close(self):
+            nonlocal close_calls
+            close_calls += 1
+            super().close()
+
+    tracking_factory = sessionmaker(
+        bind=session_factory.kw["bind"],
+        expire_on_commit=False,
+        class_=TrackingSession,
+    )
+    db = tracking_factory()
+    observed = {}
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db, source_table_name="fact_shopee_orders_daily_release_session")
+
+        class ObservingExecutor:
+            def sync_table(self, source_table_name: str, batch_size: int = 1000):
+                observed["close_calls_during_sync"] = close_calls
+                return {
+                    "status": "completed",
+                    "projection_status": "completed",
+                    "source_table_name": source_table_name,
+                }
+
+        worker = CloudBClassAutoSyncWorker(
+            db,
+            sync_executor=ObservingExecutor(),
+            heartbeat_session_factory=tracking_factory,
+        )
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert observed["close_calls_during_sync"] > 0
+        assert refreshed.status == "completed"
     finally:
         db.rollback()
         db.query(CloudBClassSyncTask).delete()

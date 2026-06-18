@@ -12,6 +12,8 @@ SELECT
     resolved_shop_account_id,
     resolution_method,
     identity_source_value,
+    canonical_shop_id,
+    identity_warning_code,
     visitor_count,
     product_visitor_count,
     page_views,

@@ -258,6 +258,7 @@ class CloudSyncWorkerFactory:
             db=db,
             sync_executor=service,
             batch_size=self.batch_size,
+            heartbeat_session_factory=self.session_factory,
         )
 
     def recover_stale_running_tasks(self, worker_id: str) -> dict:

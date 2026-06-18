@@ -24,11 +24,19 @@ class CloudBClassAutoSyncWorker:
         "projection_runtime_failure",
     }
 
-    def __init__(self, db, sync_executor, lease_seconds: int = 300, batch_size: int = 1000):
+    def __init__(
+        self,
+        db,
+        sync_executor,
+        lease_seconds: int = 300,
+        batch_size: int = 1000,
+        heartbeat_session_factory=None,
+    ):
         self.db = db
         self.sync_executor = sync_executor
         self.lease_seconds = lease_seconds
         self.batch_size = batch_size
+        self.heartbeat_session_factory = heartbeat_session_factory
 
     def _auto_sync_enabled(self) -> bool:
         explicit_flag = os.getenv("CLOUD_SYNC_AUTO_SYNC_ENABLED")
@@ -117,6 +125,31 @@ class CloudBClassAutoSyncWorker:
                 lease_expires_at=task.lease_expires_at,
             )
 
+    def _heartbeat_with_dedicated_session(self, task_id: int, worker_id: str) -> None:
+        if self.heartbeat_session_factory is None:
+            self.heartbeat(task_id, worker_id)
+            return
+
+        db = self.heartbeat_session_factory()
+        try:
+            task_center = TaskCenterSyncService(db)
+            task = db.get(CloudBClassSyncTask, task_id)
+            if task is None or task.claimed_by != worker_id:
+                return
+            now = datetime.now(timezone.utc)
+            task.heartbeat_at = now
+            task.lease_expires_at = now + timedelta(seconds=self.lease_seconds)
+            db.commit()
+            mirrored = task_center.get_task(task.job_id)
+            if mirrored is not None:
+                task_center.update_task(
+                    mirrored,
+                    heartbeat_at=task.heartbeat_at,
+                    lease_expires_at=task.lease_expires_at,
+                )
+        finally:
+            db.close()
+
     def _heartbeat_interval_seconds(self) -> float:
         configured = os.getenv("CLOUD_SYNC_HEARTBEAT_INTERVAL_SECONDS")
         if configured:
@@ -133,7 +166,7 @@ class CloudBClassAutoSyncWorker:
             interval_seconds = self._heartbeat_interval_seconds()
             while not stop_event.wait(interval_seconds):
                 try:
-                    self.heartbeat(task_id, worker_id)
+                    self._heartbeat_with_dedicated_session(task_id, worker_id)
                 except Exception:
                     break
 
@@ -185,13 +218,23 @@ class CloudBClassAutoSyncWorker:
         task = self.claim_next_task(worker_id=worker_id)
         if task is None:
             return None
+        task_id = task.id
+        source_table_name = task.source_table_name
+
+        # Release the local DB connection before long cloud writes. Otherwise the
+        # task session can sit idle for minutes and be closed before final status
+        # commit, especially on Windows collection laptops.
+        self.db.close()
 
         try:
             result = await self._run_with_lease_heartbeat(
-                task.id,
+                task_id,
                 worker_id,
-                lambda: self.sync_executor.sync_table(task.source_table_name, batch_size=self.batch_size),
+                lambda: self.sync_executor.sync_table(source_table_name, batch_size=self.batch_size),
             )
+            task = self.db.get(CloudBClassSyncTask, task_id)
+            if task is None:
+                return None
             sync_status = result.get("status", "completed")
             projection_status = result.get("projection_status", "completed")
             if sync_status != "completed":
@@ -221,6 +264,9 @@ class CloudBClassAutoSyncWorker:
                 task.error_code = None if final_status == "completed" else self._result_error_code(result)
                 task.next_retry_at = None
         except Exception as exc:
+            task = self.db.get(CloudBClassSyncTask, task_id)
+            if task is None:
+                return None
             error_code = self._normalize_error_code(exc)
             task.last_error = str(exc)
             task.error_code = error_code

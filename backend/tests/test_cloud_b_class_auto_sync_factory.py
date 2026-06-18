@@ -12,7 +12,7 @@ from backend.services.cloud_b_class_auto_sync_factory import (
     run_cloud_sync_startup_checks_from_env,
 )
 from backend.services.cloud_b_class_mirror_manager import CloudBClassMirrorManager
-from backend.services.cloud_b_class_sync_service import SQLAlchemyCloudWriter, build_sync_payload
+from backend.services.cloud_b_class_sync_service import CloudBClassSyncService, SQLAlchemyCloudWriter, build_sync_payload
 from backend.services.cloud_b_class_auto_sync_runtime import CloudBClassAutoSyncRuntime
 
 
@@ -45,6 +45,19 @@ def test_runtime_cloud_sync_service_no_longer_writes_cloud_b_class_schema():
     )
 
     assert "INSERT INTO cloud_b_class" not in source
+
+
+def test_cloud_sync_table_filter_excludes_test_fact_tables():
+    tables = CloudBClassSyncService._filter_b_class_tables(
+        [
+            "fact_shopee_orders_monthly",
+            "fact_test_platform_orders_daily",
+            "dim_shop",
+            "b_class.fact_tiktok_orders_daily",
+        ]
+    )
+
+    assert tables == ["fact_shopee_orders_monthly"]
 
 
 def test_build_sync_payload_drops_local_foreign_keys_for_cloud_write():

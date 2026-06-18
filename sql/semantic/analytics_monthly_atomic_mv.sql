@@ -34,7 +34,6 @@ mapped_monthly_traffic AS MATERIALIZED (
             TRIM(
                 COALESCE(
                     raw_data->>'platform_shop_id',
-                    raw_data->>'shop_id',
                     raw_data->>'平台店铺ID',
                     raw_data->>'店铺ID'
                 )
@@ -301,18 +300,24 @@ normalized_monthly_traffic AS MATERIALIZED (
             ARRAY[
                 LOWER(COALESCE(source_platform_shop_id, '')),
                 LOWER(COALESCE(source_shop_account_id, '')),
-                LOWER(COALESCE(source_shop_id, '')),
-                REGEXP_REPLACE(
-                    REGEXP_REPLACE(
-                        LOWER(TRIM(COALESCE(source_shop_id, ''))),
-                        '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                CASE
+                    WHEN LOWER(COALESCE(source_shop_id, '')) NOT IN ('xihong', 'unknown', 'none')
+                    THEN LOWER(COALESCE(source_shop_id, ''))
+                END,
+                CASE
+                    WHEN LOWER(COALESCE(source_shop_id, '')) NOT IN ('xihong', 'unknown', 'none')
+                    THEN REGEXP_REPLACE(
+                        REGEXP_REPLACE(
+                            LOWER(TRIM(COALESCE(source_shop_id, ''))),
+                            '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                            '',
+                            'i'
+                        ),
+                        '[[:space:]_()/-]+',
                         '',
-                        'i'
-                    ),
-                    '[[:space:]_()/-]+',
-                    '',
-                    'g'
-                ),
+                        'g'
+                    )
+                END,
                 REGEXP_REPLACE(
                     REGEXP_REPLACE(
                         LOWER(TRIM(COALESCE(store_label_raw, ''))),
@@ -336,7 +341,8 @@ resolved_monthly_traffic AS MATERIALIZED (
         m.metric_date,
         m.platform_code,
         CASE
-            WHEN resolved.resolved_shop_id IS NOT NULL THEN resolved.resolved_shop_id
+            WHEN resolved.resolved_shop_id IS NOT NULL
+            THEN COALESCE(NULLIF(TRIM(canonical.platform_shop_id), ''), resolved.resolved_shop_id)
             WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL THEN 'unknown'
             ELSE COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id)
         END AS shop_id,
@@ -348,7 +354,21 @@ resolved_monthly_traffic AS MATERIALIZED (
             WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL THEN 'missing_identity'
             ELSE 'unclaimed_identity'
         END AS resolution_method,
-        COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) AS identity_source_value,
+        CASE
+            WHEN resolved.resolved_shop_id IS NOT NULL THEN resolved.identity_source_value
+            ELSE COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id)
+        END AS identity_source_value,
+        CASE
+            WHEN resolved.resolved_shop_account_id IS NOT NULL
+            THEN COALESCE(NULLIF(TRIM(canonical.platform_shop_id), ''), resolved.resolved_shop_id)
+        END AS canonical_shop_id,
+        CASE
+            WHEN resolved.resolved_shop_account_id IS NOT NULL AND canonical.shop_account_id IS NULL
+            THEN 'missing_shop_account_authority'
+            WHEN resolved.resolved_shop_account_id IS NOT NULL AND NULLIF(TRIM(canonical.platform_shop_id), '') IS NULL
+            THEN 'missing_canonical_shop_id'
+            ELSE NULL
+        END AS identity_warning_code,
         m.visitor_count,
         m.product_visitor_count,
         m.page_views,
@@ -365,13 +385,17 @@ resolved_monthly_traffic AS MATERIALIZED (
             c.resolved_shop_id,
             c.resolved_shop_account_id,
             c.resolution_method,
-            c.resolution_priority
+            c.resolution_priority,
+            c.identity_source_value
         FROM semantic.shop_identity_resolution_candidates c
         WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
           AND c.identity_value_normalized = ANY (m.normalized_identity_candidates)
         ORDER BY c.resolution_priority, c.resolved_shop_id
         LIMIT 1
     ) resolved ON TRUE
+    LEFT JOIN core.shop_accounts canonical
+      ON LOWER(COALESCE(canonical.platform, '')) = LOWER(COALESCE(m.platform_code, ''))
+     AND canonical.shop_account_id = resolved.resolved_shop_account_id
 ),
 deduplicated_monthly_traffic AS (
     SELECT
@@ -391,6 +415,8 @@ SELECT
     resolved_shop_account_id,
     resolution_method,
     identity_source_value,
+    canonical_shop_id,
+    identity_warning_code,
     visitor_count,
     product_visitor_count,
     page_views,
