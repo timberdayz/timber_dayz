@@ -6,6 +6,10 @@ import { resolve } from 'node:path'
 const repoRoot = resolve(import.meta.dirname, '..')
 const apiSource = readFileSync(resolve(repoRoot, 'src/api/index.js'), 'utf8')
 const viewSource = readFileSync(resolve(repoRoot, 'src/domains/data_platform/views/DataSyncFiles.vue'), 'utf8')
+const templateManagementSource = readFileSync(
+  resolve(repoRoot, 'src/domains/data_platform/views/DataSyncTemplates.vue'),
+  'utf8',
+)
 const templateDeduplicationPanelSource = readFileSync(
   resolve(repoRoot, 'src/components/dataSync/TemplateDeduplicationReviewPanel.vue'),
   'utf8',
@@ -80,4 +84,12 @@ test('template hash panel merges backend options with edited bindings', () => {
   assert.match(templateDeduplicationPanelSource, /props\.currentHeaderBindings/)
   assert.match(templateDeduplicationPanelSource, /blocked_reason/)
   assert.match(templateDeduplicationPanelSource, /legacyCompatible/)
+})
+
+test('template save errors explain family hash semantic key changes', () => {
+  assert.match(templateManagementSource, /family_hash_keys/)
+  assert.match(templateManagementSource, /current_hash_keys/)
+  assert.match(templateManagementSource, /semantic_hash_key_changes/)
+  assert.match(templateManagementSource, /suggested_action/)
+  assert.match(templateManagementSource, /Hash口径/)
 })

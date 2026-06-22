@@ -1572,6 +1572,172 @@ async def test_save_mapping_template_rejects_family_hash_key_downgrade(
 
 
 @pytest.mark.asyncio
+async def test_save_mapping_template_allows_source_header_rename_when_semantic_hash_keys_match(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        legacy_template = FieldMappingTemplate(
+            platform="tiktok",
+            data_domain="products",
+            granularity="monthly",
+            sub_domain=None,
+            header_row=0,
+            header_columns=["ID", "Status"],
+            deduplication_fields=["ID", "Status"],
+            header_bindings=[
+                {
+                    "raw_name": "ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "Status",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+            template_name="tiktok_products_monthly_legacy_source_names",
+            version=1,
+            status="published",
+            field_count=2,
+            created_by="test",
+        )
+        session.add(legacy_template)
+        await session.commit()
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "tiktok",
+            "data_domain": "products",
+            "granularity": "monthly",
+            "header_row": 0,
+            "header_columns": ["Product ID", "Item Status"],
+            "deduplication_fields": ["Product ID", "Item Status"],
+            "created_by": "test",
+            "save_mode": "new_version",
+            "header_bindings": [
+                {
+                    "raw_name": "Product ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "Item Status",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "period_start_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                },
+                {
+                    "target_field": "period_end_date",
+                    "source_column": "__file_date_to__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        template = await session.get(FieldMappingTemplate, template_id)
+
+    assert template.deduplication_fields == ["product_id", "item_status"]
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_returns_structured_family_hash_change_for_semantic_change(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        legacy_template = FieldMappingTemplate(
+            platform="tiktok",
+            data_domain="products",
+            granularity="monthly",
+            sub_domain=None,
+            header_row=0,
+            header_columns=["Product Name"],
+            deduplication_fields=["Product Name"],
+            header_bindings=[
+                {
+                    "raw_name": "Product Name",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                }
+            ],
+            template_name="tiktok_products_monthly_legacy_product_name_hash",
+            version=1,
+            status="published",
+            field_count=1,
+            created_by="test",
+        )
+        session.add(legacy_template)
+        await session.commit()
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "tiktok",
+            "data_domain": "products",
+            "granularity": "monthly",
+            "header_row": 0,
+            "header_columns": ["Product ID"],
+            "deduplication_fields": ["Product ID"],
+            "created_by": "test",
+            "save_mode": "new_version",
+            "header_bindings": [
+                {
+                    "raw_name": "Product ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                }
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "period_start_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                },
+                {
+                    "target_field": "period_end_date",
+                    "source_column": "__file_date_to__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    hash_policy = payload["data"]["hash_policy"]
+    assert hash_policy["family_hash_keys"] == ["product_name"]
+    assert hash_policy["current_hash_keys"] == ["product_id"]
+    assert hash_policy["semantic_hash_key_changes"] == [
+        {"change": "missing", "semantic_key": "product_name"},
+        {"change": "added", "semantic_key": "product_id"},
+    ]
+    assert hash_policy["suggested_action"] == "migrate_family_hash_keys"
+    assert "Hash" in payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_save_mapping_template_syncs_hash_participation_from_selected_semantic_keys(
     template_update_context_client,
 ):

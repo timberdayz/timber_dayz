@@ -777,6 +777,26 @@ const showTemplateGovernanceSummary = (result) => {
 }
 
 const getHashPolicyFailureMessage = (preview) => {
+  const familyHashKeys = Array.isArray(preview?.family_hash_keys) ? preview.family_hash_keys : []
+  const currentHashKeys = Array.isArray(preview?.current_hash_keys) ? preview.current_hash_keys : []
+  const semanticHashKeyChanges = Array.isArray(preview?.semantic_hash_key_changes)
+    ? preview.semantic_hash_key_changes
+    : []
+  const sourceFieldChanges = Array.isArray(preview?.source_field_changes)
+    ? preview.source_field_changes
+    : []
+  const suggestedAction = preview?.suggested_action || ''
+  if (semanticHashKeyChanges.length > 0 && (familyHashKeys.length > 0 || currentHashKeys.length > 0)) {
+    const familyText = familyHashKeys.length > 0 ? familyHashKeys.join('、') : '无'
+    const currentText = currentHashKeys.length > 0 ? currentHashKeys.join('、') : '无'
+    const actionText = suggestedAction === 'migrate_family_hash_keys'
+      ? '需要迁移模板家族 Hash 口径，或新建模板家族/sub_domain。'
+      : '请新建模板家族/sub_domain，避免改变已有模板家族的数据去重口径。'
+    return `Hash口径变化：模板家族当前为 ${familyText}，本次选择为 ${currentText}。${actionText}`
+  }
+  if (sourceFieldChanges.length > 0 && semanticHashKeyChanges.length === 0) {
+    return '源字段名变化已识别，标准语义字段未变化，可继续保存。'
+  }
   if (preview?.blocking_errors?.[0]) {
     return preview.blocking_errors[0]
   }

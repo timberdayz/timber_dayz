@@ -100,6 +100,12 @@ DATE_PARSE_RANGE_VALUE_KINDS = {"date_range", "datetime_range", "time_range"}
 SYSTEM_HASH_SCOPE_KEYS = {"platform_code", "shop_id", "data_domain", "granularity", "sub_domain"}
 
 
+class TemplateFamilyHashKeyMismatch(ValueError):
+    def __init__(self, message: str, payload: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.payload = payload
+
+
 def _normalize_dimension_value(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -109,15 +115,118 @@ def _normalize_dimension_value(value: Any) -> Optional[str]:
     return text or None
 
 
-def _canonical_user_hash_key_set(fields: list[str] | None) -> set[str]:
+def _binding_lookup_by_source(header_bindings: list[dict[str, Any]] | None) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for binding in header_bindings or []:
+        if binding.get("semantic_review_status") != "confirmed_semantic":
+            continue
+        semantic_key = normalize_semantic_key(
+            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+        )
+        if not semantic_key or not is_canonical_semantic_key(semantic_key):
+            continue
+        for source in (
+            binding.get("raw_name"),
+            binding.get("source_header"),
+            binding.get("display_name"),
+        ):
+            source_text = str(source or "").strip()
+            if source_text:
+                lookup[source_text.lower()] = semantic_key
+    return lookup
+
+
+def _canonical_user_hash_key_set(
+    fields: list[str] | None,
+    header_bindings: list[dict[str, Any]] | None = None,
+) -> set[str]:
     keys: set[str] = set()
+    binding_lookup = _binding_lookup_by_source(header_bindings)
     for field in fields or []:
-        semantic_key = normalize_semantic_key(field)
+        field_text = str(field or "").strip()
+        semantic_key = normalize_semantic_key(field_text)
+        if not semantic_key or not is_canonical_semantic_key(semantic_key):
+            semantic_key = binding_lookup.get(field_text.lower())
         if not semantic_key or semantic_key in SYSTEM_HASH_SCOPE_KEYS:
             continue
         if is_canonical_semantic_key(semantic_key):
             keys.add(semantic_key)
     return keys
+
+
+def _hash_source_by_semantic_key(
+    fields: list[str] | None,
+    header_bindings: list[dict[str, Any]] | None,
+) -> dict[str, str]:
+    binding_lookup = _binding_lookup_by_source(header_bindings)
+    source_by_key: dict[str, str] = {}
+    for field in fields or []:
+        field_text = str(field or "").strip()
+        semantic_key = normalize_semantic_key(field_text)
+        if not semantic_key or not is_canonical_semantic_key(semantic_key):
+            semantic_key = binding_lookup.get(field_text.lower())
+        if semantic_key and semantic_key not in SYSTEM_HASH_SCOPE_KEYS and semantic_key not in source_by_key:
+            source_by_key[semantic_key] = field_text
+    for binding in header_bindings or []:
+        semantic_key = normalize_semantic_key(binding.get("semantic_key"))
+        if not semantic_key or semantic_key in source_by_key:
+            continue
+        raw_name = str(binding.get("raw_name") or binding.get("source_header") or binding.get("display_name") or "").strip()
+        if raw_name:
+            source_by_key[semantic_key] = raw_name
+    return source_by_key
+
+
+def _family_hash_change_payload(
+    *,
+    existing_template: FieldMappingTemplate,
+    existing_keys: set[str],
+    current_keys: set[str],
+    current_deduplication_fields: list[str],
+    current_header_bindings: list[dict[str, Any]],
+    data_domain: str,
+) -> dict[str, Any]:
+    existing_sources = _hash_source_by_semantic_key(
+        existing_template.deduplication_fields or [],
+        existing_template.header_bindings or [],
+    )
+    current_sources = _hash_source_by_semantic_key(
+        current_deduplication_fields,
+        current_header_bindings,
+    )
+    source_field_changes = []
+    for semantic_key in sorted(existing_keys & current_keys):
+        family_raw_name = existing_sources.get(semantic_key)
+        current_raw_name = current_sources.get(semantic_key)
+        if family_raw_name and current_raw_name and family_raw_name != current_raw_name:
+            source_field_changes.append(
+                {
+                    "semantic_key": semantic_key,
+                    "family_raw_name": family_raw_name,
+                    "current_raw_name": current_raw_name,
+                }
+            )
+    semantic_hash_key_changes = [
+        {"change": "missing", "semantic_key": key}
+        for key in sorted(existing_keys - current_keys)
+    ] + [
+        {"change": "added", "semantic_key": key}
+        for key in sorted(current_keys - existing_keys)
+    ]
+    suggested_action = "save_allowed"
+    if semantic_hash_key_changes:
+        suggested_action = (
+            "migrate_family_hash_keys"
+            if data_domain == "products" and "product_name" in existing_keys and "product_id" in current_keys
+            else "create_new_family"
+        )
+    return {
+        "family_hash_keys": sorted(existing_keys),
+        "current_hash_keys": sorted(current_keys),
+        "source_field_changes": source_field_changes,
+        "semantic_hash_key_changes": semantic_hash_key_changes,
+        "suggested_action": suggested_action,
+    }
 
 
 async def _load_file_update_preview(
@@ -820,8 +929,9 @@ async def _validate_template_family_hash_keys(
     sub_domain: Optional[str],
     account: Optional[str],
     deduplication_fields: list[str],
+    header_bindings: list[dict[str, Any]],
 ) -> None:
-    current_keys = _canonical_user_hash_key_set(deduplication_fields)
+    current_keys = _canonical_user_hash_key_set(deduplication_fields, header_bindings)
     result = await db.execute(
         select(FieldMappingTemplate).where(
             and_(
@@ -843,7 +953,10 @@ async def _validate_template_family_hash_keys(
         key=lambda item: (item.version or 0, item.id or 0),
         reverse=True,
     )[0]
-    existing_keys = _canonical_user_hash_key_set(existing.deduplication_fields or [])
+    existing_keys = _canonical_user_hash_key_set(
+        existing.deduplication_fields or [],
+        existing.header_bindings or [],
+    )
     if not existing_keys:
         return
 
@@ -851,6 +964,32 @@ async def _validate_template_family_hash_keys(
     extra_keys = sorted(current_keys - existing_keys)
     if not missing_keys and not extra_keys:
         return
+
+    payload = _family_hash_change_payload(
+        existing_template=existing,
+        existing_keys=existing_keys,
+        current_keys=current_keys,
+        current_deduplication_fields=deduplication_fields,
+        current_header_bindings=header_bindings,
+        data_domain=data_domain,
+    )
+    details: list[str] = []
+    if missing_keys:
+        details.append("缺少必要 hash 语义字段: " + ", ".join(missing_keys))
+    if extra_keys:
+        details.append("新增 hash 语义字段: " + ", ".join(extra_keys))
+    message = (
+        "; ".join(details)
+        + "。同一模板家族必须保持同一套 data_hash 语义字段；"
+        + "如业务行粒度不同，请迁移模板家族 Hash 口径，或拆分 sub_domain / 模板家族。"
+    )
+    if payload["suggested_action"] == "migrate_family_hash_keys":
+        message = (
+            "Hash口径升级: "
+            + message
+            + " Historical family hash uses product_name while current selection uses product_id."
+        )
+    raise TemplateFamilyHashKeyMismatch(message, payload)
 
     details: list[str] = []
     if missing_keys:
@@ -1035,16 +1174,18 @@ async def save_mapping_template(
                 sub_domain=request.sub_domain,
                 account=request.account,
                 deduplication_fields=deduplication_fields,
+                header_bindings=header_bindings,
             )
-        except ValueError as exc:
+        except TemplateFamilyHashKeyMismatch as exc:
             hash_policy_payload = readiness.to_dict()
+            hash_policy_payload.update(exc.payload)
             family_group = {
                 "key": "template_family_hash_keys",
                 "label": "模板家族 Data Hash 字段一致性",
                 "severity": "blocking",
                 "requirement_type": "same_as_family",
-                "accepted_keys": hash_policy_payload.get("effective_components", {}).get("user_identity_fields", []),
-                "selected_keys": hash_policy_payload.get("effective_components", {}).get("user_identity_fields", []),
+                "accepted_keys": hash_policy_payload.get("family_hash_keys", []),
+                "selected_keys": hash_policy_payload.get("current_hash_keys", []),
                 "missing_keys": [],
                 "passed": False,
                 "message": str(exc),
