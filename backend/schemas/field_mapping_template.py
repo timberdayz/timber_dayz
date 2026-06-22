@@ -116,6 +116,11 @@ class HashPolicyPreviewData(BaseModel):
     normalized_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     unresolved_deduplication_fields: List[str] = Field(default_factory=list)
     hash_options: List[Dict[str, Any]] = Field(default_factory=list)
+    family_hash_keys: List[str] = Field(default_factory=list)
+    current_hash_keys: List[str] = Field(default_factory=list)
+    source_field_changes: List[Dict[str, Any]] = Field(default_factory=list)
+    semantic_hash_key_changes: List[Dict[str, Any]] = Field(default_factory=list)
+    suggested_action: Optional[str] = None
 
 
 class HashPolicyPreviewResponse(BaseModel):

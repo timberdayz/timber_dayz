@@ -71,3 +71,51 @@ def test_template_confirmed_bindings_create_aliases_without_duplicates():
             "source": "template_confirmed",
         }
     ]
+
+
+def test_template_confirmed_bindings_collect_raw_name_aliases():
+    from backend.services.semantic_alias_registry import SemanticAliasRegistryService
+
+    service = SemanticAliasRegistryService()
+
+    aliases = service.collect_aliases_from_template_bindings(
+        data_domain="products",
+        platform_code="tiktok",
+        granularity="monthly",
+        header_bindings=[
+            {
+                "raw_name": "Product ID",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "Item Status",
+                "semantic_key": "item_status",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "GMV",
+                "semantic_key": "gmv",
+                "semantic_review_status": "pending",
+            },
+        ],
+    )
+
+    assert aliases == [
+        {
+            "data_domain": "products",
+            "standard_field": "product_id",
+            "raw_alias": "Product ID",
+            "platform_code": "tiktok",
+            "granularity": "monthly",
+            "source": "template_confirmed",
+        },
+        {
+            "data_domain": "products",
+            "standard_field": "item_status",
+            "raw_alias": "Item Status",
+            "platform_code": "tiktok",
+            "granularity": "monthly",
+            "source": "template_confirmed",
+        },
+    ]

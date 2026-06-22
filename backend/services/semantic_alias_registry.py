@@ -114,7 +114,7 @@ class SemanticAliasRegistryService:
             if binding.get("semantic_review_status") != "confirmed_semantic":
                 continue
             standard_field = binding.get("semantic_key")
-            raw_alias = binding.get("source_header") or binding.get("display_name")
+            raw_alias = binding.get("source_header") or binding.get("raw_name") or binding.get("display_name")
             if not standard_field or not raw_alias:
                 continue
             key = (data_domain, standard_field, raw_alias, platform_code, granularity)
