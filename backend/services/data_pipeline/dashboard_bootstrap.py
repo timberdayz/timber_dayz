@@ -141,10 +141,11 @@ def _compute_targets_fingerprint(targets: list[str]) -> str | None:
     hasher = hashlib.sha256()
     root = Path(__file__).resolve().parents[3]
     for target in sorted(set(targets)):
-        path = root / SQL_TARGET_PATHS[target]
+        relative_path = SQL_TARGET_PATHS[target]
+        path = root / relative_path
         hasher.update(target.encode("utf-8"))
         hasher.update(b"\0")
-        hasher.update(str(path).encode("utf-8"))
+        hasher.update(relative_path.replace("\\", "/").encode("utf-8"))
         hasher.update(b"\0")
         try:
             hasher.update(path.read_bytes())

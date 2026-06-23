@@ -39,6 +39,53 @@ def test_dashboard_module_targets_track_business_overview_refreshing_targets():
     assert "semantic.fact_analytics_monthly_atomic_mv" in targets
 
 
+def test_dashboard_asset_fingerprint_is_stable_across_project_roots(monkeypatch):
+    target_name = "api.clearance_ranking_module"
+    sql_rel_path = dashboard_bootstrap.SQL_TARGET_PATHS[target_name]
+    sql_bytes = b"CREATE OR REPLACE VIEW api.clearance_ranking_module AS SELECT 1;"
+
+    class FakeTargetPath:
+        def __init__(self, root_label: str, relative_path: str):
+            self.root_label = root_label
+            self.relative_path = relative_path
+
+        def __str__(self):
+            return f"{self.root_label}/{self.relative_path}"
+
+        def read_bytes(self):
+            return sql_bytes
+
+    class FakeRootPath:
+        def __init__(self, root_label: str):
+            self.root_label = root_label
+
+        def __truediv__(self, relative_path: str):
+            return FakeTargetPath(self.root_label, relative_path)
+
+    class FakeModulePath:
+        def __init__(self, root_label: str):
+            self.parents = [None, None, None, FakeRootPath(root_label)]
+
+        def resolve(self):
+            return self
+
+    class FakePathFactory:
+        def __init__(self, root_label: str):
+            self.root_label = root_label
+
+        def __call__(self, _path: str):
+            return FakeModulePath(self.root_label)
+
+    monkeypatch.setattr(dashboard_bootstrap, "Path", FakePathFactory("F:/repo"))
+    windows_fingerprint = dashboard_bootstrap._compute_targets_fingerprint([target_name])
+
+    monkeypatch.setattr(dashboard_bootstrap, "Path", FakePathFactory("/app"))
+    container_fingerprint = dashboard_bootstrap._compute_targets_fingerprint([target_name])
+
+    assert windows_fingerprint == container_fingerprint
+    assert sql_rel_path == dashboard_bootstrap.SQL_TARGET_PATHS[target_name]
+
+
 def test_build_module_report_does_not_keep_stale_refreshing_without_active_run():
     report = dashboard_bootstrap._build_module_report(
         module_name="business_overview",
