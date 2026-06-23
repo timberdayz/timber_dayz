@@ -21,18 +21,11 @@ from backend.services.cloud_b_class_mirror_manager import (  # noqa: E402
     build_canonical_columns,
 )
 from backend.services.cloud_b_class_sync_service import CloudBClassSyncService  # noqa: E402
-from backend.services.data_pipeline.refresh_runner import execute_refresh_plan  # noqa: E402
+from backend.services.data_pipeline.dashboard_bootstrap import (  # noqa: E402
+    refresh_dashboard_materialization_assets,
+)
 from backend.models.database import get_async_database_url  # noqa: E402
 from backend.utils.project_env import load_project_env  # noqa: E402
-
-
-REFRESH_TARGETS = [
-    "api.business_overview_kpi_module",
-    "api.business_overview_comparison_module",
-    "api.business_overview_shop_racing_module",
-    "api.business_overview_traffic_ranking_module",
-    "api.business_overview_operational_metrics_module",
-]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -102,14 +95,7 @@ async def refresh_dashboard_assets(database_url: str) -> dict:
     session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
     try:
         async with session_factory() as session:
-            result = await execute_refresh_plan(
-                session,
-                targets=REFRESH_TARGETS,
-                pipeline_name="cloud_b_class_to_b_class_migration_refresh",
-                trigger_source="cloud_b_class_to_b_class_migration",
-                context={"source_schema": "cloud_b_class", "target_schema": "b_class"},
-                continue_on_error=False,
-            )
+            result = await refresh_dashboard_materialization_assets(session, module="all")
             await session.commit()
             return result
     finally:

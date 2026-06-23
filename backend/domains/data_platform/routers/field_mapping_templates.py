@@ -98,6 +98,13 @@ DATE_PARSE_VALUE_KINDS = {
 }
 DATE_PARSE_RANGE_VALUE_KINDS = {"date_range", "datetime_range", "time_range"}
 SYSTEM_HASH_SCOPE_KEYS = {"platform_code", "shop_id", "data_domain", "granularity", "sub_domain"}
+LEGACY_SOURCE_FIELD_SEMANTIC_OVERRIDES = {
+    "products": {
+        "id": "product_id",
+        "商品": "product_name",
+        "状态": "item_status",
+    },
+}
 
 
 class TemplateFamilyHashKeyMismatch(ValueError):
@@ -139,14 +146,20 @@ def _binding_lookup_by_source(header_bindings: list[dict[str, Any]] | None) -> d
 def _canonical_user_hash_key_set(
     fields: list[str] | None,
     header_bindings: list[dict[str, Any]] | None = None,
+    data_domain: str | None = None,
 ) -> set[str]:
     keys: set[str] = set()
     binding_lookup = _binding_lookup_by_source(header_bindings)
+    legacy_overrides = LEGACY_SOURCE_FIELD_SEMANTIC_OVERRIDES.get(str(data_domain or "").lower(), {})
     for field in fields or []:
         field_text = str(field or "").strip()
         semantic_key = normalize_semantic_key(field_text)
         if not semantic_key or not is_canonical_semantic_key(semantic_key):
             semantic_key = binding_lookup.get(field_text.lower())
+        if not semantic_key or not is_canonical_semantic_key(semantic_key):
+            semantic_key = legacy_overrides.get(field_text.lower())
+        if not semantic_key or not is_canonical_semantic_key(semantic_key):
+            semantic_key = infer_semantic_key(field_text)
         if not semantic_key or semantic_key in SYSTEM_HASH_SCOPE_KEYS:
             continue
         if is_canonical_semantic_key(semantic_key):
@@ -157,14 +170,20 @@ def _canonical_user_hash_key_set(
 def _hash_source_by_semantic_key(
     fields: list[str] | None,
     header_bindings: list[dict[str, Any]] | None,
+    data_domain: str | None = None,
 ) -> dict[str, str]:
     binding_lookup = _binding_lookup_by_source(header_bindings)
+    legacy_overrides = LEGACY_SOURCE_FIELD_SEMANTIC_OVERRIDES.get(str(data_domain or "").lower(), {})
     source_by_key: dict[str, str] = {}
     for field in fields or []:
         field_text = str(field or "").strip()
         semantic_key = normalize_semantic_key(field_text)
         if not semantic_key or not is_canonical_semantic_key(semantic_key):
             semantic_key = binding_lookup.get(field_text.lower())
+        if not semantic_key or not is_canonical_semantic_key(semantic_key):
+            semantic_key = legacy_overrides.get(field_text.lower())
+        if not semantic_key or not is_canonical_semantic_key(semantic_key):
+            semantic_key = infer_semantic_key(field_text)
         if semantic_key and semantic_key not in SYSTEM_HASH_SCOPE_KEYS and semantic_key not in source_by_key:
             source_by_key[semantic_key] = field_text
     for binding in header_bindings or []:
@@ -189,10 +208,12 @@ def _family_hash_change_payload(
     existing_sources = _hash_source_by_semantic_key(
         existing_template.deduplication_fields or [],
         existing_template.header_bindings or [],
+        data_domain,
     )
     current_sources = _hash_source_by_semantic_key(
         current_deduplication_fields,
         current_header_bindings,
+        data_domain,
     )
     source_field_changes = []
     for semantic_key in sorted(existing_keys & current_keys):
@@ -227,6 +248,24 @@ def _family_hash_change_payload(
         "semantic_hash_key_changes": semantic_hash_key_changes,
         "suggested_action": suggested_action,
     }
+
+
+def _compatible_family_hash_keys(
+    *,
+    existing_keys: set[str],
+    current_keys: set[str],
+    data_domain: str,
+) -> set[str]:
+    compatible_keys = set(existing_keys)
+    if (
+        data_domain == "products"
+        and "product_id" in existing_keys
+        and "product_name" in existing_keys
+        and "product_id" in current_keys
+        and "product_name" not in current_keys
+    ):
+        compatible_keys.discard("product_name")
+    return compatible_keys
 
 
 async def _load_file_update_preview(
@@ -931,7 +970,7 @@ async def _validate_template_family_hash_keys(
     deduplication_fields: list[str],
     header_bindings: list[dict[str, Any]],
 ) -> None:
-    current_keys = _canonical_user_hash_key_set(deduplication_fields, header_bindings)
+    current_keys = _canonical_user_hash_key_set(deduplication_fields, header_bindings, data_domain)
     result = await db.execute(
         select(FieldMappingTemplate).where(
             and_(
@@ -956,18 +995,24 @@ async def _validate_template_family_hash_keys(
     existing_keys = _canonical_user_hash_key_set(
         existing.deduplication_fields or [],
         existing.header_bindings or [],
+        data_domain,
     )
     if not existing_keys:
         return
 
-    missing_keys = sorted(existing_keys - current_keys)
-    extra_keys = sorted(current_keys - existing_keys)
+    comparable_existing_keys = _compatible_family_hash_keys(
+        existing_keys=existing_keys,
+        current_keys=current_keys,
+        data_domain=data_domain,
+    )
+    missing_keys = sorted(comparable_existing_keys - current_keys)
+    extra_keys = sorted(current_keys - comparable_existing_keys)
     if not missing_keys and not extra_keys:
         return
 
     payload = _family_hash_change_payload(
         existing_template=existing,
-        existing_keys=existing_keys,
+        existing_keys=comparable_existing_keys,
         current_keys=current_keys,
         current_deduplication_fields=deduplication_fields,
         current_header_bindings=header_bindings,

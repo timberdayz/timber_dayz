@@ -1659,6 +1659,176 @@ async def test_save_mapping_template_allows_source_header_rename_when_semantic_h
 
 
 @pytest.mark.asyncio
+async def test_save_mapping_template_allows_legacy_product_source_fields_without_bindings(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        legacy_template = FieldMappingTemplate(
+            platform="tiktok",
+            data_domain="products",
+            granularity="monthly",
+            sub_domain=None,
+            header_row=0,
+            header_columns=["ID", "商品", "状态"],
+            deduplication_fields=["ID", "商品", "状态"],
+            header_bindings=[
+                {"raw_name": "ID", "semantic_key": None, "semantic_review_status": "pending"},
+                {"raw_name": "商品", "semantic_key": None, "semantic_review_status": "pending"},
+                {"raw_name": "状态", "semantic_key": None, "semantic_review_status": "pending"},
+            ],
+            template_name="tiktok_products_monthly_legacy_unbound_source_fields",
+            version=1,
+            status="published",
+            field_count=3,
+            created_by="test",
+        )
+        session.add(legacy_template)
+        await session.commit()
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "tiktok",
+            "data_domain": "products",
+            "granularity": "monthly",
+            "header_row": 0,
+            "header_columns": ["商品ID", "商品名", "发品状态"],
+            "deduplication_fields": ["商品ID", "商品名", "发品状态"],
+            "created_by": "test",
+            "save_mode": "new_version",
+            "header_bindings": [
+                {
+                    "raw_name": "商品ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "商品名",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "发品状态",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "period_start_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                },
+                {
+                    "target_field": "period_end_date",
+                    "source_column": "__file_date_to__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        template = await session.get(FieldMappingTemplate, template_id)
+
+    assert template.deduplication_fields == ["product_id", "product_name", "item_status"]
+
+
+@pytest.mark.asyncio
+async def test_save_mapping_template_ignores_legacy_unbound_product_name_hash_when_product_id_exists(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        legacy_template = FieldMappingTemplate(
+            platform="tiktok",
+            data_domain="products",
+            granularity="monthly",
+            sub_domain=None,
+            header_row=0,
+            header_columns=["ID", "商品", "状态"],
+            deduplication_fields=["ID", "商品", "状态"],
+            header_bindings=[
+                {"raw_name": "ID", "semantic_key": None, "semantic_review_status": "pending"},
+                {"raw_name": "商品", "semantic_key": None, "semantic_review_status": "pending"},
+                {"raw_name": "状态", "semantic_key": None, "semantic_review_status": "pending"},
+            ],
+            template_name="tiktok_products_monthly_legacy_unbound_product_name_hash",
+            version=1,
+            status="published",
+            field_count=3,
+            created_by="test",
+        )
+        session.add(legacy_template)
+        await session.commit()
+
+    response = await client.post(
+        "/api/field-mapping/templates/save",
+        json={
+            "platform": "tiktok",
+            "data_domain": "products",
+            "granularity": "monthly",
+            "header_row": 0,
+            "header_columns": ["商品ID", "商品名称", "发品状态"],
+            "deduplication_fields": ["商品ID", "发品状态"],
+            "created_by": "test",
+            "save_mode": "new_version",
+            "header_bindings": [
+                {
+                    "raw_name": "商品ID",
+                    "semantic_key": "product_id",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "商品名称",
+                    "semantic_key": "product_name",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+                {
+                    "raw_name": "发品状态",
+                    "semantic_key": "item_status",
+                    "semantic_review_status": "confirmed_semantic",
+                },
+            ],
+            "field_parse_rules": [
+                {
+                    "target_field": "period_start_date",
+                    "source_column": "__file_date_from__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                },
+                {
+                    "target_field": "period_end_date",
+                    "source_column": "__file_date_to__",
+                    "value_kind": "single_date",
+                    "date_format": "yyyy-mm-dd",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    template_id = payload["data"]["template_id"]
+
+    async with session_factory() as session:
+        template = await session.get(FieldMappingTemplate, template_id)
+
+    assert template.deduplication_fields == ["product_id", "item_status"]
+
+
+@pytest.mark.asyncio
 async def test_save_mapping_template_returns_structured_family_hash_change_for_semantic_change(
     template_update_context_client,
 ):

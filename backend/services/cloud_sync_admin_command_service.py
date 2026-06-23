@@ -19,6 +19,10 @@ from backend.services.cloud_b_class_auto_sync_factory import (
 )
 from backend.services.task_center_sync_service import TaskCenterSyncService
 from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
+from backend.services.data_pipeline.dashboard_bootstrap import (
+    DASHBOARD_MODULE_TARGETS,
+    bootstrap_dashboard_assets_if_needed,
+)
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, extract_run_id
 from backend.services.cloud_b_class_sync_utils import validate_b_class_table_name
 from backend.services.cloud_b_class_sync_service import CloudBClassSyncService
@@ -354,6 +358,13 @@ class CloudSyncAdminCommandService:
                 metadata={"target_count": 0},
             ).model_dump()
 
+        for module_name in self._dashboard_modules_for_targets(targets):
+            await bootstrap_dashboard_assets_if_needed(
+                self.db,
+                wait_for_lock=True,
+                module=module_name,
+            )
+
         refresh_result = await execute_refresh_plan(
             self.db,
             targets=targets,
@@ -379,6 +390,18 @@ class CloudSyncAdminCommandService:
                 "targets": targets,
             },
         ).model_dump()
+
+    @staticmethod
+    def _dashboard_modules_for_targets(targets: list[str]) -> list[str]:
+        target_set = set(targets)
+        module_names = []
+        for module_name, module_targets in DASHBOARD_MODULE_TARGETS.items():
+            module_target_set = set(module_targets.get("core_targets", [])) | set(
+                module_targets.get("refresh_targets", [])
+            )
+            if target_set & module_target_set:
+                module_names.append(module_name)
+        return module_names
 
     async def _get_task(self, job_id: str) -> CloudBClassSyncTask | None:
         stmt = select(CloudBClassSyncTask).where(CloudBClassSyncTask.job_id == job_id)

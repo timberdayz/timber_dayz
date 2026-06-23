@@ -208,6 +208,14 @@ async def test_command_service_repair_checkpoint_only_resets_current_scope(
 async def test_command_service_refresh_projection_executes_refresh_plan(monkeypatch, cloud_sync_sqlite_session):
     calls = {}
 
+    async def fake_bootstrap_dashboard_assets_if_needed(db, wait_for_lock, module):
+        calls["bootstrap"] = {
+            "db": db,
+            "wait_for_lock": wait_for_lock,
+            "module": module,
+        }
+        return {"ready": True}
+
     async def fake_execute_refresh_plan(db, targets, pipeline_name, trigger_source, context, continue_on_error, max_attempts, retry_backoff_seconds):
         calls["targets"] = targets
         calls["pipeline_name"] = pipeline_name
@@ -219,6 +227,10 @@ async def test_command_service_refresh_projection_executes_refresh_plan(monkeypa
         "backend.services.cloud_sync_admin_command_service.execute_refresh_plan",
         fake_execute_refresh_plan,
     )
+    monkeypatch.setattr(
+        "backend.services.cloud_sync_admin_command_service.bootstrap_dashboard_assets_if_needed",
+        fake_bootstrap_dashboard_assets_if_needed,
+    )
 
     service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
     payload = await service.refresh_projection("fact_shopee_orders_daily")
@@ -227,6 +239,8 @@ async def test_command_service_refresh_projection_executes_refresh_plan(monkeypa
     assert payload["source_table_name"] == "fact_shopee_orders_daily"
     assert payload["metadata"]["run_id"] == "run-1"
     assert payload["metadata"]["refresh_status"] == "success"
+    assert calls["bootstrap"]["wait_for_lock"] is True
+    assert calls["bootstrap"]["module"] == "business_overview"
     assert "api.business_overview_kpi_module" in calls["targets"]
 
 
