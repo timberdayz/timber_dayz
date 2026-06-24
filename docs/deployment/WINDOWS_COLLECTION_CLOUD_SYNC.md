@@ -125,6 +125,88 @@ Recovery actions:
 - use retry for failed tasks
 - use checkpoint repair only for the current active cloud target
 
+### Cloud Sync Worker Log Monitoring
+
+The cloud sync worker runs inside the host Python backend process started by
+`scripts\start_collection_formal.ps1`. It does **not** run inside the Docker
+`celery-worker` container in current headed mode (the container's env block
+does not receive `CLOUD_DATABASE_URL`).
+
+To capture and tail the worker log:
+
+```powershell
+# Start in background with timestamped log
+New-Item -ItemType Directory -Force C:\xihong_logs | Out-Null
+powershell -ExecutionPolicy Bypass -File .\scripts\start_collection_formal.ps1 `
+    *> C:\xihong_logs\formal_$(Get-Date -Format yyyyMMdd_HHmmss).log
+
+# Tail latest
+Get-Content (Get-ChildItem C:\xihong_logs\formal_*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName -Wait -Tail 200
+```
+
+For live state without parsing logs, hit the admin-only API:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8001/api/cloud-sync/health | Select-Object -ExpandProperty Content
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8001/api/cloud-sync/tables | Select-Object -ExpandProperty Content
+```
+
+Healthy baseline:
+- a `poll cycle completed in <N>ms` line every `CLOUD_SYNC_POLL_INTERVAL_SECONDS` (default 5s)
+- zero `retry_waiting` transitions for more than 2 minutes after collection activity stops
+
+Error classification quick-reference (definitions in
+`backend/services/cloud_b_class_auto_sync_worker.py`):
+
+| Error code | Meaning |
+|---|---|
+| `cloud_db_unavailable` | cloud PostgreSQL refused connection |
+| `cloud_db_connection_closed` | TCP succeeded, socket died mid-query |
+| `tunnel_unhealthy` | local forwarded port stopped accepting |
+| `ssh_process_failed` | the local `ssh.exe` process exited |
+
+Backoff ladder when retryable: 1m → 5m → 15m → 60m, then the task stays in
+`retry_waiting` until manual recovery or until the tunnel is restored.
+
+### SSH Orphan Process Cleanup
+
+`Ensure-CloudSyncTunnel` (in `scripts\start_collection_formal.ps1`) only
+respawns the SSH tunnel when the local forwarded port (`127.0.0.1:15433`) is
+**not** TCP-reachable. If a previous PowerShell session left a healthy
+`ssh.exe` running, the launcher reuses it without re-verifying the SSH
+session itself. That process will eventually die (after
+`ServerAliveCountMax=3` × 30s = ~90s of upstream silence) and the worker will
+discover it via `tunnel_unhealthy` or `ssh_process_failed` classifications.
+
+If you need to manually clean up the tunnel:
+
+```powershell
+# 1. List every ssh.exe in your session
+Get-Process ssh -ErrorAction SilentlyContinue |
+    Where-Object { $_.SessionId -eq (Get-Process -Id $PID).SessionId } |
+    Select-Object Id, ProcessName, StartTime |
+    Format-Table -AutoSize
+
+# 2. Find which PID owns the 15433 forward
+Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" |
+    Where-Object { $_.CommandLine -like '*-L 15433:*' } |
+    Select-Object ProcessId, CommandLine
+
+# 3. Kill only that PID
+Stop-Process -Id <PID> -Force
+
+# 4. Confirm 15433 is no longer LISTEN
+Get-NetTCPConnection -LocalPort 15433 -State Listen -ErrorAction SilentlyContinue
+# Expected: empty
+
+# 5. Restart formal mode; it will spawn a fresh tunnel
+powershell -ExecutionPolicy Bypass -File .\scripts\start_collection_formal.ps1
+```
+
+Only kill `ssh.exe` processes that belong to your session and that own the
+`15433` forward. Do **not** touch `ssh.exe` belonging to other users or
+serving other ports (Git, WSL, remote shells, etc.).
+
 ## Important Behavior
 
 - `sync_now` only evaluates catch-up against the current `CLOUD_DATABASE_URL` scope

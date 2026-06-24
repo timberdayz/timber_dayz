@@ -9,7 +9,10 @@
       "Bash(timeout /t 3)",
       "Bash(timeout /t 5)",
       "Bash(timeout /t 8)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(powershell -Command ' *)",
+      "Bash(git *)",
+      "Bash(rm:*)"
     ]
   }
 }

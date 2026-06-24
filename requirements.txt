@@ -1,3 +1,7 @@
+# Web 框架 (FastAPI 是后端 API 必需)
+fastapi==0.110.0
+starlette<0.37
+
 # 数据处理
 pandas>=2.2.0
 numpy>=1.24.0
@@ -60,6 +64,15 @@ cryptography>=41.0.0
 PyJWT>=2.8.0  # JWT认证（阶段2新增）
 passlib>=1.7.4  # 密码加密（阶段2新增）
 python-multipart>=0.0.6  # 文件上传支持（阶段2新增）
+bcrypt>=4.0.0  # 密码哈希（backend.services.auth_service 需要）
+
+# 限流（slowapi - backend.middleware.rate_limiter 需要）
+slowapi>=0.1.10
+limits>=2.3.0
+
+# Email 验证（pydantic[email] - EmailStr 字段需要）
+email-validator>=2.0.0
+dnspython>=2.0.0
 
 # 其他工具
 python-dateutil>=2.8.0
