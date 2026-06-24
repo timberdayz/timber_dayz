@@ -81,3 +81,84 @@ async def test_extra_raw_fields_do_not_block_when_required_semantic_keys_resolve
     assert result.status == "non_breaking_drift"
     assert result.should_block is False
     assert result.extra_raw_fields == ["platform_new_column"]
+
+
+@pytest.mark.asyncio
+async def test_orders_chinese_headers_resolve_required_keys_when_bindings_are_incomplete():
+    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+
+    service = SemanticFieldContractService(db=None)
+    result = await service.evaluate(
+        platform="shopee",
+        data_domain="orders",
+        granularity="monthly",
+        sub_domain=None,
+        header_bindings=[
+            {"raw_name": "订单编号", "semantic_key": "order_id"},
+            {"raw_name": "店铺", "semantic_key": "shop_id"},
+            {"raw_name": "下单时间", "semantic_key": "order_date"},
+        ],
+        current_columns=[
+            "订单编号",
+            "店铺",
+            "下单时间",
+            "销售数量",
+            "买家支付(RMB)",
+            "利润(RMB)",
+        ],
+        template_columns=[
+            "订单编号",
+            "店铺",
+            "下单时间",
+            "销售数量",
+            "买家支付(RMB)",
+            "利润(RMB)",
+            "预估回款金额",
+        ],
+    )
+
+    assert result.status == "non_breaking_drift"
+    assert result.should_block is False
+    assert result.missing_required_keys == []
+    assert result.resolved_required_keys == [
+        "order_id",
+        "shop_id",
+        "order_date",
+        "sales_volume",
+        "paid_amount",
+        "profit",
+    ]
+    assert result.missing_optional_keys == ["estimated_settlement_amount"]
+
+
+@pytest.mark.asyncio
+async def test_orders_chinese_headers_block_when_sales_volume_is_absent():
+    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+
+    service = SemanticFieldContractService(db=None)
+    result = await service.evaluate(
+        platform="shopee",
+        data_domain="orders",
+        granularity="monthly",
+        sub_domain=None,
+        header_bindings=[],
+        current_columns=[
+            "订单编号",
+            "店铺",
+            "下单时间",
+            "买家支付(RMB)",
+            "利润(RMB)",
+        ],
+        template_columns=[
+            "订单编号",
+            "店铺",
+            "下单时间",
+            "销售数量",
+            "买家支付(RMB)",
+            "利润(RMB)",
+        ],
+    )
+
+    assert result.status == "breaking_drift"
+    assert result.should_block is True
+    assert result.missing_required_keys == ["sales_volume"]
