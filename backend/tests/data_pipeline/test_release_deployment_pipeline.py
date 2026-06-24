@@ -8,6 +8,7 @@ def test_deploy_workflow_syncs_nginx_prod_conf():
     )
 
     assert "nginx/nginx.prod.conf" in text
+    assert "nginx/ssl/https.conf" in text
 
 
 def test_deploy_workflow_creates_remote_directories_before_upload():
@@ -110,6 +111,7 @@ def test_deploy_workflow_no_longer_scp_uploads_sql_and_nginx_files_individually(
 
     assert 'for f in sql/init/*.sql; do' not in text
     assert 'scp_with_retry nginx/nginx.prod.conf ${PRODUCTION_PATH}/nginx/nginx.prod.conf' not in text
+    assert 'scp_with_retry nginx/ssl/https.conf ${PRODUCTION_PATH}/nginx/ssl/https.conf' not in text
 
 
 def test_deploy_workflow_sets_cnb_tag_on_a_real_command_line():

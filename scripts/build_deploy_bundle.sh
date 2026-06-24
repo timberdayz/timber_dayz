@@ -12,7 +12,8 @@ mkdir -p \
   "${BUNDLE_DIR}" \
   "${BUNDLE_DIR}/config" \
   "${BUNDLE_DIR}/sql/init" \
-  "${BUNDLE_DIR}/nginx"
+  "${BUNDLE_DIR}/nginx" \
+  "${BUNDLE_DIR}/nginx/ssl"
 
 copy_if_exists() {
   local src="$1"
@@ -51,6 +52,7 @@ for file in sql/init/*.sql; do
 done
 
 copy_if_exists "nginx/nginx.prod.conf" "${BUNDLE_DIR}/nginx/nginx.prod.conf"
+copy_if_exists "nginx/ssl/https.conf" "${BUNDLE_DIR}/nginx/ssl/https.conf"
 
 tar -czf "${OUTPUT_PATH}" -C "${BUNDLE_DIR}" .
 
