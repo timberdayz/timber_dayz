@@ -66,6 +66,32 @@ DEFAULT_CONTRACTS: dict[str, tuple[SemanticContractDefinition, ...]] = {
 }
 
 
+ORDER_SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "order_id": ("订单编号", "订单号", "order_id", "order no", "order_no", "order id"),
+    "shop_id": ("店铺", "店铺id", "shop_id", "shop id", "shop_name", "shop name"),
+    "order_date": ("下单时间", "下单日期", "订单日期", "订单时间", "order_date", "order time", "order_time"),
+    "sales_volume": ("销售数量", "出库数量", "销量", "sold_qty", "sales_volume", "quantity"),
+    "paid_amount": (
+        "买家支付",
+        "买家支付(rmb)",
+        "买家支付（rmb）",
+        "实付金额",
+        "buyer_paid",
+        "paid_amount",
+    ),
+    "profit": ("利润", "利润(rmb)", "利润（rmb）", "profit", "profit_amount", "profit_rmb"),
+    "estimated_settlement_amount": (
+        "预估回款金额",
+        "预估回款金额(rmb)",
+        "预估回款金额（rmb）",
+        "estimated_settlement",
+        "estimated_settlement_amount",
+    ),
+    "settlement_time": ("结算时间", "settlement_time", "settlement date"),
+    "cost_profit_rate": ("成本利润率", "cost_profit_rate"),
+}
+
+
 class SemanticFieldContractService:
     def __init__(self, db):
         self.db = db
@@ -89,20 +115,35 @@ class SemanticFieldContractService:
             sub_domain=sub_domain,
             consumer=consumer,
         )
-        if not definitions or not header_bindings:
+        if not definitions:
             return SemanticContractResult(status="not_configured", should_block=False, has_contract=False)
 
         current_set = {str(column) for column in current_columns}
         bindings = header_bindings or []
         raw_to_semantic = self._raw_to_semantic(bindings)
+        inferred_current_keys = self._infer_semantic_keys(
+            data_domain=data_domain,
+            columns=current_columns,
+        )
+        inferred_template_keys = self._infer_semantic_keys(
+            data_domain=data_domain,
+            columns=template_columns or [],
+        )
         resolved_keys = {
             semantic_key
             for raw_name, semantic_key in raw_to_semantic.items()
             if raw_name in current_set
         }
+        resolved_keys.update(inferred_current_keys)
         resolved_keys.update(column for column in current_set if column in {item.semantic_key for item in definitions})
 
         template_declared_keys = set(raw_to_semantic.values())
+        template_declared_keys.update(inferred_template_keys)
+        template_declared_keys.update(
+            column
+            for column in set(template_columns or [])
+            if column in {item.semantic_key for item in definitions}
+        )
         required_keys = [item.semantic_key for item in definitions if item.importance == "required"]
         optional_keys = [
             item.semantic_key
@@ -146,6 +187,26 @@ class SemanticFieldContractService:
             impact_descriptions=impact_descriptions,
             has_contract=True,
         )
+
+    @classmethod
+    def _infer_semantic_keys(
+        cls,
+        *,
+        data_domain: str | None,
+        columns: list[str],
+    ) -> set[str]:
+        if str(data_domain or "").strip().lower() != "orders":
+            return set()
+        normalized_columns = {cls._normalize_alias(column) for column in columns}
+        return {
+            semantic_key
+            for semantic_key, aliases in ORDER_SEMANTIC_ALIASES.items()
+            if any(cls._normalize_alias(alias) in normalized_columns for alias in aliases)
+        }
+
+    @staticmethod
+    def _normalize_alias(value: Any) -> str:
+        return str(value or "").strip().lower().replace("（", "(").replace("）", ")")
 
     async def _load_contracts(
         self,

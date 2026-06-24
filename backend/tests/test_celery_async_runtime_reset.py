@@ -493,6 +493,111 @@ def test_recover_stale_auto_ingest_returns_processing_files_to_pending():
     assert db.commits == 1
 
 
+def test_recover_template_update_required_files_returns_ready_files_to_pending(monkeypatch):
+    from backend.tasks import scheduled_tasks as scheduled_module
+    original_asyncio_run = asyncio.run
+
+    ready_file = SimpleNamespace(
+        id=2746,
+        status="template_update_required",
+        file_metadata={"auto_ingest": {"last_status": "template_update_required"}},
+        error_message="新增0个字段, 删除1个字段 (匹配率: 98.5%)",
+    )
+    blocked_file = SimpleNamespace(
+        id=2747,
+        status="template_update_required",
+        file_metadata={},
+        error_message="缺少订单编号",
+    )
+
+    class _FakeScalarResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [ready_file, blocked_file]
+
+    class _FakeSession:
+        def __init__(self):
+            self.commits = 0
+
+        def execute(self, _stmt):
+            return _FakeScalarResult()
+
+        def commit(self):
+            self.commits += 1
+
+    class _FakeAsyncSession:
+        async def close(self):
+            return None
+
+    class _FakeDataSyncService:
+        def __init__(self, db):
+            self.db = db
+
+        async def get_file_sync_readiness(self, file_id, use_template_header_row=True):
+            if file_id == 2746:
+                return {
+                    "file_id": file_id,
+                    "file_name": "shopee_orders_monthly.xls",
+                    "template_status": "alias_only",
+                    "governance_status": "non_breaking_drift",
+                    "should_auto_sync": True,
+                }
+            return {
+                "file_id": file_id,
+                "file_name": "broken_orders.xls",
+                "template_status": "update_required",
+                "governance_status": "breaking_drift",
+                "should_auto_sync": False,
+                "update_reason": "missing order_id",
+            }
+
+    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
+    monkeypatch.setattr("backend.services.data_sync_service.DataSyncService", _FakeDataSyncService)
+    monkeypatch.setattr(scheduled_module.asyncio, "run", lambda coro: original_asyncio_run(coro))
+
+    db = _FakeSession()
+    recovered = scheduled_module._recover_template_update_required_files(db, limit=20)
+
+    assert recovered == {"checked": 2, "recovered": 1, "still_blocked": 1}
+    assert ready_file.status == "pending"
+    assert ready_file.error_message is None
+    assert ready_file.file_metadata["auto_ingest"]["last_status"] == "readiness_recovered"
+    assert ready_file.file_metadata["auto_ingest"]["last_recovered_from"] == "template_update_required"
+    assert blocked_file.status == "template_update_required"
+    assert blocked_file.file_metadata["auto_ingest"]["last_status"] == "template_update_required"
+    assert blocked_file.file_metadata["auto_ingest"]["last_reason"] == "missing order_id"
+    assert db.commits == 1
+
+
+def test_auto_ingest_task_details_include_template_readiness_diagnostics():
+    from backend.tasks import scheduled_tasks as scheduled_module
+
+    details = scheduled_module._build_auto_ingest_task_details(
+        {"processed": 1, "succeeded": 0, "quarantined": 0, "failed": 0, "skipped": 1},
+        [
+            {
+                "file_id": 2746,
+                "file_name": "shopee_orders_monthly.xls",
+                "status": "skipped",
+                "error_code": "TEMPLATE_UPDATE_REQUIRED",
+                "message": "header_changed",
+                "removed_fields": ["预估回款金额"],
+                "missing_required_keys": ["paid_amount"],
+                "missing_optional_keys": ["estimated_settlement_amount"],
+                "should_auto_sync": False,
+            }
+        ],
+    )
+
+    file_entry = details["task_details"]["files"][0]
+    assert file_entry["removed_fields"] == ["预估回款金额"]
+    assert file_entry["missing_required_keys"] == ["paid_amount"]
+    assert file_entry["missing_optional_keys"] == ["estimated_settlement_amount"]
+    assert file_entry["should_auto_sync"] is False
+
+
 def test_auto_ingest_pending_files_records_quarantined_success_result(monkeypatch):
     from backend.tasks import scheduled_tasks as scheduled_module
 

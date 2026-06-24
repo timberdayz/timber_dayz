@@ -40,6 +40,9 @@ AUTO_INGEST_STALE_WARNING_MINUTES = max(
 AUTO_INGEST_WATCHDOG_INTERVAL_MINUTES = max(
     1, int(os.getenv("AUTO_INGEST_WATCHDOG_INTERVAL_MINUTES", "5"))
 )
+AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES = max(
+    1, int(os.getenv("AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES", "20"))
+)
 AUTO_INGEST_LOCK_KEY = int(os.getenv("AUTO_INGEST_LOCK_KEY", "928451203"))
 AUTO_INGEST_WATCHDOG_LOCK_KEY = int(os.getenv("AUTO_INGEST_WATCHDOG_LOCK_KEY", "928451204"))
 AUTO_INGEST_SOURCE = "scheduled_tasks.auto_ingest_pending_files"
@@ -217,6 +220,112 @@ def _recover_stale_auto_ingest_records(
     return {"tasks": recovered_tasks, "files": recovered_files}
 
 
+def _recover_template_update_required_files(
+    db,
+    limit: int = AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES,
+) -> Dict[str, int]:
+    try:
+        blocked_files = (
+            db.execute(
+                select(CatalogFile)
+                .where(CatalogFile.status == "template_update_required")
+                .order_by(CatalogFile.first_seen_at.asc())
+                .limit(max(1, int(limit)))
+            )
+            .scalars()
+            .all()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[AutoIngest] template readiness recheck skipped: %s", exc)
+        return {"checked": 0, "recovered": 0, "still_blocked": 0}
+
+    if not blocked_files:
+        return {"checked": 0, "recovered": 0, "still_blocked": 0}
+
+    async def _load_readiness(file_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+        from backend.models.database import AsyncSessionLocal
+        from backend.services.data_sync_service import DataSyncService
+
+        results: Dict[int, Dict[str, Any]] = {}
+        for file_id in file_ids:
+            db_local = AsyncSessionLocal()
+            try:
+                readiness = await DataSyncService(db_local).get_file_sync_readiness(
+                    file_id,
+                    use_template_header_row=True,
+                )
+                results[file_id] = readiness if isinstance(readiness, dict) else {}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[AutoIngest] template readiness recheck failed for file_id=%s: %s",
+                    file_id,
+                    exc,
+                    exc_info=True,
+                )
+                results[file_id] = {
+                    "should_auto_sync": False,
+                    "update_reason": str(exc),
+                }
+            finally:
+                try:
+                    await db_local.close()
+                except Exception:
+                    pass
+        return results
+
+    file_ids = [int(file_record.id) for file_record in blocked_files if getattr(file_record, "id", None)]
+    if not file_ids:
+        return {"checked": 0, "recovered": 0, "still_blocked": 0}
+
+    reset_async_engine_pool_for_new_loop()
+    readiness_by_id = asyncio.run(_load_readiness(file_ids))
+    now = datetime.now(timezone.utc)
+    recovered = 0
+    still_blocked = 0
+
+    for file_record in blocked_files:
+        readiness = readiness_by_id.get(int(file_record.id), {})
+        meta = dict(file_record.file_metadata or {})
+        auto_meta = dict(meta.get("auto_ingest") or {})
+        if readiness.get("should_auto_sync") is True:
+            auto_meta["last_status"] = "readiness_recovered"
+            auto_meta["last_recovered_at"] = now.isoformat()
+            auto_meta["last_recovered_from"] = "template_update_required"
+            auto_meta["current_task_id"] = None
+            auto_meta["last_template_status"] = readiness.get("template_status")
+            auto_meta["last_governance_status"] = readiness.get("governance_status")
+            meta["auto_ingest"] = auto_meta
+            file_record.file_metadata = meta
+            file_record.status = "pending"
+            file_record.error_message = None
+            recovered += 1
+        else:
+            reason = (
+                readiness.get("update_reason")
+                or readiness.get("message")
+                or readiness.get("error_code")
+                or "template update required before ingest"
+            )
+            auto_meta["last_status"] = "template_update_required"
+            auto_meta["last_reason"] = str(reason)
+            auto_meta["last_rechecked_at"] = now.isoformat()
+            auto_meta["current_task_id"] = None
+            auto_meta["last_template_status"] = readiness.get("template_status")
+            auto_meta["last_governance_status"] = readiness.get("governance_status")
+            meta["auto_ingest"] = auto_meta
+            file_record.file_metadata = meta
+            still_blocked += 1
+
+    if recovered or still_blocked:
+        db.commit()
+
+    return {
+        "checked": len(file_ids),
+        "recovered": recovered,
+        "still_blocked": still_blocked,
+    }
+
+
 def _create_auto_ingest_task_record(
     db,
     pending_ids: List[int],
@@ -339,6 +448,17 @@ def _build_auto_ingest_task_details(
             "error_code": safe_item.get("error_code"),
             "message": message,
         }
+        for diagnostic_key in (
+            "added_fields",
+            "removed_fields",
+            "missing_required_keys",
+            "missing_optional_keys",
+            "should_auto_sync",
+            "template_status",
+            "governance_status",
+        ):
+            if diagnostic_key in safe_item:
+                file_entry[diagnostic_key] = safe_item.get(diagnostic_key)
         files.append(file_entry)
         if status == "failed":
             errors.append(file_entry)
@@ -916,6 +1036,13 @@ def auto_ingest_pending_files(max_files: int | None = None):
             return {"status": "skipped", "reason": "auto_ingest_already_running"}
 
         _recover_stale_auto_ingest_records(db, timeout_minutes=stale_timeout_minutes)
+        _recover_template_update_required_files(
+            db,
+            limit=_int_env(
+                "AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES",
+                AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES,
+            ),
+        )
 
         pending_ids = db.execute(
             select(CatalogFile.id)
@@ -986,6 +1113,13 @@ def auto_ingest_pending_files(max_files: int | None = None):
                                     "status": "skipped",
                                     "error_code": "TEMPLATE_UPDATE_REQUIRED",
                                     "message": update_message,
+                                    "added_fields": (readiness.get("header_changes") or {}).get("added_fields"),
+                                    "removed_fields": (readiness.get("header_changes") or {}).get("removed_fields"),
+                                    "missing_required_keys": readiness.get("missing_required_keys"),
+                                    "missing_optional_keys": readiness.get("missing_optional_keys"),
+                                    "should_auto_sync": readiness.get("should_auto_sync"),
+                                    "template_status": readiness.get("template_status"),
+                                    "governance_status": readiness.get("governance_status"),
                                 }
                             if template_status == "missing":
                                 return {
