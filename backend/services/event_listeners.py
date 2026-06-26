@@ -13,7 +13,10 @@ from backend.services.data_pipeline.inventory_age_refresh_service import (
     InventoryAgeRefreshService,
 )
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
-from backend.services.data_pipeline.refresh_registry import SQL_TARGET_PATHS
+from backend.services.data_pipeline.refresh_registry import (
+    SQL_TARGET_PATHS,
+    resolve_refresh_targets_for_source_table,
+)
 from backend.services.data_pipeline.refresh_runner import (
     execute_refresh_plan,
     extract_refresh_status,
@@ -31,21 +34,33 @@ DATA_INGESTED_REFRESH_LOCK = asyncio.Lock()
 DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
     "orders": [
         "api.business_overview_kpi_module",
+        "mart.platform_day_kpi",
+        "mart.platform_week_kpi",
+        "api.business_overview_comparison_platform_module",
         "api.business_overview_comparison_module",
         "api.business_overview_shop_racing_module",
+        "api.business_overview_shop_racing_monthly_module",
         "api.business_overview_traffic_ranking_module",
         "api.business_overview_inventory_backlog_module",
         "api.business_overview_operational_metrics_module",
     ],
     "analytics": [
         "api.business_overview_kpi_module",
+        "mart.platform_day_kpi",
+        "mart.platform_week_kpi",
+        "api.business_overview_comparison_platform_module",
         "api.business_overview_comparison_module",
         "api.business_overview_shop_racing_module",
+        "api.business_overview_shop_racing_monthly_module",
         "api.business_overview_traffic_ranking_module",
         "api.business_overview_operational_metrics_module",
     ],
     "traffic": [
+        "mart.platform_day_kpi",
+        "mart.platform_week_kpi",
+        "api.business_overview_comparison_platform_module",
         "api.business_overview_comparison_module",
+        "api.business_overview_shop_racing_monthly_module",
         "api.business_overview_traffic_ranking_module",
         "api.business_overview_operational_metrics_module",
     ],
@@ -63,7 +78,13 @@ DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
 
 
 def determine_pipeline_targets_for_data_ingested(event: DataIngestedEvent) -> list[str]:
-    requested_targets = list(DATA_INGESTED_PIPELINE_TARGETS.get(event.data_domain or "", []))
+    requested_targets = resolve_refresh_targets_for_source_table(
+        source_table_name=event.source_table_name,
+        data_domain=event.data_domain,
+        granularity=event.granularity,
+    )
+    if not requested_targets:
+        requested_targets = list(DATA_INGESTED_PIPELINE_TARGETS.get(event.data_domain or "", []))
     registered_targets = [target for target in requested_targets if target in SQL_TARGET_PATHS]
     dropped_targets = [target for target in requested_targets if target not in SQL_TARGET_PATHS]
     if dropped_targets:

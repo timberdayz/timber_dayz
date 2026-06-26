@@ -135,6 +135,7 @@ class CloudRefreshQueueEnqueuer:
         data_domain: str,
         written_rows: int,
         checkpoint_scope: str,
+        source_latest_ingest_timestamp: Any | None = None,
     ) -> dict[str, Any]:
         from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
         from backend.utils.events import DataIngestedEvent
@@ -160,6 +161,8 @@ class CloudRefreshQueueEnqueuer:
             "trigger_source": self.TRIGGER_TYPE,
             "related_table_names": [source_table_name],
         }
+        if source_latest_ingest_timestamp is not None:
+            context["source_latest_ingest_timestamp"] = str(source_latest_ingest_timestamp)
         dedupe_key = RefreshQueueService.build_dedupe_key(self.PIPELINE_NAME, targets)
         table = RefreshQueueTask.__table__
 
@@ -354,6 +357,7 @@ class CloudBClassSyncService:
             self.mirror_manager.ensure_cloud_mirror_table(table_name, data_domain)
             total_written_rows = 0
             dry_run_seen = False
+            latest_ingest_timestamp = None
 
             def _projection_result() -> dict[str, Any]:
                 if total_written_rows <= 0 or dry_run_seen:
@@ -366,6 +370,7 @@ class CloudBClassSyncService:
                         data_domain=data_domain,
                         written_rows=total_written_rows,
                         checkpoint_scope=self.checkpoint_scope,
+                        source_latest_ingest_timestamp=latest_ingest_timestamp,
                     )
                 except Exception as exc:  # noqa: BLE001
                     return {
@@ -425,6 +430,7 @@ class CloudBClassSyncService:
                 dry_run_seen = dry_run_seen or bool(write_result.get("dry_run"))
                 if self._should_advance_checkpoint(write_succeeded, dry_run=bool(write_result.get("dry_run"))):
                     last_row = rows[-1]
+                    latest_ingest_timestamp = last_row["ingest_timestamp"]
                     self.checkpoint_service.advance_checkpoint(
                         table_name=table_name,
                         ingest_timestamp=last_row["ingest_timestamp"],

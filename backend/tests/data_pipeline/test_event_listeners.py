@@ -179,3 +179,29 @@ def test_data_ingested_targets_are_registered_refresh_targets():
     for domain, targets in DATA_INGESTED_PIPELINE_TARGETS.items():
         for target in targets:
             assert target in SQL_TARGET_PATHS, f"{domain} target must be registered: {target}"
+
+
+def test_business_overview_ingested_targets_rebuild_cascade_dependents():
+    from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
+
+    required_targets = {
+        "mart.platform_day_kpi",
+        "mart.platform_week_kpi",
+        "api.business_overview_comparison_platform_module",
+        "api.business_overview_shop_racing_monthly_module",
+    }
+
+    for data_domain in ("orders", "analytics", "traffic"):
+        event = DataIngestedEvent(
+            file_id=None,
+            platform_code=None,
+            data_domain=data_domain,
+            granularity=None,
+            source_table_name=f"fact_shopee_{data_domain}_daily",
+            row_count=1,
+        )
+
+        targets = set(determine_pipeline_targets_for_data_ingested(event))
+
+        missing_targets = required_targets - targets
+        assert not missing_targets, f"{data_domain} missing cascade dependents: {missing_targets}"

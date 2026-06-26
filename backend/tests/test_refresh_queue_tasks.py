@@ -304,6 +304,178 @@ async def test_process_refresh_queue_task_repairs_drifted_dashboard_assets_befor
 
 
 @pytest.mark.asyncio
+async def test_process_refresh_queue_task_repairs_after_refresh_validation_failure(monkeypatch):
+    from backend.tasks import refresh_queue_tasks as task_module
+
+    calls = []
+
+    class _FakeTask:
+        id = 14
+        job_id = "job-14"
+        trigger_type = "cloud_sync"
+        pipeline_name = "data_ingested_refresh"
+        targets_json = ["api.business_overview_kpi_module"]
+        context_json = {
+            "source_table_name": "fact_shopee_orders_monthly",
+            "data_domain": "orders",
+            "written_rows": 10,
+        }
+
+    class _FakeSession:
+        async def commit(self):
+            calls.append("commit")
+
+        async def rollback(self):
+            return None
+
+        async def close(self):
+            return None
+
+    class _FakeQueueService:
+        def __init__(self, db):
+            self.db = db
+
+        async def recover_stale_running_tasks(self, timeout_seconds: int):
+            return 0
+
+        async def claim_next_refresh_task(self):
+            return _FakeTask()
+
+        async def mark_completed(self, task_id: int):
+            calls.append(("completed", task_id))
+
+        async def mark_failed(self, task_id: int, error_message: str):
+            calls.append(("failed", task_id, error_message))
+
+    class _Report:
+        def __init__(self, status, missing_objects=None, repair_attempted=False):
+            self.status = status
+            self.missing_objects = missing_objects or []
+            self.stale_targets = []
+            self.modules = ["business_overview"]
+            self.repair_attempted = repair_attempted
+            self.error_message = None
+
+        def is_success(self):
+            return self.status == "success"
+
+        def to_error_message(self):
+            return "missing_objects:" + ",".join(self.missing_objects)
+
+    validation_reports = [
+        _Report("failed", ["api.business_overview_kpi_module"]),
+        _Report("failed", ["api.business_overview_kpi_module"], repair_attempted=True),
+        _Report("success", repair_attempted=True),
+    ]
+
+    async def _fake_execute_refresh_plan(*args, **kwargs):
+        calls.append(("execute", tuple(kwargs["targets"])))
+        return {"run_id": f"run-{len([call for call in calls if call[0] == 'execute'])}", "status": "success", "failed_targets": []}
+
+    async def _fake_validate_refresh_result(*args, **kwargs):
+        calls.append("validate")
+        return validation_reports.pop(0)
+
+    async def _fake_bootstrap_dashboard_assets_if_needed(db, wait_for_lock, module):
+        calls.append(("bootstrap", wait_for_lock, module))
+        return {"modules": {module: {"status": "ready"}}}
+
+    monkeypatch.setattr(task_module, "AsyncSessionLocal", lambda: _FakeSession(), raising=False)
+    monkeypatch.setattr(task_module, "RefreshQueueService", _FakeQueueService, raising=False)
+    monkeypatch.setattr(task_module, "execute_refresh_plan", _fake_execute_refresh_plan, raising=False)
+    monkeypatch.setattr(task_module, "validate_refresh_result", _fake_validate_refresh_result, raising=False)
+    monkeypatch.setattr(task_module, "bootstrap_dashboard_assets_if_needed", _fake_bootstrap_dashboard_assets_if_needed, raising=False)
+
+    result = await task_module._async_process_refresh_queue_task()
+
+    assert result["status"] == "success"
+    assert calls.count("validate") == 3
+    assert len([call for call in calls if isinstance(call, tuple) and call[0] == "execute"]) == 2
+    assert ("bootstrap", True, "business_overview") in calls
+    assert ("completed", 14) in calls
+    assert not any(call[0] == "failed" for call in calls if isinstance(call, tuple))
+
+
+@pytest.mark.asyncio
+async def test_process_refresh_queue_task_fails_when_post_refresh_repair_cannot_validate(monkeypatch):
+    from backend.tasks import refresh_queue_tasks as task_module
+
+    calls = []
+
+    class _FakeTask:
+        id = 15
+        job_id = "job-15"
+        trigger_type = "cloud_sync"
+        pipeline_name = "data_ingested_refresh"
+        targets_json = ["api.business_overview_kpi_module"]
+        context_json = {"source_table_name": "fact_shopee_orders_monthly", "data_domain": "orders"}
+
+    class _FakeSession:
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+        async def close(self):
+            return None
+
+    class _FakeQueueService:
+        def __init__(self, db):
+            self.db = db
+
+        async def recover_stale_running_tasks(self, timeout_seconds: int):
+            return 0
+
+        async def claim_next_refresh_task(self):
+            return _FakeTask()
+
+        async def mark_completed(self, task_id: int):
+            calls.append(("completed", task_id))
+
+        async def mark_failed(self, task_id: int, error_message: str):
+            calls.append(("failed", task_id, error_message))
+
+    class _Report:
+        status = "failed"
+        missing_objects = ["api.business_overview_kpi_module"]
+        stale_targets = []
+        modules = ["business_overview"]
+        repair_attempted = False
+        error_message = None
+
+        def is_success(self):
+            return False
+
+        def to_error_message(self):
+            return "missing_objects:api.business_overview_kpi_module"
+
+    async def _fake_execute_refresh_plan(*args, **kwargs):
+        return {"run_id": "run-15", "status": "success", "failed_targets": []}
+
+    async def _fake_validate_refresh_result(*args, **kwargs):
+        calls.append("validate")
+        return _Report()
+
+    async def _fake_bootstrap_dashboard_assets_if_needed(db, wait_for_lock, module):
+        calls.append(("bootstrap", wait_for_lock, module))
+        return {"modules": {module: {"status": "drift"}}}
+
+    monkeypatch.setattr(task_module, "AsyncSessionLocal", lambda: _FakeSession(), raising=False)
+    monkeypatch.setattr(task_module, "RefreshQueueService", _FakeQueueService, raising=False)
+    monkeypatch.setattr(task_module, "execute_refresh_plan", _fake_execute_refresh_plan, raising=False)
+    monkeypatch.setattr(task_module, "validate_refresh_result", _fake_validate_refresh_result, raising=False)
+    monkeypatch.setattr(task_module, "bootstrap_dashboard_assets_if_needed", _fake_bootstrap_dashboard_assets_if_needed, raising=False)
+
+    result = await task_module._async_process_refresh_queue_task()
+
+    assert result["status"] == "failed"
+    assert ("bootstrap", True, "business_overview") in calls
+    assert calls[-1][0] == "failed"
+    assert "missing_objects:api.business_overview_kpi_module" in calls[-1][2]
+
+
+@pytest.mark.asyncio
 async def test_process_refresh_queue_task_marks_failed_on_partial_failed_run(monkeypatch):
     from backend.tasks import refresh_queue_tasks as task_module
 

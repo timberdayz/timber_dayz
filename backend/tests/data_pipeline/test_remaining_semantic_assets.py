@@ -68,3 +68,14 @@ def test_services_atomic_sql_asset():
             "data_hash",
         ),
     )
+
+
+def test_services_atomic_preserves_existing_gmv_column_order_before_buyer_count():
+    sql_text = Path("sql/semantic/services_atomic.sql").read_text(encoding="utf-8")
+    final_select = sql_text.rsplit("FROM deduplicated", 1)[0].rsplit("SELECT", 1)[-1]
+
+    assert "COALESCE(gmv, 0) AS gmv" in final_select
+    assert "COALESCE(buyer_count, 0) AS buyer_count" in final_select
+    assert final_select.index("COALESCE(gmv, 0) AS gmv") < final_select.index(
+        "COALESCE(buyer_count, 0) AS buyer_count"
+    )

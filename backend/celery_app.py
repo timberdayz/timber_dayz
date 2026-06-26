@@ -107,6 +107,11 @@ celery_app.conf.beat_schedule = {
     },
     
     # 每6小时检查低库存
+    'dashboard-refresh-safety-net-every-5min': {
+        'task': 'backend.tasks.refresh_queue_tasks.dashboard_refresh_safety_net',
+        'schedule': crontab(minute='*/5'),
+    },
+
     'check-low-stock-every-6hours': {
         'task': 'backend.tasks.scheduled_tasks.check_low_stock_alert',
         'schedule': crontab(hour='*/6', minute=0),  # 每6小时

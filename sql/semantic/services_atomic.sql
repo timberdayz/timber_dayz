@@ -139,13 +139,13 @@ SELECT
     COALESCE(visitor_count, 0) AS visitor_count,
     COALESCE(chat_count, 0) AS chat_count,
     COALESCE(order_count, 0) AS order_count,
-    COALESCE(buyer_count, 0) AS buyer_count,
     COALESCE(gmv, 0) AS gmv,
     COALESCE(satisfaction, 0) AS satisfaction,
     raw_data,
     header_columns,
     data_hash,
     ingest_timestamp,
-    currency_code
+    currency_code,
+    COALESCE(buyer_count, 0) AS buyer_count
 FROM deduplicated
 WHERE rn = 1;

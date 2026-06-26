@@ -12,6 +12,10 @@ from backend.services.data_pipeline.dashboard_bootstrap import (
     inspect_dashboard_assets,
 )
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
+from backend.services.data_pipeline.refresh_validation import (
+    RefreshValidationReport,
+    validate_refresh_result,
+)
 from backend.services.data_pipeline.refresh_runner import (
     execute_refresh_plan,
     extract_failed_targets,
@@ -93,6 +97,69 @@ async def _invalidate_refresh_target_caches(targets: list[str]) -> None:
         )
 
 
+async def _bootstrap_modules_for_validation_report(db, report: RefreshValidationReport) -> None:
+    for module_name in report.modules:
+        await bootstrap_dashboard_assets_if_needed(
+            db,
+            wait_for_lock=True,
+            module=module_name,
+        )
+        if hasattr(db, "commit"):
+            await db.commit()
+
+
+async def _validate_refresh_with_repair(
+    db,
+    *,
+    targets: list[str],
+    context: dict,
+    modules: list[str],
+    pipeline_name: str,
+    trigger_source: str,
+) -> tuple[RefreshValidationReport, dict | None]:
+    report = await validate_refresh_result(
+        db,
+        targets=targets,
+        context=context,
+        modules=modules,
+    )
+    if report.is_success():
+        return report, None
+
+    retry_result = await execute_refresh_plan(
+        db,
+        targets=targets,
+        pipeline_name=pipeline_name,
+        trigger_source=trigger_source,
+        context={**context, "repair_stage": "post_refresh_retry"},
+        continue_on_error=True,
+        max_attempts=2,
+        retry_backoff_seconds=0.1,
+    )
+    retry_status = extract_refresh_status(retry_result)
+    if retry_status == "success" and hasattr(db, "commit"):
+        await db.commit()
+    retry_report = await validate_refresh_result(
+        db,
+        targets=targets,
+        context=context,
+        modules=modules,
+        repair_attempted=True,
+    )
+    if retry_report.is_success():
+        return retry_report, retry_result
+
+    await _bootstrap_modules_for_validation_report(db, retry_report)
+    final_report = await validate_refresh_result(
+        db,
+        targets=targets,
+        context=context,
+        modules=modules,
+        repair_attempted=True,
+    )
+    return final_report, retry_result
+
+
 async def _async_process_refresh_queue_task() -> dict:
     db = AsyncSessionLocal()
     try:
@@ -111,13 +178,15 @@ async def _async_process_refresh_queue_task() -> dict:
 
         try:
             targets = list(task.targets_json or [])
+            context = dict(task.context_json or {})
+            modules = _modules_for_targets(targets)
             await _repair_dashboard_assets_if_needed(db, targets)
             refresh_result = await execute_refresh_plan(
                 db,
                 targets=targets,
                 pipeline_name=task.pipeline_name,
                 trigger_source=getattr(task, "trigger_type", "data_ingested"),
-                context=dict(task.context_json or {}),
+                context=context,
                 continue_on_error=True,
                 max_attempts=2,
                 retry_backoff_seconds=0.1,
@@ -140,6 +209,27 @@ async def _async_process_refresh_queue_task() -> dict:
                     "job_id": task.job_id,
                     "run_id": run_id,
                     "error": error_message,
+                }
+            validation_report, repair_result = await _validate_refresh_with_repair(
+                db,
+                targets=targets,
+                context=context,
+                modules=modules,
+                pipeline_name=task.pipeline_name,
+                trigger_source=getattr(task, "trigger_type", "data_ingested"),
+            )
+            if repair_result is not None:
+                run_id = extract_run_id(repair_result) or run_id
+            if not validation_report.is_success():
+                error_message = validation_report.to_error_message()
+                await queue_service.mark_failed(task.id, error_message)
+                return {
+                    "status": "failed",
+                    "job_id": task.job_id,
+                    "run_id": run_id,
+                    "error": error_message,
+                    "missing_objects": validation_report.missing_objects,
+                    "stale_targets": validation_report.stale_targets,
                 }
             await _invalidate_refresh_target_caches(targets)
             await queue_service.mark_completed(task.id)
@@ -170,3 +260,65 @@ async def _async_process_refresh_queue_task() -> dict:
 def process_refresh_queue_task(self):  # noqa: ANN201
     reset_async_engine_pool_for_new_loop()
     return asyncio.run(_async_process_refresh_queue_task())
+
+
+async def _async_dashboard_refresh_safety_net() -> dict:
+    db = AsyncSessionLocal()
+    try:
+        queue_service = RefreshQueueService(db)
+        recovered_count = await queue_service.recover_stale_running_tasks(
+            timeout_seconds=REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS
+        )
+        report = await inspect_dashboard_assets(db)
+        module_reports = report.get("modules") if isinstance(report, dict) else {}
+        enqueued_repairs = 0
+        if isinstance(module_reports, dict):
+            for module_name, module_report in module_reports.items():
+                if not isinstance(module_report, dict):
+                    continue
+                if module_report.get("status") == "ready":
+                    continue
+                module_targets = DASHBOARD_MODULE_TARGETS.get(module_name, {})
+                targets = list(
+                    dict.fromkeys(
+                        [
+                            *module_targets.get("refresh_targets", []),
+                            *module_targets.get("core_targets", []),
+                        ]
+                    )
+                )
+                if not targets:
+                    continue
+                await queue_service.enqueue_refresh(
+                    trigger_type="safety_net",
+                    pipeline_name="dashboard_safety_net_repair",
+                    targets=targets,
+                    context={
+                        "module_name": module_name,
+                        "reason": "dashboard_asset_drift",
+                        "dashboard_asset_status": module_report.get("status"),
+                        "missing_objects": module_report.get("core_missing_objects", [])
+                        or module_report.get("missing_objects", []),
+                    },
+                )
+                enqueued_repairs += 1
+        return {
+            "status": "success",
+            "recovered_stale_tasks": recovered_count,
+            "enqueued_repairs": enqueued_repairs,
+        }
+    finally:
+        await db.close()
+
+
+@celery_app.task(
+    name="backend.tasks.refresh_queue_tasks.dashboard_refresh_safety_net",
+    bind=True,
+    queue="scheduled",
+    priority=4,
+    time_limit=900,
+    soft_time_limit=780,
+)
+def dashboard_refresh_safety_net(self):  # noqa: ANN201
+    reset_async_engine_pool_for_new_loop()
+    return asyncio.run(_async_dashboard_refresh_safety_net())
