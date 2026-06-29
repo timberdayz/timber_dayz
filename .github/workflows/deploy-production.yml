@@ -288,6 +288,69 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Backend container startup smoke
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          BACKEND_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${TAG}"
+          NETWORK_NAME="xihong_erp_backend_smoke_net"
+          cleanup_smoke() {
+            docker stop xihong_erp_backend_smoke_postgres xihong_erp_backend_smoke_redis >/dev/null 2>&1 || true
+            docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
+          }
+          trap cleanup_smoke EXIT
+
+          docker pull "${BACKEND_IMAGE}"
+          docker network create "${NETWORK_NAME}"
+          docker run -d --rm --name xihong_erp_backend_smoke_postgres \
+            --network "${NETWORK_NAME}" \
+            -e POSTGRES_USER=erp_user \
+            -e POSTGRES_PASSWORD=smoke_pg_pass \
+            -e POSTGRES_DB=xihong_erp \
+            postgres:15-alpine
+          docker run -d --rm --name xihong_erp_backend_smoke_redis \
+            --network "${NETWORK_NAME}" \
+            redis:7-alpine redis-server --requirepass redis_pass_2025
+
+          for i in $(seq 1 60); do
+            if docker exec xihong_erp_backend_smoke_postgres pg_isready -U erp_user -d xihong_erp >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          docker run --rm --network "${NETWORK_NAME}" \
+            -e DATABASE_URL=postgresql://erp_user:smoke_pg_pass@xihong_erp_backend_smoke_postgres:5432/xihong_erp \
+            -e REDIS_URL=redis://:redis_pass_2025@xihong_erp_backend_smoke_redis:6379/0 \
+            -e SECRET_KEY=smoke-secret-key \
+            -e JWT_SECRET_KEY=smoke-jwt-secret-key \
+            -e ACCOUNT_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= \
+            -e RUN_MIGRATIONS=0 \
+            -e ENVIRONMENT=development \
+            -e APP_ENV=development \
+            -e DEPLOYMENT_ROLE=api \
+            -e RATE_LIMIT_ENABLED=false \
+            -e AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false \
+            "${BACKEND_IMAGE}" \
+            python -c "import backend.main; print('import_ok')"
+
+          docker run --rm --network "${NETWORK_NAME}" \
+            -e DATABASE_URL=postgresql://erp_user:smoke_pg_pass@xihong_erp_backend_smoke_postgres:5432/xihong_erp \
+            -e REDIS_URL=redis://:redis_pass_2025@xihong_erp_backend_smoke_redis:6379/0 \
+            -e SECRET_KEY=smoke-secret-key \
+            -e JWT_SECRET_KEY=smoke-jwt-secret-key \
+            -e ACCOUNT_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= \
+            -e RUN_MIGRATIONS=0 \
+            -e ENVIRONMENT=development \
+            -e APP_ENV=development \
+            -e DEPLOYMENT_ROLE=api \
+            -e RATE_LIMIT_ENABLED=false \
+            -e ENABLE_INIT_DB_ON_STARTUP=true \
+            -e AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false \
+            "${BACKEND_IMAGE}" \
+            sh -lc "gunicorn backend.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 60 --access-logfile - --error-logfile - --log-level info & pid=\$!; sleep 20; kill \$pid; wait \$pid || true"
+
       - name: Build and push frontend image
         uses: docker/build-push-action@v6
         with:

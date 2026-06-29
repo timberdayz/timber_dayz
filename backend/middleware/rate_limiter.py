@@ -112,7 +112,7 @@ limiter = Limiter(
     default_limits=["100/minute"],  # 默认限制:每分钟100次
     enabled=os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true",  # 可通过环境变量禁用
     storage_uri=settings.rate_limit_storage_uri,  # [*] v4.19.5: 使用环境感知的存储URI(Redis/内存)
-    config_filename=str(_env_limiter) if _env_limiter.exists() else ".env.limiter",
+    config_filename=str(_env_limiter) if _env_limiter.exists() else None,
 )
 
 

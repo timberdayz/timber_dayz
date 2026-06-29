@@ -512,6 +512,28 @@ fi
 # [FIX] 立即验证 YAML 语法（更稳的防护，提前发现问题）
 # [PROD] 生产需要 Metabase：将 docker-compose.metabase.yml 纳入同一 project，避免 "Found orphan containers (xihong_erp_metabase)" 警告
 # [4c8g] CLOUD_PROFILE=4c8g 时加载 cloud-4c8g、metabase.4c8g overlay
+validate_cleaned_env_quotes() {
+  local env_file="$1"
+  local failed=0
+  local key
+
+  for key in DATABASE_URL REDIS_URL SECRET_KEY JWT_SECRET_KEY; do
+    local value
+    value="$(grep -E "^${key}=" "${env_file}" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)"
+    if printf '%s' "${value}" | grep -Eq '^".*"$|^'\''.*'\''$'; then
+      echo "[FAIL] ${key} must not be wrapped in literal quotes in .env.cleaned"
+      failed=1
+    fi
+  done
+
+  return "${failed}"
+}
+
+if ! validate_cleaned_env_quotes "${PRODUCTION_PATH}/.env.cleaned"; then
+  echo "[INFO] Deployment blocked before docker-compose because cleaned env values are invalid"
+  exit 1
+fi
+
 echo "[INFO] Validating docker-compose config..."
 compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production)
 if [ -f docker-compose.cloud.yml ]; then
@@ -743,13 +765,21 @@ for i in $(seq 1 60); do
     echo "[INFO] Backend container status:"
     docker ps -a --filter name=xihong_erp_backend_api || true
     echo "[INFO] Backend inspect state:"
-    docker inspect xihong_erp_backend_api --format 'status={{.State.Status}} exit_code={{.State.ExitCode}} error={{.State.Error}} oom_killed={{.State.OOMKilled}} restart_count={{.RestartCount}}' || true
-    echo "[INFO] Backend docker logs (tail 300):"
-    docker logs xihong_erp_backend_api --tail 300 2>&1 || true
-    echo "[INFO] Backend gunicorn error log (tail 300):"
-    docker exec xihong_erp_backend_api sh -lc 'tail -n 300 /app/logs/error.log || true' 2>&1 || true
-    echo "[INFO] Backend access log (tail 200):"
-    docker exec xihong_erp_backend_api sh -lc 'tail -n 200 /app/logs/access.log || true' 2>&1 || true
+    docker inspect xihong_erp_backend_api --format '{{json .State}}' || true
+    echo "[INFO] Backend docker logs (timestamps tail 1000):"
+    docker logs --timestamps --tail 1000 xihong_erp_backend_api 2>&1 || true
+    echo "[INFO] Backend file logs (best-effort docker cp):"
+    mkdir -p "${DEPLOY_LOG_DIR}/backend-api" || true
+    docker cp xihong_erp_backend_api:/app/logs/error.log "${DEPLOY_LOG_DIR}/backend-api/error.log" 2>/dev/null || true
+    docker cp xihong_erp_backend_api:/app/logs/access.log "${DEPLOY_LOG_DIR}/backend-api/access.log" 2>/dev/null || true
+    if [ -f "${DEPLOY_LOG_DIR}/backend-api/error.log" ]; then
+      echo "[INFO] Backend gunicorn error log (tail 300):"
+      tail -n 300 "${DEPLOY_LOG_DIR}/backend-api/error.log" || true
+    fi
+    if [ -f "${DEPLOY_LOG_DIR}/backend-api/access.log" ]; then
+      echo "[INFO] Backend access log (tail 200):"
+      tail -n 200 "${DEPLOY_LOG_DIR}/backend-api/access.log" || true
+    fi
     exit 1
   fi
   sleep 2

@@ -7,6 +7,17 @@ cd /app
 
 should_run_migrations="${RUN_MIGRATIONS:-0}"
 
+is_backend_service_command() {
+    case "$1" in
+        gunicorn|uvicorn)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 case "${should_run_migrations}" in
     1|true|TRUE|yes|YES)
         echo "[INFO] Running database migrations..."
@@ -26,5 +37,9 @@ case "${should_run_migrations}" in
         ;;
 esac
 
-echo "[INFO] Starting backend service..."
+if [ "$#" -gt 0 ] && is_backend_service_command "$1"; then
+    echo "[INFO] Starting backend service..."
+else
+    echo "[INFO] Running one-off command: $*"
+fi
 exec "$@"

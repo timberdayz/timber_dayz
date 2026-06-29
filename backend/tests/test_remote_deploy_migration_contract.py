@@ -43,10 +43,18 @@ def test_remote_deploy_backend_timeout_outputs_actionable_container_diagnostics(
     script = _deploy_script()
 
     assert "docker ps -a --filter name=xihong_erp_backend_api" in script
-    assert "docker inspect xihong_erp_backend_api" in script
-    assert "docker logs xihong_erp_backend_api --tail 300" in script
-    assert "tail -n 300 /app/logs/error.log" in script
-    assert "tail -n 200 /app/logs/access.log" in script
+    assert "docker inspect xihong_erp_backend_api --format '{{json .State}}'" in script
+    assert "docker logs --timestamps --tail 1000 xihong_erp_backend_api" in script
+    assert "docker cp xihong_erp_backend_api:/app/logs/error.log" in script
+    assert "docker cp xihong_erp_backend_api:/app/logs/access.log" in script
+
+
+def test_remote_deploy_validates_cleaned_env_values_are_unquoted():
+    script = _deploy_script()
+
+    assert "validate_cleaned_env_quotes" in script
+    assert "DATABASE_URL REDIS_URL SECRET_KEY JWT_SECRET_KEY" in script
+    assert "must not be wrapped in literal quotes" in script
 
 
 def test_backend_gunicorn_errors_are_written_to_container_stderr():
