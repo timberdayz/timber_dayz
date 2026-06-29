@@ -133,10 +133,21 @@ async def test_metrics_endpoint_exposes_cloud_sync_gauges(system_client: AsyncCl
                 ]
             }
 
+    class _FakeReceiveLogQuery:
+        def get_latest_receive_summary(self):
+            return {
+                "available": True,
+                "last_receive_at": "2026-06-29T04:00:00+00:00",
+                "table_receives": {
+                    "fact_shopee_orders_monthly": "2026-06-29T04:00:00+00:00"
+                },
+            }
+
     monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
     monkeypatch.setattr("backend.models.database.SessionLocal", lambda: _FakeSyncSession())
     monkeypatch.setattr("backend.services.cloud_sync_admin_query_service.CloudSyncAdminQueryService", lambda session: _FakeQueryService())
     monkeypatch.setattr("backend.services.postgresql_dashboard_service.PostgresqlDashboardService", lambda: _FakeDashboardService())
+    monkeypatch.setattr("backend.services.cloud_sync_receive_log_query.CloudSyncReceiveLogQuery", lambda: _FakeReceiveLogQuery())
     monkeypatch.setattr("backend.tasks.scheduled_tasks.detect_auto_ingest_orphan_locks", lambda db: [1])
 
     response = await system_client.get("/metrics")
@@ -146,5 +157,6 @@ async def test_metrics_endpoint_exposes_cloud_sync_gauges(system_client: AsyncCl
     assert "xihong_cloud_sync_pending_catalog_files_total 2" in text
     assert "xihong_cloud_sync_pending_catalog_files_overdue_total 1" in text
     assert "xihong_cloud_sync_refresh_queue_failed_total 3" in text
+    assert "xihong_cloud_sync_receive_log_available 1" in text
     assert 'xihong_cloud_sync_table_receive_age_seconds{source_table_name="fact_shopee_orders_monthly"}' in text
     assert 'xihong_business_table_stale_hours{side="orders",table_name="fact_shopee_orders_monthly"} 30.0' in text

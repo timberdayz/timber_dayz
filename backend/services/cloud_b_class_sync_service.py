@@ -20,6 +20,17 @@ def build_sync_payload(row: dict[str, Any]) -> dict[str, Any]:
     payload = {column: row.get(column) for column in build_canonical_columns()}
     if payload.get("data_domain") != "services" and payload.get("shop_id") is None:
         payload["shop_id"] = ""
+    raw_data = payload.get("raw_data")
+    if isinstance(raw_data, dict):
+        raw_payload = dict(raw_data)
+    else:
+        raw_payload = {}
+        if raw_data not in (None, ""):
+            raw_payload["_cloud_sync_original_raw_data"] = raw_data
+    if row.get("file_id") is not None:
+        raw_payload["_cloud_sync_source_file_id"] = row.get("file_id")
+    if raw_payload:
+        payload["raw_data"] = raw_payload
     # Cloud-side raw facts do not own the local file/template dimension rows.
     payload["file_id"] = None
     payload["template_id"] = None
@@ -107,6 +118,33 @@ class SQLAlchemyCloudWriter:
             conn.execute(text(sql), prepared_rows)
         return {"success": True, "written_rows": len(rows)}
 
+    def write_rows_with_receive_log(
+        self,
+        *,
+        table_name: str,
+        rows: list[dict[str, Any]],
+        data_domain: str,
+        receive_log_recorder: "CloudSyncReceiveLogRecorder",
+        receive_log_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self.dry_run:
+            return {"success": True, "written_rows": len(rows), "dry_run": True}
+
+        sql = self._build_upsert_sql(table_name, data_domain)
+        prepared_rows = self._prepare_rows_for_insert(rows)
+        with self.engine.begin() as conn:
+            conn.execute(text(sql), prepared_rows)
+            receive_result = receive_log_recorder.record_success_on_connection(
+                conn,
+                **receive_log_context,
+            )
+        return {
+            "success": True,
+            "written_rows": len(rows),
+            "receive_log": receive_result,
+            "receive_id": receive_result.get("receive_id"),
+        }
+
     @staticmethod
     def _prepare_rows_for_insert(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         prepared_rows: list[dict[str, Any]] = []
@@ -165,6 +203,67 @@ class CloudSyncReceiveLogRecorder:
         self,
         *,
         source_table_name: str,
+        receive_id: str | None = None,
+        source_file_id: int | None = None,
+        platform_code: str | None = None,
+        data_domain: str | None = None,
+        granularity: str | None = None,
+        checkpoint_scope: str = "b_class",
+        source_latest_ingest_timestamp: Any | None = None,
+        written_rows: int = 0,
+        rows: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        payload = self._build_success_payload(
+            source_table_name=source_table_name,
+            receive_id=receive_id,
+            source_file_id=source_file_id,
+            platform_code=platform_code,
+            data_domain=data_domain,
+            granularity=granularity,
+            checkpoint_scope=checkpoint_scope,
+            source_latest_ingest_timestamp=source_latest_ingest_timestamp,
+            written_rows=written_rows,
+            rows=rows,
+        )
+        with self.engine.begin() as conn:
+            conn.execute(insert(CloudSyncReceiveLog.__table__).values(**payload))
+        return {"status": "completed", "receive_id": payload["receive_id"], "written_rows": written_rows}
+
+    def record_success_on_connection(
+        self,
+        conn,
+        *,
+        source_table_name: str,
+        receive_id: str | None = None,
+        source_file_id: int | None = None,
+        platform_code: str | None = None,
+        data_domain: str | None = None,
+        granularity: str | None = None,
+        checkpoint_scope: str = "b_class",
+        source_latest_ingest_timestamp: Any | None = None,
+        written_rows: int = 0,
+        rows: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        payload = self._build_success_payload(
+            source_table_name=source_table_name,
+            receive_id=receive_id,
+            source_file_id=source_file_id,
+            platform_code=platform_code,
+            data_domain=data_domain,
+            granularity=granularity,
+            checkpoint_scope=checkpoint_scope,
+            source_latest_ingest_timestamp=source_latest_ingest_timestamp,
+            written_rows=written_rows,
+            rows=rows,
+        )
+        conn.execute(insert(CloudSyncReceiveLog.__table__).values(**payload))
+        return {"status": "completed", "receive_id": payload["receive_id"], "written_rows": written_rows}
+
+    def _build_success_payload(
+        self,
+        *,
+        source_table_name: str,
+        receive_id: str | None = None,
         source_file_id: int | None = None,
         platform_code: str | None = None,
         data_domain: str | None = None,
@@ -176,9 +275,8 @@ class CloudSyncReceiveLogRecorder:
     ) -> dict[str, Any]:
         rows = list(rows or [])
         business_date_min, business_date_max = self._business_date_range(rows)
-        table = CloudSyncReceiveLog.__table__
-        receive_id = f"receive-{uuid.uuid4().hex}"
-        payload = {
+        receive_id = receive_id or f"receive-{uuid.uuid4().hex}"
+        return {
             "receive_id": receive_id,
             "source_environment": self.source_environment,
             "checkpoint_scope": checkpoint_scope,
@@ -193,9 +291,6 @@ class CloudSyncReceiveLogRecorder:
             "written_rows": written_rows,
             "status": "completed",
         }
-        with self.engine.begin() as conn:
-            conn.execute(insert(table).values(**payload))
-        return {"status": "completed", "receive_id": receive_id, "written_rows": written_rows}
 
 
 class CloudRefreshQueueEnqueuer:
@@ -491,13 +586,50 @@ class CloudBClassSyncService:
                         **_projection_result(),
                     }
 
-                write_result = await self._maybe_await(
-                    self.remote_writer(
-                        table_name=table_name,
-                        rows=payload_rows,
-                        data_domain=data_domain,
+                receive_id = f"receive-{uuid.uuid4().hex}"
+                source_file_id = CloudSyncReceiveLogRecorder._first_non_empty(rows, "file_id")
+                for payload_row in payload_rows:
+                    raw_payload = payload_row.get("raw_data")
+                    if not isinstance(raw_payload, dict):
+                        raw_payload = {}
+                    raw_payload["_cloud_sync_receive_id"] = receive_id
+                    if source_file_id is not None:
+                        raw_payload.setdefault("_cloud_sync_source_file_id", source_file_id)
+                    payload_row["raw_data"] = raw_payload
+
+                receive_log_context = {
+                    "source_table_name": table_name,
+                    "receive_id": receive_id,
+                    "source_file_id": source_file_id,
+                    "data_domain": data_domain,
+                    "granularity": (payload_rows[0] or {}).get("granularity") if payload_rows else None,
+                    "platform_code": (payload_rows[0] or {}).get("platform_code") if payload_rows else None,
+                    "checkpoint_scope": self.checkpoint_scope,
+                    "source_latest_ingest_timestamp": rows[-1].get("ingest_timestamp") if rows else None,
+                    "written_rows": len(rows),
+                    "rows": rows,
+                }
+                if (
+                    self.receive_log_recorder is not None
+                    and hasattr(self.remote_writer, "write_rows_with_receive_log")
+                ):
+                    write_result = await self._maybe_await(
+                        self.remote_writer.write_rows_with_receive_log(
+                            table_name=table_name,
+                            rows=payload_rows,
+                            data_domain=data_domain,
+                            receive_log_recorder=self.receive_log_recorder,
+                            receive_log_context=receive_log_context,
+                        )
                     )
-                )
+                else:
+                    write_result = await self._maybe_await(
+                        self.remote_writer(
+                            table_name=table_name,
+                            rows=payload_rows,
+                            data_domain=data_domain,
+                        )
+                    )
 
                 write_succeeded = bool(write_result.get("success"))
                 if not write_succeeded:
@@ -510,18 +642,13 @@ class CloudBClassSyncService:
                     }
 
                 total_written_rows += int(write_result.get("written_rows", len(rows)))
-                if self.receive_log_recorder is not None and not bool(write_result.get("dry_run")):
+                if (
+                    self.receive_log_recorder is not None
+                    and not bool(write_result.get("dry_run"))
+                    and not write_result.get("receive_log")
+                ):
                     await self._maybe_await(
-                        self.receive_log_recorder.record_success(
-                            source_table_name=table_name,
-                            data_domain=data_domain,
-                            granularity=(payload_rows[0] or {}).get("granularity") if payload_rows else None,
-                            platform_code=(payload_rows[0] or {}).get("platform_code") if payload_rows else None,
-                            checkpoint_scope=self.checkpoint_scope,
-                            source_latest_ingest_timestamp=rows[-1].get("ingest_timestamp") if rows else None,
-                            written_rows=int(write_result.get("written_rows", len(rows))),
-                            rows=rows,
-                        )
+                        self.receive_log_recorder.record_success(**receive_log_context)
                     )
                 dry_run_seen = dry_run_seen or bool(write_result.get("dry_run"))
                 if self._should_advance_checkpoint(write_succeeded, dry_run=bool(write_result.get("dry_run"))):
