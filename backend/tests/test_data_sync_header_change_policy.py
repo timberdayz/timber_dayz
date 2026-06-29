@@ -16,6 +16,24 @@ def test_alias_only_header_change_does_not_block_sync():
     )
 
 
+def test_non_breaking_semantic_contract_header_change_does_not_block_sync():
+    assert (
+        DataSyncService._is_blocking_header_change(
+            {
+                "detected": True,
+                "is_exact_match": False,
+                "is_semantic_match": False,
+                "semantic_contract_status": "non_breaking_drift",
+                "blocking_changes": [],
+                "missing_required_keys": [],
+                "added_fields": ["profit"],
+                "removed_fields": ["estimated_settlement_amount"],
+            }
+        )
+        is False
+    )
+
+
 def test_true_structural_header_change_blocks_sync():
     assert (
         DataSyncService._is_blocking_header_change(

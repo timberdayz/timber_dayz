@@ -501,7 +501,7 @@ v4.6.0新增：独立的数据同步系统
             >
               <el-tag type="warning" size="small">
                 <el-icon><Warning /></el-icon>
-                降级同步
+                可同步（字段漂移）
               </el-tag>
             </el-tooltip>
             <el-tag v-else-if="row.has_template" type="success" size="small">
@@ -1019,7 +1019,11 @@ const getFileStatusType = (status) => {
     needs_shop: 'info',
     partial_success: 'warning',
     source_missing: 'warning',
-    template_update_required: 'warning'
+    template_update_required: 'warning',
+    blocked_template_update: 'warning',
+    blocked_missing_template: 'warning',
+    blocked_missing_variant: 'warning',
+    blocked_semantic_contract: 'warning'
   }
   return types[status] || 'info'
 }
@@ -1033,7 +1037,11 @@ const getFileStatusText = (status) => {
     needs_shop: '需指派店铺',
     partial_success: '部分成功',
     source_missing: '源文件缺失',
-    template_update_required: '模板待确认'
+    template_update_required: '模板待确认',
+    blocked_template_update: '模板待确认',
+    blocked_missing_template: '缺少模板',
+    blocked_missing_variant: '缺少模板变体',
+    blocked_semantic_contract: '语义字段缺失'
   }
   return texts[status] || status || '未知'
 }
@@ -1083,7 +1091,7 @@ const getTemplateStatusTooltip = (row) => {
   if (row?.semantic_contract_status === 'breaking_drift') {
     parts.push('模板待确认：缺少业务概览 required 语义字段')
   } else if (row?.semantic_contract_status === 'non_breaking_drift') {
-    parts.push('非破坏性变更：核心语义字段完整，允许降级同步')
+    parts.push('字段漂移但核心语义字段完整，允许自动同步')
   }
   if (missingRequired.length) {
     parts.push(`缺少核心字段：${missingRequired.join(', ')}`)
@@ -2405,6 +2413,7 @@ const pollTaskProgress = async (taskId) => {
         if (isCompleted) {
           const successCount = progress.success_files || 0
           const failedCount = progress.failed_files || 0
+          const blockedCount = progress.blocked_files || 0
           const skippedCount = progress.skipped_files || 0
 
           if (isSingleFile) {
@@ -2422,8 +2431,11 @@ const pollTaskProgress = async (taskId) => {
             if (failedCount > 0) {
               message += `，失败${failedCount}个`
             }
+            if (blockedCount > 0) {
+              message += `，阻断${blockedCount}个（模板或语义字段待确认）`
+            }
             if (skippedCount > 0) {
-              message += `，跳过${skippedCount}个（重复数据）`
+              message += `，重复跳过${skippedCount}个`
             }
             ElMessage.success(message)
           }

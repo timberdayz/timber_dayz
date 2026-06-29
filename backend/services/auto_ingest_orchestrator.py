@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 
 def _is_no_template_result(result: Dict[str, Any]) -> bool:
-    if result.get("status") != "skipped":
+    if result.get("status") not in {"skipped", "blocked_missing_template"}:
         return False
     message = str(result.get("message", ""))
     message_lower = message.lower()
@@ -137,7 +137,7 @@ class AutoIngestOrchestrator:
         succeeded = 0
         quarantined = 0
         failed = 0
-        skipped_no_template = 0
+        blocked_missing_template = 0
         processed_files: List[Dict[str, Any]] = []
 
         for idx, file_record in enumerate(files):
@@ -171,7 +171,8 @@ class AutoIngestOrchestrator:
             elif status == "failed":
                 failed += 1
             elif _is_no_template_result(item):
-                skipped_no_template += 1
+                item["status"] = "blocked_missing_template"
+                blocked_missing_template += 1
 
             processed_files.append(item)
 
@@ -186,7 +187,10 @@ class AutoIngestOrchestrator:
                     "quarantined": quarantined,
                     "error_rows": failed,
                     "failed": failed,
-                    "skipped": skipped_no_template,
+                    "blocked": blocked_missing_template,
+                    "blocked_files": blocked_missing_template,
+                    "blocked_missing_template": blocked_missing_template,
+                    "skipped": 0,
                     "files": processed_files[-10:],
                 },
             )
@@ -202,7 +206,10 @@ class AutoIngestOrchestrator:
                 "succeeded": succeeded,
                 "quarantined": quarantined,
                 "failed": failed,
-                "skipped_no_template": skipped_no_template,
+                "blocked": blocked_missing_template,
+                "blocked_missing_template": blocked_missing_template,
+                "skipped": 0,
+                "skipped_no_template": 0,
             },
             "files": processed_files,
         }

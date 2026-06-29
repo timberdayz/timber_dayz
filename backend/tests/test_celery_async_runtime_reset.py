@@ -312,21 +312,22 @@ def test_auto_ingest_pending_files_creates_auto_ingest_task_record(monkeypatch):
     assert updated["processed_items"] == 3
     assert updated["success_items"] == 1
     assert updated["failed_items"] == 1
-    assert updated["skipped_items"] == 1
+    assert updated["skipped_items"] == 0
     assert updated["progress_percent"] == 100.0
 
     task_details = updated["details_json"]["task_details"]
     assert task_details["success_files"] == 1
     assert task_details["failed_files"] == 1
-    assert task_details["skipped_files"] == 1
-    assert task_details["skipped_no_template"] == 1
+    assert task_details["blocked_files"] == 1
+    assert task_details["blocked_missing_template"] == 1
+    assert task_details["skipped_files"] == 0
     assert task_details["files"] == [
         {"file_id": 101, "file_name": "ok.xlsx", "status": "success", "error_code": None, "message": ""},
         {"file_id": 102, "file_name": "bad.xlsx", "status": "failed", "error_code": None, "message": "boom"},
         {
             "file_id": 103,
             "file_name": "skip.xlsx",
-            "status": "skipped",
+            "status": "blocked_missing_template",
             "error_code": "NO_TEMPLATE",
             "message": "template missing",
         },
@@ -571,16 +572,24 @@ def test_recover_template_update_required_files_returns_ready_files_to_pending(m
     assert db.commits == 1
 
 
-def test_auto_ingest_task_details_include_template_readiness_diagnostics():
+def test_auto_ingest_task_details_include_blocked_template_readiness_diagnostics():
     from backend.tasks import scheduled_tasks as scheduled_module
 
     details = scheduled_module._build_auto_ingest_task_details(
-        {"processed": 1, "succeeded": 0, "quarantined": 0, "failed": 0, "skipped": 1},
+        {
+            "processed": 1,
+            "succeeded": 0,
+            "quarantined": 0,
+            "failed": 0,
+            "skipped": 0,
+            "blocked": 1,
+            "blocked_template_update": 1,
+        },
         [
             {
                 "file_id": 2746,
                 "file_name": "shopee_orders_monthly.xls",
-                "status": "skipped",
+                "status": "blocked_template_update",
                 "error_code": "TEMPLATE_UPDATE_REQUIRED",
                 "message": "header_changed",
                 "removed_fields": ["预估回款金额"],
@@ -592,6 +601,10 @@ def test_auto_ingest_task_details_include_template_readiness_diagnostics():
     )
 
     file_entry = details["task_details"]["files"][0]
+    assert details["task_details"]["blocked_files"] == 1
+    assert details["task_details"]["blocked_template_update"] == 1
+    assert details["task_details"]["skipped_files"] == 0
+    assert file_entry["status"] == "blocked_template_update"
     assert file_entry["removed_fields"] == ["预估回款金额"]
     assert file_entry["missing_required_keys"] == ["paid_amount"]
     assert file_entry["missing_optional_keys"] == ["estimated_settlement_amount"]
@@ -729,7 +742,7 @@ def test_sync_single_file_task_resets_async_engine_before_asyncio_run(monkeypatc
     assert calls[:2] == ["reset", "run"]
 
 
-def test_auto_ingest_pending_files_skips_template_update_required(monkeypatch):
+def test_auto_ingest_pending_files_blocks_template_update_required(monkeypatch):
     from backend.tasks import scheduled_tasks as scheduled_module
     original_asyncio_run = asyncio.run
     records = {}
@@ -812,10 +825,14 @@ def test_auto_ingest_pending_files_skips_template_update_required(monkeypatch):
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 
     assert result["status"] == "success"
-    assert result["summary"]["skipped"] == 1
-    assert result["summary"]["skipped_template_update"] == 1
+    assert result["summary"]["skipped"] == 0
+    assert result["summary"]["blocked"] == 1
+    assert result["summary"]["blocked_template_update"] == 1
     task_details = records["updated"]["details_json"]["task_details"]
-    assert task_details["skipped_template_update"] == 1
+    assert task_details["skipped_files"] == 0
+    assert task_details["blocked_files"] == 1
+    assert task_details["blocked_template_update"] == 1
+    assert task_details["files"][0]["status"] == "blocked_template_update"
     assert task_details["files"][0]["error_code"] == "TEMPLATE_UPDATE_REQUIRED"
 
 

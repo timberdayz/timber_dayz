@@ -138,6 +138,10 @@ async def test_legacy_orchestrator_batch_delegates_and_summarizes(monkeypatch):
     assert result["success"] is True
     assert result["summary"]["total_files"] == 2
     assert result["summary"]["succeeded"] == 1
-    assert result["summary"]["skipped_no_template"] == 1
+    assert result["summary"]["blocked"] == 1
+    assert result["summary"]["blocked_missing_template"] == 1
+    assert result["summary"]["skipped"] == 0
+    assert result["summary"]["skipped_no_template"] == 0
+    assert result["files"][1]["status"] == "blocked_missing_template"
     assert len(seen_calls) == 2
     assert progress.created and progress.completed

@@ -88,7 +88,7 @@
       </section>
 
       <section class="template-deduplication-review-panel__group">
-        <div class="template-deduplication-review-panel__group-title">当前模板保留字段</div>
+        <div class="template-deduplication-review-panel__group-title">继承自模板的标准 Hash 字段</div>
         <div class="template-deduplication-review-panel__tags">
           <el-tag v-for="field in existingDeduplicationFieldsAvailable" :key="field" size="small" type="success">
             {{ field }}
@@ -98,7 +98,7 @@
       </section>
 
       <section v-if="semanticMatchedHashableFields.length > 0" class="template-deduplication-review-panel__group">
-        <div class="template-deduplication-review-panel__group-title">已语义匹配</div>
+        <div class="template-deduplication-review-panel__group-title">当前文件源字段映射</div>
         <div class="template-deduplication-review-panel__tags">
           <el-tag
             v-for="match in semanticMatchedHashableFields"

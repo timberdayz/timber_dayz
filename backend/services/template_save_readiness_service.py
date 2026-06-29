@@ -11,6 +11,11 @@ from backend.services.template_hash_policy import HashPolicyResult, TemplateHash
 from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
 
 
+UNRESOLVED_DEDUPLICATION_FIELDS_PREFIX = (
+    "deduplication_fields must resolve to confirmed semantic bindings or parse rules: "
+)
+
+
 @dataclass(frozen=True)
 class TemplateSaveReadinessResult:
     can_save: bool
@@ -100,7 +105,7 @@ def validate_deduplication_fields_against_bindings(
 
     header_lookup = {str(column).strip().lower() for column in header_columns}
     invalid_fields: list[str] = []
-    non_semantic_fields: list[str] = []
+    non_semantic_diagnostics: list[str] = []
 
     for field in deduplication_fields:
         field_text = str(field).strip()
@@ -108,19 +113,12 @@ def validate_deduplication_fields_against_bindings(
         normalized_key = normalize_semantic_key(field_text)
         raw_binding = binding_by_raw.get(field_key)
         semantic_bindings = bindings_by_semantic.get(normalized_key or "", [])
-
         candidate_bindings = [binding for binding in [raw_binding, *semantic_bindings] if binding]
-        non_semantic_binding = next(
-            (
-                binding
-                for binding in candidate_bindings
-                if binding.get("semantic_review_status") == "confirmed_non_semantic"
-            ),
-            None,
-        )
-        if non_semantic_binding:
-            non_semantic_fields.append(str(non_semantic_binding.get("raw_name") or field_text).strip())
-            continue
+        for binding in candidate_bindings:
+            if binding.get("semantic_review_status") == "confirmed_non_semantic":
+                raw_name = str(binding.get("raw_name") or field_text).strip()
+                if raw_name and raw_name not in non_semantic_diagnostics:
+                    non_semantic_diagnostics.append(raw_name)
 
         confirmed_semantic_bindings = [
             binding
@@ -144,18 +142,16 @@ def validate_deduplication_fields_against_bindings(
             and is_canonical_semantic_key(raw_semantic_key)
         ):
             continue
-        invalid_fields.append(field_text)
+        invalid_fields.append(normalized_key or field_text)
 
-    if non_semantic_fields:
-        raise ValueError(
-            "deduplication_fields包含已确认非核心语义字段，不能参与Hash: "
-            + ", ".join(non_semantic_fields)
-        )
     if invalid_fields:
-        raise ValueError(
-            "deduplication_fields必须能通过表头或语义绑定解析到真实字段: "
-            + ", ".join(invalid_fields)
-        )
+        message = UNRESOLVED_DEDUPLICATION_FIELDS_PREFIX + ", ".join(invalid_fields)
+        if non_semantic_diagnostics:
+            message += (
+                "; non-semantic source fields are diagnostic only: "
+                + ", ".join(non_semantic_diagnostics)
+            )
+        raise ValueError(message)
     return invalid_fields
 
 
@@ -212,11 +208,12 @@ class TemplateSaveReadinessService:
             )
         except ValueError as exc:
             binding_errors.append(str(exc))
-            prefix = "deduplication_fields必须能通过表头或语义绑定解析到真实字段: "
+            prefix = UNRESOLVED_DEDUPLICATION_FIELDS_PREFIX
             if str(exc).startswith(prefix):
+                unresolved_text = str(exc)[len(prefix) :].split(";", 1)[0]
                 unresolved_deduplication_fields = [
                     item.strip()
-                    for item in str(exc)[len(prefix) :].split(",")
+                    for item in unresolved_text.split(",")
                     if item.strip()
                 ]
 

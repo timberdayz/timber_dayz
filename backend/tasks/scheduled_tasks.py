@@ -372,8 +372,13 @@ def _create_auto_ingest_task_record(
                     "file_ids": list(pending_ids),
                     "success_files": 0,
                     "failed_files": 0,
+                    "blocked_files": 0,
                     "skipped_files": 0,
                     "quarantined_files": 0,
+                    "blocked_template_update": 0,
+                    "blocked_missing_template": 0,
+                    "blocked_missing_variant": 0,
+                    "blocked_semantic_contract": 0,
                     "skipped_template_update": 0,
                     "skipped_no_template": 0,
                     "files": [],
@@ -407,6 +412,19 @@ def _create_auto_ingest_task_record(
 
 def _auto_ingest_result_status(item: Dict[str, Any]) -> str:
     status = str(item.get("status") or "").strip()
+    error_code = str(item.get("error_code") or "").strip()
+    skip_reason = str(item.get("skip_reason") or "").strip()
+    message = str(item.get("message") or "").lower()
+    if status == "skipped":
+        if error_code == "TEMPLATE_UPDATE_REQUIRED":
+            return "blocked_template_update"
+        if (
+            error_code == "NO_TEMPLATE"
+            or skip_reason == "no_template"
+            or "no_template" in message
+            or "no template" in message
+        ):
+            return "blocked_missing_template"
     try:
         quarantined = int(item.get("quarantined") or 0)
     except (TypeError, ValueError):
@@ -418,6 +436,39 @@ def _auto_ingest_result_status(item: Dict[str, Any]) -> str:
     if item.get("success") is True:
         return "success"
     return "failed"
+
+
+_AUTO_INGEST_BLOCKED_STATUSES = {
+    "blocked_template_update",
+    "blocked_missing_template",
+    "blocked_missing_variant",
+    "blocked_semantic_contract",
+}
+
+
+def _is_auto_ingest_blocked_status(status: str) -> bool:
+    return status in _AUTO_INGEST_BLOCKED_STATUSES
+
+
+def _blocked_auto_ingest_status_for_readiness(readiness: Dict[str, Any]) -> str:
+    template_status = str(readiness.get("template_status") or "").strip()
+    governance_status = str(readiness.get("governance_status") or "").strip()
+    semantic_contract_status = str(
+        readiness.get("semantic_contract_status") or ""
+    ).strip()
+    if template_status == "missing_variant" or governance_status == "missing_variant":
+        return "blocked_missing_variant"
+    if (
+        template_status in {"missing", "missing_family"}
+        or governance_status == "missing_family"
+    ):
+        return "blocked_missing_template"
+    if (
+        semantic_contract_status == "breaking_drift"
+        or governance_status == "breaking_drift"
+    ):
+        return "blocked_semantic_contract"
+    return "blocked_template_update"
 
 
 def _auto_ingest_result_message(item: Dict[str, Any]) -> str:
@@ -462,7 +513,7 @@ def _build_auto_ingest_task_details(
         files.append(file_entry)
         if status == "failed":
             errors.append(file_entry)
-        elif status == "skipped":
+        elif status == "skipped" or _is_auto_ingest_blocked_status(status):
             warnings.append(file_entry)
 
     message = (
@@ -470,6 +521,7 @@ def _build_auto_ingest_task_details(
         f"success={summary.get('succeeded', 0)}, "
         f"quarantined={summary.get('quarantined', 0)}, "
         f"failed={summary.get('failed', 0)}, "
+        f"blocked={summary.get('blocked', 0)}, "
         f"skipped={summary.get('skipped', 0)}"
     )
 
@@ -481,8 +533,13 @@ def _build_auto_ingest_task_details(
         "task_details": {
             "success_files": summary.get("succeeded", 0),
             "failed_files": summary.get("failed", 0),
+            "blocked_files": summary.get("blocked", 0),
             "skipped_files": summary.get("skipped", 0),
             "quarantined_files": summary.get("quarantined", 0),
+            "blocked_template_update": summary.get("blocked_template_update", 0),
+            "blocked_missing_template": summary.get("blocked_missing_template", 0),
+            "blocked_missing_variant": summary.get("blocked_missing_variant", 0),
+            "blocked_semantic_contract": summary.get("blocked_semantic_contract", 0),
             "skipped_template_update": summary.get("skipped_template_update", 0),
             "skipped_no_template": summary.get("skipped_no_template", 0),
             "files": files,
@@ -496,6 +553,11 @@ def _summarize_auto_ingest_results(results: List[Dict[str, Any]]) -> Dict[str, i
         "succeeded": 0,
         "quarantined": 0,
         "failed": 0,
+        "blocked": 0,
+        "blocked_template_update": 0,
+        "blocked_missing_template": 0,
+        "blocked_missing_variant": 0,
+        "blocked_semantic_contract": 0,
         "skipped": 0,
         "skipped_no_template": 0,
         "skipped_template_update": 0,
@@ -509,6 +571,10 @@ def _summarize_auto_ingest_results(results: List[Dict[str, Any]]) -> Dict[str, i
             summary["quarantined"] += 1
         elif status == "failed":
             summary["failed"] += 1
+        elif _is_auto_ingest_blocked_status(status):
+            summary["blocked"] += 1
+            if status in summary:
+                summary[status] += 1
         elif status == "skipped":
             summary["skipped"] += 1
             message = safe_item.get("message", "")
@@ -571,10 +637,11 @@ def _update_auto_ingest_task_progress(
 def _resolve_auto_ingest_task_status(summary: Dict[str, int]) -> str:
     processed = int(summary.get("processed", 0) or 0)
     failed = int(summary.get("failed", 0) or 0)
+    blocked = int(summary.get("blocked", 0) or 0)
     skipped = int(summary.get("skipped", 0) or 0)
     if processed > 0 and failed >= processed:
         return "failed"
-    if failed > 0 or skipped > 0:
+    if failed > 0 or blocked > 0 or skipped > 0:
         return "partial_success"
     return "completed"
 
@@ -1110,7 +1177,7 @@ def auto_ingest_pending_files(max_files: int | None = None):
                                     "success": False,
                                     "file_id": file_id,
                                     "file_name": readiness.get("file_name"),
-                                    "status": "skipped",
+                                    "status": _blocked_auto_ingest_status_for_readiness(readiness),
                                     "error_code": "TEMPLATE_UPDATE_REQUIRED",
                                     "message": update_message,
                                     "added_fields": (readiness.get("header_changes") or {}).get("added_fields"),
@@ -1120,16 +1187,33 @@ def auto_ingest_pending_files(max_files: int | None = None):
                                     "should_auto_sync": readiness.get("should_auto_sync"),
                                     "template_status": readiness.get("template_status"),
                                     "governance_status": readiness.get("governance_status"),
+                                    "semantic_contract_status": readiness.get("semantic_contract_status"),
                                 }
                             if template_status == "missing":
                                 return {
                                     "success": False,
                                     "file_id": file_id,
                                     "file_name": readiness.get("file_name"),
-                                    "status": "skipped",
+                                    "status": _blocked_auto_ingest_status_for_readiness(readiness),
                                     "error_code": "NO_TEMPLATE",
                                     "message": readiness.get("message") or "无模板",
                                 }
+                            return {
+                                "success": False,
+                                "file_id": file_id,
+                                "file_name": readiness.get("file_name"),
+                                "status": _blocked_auto_ingest_status_for_readiness(readiness),
+                                "error_code": readiness.get("error_code") or "TEMPLATE_BLOCKED",
+                                "message": readiness.get("update_reason")
+                                or readiness.get("message")
+                                or "template readiness blocked auto ingest",
+                                "missing_required_keys": readiness.get("missing_required_keys"),
+                                "missing_optional_keys": readiness.get("missing_optional_keys"),
+                                "should_auto_sync": readiness.get("should_auto_sync"),
+                                "template_status": readiness.get("template_status"),
+                                "governance_status": readiness.get("governance_status"),
+                                "semantic_contract_status": readiness.get("semantic_contract_status"),
+                            }
                         result = await sync_service.sync_single_file(
                             file_id=file_id,
                             only_with_template=True,

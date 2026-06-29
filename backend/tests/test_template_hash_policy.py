@@ -1,4 +1,5 @@
 from backend.services.template_hash_policy import TemplateHashPolicyService
+from backend.services.template_save_readiness_service import TemplateSaveReadinessService
 from backend.services.semantic_field_registry import (
     get_semantic_field_meta,
     is_canonical_semantic_key,
@@ -761,3 +762,76 @@ def test_sample_diagnostics_warns_when_hash_distinct_count_is_too_low():
     assert result.sample_diagnostics["row_count"] == 2
     assert result.sample_diagnostics["hash_distinct_count"] == 1
     assert any("distinct" in warning for warning in result.warnings)
+
+
+def test_save_readiness_allows_standard_hash_key_when_other_raw_field_is_non_semantic():
+    service = TemplateSaveReadinessService()
+
+    result = service.assess(
+        data_domain="inventory",
+        granularity="daily",
+        sub_domain=None,
+        deduplication_fields=["platform_sku", "warehouse_name", "metric_date"],
+        header_columns=["Platform SKU", "商品SKU", "Warehouse", "Date"],
+        header_bindings=[
+            {
+                "raw_name": "Platform SKU",
+                "semantic_key": "platform_sku",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "商品SKU",
+                "semantic_key": "platform_sku",
+                "semantic_review_status": "confirmed_non_semantic",
+            },
+            {
+                "raw_name": "Warehouse",
+                "semantic_key": "warehouse_name",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "Date",
+                "semantic_key": "metric_date",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+        field_parse_rules=[],
+    )
+
+    assert result.can_save is True
+    assert result.blocking_errors == []
+    assert result.unresolved_deduplication_fields == []
+
+
+def test_save_readiness_rejects_standard_hash_key_only_when_no_semantic_binding_exists():
+    service = TemplateSaveReadinessService()
+
+    result = service.assess(
+        data_domain="inventory",
+        granularity="daily",
+        sub_domain=None,
+        deduplication_fields=["platform_sku", "warehouse_name", "metric_date"],
+        header_columns=["商品SKU", "Warehouse", "Date"],
+        header_bindings=[
+            {
+                "raw_name": "商品SKU",
+                "semantic_key": "platform_sku",
+                "semantic_review_status": "confirmed_non_semantic",
+            },
+            {
+                "raw_name": "Warehouse",
+                "semantic_key": "warehouse_name",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "Date",
+                "semantic_key": "metric_date",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+        field_parse_rules=[],
+    )
+
+    assert result.can_save is False
+    assert result.unresolved_deduplication_fields == ["platform_sku"]
+    assert any("platform_sku" in error for error in result.blocking_errors)

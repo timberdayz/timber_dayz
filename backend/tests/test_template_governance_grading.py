@@ -290,9 +290,13 @@ def test_auto_ingest_marks_template_update_required_when_readiness_blocks(
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 
     assert result["status"] == "success"
-    assert result["summary"]["skipped_template_update"] == 1
+    assert result["summary"]["blocked"] == 1
+    assert result["summary"]["blocked_template_update"] == 1
+    assert result["summary"]["skipped"] == 0
     assert records["updated"]["status"] == "partial_success"
-    assert records["updated"]["details_json"]["task_details"]["skipped_template_update"] == 1
+    assert records["updated"]["details_json"]["task_details"]["blocked_files"] == 1
+    assert records["updated"]["details_json"]["task_details"]["blocked_template_update"] == 1
+    assert records["updated"]["details_json"]["task_details"]["files"][0]["status"] == "blocked_template_update"
     assert file_record.status == "template_update_required"
     assert file_record.error_message == "新增0个字段, 删除1个字段 (匹配率: 98.5%)"
     assert file_record.file_metadata["auto_ingest"]["last_status"] == "template_update_required"

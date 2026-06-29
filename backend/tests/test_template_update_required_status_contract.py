@@ -45,3 +45,22 @@ def test_data_sync_files_frontend_exposes_template_update_required_state():
     assert "getFileStatusType(row.status)" in view_text
     assert "getFileStatusText(row.status)" in view_text
     assert "isTemplateUpdateRequiredHistory(row)" in view_text
+
+
+def test_data_sync_files_frontend_separates_blocked_from_duplicate_skipped():
+    view_text = (
+        PROJECT_ROOT
+        / "frontend"
+        / "src"
+        / "domains"
+        / "data_platform"
+        / "views"
+        / "DataSyncFiles.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "blocked_template_update" in view_text
+    assert "blocked_missing_variant" in view_text
+    assert "blocked_missing_template" in view_text
+    assert "blocked_semantic_contract" in view_text
+    assert "blocked_files" in view_text
+    assert "跳过${skippedCount}个（重复数据）" not in view_text

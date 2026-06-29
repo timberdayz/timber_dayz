@@ -301,6 +301,14 @@ class DataSyncService:
             return False
         if header_changes.get("is_semantic_match", False):
             return False
+        semantic_contract_status = header_changes.get("semantic_contract_status")
+        if semantic_contract_status in {"ready", "non_breaking_drift"}:
+            missing_required = header_changes.get("missing_required_keys") or []
+            blocking_changes = header_changes.get("blocking_changes") or []
+            if not missing_required and not blocking_changes:
+                return False
+        if header_changes.get("should_auto_sync") is True:
+            return False
         return True
 
     @staticmethod
@@ -550,6 +558,7 @@ class DataSyncService:
                     "status": "failed",
                     "message": "文件不存在",
                 }
+            sync_mode = "normal"
 
             # 2. 检查状态(防止并发)
             semantic_validation = validate_file_semantics(
@@ -850,6 +859,33 @@ class DataSyncService:
                 header_changes = await self.template_matcher.detect_header_changes(
                     template_id=template.id, current_columns=file_header_columns
                 )
+                try:
+                    readiness_status = await self.template_status_service.evaluate_catalog_file(
+                        catalog_file,
+                        template=template,
+                        current_columns=file_header_columns,
+                        sample_rows=sample_rows,
+                    )
+                    readiness_status = self._normalize_governance_status(
+                        dict(readiness_status or {})
+                    )
+                    readiness_header_changes = readiness_status.get("header_changes")
+                    if isinstance(readiness_header_changes, dict):
+                        header_changes.update(readiness_header_changes)
+                    for readiness_key in (
+                        "should_auto_sync",
+                        "semantic_contract_status",
+                        "missing_required_keys",
+                        "blocking_changes",
+                        "governance_status",
+                    ):
+                        if readiness_key in readiness_status:
+                            header_changes[readiness_key] = readiness_status.get(readiness_key)
+                except Exception as exc:
+                    logger.warning(
+                        "[DataSync] template readiness check failed during header drift diagnostics: %s",
+                        exc,
+                    )
 
                 # [WARN] 安全原则:任何变化都阻止同步,要求用户更新模板
                 if header_changes.get("detected"):
@@ -923,6 +959,11 @@ class DataSyncService:
                                 ),
                             },
                         }
+                    semantic_contract_status = header_changes.get(
+                        "semantic_contract_status"
+                    )
+                    if semantic_contract_status == "non_breaking_drift":
+                        sync_mode = "semantic_drift_allowed"
 
                 # 如果表头完全匹配,使用模板的header_columns
                 header_columns = template_header_columns
@@ -1131,6 +1172,7 @@ class DataSyncService:
                     "imported": result.get("imported", 0),
                     "quarantined": result.get("quarantined", 0),
                     "skipped": result.get("skipped", False),  # [*] 新增:传递skipped标志
+                    "sync_mode": sync_mode,
                     "import_stats": result.get(
                         "import_stats"
                     ),  # [*] v4.15.0新增:传递详细统计信息
