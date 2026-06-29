@@ -84,6 +84,24 @@ def register_system_routes(app, settings, app_version, get_db):
         except Exception:
             orphan_lock_count = 0
 
+        cloud_receive_summary = {
+            "available": False,
+            "last_receive_at": None,
+            "table_receives": {},
+        }
+        try:
+            from backend.services.cloud_sync_receive_log_query import (
+                CloudSyncReceiveLogQuery,
+            )
+
+            cloud_receive_summary = CloudSyncReceiveLogQuery().get_latest_receive_summary()
+        except Exception:
+            cloud_receive_summary = {
+                "available": False,
+                "last_receive_at": None,
+                "table_receives": {},
+            }
+
         lines = [
             "# HELP xihong_cloud_sync_pending_catalog_files_total Pending catalog files awaiting local ingest.",
             "# TYPE xihong_cloud_sync_pending_catalog_files_total gauge",
@@ -112,11 +130,37 @@ def register_system_routes(app, settings, app_version, get_db):
         _emit_metric(lines, "xihong_cloud_sync_orphan_lock_count", orphan_lock_count)
         lines.extend(
             [
+                "# HELP xihong_cloud_sync_receive_log_available Whether cloud receive log can be queried.",
+                "# TYPE xihong_cloud_sync_receive_log_available gauge",
+            ]
+        )
+        _emit_metric(
+            lines,
+            "xihong_cloud_sync_receive_log_available",
+            1 if cloud_receive_summary.get("available") else 0,
+        )
+        lines.extend(
+            [
+                "# HELP xihong_cloud_sync_cloud_db_available Whether cloud database can be queried for receive log.",
+                "# TYPE xihong_cloud_sync_cloud_db_available gauge",
+            ]
+        )
+        _emit_metric(
+            lines,
+            "xihong_cloud_sync_cloud_db_available",
+            1 if cloud_receive_summary.get("available") else 0,
+        )
+        lines.extend(
+            [
                 "# HELP xihong_cloud_sync_receive_age_seconds Age in seconds since the latest successful cloud receive log.",
                 "# TYPE xihong_cloud_sync_receive_age_seconds gauge",
             ]
         )
-        _emit_metric(lines, "xihong_cloud_sync_receive_age_seconds", _safe_age_seconds(overview.get("last_receive_at")))
+        _emit_metric(
+            lines,
+            "xihong_cloud_sync_receive_age_seconds",
+            _safe_age_seconds(cloud_receive_summary.get("last_receive_at")),
+        )
         lines.extend(
             [
                 "# HELP xihong_cloud_sync_runtime_heartbeat_age_seconds Age in seconds since runtime heartbeat.",
@@ -137,12 +181,14 @@ def register_system_routes(app, settings, app_version, get_db):
                 "# TYPE xihong_cloud_sync_table_receive_age_seconds gauge",
             ]
         )
+        table_receives = cloud_receive_summary.get("table_receives") or {}
         for row in table_states:
+            source_table_name = row.get("source_table_name", "unknown")
             _emit_metric(
                 lines,
                 "xihong_cloud_sync_table_receive_age_seconds",
-                _safe_age_seconds((row.get("receive_log") or {}).get("last_receive_at")),
-                labels={"source_table_name": row.get("source_table_name", "unknown")},
+                _safe_age_seconds(table_receives.get(source_table_name)),
+                labels={"source_table_name": source_table_name},
             )
         lines.extend(
             [

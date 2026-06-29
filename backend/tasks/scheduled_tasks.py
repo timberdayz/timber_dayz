@@ -1600,6 +1600,38 @@ def cleanup_old_backups(retention_days: int = 30):
         return {"status": "failed", "error": str(e)}
 
 
+@celery_app.task(name="backend.tasks.scheduled_tasks.cloud_sync_auto_recovery")
+def cloud_sync_auto_recovery(limit: int = 20):
+    """Recover known-safe cloud sync and ingest stalls."""
+    db = SessionLocal()
+    try:
+        from backend.services.cloud_sync_auto_recovery_service import (
+            CloudSyncAutoRecoveryService,
+        )
+
+        service = CloudSyncAutoRecoveryService(db)
+        result = service.run_once(limit=limit)
+        try:
+            lock_result = service.release_orphan_auto_ingest_locks(terminate=True)
+            result["auto_ingest_locks"] = lock_result
+        except Exception as lock_exc:  # noqa: BLE001
+            logger.warning("[CloudSyncAutoRecovery] lock recovery skipped: %s", lock_exc)
+            result["auto_ingest_locks"] = {
+                "status": "skipped",
+                "error": str(lock_exc),
+            }
+        return result
+    except Exception as exc:  # noqa: BLE001
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.error("[CloudSyncAutoRecovery] failed: %s", exc, exc_info=True)
+        return {"status": "failed", "error": str(exc)}
+    finally:
+        db.close()
+
+
 @celery_app.task(name="backend.tasks.scheduled_tasks.trigger_system_backup")
 def trigger_system_backup():
     """

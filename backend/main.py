@@ -540,6 +540,10 @@ async def lifespan(app: FastAPI):
                 startup_checks = run_cloud_sync_startup_checks_from_env()
                 app.state.cloud_sync_startup_checks = startup_checks
                 logger.info("[CloudSync] Startup checks status=%s details=%s", startup_checks["status"], startup_checks["checks"])
+                if startup_checks.get("status") == "error":
+                    raise RuntimeError(
+                        f"cloud sync startup checks failed: {startup_checks.get('checks')}"
+                    )
                 cloud_sync_runtime = build_cloud_sync_runtime_from_env()
                 app.state.cloud_sync_runtime = cloud_sync_runtime
                 if cloud_sync_runtime is None:

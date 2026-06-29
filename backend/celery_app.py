@@ -105,6 +105,10 @@ celery_app.conf.beat_schedule = {
         'task': 'backend.tasks.refresh_queue_tasks.process_refresh_queue_task',
         'schedule': crontab(minute='*'),
     },
+    'cloud-sync-auto-recovery-every-minute': {
+        'task': 'backend.tasks.scheduled_tasks.cloud_sync_auto_recovery',
+        'schedule': crontab(minute='*'),
+    },
     
     # 每6小时检查低库存
     'dashboard-refresh-safety-net-every-5min': {
