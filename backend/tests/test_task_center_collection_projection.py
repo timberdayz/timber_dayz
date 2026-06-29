@@ -7,7 +7,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.services.task_center_service import TaskCenterService
-from modules.core.db import Base, CollectionTask
+from modules.core.db import (
+    CollectionConfigRun,
+    CollectionTask,
+    CollectionTaskLog,
+    ComponentVersion,
+    TaskCenterLink,
+    TaskCenterLog,
+    TaskCenterTask,
+)
 
 
 @pytest_asyncio.fixture
@@ -15,9 +23,18 @@ async def task_center_sqlite_engine():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
+        for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops"):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
-        await conn.run_sync(Base.metadata.create_all)
+        for table in (
+            CollectionTask.__table__,
+            CollectionTaskLog.__table__,
+            CollectionConfigRun.__table__,
+            ComponentVersion.__table__,
+            TaskCenterTask.__table__,
+            TaskCenterLog.__table__,
+            TaskCenterLink.__table__,
+        ):
+            await conn.run_sync(table.create)
 
     yield engine
     await engine.dispose()
@@ -37,16 +54,29 @@ async def task_center_sqlite_session(task_center_session_factory):
 @pytest_asyncio.fixture
 async def collection_async_client(task_center_sqlite_session):
     from backend.main import app
+    from backend.dependencies.auth import get_current_user
     from backend.models.database import get_async_db
 
     async def override_get_async_db():
         yield task_center_sqlite_session
 
+    class _MockUser:
+        id = 1
+        username = "test_admin"
+        is_active = True
+        is_superuser = True
+        role_id = 1
+
+    async def override_current_user():
+        return _MockUser()
+
     app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:
         yield client
     app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 class _AccountLoaderStub:
@@ -81,6 +111,11 @@ async def test_collection_task_creation_writes_task_center_row(
         component_runtime_resolver.ComponentRuntimeResolver,
         "from_async_session",
         classmethod(lambda cls, db: _ResolverStub()),
+    )
+    monkeypatch.setattr(
+        collection_tasks,
+        "load_collection_account_runtime",
+        lambda account_id, db: _AccountLoaderStub().load_account_async(account_id, db),
     )
 
     def _swallow_background(coro, *args, **kwargs):
@@ -128,6 +163,11 @@ async def test_collection_task_create_api_accepts_time_selection_payload(
         component_runtime_resolver.ComponentRuntimeResolver,
         "from_async_session",
         classmethod(lambda cls, db: _ResolverStub()),
+    )
+    monkeypatch.setattr(
+        collection_tasks,
+        "load_collection_account_runtime",
+        lambda account_id, db: _AccountLoaderStub().load_account_async(account_id, db),
     )
 
     async def _noop_background(**kwargs):

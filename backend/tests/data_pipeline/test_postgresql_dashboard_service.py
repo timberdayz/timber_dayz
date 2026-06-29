@@ -259,6 +259,8 @@ async def test_business_overview_data_freshness_flags_orders_lagging_traffic(mon
     assert result["orders"]["period_end_date"] == date(2026, 6, 10)
     assert result["traffic"]["period_end_date"] == date(2026, 6, 16)
     assert "orders period_end_date 2026-06-10 lags traffic 2026-06-16" in result["warnings"]
+    assert result["table_checks"][0]["table_name"] == "fact_shopee_orders_monthly"
+    assert result["table_checks"][0]["is_stale"] is True
     assert captured[-1][1]["platform_code"] == "shopee"
 
 

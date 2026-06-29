@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 from datetime import date as date_cls
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -62,6 +62,29 @@ def _ratio_or_none(numerator: int | float | None, denominator: int | float | Non
 def _sort_numeric(value: Any) -> float:
     maybe_value = _to_optional_float(value)
     return maybe_value if maybe_value is not None else float("-inf")
+
+
+def _parse_datetimeish(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    normalized = text_value[:-1] + "+00:00" if text_value.endswith("Z") else text_value
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _month_time_progress_pct(period_month: date_cls, today: date_cls | None = None) -> float:
@@ -1642,9 +1665,37 @@ class PostgresqlDashboardService:
         if orders_end is not None and traffic_end is not None and orders_end != traffic_end:
             warnings.append(f"orders period_end_date {orders_end} lags traffic {traffic_end}")
 
+        table_checks = []
+        for side in (orders, traffic):
+            latest_ingest_timestamp = side.get("latest_ingest_timestamp")
+            stale_hours = None
+            is_side_stale = False
+            if latest_ingest_timestamp is not None:
+                parsed_ingest = _as_utc(_parse_datetimeish(latest_ingest_timestamp))
+                if parsed_ingest is not None:
+                    stale_hours = round(
+                        (datetime.now(timezone.utc) - parsed_ingest).total_seconds() / 3600,
+                        2,
+                    )
+                    is_side_stale = stale_hours > 24
+            for table_name in side.get("tables", []):
+                table_checks.append(
+                    {
+                        "table_name": table_name,
+                        "side": side.get("side"),
+                        "latest_ingest_timestamp": latest_ingest_timestamp,
+                        "latest_business_date": side.get("period_end_date") or side.get("latest_metric_date"),
+                        "stale_hours": stale_hours,
+                        "is_stale": is_side_stale,
+                    }
+                )
+                if is_side_stale:
+                    warnings.append(f"{table_name} has no new ingest for {stale_hours}h")
+
         return {
             "orders": orders,
             "traffic": traffic,
+            "table_checks": table_checks,
             "is_stale": bool(warnings),
             "warnings": warnings,
         }

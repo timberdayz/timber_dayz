@@ -858,6 +858,36 @@ class CloudBClassSyncTask(Base):
         Index("ix_cloud_b_class_sync_tasks_dedupe_key", "dedupe_key"),
     )
 
+class CloudSyncReceiveLog(Base):
+    """Cloud-side append-only ledger for received B-class sync writes."""
+
+    __tablename__ = "cloud_sync_receive_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    receive_id = Column(String(100), nullable=False)
+    source_environment = Column(String(64), nullable=True)
+    checkpoint_scope = Column(String(64), nullable=False, default="b_class")
+    source_table_name = Column(String(255), nullable=False)
+    source_file_id = Column(Integer, nullable=True)
+    platform_code = Column(String(32), nullable=True)
+    data_domain = Column(String(64), nullable=True)
+    granularity = Column(String(32), nullable=True)
+    business_date_min = Column(Date, nullable=True)
+    business_date_max = Column(Date, nullable=True)
+    source_latest_ingest_timestamp = Column(DateTime(timezone=True), nullable=True)
+    written_rows = Column(Integer, nullable=False, default=0)
+    status = Column(String(32), nullable=False, default="completed")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    error_message = Column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("receive_id", name="uq_cloud_sync_receive_log_receive_id"),
+        Index("ix_cloud_sync_receive_log_created", "created_at"),
+        Index("ix_cloud_sync_receive_log_table_created", "source_table_name", "created_at"),
+        Index("ix_cloud_sync_receive_log_file", "source_file_id"),
+        {"schema": "ops"},
+    )
+
 class RefreshQueueTask(Base):
     """Durable global queue row for serial post-ingest refresh work."""
 

@@ -19,10 +19,12 @@ from sqlalchemy import desc, select
 from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from modules.core.db import (
+    CatalogFile,
     CollectionConfig,
     CollectionConfigRun,
     CollectionTask,
     CollectionTaskLog,
+    TaskCenterTask,
 )
 from modules.core.logger import get_logger
 from backend.schemas.collection import (
@@ -162,6 +164,189 @@ def _collection_task_details_payload(task: CollectionTask) -> dict:
             "verification_screenshot": getattr(task, "verification_screenshot", None),
         }
     }
+
+
+def _extract_collected_paths(result: Any | None) -> list[str]:
+    if result is None:
+        return []
+    paths = []
+    for item in getattr(result, "collected_files", None) or []:
+        if isinstance(item, str) and item.strip():
+            paths.append(item.strip())
+        elif isinstance(item, dict):
+            value = item.get("file_path") or item.get("path") or item.get("target_path")
+            if value:
+                paths.append(str(value).strip())
+    return paths
+
+
+async def _find_post_collection_catalog_files(
+    db: AsyncSession,
+    task: CollectionTask,
+    result: Any | None = None,
+) -> list[CatalogFile]:
+    collected_paths = _extract_collected_paths(result)
+    candidates: list[CatalogFile] = []
+    if collected_paths:
+        rows = await db.execute(
+            select(CatalogFile).where(CatalogFile.file_path.in_(collected_paths))
+        )
+        candidates.extend(rows.scalars().all())
+
+    if not candidates:
+        data_domains = getattr(task, "data_domains", None) or []
+        stmt = select(CatalogFile).where(CatalogFile.status == "pending")
+        if getattr(task, "account", None):
+            stmt = stmt.where(CatalogFile.account == task.account)
+        if data_domains:
+            stmt = stmt.where(CatalogFile.data_domain.in_(data_domains))
+        if getattr(task, "granularity", None):
+            stmt = stmt.where(CatalogFile.granularity == task.granularity)
+        rows = await db.execute(stmt.order_by(CatalogFile.id.asc()).limit(max(getattr(task, "files_collected", 0) or 1, 1) * 5))
+        for file_row in rows.scalars().all():
+            metadata = file_row.file_metadata if isinstance(file_row.file_metadata, dict) else {}
+            if (
+                metadata.get("collection_task_id") == task.task_id
+                or metadata.get("task_id") == task.task_id
+            ):
+                candidates.append(file_row)
+
+    seen: set[int] = set()
+    unique: list[CatalogFile] = []
+    for file_row in candidates:
+        if file_row.id in seen:
+            continue
+        seen.add(file_row.id)
+        unique.append(file_row)
+    return unique
+
+
+async def _enqueue_post_collection_ingest_tasks(
+    db: AsyncSession,
+    task_id: str,
+    result: Any | None = None,
+) -> dict[str, Any]:
+    task_row = (
+        await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+    ).scalar_one_or_none()
+    if task_row is None:
+        return {"ingest_status": "skipped", "reason": "collection_task_not_found"}
+
+    files = await _find_post_collection_catalog_files(db, task_row, result=result)
+    collected_file_ids = [int(file_row.id) for file_row in files]
+    if not collected_file_ids:
+        status_payload = {
+            "status": "not_required",
+            "collected_file_ids": [],
+            "ingest_task_ids": [],
+        }
+        await _update_collection_ingest_projection(db, task_row, status_payload)
+        return {"ingest_status": "not_required", **status_payload}
+
+    ingest_task_ids: list[str] = []
+    try:
+        task_module = globals().get("sync_single_file_task")
+        if task_module is None:
+            from backend.tasks.data_sync_tasks import sync_single_file_task as task_module
+
+        task_center = TaskCenterService(db)
+        for file_row in files:
+            existing = (
+                await db.execute(
+                    select(TaskCenterTask)
+                    .where(
+                        TaskCenterTask.task_type == "single_file",
+                        TaskCenterTask.source_file_id == file_row.id,
+                        TaskCenterTask.status.in_(["pending", "queued", "running"]),
+                    )
+                    .order_by(TaskCenterTask.id.desc())
+                )
+            ).scalars().first()
+            single_task_id = existing.task_id if existing else f"single_file_{file_row.id}_{uuid.uuid4().hex[:8]}"
+            if existing is None:
+                await task_center.create_task(
+                    task_id=single_task_id,
+                    task_family="data_sync",
+                    task_type="single_file",
+                    status="queued",
+                    trigger_source="post_collection",
+                    platform_code=file_row.platform_code,
+                    account_id=file_row.account,
+                    source_file_id=file_row.id,
+                    current_step="queued",
+                    total_items=1,
+                    details_json={
+                        "ingest": {
+                            "source": "post_collection",
+                            "collection_task_id": task_id,
+                        }
+                    },
+                )
+                await task_center.add_link(
+                    single_task_id,
+                    subject_type="catalog_file",
+                    subject_id=str(file_row.id),
+                )
+            task_module.apply_async(
+                kwargs={
+                    "file_id": file_row.id,
+                    "task_id": single_task_id,
+                    "only_with_template": True,
+                    "allow_quarantine": True,
+                    "use_template_header_row": True,
+                }
+            )
+            ingest_task_ids.append(single_task_id)
+
+        status_payload = {
+            "status": "queued",
+            "collected_file_ids": collected_file_ids,
+            "ingest_task_ids": ingest_task_ids,
+        }
+        await _update_collection_ingest_projection(db, task_row, status_payload)
+        return {"ingest_status": "queued", **status_payload}
+    except Exception as exc:
+        status_payload = {
+            "status": "enqueue_failed",
+            "collected_file_ids": collected_file_ids,
+            "ingest_task_ids": ingest_task_ids,
+            "error": str(exc),
+        }
+        await _update_collection_ingest_projection(db, task_row, status_payload)
+        try:
+            await _mirror_collection_task_log(
+                db,
+                task_id,
+                level="warning",
+                event_type="post_collection_ingest",
+                message="post collection ingest enqueue failed",
+                details=status_payload,
+            )
+        except Exception:
+            logger.warning("Failed to mirror post collection ingest warning", exc_info=True)
+        return {"ingest_status": "enqueue_failed", **status_payload}
+
+
+async def _update_collection_ingest_projection(
+    db: AsyncSession,
+    task: CollectionTask,
+    status_payload: dict[str, Any],
+) -> None:
+    task_center = TaskCenterService(db)
+    existing = await task_center.get_task(task.task_id)
+    if existing is None:
+        await _mirror_collection_task(db, task)
+    await task_center.update_task(
+        task.task_id,
+        details_json={
+            "ingest": {
+                "status": status_payload.get("status"),
+                "collected_file_ids": status_payload.get("collected_file_ids", []),
+                "ingest_task_ids": status_payload.get("ingest_task_ids", []),
+                "error": status_payload.get("error"),
+            }
+        },
+    )
 
 
 def _collection_status_to_task_center(status: Optional[str]) -> Optional[str]:
@@ -1411,7 +1596,13 @@ async def _persist_collection_task_result(
             task.verification_type = None
             task.verification_screenshot = None
 
-    return await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=1)
+    task = await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=1)
+    if result.status in [TASK_STATUS.COMPLETED, TASK_STATUS.PARTIAL_SUCCESS]:
+        from backend.models.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            await _enqueue_post_collection_ingest_tasks(db, task_id, result=result)
+    return task
 
 
 async def _execute_collection_task_background_v2(

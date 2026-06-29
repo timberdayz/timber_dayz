@@ -25,7 +25,7 @@
 
     <section class="overview-grid">
       <el-card
-        v-for="card in statusCards"
+        v-for="card in lifecycleStatusCards"
         :key="card.key"
         shadow="hover"
         class="status-card"
@@ -534,6 +534,73 @@ const statusCards = computed(() => [
   },
 ])
 
+const lifecycleStatusCards = computed(() => [
+  statusCards.value[0],
+  statusCards.value[1],
+  {
+    key: 'local-ingest',
+    label: '本地入库',
+    value: formatLifecycleStatus(
+      store.processingCatalogFileCount > 0
+        ? 'running'
+        : store.overduePendingCatalogFileCount > 0
+          ? 'failed'
+          : store.pendingCatalogFileCount > 0
+            ? 'pending'
+            : 'completed',
+    ),
+    meta: `待入库 ${store.pendingCatalogFileCount} / 处理中 ${store.processingCatalogFileCount} / 超时 ${store.overduePendingCatalogFileCount}`,
+    tone: statusTone(
+      store.processingCatalogFileCount > 0
+        ? 'running'
+        : store.overduePendingCatalogFileCount > 0
+          ? 'failed'
+          : store.pendingCatalogFileCount > 0
+            ? 'pending'
+            : 'completed',
+    ),
+  },
+  {
+    key: 'cloud-sync',
+    label: '云端同步',
+    value: formatCatchUpStatus(store.catchUpStatus),
+    meta: `待处理 ${store.pendingTaskCount} / 运行中 ${store.runningTaskCount} / 过期 ${store.staleRunningTaskCount}`,
+    tone: statusTone(store.catchUpStatus),
+  },
+  {
+    key: 'cloud-refresh',
+    label: '云端刷新',
+    value: formatLifecycleStatus(
+      store.refreshRunningTaskCount > 0
+        ? 'running'
+        : store.refreshFailedTaskCount > 0
+          ? 'failed'
+          : store.refreshPendingTaskCount > 0
+            ? 'pending'
+            : 'completed',
+    ),
+    meta: `待刷新 ${store.refreshPendingTaskCount} / 运行中 ${store.refreshRunningTaskCount} / 失败 ${store.refreshFailedTaskCount}`,
+    tone: statusTone(
+      store.refreshRunningTaskCount > 0
+        ? 'running'
+        : store.refreshFailedTaskCount > 0
+          ? 'failed'
+          : store.refreshPendingTaskCount > 0
+            ? 'pending'
+            : 'completed',
+    ),
+  },
+  {
+    key: 'receive',
+    label: '最近接收',
+    value: formatTime(store.lastReceiveAt) || '暂无记录',
+    meta: store.lastReceiveTableName
+      ? `最新表 ${store.lastReceiveTableName}`
+      : (store.hasHistory ? `最近错误：${latestErrorText.value}` : '当前尚无云端接收记录'),
+    tone: store.lastReceiveAt ? 'is-success' : '',
+  },
+])
+
 function formatTime(value) {
   if (!value) return ''
   return dayjs(value).format('YYYY-MM-DD HH:mm:ss')
@@ -588,6 +655,21 @@ function formatResultStatus(status) {
     skipped: '已跳过',
   }
   return mapping[status] || status || '-'
+}
+
+function formatLifecycleStatus(status) {
+  const mapping = {
+    not_required: '不需要',
+    not_started: '未开始',
+    pending: '待处理',
+    queued: '已排队',
+    running: '进行中',
+    completed: '已完成',
+    failed: '失败',
+    partial_success: '部分成功',
+    template_update_required: '模板待更新',
+  }
+  return mapping[status] || formatResultStatus(status)
 }
 
 function formatEventTitle(event) {

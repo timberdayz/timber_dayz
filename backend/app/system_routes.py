@@ -1,8 +1,10 @@
 import os
 from datetime import datetime
+from datetime import timezone
 
 from fastapi import Depends
 from fastapi.responses import JSONResponse
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,24 @@ from backend.services.collection_runtime_health import (
 
 
 def register_system_routes(app, settings, app_version, get_db):
+    def _safe_age_seconds(value: str | None) -> float:
+        if not value:
+            return -1.0
+        normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return -1.0
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max((datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds(), 0.0)
+
+    def _emit_metric(lines: list[str], name: str, value: float | int, labels: dict[str, str] | None = None) -> None:
+        if labels:
+            rendered = ",".join(f'{key}="{str(val).replace(chr(34), "")}"' for key, val in sorted(labels.items()))
+            lines.append(f"{name}{{{rendered}}} {value}")
+            return
+        lines.append(f"{name} {value}")
     @app.get("/api/healthz/live", tags=["系统"])
     @app.get("/healthz/live", tags=["系统"])
     async def live_health_check():
@@ -21,6 +41,124 @@ def register_system_routes(app, settings, app_version, get_db):
             "version": app_version,
             "timestamp": datetime.now().isoformat(),
         }
+
+    @app.get("/metrics", include_in_schema=False)
+    async def prometheus_metrics():
+        from backend.models.database import AsyncSessionLocal, SessionLocal
+        from backend.services.cloud_sync_admin_query_service import CloudSyncAdminQueryService
+        from backend.services.postgresql_dashboard_service import PostgresqlDashboardService
+        from backend.tasks.scheduled_tasks import detect_auto_ingest_orphan_locks
+
+        runtime = getattr(app.state, "cloud_sync_runtime", None)
+        runtime_health = runtime.get_health() if runtime is not None else None
+
+        overview = {}
+        runtime_summary = {}
+        table_states = []
+        try:
+            async with AsyncSessionLocal() as session:
+                service = CloudSyncAdminQueryService(session)
+                overview = await service.get_overview_summary(runtime_health=runtime_health)
+                runtime_summary = await service.get_runtime_summary(runtime_health=runtime_health)
+                table_states = await service.list_table_states()
+        except Exception:
+            overview = {}
+            runtime_summary = {}
+            table_states = []
+
+        freshness_checks = []
+        try:
+            dashboard_service = PostgresqlDashboardService()
+            freshness = await dashboard_service.get_business_overview_data_freshness()
+            freshness_checks = freshness.get("table_checks", [])
+        except Exception:
+            freshness_checks = []
+
+        orphan_lock_count = 0
+        try:
+            db = SessionLocal()
+            try:
+                orphan_lock_count = len(detect_auto_ingest_orphan_locks(db))
+            finally:
+                db.close()
+        except Exception:
+            orphan_lock_count = 0
+
+        lines = [
+            "# HELP xihong_cloud_sync_pending_catalog_files_total Pending catalog files awaiting local ingest.",
+            "# TYPE xihong_cloud_sync_pending_catalog_files_total gauge",
+        ]
+        _emit_metric(lines, "xihong_cloud_sync_pending_catalog_files_total", int(overview.get("pending_catalog_file_count") or 0))
+        lines.extend(
+            [
+                "# HELP xihong_cloud_sync_pending_catalog_files_overdue_total Pending catalog files older than 10 minutes.",
+                "# TYPE xihong_cloud_sync_pending_catalog_files_overdue_total gauge",
+            ]
+        )
+        _emit_metric(lines, "xihong_cloud_sync_pending_catalog_files_overdue_total", int(overview.get("overdue_pending_catalog_file_count") or 0))
+        lines.extend(
+            [
+                "# HELP xihong_cloud_sync_refresh_queue_failed_total Failed refresh queue tasks triggered by cloud sync.",
+                "# TYPE xihong_cloud_sync_refresh_queue_failed_total gauge",
+            ]
+        )
+        _emit_metric(lines, "xihong_cloud_sync_refresh_queue_failed_total", int(overview.get("refresh_failed_task_count") or 0))
+        lines.extend(
+            [
+                "# HELP xihong_cloud_sync_orphan_lock_count Idle auto-ingest advisory locks without a running task.",
+                "# TYPE xihong_cloud_sync_orphan_lock_count gauge",
+            ]
+        )
+        _emit_metric(lines, "xihong_cloud_sync_orphan_lock_count", orphan_lock_count)
+        lines.extend(
+            [
+                "# HELP xihong_cloud_sync_receive_age_seconds Age in seconds since the latest successful cloud receive log.",
+                "# TYPE xihong_cloud_sync_receive_age_seconds gauge",
+            ]
+        )
+        _emit_metric(lines, "xihong_cloud_sync_receive_age_seconds", _safe_age_seconds(overview.get("last_receive_at")))
+        lines.extend(
+            [
+                "# HELP xihong_cloud_sync_runtime_heartbeat_age_seconds Age in seconds since runtime heartbeat.",
+                "# TYPE xihong_cloud_sync_runtime_heartbeat_age_seconds gauge",
+            ]
+        )
+        _emit_metric(lines, "xihong_cloud_sync_runtime_heartbeat_age_seconds", _safe_age_seconds(runtime_summary.get("last_runtime_heartbeat_at")))
+        lines.extend(
+            [
+                "# HELP xihong_cloud_sync_task_heartbeat_age_seconds Age in seconds since current task heartbeat.",
+                "# TYPE xihong_cloud_sync_task_heartbeat_age_seconds gauge",
+            ]
+        )
+        _emit_metric(lines, "xihong_cloud_sync_task_heartbeat_age_seconds", float(runtime_summary.get("seconds_since_task_heartbeat") or -1))
+        lines.extend(
+            [
+                "# HELP xihong_cloud_sync_table_receive_age_seconds Age in seconds since latest receive log per source table.",
+                "# TYPE xihong_cloud_sync_table_receive_age_seconds gauge",
+            ]
+        )
+        for row in table_states:
+            _emit_metric(
+                lines,
+                "xihong_cloud_sync_table_receive_age_seconds",
+                _safe_age_seconds((row.get("receive_log") or {}).get("last_receive_at")),
+                labels={"source_table_name": row.get("source_table_name", "unknown")},
+            )
+        lines.extend(
+            [
+                "# HELP xihong_business_table_stale_hours Hours since latest ingest per business overview table.",
+                "# TYPE xihong_business_table_stale_hours gauge",
+            ]
+        )
+        for check in freshness_checks:
+            _emit_metric(
+                lines,
+                "xihong_business_table_stale_hours",
+                float(check.get("stale_hours") or -1),
+                labels={"table_name": check.get("table_name", "unknown"), "side": check.get("side", "unknown")},
+            )
+
+        return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
     async def build_ready_health_payload(db: Session) -> tuple[dict, int]:
         runtime_mode = str(getattr(app.state, "runtime_mode", "")).strip().lower()

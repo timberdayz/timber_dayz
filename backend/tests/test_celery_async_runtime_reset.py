@@ -133,7 +133,7 @@ def test_auto_ingest_pending_files_skips_when_advisory_lock_not_acquired(monkeyp
 
         def execute(self, stmt, params=None):
             text_value = str(stmt)
-            if "pg_try_advisory_lock" in text_value:
+            if "pg_try_advisory_xact_lock" in text_value:
                 return SimpleNamespace(scalar=lambda: False)
             raise AssertionError("no pending files should be queried when lock is unavailable")
 
@@ -172,11 +172,8 @@ def test_auto_ingest_pending_files_releases_lock_after_success(monkeypatch):
 
         def execute(self, stmt, params=None):
             text_value = str(stmt)
-            if "pg_try_advisory_lock" in text_value:
+            if "pg_try_advisory_xact_lock" in text_value:
                 lock_calls.append("lock")
-                return SimpleNamespace(scalar=lambda: True)
-            if "pg_advisory_unlock" in text_value:
-                lock_calls.append("unlock")
                 return SimpleNamespace(scalar=lambda: True)
             return _FakeScalarResult()
 
@@ -188,7 +185,7 @@ def test_auto_ingest_pending_files_releases_lock_after_success(monkeypatch):
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 
     assert result["status"] == "success"
-    assert lock_calls == ["lock", "unlock"]
+    assert lock_calls == ["lock"]
 
 
 def test_auto_ingest_pending_files_releases_lock_after_exception(monkeypatch):
@@ -201,11 +198,8 @@ def test_auto_ingest_pending_files_releases_lock_after_exception(monkeypatch):
 
         def execute(self, stmt, params=None):
             text_value = str(stmt)
-            if "pg_try_advisory_lock" in text_value:
+            if "pg_try_advisory_xact_lock" in text_value:
                 lock_calls.append("lock")
-                return SimpleNamespace(scalar=lambda: True)
-            if "pg_advisory_unlock" in text_value:
-                lock_calls.append("unlock")
                 return SimpleNamespace(scalar=lambda: True)
             raise RuntimeError("pending query crashed")
 
@@ -217,7 +211,7 @@ def test_auto_ingest_pending_files_releases_lock_after_exception(monkeypatch):
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 
     assert result["status"] == "failed"
-    assert lock_calls == ["lock", "unlock"]
+    assert lock_calls == ["lock"]
 
 
 def test_auto_ingest_pending_files_creates_auto_ingest_task_record(monkeypatch):
@@ -971,11 +965,8 @@ def test_cleanup_stale_auto_ingest_tasks_releases_watchdog_lock(monkeypatch):
 
         def execute(self, stmt, params=None):
             text_value = str(stmt)
-            if "pg_try_advisory_lock" in text_value:
+            if "pg_try_advisory_xact_lock" in text_value:
                 calls.append("lock")
-                return SimpleNamespace(scalar=lambda: True)
-            if "pg_advisory_unlock" in text_value:
-                calls.append("unlock")
                 return SimpleNamespace(scalar=lambda: True)
             raise AssertionError("watchdog should not issue SQL when recovery is mocked")
 
@@ -993,7 +984,7 @@ def test_cleanup_stale_auto_ingest_tasks_releases_watchdog_lock(monkeypatch):
     result = scheduled_module.cleanup_stale_auto_ingest_tasks()
 
     assert result == {"status": "success", "recovered": {"tasks": 2, "files": 3}}
-    assert calls == ["lock", "unlock"]
+    assert calls == ["lock"]
 
 
 def test_cleanup_stale_auto_ingest_tasks_skips_when_watchdog_lock_unavailable(monkeypatch):
@@ -1004,7 +995,7 @@ def test_cleanup_stale_auto_ingest_tasks_skips_when_watchdog_lock_unavailable(mo
 
         def execute(self, stmt, params=None):
             text_value = str(stmt)
-            if "pg_try_advisory_lock" in text_value:
+            if "pg_try_advisory_xact_lock" in text_value:
                 return SimpleNamespace(scalar=lambda: False)
             raise AssertionError("watchdog should skip recovery when lock is unavailable")
 

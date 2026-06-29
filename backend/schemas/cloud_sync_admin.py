@@ -73,6 +73,23 @@ class CloudSyncProjectionState(BaseModel):
     status: str | None = None
 
 
+class CloudSyncLifecycleState(BaseModel):
+    collection_status: str | None = None
+    local_ingest_status: str | None = None
+    cloud_sync_status: str | None = None
+    cloud_refresh_status: str | None = None
+    source_file_id: int | None = None
+    collection_task_id: str | None = None
+    ingest_task_id: str | None = None
+
+
+class CloudSyncReceiveLogState(BaseModel):
+    last_receive_at: str | None = None
+    last_written_rows: int | None = None
+    latest_business_date: str | None = None
+    status: str | None = None
+
+
 class CloudSyncTableStateRow(BaseModel):
     source_table_name: str
     platform_code: str | None = None
@@ -81,6 +98,8 @@ class CloudSyncTableStateRow(BaseModel):
     checkpoint: CloudSyncCheckpointState
     latest_task: CloudSyncLatestTaskState
     projection: CloudSyncProjectionState
+    lifecycle: CloudSyncLifecycleState = CloudSyncLifecycleState()
+    receive_log: CloudSyncReceiveLogState = CloudSyncReceiveLogState()
     last_success_at: str | None = None
     latest_error: str | None = None
 
@@ -106,6 +125,8 @@ class CloudSyncTaskRow(BaseModel):
     updated_at: str | None = None
     finished_at: str | None = None
     metadata: dict[str, Any] = {}
+    lifecycle: CloudSyncLifecycleState = CloudSyncLifecycleState()
+    receive_log: CloudSyncReceiveLogState = CloudSyncReceiveLogState()
 
 
 class CloudSyncCommandResponse(BaseModel):
@@ -136,6 +157,14 @@ class CloudSyncOverviewSummary(BaseModel):
     auto_sync_enabled: bool = True
     current_checkpoint_scope: str | None = None
     legacy_scope_exception_count: int = 0
+    pending_catalog_file_count: int = 0
+    overdue_pending_catalog_file_count: int = 0
+    processing_catalog_file_count: int = 0
+    refresh_pending_task_count: int = 0
+    refresh_running_task_count: int = 0
+    refresh_failed_task_count: int = 0
+    last_receive_at: str | None = None
+    last_receive_table_name: str | None = None
 
 
 class CloudSyncRuntimeSummary(BaseModel):

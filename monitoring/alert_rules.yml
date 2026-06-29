@@ -239,3 +239,65 @@ groups:
         annotations:
           summary: "Celery Redis 连接失败"
           description: "Redis 连接失败次数 {{ $value }}"
+  - name: cloud_sync_alerts
+    interval: 30s
+    rules:
+      - alert: CloudSyncNoRecentReceive
+        expr: xihong_cloud_sync_receive_age_seconds > 1800
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud-sync
+        annotations:
+          summary: "Cloud Sync 30 分钟无新接收"
+          description: "距最近一次云端接收已超过 {{ $value }} 秒。"
+
+      - alert: CloudSyncPendingCatalogFilesOverdue
+        expr: xihong_cloud_sync_pending_catalog_files_overdue_total > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: cloud-sync
+        annotations:
+          summary: "存在超时未入库文件"
+          description: "超时未入库 catalog files 数量为 {{ $value }}。"
+
+      - alert: CloudSyncRefreshQueueFailed
+        expr: xihong_cloud_sync_refresh_queue_failed_total > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: cloud-sync
+        annotations:
+          summary: "云端刷新队列存在失败任务"
+          description: "失败的 refresh queue 任务数量为 {{ $value }}。"
+
+      - alert: CloudSyncOrphanAutoIngestLock
+        expr: xihong_cloud_sync_orphan_lock_count > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: auto-ingest
+        annotations:
+          summary: "检测到 auto-ingest 孤儿锁"
+          description: "idle advisory lock 数量为 {{ $value }}。"
+
+      - alert: CloudSyncRuntimeHeartbeatStalled
+        expr: xihong_cloud_sync_runtime_heartbeat_age_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud-sync
+        annotations:
+          summary: "Cloud Sync runtime 心跳停滞"
+          description: "runtime 心跳已超过 {{ $value }} 秒未更新。"
+
+      - alert: CloudSyncCoreFactTableStale
+        expr: xihong_cloud_sync_table_receive_age_seconds{source_table_name=~"fact_(shopee|tiktok|miaoshou)_(orders|analytics|products)_monthly"} > 86400
+        for: 30m
+        labels:
+          severity: warning
+          component: cloud-sync
+        annotations:
+          summary: "核心事实表接收已落后 24 小时"
+          description: "{{ $labels.source_table_name }} 已超过 {{ $value }} 秒未收到新写入。"

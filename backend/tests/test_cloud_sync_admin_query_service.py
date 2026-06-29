@@ -10,7 +10,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from backend.services.cloud_b_class_auto_sync_factory import _build_checkpoint_scope_key
 from backend.services.cloud_sync_admin_query_service import CloudSyncAdminQueryService
 from modules.core.db import Base
-from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncTask, SystemConfig
+from modules.core.db import (
+    CatalogFile,
+    CloudBClassSyncCheckpoint,
+    CloudBClassSyncTask,
+    CloudSyncReceiveLog,
+    RefreshQueueTask,
+    SystemConfig,
+    TaskCenterTask,
+)
 
 
 @pytest_asyncio.fixture
@@ -18,15 +26,19 @@ async def cloud_sync_sqlite_session():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
+        for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops"):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
         await conn.execute(text("CREATE TABLE core.dim_users (user_id INTEGER PRIMARY KEY)"))
         await conn.run_sync(
             Base.metadata.create_all,
             tables=[
+                CatalogFile.__table__,
                 CloudBClassSyncCheckpoint.__table__,
                 CloudBClassSyncTask.__table__,
+                CloudSyncReceiveLog.__table__,
+                RefreshQueueTask.__table__,
                 SystemConfig.__table__,
+                TaskCenterTask.__table__,
             ],
         )
 
@@ -103,6 +115,121 @@ async def test_table_state_row_contains_checkpoint_and_projection_sections(seede
     assert row["checkpoint"]["last_source_id"] == 321
     assert row["latest_task"]["job_id"] == "job-1"
     assert row["projection"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_table_state_row_includes_lifecycle_and_receive_log(cloud_sync_sqlite_session):
+    now = datetime.now(timezone.utc)
+    cloud_sync_sqlite_session.add_all(
+        [
+            CatalogFile(
+                id=2804,
+                file_path="data/raw/2026/shopee_orders_monthly.xls",
+                file_name="shopee_orders_monthly.xls",
+                platform_code="shopee",
+                account="acc-1",
+                data_domain="orders",
+                granularity="monthly",
+                status="ingested",
+                file_metadata={"collection_task_id": "collection-1"},
+            ),
+            TaskCenterTask(
+                task_id="single_file_2804_abc12345",
+                task_family="data_sync",
+                task_type="single_file",
+                status="completed",
+                source_file_id=2804,
+                details_json={"ingest": {"source": "post_collection"}},
+            ),
+            CloudBClassSyncTask(
+                job_id="job-lifecycle",
+                dedupe_key="fact_shopee_orders_monthly",
+                source_table_name="fact_shopee_orders_monthly",
+                platform_code="shopee",
+                data_domain="orders",
+                granularity="monthly",
+                source_file_id=2804,
+                status="running",
+                projection_status="queued",
+                metadata_json={"checkpoint_scope": "b_class"},
+                created_at=now - timedelta(minutes=5),
+            ),
+            CloudSyncReceiveLog(
+                receive_id="receive-1",
+                source_environment="collection",
+                checkpoint_scope="b_class",
+                source_table_name="fact_shopee_orders_monthly",
+                source_file_id=2804,
+                platform_code="shopee",
+                data_domain="orders",
+                granularity="monthly",
+                business_date_min=datetime(2026, 6, 22, tzinfo=timezone.utc).date(),
+                business_date_max=datetime(2026, 6, 28, tzinfo=timezone.utc).date(),
+                source_latest_ingest_timestamp=now - timedelta(minutes=2),
+                written_rows=77,
+                status="completed",
+            ),
+            RefreshQueueTask(
+                job_id="refresh-1",
+                trigger_type="cloud_sync",
+                pipeline_name="data_ingested_refresh",
+                dedupe_key="dedupe-1",
+                targets_json=["ops.pipeline_run_log"],
+                context_json={"source_table_name": "fact_shopee_orders_monthly"},
+                status="running",
+            ),
+        ]
+    )
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+    rows = await service.list_table_states()
+    row = next(item for item in rows if item["source_table_name"] == "fact_shopee_orders_monthly")
+
+    assert row["lifecycle"]["collection_status"] == "completed"
+    assert row["lifecycle"]["local_ingest_status"] == "completed"
+    assert row["lifecycle"]["cloud_sync_status"] == "running"
+    assert row["lifecycle"]["cloud_refresh_status"] == "running"
+    assert row["receive_log"]["last_receive_at"] is not None
+    assert row["receive_log"]["last_written_rows"] == 77
+
+
+@pytest.mark.asyncio
+async def test_overview_summary_includes_pipeline_lifecycle_counts(cloud_sync_sqlite_session):
+    now = datetime.now(timezone.utc)
+    cloud_sync_sqlite_session.add_all(
+        [
+            CatalogFile(
+                id=2803,
+                file_path="data/raw/2026/tiktok_orders_monthly.xls",
+                file_name="tiktok_orders_monthly.xls",
+                platform_code="tiktok",
+                account="acc-1",
+                data_domain="orders",
+                granularity="monthly",
+                status="pending",
+                first_seen_at=now - timedelta(minutes=45),
+            ),
+            RefreshQueueTask(
+                job_id="refresh-failed",
+                trigger_type="cloud_sync",
+                pipeline_name="data_ingested_refresh",
+                dedupe_key="dedupe-refresh-failed",
+                targets_json=["ops.pipeline_run_log"],
+                context_json={"source_table_name": "fact_shopee_orders_monthly"},
+                status="failed",
+            ),
+        ]
+    )
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+    payload = await service.get_overview_summary(runtime_health={"status": "running"})
+
+    assert payload["pending_catalog_file_count"] == 1
+    assert payload["overdue_pending_catalog_file_count"] == 1
+    assert payload["refresh_failed_task_count"] == 1
+    assert payload["last_receive_at"] is None
 
 
 @pytest.mark.asyncio

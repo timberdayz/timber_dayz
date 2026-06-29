@@ -94,7 +94,7 @@ async def pg_engine():
             # 创建项目使用的 schema, 避免 JSONB / schema 不存在等错误
             from sqlalchemy import text
 
-            for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
+            for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops"):
                 await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
 
             await conn.run_sync(Base.metadata.create_all)

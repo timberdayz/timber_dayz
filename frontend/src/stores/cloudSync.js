@@ -88,6 +88,14 @@ export const useCloudSyncStore = defineStore('cloudSync', {
     selectedTableState: (state) =>
       state.tableStates.find((row) => row.source_table_name === state.selectedTableName) || null,
     legacyScopeExceptionCount: (state) => state.overview?.legacy_scope_exception_count || 0,
+    pendingCatalogFileCount: (state) => state.overview?.pending_catalog_file_count || 0,
+    overduePendingCatalogFileCount: (state) => state.overview?.overdue_pending_catalog_file_count || 0,
+    processingCatalogFileCount: (state) => state.overview?.processing_catalog_file_count || 0,
+    refreshPendingTaskCount: (state) => state.overview?.refresh_pending_task_count || 0,
+    refreshRunningTaskCount: (state) => state.overview?.refresh_running_task_count || 0,
+    refreshFailedTaskCount: (state) => state.overview?.refresh_failed_task_count || 0,
+    lastReceiveAt: (state) => state.overview?.last_receive_at || null,
+    lastReceiveTableName: (state) => state.overview?.last_receive_table_name || '',
   },
 
   actions: {

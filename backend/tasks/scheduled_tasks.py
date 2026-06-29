@@ -84,20 +84,120 @@ def _get_session_dialect_name(db) -> str:
 def _acquire_auto_ingest_lock(db, lock_key: int = AUTO_INGEST_LOCK_KEY) -> bool:
     if _get_session_dialect_name(db) != "postgresql":
         return True
+    bind = getattr(db, "bind", None)
+    if bind is None and hasattr(db, "get_bind"):
+        try:
+            bind = db.get_bind()
+        except Exception:
+            bind = None
+    if bind is not None and hasattr(bind, "connect"):
+        connection = bind.connect()
+        transaction = connection.begin()
+        try:
+            result = connection.execute(
+                text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
+                {"lock_key": lock_key},
+            )
+            acquired = bool(result.scalar())
+            if acquired:
+                setattr(
+                    db,
+                    "_auto_ingest_lock_handle",
+                    {"connection": connection, "transaction": transaction},
+                )
+                return True
+            transaction.rollback()
+            connection.close()
+            return False
+        except Exception:
+            try:
+                transaction.rollback()
+            finally:
+                connection.close()
+            raise
     result = db.execute(
-        text("SELECT pg_try_advisory_lock(:lock_key)"),
+        text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
         {"lock_key": lock_key},
     )
     return bool(result.scalar())
 
 
 def _release_auto_ingest_lock(db, lock_key: int = AUTO_INGEST_LOCK_KEY) -> None:
+    # Transaction-scoped advisory locks are released by commit/rollback.
+    # A dedicated lock connection keeps the lock alive across main-session commits.
+    handle = getattr(db, "_auto_ingest_lock_handle", None)
+    if handle:
+        try:
+            handle["transaction"].rollback()
+        finally:
+            handle["connection"].close()
+            try:
+                delattr(db, "_auto_ingest_lock_handle")
+            except AttributeError:
+                pass
+    return
+
+
+def detect_auto_ingest_orphan_locks(
+    db,
+    *,
+    lock_key: int = AUTO_INGEST_LOCK_KEY,
+    idle_seconds: int = 300,
+) -> list[dict[str, Any]]:
     if _get_session_dialect_name(db) != "postgresql":
-        return
-    db.execute(
-        text("SELECT pg_advisory_unlock(:lock_key)"),
-        {"lock_key": lock_key},
+        return []
+
+    result = db.execute(
+        text(
+            """
+            SELECT
+                a.pid,
+                a.state,
+                EXTRACT(EPOCH FROM (now() - COALESCE(a.state_change, a.query_start)))::int
+                    AS lock_age_seconds,
+                a.query,
+                (
+                    SELECT COUNT(*)
+                    FROM task_center_tasks t
+                    WHERE t.task_type = 'auto_ingest'
+                      AND t.status = 'running'
+                ) AS running_auto_ingest_tasks
+            FROM pg_locks l
+            JOIN pg_stat_activity a ON a.pid = l.pid
+            WHERE l.locktype = 'advisory'
+              AND l.granted = true
+              AND l.objid = :lock_key
+              AND a.state = 'idle'
+              AND EXTRACT(EPOCH FROM (now() - COALESCE(a.state_change, a.query_start))) >= :idle_seconds
+            """
+        ),
+        {"lock_key": lock_key, "idle_seconds": idle_seconds},
     )
+    locks = [dict(row) for row in result.mappings().all()]
+    orphaned = [
+        row for row in locks
+        if int(row.get("running_auto_ingest_tasks") or 0) == 0
+    ]
+    for row in orphaned:
+        logger.warning(
+            "[AutoIngest] advisory lock appears orphaned: pid=%s state=%s age=%ss query=%s",
+            row.get("pid"),
+            row.get("state"),
+            row.get("lock_age_seconds"),
+            row.get("query"),
+        )
+    return orphaned
+
+
+def _warn_auto_ingest_orphan_locks(db, *, lock_key: int, idle_seconds: int) -> None:
+    try:
+        detect_auto_ingest_orphan_locks(
+            db,
+            lock_key=lock_key,
+            idle_seconds=idle_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[AutoIngest] orphan lock diagnostic skipped: %s", exc)
 
 
 def _parse_auto_ingest_timestamp(value) -> datetime | None:
@@ -1099,8 +1199,18 @@ def auto_ingest_pending_files(max_files: int | None = None):
         lock_key = _int_env("AUTO_INGEST_LOCK_KEY", AUTO_INGEST_LOCK_KEY, minimum=1)
         lock_acquired = _acquire_auto_ingest_lock(db, lock_key)
         if not lock_acquired:
+            _warn_auto_ingest_orphan_locks(
+                db,
+                lock_key=lock_key,
+                idle_seconds=_int_env("AUTO_INGEST_ORPHAN_LOCK_IDLE_SECONDS", 300, minimum=1),
+            )
             logger.info("[AutoIngest] skipped because another auto-ingest task is running")
             return {"status": "skipped", "reason": "auto_ingest_already_running"}
+        _warn_auto_ingest_orphan_locks(
+            db,
+            lock_key=lock_key,
+            idle_seconds=_int_env("AUTO_INGEST_ORPHAN_LOCK_IDLE_SECONDS", 300, minimum=1),
+        )
 
         _recover_stale_auto_ingest_records(db, timeout_minutes=stale_timeout_minutes)
         _recover_template_update_required_files(
@@ -1357,6 +1467,10 @@ def auto_ingest_pending_files(max_files: int | None = None):
                 _release_auto_ingest_lock(db, _int_env("AUTO_INGEST_LOCK_KEY", AUTO_INGEST_LOCK_KEY, minimum=1))
             except Exception as unlock_exc:  # noqa: BLE001
                 logger.warning("[AutoIngest] failed to release advisory lock: %s", unlock_exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
         db.close()
 
 

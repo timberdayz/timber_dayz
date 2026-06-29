@@ -4,6 +4,7 @@ import inspect
 import json
 import uuid
 from collections.abc import Iterable
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import create_engine, insert, inspect as sa_inspect, select, text, update
@@ -11,7 +12,7 @@ from sqlalchemy import create_engine, insert, inspect as sa_inspect, select, tex
 from backend.services.cloud_b_class_mirror_manager import build_canonical_columns
 from backend.services.cloud_b_class_sync_utils import quote_ident, validate_b_class_table_name
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
-from modules.core.db import RefreshQueueTask
+from modules.core.db import CloudSyncReceiveLog, RefreshQueueTask
 
 
 def build_sync_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -117,6 +118,84 @@ class SQLAlchemyCloudWriter:
                 record["header_columns"] = json.dumps(record["header_columns"], ensure_ascii=False)
             prepared_rows.append(record)
         return prepared_rows
+
+
+class CloudSyncReceiveLogRecorder:
+    """Append cloud-side receive ledger rows after successful mirror writes."""
+
+    def __init__(self, engine, source_environment: str | None = None):
+        self.engine = engine
+        self.source_environment = source_environment
+
+    @staticmethod
+    def _coerce_business_date(value: Any) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except ValueError:
+            return None
+
+    @classmethod
+    def _business_date_range(cls, rows: list[dict[str, Any]]) -> tuple[date | None, date | None]:
+        dates: list[date] = []
+        for row in rows:
+            for key in ("business_date", "period_end_date", "analytics_date", "order_date", "stat_date", "date"):
+                parsed = cls._coerce_business_date(row.get(key))
+                if parsed is not None:
+                    dates.append(parsed)
+                    break
+        if not dates:
+            return None, None
+        return min(dates), max(dates)
+
+    @staticmethod
+    def _first_non_empty(rows: list[dict[str, Any]], key: str) -> Any | None:
+        for row in rows:
+            value = row.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    def record_success(
+        self,
+        *,
+        source_table_name: str,
+        source_file_id: int | None = None,
+        platform_code: str | None = None,
+        data_domain: str | None = None,
+        granularity: str | None = None,
+        checkpoint_scope: str = "b_class",
+        source_latest_ingest_timestamp: Any | None = None,
+        written_rows: int = 0,
+        rows: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        rows = list(rows or [])
+        business_date_min, business_date_max = self._business_date_range(rows)
+        table = CloudSyncReceiveLog.__table__
+        receive_id = f"receive-{uuid.uuid4().hex}"
+        payload = {
+            "receive_id": receive_id,
+            "source_environment": self.source_environment,
+            "checkpoint_scope": checkpoint_scope,
+            "source_table_name": source_table_name,
+            "source_file_id": source_file_id if source_file_id is not None else self._first_non_empty(rows, "file_id"),
+            "platform_code": platform_code or self._first_non_empty(rows, "platform_code"),
+            "data_domain": data_domain or self._first_non_empty(rows, "data_domain"),
+            "granularity": granularity or self._first_non_empty(rows, "granularity"),
+            "business_date_min": business_date_min,
+            "business_date_max": business_date_max,
+            "source_latest_ingest_timestamp": source_latest_ingest_timestamp,
+            "written_rows": written_rows,
+            "status": "completed",
+        }
+        with self.engine.begin() as conn:
+            conn.execute(insert(table).values(**payload))
+        return {"status": "completed", "receive_id": receive_id, "written_rows": written_rows}
 
 
 class CloudRefreshQueueEnqueuer:
@@ -229,6 +308,7 @@ class CloudBClassSyncService:
         owns_engines: bool = False,
         checkpoint_scope: str = "b_class",
         projection_enqueuer=None,
+        receive_log_recorder=None,
     ) -> None:
         self.checkpoint_service = checkpoint_service
         self.mirror_manager = mirror_manager
@@ -242,8 +322,11 @@ class CloudBClassSyncService:
         self.owns_engines = owns_engines
         self.checkpoint_scope = checkpoint_scope
         self.projection_enqueuer = projection_enqueuer
+        self.receive_log_recorder = receive_log_recorder
         if self.projection_enqueuer is None and cloud_engine is not None:
             self.projection_enqueuer = CloudRefreshQueueEnqueuer(cloud_engine)
+        if self.receive_log_recorder is None and cloud_engine is not None:
+            self.receive_log_recorder = CloudSyncReceiveLogRecorder(cloud_engine)
 
     @staticmethod
     def _should_advance_checkpoint(write_succeeded: bool, dry_run: bool = False) -> bool:
@@ -427,6 +510,19 @@ class CloudBClassSyncService:
                     }
 
                 total_written_rows += int(write_result.get("written_rows", len(rows)))
+                if self.receive_log_recorder is not None and not bool(write_result.get("dry_run")):
+                    await self._maybe_await(
+                        self.receive_log_recorder.record_success(
+                            source_table_name=table_name,
+                            data_domain=data_domain,
+                            granularity=(payload_rows[0] or {}).get("granularity") if payload_rows else None,
+                            platform_code=(payload_rows[0] or {}).get("platform_code") if payload_rows else None,
+                            checkpoint_scope=self.checkpoint_scope,
+                            source_latest_ingest_timestamp=rows[-1].get("ingest_timestamp") if rows else None,
+                            written_rows=int(write_result.get("written_rows", len(rows))),
+                            rows=rows,
+                        )
+                    )
                 dry_run_seen = dry_run_seen or bool(write_result.get("dry_run"))
                 if self._should_advance_checkpoint(write_succeeded, dry_run=bool(write_result.get("dry_run"))):
                     last_row = rows[-1]
