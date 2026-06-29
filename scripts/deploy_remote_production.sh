@@ -577,231 +577,103 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
-# [SCHEMA MIGRATION] Phase 2: 智能数据库迁移
+# [SCHEMA MIGRATION] Phase 2: smart database migration.
 smart_database_migrate() {
-  # [FIX] 容器名称配置化（支持不同环境）
-  BACKEND_CONTAINER="xihong_erp_backend_api"
-  POSTGRES_CONTAINER="xihong_erp_postgres"
   POSTGRES_USER_VAL="${POSTGRES_USER_VAL:-erp_user}"
   POSTGRES_DB_VAL="${POSTGRES_DB_VAL:-xihong_erp}"
 
-  # [FIX] 检查 alembic_version 表是否存在（更准确的判断方式）
-  ALEMBIC_VERSION_EXISTS=$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
+  CORE_ALEMBIC_VERSION_EXISTS="$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
+      "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'core' AND table_name = 'alembic_version')" \
+      2>/dev/null | tr -d ' \n\r' || echo "f")"
+  PUBLIC_ALEMBIC_VERSION_EXISTS="$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
       "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'alembic_version')" \
-      2>/dev/null | tr -d ' \n\r' || echo "f")
+      2>/dev/null | tr -d ' \n\r' || echo "f")"
+  BUSINESS_TABLE_COUNT=$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type = 'BASE TABLE' AND table_name <> 'alembic_version'" \
+      2>/dev/null | tr -d ' \n\r' || echo "0")
+  CRITICAL_SCHEMA_COUNT=$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
+      "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name IN ('core','b_class','semantic','mart','api','ops')" \
+      2>/dev/null | tr -d ' \n\r' || echo "0")
 
-  if [ "$ALEMBIC_VERSION_EXISTS" = "f" ] || [ -z "$ALEMBIC_VERSION_EXISTS" ]; then
-    # 新数据库：使用 Schema 快照迁移
-    echo "[INFO] 检测到全新数据库（alembic_version 表不存在），使用 Schema 快照迁移..."
-    # [FIX] 验证快照迁移 revision ID 是否存在
+  DATABASE_IS_EMPTY="false"
+  if [ "${BUSINESS_TABLE_COUNT:-0}" = "0" ] && [ "${CRITICAL_SCHEMA_COUNT:-0}" = "0" ]; then
+    DATABASE_IS_EMPTY="true"
+  fi
+
+  echo "[INFO] Alembic state: core=${CORE_ALEMBIC_VERSION_EXISTS:-f}, public=${PUBLIC_ALEMBIC_VERSION_EXISTS:-f}, business_tables=${BUSINESS_TABLE_COUNT:-0}, critical_schemas=${CRITICAL_SCHEMA_COUNT:-0}"
+
+  if [ "${CORE_ALEMBIC_VERSION_EXISTS}" = "t" ]; then
+    echo "[INFO] Existing database detected via core.alembic_version; running incremental migrations"
+  elif [ "${PUBLIC_ALEMBIC_VERSION_EXISTS}" = "t" ]; then
+    echo "[WARN] Existing database detected via legacy public.alembic_version; running incremental migrations"
+  elif [ "${DATABASE_IS_EMPTY}" != "true" ]; then
+    echo "[ERROR] No alembic_version table found, but database is not empty"
+    echo "[INFO] BUSINESS_TABLE_COUNT=${BUSINESS_TABLE_COUNT:-0}, CRITICAL_SCHEMA_COUNT=${CRITICAL_SCHEMA_COUNT:-0}"
+    echo "[INFO] Refusing snapshot initialization to avoid corrupting an existing production database"
+    return 1
+  fi
+
+  MIGRATE_LOG=$(mktemp)
+  if [ "${CORE_ALEMBIC_VERSION_EXISTS}" != "t" ] && [ "${PUBLIC_ALEMBIC_VERSION_EXISTS}" != "t" ]; then
+    echo "[INFO] Fresh empty database detected; running schema snapshot migration path"
     REVISION_EXISTS=$("${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic history 2>&1 | grep -c "v5_0_0_schema_snapshot" || echo "0")
-    if [ "$REVISION_EXISTS" -eq 0 ]; then
-      echo "[WARN] 快照迁移 revision ID 'v5_0_0_schema_snapshot' 不存在"
-      echo "[INFO] 尝试使用 alembic upgrade heads 作为降级方案..."
-      "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads || {
-        echo "[ERROR] 无法执行迁移（快照迁移 revision 不存在且 heads 迁移失败）"
-        echo "[INFO] 请检查迁移文件是否存在，或手动创建快照迁移"
+    if [ "${REVISION_EXISTS}" -gt 0 ]; then
+      "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade v5_0_0_schema_snapshot 2> "${MIGRATE_LOG}" || {
+        echo "[ERROR] Schema snapshot migration failed"
+        cat "${MIGRATE_LOG}"
+        rm -f "${MIGRATE_LOG}"
         return 1
       }
     else
-      "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade v5_0_0_schema_snapshot || {
-        echo "[ERROR] Schema 快照迁移失败"
-        # [FIX] 检查表是否已部分创建
-        TABLE_COUNT=$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'" \
-            2>/dev/null | tr -d ' \n\r' || echo "0")
-        if [ "$TABLE_COUNT" -gt 5 ]; then
-          echo "[WARN] 检测到表已部分创建（$TABLE_COUNT 张表），可能需要清理或继续"
-          echo "[INFO] 选项1: 清理数据库后重试"
-          echo "[INFO] 选项2: 使用 alembic upgrade heads 继续迁移"
-          # 尝试继续迁移
-          "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads || {
-            echo "[ERROR] 继续迁移也失败，请手动检查"
-            return 1
-          }
-        else
-          return 1
-        fi
-      }
+      echo "[WARN] Snapshot revision v5_0_0_schema_snapshot not found; falling back to alembic upgrade heads"
     fi
-    # 继续执行后续增量迁移（如果有）
-    # [FIX] 使用 heads（复数）以支持多头迁移分支
-    "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads || {
-      echo "[WARN] 后续增量迁移失败，可能是快照迁移 revision ID 不正确或链接问题"
-      echo "[INFO] 检查快照迁移的 revision ID 和后续迁移的 down_revision"
-      echo "[INFO] 如果表已创建，可以继续部署；否则需要手动修复"
-      # 不阻止部署，因为表可能已经通过快照迁移创建
-    }
-  else
-    # 已有数据库：尝试增量迁移
-    echo "[INFO] 检测到已有数据库（alembic_version 表存在），尝试增量迁移..."
-    MIGRATE_LOG=$(mktemp)
-    # [FIX] 使用 heads（复数）以支持多头迁移分支；捕获完整输出便于排查（如云服务器为旧版本表结构）
-    "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads 2> "${MIGRATE_LOG}"
-    MIGRATE_EXIT=$?
-    if [ ${MIGRATE_EXIT} -ne 0 ]; then
-      echo "[WARN] 迁移命令返回非零 (exit ${MIGRATE_EXIT})，完整输出如下:"
-      cat "${MIGRATE_LOG}"
-      echo "[WARN] 迁移失败，检测缺失的表..."
-      MISSING_TABLES=$("${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 -c "
-from backend.models.database import Base, engine
-from sqlalchemy import inspect
-import sys
+  fi
 
-try:
-    # 直接检查表是否存在，不依赖 verify_schema_completeness（可能因为多头迁移失败）
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-    expected_tables = set(Base.metadata.tables.keys())
-    missing_tables = expected_tables - existing_tables
+  "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads 2> "${MIGRATE_LOG}" || {
+    echo "[ERROR] Alembic upgrade heads failed"
+    cat "${MIGRATE_LOG}"
+    rm -f "${MIGRATE_LOG}"
+    return 1
+  }
+  rm -f "${MIGRATE_LOG}"
+}
 
-    if missing_tables:
-        missing = sorted(list(missing_tables))
-        print(','.join(missing), file=sys.stdout)
-        sys.exit(1)
-    else:
-        print('[INFO] 所有表都存在，迁移失败可能是其他原因', file=sys.stderr)
-        sys.exit(0)
-except Exception as e:
-    print(f'[ERROR] 检测缺失表时出错: {e}', file=sys.stderr)
-    sys.exit(2)
-" 2>&1)
-
-      DETECT_EXIT_CODE=$?
-
-      if [ $DETECT_EXIT_CODE -eq 1 ] && [ -n "$MISSING_TABLES" ]; then
-        echo "[INFO] 发现缺失的表，尝试补充: $MISSING_TABLES"
-        # [FIX] 使用 Base.metadata.create_all() 只创建缺失的表
-        # [FIX] 使用 tables 参数指定要创建的表，SQLAlchemy 会自动处理依赖顺序
-        "${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 -c "
-from backend.models.database import Base, engine
-from sqlalchemy import inspect, text
-import sys
-
-inspector = inspect(engine)
-existing_tables = set(inspector.get_table_names())
-expected_tables = set(Base.metadata.tables.keys())
-missing_tables = expected_tables - existing_tables
-
-if missing_tables:
-    print(f'[INFO] 创建缺失的表: {missing_tables}')
-    missing_table_objects = [Base.metadata.tables[t] for t in missing_tables if t in Base.metadata.tables]
-    if len(missing_table_objects) < len(missing_tables):
-        skipped = set(missing_tables) - set(Base.metadata.tables.keys())
-        print(f'[WARN] 跳过不在 metadata 中的表: {skipped}', file=sys.stderr)
-    if missing_table_objects:
-        # [FIX] 补表前先创建缺失表所在的 schema，避免 schema \"core\" does not exist
-        schemas_to_create = set()
-        for t in missing_table_objects:
-            s = getattr(t, 'schema', None)
-            if s and s != 'public':
-                schemas_to_create.add(s)
-        for schema_name in sorted(schemas_to_create):
-            with engine.connect() as conn:
-                conn.execute(text('CREATE SCHEMA IF NOT EXISTS \"' + schema_name + '\"'))
-                conn.commit()
-        Base.metadata.create_all(bind=engine, tables=missing_table_objects, checkfirst=True)
-    else:
-        print('[WARN] 没有可创建的表（所有缺失的表都不在 metadata 中）', file=sys.stderr)
-        sys.exit(1)
-    print('[OK] 缺失表已创建')
-
-    inspector_after = inspect(engine)
-    existing_after = set(inspector_after.get_table_names())
-    still_missing = expected_tables - existing_after
-    if still_missing:
-        print(f'[WARN] 部分表创建失败: {still_missing}', file=sys.stderr)
-        sys.exit(1)
-else:
-    print('[INFO] 所有表都已存在')
-" || {
-          echo "[ERROR] 创建缺失表失败"
-          rm -f "${MIGRATE_LOG}"
-          return 1
-        }
-
-        # [FIX] 验证表结构完整性后再标记
-        # [FIX] 直接检查表是否存在，不依赖 verify_schema_completeness()（可能因多头迁移失败）
-        VERIFY_RESULT=$("${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 -c "
-from backend.models.database import Base, engine
-from sqlalchemy import inspect
+verify_schema_gate() {
+  echo "[INFO] Phase 2.1: Verifying schema completeness..."
+  set +e
+  SCHEMA_GATE_OUTPUT=$("${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 -c '
 import json
 import sys
 
-try:
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-    expected_tables = set(Base.metadata.tables.keys())
-    missing_tables = expected_tables - existing_tables
+from backend.models.database import verify_schema_completeness
 
-    result = {
-        'all_tables_exist': len(missing_tables) == 0,
-        'missing_tables': sorted(list(missing_tables)),
-        'expected_count': len(expected_tables),
-        'actual_count': len(existing_tables)
-    }
-    print(json.dumps(result))
-except Exception as e:
-    print(json.dumps({'error': str(e), 'all_tables_exist': False}), file=sys.stderr)
-    sys.exit(1)
-" 2>&1)
-
-        if echo "$VERIFY_RESULT" | grep -q '"all_tables_exist": true'; then
-          echo "[OK] 表结构验证通过，标记迁移为最新"
-          # [FIX] 仅在验证通过后才标记为最新
-          # [FIX] 检查 head 数量，根据情况选择 stamp 命令
-          # [FIX] 使用更准确的检测方式：统计包含 "(head)" 的行数
-          HEAD_COUNT=$("${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic heads 2>&1 | grep -E "\(head\)" | wc -l | tr -d ' \n\r' || echo "0")
-          if [ "$HEAD_COUNT" -eq 1 ]; then
-            echo "[INFO] 检测到单个 head，使用 alembic stamp head"
-            "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic stamp head || {
-              echo "[WARN] alembic stamp head 失败，但表已创建"
-            }
-          else
-            echo "[INFO] 检测到多个 head ($HEAD_COUNT 个)，使用 alembic stamp heads"
-            "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic stamp heads || {
-              echo "[WARN] alembic stamp heads 失败，但表已创建"
-            }
-          fi
-        else
-          echo "[ERROR] 表结构验证失败，不标记迁移"
-          echo "[INFO] 请手动检查并修复表结构"
-          rm -f "${MIGRATE_LOG}"
-          return 1
-        fi
-      elif [ $DETECT_EXIT_CODE -eq 2 ]; then
-        echo "[ERROR] 检测缺失表时出错"
-        echo "[INFO] 请检查数据库连接和 Python 环境"
-        rm -f "${MIGRATE_LOG}"
-        return 1
-      else
-        # [P0] 所有表都存在：尝试补列后重试迁移（云上旧 schema 缺列时一次补齐）
-        echo "[INFO] 所有表都存在，尝试补列后重试迁移..."
-        if ! "${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 /app/scripts/sync_schema_columns.py 2>/dev/null; then
-          echo "[WARN] sync_schema_columns.py 执行失败或未找到，继续重试迁移"
-        fi
-        echo "[INFO] 重试 alembic upgrade heads..."
-        "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads 2> "${MIGRATE_LOG}"
-        RETRY_EXIT=$?
-        if [ ${RETRY_EXIT} -eq 0 ]; then
-          echo "[OK] 补列后迁移成功"
-        else
-          echo "[ERROR] 迁移失败且无法自动修复（所有表都存在）"
-          echo "[INFO] 云服务器可能是旧版本表结构，与当前迁移不兼容；或存在字段/约束冲突、alembic_version 与代码不一致等。"
-          echo "[INFO] 请根据下方「迁移命令原始错误」手动修复（如调整迁移脚本、在服务器执行 alembic 命令或联系运维）。"
-          echo "[INFO] --- 迁移命令原始错误 ---"
-          cat "${MIGRATE_LOG}"
-          echo "[INFO] --- 结束 ---"
-          rm -f "${MIGRATE_LOG}"
-          return 1
-        fi
-      fi
-      rm -f "${MIGRATE_LOG}"
-    fi
-    rm -f "${MIGRATE_LOG}"
-  fi
+result = verify_schema_completeness()
+summary = {
+    "migration_status": result.get("migration_status"),
+    "current_revision": result.get("current_revision"),
+    "head_revision": result.get("head_revision"),
+    "missing_tables": result.get("missing_tables", [])[:20],
+    "missing_columns": result.get("missing_columns", [])[:20],
+    "all_tables_exist": result.get("all_tables_exist"),
+    "all_critical_columns_exist": result.get("all_critical_columns_exist"),
 }
-
+print(json.dumps(summary, ensure_ascii=False))
+if (
+    summary["migration_status"] != "up_to_date"
+    or not summary["all_tables_exist"]
+    or not summary["all_critical_columns_exist"]
+):
+    sys.exit(1)
+' 2>&1)
+  SCHEMA_GATE_RC=$?
+  set -e
+  echo "${SCHEMA_GATE_OUTPUT}"
+  if [ ${SCHEMA_GATE_RC} -ne 0 ]; then
+    echo "[FAIL] Schema gate failed after migrations"
+    return 1
+  fi
+  echo "[OK] Schema gate passed"
+}
 echo "[INFO] Phase 2: Running smart database migration..."
 if ! smart_database_migrate; then
   echo "[FAIL] Smart database migration failed"
@@ -810,6 +682,11 @@ if ! smart_database_migrate; then
   exit 1
 fi
 echo "[OK] Smart database migration completed successfully"
+
+if ! verify_schema_gate; then
+  echo "[INFO] Deployment blocked before backend startup"
+  exit 1
+fi
 
 # [BOOTSTRAP] Phase 2.5: Bootstrap initialization (after migrations, before application layer)
 # Note: Schema verification is now integrated into smart_database_migrate() function above
@@ -863,7 +740,16 @@ for i in $(seq 1 60); do
   fi
   if [ "${i}" = "60" ]; then
     echo "[FAIL] Backend startup timeout"
-    docker logs xihong_erp_backend_api --tail 80 2>&1 || true
+    echo "[INFO] Backend container status:"
+    docker ps -a --filter name=xihong_erp_backend_api || true
+    echo "[INFO] Backend inspect state:"
+    docker inspect xihong_erp_backend_api --format 'status={{.State.Status}} exit_code={{.State.ExitCode}} error={{.State.Error}} oom_killed={{.State.OOMKilled}} restart_count={{.RestartCount}}' || true
+    echo "[INFO] Backend docker logs (tail 300):"
+    docker logs xihong_erp_backend_api --tail 300 2>&1 || true
+    echo "[INFO] Backend gunicorn error log (tail 300):"
+    docker exec xihong_erp_backend_api sh -lc 'tail -n 300 /app/logs/error.log || true' 2>&1 || true
+    echo "[INFO] Backend access log (tail 200):"
+    docker exec xihong_erp_backend_api sh -lc 'tail -n 200 /app/logs/access.log || true' 2>&1 || true
     exit 1
   fi
   sleep 2

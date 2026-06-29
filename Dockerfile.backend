@@ -86,5 +86,5 @@ CMD ["gunicorn", "backend.main:app", \
      "--timeout", "120", \
      "--keep-alive", "5", \
      "--access-logfile", "/app/logs/access.log", \
-     "--error-logfile", "/app/logs/error.log", \
+     "--error-logfile", "-", \
      "--log-level", "info"]
