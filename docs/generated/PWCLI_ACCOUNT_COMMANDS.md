@@ -7,6 +7,12 @@
 
 本文档提供给业务同事直接复制使用。
 
+首次使用或新打开 PowerShell 窗口时，请先在仓库根目录执行:
+
+```powershell
+. .\scripts\pwcli_helpers.ps1
+```
+
 规则:
 
 1. 先执行“打开命令”

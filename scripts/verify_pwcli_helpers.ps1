@@ -1,5 +1,7 @@
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "pwcli_helpers.ps1")
+
 $requiredHelpers = @(
     "pwcli",
     "Open-PwcliMiaoshou",
@@ -24,6 +26,7 @@ $requiredScripts = @(
     "scripts/pw-shot.ps1",
     "scripts/pw-pack.ps1",
     "scripts/pw-cap.ps1",
+    "scripts/pwcli_helpers.ps1",
     "scripts/pwcli_native.py",
     "scripts/pwcli_workflow.py"
 )

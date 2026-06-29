@@ -4,7 +4,14 @@ This file is the agent-facing command reference for `pwcli`, `pwcap`, and relate
 
 ## Verified Local Helpers
 
-The current PowerShell environment exposes these user-facing helpers:
+Load the repository-owned helpers before using the user-facing commands in a
+new PowerShell window:
+
+```powershell
+. .\scripts\pwcli_helpers.ps1
+```
+
+The helper script exposes these user-facing commands:
 
 - `pwcli`
 - `Open-PwcliMiaoshou`
@@ -29,7 +36,7 @@ Get-Command pwcli, Open-PwcliMiaoshou, Open-PwcliShopee, Open-PwcliTiktok, Save-
 For a repository-owned self-check, run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify_pwcli_helpers.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_pwcli_helpers.ps1
 ```
 
 If these commands exist, prefer them in user-facing guidance over longer repo-local script paths.
