@@ -148,6 +148,7 @@ class CollectionQueueRunner:
                 trigger_type=run.trigger_type,
                 start_background=False,
                 resolve_runtime=True,
+                time_window_now=getattr(run, "scheduled_for", None),
             )
 
     async def _execute_task(

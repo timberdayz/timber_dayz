@@ -45,6 +45,9 @@ export const normalizeConfigGranularity = (config = {}) => {
   }
 
   const preset = String(config.date_range_type || '').toLowerCase()
+  if (preset === 'dynamic:previous_day') return 'daily'
+  if (preset === 'dynamic:current_week_to_available_day') return 'weekly'
+  if (preset === 'dynamic:current_month_to_available_day') return 'monthly'
   if (preset === 'today' || preset === 'yesterday') return 'daily'
   if (preset === 'last_7_days') return 'weekly'
   if (preset === 'last_30_days') return 'monthly'
@@ -71,11 +74,25 @@ export const normalizeDomainSubtypeMap = (rawValue) => {
 }
 
 export const getDatePresetLabel = (preset, platform = '') => {
+  if (preset === 'dynamic:previous_day') return '昨天'
+  if (preset === 'dynamic:current_week_to_available_day') return '本周累计到最近可采集日'
+  if (preset === 'dynamic:current_month_to_available_day') return '本月累计到最近可采集日'
   if (preset === 'last_7_days') return '最近7天'
   if (preset === 'last_30_days') {
     return String(platform).toLowerCase() === 'tiktok' ? '最近28天' : '最近30天'
   }
   return preset
+}
+
+export const getDefaultDynamicDateRangeType = (granularity) => {
+  if (granularity === 'weekly') return 'dynamic:current_week_to_available_day'
+  if (granularity === 'monthly') return 'dynamic:current_month_to_available_day'
+  return 'dynamic:previous_day'
+}
+
+export const getDynamicStrategyFromDateRangeType = (value) => {
+  const normalized = String(value || '').toLowerCase()
+  return normalized.startsWith('dynamic:') ? normalized.split(':')[1] : ''
 }
 
 export const buildDateRangeFromPreset = (
@@ -124,6 +141,15 @@ export const buildTimeSelectionPayload = (
     endTime = '23:59:59'
   } = {}
 ) => {
+  const dynamicStrategy = getDynamicStrategyFromDateRangeType(preset)
+  if (dynamicStrategy) {
+    return {
+      mode: 'dynamic',
+      strategy: dynamicStrategy,
+      available_after_time: '06:00'
+    }
+  }
+
   if (preset === 'custom' && Array.isArray(customRange) && customRange.length === 2) {
     return {
       mode: 'custom',

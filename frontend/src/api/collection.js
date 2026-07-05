@@ -80,6 +80,11 @@ export const bulkAdvanceCurrentGranularity = async (payload) => {
   return response
 }
 
+export const bulkRunCurrentGranularity = async (payload) => {
+  const response = await api.post('/collection/configs/run-current-granularity', payload)
+  return response
+}
+
 export const backfillLegacyConfigTemplates = async () => {
   const response = await api.post('/collection/config-template-backfill')
   return response
@@ -516,6 +521,7 @@ export default {
   createFutureConfigBatches,
   advanceCurrentConfig,
   bulkAdvanceCurrentGranularity,
+  bulkRunCurrentGranularity,
   backfillLegacyConfigTemplates,
   createConfig,
   updateConfig,
@@ -564,4 +570,3 @@ export default {
   createTaskWebSocket,
   getWebSocketStats
 }
-

@@ -14,11 +14,19 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class TimeSelectionPayload(BaseModel):
     """????????"""
 
-    mode: Literal["preset", "custom"] = Field(..., description="????")
+    mode: Literal["preset", "custom", "dynamic"] = Field(..., description="????")
     preset: Optional[Literal["today", "yesterday", "last_7_days", "last_30_days"]] = Field(
         None,
         description="??????",
     )
+    strategy: Optional[
+        Literal[
+            "previous_day",
+            "current_week_to_available_day",
+            "current_month_to_available_day",
+        ]
+    ] = Field(None, description="动态时间策略")
+    available_after_time: Optional[str] = Field("06:00", description="平台数据可用时间 HH:MM")
     start_date: Optional[str] = Field(None, description="鑷畾涔夊紑濮嬫棩鏈?YYYY-MM-DD")
     end_date: Optional[str] = Field(None, description="鑷畾涔夌粨鏉熸棩鏈?YYYY-MM-DD")
     start_time: Optional[str] = Field("00:00:00", description="鑷畾涔夊紑濮嬫椂闂?HH:MM:SS")
@@ -39,10 +47,24 @@ class TimeSelectionPayload(BaseModel):
         if mode == "custom":
             if self.preset:
                 raise ValueError("custom time selection cannot include preset fields")
+            if self.strategy:
+                raise ValueError("custom time selection cannot include dynamic strategy")
             if not self.start_date or not self.end_date:
                 raise ValueError("custom time selection requires start_date and end_date")
             self.start_time = self.start_time or "00:00:00"
             self.end_time = self.end_time or "23:59:59"
+            return self
+
+        if mode == "dynamic":
+            if self.preset:
+                raise ValueError("dynamic time selection cannot include preset fields")
+            if self.start_date or self.end_date:
+                raise ValueError("dynamic time selection cannot include custom range fields")
+            if not self.strategy:
+                raise ValueError("dynamic time selection requires strategy")
+            self.available_after_time = self.available_after_time or "06:00"
+            self.start_time = "00:00:00"
+            self.end_time = "23:59:59"
             return self
 
         return self
@@ -129,6 +151,7 @@ class CollectionConfigResponse(BaseModel):
     custom_date_start: Optional[date]
     custom_date_end: Optional[date]
     time_selection: Optional[TimeSelectionPayload] = None
+    time_window_preview: Optional[Dict[str, Any]] = None
     execution_mode: Literal["headless", "headed"] = "headless"
     schedule_enabled: bool
     schedule_cron: Optional[str]
@@ -143,6 +166,13 @@ class CollectionConfigResponse(BaseModel):
     @model_validator(mode="after")
     def hydrate_time_selection(self):
         if self.time_selection is None:
+            if str(self.date_range_type or "").startswith("dynamic:"):
+                payload = {
+                    "mode": "dynamic",
+                    "strategy": str(self.date_range_type).split(":", 1)[1],
+                }
+                self.time_selection = TimeSelectionPayload.model_validate(payload)
+                return self
             mode = "custom" if self.date_range_type == "custom" else "preset"
             payload = {"mode": mode}
             if mode == "preset" and self.date_range_type:
@@ -216,6 +246,19 @@ class CollectionConfigBulkAdvanceRequest(BaseModel):
 
 class CollectionConfigBulkAdvanceResponse(BaseModel):
     affected_config_ids: List[int] = Field(default_factory=list)
+    skipped_config_ids: List[int] = Field(default_factory=list)
+
+
+class CollectionConfigBulkRunRequest(BaseModel):
+    granularity: Literal["daily", "weekly", "monthly"]
+    platform: Optional[str] = None
+    main_account_ids: List[str] = Field(default_factory=list)
+
+
+class CollectionConfigBulkRunResponse(BaseModel):
+    created_run_count: int = 0
+    skipped_config_count: int = 0
+    runs: List["CollectionConfigRunResponse"] = Field(default_factory=list)
     skipped_config_ids: List[int] = Field(default_factory=list)
 
 

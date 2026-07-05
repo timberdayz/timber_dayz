@@ -61,6 +61,9 @@ class CollectionConfigRunService:
             trigger_type=trigger_type,
             status="queued",
             priority=priority,
+            scheduled_for=datetime.now(timezone.utc)
+            if str(trigger_type).strip().lower() == "scheduled"
+            else None,
         )
         self.db.add(run)
         await self.db.commit()

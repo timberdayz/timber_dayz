@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 from backend.services import component_name_utils
+from backend.services.collection_time_window import (
+    DYNAMIC_STRATEGY_TO_GRANULARITY,
+    build_dynamic_time_selection,
+    derive_granularity_from_dynamic_time_selection,
+    is_dynamic_time_selection,
+    normalize_dynamic_time_selection,
+    resolve_collection_time_window,
+)
 
 DATA_DOMAIN_SUB_TYPES = component_name_utils.DATA_DOMAIN_SUB_TYPES
 
@@ -24,9 +32,9 @@ DEFAULT_CONFIG_DATA_DOMAINS: List[str] = [
 ]
 
 DEFAULT_GRANULARITY_DATE_RANGE_TYPE: Dict[str, str] = {
-    "daily": "yesterday",
-    "weekly": "last_7_days",
-    "monthly": "last_30_days",
+    "daily": "dynamic:previous_day",
+    "weekly": "dynamic:current_week_to_available_day",
+    "monthly": "dynamic:current_month_to_available_day",
 }
 
 
@@ -105,6 +113,19 @@ def normalize_time_selection(
     date_range: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     raw: Dict[str, Any] = dict(time_selection or {})
+    raw_mode = str(raw.get("mode") or "").strip().lower()
+    if raw_mode == "dynamic":
+        return normalize_dynamic_time_selection(raw)
+
+    if isinstance(date_range_type, str) and date_range_type.startswith("dynamic:"):
+        return normalize_dynamic_time_selection(
+            {
+                "mode": "dynamic",
+                "strategy": date_range_type.split(":", 1)[1],
+                "available_after_time": raw.get("available_after_time"),
+            }
+        )
+
     explicit_preset = str(raw.get("preset") or date_preset or date_range_type or "").strip().lower()
     explicit_start = (
         raw.get("start_date")
@@ -162,6 +183,9 @@ def normalize_time_selection(
             "end_time": str(raw.get("end_time") or end_time or "23:59:59").strip(),
         }
 
+    if mode == "dynamic":
+        return normalize_dynamic_time_selection(raw)
+
     raise ValueError(f"invalid time mode: {mode}")
 
 
@@ -171,6 +195,8 @@ def derive_granularity_from_time_selection(
 ) -> str:
     normalized = normalize_time_selection(time_selection=time_selection)
     mode = normalized["mode"]
+    if mode == "dynamic":
+        return derive_granularity_from_dynamic_time_selection(normalized)
     if mode == "preset":
         return TIME_PRESET_TO_GRANULARITY[normalized["preset"]]
     if mode == "custom":
@@ -185,11 +211,14 @@ def build_date_range_from_time_selection(
     time_selection: Dict[str, Any],
     *,
     today: Optional[date] = None,
+    now: Optional[datetime] = None,
 ) -> Dict[str, str]:
     normalized = normalize_time_selection(time_selection=time_selection)
     if normalized["mode"] == "custom":
         start = normalized["start_date"]
         end = normalized["end_date"]
+    elif normalized["mode"] == "dynamic":
+        return resolve_collection_time_window(normalized, now=now)
     else:
         target = today or date.today()
         preset = normalized["preset"]
@@ -219,6 +248,12 @@ def build_legacy_collection_date_fields(
     time_selection: Dict[str, Any],
 ) -> Dict[str, Any]:
     normalized = normalize_time_selection(time_selection=time_selection)
+    if normalized["mode"] == "dynamic":
+        return {
+            "date_range_type": f"dynamic:{normalized['strategy']}",
+            "custom_date_start": None,
+            "custom_date_end": None,
+        }
     if normalized["mode"] == "preset":
         return {
             "date_range_type": normalized["preset"],
@@ -231,6 +266,29 @@ def build_legacy_collection_date_fields(
         "custom_date_start": date.fromisoformat(normalized["start_date"]),
         "custom_date_end": date.fromisoformat(normalized["end_date"]),
     }
+
+
+def build_time_window_preview(
+    time_selection: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    normalized = normalize_time_selection(time_selection=time_selection)
+    window = build_date_range_from_time_selection(normalized, now=now)
+    window["time_selection"] = normalized
+    if not is_dynamic_time_selection(normalized):
+        window.setdefault("time_window_label", _static_time_window_label(normalized))
+    return window
+
+
+def default_dynamic_time_selection_for_granularity(granularity: str) -> Dict[str, str]:
+    return build_dynamic_time_selection(granularity)
+
+
+def _static_time_window_label(time_selection: Dict[str, Any]) -> str:
+    if time_selection.get("mode") == "preset":
+        return str(time_selection.get("preset") or "")
+    return "固定自定义区间"
 
 
 def _allowed_subtype_mapping() -> Dict[str, List[str]]:

@@ -100,6 +100,7 @@ async def create_tasks_for_config(
     app: Any = None,
     start_background: bool = False,
     resolve_runtime: bool = True,
+    time_window_now: datetime | None = None,
 ) -> List[CollectionTask]:
     result = await db.execute(
         select(CollectionConfig)
@@ -151,7 +152,10 @@ async def create_tasks_for_config(
         custom_date_start=config.custom_date_start,
         custom_date_end=config.custom_date_end,
     )
-    normalized_date_range = build_date_range_from_time_selection(time_selection)
+    normalized_date_range = build_date_range_from_time_selection(
+        time_selection,
+        now=time_window_now,
+    )
     normalized_date_range["time_selection"] = time_selection
     effective_granularity = derive_granularity_from_time_selection(
         time_selection, config.granularity

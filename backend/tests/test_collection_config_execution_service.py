@@ -1,5 +1,6 @@
 import pytest
 import pytest_asyncio
+from datetime import datetime
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from types import SimpleNamespace
@@ -175,6 +176,44 @@ async def test_create_tasks_for_config_expands_per_shop_scope(config_execution_s
     assert task_map["shop-my-1"].data_domains == ["products"]
     assert task_map["shop-my-1"].sub_domains is None
     assert task_map["shop-my-1"].config_run_id == config_run_id
+
+
+@pytest.mark.asyncio
+async def test_create_tasks_for_config_resolves_dynamic_time_window(
+    config_execution_session,
+):
+    config_id = await _seed_config(config_execution_session)
+    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+
+    config = (
+        await config_execution_session.execute(
+            select(CollectionConfig).where(CollectionConfig.id == config_id)
+        )
+    ).scalar_one()
+    config.granularity = "monthly"
+    config.date_range_type = "dynamic:current_month_to_available_day"
+    config.custom_date_start = None
+    config.custom_date_end = None
+    await config_execution_session.commit()
+
+    from backend.services.collection_time_window import DEFAULT_TIMEZONE
+
+    tasks = await create_tasks_for_config(
+        config_execution_session,
+        config_id=config_id,
+        config_run_id=config_run_id,
+        trigger_type="scheduled",
+        resolve_runtime=False,
+        time_window_now=datetime(2026, 7, 5, 6, 0, tzinfo=DEFAULT_TIMEZONE),
+    )
+
+    assert len(tasks) == 2
+    assert {task.date_range["start_date"] for task in tasks} == {"2026-07-01"}
+    assert {task.date_range["end_date"] for task in tasks} == {"2026-07-04"}
+    assert all(
+        task.date_range["time_selection"]["strategy"] == "current_month_to_available_day"
+        for task in tasks
+    )
 
 
 @pytest.mark.asyncio

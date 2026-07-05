@@ -67,6 +67,21 @@ async def test_enqueue_config_run_creates_queued_run(config_run_session):
     assert run.config_id == config.id
     assert run.status == "queued"
     assert run.trigger_type == "scheduled"
+    assert run.scheduled_for is not None
+
+
+@pytest.mark.asyncio
+async def test_enqueue_manual_config_run_does_not_set_scheduled_for(config_run_session):
+    from backend.services.collection_config_run_service import CollectionConfigRunService
+
+    config = await _seed_config(config_run_session)
+    service = CollectionConfigRunService(config_run_session)
+
+    run, created = await service.enqueue_config_run(config, trigger_type="manual")
+
+    assert created is True
+    assert run.trigger_type == "manual"
+    assert run.scheduled_for is None
 
 
 @pytest.mark.asyncio

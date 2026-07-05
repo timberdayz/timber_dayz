@@ -26,6 +26,8 @@ from backend.schemas.collection import (
     CollectionConfigFutureBatchCreateResponse,
     CollectionConfigBulkAdvanceRequest,
     CollectionConfigBulkAdvanceResponse,
+    CollectionConfigBulkRunRequest,
+    CollectionConfigBulkRunResponse,
     CollectionConfigTemplateBackfillResponse,
     CollectionConfigBatchRemediationCreatedItem,
     CollectionConfigBatchRemediationRequest,
@@ -48,6 +50,7 @@ from backend.services.collection_contracts import (
     DEFAULT_GRANULARITY_DATE_RANGE_TYPE,
     TIME_PRESET_TO_GRANULARITY,
     build_date_range_from_time_selection,
+    build_time_window_preview,
     build_legacy_collection_date_fields,
     build_default_sub_domains,
     derive_granularity_from_time_selection,
@@ -130,7 +133,19 @@ def _build_batch_remediation_name(
 
 
 def _build_config_response(config: CollectionConfig) -> CollectionConfigResponse:
-    return CollectionConfigResponse.model_validate(config)
+    response = CollectionConfigResponse.model_validate(config)
+    if response.time_selection:
+        try:
+            response.time_window_preview = build_time_window_preview(
+                response.time_selection.model_dump(exclude_none=True)
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to build collection time window preview for config %s: %s",
+                getattr(config, "id", None),
+                exc,
+            )
+    return response
 
 
 def _normalize_template_scope_rows(
@@ -1508,6 +1523,62 @@ async def bulk_advance_current_granularity(
     await db.commit()
     return CollectionConfigBulkAdvanceResponse(
         affected_config_ids=affected_config_ids,
+        skipped_config_ids=skipped_config_ids,
+    )
+
+
+@router.post("/configs/run-current-granularity", response_model=CollectionConfigBulkRunResponse)
+async def bulk_run_current_granularity(
+    payload: CollectionConfigBulkRunRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    from backend.domains.collection.routers.collection_tasks import (
+        _build_config_run_response_payload,
+    )
+    from backend.services.collection_config_run_service import CollectionConfigRunService
+
+    stmt = (
+        select(CollectionConfig)
+        .where(
+            CollectionConfig.granularity == payload.granularity,
+            CollectionConfig.is_active == True,
+        )
+        .order_by(
+            CollectionConfig.platform,
+            CollectionConfig.main_account_id,
+            desc(CollectionConfig.updated_at),
+            desc(CollectionConfig.id),
+        )
+    )
+    if payload.platform:
+        stmt = stmt.where(CollectionConfig.platform == payload.platform)
+    if payload.main_account_ids:
+        stmt = stmt.where(CollectionConfig.main_account_id.in_(payload.main_account_ids))
+
+    configs = list((await db.execute(stmt)).scalars().all())
+    selected: Dict[tuple[str, str, str], CollectionConfig] = {}
+    for config in configs:
+        key = (
+            str(config.platform or ""),
+            str(config.main_account_id or ""),
+            str(config.granularity or ""),
+        )
+        selected.setdefault(key, config)
+
+    run_service = CollectionConfigRunService(db)
+    runs = []
+    skipped_config_ids: List[int] = []
+    for config in selected.values():
+        run, created = await run_service.enqueue_config_run(config, trigger_type="manual")
+        if created:
+            runs.append(_build_config_run_response_payload(run))
+        else:
+            skipped_config_ids.append(config.id)
+
+    return CollectionConfigBulkRunResponse(
+        created_run_count=len(runs),
+        skipped_config_count=len(skipped_config_ids),
+        runs=runs,
         skipped_config_ids=skipped_config_ids,
     )
 

@@ -91,6 +91,14 @@
           全部主账号推进到下一周
         </el-button>
         <el-button
+          size="small"
+          type="success"
+          :disabled="!mainAccountCards.length"
+          @click="bulkRunCurrentGranularity"
+        >
+          {{ bulkRunCurrentGranularityLabel }}
+        </el-button>
+        <el-button
           v-if="activeGranularity === 'monthly'"
           size="small"
           type="primary"
@@ -267,6 +275,13 @@
             <div class="current-config-summary">
               <span>店铺数 {{ currentConfigSummary.shop_scopes?.length || 0 }}</span>
               <span>例外店铺 {{ currentConfigSummary.override_count || 0 }}</span>
+            </div>
+            <div v-if="currentConfigSummary.time_window_preview" class="shop-scope-meta">
+              {{ currentConfigSummary.time_window_preview.time_window_label || getDateRangeLabel(currentConfigSummary.date_range_type) }}：
+              {{ formatConfigDateRange(currentConfigSummary) }}
+              <span v-if="currentConfigSummary.time_window_preview.available_after_time">
+                （{{ currentConfigSummary.time_window_preview.available_after_time }} 后采最近可用数据）
+              </span>
             </div>
             <div v-if="blockingTasks.length" class="shop-scope-meta warning-text">
               当前主账号有 {{ blockingTasks.length }} 条活动任务占用，配置执行会跳过这些店铺。
@@ -563,6 +578,7 @@ import collectionApi from '@/api/collection'
 import {
   buildAutoSelectedSubDomains,
   buildTimeSelectionPayload,
+  getDefaultDynamicDateRangeType,
   getAvailableDomainOptions,
   getSelectedSubtypeDomains,
   getSubtypeOptions,
@@ -615,7 +631,7 @@ const form = reactive({
   name: '',
   platform: '',
   main_account_id: '',
-  default_date_range_type: 'yesterday',
+  default_date_range_type: getDefaultDynamicDateRangeType('daily'),
   execution_mode: 'headless',
   schedule_enabled: false,
   schedule_cron: '',
@@ -624,11 +640,16 @@ const form = reactive({
 
 const temporaryRunForm = reactive({
   scope_mode: 'selected',
-  date_range_type: 'custom',
+  date_range_type: getDefaultDynamicDateRangeType('daily'),
   execution_mode: 'headless',
 })
 
 const activeGranularityLabel = computed(() => getGranularityLabel(activeGranularity.value))
+const bulkRunCurrentGranularityLabel = computed(() => {
+  if (activeGranularity.value === 'monthly') return '执行当前月采集'
+  if (activeGranularity.value === 'weekly') return '执行当前周采集'
+  return '执行昨日日采集'
+})
 const platformOptions = computed(() => {
   const options = new Map()
   for (const account of flatAccounts.value || []) {
@@ -800,6 +821,7 @@ const dialogMainAccountOptions = computed(() => buildMainAccountOptions(dialogAc
 const currentGranularityDateOptions = computed(() => {
   if (activeGranularity.value === 'daily') {
     return [
+      { label: '昨天（06:00 后采最近可用数据）', value: 'dynamic:previous_day' },
       { label: '昨天', value: 'yesterday' },
       { label: '今天', value: 'today' },
       { label: '按日自定义', value: 'custom' },
@@ -807,11 +829,13 @@ const currentGranularityDateOptions = computed(() => {
   }
   if (activeGranularity.value === 'weekly') {
     return [
+      { label: '本周累计到最近可采集日', value: 'dynamic:current_week_to_available_day' },
       { label: '最近7天', value: 'last_7_days' },
       { label: '按周自定义', value: 'custom' },
     ]
   }
   return [
+    { label: '本月累计到最近可采集日', value: 'dynamic:current_month_to_available_day' },
     { label: '最近30天', value: 'last_30_days' },
     { label: '按月自定义', value: 'custom' },
   ]
@@ -1011,6 +1035,10 @@ function formatDateTime(value) {
 
 function formatConfigDateRange(config) {
   if (!config) return '-'
+  const preview = config.time_window_preview || {}
+  if (preview.start_date && preview.end_date) {
+    return `${preview.start_date} ~ ${preview.end_date}`
+  }
   if (config.custom_date_start && config.custom_date_end) {
     return `${config.custom_date_start} ~ ${config.custom_date_end}`
   }
@@ -1170,7 +1198,7 @@ function resetCurrentConfigForm() {
     name: '',
     platform: selectedMainAccountCard.value?.platform || filters.platform || '',
     main_account_id: selectedMainAccountCard.value?.main_account_id || '',
-    default_date_range_type: activeGranularity.value === 'daily' ? 'yesterday' : 'custom',
+    default_date_range_type: getDefaultDynamicDateRangeType(activeGranularity.value),
     execution_mode: 'headless',
     schedule_enabled: false,
     schedule_cron: '',
@@ -1228,7 +1256,7 @@ function openCurrentConfigDialog() {
     name: currentConfigSummary.value?.name || '',
     platform: selectedMainAccountCard.value.platform,
     main_account_id: selectedMainAccountCard.value.main_account_id,
-    default_date_range_type: currentConfigSummary.value?.date_range_type || (activeGranularity.value === 'daily' ? 'yesterday' : 'custom'),
+    default_date_range_type: currentConfigSummary.value?.date_range_type || getDefaultDynamicDateRangeType(activeGranularity.value),
     execution_mode: currentConfigSummary.value?.execution_mode || selectedTemplate.value?.default_execution_mode || 'headless',
     schedule_enabled: Boolean(granularitySchedule.value?.enabled),
     schedule_cron: granularitySchedule.value?.cron || '',
@@ -1569,7 +1597,7 @@ async function runConfig(row) {
 function openTemporaryRunDialog() {
   if (!currentConfigSummary.value) return
   temporaryRunForm.scope_mode = selectedShopScopeIds.value.length ? 'selected' : 'enabled'
-  temporaryRunForm.date_range_type = currentConfigSummary.value.date_range_type || (activeGranularity.value === 'daily' ? 'yesterday' : 'custom')
+  temporaryRunForm.date_range_type = currentConfigSummary.value.date_range_type || getDefaultDynamicDateRangeType(activeGranularity.value)
   temporaryRunForm.execution_mode = currentConfigSummary.value.execution_mode || 'headless'
   temporaryRunCustomDateRange.value =
     currentConfigSummary.value.custom_date_start && currentConfigSummary.value.custom_date_end
@@ -1631,6 +1659,32 @@ async function bulkAdvanceCurrentGranularity() {
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error(`批量推进失败: ${error.message}`)
+    }
+  }
+}
+
+async function bulkRunCurrentGranularity() {
+  try {
+    const total = mainAccountCards.value.filter((card) => card.isConfigured).length
+    await ElMessageBox.confirm(
+      `确认将${activeGranularityLabel.value}下的 ${total} 个主账号加入采集队列吗？`,
+      '批量执行确认'
+    )
+    const result = await collectionApi.bulkRunCurrentGranularity({
+      granularity: activeGranularity.value,
+      platform: filters.platform || undefined,
+    })
+    await Promise.all([loadConfigRuns(), loadCollectionHealth()])
+    const created = result.created_run_count || 0
+    const skipped = result.skipped_config_count || 0
+    if (created) {
+      ElMessage.success(`已加入执行队列 ${created} 个配置${skipped ? `，跳过 ${skipped} 个已有运行` : ''}`)
+    } else {
+      ElMessage.warning(`没有新的配置入队${skipped ? `，${skipped} 个配置已有运行` : ''}`)
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(`批量执行失败: ${error.message}`)
     }
   }
 }

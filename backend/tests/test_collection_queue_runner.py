@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -217,6 +218,42 @@ async def test_process_run_executes_expanded_tasks_sequentially(queue_runner_ses
 
     assert execution_order == ["task-1", "task-2"]
     assert finalized == [11]
+
+
+@pytest.mark.asyncio
+async def test_expand_run_tasks_uses_scheduled_for_as_time_window_now(
+    queue_runner_session_factory,
+    monkeypatch,
+):
+    from backend.services.collection_queue_runner import CollectionQueueRunner
+
+    config = await _seed_config(queue_runner_session_factory)
+    scheduled_for = datetime(2026, 7, 5, 5, 59, tzinfo=timezone.utc)
+    captured = {}
+
+    async def _fake_create_tasks_for_config(_session, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        "backend.services.collection_config_execution.create_tasks_for_config",
+        _fake_create_tasks_for_config,
+    )
+
+    runner = CollectionQueueRunner(
+        session_factory=queue_runner_session_factory,
+        poll_interval_seconds=0.01,
+    )
+    run = SimpleNamespace(
+        id=31,
+        config_id=config.id,
+        trigger_type="scheduled",
+        scheduled_for=scheduled_for,
+    )
+
+    await runner._expand_run_tasks(run)
+
+    assert captured["time_window_now"] == scheduled_for
 
 
 @pytest.mark.asyncio
