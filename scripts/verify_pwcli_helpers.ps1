@@ -11,6 +11,7 @@ $requiredHelpers = @(
     "Save-PwcliShopeeState",
     "Save-PwcliTiktokState",
     "Show-PwcliPaths",
+    "Start-PwcliDailyInspection",
     "pwsnap",
     "pwnote",
     "pwshot",
@@ -28,6 +29,10 @@ $requiredScripts = @(
     "scripts/pw-cap.ps1",
     "scripts/pwcli_helpers.ps1",
     "scripts/pwcli_native.py",
+    "scripts/pwcli_account_inventory.py",
+    "scripts/pwcli_daily_inspection.py",
+    "scripts/pwcli_inspection_panel.py",
+    "scripts/pwcli_inspection_panel_static/index.html",
     "scripts/pwcli_workflow.py"
 )
 

@@ -37,6 +37,27 @@
 
 ## 推荐操作方式
 
+### 0. 本地网页巡店面板（推荐）
+
+日常人工巡店优先使用本地网页巡店面板，减少复制命令、手写 `AccountId` 和 `WorkTag` 的重复操作。
+
+```powershell
+python scripts\pwcli_inspection_panel.py
+```
+
+面板会自动打开 `http://127.0.0.1:<port>/?token=<一次性token>`，只允许本机访问。点击账号卡片里的“打开巡店”后，在浏览器里人工巡店、关闭弹窗、处理验证；确认页面稳定后，回到面板勾选保存前检查项并点击“保存会话”。
+
+巡店面板只负责打开账号会话、等待人工确认后保存。它不会自动点击页面、关闭弹窗或处理验证码。在页面停留于登录页、验证页、报错页或明显异常页时，请选择“跳过/清除状态”。
+
+如果网页面板不可用，可使用 CLI 菜单兜底:
+
+```powershell
+. .\scripts\pwcli_helpers.ps1
+Start-PwcliDailyInspection
+```
+
+手动复制命令仍保留为兜底方式，见 `docs/generated/PWCLI_ACCOUNT_COMMANDS.md`。
+
 ### 1. 打开主账号会话
 
 Shopee:

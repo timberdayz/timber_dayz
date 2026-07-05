@@ -2,7 +2,7 @@
 
 > 自动生成文件，请勿手工修改。
 > 刷新命令: `python scripts/generate_pwcli_account_commands.py`
-> 生成时间: `2026-05-30 05:16:23 UTC`
+> 生成时间: `2026-07-05 12:27:06 UTC`
 > 数据来源: `postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp` 中的 `core.main_accounts where enabled = true`
 
 本文档提供给业务同事直接复制使用。
@@ -12,6 +12,25 @@
 ```powershell
 . .\scripts\pwcli_helpers.ps1
 ```
+
+## 推荐日常方式
+
+日常人工巡店优先使用本地网页巡店面板，减少复制命令和手写账号参数:
+
+```powershell
+python scripts\pwcli_inspection_panel.py
+```
+
+网页面板只监听本机 `127.0.0.1`，通过按钮打开账号会话，并在人工确认后保存。
+
+如果网页面板不可用，可使用 CLI 菜单兜底:
+
+```powershell
+. .\scripts\pwcli_helpers.ps1
+Start-PwcliDailyInspection
+```
+
+这些工具只负责打开账号会话和等待人工确认保存，不会自动点击页面、关闭弹窗或处理验证码。
 
 规则:
 
@@ -54,15 +73,15 @@ Show-PwcliPaths -Platform miaoshou -AccountId '<main-account-id>' -WorkTag <fixe
 
 ## 账号总表
 
-| 平台   | 显示名                               | AccountId                   | WorkTag                                    |
-| ------ | ------------------------------------ | --------------------------- | ------------------------------------------ |
-| 妙手   | xihong                               | `miaoshou_real_001`         | `miaoshou-miaoshou-real-001-inspect`       |
-| Shopee | playwright_smoke_admin               | `accept_main_1775126941575` | `shopee-accept-main-1775126941575-inspect` |
-| Shopee | shopee新加坡3C店                     | `chenewei666:main`          | `shopee-chenewei666-main-inspect`          |
-| Shopee | hongxikeji:main                      | `hongxikeji:main`           | `shopee-hongxikeji-main-inspect`           |
-| Shopee | Leslieshop:main                      | `shopee KR`                 | `shopee-shopee-kr-inspect`                 |
-| TikTok | Tiktok 1店 (chenzewei666666@163.com) | `Tiktok 1店`                | `tiktok-tiktok-1-inspect`                  |
-| TikTok | Tiktok 2店                           | `chenzeweinbnb@163.com`     | `tiktok-chenzeweinbnb-163-com-inspect`     |
+| 平台 | 显示名 | AccountId | WorkTag |
+| --- | --- | --- | --- |
+| 妙手 | xihong | `miaoshou_real_001` | `miaoshou-miaoshou-real-001-inspect` |
+| Shopee | playwright_smoke_admin | `accept_main_1775126941575` | `shopee-accept-main-1775126941575-inspect` |
+| Shopee | shopee新加坡3C店 | `chenewei666:main` | `shopee-chenewei666-main-inspect` |
+| Shopee | hongxikeji:main | `hongxikeji:main` | `shopee-hongxikeji-main-inspect` |
+| Shopee | Leslieshop:main | `shopee KR` | `shopee-shopee-kr-inspect` |
+| TikTok | Tiktok 1店 (chenzewei666666@163.com) | `Tiktok 1店` | `tiktok-tiktok-1-inspect` |
+| TikTok | Tiktok 2店 | `chenzeweinbnb@163.com` | `tiktok-chenzeweinbnb-163-com-inspect` |
 
 ## 妙手
 
