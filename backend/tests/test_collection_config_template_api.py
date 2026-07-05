@@ -204,6 +204,37 @@ async def test_create_template_and_batch_returns_grouped_workbench_shape(
 
 
 @pytest.mark.asyncio
+async def test_create_template_compacts_dynamic_default_date_range_type(
+    collection_template_client,
+    collection_template_session,
+):
+    await _seed_template_accounts(collection_template_session)
+
+    template_response = await collection_template_client.post(
+        "/api/collection/config-templates",
+        json={
+            "platform": "shopee",
+            "main_account_id": "main-shopee",
+            "granularity": "monthly",
+            "default_date_range_type": "dynamic:current_month_to_available_day",
+            "default_execution_mode": "headless",
+            "default_shop_scopes": [
+                {
+                    "shop_account_id": "shop-my-1",
+                    "data_domains": ["products"],
+                    "enabled": True,
+                }
+            ],
+        },
+    )
+
+    assert template_response.status_code == 200
+    payload = template_response.json()
+    assert payload["default_date_range_type"] == "auto_month_to_date"
+    assert len(payload["default_date_range_type"]) <= 32
+
+
+@pytest.mark.asyncio
 async def test_clone_next_batch_advances_month_and_keeps_overrides(
     collection_template_client,
     collection_template_session,

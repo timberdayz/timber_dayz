@@ -22,6 +22,8 @@ from backend.schemas.collection import (
     CollectionAccountGroupResponse,
     CollectionAccountResponse,
     CollectionConfigBatchCreate,
+    CollectionConfigBulkApplyTimeSelectionRequest,
+    CollectionConfigBulkApplyTimeSelectionResponse,
     CollectionConfigFutureBatchCreateRequest,
     CollectionConfigFutureBatchCreateResponse,
     CollectionConfigBulkAdvanceRequest,
@@ -426,6 +428,72 @@ def _legacy_batch_key_for_config(config: CollectionConfig) -> str:
         return _next_batch_key(granularity=config.granularity, start_value=config.custom_date_start)
     base = f"{config.granularity}-{config.id}"
     return base[:32]
+
+
+def _select_current_config_records(configs: List[CollectionConfig]) -> List[CollectionConfig]:
+    grouped: Dict[tuple[str, str, str], List[CollectionConfig]] = {}
+    for config in configs:
+        key = (
+            str(config.platform or ""),
+            str(config.main_account_id or ""),
+            str(config.granularity or ""),
+        )
+        grouped.setdefault(key, []).append(config)
+
+    selected: List[CollectionConfig] = []
+    for bucket in grouped.values():
+        bucket.sort(
+            key=lambda item: (
+                0 if str(getattr(item, "batch_status", "") or "").lower() == "active" else 1,
+                -(getattr(item, "updated_at", None).timestamp() if getattr(item, "updated_at", None) else 0),
+                -(getattr(item, "id", 0) or 0),
+            )
+        )
+        selected.append(bucket[0])
+
+    return sorted(
+        selected,
+        key=lambda item: (
+            str(item.platform or ""),
+            str(item.main_account_id or ""),
+            str(item.granularity or ""),
+            getattr(item, "id", 0) or 0,
+        ),
+    )
+
+
+def _apply_time_selection_to_config(
+    config: CollectionConfig,
+    *,
+    time_selection: dict,
+    granularity: str,
+    time_window_preview: dict,
+) -> None:
+    legacy_fields = build_legacy_collection_date_fields(time_selection)
+    config.granularity = granularity
+    config.date_range_type = legacy_fields["date_range_type"]
+    config.custom_date_start = legacy_fields["custom_date_start"]
+    config.custom_date_end = legacy_fields["custom_date_end"]
+    if time_window_preview.get("start_date"):
+        config.batch_key = _next_batch_key(
+            granularity=granularity,
+            start_value=_parse_date(time_window_preview["start_date"]),
+        )
+    if getattr(config, "batch_status", None) != "disabled":
+        config.batch_status = "active"
+    config.updated_at = datetime.now(timezone.utc)
+
+
+def _compact_default_date_range_type(value: str) -> str:
+    normalized_value = str(value or "").strip()
+    if normalized_value != "custom":
+        try:
+            time_selection = normalize_time_selection(date_range_type=normalized_value)
+            if time_selection:
+                return build_legacy_collection_date_fields(time_selection)["date_range_type"]
+        except ValueError:
+            pass
+    return normalized_value
 
 
 
@@ -1228,7 +1296,7 @@ async def create_config_template(
         platform=payload.platform,
         main_account_id=payload.main_account_id,
         granularity=payload.granularity,
-        default_date_range_type=payload.default_date_range_type,
+        default_date_range_type=_compact_default_date_range_type(payload.default_date_range_type),
         default_execution_mode=payload.default_execution_mode,
         default_schedule_enabled=payload.default_schedule_enabled,
         default_schedule_cron=payload.default_schedule_cron,
@@ -1270,6 +1338,8 @@ async def update_config_template(
             valid_domains=get_supported_config_data_domains(template.platform),
         )
     for key, value in update_dict.items():
+        if key == "default_date_range_type":
+            value = _compact_default_date_range_type(value)
         setattr(template, key, value)
     template.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -1527,6 +1597,76 @@ async def bulk_advance_current_granularity(
     )
 
 
+@router.post(
+    "/configs/apply-time-selection-current-granularity",
+    response_model=CollectionConfigBulkApplyTimeSelectionResponse,
+)
+async def apply_time_selection_current_granularity(
+    payload: CollectionConfigBulkApplyTimeSelectionRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    time_selection = normalize_time_selection(
+        time_selection=payload.time_selection.model_dump(exclude_none=True)
+    )
+    resolved_granularity = derive_granularity_from_time_selection(
+        time_selection,
+        payload.granularity,
+    )
+    if resolved_granularity != payload.granularity:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "time selection granularity does not match request granularity: "
+                f"{resolved_granularity} != {payload.granularity}"
+            ),
+        )
+
+    time_window_preview = build_time_window_preview(time_selection)
+    stmt = (
+        select(CollectionConfig)
+        .where(
+            CollectionConfig.granularity == payload.granularity,
+            CollectionConfig.is_active == True,
+        )
+        .order_by(
+            CollectionConfig.platform,
+            CollectionConfig.main_account_id,
+            desc(CollectionConfig.updated_at),
+            desc(CollectionConfig.id),
+        )
+    )
+    if payload.platform:
+        stmt = stmt.where(CollectionConfig.platform == payload.platform)
+    if payload.main_account_ids:
+        stmt = stmt.where(CollectionConfig.main_account_id.in_(payload.main_account_ids))
+
+    configs = _select_current_config_records(list((await db.execute(stmt)).scalars().all()))
+    updated_config_ids: List[int] = []
+    skipped_config_ids: List[int] = []
+
+    for config in configs:
+        try:
+            _apply_time_selection_to_config(
+                config,
+                time_selection=time_selection,
+                granularity=payload.granularity,
+                time_window_preview=time_window_preview,
+            )
+            updated_config_ids.append(config.id)
+        except Exception as exc:
+            logger.warning("Failed to apply time selection to config %s: %s", config.id, exc)
+            skipped_config_ids.append(config.id)
+
+    await db.commit()
+    return CollectionConfigBulkApplyTimeSelectionResponse(
+        updated_config_count=len(updated_config_ids),
+        skipped_config_count=len(skipped_config_ids),
+        updated_config_ids=updated_config_ids,
+        skipped_config_ids=skipped_config_ids,
+        time_window_preview=time_window_preview,
+    )
+
+
 @router.post("/configs/run-current-granularity", response_model=CollectionConfigBulkRunResponse)
 async def bulk_run_current_granularity(
     payload: CollectionConfigBulkRunRequest,
@@ -1555,20 +1695,12 @@ async def bulk_run_current_granularity(
     if payload.main_account_ids:
         stmt = stmt.where(CollectionConfig.main_account_id.in_(payload.main_account_ids))
 
-    configs = list((await db.execute(stmt)).scalars().all())
-    selected: Dict[tuple[str, str, str], CollectionConfig] = {}
-    for config in configs:
-        key = (
-            str(config.platform or ""),
-            str(config.main_account_id or ""),
-            str(config.granularity or ""),
-        )
-        selected.setdefault(key, config)
+    configs = _select_current_config_records(list((await db.execute(stmt)).scalars().all()))
 
     run_service = CollectionConfigRunService(db)
     runs = []
     skipped_config_ids: List[int] = []
-    for config in selected.values():
+    for config in configs:
         run, created = await run_service.enqueue_config_run(config, trigger_type="manual")
         if created:
             runs.append(_build_config_run_response_payload(run))

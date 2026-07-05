@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
+  buildDynamicTimeWindowPreview,
   buildTimeSelectionPayload,
   getAvailableDomainOptions,
   resolveAccountIdsForConfigRun,
@@ -55,6 +56,45 @@ test('buildTimeSelectionPayload emits custom runtime contract', () => {
       end_date: '2026-03-31',
       start_time: '00:00:00',
       end_time: '23:59:59',
+    }
+  )
+})
+
+test('buildTimeSelectionPayload accepts compact dynamic date range codes', () => {
+  assert.deepEqual(
+    buildTimeSelectionPayload('auto_month_to_date'),
+    {
+      mode: 'dynamic',
+      strategy: 'current_month_to_available_day',
+      available_after_time: '06:00',
+    }
+  )
+})
+
+test('buildDynamicTimeWindowPreview uses Asia Hong Kong 06:00 cutoff', () => {
+  assert.deepEqual(
+    buildDynamicTimeWindowPreview(
+      'auto_month_to_date',
+      new Date('2026-07-04T21:59:00.000Z')
+    ),
+    {
+      start_date: '2026-07-01',
+      end_date: '2026-07-03',
+      available_after_time: '06:00',
+      time_window_label: '本月累计到最近可采集日',
+    }
+  )
+
+  assert.deepEqual(
+    buildDynamicTimeWindowPreview(
+      'auto_month_to_date',
+      new Date('2026-07-04T22:00:00.000Z')
+    ),
+    {
+      start_date: '2026-07-01',
+      end_date: '2026-07-04',
+      available_after_time: '06:00',
+      time_window_label: '本月累计到最近可采集日',
     }
   )
 })
@@ -138,7 +178,7 @@ test('CollectionConfig hands execution off to CollectionTasks after creating tas
   )
 
   assert.equal(
-    viewSource.includes('collectionApi.runConfig(row.id)'),
+    viewSource.includes('collectionApi.runConfig(row.id,'),
     true,
     'config page should invoke the config-run endpoint directly'
   )

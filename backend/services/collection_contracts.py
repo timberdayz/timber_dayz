@@ -5,6 +5,8 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 from backend.services import component_name_utils
 from backend.services.collection_time_window import (
+    DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY,
+    DYNAMIC_STRATEGY_TO_DATE_RANGE_TYPE,
     DYNAMIC_STRATEGY_TO_GRANULARITY,
     build_dynamic_time_selection,
     derive_granularity_from_dynamic_time_selection,
@@ -32,9 +34,9 @@ DEFAULT_CONFIG_DATA_DOMAINS: List[str] = [
 ]
 
 DEFAULT_GRANULARITY_DATE_RANGE_TYPE: Dict[str, str] = {
-    "daily": "dynamic:previous_day",
-    "weekly": "dynamic:current_week_to_available_day",
-    "monthly": "dynamic:current_month_to_available_day",
+    "daily": "auto_prev_day",
+    "weekly": "auto_week_to_date",
+    "monthly": "auto_month_to_date",
 }
 
 
@@ -117,11 +119,25 @@ def normalize_time_selection(
     if raw_mode == "dynamic":
         return normalize_dynamic_time_selection(raw)
 
-    if isinstance(date_range_type, str) and date_range_type.startswith("dynamic:"):
+    normalized_date_range_type = (
+        str(date_range_type or "").strip().lower()
+        if isinstance(date_range_type, str)
+        else ""
+    )
+    if normalized_date_range_type in DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY:
         return normalize_dynamic_time_selection(
             {
                 "mode": "dynamic",
-                "strategy": date_range_type.split(":", 1)[1],
+                "strategy": DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY[normalized_date_range_type],
+                "available_after_time": raw.get("available_after_time"),
+            }
+        )
+
+    if normalized_date_range_type.startswith("dynamic:"):
+        return normalize_dynamic_time_selection(
+            {
+                "mode": "dynamic",
+                "strategy": normalized_date_range_type.split(":", 1)[1],
                 "available_after_time": raw.get("available_after_time"),
             }
         )
@@ -250,7 +266,7 @@ def build_legacy_collection_date_fields(
     normalized = normalize_time_selection(time_selection=time_selection)
     if normalized["mode"] == "dynamic":
         return {
-            "date_range_type": f"dynamic:{normalized['strategy']}",
+            "date_range_type": DYNAMIC_STRATEGY_TO_DATE_RANGE_TYPE[normalized["strategy"]],
             "custom_date_start": None,
             "custom_date_end": None,
         }

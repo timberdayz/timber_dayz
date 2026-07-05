@@ -38,6 +38,18 @@ export const getAvailableDomainOptions = (platform = '') => {
   return DEFAULT_DOMAIN_OPTIONS
 }
 
+export const DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY = {
+  auto_prev_day: 'previous_day',
+  auto_week_to_date: 'current_week_to_available_day',
+  auto_month_to_date: 'current_month_to_available_day'
+}
+
+export const DYNAMIC_STRATEGY_TO_UI_DATE_RANGE_TYPE = {
+  previous_day: 'dynamic:previous_day',
+  current_week_to_available_day: 'dynamic:current_week_to_available_day',
+  current_month_to_available_day: 'dynamic:current_month_to_available_day'
+}
+
 export const normalizeConfigGranularity = (config = {}) => {
   const explicit = String(config.granularity || '').toLowerCase()
   if (explicit === 'daily' || explicit === 'weekly' || explicit === 'monthly') {
@@ -48,6 +60,9 @@ export const normalizeConfigGranularity = (config = {}) => {
   if (preset === 'dynamic:previous_day') return 'daily'
   if (preset === 'dynamic:current_week_to_available_day') return 'weekly'
   if (preset === 'dynamic:current_month_to_available_day') return 'monthly'
+  if (preset === 'auto_prev_day') return 'daily'
+  if (preset === 'auto_week_to_date') return 'weekly'
+  if (preset === 'auto_month_to_date') return 'monthly'
   if (preset === 'today' || preset === 'yesterday') return 'daily'
   if (preset === 'last_7_days') return 'weekly'
   if (preset === 'last_30_days') return 'monthly'
@@ -77,6 +92,9 @@ export const getDatePresetLabel = (preset, platform = '') => {
   if (preset === 'dynamic:previous_day') return '昨天'
   if (preset === 'dynamic:current_week_to_available_day') return '本周累计到最近可采集日'
   if (preset === 'dynamic:current_month_to_available_day') return '本月累计到最近可采集日'
+  if (preset === 'auto_prev_day') return '昨天'
+  if (preset === 'auto_week_to_date') return '本周累计到最近可采集日'
+  if (preset === 'auto_month_to_date') return '本月累计到最近可采集日'
   if (preset === 'last_7_days') return '最近7天'
   if (preset === 'last_30_days') {
     return String(platform).toLowerCase() === 'tiktok' ? '最近28天' : '最近30天'
@@ -92,7 +110,81 @@ export const getDefaultDynamicDateRangeType = (granularity) => {
 
 export const getDynamicStrategyFromDateRangeType = (value) => {
   const normalized = String(value || '').toLowerCase()
+  if (DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY[normalized]) {
+    return DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY[normalized]
+  }
   return normalized.startsWith('dynamic:') ? normalized.split(':')[1] : ''
+}
+
+export const getUiDateRangeTypeFromTimeSelection = (timeSelection = {}, fallback = '') => {
+  if (String(timeSelection?.mode || '').toLowerCase() === 'dynamic') {
+    return DYNAMIC_STRATEGY_TO_UI_DATE_RANGE_TYPE[String(timeSelection.strategy || '').toLowerCase()] || fallback
+  }
+  return fallback
+}
+
+const DYNAMIC_PREVIEW_TIME_ZONE = 'Asia/Hong_Kong'
+
+const padDatePart = (value) => String(value).padStart(2, '0')
+
+const formatUtcDate = (value) =>
+  `${value.getUTCFullYear()}-${padDatePart(value.getUTCMonth() + 1)}-${padDatePart(value.getUTCDate())}`
+
+const addDays = (value, days) => {
+  const next = new Date(value)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next
+}
+
+const getZonedDateParts = (value) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DYNAMIC_PREVIEW_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(value)
+
+  return Object.fromEntries(
+    parts
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)])
+  )
+}
+
+export const buildDynamicTimeWindowPreview = (preset, now = new Date()) => {
+  const strategy = getDynamicStrategyFromDateRangeType(preset)
+  if (!strategy) return null
+
+  const current = now instanceof Date ? new Date(now) : new Date(now)
+  if (Number.isNaN(current.getTime())) return null
+  const currentParts = getZonedDateParts(current)
+
+  const cutoffHour = 6
+  const cutoffMinute = 0
+  const afterCutoff =
+    currentParts.hour > cutoffHour
+    || (currentParts.hour === cutoffHour && currentParts.minute >= cutoffMinute)
+  const currentDate = new Date(Date.UTC(currentParts.year, currentParts.month - 1, currentParts.day))
+  const availableDay = addDays(currentDate, afterCutoff ? -1 : -2)
+
+  let start = new Date(availableDay)
+  if (strategy === 'current_week_to_available_day') {
+    const day = start.getUTCDay()
+    const offsetToMonday = day === 0 ? -6 : 1 - day
+    start = addDays(start, offsetToMonday)
+  } else if (strategy === 'current_month_to_available_day') {
+    start = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))
+  }
+
+  return {
+    start_date: formatUtcDate(start),
+    end_date: formatUtcDate(availableDay),
+    available_after_time: '06:00',
+    time_window_label: getDatePresetLabel(preset)
+  }
 }
 
 export const buildDateRangeFromPreset = (

@@ -7,7 +7,7 @@
     <div class="page-header">
       <div>
         <h2>采集配置管理</h2>
-        <p class="page-subtitle">按主账号维护当前配置，统一推进周期时间，并直接在店铺工作区完成例外管理。</p>
+        <p class="page-subtitle">按主账号维护当前配置，统一设置采集时间，并直接在店铺工作区完成例外管理。</p>
       </div>
       <div class="header-actions">
         <el-button @click="backfillLegacyTemplates">回填旧配置</el-button>
@@ -82,30 +82,29 @@
           </div>
         </div>
         <el-button
-          v-if="activeGranularity === 'weekly'"
           size="small"
           type="primary"
-          :disabled="!mainAccountCards.length"
-          @click="bulkAdvanceCurrentGranularity"
+          plain
+          :disabled="!configuredMainAccountCount"
+          @click="openBulkCustomTimeSelectionDialog"
         >
-          全部主账号推进到下一周
+          {{ bulkCustomTimeSelectionLabel }}
+        </el-button>
+        <el-button
+          size="small"
+          type="primary"
+          :disabled="!configuredMainAccountCount"
+          @click="applyCurrentGranularityToAvailableDay"
+        >
+          全部到最近可采集日
         </el-button>
         <el-button
           size="small"
           type="success"
-          :disabled="!mainAccountCards.length"
+          :disabled="!configuredMainAccountCount"
           @click="bulkRunCurrentGranularity"
         >
           {{ bulkRunCurrentGranularityLabel }}
-        </el-button>
-        <el-button
-          v-if="activeGranularity === 'monthly'"
-          size="small"
-          type="primary"
-          :disabled="!mainAccountCards.length"
-          @click="bulkAdvanceCurrentGranularity"
-        >
-          全部主账号推进到下一月
         </el-button>
       </div>
 
@@ -220,6 +219,7 @@
               <div class="account-summary">
                 <span>{{ account.shop_count }} 店</span>
                 <span>{{ account.executionLabel }}</span>
+                <span>{{ account.dateRangeLabel }}</span>
               </div>
               <div class="account-summary">
                 <el-tag size="small" :type="account.scheduleEnabled ? 'success' : 'info'">{{ account.scheduleEnabled ? '已定时' : '未定时' }}</el-tag>
@@ -238,8 +238,8 @@
               <el-button size="small" type="primary" :disabled="!selectedMainAccountCard" @click="openCurrentConfigDialog">
                 {{ currentConfigSummary ? '编辑配置' : '快速创建配置' }}
               </el-button>
-              <el-button size="small" :disabled="!currentConfigSummary" @click="advanceCurrentConfig">
-                推进到下一周期
+              <el-button size="small" :disabled="!currentConfigSummary" @click="setCurrentConfigToAvailableDay">
+                设为最近可采集日
               </el-button>
             </div>
           </div>
@@ -492,6 +492,17 @@
                 value-format="YYYY-MM-DD"
               />
             </el-form-item>
+            <el-form-item v-else-if="formDynamicTimeWindowPreview" label="预计日期范围">
+              <div class="readonly-date-window">
+                <el-input
+                  :model-value="`${formDynamicTimeWindowPreview.start_date} ~ ${formDynamicTimeWindowPreview.end_date}`"
+                  readonly
+                />
+                <div class="field-tip">
+                  {{ formDynamicTimeWindowPreview.time_window_label }}，{{ formDynamicTimeWindowPreview.available_after_time }} 后采昨天
+                </div>
+              </div>
+            </el-form-item>
             <el-form-item label="执行模式">
               <el-radio-group v-model="form.execution_mode">
                 <el-radio-button label="headless">无头模式</el-radio-button>
@@ -511,6 +522,40 @@
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" data-testid="collection-config-save-button" :loading="submitting" @click="submitCurrentConfigForm">
           {{ isEdit ? '保存配置' : '创建配置' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="bulkCustomTimeSelectionVisible"
+      :title="bulkCustomTimeSelectionLabel"
+      width="560px"
+      destroy-on-close
+    >
+      <el-form label-width="110px">
+        <el-form-item :label="`${activeGranularityLabel}日期`">
+          <el-date-picker
+            v-model="bulkCustomDateRange"
+            type="daterange"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+          />
+        </el-form-item>
+        <el-alert
+          :title="`将更新当前筛选范围内 ${configuredMainAccountCount} 个已配置主账号，不会创建采集任务。`"
+          type="info"
+          :closable="false"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="bulkCustomTimeSelectionVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="bulkTimeSelectionSubmitting"
+          @click="submitBulkCustomTimeSelection"
+        >
+          保存批量设置
         </el-button>
       </template>
     </el-dialog>
@@ -576,9 +621,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument, Edit, MagicStick, Plus, Refresh } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
 import {
+  buildDynamicTimeWindowPreview,
   buildAutoSelectedSubDomains,
   buildTimeSelectionPayload,
   getDefaultDynamicDateRangeType,
+  getUiDateRangeTypeFromTimeSelection,
   getAvailableDomainOptions,
   getSelectedSubtypeDomains,
   getSubtypeOptions,
@@ -593,8 +640,10 @@ const coverageLoading = ref(false)
 const configRunsLoading = ref(false)
 const dialogVisible = ref(false)
 const temporaryRunVisible = ref(false)
+const bulkCustomTimeSelectionVisible = ref(false)
 const submitting = ref(false)
 const temporaryRunSubmitting = ref(false)
+const bulkTimeSelectionSubmitting = ref(false)
 const isEdit = ref(false)
 const formRef = ref(null)
 const shopTableRef = ref(null)
@@ -608,6 +657,7 @@ const onlyExceptionShops = ref(false)
 const showOnlyAttentionAccounts = ref(false)
 const customDateRange = ref([])
 const temporaryRunCustomDateRange = ref([])
+const bulkCustomDateRange = ref([])
 const selectedShopScopeIds = ref([])
 
 const templatesData = ref([])
@@ -645,10 +695,18 @@ const temporaryRunForm = reactive({
 })
 
 const activeGranularityLabel = computed(() => getGranularityLabel(activeGranularity.value))
+const configuredMainAccountCount = computed(() =>
+  mainAccountCards.value.filter((card) => card.isConfigured).length
+)
+const bulkCustomTimeSelectionLabel = computed(() => {
+  if (activeGranularity.value === 'monthly') return '全部按月自定义'
+  if (activeGranularity.value === 'weekly') return '全部按周自定义'
+  return '全部按日自定义'
+})
 const bulkRunCurrentGranularityLabel = computed(() => {
-  if (activeGranularity.value === 'monthly') return '执行当前月采集'
+  if (activeGranularity.value === 'monthly') return '执行当月采集'
   if (activeGranularity.value === 'weekly') return '执行当前周采集'
-  return '执行昨日日采集'
+  return '执行最近可采集日采集'
 })
 const platformOptions = computed(() => {
   const options = new Map()
@@ -676,8 +734,12 @@ const currentGranularityScheduleDescription = computed(() => {
   if (granularitySchedule.value?.description) return granularitySchedule.value.description
   if (activeGranularity.value === 'daily') return '每天 07:00 自动采集昨天'
   if (activeGranularity.value === 'weekly') return '每周一 09:00 自动采集上周'
-  return '每月 1 日 09:00 自动采集上月'
+  return '每天 09:00 自动采集当月累计到最近可采集日'
 })
+
+const formDynamicTimeWindowPreview = computed(() =>
+  buildDynamicTimeWindowPreview(form.default_date_range_type)
+)
 
 const activeConfigRuns = computed(() => (configRuns.value || []).filter((run) => run.status === 'running'))
 const queuedConfigRuns = computed(() => (configRuns.value || []).filter((run) => run.status === 'queued'))
@@ -720,16 +782,26 @@ const mainAccountCards = computed(() => {
   return Array.from(cardMap.values())
     .map((card) => {
       const currentTemplate = (card.templates || []).find((item) => normalizeConfigGranularity({ granularity: item.granularity }) === activeGranularity.value) || null
+      const currentBatches = [...(currentTemplate?.batches || [])].filter((item) =>
+        normalizeConfigGranularity({
+          granularity: item.granularity,
+          date_range_type: item.date_range_type,
+        }) === activeGranularity.value
+      )
+      currentBatches.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
+      const currentBatch = currentBatches.find((item) => item.status === 'active') || currentBatches[0] || null
       const hasScopeDrift = Boolean(currentTemplate?.missing_shop_scope_ids?.length || currentTemplate?.stale_shop_scope_ids?.length)
       const isConfigured = Boolean(currentTemplate)
       return {
         ...card,
         currentTemplate,
+        currentBatch,
         isConfigured,
         hasScopeDrift,
         scheduleEnabled: Boolean(currentTemplate?.default_schedule_enabled),
         scheduleLabel: currentTemplate?.default_schedule_enabled ? '已定时' : '未定时',
         executionLabel: currentTemplate ? getExecutionModeLabel(currentTemplate.default_execution_mode) : '未配置',
+        dateRangeLabel: currentBatch ? formatConfigDateRange(currentBatch) : '未配置',
       }
     })
     .filter((card) => {
@@ -929,6 +1001,12 @@ function getGranularityLabel(granularity) {
 
 function getDateRangeLabel(value) {
   const labels = {
+    'dynamic:previous_day': '昨天',
+    'dynamic:current_week_to_available_day': '本周累计到最近可采集日',
+    'dynamic:current_month_to_available_day': '本月累计到最近可采集日',
+    auto_prev_day: '昨天',
+    auto_week_to_date: '本周累计到最近可采集日',
+    auto_month_to_date: '本月累计到最近可采集日',
     today: '今天',
     yesterday: '昨天',
     last_7_days: '最近7天',
@@ -936,6 +1014,14 @@ function getDateRangeLabel(value) {
     custom: activeGranularityLabel.value.replace('采集', '') + '自定义',
   }
   return labels[value] || value
+}
+
+function resolveConfigDateRangeTypeForForm(config) {
+  if (!config) return getDefaultDynamicDateRangeType(activeGranularity.value)
+  return getUiDateRangeTypeFromTimeSelection(
+    config.time_selection,
+    config.date_range_type || getDefaultDynamicDateRangeType(activeGranularity.value)
+  )
 }
 
 function getExecutionModeLabel(mode) {
@@ -1256,7 +1342,7 @@ function openCurrentConfigDialog() {
     name: currentConfigSummary.value?.name || '',
     platform: selectedMainAccountCard.value.platform,
     main_account_id: selectedMainAccountCard.value.main_account_id,
-    default_date_range_type: currentConfigSummary.value?.date_range_type || getDefaultDynamicDateRangeType(activeGranularity.value),
+    default_date_range_type: resolveConfigDateRangeTypeForForm(currentConfigSummary.value),
     execution_mode: currentConfigSummary.value?.execution_mode || selectedTemplate.value?.default_execution_mode || 'headless',
     schedule_enabled: Boolean(granularitySchedule.value?.enabled),
     schedule_cron: granularitySchedule.value?.cron || '',
@@ -1352,14 +1438,18 @@ async function saveCurrentConfigFromWorkbench() {
   }
 }
 
-async function advanceCurrentConfig() {
+async function setCurrentConfigToAvailableDay() {
   if (!currentConfigSummary.value) return
+  const dateRangeType = getDefaultDynamicDateRangeType(activeGranularity.value)
   try {
-    await collectionApi.advanceCurrentConfig(currentConfigSummary.value.id)
-    ElMessage.success('当前配置时间范围已推进到下一周期')
+    await collectionApi.updateConfig(currentConfigSummary.value.id, {
+      date_range_type: dateRangeType,
+      time_selection: buildTimeSelectionPayload(dateRangeType),
+    })
+    ElMessage.success('当前配置已设置为最近可采集日')
     await reloadPageData()
   } catch (error) {
-    ElMessage.error(`推进失败: ${error.message}`)
+    ElMessage.error(`设置失败: ${error.message}`)
   }
 }
 
@@ -1597,7 +1687,7 @@ async function runConfig(row) {
 function openTemporaryRunDialog() {
   if (!currentConfigSummary.value) return
   temporaryRunForm.scope_mode = selectedShopScopeIds.value.length ? 'selected' : 'enabled'
-  temporaryRunForm.date_range_type = currentConfigSummary.value.date_range_type || getDefaultDynamicDateRangeType(activeGranularity.value)
+  temporaryRunForm.date_range_type = resolveConfigDateRangeTypeForForm(currentConfigSummary.value)
   temporaryRunForm.execution_mode = currentConfigSummary.value.execution_mode || 'headless'
   temporaryRunCustomDateRange.value =
     currentConfigSummary.value.custom_date_start && currentConfigSummary.value.custom_date_end
@@ -1646,28 +1736,69 @@ async function submitTemporaryRun() {
   }
 }
 
-async function bulkAdvanceCurrentGranularity() {
+function openBulkCustomTimeSelectionDialog() {
+  bulkCustomDateRange.value = []
+  bulkCustomTimeSelectionVisible.value = true
+}
+
+async function applyTimeSelectionCurrentGranularity(timeSelection, messagePrefix = '已更新') {
+  const result = await collectionApi.applyTimeSelectionCurrentGranularity({
+    granularity: activeGranularity.value,
+    platform: filters.platform || undefined,
+    time_selection: timeSelection,
+  })
+  await reloadPageData()
+  const updated = result.updated_config_count || 0
+  const skipped = result.skipped_config_count || 0
+  ElMessage.success(`${messagePrefix} ${updated} 条当前配置${skipped ? `，跳过 ${skipped} 条` : ''}`)
+  return result
+}
+
+async function applyCurrentGranularityToAvailableDay() {
   try {
-    const label = activeGranularity.value === 'weekly' ? '下一周' : '下一月'
-    await ElMessageBox.confirm(`确认将当前粒度下的主账号统一推进到${label}吗？`, '批量推进确认')
-    const result = await collectionApi.bulkAdvanceCurrentGranularity({
-      granularity: activeGranularity.value,
-      platform: filters.platform || undefined,
-    })
-    ElMessage.success(`已推进 ${result.affected_config_ids?.length || 0} 条当前配置`)
-    await reloadPageData()
+    const dateRangeType = getDefaultDynamicDateRangeType(activeGranularity.value)
+    const preview = buildDynamicTimeWindowPreview(dateRangeType)
+    const previewText = preview ? `本次预计窗口：${preview.start_date} ~ ${preview.end_date}` : '执行前会自动计算本次日期窗口'
+    await ElMessageBox.confirm(
+      `确认将${activeGranularityLabel.value}下的 ${configuredMainAccountCount.value} 个已配置主账号全部设置为“${getDateRangeLabel(dateRangeType)}”吗？${previewText}`,
+      '批量设置确认'
+    )
+    await applyTimeSelectionCurrentGranularity(
+      buildTimeSelectionPayload(dateRangeType),
+      '已设置为最近可采集日'
+    )
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error(`批量推进失败: ${error.message}`)
+      ElMessage.error(`批量设置失败: ${error.message}`)
     }
+  }
+}
+
+async function submitBulkCustomTimeSelection() {
+  if (!Array.isArray(bulkCustomDateRange.value) || bulkCustomDateRange.value.length !== 2) {
+    ElMessage.warning('请选择自定义起止日期')
+    return
+  }
+  bulkTimeSelectionSubmitting.value = true
+  try {
+    await applyTimeSelectionCurrentGranularity(
+      buildTimeSelectionPayload('custom', {
+        customRange: bulkCustomDateRange.value,
+      }),
+      '已保存自定义日期'
+    )
+    bulkCustomTimeSelectionVisible.value = false
+  } catch (error) {
+    ElMessage.error(`批量保存自定义日期失败: ${error.message}`)
+  } finally {
+    bulkTimeSelectionSubmitting.value = false
   }
 }
 
 async function bulkRunCurrentGranularity() {
   try {
-    const total = mainAccountCards.value.filter((card) => card.isConfigured).length
     await ElMessageBox.confirm(
-      `确认将${activeGranularityLabel.value}下的 ${total} 个主账号加入采集队列吗？`,
+      `确认将${activeGranularityLabel.value}下的 ${configuredMainAccountCount.value} 个主账号加入采集队列吗？`,
       '批量执行确认'
     )
     const result = await collectionApi.bulkRunCurrentGranularity({
@@ -2004,6 +2135,17 @@ onMounted(() => {
 
 .full-width-select {
   width: 100%;
+}
+
+.readonly-date-window {
+  width: 100%;
+}
+
+.field-tip {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .editor-layout {

@@ -1,9 +1,11 @@
 from backend.services.collection_contracts import (
+    DEFAULT_GRANULARITY_DATE_RANGE_TYPE,
     build_legacy_collection_date_fields,
     count_collection_targets,
     iter_domain_targets,
     normalize_collection_date_range,
     normalize_domain_subtypes,
+    normalize_time_selection,
 )
 
 
@@ -104,4 +106,33 @@ def test_build_legacy_collection_date_fields_for_preset():
         "date_range_type": "yesterday",
         "custom_date_start": None,
         "custom_date_end": None,
+    }
+
+
+def test_build_legacy_collection_date_fields_for_dynamic_uses_compact_code():
+    legacy = build_legacy_collection_date_fields(
+        {"mode": "dynamic", "strategy": "current_month_to_available_day"}
+    )
+
+    assert legacy == {
+        "date_range_type": "auto_month_to_date",
+        "custom_date_start": None,
+        "custom_date_end": None,
+    }
+    assert len(legacy["date_range_type"]) <= 20
+    assert DEFAULT_GRANULARITY_DATE_RANGE_TYPE["monthly"] == "auto_month_to_date"
+
+
+def test_normalize_time_selection_accepts_compact_and_legacy_dynamic_codes():
+    assert normalize_time_selection(date_range_type="auto_prev_day") == {
+        "mode": "dynamic",
+        "strategy": "previous_day",
+        "available_after_time": "06:00",
+    }
+    assert normalize_time_selection(
+        date_range_type="dynamic:current_week_to_available_day"
+    ) == {
+        "mode": "dynamic",
+        "strategy": "current_week_to_available_day",
+        "available_after_time": "06:00",
     }

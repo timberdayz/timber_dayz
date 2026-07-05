@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from backend.services.collection_time_window import DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY
+
 
 class TimeSelectionPayload(BaseModel):
     """????????"""
@@ -166,10 +168,18 @@ class CollectionConfigResponse(BaseModel):
     @model_validator(mode="after")
     def hydrate_time_selection(self):
         if self.time_selection is None:
-            if str(self.date_range_type or "").startswith("dynamic:"):
+            normalized_date_range_type = str(self.date_range_type or "").strip().lower()
+            if normalized_date_range_type in DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY:
                 payload = {
                     "mode": "dynamic",
-                    "strategy": str(self.date_range_type).split(":", 1)[1],
+                    "strategy": DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY[normalized_date_range_type],
+                }
+                self.time_selection = TimeSelectionPayload.model_validate(payload)
+                return self
+            if normalized_date_range_type.startswith("dynamic:"):
+                payload = {
+                    "mode": "dynamic",
+                    "strategy": normalized_date_range_type.split(":", 1)[1],
                 }
                 self.time_selection = TimeSelectionPayload.model_validate(payload)
                 return self
@@ -247,6 +257,21 @@ class CollectionConfigBulkAdvanceRequest(BaseModel):
 class CollectionConfigBulkAdvanceResponse(BaseModel):
     affected_config_ids: List[int] = Field(default_factory=list)
     skipped_config_ids: List[int] = Field(default_factory=list)
+
+
+class CollectionConfigBulkApplyTimeSelectionRequest(BaseModel):
+    granularity: Literal["daily", "weekly", "monthly"]
+    platform: Optional[str] = None
+    main_account_ids: List[str] = Field(default_factory=list)
+    time_selection: TimeSelectionPayload
+
+
+class CollectionConfigBulkApplyTimeSelectionResponse(BaseModel):
+    updated_config_count: int = 0
+    skipped_config_count: int = 0
+    updated_config_ids: List[int] = Field(default_factory=list)
+    skipped_config_ids: List[int] = Field(default_factory=list)
+    time_window_preview: Optional[Dict[str, Any]] = None
 
 
 class CollectionConfigBulkRunRequest(BaseModel):

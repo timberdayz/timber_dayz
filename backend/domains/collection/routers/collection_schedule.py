@@ -54,8 +54,8 @@ GRANULARITY_SCHEDULE_PRESETS = {
         "description": "每周一 09:00 自动采集上周",
     },
     "monthly": {
-        "cron": "0 9 1 * *",
-        "description": "每月 1 日 09:00 自动采集上月",
+        "cron": "0 9 * * *",
+        "description": "每天 09:00 自动采集当月累计到最近可采集日",
     },
 }
 

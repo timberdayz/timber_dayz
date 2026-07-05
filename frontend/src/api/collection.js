@@ -80,6 +80,11 @@ export const bulkAdvanceCurrentGranularity = async (payload) => {
   return response
 }
 
+export const applyTimeSelectionCurrentGranularity = async (payload) => {
+  const response = await api.post('/collection/configs/apply-time-selection-current-granularity', payload)
+  return response
+}
+
 export const bulkRunCurrentGranularity = async (payload) => {
   const response = await api.post('/collection/configs/run-current-granularity', payload)
   return response
@@ -521,6 +526,7 @@ export default {
   createFutureConfigBatches,
   advanceCurrentConfig,
   bulkAdvanceCurrentGranularity,
+  applyTimeSelectionCurrentGranularity,
   bulkRunCurrentGranularity,
   backfillLegacyConfigTemplates,
   createConfig,

@@ -20,6 +20,16 @@ DEFAULT_DYNAMIC_TIME_SELECTION_BY_GRANULARITY = {
     "monthly": "current_month_to_available_day",
 }
 
+DYNAMIC_STRATEGY_TO_DATE_RANGE_TYPE = {
+    "previous_day": "auto_prev_day",
+    "current_week_to_available_day": "auto_week_to_date",
+    "current_month_to_available_day": "auto_month_to_date",
+}
+
+DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY = {
+    value: key for key, value in DYNAMIC_STRATEGY_TO_DATE_RANGE_TYPE.items()
+}
+
 DYNAMIC_TIME_SELECTION_LABELS = {
     "previous_day": "昨天",
     "current_week_to_available_day": "本周累计到最近可采集日",

@@ -233,6 +233,209 @@ async def test_create_config_with_dynamic_time_selection_returns_preview(
 
 
 @pytest.mark.asyncio
+async def test_update_config_with_dynamic_time_selection_persists_compact_date_range_type(
+    schedule_sync_client,
+    schedule_sync_session,
+    auth_headers,
+):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    create_response = await client.post(
+        "/api/collection/configs",
+        headers=auth_headers,
+        json={
+            "name": "shopee-dynamic-save-v1",
+            "platform": "shopee",
+            "main_account_id": "main-shopee",
+            "shop_scopes": [
+                {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
+                {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
+            ],
+            "granularity": "monthly",
+            "time_selection": {"mode": "preset", "preset": "last_30_days"},
+            "schedule_enabled": False,
+            "retry_count": 3,
+        },
+    )
+    config_id = create_response.json()["id"]
+
+    update_response = await client.put(
+        f"/api/collection/configs/{config_id}",
+        headers=auth_headers,
+        json={
+            "time_selection": {
+                "mode": "dynamic",
+                "strategy": "current_month_to_available_day",
+            },
+        },
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.json()
+    assert payload["date_range_type"] == "auto_month_to_date"
+    assert payload["time_selection"]["mode"] == "dynamic"
+    assert payload["time_selection"]["strategy"] == "current_month_to_available_day"
+    assert payload["time_window_preview"]["start_date"]
+
+    stored = await schedule_sync_session.get(CollectionConfig, config_id)
+    assert stored.date_range_type == "auto_month_to_date"
+    assert len(stored.date_range_type) <= 20
+
+
+@pytest.mark.asyncio
+async def test_apply_time_selection_current_granularity_updates_dynamic_current_configs(
+    schedule_sync_client,
+    schedule_sync_session,
+    auth_headers,
+):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    extra_main = MainAccount(
+        platform="shopee",
+        main_account_id="main-shopee-2",
+        main_account_name="Shopee Main 2",
+        username="shopee-main-2",
+        password_encrypted="enc",
+        enabled=True,
+    )
+    extra_shop = ShopAccount(
+        platform="shopee",
+        shop_account_id="shop-extra-1",
+        main_account_id="main-shopee-2",
+        store_name="Shop Extra 1",
+        platform_shop_id="platform-extra-1",
+        shop_region="SG",
+        shop_type="local",
+        enabled=True,
+    )
+    schedule_sync_session.add_all([extra_main, extra_shop])
+    await schedule_sync_session.flush()
+    schedule_sync_session.add(
+        ShopAccountCapability(shop_account_id=extra_shop.id, data_domain="orders", enabled=True)
+    )
+    await schedule_sync_session.commit()
+
+    configs = [
+        (
+            "monthly-apply-a",
+            "main-shopee",
+            [
+                {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
+                {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
+            ],
+        ),
+        (
+            "monthly-apply-b",
+            "main-shopee-2",
+            [{"shop_account_id": "shop-extra-1", "data_domains": ["orders"]}],
+        ),
+    ]
+    created_ids = []
+    for name, main_account_id, shop_scopes in configs:
+        response = await client.post(
+            "/api/collection/configs",
+            headers=auth_headers,
+            json={
+                "name": name,
+                "platform": "shopee",
+                "main_account_id": main_account_id,
+                "shop_scopes": shop_scopes,
+                "granularity": "monthly",
+                "time_selection": {"mode": "preset", "preset": "last_30_days"},
+                "schedule_enabled": False,
+                "retry_count": 3,
+            },
+        )
+        assert response.status_code == 200
+        created_ids.append(response.json()["id"])
+
+    response = await client.post(
+        "/api/collection/configs/apply-time-selection-current-granularity",
+        headers=auth_headers,
+        json={
+            "granularity": "monthly",
+            "platform": "shopee",
+            "time_selection": {
+                "mode": "dynamic",
+                "strategy": "current_month_to_available_day",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updated_config_count"] == 2
+    assert payload["skipped_config_count"] == 0
+    assert sorted(payload["updated_config_ids"]) == sorted(created_ids)
+    assert payload["time_window_preview"]["time_selection"]["strategy"] == "current_month_to_available_day"
+
+    for config_id in created_ids:
+        stored = await schedule_sync_session.get(CollectionConfig, config_id)
+        assert stored.date_range_type == "auto_month_to_date"
+        assert stored.custom_date_start is None
+        assert stored.custom_date_end is None
+
+
+@pytest.mark.asyncio
+async def test_apply_time_selection_current_granularity_updates_custom_range(
+    schedule_sync_client,
+    schedule_sync_session,
+    auth_headers,
+):
+    client, _ = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    create_response = await client.post(
+        "/api/collection/configs",
+        headers=auth_headers,
+        json={
+            "name": "monthly-apply-custom",
+            "platform": "shopee",
+            "main_account_id": "main-shopee",
+            "shop_scopes": [
+                {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
+                {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
+            ],
+            "granularity": "monthly",
+            "time_selection": {
+                "mode": "dynamic",
+                "strategy": "current_month_to_available_day",
+            },
+            "schedule_enabled": False,
+            "retry_count": 3,
+        },
+    )
+    config_id = create_response.json()["id"]
+
+    response = await client.post(
+        "/api/collection/configs/apply-time-selection-current-granularity",
+        headers=auth_headers,
+        json={
+            "granularity": "monthly",
+            "platform": "shopee",
+            "time_selection": {
+                "mode": "custom",
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-28",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updated_config_ids"] == [config_id]
+    assert payload["time_window_preview"]["start_date"] == "2026-06-01"
+    assert payload["time_window_preview"]["end_date"] == "2026-06-28"
+
+    stored = await schedule_sync_session.get(CollectionConfig, config_id)
+    assert stored.date_range_type == "custom"
+    assert stored.custom_date_start.isoformat() == "2026-06-01"
+    assert stored.custom_date_end.isoformat() == "2026-06-28"
+
+
+@pytest.mark.asyncio
 async def test_bulk_run_current_granularity_enqueues_current_configs(
     schedule_sync_client,
     schedule_sync_session,
@@ -406,6 +609,51 @@ async def test_update_granularity_schedule_enables_all_matching_configs_with_pre
     assert payload["cron"] == "0 7 * * *"
     assert payload["affected_config_count"] == 1
     assert len(fake_scheduler.add_calls) >= 1
+
+
+@pytest.mark.asyncio
+async def test_monthly_granularity_schedule_defaults_to_daily_9am(
+    schedule_sync_client,
+    schedule_sync_session,
+    auth_headers,
+):
+    client, fake_scheduler = schedule_sync_client
+    await _seed_shopee_accounts(schedule_sync_session)
+
+    response = await client.post(
+        "/api/collection/configs",
+        headers=auth_headers,
+        json={
+            "name": "monthly-daily-schedule",
+            "platform": "shopee",
+            "main_account_id": "main-shopee",
+            "shop_scopes": [
+                {"shop_account_id": "shop-sg-1", "data_domains": ["orders"]},
+                {"shop_account_id": "shop-my-1", "data_domains": ["products"]},
+            ],
+            "granularity": "monthly",
+            "time_selection": {
+                "mode": "dynamic",
+                "strategy": "current_month_to_available_day",
+            },
+            "schedule_enabled": False,
+            "retry_count": 3,
+        },
+    )
+    assert response.status_code == 200
+    config_id = response.json()["id"]
+
+    update_response = await client.post(
+        "/api/collection/schedule/granularity/monthly",
+        headers=auth_headers,
+        json={"schedule_enabled": True},
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.json()
+    assert payload["cron"] == "0 9 * * *"
+    assert payload["description"] == "每天 09:00 自动采集当月累计到最近可采集日"
+    assert fake_scheduler.add_calls[-1] == (config_id, "0 9 * * *")
 
 
 @pytest.mark.asyncio
