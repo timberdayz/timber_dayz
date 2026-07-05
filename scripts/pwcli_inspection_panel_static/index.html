@@ -97,11 +97,6 @@
       background: var(--accent-2);
     }
 
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.48;
-    }
-
     .notice {
       background: var(--warn);
       border: 1px solid #e8d5a8;
@@ -179,25 +174,6 @@
       flex-wrap: wrap;
     }
 
-    .confirm {
-      margin: 18px 0;
-      padding: 14px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 9px;
-    }
-
-    .confirm label {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      color: var(--muted);
-      font-size: 14px;
-    }
-
     .log {
       margin-top: 18px;
       border-top: 1px solid var(--line);
@@ -244,14 +220,7 @@
     </section>
 
     <section class="notice">
-      保存前必须确认下面四项。页面停留在登录页、验证码页、报错页或异常页时，请点击“跳过/清除状态”。
-    </section>
-
-    <section class="confirm" aria-label="保存前确认项">
-      <label><input class="save-check" type="checkbox"> 当前不是登录页</label>
-      <label><input class="save-check" type="checkbox"> 当前不是验证码页</label>
-      <label><input class="save-check" type="checkbox"> 当前不是报错页</label>
-      <label><input class="save-check" type="checkbox"> 页面已稳定进入后台或正常业务页面</label>
+      是否保存由人工判断。请只在你确认页面状态值得保留时点击“保存会话”；如果停留在登录页、验证码页、报错页或异常页，请点击“跳过/清除状态”。
     </section>
 
     <section id="accountGrid" class="grid" aria-live="polite"></section>
@@ -268,10 +237,6 @@
     const accountGrid = document.querySelector('#accountGrid');
     const countLabel = document.querySelector('#countLabel');
     const log = document.querySelector('#log');
-
-    function saveChecksPassed() {
-      return [...document.querySelectorAll('.save-check')].every((item) => item.checked);
-    }
 
     function addLog(message) {
       const row = document.createElement('div');
@@ -331,7 +296,6 @@
         codeNodes[0].textContent = account.account_id;
         codeNodes[1].textContent = account.work_tag;
         card.querySelector('.open').addEventListener('click', () => runAction('open', account));
-        card.querySelector('.save').disabled = !saveChecksPassed();
         card.querySelector('.save').addEventListener('click', () => runAction('save', account));
         card.querySelector('.skip').addEventListener('click', () => runAction('skip', account));
         accountGrid.appendChild(card);
@@ -345,10 +309,6 @@
     }
 
     async function runAction(action, account) {
-      if (action === 'save' && !saveChecksPassed()) {
-        addLog('保存前确认项未全部勾选');
-        return;
-      }
       try {
         const result = await api(`/api/accounts/${action}`, {
           method: 'POST',
@@ -366,7 +326,6 @@
     document.querySelector('#refreshButton').addEventListener('click', loadAccounts);
     platformFilter.addEventListener('change', render);
     searchInput.addEventListener('input', render);
-    document.querySelectorAll('.save-check').forEach((item) => item.addEventListener('change', render));
     loadAccounts().catch((error) => addLog(error.message));
   </script>
 </body>

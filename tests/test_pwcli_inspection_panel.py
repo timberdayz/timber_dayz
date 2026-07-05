@@ -179,7 +179,7 @@ def test_find_available_port_skips_occupied_port():
     assert selected == occupied + 1
 
 
-def test_static_panel_page_contains_controls_and_save_confirmations():
+def test_static_panel_page_keeps_save_user_decided_without_blocking_confirmations():
     html = Path("scripts/pwcli_inspection_panel_static/index.html").read_text(encoding="utf-8")
 
     for text in [
@@ -189,12 +189,14 @@ def test_static_panel_page_contains_controls_and_save_confirmations():
         "打开巡店",
         "保存会话",
         "跳过/清除状态",
-        "当前不是登录页",
-        "当前不是验证码页",
-        "当前不是报错页",
-        "页面已稳定进入后台或正常业务页面",
+        "是否保存由人工判断",
     ]:
         assert text in html
+
+    assert "save-check" not in html
+    assert "saveChecksPassed" not in html
+    assert "保存前确认项未全部勾选" not in html
+    assert "card.querySelector('.save').disabled" not in html
 
 
 def test_favicon_route_does_not_log_as_not_found():
