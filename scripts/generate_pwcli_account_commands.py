@@ -8,102 +8,26 @@ Usage:
 from __future__ import annotations
 
 import os
-import re
-from dataclasses import dataclass
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import sqlalchemy as sa
-
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.pwcli_account_inventory import (
+    PLATFORM_HELPERS,
+    MainAccountRow,
+    database_url,
+    display_name,
+    load_accounts,
+    quote_ps,
+    work_tag,
+)
+
+
 OUTPUT_PATH = PROJECT_ROOT / "docs" / "generated" / "PWCLI_ACCOUNT_COMMANDS.md"
-DEFAULT_DATABASE_URL = "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
-
-
-@dataclass(frozen=True)
-class MainAccountRow:
-    platform: str
-    main_account_id: str
-    main_account_name: str
-    username: str
-
-
-PLATFORM_HELPERS = {
-    "miaoshou": {
-        "open": "Open-PwcliMiaoshou",
-        "save": "Save-PwcliMiaoshouState",
-        "show": "Show-PwcliPaths -Platform miaoshou",
-        "title": "\u5999\u624b",
-    },
-    "shopee": {
-        "open": "Open-PwcliShopee",
-        "save": "Save-PwcliShopeeState",
-        "show": "Show-PwcliPaths -Platform shopee",
-        "title": "Shopee",
-    },
-    "tiktok": {
-        "open": "Open-PwcliTiktok",
-        "save": "Save-PwcliTiktokState",
-        "show": "Show-PwcliPaths -Platform tiktok",
-        "title": "TikTok",
-    },
-}
-
-
-def database_url() -> str:
-    return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL).strip()
-
-
-def slugify(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip().lower())
-    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
-    return cleaned or "account"
-
-
-def work_tag(platform: str, account_id: str) -> str:
-    return f"{slugify(platform)}-{slugify(account_id)}-inspect"
-
-
-def quote_ps(value: str) -> str:
-    return str(value or "").replace("'", "''")
-
-
-def display_name(row: MainAccountRow) -> str:
-    account_id = row.main_account_id.strip()
-    main_name = row.main_account_name.strip()
-    username = row.username.strip()
-    if main_name and main_name != account_id:
-        return main_name
-    if username and username != account_id:
-        return f"{account_id} ({username})"
-    return account_id
-
-
-def load_accounts() -> list[MainAccountRow]:
-    query = sa.text(
-        """
-        select
-            platform,
-            main_account_id,
-            coalesce(main_account_name, '') as main_account_name,
-            coalesce(username, '') as username
-        from core.main_accounts
-        where enabled = true
-        order by platform, main_account_id
-        """
-    )
-    engine = sa.create_engine(database_url())
-    with engine.connect() as conn:
-        return [
-            MainAccountRow(
-                platform=str(row.platform or "").strip().lower(),
-                main_account_id=str(row.main_account_id or "").strip(),
-                main_account_name=str(row.main_account_name or "").strip(),
-                username=str(row.username or "").strip(),
-            )
-            for row in conn.execute(query)
-        ]
 
 
 def render_account_block(row: MainAccountRow) -> str:
@@ -171,6 +95,25 @@ def render_document(rows: list[MainAccountRow]) -> str:
         "```powershell",
         ". .\\scripts\\pwcli_helpers.ps1",
         "```",
+        "",
+        "## 推荐日常方式",
+        "",
+        "日常人工巡店优先使用本地网页巡店面板，减少复制命令和手写账号参数:",
+        "",
+        "```powershell",
+        "python scripts\\pwcli_inspection_panel.py",
+        "```",
+        "",
+        "网页面板只监听本机 `127.0.0.1`，通过按钮打开账号会话，并在人工确认后保存。",
+        "",
+        "如果网页面板不可用，可使用 CLI 菜单兜底:",
+        "",
+        "```powershell",
+        ". .\\scripts\\pwcli_helpers.ps1",
+        "Start-PwcliDailyInspection",
+        "```",
+        "",
+        "这些工具只负责打开账号会话和等待人工确认保存，不会自动点击页面、关闭弹窗或处理验证码。",
         "",
         "\u89c4\u5219:",
         "",

@@ -392,3 +392,103 @@ function pwpack {
 
     python (Get-PwcliScriptPath "pwcli_workflow.py") pack --work-dir (Get-PwcliWorkDir -Platform $Platform -WorkTag $WorkTag) --platform $Platform --work-tag $WorkTag
 }
+
+function Get-PwcliDailyInspectionAccounts {
+    $script = Get-PwcliScriptPath "pwcli_daily_inspection.py"
+    $json = python $script "list-accounts" "--format" "json"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to load PWCLI inspection accounts. Check DATABASE_URL and account database availability."
+    }
+    if ([string]::IsNullOrWhiteSpace($json)) {
+        return @()
+    }
+    $accounts = $json | ConvertFrom-Json
+    if ($null -eq $accounts) {
+        return @()
+    }
+    if ($accounts -is [array]) {
+        return $accounts
+    }
+    return @($accounts)
+}
+
+function Start-PwcliDailyInspection {
+    $accounts = @(Get-PwcliDailyInspectionAccounts)
+    if (-not $accounts -or $accounts.Count -eq 0) {
+        Write-Output "No enabled PWCLI inspection accounts were found."
+        return
+    }
+
+    while ($true) {
+        Write-Output ""
+        Write-Output "PWCLI Daily Inspection Helper"
+        Write-Output ""
+        for ($i = 0; $i -lt $accounts.Count; $i++) {
+            $account = $accounts[$i]
+            $number = $i + 1
+            Write-Output ("{0}. {1} / {2} [{3}]" -f $number, $account.platform, $account.display_name, $account.account_id)
+        }
+        Write-Output ""
+
+        $choice = Read-Host "Select account number, or q to quit"
+        if ($choice -eq "q") {
+            return
+        }
+
+        $selectedIndex = 0
+        if (-not [int]::TryParse($choice, [ref]$selectedIndex)) {
+            Write-Warning "Invalid selection: $choice"
+            continue
+        }
+        if ($selectedIndex -lt 1 -or $selectedIndex -gt $accounts.Count) {
+            Write-Warning "Selection out of range: $choice"
+            continue
+        }
+
+        $account = $accounts[$selectedIndex - 1]
+        switch ($account.platform) {
+            "miaoshou" {
+                Open-PwcliMiaoshou -WorkTag $account.work_tag -AccountId $account.account_id
+            }
+            "shopee" {
+                Open-PwcliShopee -WorkTag $account.work_tag -AccountId $account.account_id
+            }
+            "tiktok" {
+                Open-PwcliTiktok -WorkTag $account.work_tag -AccountId $account.account_id
+            }
+            default {
+                Write-Warning "Unsupported platform: $($account.platform)"
+                continue
+            }
+        }
+
+        Write-Output ""
+        Write-Output "Browser opened. Complete manual inspection, close popups, and finish verification in the browser."
+        Write-Output "Before saving, make sure the page is not a login, captcha, error, or abnormal page."
+        $saveChoice = Read-Host "Press Enter to save, s to skip save, or q to quit"
+        if ($saveChoice -eq "q") {
+            return
+        }
+        if ($saveChoice -eq "s") {
+            Write-Output "Skipped state save."
+            continue
+        }
+
+        switch ($account.platform) {
+            "miaoshou" {
+                Save-PwcliMiaoshouState -AccountId $account.account_id
+            }
+            "shopee" {
+                Save-PwcliShopeeState -AccountId $account.account_id
+            }
+            "tiktok" {
+                Save-PwcliTiktokState -AccountId $account.account_id
+            }
+            default {
+                Write-Warning "Unsupported platform: $($account.platform)"
+                continue
+            }
+        }
+        Write-Output "State saved."
+    }
+}

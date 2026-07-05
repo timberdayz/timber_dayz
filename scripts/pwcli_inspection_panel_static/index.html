@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PWCLI 本地巡店面板</title>
+  <style>
+    :root {
+      --ink: #17211b;
+      --muted: #627267;
+      --line: #d9e2dc;
+      --paper: #fbfcf8;
+      --panel: #ffffff;
+      --accent: #176b5b;
+      --accent-2: #c83f31;
+      --soft: #eef5ef;
+      --warn: #fff2d7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #f4f8f1 0%, #fbfcf8 42%, #f6f4ed 100%);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 30px 0 42px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 18px;
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 18px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+      max-width: 760px;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 180px minmax(220px, 1fr) auto;
+      gap: 12px;
+      margin: 18px 0;
+      align-items: center;
+    }
+
+    select,
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    button {
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 10px 13px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+    }
+
+    button.secondary {
+      background: #fff;
+      border-color: var(--line);
+      color: var(--ink);
+    }
+
+    button.danger {
+      background: var(--accent-2);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.48;
+    }
+
+    .notice {
+      background: var(--warn);
+      border: 1px solid #e8d5a8;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 18px;
+      color: #5f4d1e;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 15px;
+      box-shadow: 0 8px 22px rgba(23, 33, 27, 0.06);
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .platform {
+      color: var(--accent);
+      font-weight: 800;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+
+    .name {
+      font-size: 18px;
+      font-weight: 800;
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+    }
+
+    .status {
+      background: var(--soft);
+      border-radius: 999px;
+      padding: 5px 9px;
+      height: 28px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .meta {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      margin: 12px 0 14px;
+    }
+
+    code {
+      color: var(--ink);
+      background: #f3f5f0;
+      padding: 2px 5px;
+      border-radius: 4px;
+      overflow-wrap: anywhere;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .confirm {
+      margin: 18px 0;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 9px;
+    }
+
+    .confirm label {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .log {
+      margin-top: 18px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      display: grid;
+      gap: 7px;
+    }
+
+    @media (max-width: 720px) {
+      main { width: min(100vw - 24px, 1180px); padding-top: 18px; }
+      header,
+      .toolbar { grid-template-columns: 1fr; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>PWCLI 本地巡店面板</h1>
+        <p class="subtitle">通过按钮打开账号会话，人工巡店后再确认保存。本页面只连接本机服务，不会自动点击页面、关闭弹窗或处理验证码。</p>
+      </div>
+      <button id="refreshButton" class="secondary">刷新账号</button>
+    </header>
+
+    <section class="toolbar" aria-label="账号筛选">
+      <label>
+        <span>平台筛选</span>
+        <select id="platformFilter">
+          <option value="">全部平台</option>
+          <option value="miaoshou">妙手</option>
+          <option value="shopee">Shopee</option>
+          <option value="tiktok">TikTok</option>
+        </select>
+      </label>
+      <label>
+        <span>搜索账号</span>
+        <input id="searchInput" type="search" placeholder="输入显示名、AccountId 或 WorkTag">
+      </label>
+      <span id="countLabel">0 个账号</span>
+    </section>
+
+    <section class="notice">
+      保存前必须确认下面四项。页面停留在登录页、验证码页、报错页或异常页时，请点击“跳过/清除状态”。
+    </section>
+
+    <section class="confirm" aria-label="保存前确认项">
+      <label><input class="save-check" type="checkbox"> 当前不是登录页</label>
+      <label><input class="save-check" type="checkbox"> 当前不是验证码页</label>
+      <label><input class="save-check" type="checkbox"> 当前不是报错页</label>
+      <label><input class="save-check" type="checkbox"> 页面已稳定进入后台或正常业务页面</label>
+    </section>
+
+    <section id="accountGrid" class="grid" aria-live="polite"></section>
+    <section id="log" class="log" aria-live="polite"></section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token') || '';
+    let accounts = [];
+
+    const platformFilter = document.querySelector('#platformFilter');
+    const searchInput = document.querySelector('#searchInput');
+    const accountGrid = document.querySelector('#accountGrid');
+    const countLabel = document.querySelector('#countLabel');
+    const log = document.querySelector('#log');
+
+    function saveChecksPassed() {
+      return [...document.querySelectorAll('.save-check')].every((item) => item.checked);
+    }
+
+    function addLog(message) {
+      const row = document.createElement('div');
+      row.textContent = `${new Date().toLocaleTimeString()} ${message}`;
+      log.prepend(row);
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(`${path}?token=${encodeURIComponent(token)}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || `请求失败: ${response.status}`);
+      }
+      return payload;
+    }
+
+    function filteredAccounts() {
+      const platform = platformFilter.value;
+      const term = searchInput.value.trim().toLowerCase();
+      return accounts.filter((account) => {
+        const platformMatch = !platform || account.platform === platform;
+        const text = `${account.platform} ${account.display_name} ${account.account_id} ${account.work_tag}`.toLowerCase();
+        return platformMatch && (!term || text.includes(term));
+      });
+    }
+
+    function render() {
+      const visible = filteredAccounts();
+      countLabel.textContent = `${visible.length} 个账号`;
+      accountGrid.innerHTML = '';
+      for (const account of visible) {
+        const card = document.createElement('article');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="card-head">
+            <div>
+              <div class="platform">${account.platform}</div>
+              <div class="name"></div>
+            </div>
+            <div class="status">${account.status}</div>
+          </div>
+          <div class="meta">
+            <div>AccountId <code></code></div>
+            <div>WorkTag <code></code></div>
+          </div>
+          <div class="actions">
+            <button class="open">打开巡店</button>
+            <button class="save danger">保存会话</button>
+            <button class="skip secondary">跳过/清除状态</button>
+          </div>
+        `;
+        card.querySelector('.name').textContent = account.display_name;
+        const codeNodes = card.querySelectorAll('code');
+        codeNodes[0].textContent = account.account_id;
+        codeNodes[1].textContent = account.work_tag;
+        card.querySelector('.open').addEventListener('click', () => runAction('open', account));
+        card.querySelector('.save').disabled = !saveChecksPassed();
+        card.querySelector('.save').addEventListener('click', () => runAction('save', account));
+        card.querySelector('.skip').addEventListener('click', () => runAction('skip', account));
+        accountGrid.appendChild(card);
+      }
+    }
+
+    async function loadAccounts() {
+      accounts = await api('/api/accounts');
+      render();
+      addLog('账号列表已刷新');
+    }
+
+    async function runAction(action, account) {
+      if (action === 'save' && !saveChecksPassed()) {
+        addLog('保存前确认项未全部勾选');
+        return;
+      }
+      try {
+        const result = await api(`/api/accounts/${action}`, {
+          method: 'POST',
+          body: JSON.stringify({ platform: account.platform, account_id: account.account_id }),
+        });
+        const index = accounts.findIndex((item) => item.platform === result.platform && item.account_id === result.account_id);
+        if (index >= 0) accounts[index] = result;
+        render();
+        addLog(`${account.display_name} ${action} -> ${result.status}`);
+      } catch (error) {
+        addLog(`${account.display_name} ${error.message}`);
+      }
+    }
+
+    document.querySelector('#refreshButton').addEventListener('click', loadAccounts);
+    platformFilter.addEventListener('change', render);
+    searchInput.addEventListener('input', render);
+    document.querySelectorAll('.save-check').forEach((item) => item.addEventListener('change', render));
+    loadAccounts().catch((error) => addLog(error.message));
+  </script>
+</body>
+</html>
