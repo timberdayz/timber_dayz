@@ -49,6 +49,7 @@ from modules.apps.collection_center.transition_gates import (
 )
 from modules.services.file_semantics import validate_file_semantics
 from backend.services.collection_contracts import (
+    build_execution_time_selection,
     count_collection_targets,
     normalize_collection_date_range,
     normalize_domain_subtypes,
@@ -342,16 +343,28 @@ def _build_runtime_task_params(
         "end_date": normalized_date_range.get("end_date"),
     }
 
-    time_selection = normalized_date_range.get("time_selection")
-    if time_selection:
-        params["time_selection"] = time_selection
-        params["params"]["time_selection"] = time_selection
-        if str(time_selection.get("mode") or "").strip().lower() == "custom":
+    source_time_selection = normalized_date_range.get("time_selection")
+    execution_time_selection = normalized_date_range.get("execution_time_selection")
+    if not execution_time_selection and source_time_selection:
+        execution_time_selection = build_execution_time_selection(
+            source_time_selection,
+            normalized_date_range,
+            granularity=granularity,
+        )
+
+    if source_time_selection:
+        params["source_time_selection"] = source_time_selection
+        params["params"]["source_time_selection"] = source_time_selection
+
+    if execution_time_selection:
+        params["time_selection"] = execution_time_selection
+        params["params"]["time_selection"] = execution_time_selection
+        if str(execution_time_selection.get("mode") or "").strip().lower() == "custom":
             params["custom_date_range"] = {
-                "start_date": time_selection.get("start_date"),
-                "end_date": time_selection.get("end_date"),
-                "start_time": time_selection.get("start_time", "00:00:00"),
-                "end_time": time_selection.get("end_time", "23:59:59"),
+                "start_date": execution_time_selection.get("start_date"),
+                "end_date": execution_time_selection.get("end_date"),
+                "start_time": execution_time_selection.get("start_time", "00:00:00"),
+                "end_time": execution_time_selection.get("end_time", "23:59:59"),
             }
 
     return params

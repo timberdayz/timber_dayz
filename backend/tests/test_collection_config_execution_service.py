@@ -214,6 +214,18 @@ async def test_create_tasks_for_config_resolves_dynamic_time_window(
         task.date_range["time_selection"]["strategy"] == "current_month_to_available_day"
         for task in tasks
     )
+    assert {task.date_range["execution_time_selection"]["mode"] for task in tasks} == {
+        "custom"
+    }
+    assert {task.date_range["execution_time_selection"]["granularity"] for task in tasks} == {
+        "monthly"
+    }
+    assert {task.date_range["execution_time_selection"]["start_date"] for task in tasks} == {
+        "2026-07-01"
+    }
+    assert {task.date_range["execution_time_selection"]["end_date"] for task in tasks} == {
+        "2026-07-04"
+    }
 
 
 @pytest.mark.asyncio

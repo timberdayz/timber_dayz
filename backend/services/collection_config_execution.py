@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.services.collection_contracts import (
     build_date_range_from_time_selection,
+    build_execution_time_selection,
     count_collection_targets,
     derive_granularity_from_time_selection,
     iter_domain_targets,
@@ -159,6 +160,11 @@ async def create_tasks_for_config(
     normalized_date_range["time_selection"] = time_selection
     effective_granularity = derive_granularity_from_time_selection(
         time_selection, config.granularity
+    )
+    normalized_date_range["execution_time_selection"] = build_execution_time_selection(
+        time_selection,
+        normalized_date_range,
+        granularity=effective_granularity,
     )
 
     created_tasks: List[CollectionTask] = []

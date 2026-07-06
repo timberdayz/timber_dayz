@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.services.task_center_service import TaskCenterService
@@ -181,9 +181,10 @@ async def test_collection_task_create_api_accepts_time_selection_payload(
             "platform": "shopee",
             "account_id": "acc-1",
             "data_domains": ["orders"],
+            "granularity": "monthly",
             "time_selection": {
-                "mode": "preset",
-                "preset": "yesterday",
+                "mode": "dynamic",
+                "strategy": "current_month_to_available_day",
             },
         },
     )
@@ -191,6 +192,22 @@ async def test_collection_task_create_api_accepts_time_selection_payload(
     assert response.status_code == 200
     payload = response.json()
     assert payload["task_id"]
+    task = (
+        await task_center_sqlite_session.execute(
+            select(CollectionTask).where(CollectionTask.task_id == payload["task_id"])
+        )
+    ).scalar_one()
+    assert task.date_range["time_selection"]["mode"] == "dynamic"
+    assert task.date_range["execution_time_selection"]["mode"] == "custom"
+    assert task.date_range["execution_time_selection"]["granularity"] == "monthly"
+    assert (
+        task.date_range["execution_time_selection"]["start_date"]
+        == task.date_range["start_date"]
+    )
+    assert (
+        task.date_range["execution_time_selection"]["end_date"]
+        == task.date_range["end_date"]
+    )
 
 
 @pytest.mark.asyncio

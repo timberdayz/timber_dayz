@@ -41,6 +41,7 @@ from backend.schemas.collection import (
 from backend.schemas.common import SuccessResponse
 from backend.services.collection_contracts import (
     build_date_range_from_time_selection,
+    build_execution_time_selection,
     count_collection_targets,
     derive_granularity_from_time_selection,
     normalize_collection_date_range,
@@ -669,6 +670,11 @@ async def create_task(
     )
     normalized_date_range = build_date_range_from_time_selection(time_selection)
     normalized_date_range["time_selection"] = time_selection
+    normalized_date_range["execution_time_selection"] = build_execution_time_selection(
+        time_selection,
+        normalized_date_range,
+        granularity=effective_granularity,
+    )
 
     try:
         resolver = ComponentRuntimeResolver.from_async_session(db)

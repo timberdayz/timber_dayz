@@ -9,6 +9,7 @@ import pytest
 
 from modules.components.base import ExecutionContext
 from modules.components.export.base import ExportMode
+from modules.apps.collection_center import executor_v2
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
 from modules.platforms.shopee.components.services_agent_export import ShopeeServicesAgentExport
 from modules.platforms.shopee.components.services_ai_assistant_export import ShopeeServicesAiAssistantExport
@@ -1047,6 +1048,59 @@ async def test_shopee_products_export_custom_monthly_uses_month_mode_instead_of_
     component._hover_text_option.assert_awaited_once_with(page, "按月")
     component._select_month_value.assert_awaited_once_with(page, "2026-03-01")
     component._click_text_option.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_dynamic_monthly_execution_reuses_custom_month_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    params = executor_v2._build_runtime_task_params(
+        task_id="task-dynamic-shopee-monthly",
+        account={"account_id": "acc-dynamic"},
+        platform="shopee",
+        granularity="monthly",
+        normalized_date_range={
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-05",
+            "date_from": "2026-07-01",
+            "date_to": "2026-07-05",
+            "time_selection": {
+                "mode": "dynamic",
+                "strategy": "current_month_to_available_day",
+                "available_after_time": "06:00",
+            },
+            "execution_time_selection": {
+                "mode": "custom",
+                "granularity": "monthly",
+                "start_date": "2026-07-01",
+                "end_date": "2026-07-05",
+                "start_time": "00:00:00",
+                "end_time": "23:59:59",
+            },
+        },
+        task_download_dir="temp/downloads/task-dynamic-shopee-monthly",
+        screenshot_dir="temp/screenshots/task-dynamic-shopee-monthly",
+        reused_session=False,
+    )
+    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", **params}))
+    picker = component._date_picker_helper()
+
+    monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
+    monkeypatch.setattr(picker, "_current_date_label", AsyncMock(return_value="浠婃棩瀹炴椂"))
+    monkeypatch.setattr(picker, "_open_date_picker", AsyncMock())
+    monkeypatch.setattr(picker, "_click_text_option", AsyncMock(return_value=False))
+    monkeypatch.setattr(picker, "_hover_text_option", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(picker, "_select_month_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(picker, "_wait_custom_date_selection_applied", AsyncMock(return_value=True), raising=False)
+
+    await component._ensure_date_selection(page)
+
+    assert component.ctx.config["source_time_selection"]["mode"] == "dynamic"
+    assert component.ctx.config["time_selection"]["mode"] == "custom"
+    picker._hover_text_option.assert_awaited_once()
+    picker._select_month_value.assert_awaited_once_with(page, "2026-07-01")
+    picker._click_text_option.assert_not_awaited()
 
 
 @pytest.mark.asyncio

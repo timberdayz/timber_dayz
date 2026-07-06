@@ -260,6 +260,53 @@ def build_date_range_from_time_selection(
     }
 
 
+def build_execution_time_selection(
+    time_selection: Dict[str, Any],
+    resolved_date_range: Dict[str, Any],
+    *,
+    granularity: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized = normalize_time_selection(time_selection=time_selection)
+    mode = normalized["mode"]
+    if mode == "dynamic":
+        start = str(
+            resolved_date_range.get("start_date")
+            or resolved_date_range.get("date_from")
+            or ""
+        ).strip()
+        end = str(
+            resolved_date_range.get("end_date")
+            or resolved_date_range.get("date_to")
+            or ""
+        ).strip()
+        if not start or not end:
+            raise ValueError(
+                "dynamic execution time selection requires resolved start_date and end_date"
+            )
+        effective_granularity = derive_granularity_from_time_selection(
+            normalized,
+            granularity,
+        )
+        return {
+            "mode": "custom",
+            "granularity": effective_granularity,
+            "start_date": start,
+            "end_date": end,
+            "start_time": "00:00:00",
+            "end_time": "23:59:59",
+        }
+
+    if mode == "custom":
+        effective = dict(normalized)
+        effective["granularity"] = derive_granularity_from_time_selection(
+            normalized,
+            granularity,
+        )
+        return effective
+
+    return dict(normalized)
+
+
 def build_legacy_collection_date_fields(
     time_selection: Dict[str, Any],
 ) -> Dict[str, Any]:

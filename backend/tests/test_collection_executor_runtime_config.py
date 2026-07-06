@@ -66,6 +66,112 @@ def test_runtime_task_params_include_custom_date_range_for_custom_selection():
     }
 
 
+def test_runtime_task_params_prefer_execution_time_selection_for_dynamic_source():
+    normalized_date_range = {
+        "start_date": "2026-07-01",
+        "end_date": "2026-07-05",
+        "date_from": "2026-07-01",
+        "date_to": "2026-07-05",
+        "time_selection": {
+            "mode": "dynamic",
+            "strategy": "current_month_to_available_day",
+            "available_after_time": "06:00",
+        },
+        "execution_time_selection": {
+            "mode": "custom",
+            "granularity": "monthly",
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-05",
+            "start_time": "00:00:00",
+            "end_time": "23:59:59",
+        },
+    }
+
+    params = executor_v2._build_runtime_task_params(
+        task_id="task-dynamic",
+        account={"account_id": "acc-dynamic"},
+        platform="shopee",
+        granularity="monthly",
+        normalized_date_range=normalized_date_range,
+        task_download_dir="temp/downloads/task-dynamic",
+        screenshot_dir="temp/screenshots/task-dynamic",
+        reused_session=False,
+    )
+
+    assert params["time_selection"]["mode"] == "custom"
+    assert params["params"]["time_selection"]["mode"] == "custom"
+    assert params["source_time_selection"]["mode"] == "dynamic"
+    assert params["params"]["source_time_selection"]["mode"] == "dynamic"
+    assert params["custom_date_range"] == {
+        "start_date": "2026-07-01",
+        "end_date": "2026-07-05",
+        "start_time": "00:00:00",
+        "end_time": "23:59:59",
+    }
+
+
+def test_runtime_task_params_build_legacy_dynamic_execution_selection_from_resolved_dates():
+    normalized_date_range = {
+        "start_date": "2026-07-01",
+        "end_date": "2026-07-05",
+        "date_from": "2026-07-01",
+        "date_to": "2026-07-05",
+        "time_selection": {
+            "mode": "dynamic",
+            "strategy": "current_month_to_available_day",
+            "available_after_time": "06:00",
+        },
+    }
+
+    params = executor_v2._build_runtime_task_params(
+        task_id="task-dynamic-legacy",
+        account={"account_id": "acc-dynamic"},
+        platform="tiktok",
+        granularity="monthly",
+        normalized_date_range=normalized_date_range,
+        task_download_dir="temp/downloads/task-dynamic-legacy",
+        screenshot_dir="temp/screenshots/task-dynamic-legacy",
+        reused_session=False,
+    )
+
+    assert params["time_selection"] == {
+        "mode": "custom",
+        "granularity": "monthly",
+        "start_date": "2026-07-01",
+        "end_date": "2026-07-05",
+        "start_time": "00:00:00",
+        "end_time": "23:59:59",
+    }
+    assert params["custom_date_range"]["start_date"] == "2026-07-01"
+    assert params["custom_date_range"]["end_date"] == "2026-07-05"
+
+
+def test_runtime_task_params_reject_unresolved_dynamic_time_selection():
+    normalized_date_range = {
+        "time_selection": {
+            "mode": "dynamic",
+            "strategy": "current_month_to_available_day",
+            "available_after_time": "06:00",
+        },
+    }
+
+    try:
+        executor_v2._build_runtime_task_params(
+            task_id="task-dynamic-unresolved",
+            account={"account_id": "acc-dynamic"},
+            platform="shopee",
+            granularity="monthly",
+            normalized_date_range=normalized_date_range,
+            task_download_dir="temp/downloads/task-dynamic-unresolved",
+            screenshot_dir="temp/screenshots/task-dynamic-unresolved",
+            reused_session=False,
+        )
+    except ValueError as exc:
+        assert "requires resolved start_date and end_date" in str(exc)
+    else:
+        raise AssertionError("dynamic time selection without resolved dates should fail")
+
+
 def test_runtime_task_params_keep_top_level_granularity_for_shopee_custom_date_components():
     normalized_date_range = {
         "start_date": "2026-03-01",

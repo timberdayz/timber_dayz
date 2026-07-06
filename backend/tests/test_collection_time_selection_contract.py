@@ -6,6 +6,7 @@ import pytest
 from backend.schemas.collection import CollectionConfigResponse, TimeSelectionPayload
 from backend.services.collection_contracts import (
     build_date_range_from_time_selection,
+    build_execution_time_selection,
     derive_granularity_from_time_selection,
     get_supported_config_data_domains,
     normalize_domain_subtypes,
@@ -77,6 +78,64 @@ def test_build_date_range_from_time_selection_for_last_30_days_is_inclusive():
     }
 
 
+def test_build_execution_time_selection_converts_dynamic_window_to_custom_range():
+    source = {
+        "mode": "dynamic",
+        "strategy": "current_month_to_available_day",
+        "available_after_time": "06:00",
+    }
+    resolved_range = {
+        "start_date": "2026-07-01",
+        "end_date": "2026-07-05",
+        "date_from": "2026-07-01",
+        "date_to": "2026-07-05",
+    }
+
+    result = build_execution_time_selection(
+        source,
+        resolved_range,
+        granularity="monthly",
+    )
+
+    assert result == {
+        "mode": "custom",
+        "granularity": "monthly",
+        "start_date": "2026-07-01",
+        "end_date": "2026-07-05",
+        "start_time": "00:00:00",
+        "end_time": "23:59:59",
+    }
+    assert source["mode"] == "dynamic"
+
+
+def test_build_execution_time_selection_keeps_preset_as_preset():
+    result = build_execution_time_selection(
+        {"mode": "preset", "preset": "last_30_days"},
+        {
+            "start_date": "2026-02-26",
+            "end_date": "2026-03-27",
+            "date_from": "2026-02-26",
+            "date_to": "2026-03-27",
+        },
+        granularity="monthly",
+    )
+
+    assert result == {"mode": "preset", "preset": "last_30_days"}
+
+
+def test_build_execution_time_selection_rejects_unresolved_dynamic_window():
+    with pytest.raises(ValueError, match="requires resolved start_date and end_date"):
+        build_execution_time_selection(
+            {
+                "mode": "dynamic",
+                "strategy": "current_month_to_available_day",
+                "available_after_time": "06:00",
+            },
+            {},
+            granularity="monthly",
+        )
+
+
 def test_normalize_time_selection_rejects_preset_plus_custom_fields():
     with pytest.raises(ValueError, match="preset time selection cannot include custom"):
         normalize_time_selection(
@@ -139,6 +198,7 @@ def test_collection_config_response_derives_time_selection_from_legacy_fields():
             id=1,
             name="miaoshou-orders-v1",
             platform="miaoshou",
+            main_account_id="miaoshou-main",
             account_ids=[],
             data_domains=["orders"],
             sub_domains={"orders": ["shopee"]},
@@ -161,6 +221,7 @@ def test_collection_config_response_derives_time_selection_from_legacy_fields():
     assert payload.time_selection.model_dump(exclude_none=True) == {
         "mode": "preset",
         "preset": "last_7_days",
+        "available_after_time": "06:00",
         "start_time": "00:00:00",
         "end_time": "23:59:59",
     }
