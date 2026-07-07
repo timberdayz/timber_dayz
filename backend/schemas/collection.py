@@ -447,6 +447,9 @@ class CollectionConfigRunResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+CollectionConfigBulkRunResponse.model_rebuild()
+
+
 class CollectionVerificationItem(BaseModel):
     task_id: str
     account_id: str

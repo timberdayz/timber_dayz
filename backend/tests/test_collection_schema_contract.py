@@ -35,3 +35,11 @@ def test_collection_config_run_table_binds_explicitly_to_core_schema():
 
 def test_collection_task_exposes_config_run_linkage():
     assert hasattr(CollectionTask, "config_run_id")
+
+
+def test_collection_config_bulk_run_response_resolves_nested_run_schema():
+    from backend.schemas.collection import CollectionConfigBulkRunResponse
+
+    schema = CollectionConfigBulkRunResponse.model_json_schema()
+
+    assert "CollectionConfigRunResponse" in schema.get("$defs", {})
