@@ -65,44 +65,73 @@ class MiaoshouDatePicker(DatePickerComponent):
             pass
         await locator.fill(value, timeout=1500)
 
-    async def _type_range_inputs(self, page: Any, date_range: MiaoshouCustomDateRange) -> bool:
-        start_str = f"{date_range.start_date} {date_range.start_time}"
-        end_str = f"{date_range.end_date} {date_range.end_time}"
+    async def _range_input(self, page: Any, index: int) -> Any | None:
+        for selector in (
+            ".jx-date-editor--datetimerange input.jx-range-input",
+            "input.jx-range-input",
+        ):
+            try:
+                inputs = page.locator(selector)
+                if await inputs.count() > index:
+                    return inputs.nth(index)
+            except Exception:
+                continue
+        return None
+
+    async def _fill_range_input(self, locator: Any, value: str) -> bool:
         try:
-            inputs = page.locator(".jx-date-editor--datetimerange input.jx-range-input")
-            if await inputs.count() < 2:
-                inputs = page.locator("input.jx-range-input")
-            if await inputs.count() < 2:
-                return False
-
-            start_input = inputs.nth(0)
-            await start_input.click(timeout=1500)
+            await locator.click(timeout=1500)
             try:
-                await start_input.press("Control+A")
+                await locator.press("Control+A")
             except Exception:
                 pass
-            await start_input.fill(start_str, timeout=1500)
-            try:
-                await start_input.press("Enter")
-            except Exception:
-                pass
-            await page.wait_for_timeout(120)
-
-            end_input = inputs.nth(1)
-            await end_input.click(timeout=1500)
-            try:
-                await end_input.press("Control+A")
-            except Exception:
-                pass
-            await end_input.fill(end_str, timeout=1500)
-            try:
-                await end_input.press("Enter")
-            except Exception:
-                pass
-            await page.wait_for_timeout(120)
+            await locator.fill(value, timeout=1500)
             return True
         except Exception:
             return False
+
+    async def _focus_time_combobox(self, page: Any, name: str) -> bool:
+        try:
+            locator = page.get_by_role("combobox", name=name).first
+            await locator.click(timeout=1000)
+            try:
+                await page.wait_for_timeout(120)
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
+    async def _type_range_inputs(self, page: Any, date_range: MiaoshouCustomDateRange) -> bool:
+        start_str = f"{date_range.start_date} {date_range.start_time}"
+        end_str = f"{date_range.end_date} {date_range.end_time}"
+        start_input = await self._range_input(page, 0)
+        if start_input is None:
+            return False
+        if not await self._fill_range_input(start_input, start_str):
+            return False
+
+        try:
+            await page.wait_for_timeout(120)
+        except Exception:
+            pass
+
+        end_input = await self._range_input(page, 1)
+        if end_input is None:
+            return False
+        if not await self._fill_range_input(end_input, end_str):
+            await self._focus_time_combobox(page, "结束时间")
+            end_input = await self._range_input(page, 1)
+            if end_input is None:
+                return False
+            if not await self._fill_range_input(end_input, end_str):
+                return False
+
+        try:
+            await page.wait_for_timeout(120)
+        except Exception:
+            pass
+        return True
 
     async def _read_combobox_value(self, page: Any, name: str) -> str:
         locator = page.get_by_role("combobox", name=name).first
@@ -165,6 +194,7 @@ class MiaoshouDatePicker(DatePickerComponent):
         await self._open(page)
         used_range_inputs = await self._type_range_inputs(page, date_range)
         if not used_range_inputs:
+            await self._open(page)
             await self._fill_input_by_name(page, "开始日期", date_range.start_date)
             await self._fill_input_by_name(page, "开始时间", date_range.start_time)
             await self._fill_input_by_name(page, "结束日期", date_range.end_date)

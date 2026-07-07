@@ -66,6 +66,11 @@ class _UnexpectedLocator(_FakeLocator):
         raise AssertionError("unexpected click")
 
 
+class _StaleLocator(_FakeLocator):
+    async def click(self, timeout: int | None = None) -> None:
+        raise RuntimeError("stale locator")
+
+
 class _FakePage:
     def __init__(self) -> None:
         self.start_time = _FakeLocator()
@@ -171,6 +176,43 @@ class _CustomRangePage:
         self.timeout_calls.append(ms)
 
 
+class _RequeryRangeInputPage:
+    def __init__(self) -> None:
+        self.range_start = _FakeLocator()
+        self.stale_range_end = _StaleLocator()
+        self.fresh_range_end = _FakeLocator()
+        self.locator_calls = 0
+        self.timeout_calls: list[int] = []
+
+    def locator(self, selector: str):  # noqa: ANN001
+        if selector in (
+            ".jx-date-editor--datetimerange input.jx-range-input",
+            "input.jx-range-input",
+        ):
+            self.locator_calls += 1
+            if self.locator_calls == 1:
+                return _FakeLocatorList([self.range_start, self.stale_range_end])
+            return _FakeLocatorList([self.range_start, self.fresh_range_end])
+        raise AssertionError(f"unexpected locator({selector!r})")
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        self.timeout_calls.append(ms)
+
+
+class _FallbackAfterRangeFailurePage(_CustomRangePage):
+    def __init__(self, *, displayed_start: str, displayed_end: str) -> None:
+        super().__init__(displayed_start=displayed_start, displayed_end=displayed_end)
+        self.failing_range_end = _StaleLocator()
+
+    def locator(self, selector: str):  # noqa: ANN001
+        if selector in (
+            ".jx-date-editor--datetimerange input.jx-range-input",
+            "input.jx-range-input",
+        ):
+            return _FakeLocatorList([self.range_start, self.failing_range_end])
+        raise AssertionError(f"unexpected locator({selector!r})")
+
+
 @pytest.mark.asyncio
 async def test_miaoshou_date_picker_custom_range_fails_when_displayed_values_do_not_match_requested_range() -> None:
     component = MiaoshouDatePicker(_ctx())
@@ -222,8 +264,6 @@ async def test_miaoshou_date_picker_custom_range_prefers_range_inputs_and_clicks
     assert result.success is True
     assert page.range_start.filled_values == ["2026-02-01 00:00:00"]
     assert page.range_end.filled_values == ["2026-02-28 23:59:59"]
-    assert "Enter" in page.range_start.pressed
-    assert "Enter" in page.range_end.pressed
     assert page.confirm.clicked == 1
 
 
@@ -254,3 +294,58 @@ async def test_miaoshou_date_picker_custom_range_succeeds_when_range_inputs_appl
     assert result.success is True
     assert page.range_start.filled_values == ["2026-03-01 00:00:00"]
     assert page.range_end.filled_values == ["2026-03-31 23:59:59"]
+
+
+@pytest.mark.asyncio
+async def test_miaoshou_date_picker_requeries_end_range_input_after_start_field_changes_dom() -> None:
+    component = MiaoshouDatePicker(_ctx())
+    page = _RequeryRangeInputPage()
+
+    result = await component._type_range_inputs(
+        page,
+        MiaoshouCustomDateRange(
+            start_date="2026-04-01",
+            end_date="2026-04-30",
+            start_time="00:00:00",
+            end_time="23:59:59",
+        ),
+    )
+
+    assert result is True
+    assert page.locator_calls >= 2
+    assert page.range_start.filled_values == ["2026-04-01 00:00:00"]
+    assert page.stale_range_end.filled_values == []
+    assert page.fresh_range_end.filled_values == ["2026-04-30 23:59:59"]
+
+
+@pytest.mark.asyncio
+async def test_miaoshou_date_picker_reopens_panel_before_named_field_fallback_after_range_failure() -> None:
+    component = MiaoshouDatePicker(_ctx())
+    page = _FallbackAfterRangeFailurePage(
+        displayed_start="2026-05-01 00:00",
+        displayed_end="2026-05-31 23:59",
+    )
+    open_calls = 0
+
+    async def _fake_open(current_page) -> None:
+        nonlocal open_calls
+        open_calls += 1
+
+    component._open = _fake_open  # type: ignore[method-assign]
+
+    result = await component.apply_custom_range(
+        page,
+        MiaoshouCustomDateRange(
+            start_date="2026-05-01",
+            end_date="2026-05-31",
+            start_time="00:00:00",
+            end_time="23:59:59",
+        ),
+    )
+
+    assert result.success is True
+    assert open_calls == 2
+    assert page.start_date.filled_values == ["2026-05-01"]
+    assert page.start_time.filled_values == ["00:00:00"]
+    assert page.end_date.filled_values == ["2026-05-31"]
+    assert page.end_time.filled_values == ["23:59:59"]
