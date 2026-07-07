@@ -79,11 +79,29 @@
         <el-table-column prop="platform_code" label="平台" width="120" />
         <el-table-column prop="shop_id" label="店铺ID" min-width="140" />
         <el-table-column prop="currency_code" label="币种" width="100" />
+        <el-table-column prop="gmv" label="GMV" min-width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.gmv) }}</template>
+        </el-table-column>
+        <el-table-column prop="purchase_amount" label="采购金额" min-width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.purchase_amount) }}</template>
+        </el-table-column>
+        <el-table-column prop="warehouse_operation_fee" label="仓库操作费" min-width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.warehouse_operation_fee) }}</template>
+        </el-table-column>
+        <el-table-column prop="platform_total_cost_itemized" label="平台费用合计" min-width="150" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.platform_total_cost_itemized) }}</template>
+        </el-table-column>
         <el-table-column prop="total_cost_b" label="B类总成本" min-width="140" align="right">
           <template #default="{ row }">{{ formatCurrency(row.total_cost_b) }}</template>
         </el-table-column>
-        <el-table-column prop="gmv" label="GMV" min-width="140" align="right">
-          <template #default="{ row }">{{ formatCurrency(row.gmv) }}</template>
+        <el-table-column label="B类成本占比" min-width="130" align="right">
+          <template #default="{ row }">{{ formatPercent(calcCostRatio(row.total_cost_b, row.gmv)) }}</template>
+        </el-table-column>
+        <el-table-column prop="gross_margin_ref" label="毛利率参考" min-width="130" align="right">
+          <template #default="{ row }">{{ formatPercent(row.gross_margin_ref) }}</template>
+        </el-table-column>
+        <el-table-column prop="net_margin_ref" label="净利率参考" min-width="130" align="right">
+          <template #default="{ row }">{{ formatPercent(row.net_margin_ref) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
@@ -91,7 +109,7 @@
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暂无店铺月汇总数据" />
+          <el-empty description="当前筛选条件下暂无店铺月汇总数据" />
         </template>
       </el-table>
     </el-card>
@@ -113,15 +131,48 @@
 
       <el-table :data="orderDetailRows" border stripe v-loading="orderDetailLoading">
         <el-table-column prop="order_id" label="订单号" min-width="160" />
+        <el-table-column prop="order_time" label="下单时间" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.order_time) }}</template>
+        </el-table-column>
+        <el-table-column prop="platform_code" label="平台" width="110">
+          <template #default="{ row }">{{ row.platform_code || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="shop_id" label="店铺ID" min-width="140">
+          <template #default="{ row }">{{ row.shop_id || '-' }}</template>
+        </el-table-column>
         <el-table-column label="SKU" min-width="160">
           <template #default="{ row }">{{ row.platform_sku || row.product_sku || '-' }}</template>
         </el-table-column>
         <el-table-column prop="currency_code" label="币种" width="100" />
+        <el-table-column prop="order_original_amount" label="订单原始金额" min-width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.order_original_amount) }}</template>
+        </el-table-column>
+        <el-table-column prop="gmv" label="实付金额" min-width="120" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.gmv) }}</template>
+        </el-table-column>
         <el-table-column prop="purchase_amount" label="采购金额" min-width="120" align="right">
           <template #default="{ row }">{{ formatCurrency(row.purchase_amount) }}</template>
         </el-table-column>
         <el-table-column prop="warehouse_operation_fee" label="仓库操作费" min-width="120" align="right">
           <template #default="{ row }">{{ formatCurrency(row.warehouse_operation_fee) }}</template>
+        </el-table-column>
+        <el-table-column prop="shipping_fee" label="运费" min-width="110" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.shipping_fee) }}</template>
+        </el-table-column>
+        <el-table-column prop="promotion_fee" label="推广费" min-width="110" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.promotion_fee) }}</template>
+        </el-table-column>
+        <el-table-column prop="platform_commission" label="平台佣金" min-width="120" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.platform_commission) }}</template>
+        </el-table-column>
+        <el-table-column prop="platform_deduction_fee" label="平台扣费" min-width="120" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.platform_deduction_fee) }}</template>
+        </el-table-column>
+        <el-table-column prop="platform_voucher" label="平台代金券" min-width="130" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.platform_voucher) }}</template>
+        </el-table-column>
+        <el-table-column prop="platform_service_fee" label="平台服务费" min-width="130" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.platform_service_fee) }}</template>
         </el-table-column>
         <el-table-column prop="platform_total_cost_itemized" label="平台费用(明细)" min-width="140" align="right">
           <template #default="{ row }">{{ formatCurrency(row.platform_total_cost_itemized) }}</template>
@@ -129,10 +180,24 @@
         <el-table-column prop="platform_total_cost_derived" label="平台费用(推导)" min-width="140" align="right">
           <template #default="{ row }">{{ formatCurrency(row.platform_total_cost_derived) }}</template>
         </el-table-column>
+        <el-table-column prop="total_cost_b" label="订单B类成本" min-width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.total_cost_b) }}</template>
+        </el-table-column>
         <template #empty>
-          <el-empty description="暂无订单明细数据" />
+          <el-empty description="当前店铺月份下暂无订单明细数据" />
         </template>
       </el-table>
+
+      <div class="order-detail-pagination">
+        <el-pagination
+          v-model:current-page="orderDetailPage"
+          :page-size="orderDetailPageSize"
+          :total="orderDetailTotal"
+          layout="total, prev, pager, next"
+          background
+          @current-change="handleOrderDetailPageChange"
+        />
+      </div>
     </el-drawer>
   </div>
 </template>
@@ -148,6 +213,7 @@ const activeView = ref('shop-month')
 
 const orderDetailPage = ref(1)
 const orderDetailPageSize = ref(20)
+const orderDetailTotal = ref(0)
 
 const filters = reactive({
   period_month: periodMonth.value,
@@ -204,6 +270,21 @@ const formatPercent = (value) => {
   const num = Number(value)
   if (Number.isNaN(num)) return 'N/A'
   return `${(num * 100).toFixed(2)}%`
+}
+
+const formatDateTime = (value) => {
+  if (!value) return '-'
+  const parsed = dayjs(value)
+  if (!parsed.isValid()) return '-'
+  return parsed.format('YYYY-MM-DD HH:mm')
+}
+
+const calcCostRatio = (cost, gmv) => {
+  if (cost === null || cost === undefined || gmv === null || gmv === undefined) return null
+  const costValue = Number(cost)
+  const gmvValue = Number(gmv)
+  if (Number.isNaN(costValue) || Number.isNaN(gmvValue) || gmvValue === 0) return null
+  return costValue / gmvValue
 }
 
 const kpiCards = computed(() => {
@@ -266,9 +347,14 @@ const loadOrderDetail = async (row) => {
   orderDetailError.value = ''
   try {
     const response = await dashboardApi.queryBCostAnalysisOrderDetail(toOrderDetailPayload(row))
-    orderDetailRows.value = unwrapList(response)
+    const payload = response?.data ?? response ?? {}
+    orderDetailRows.value = unwrapList(payload)
+    orderDetailTotal.value = payload.total || 0
+    orderDetailPage.value = payload.page || orderDetailPage.value
+    orderDetailPageSize.value = payload.page_size || orderDetailPageSize.value
   } catch (error) {
     orderDetailRows.value = []
+    orderDetailTotal.value = 0
     orderDetailError.value = error?.message || '订单明细加载失败'
   } finally {
     orderDetailLoading.value = false
@@ -276,13 +362,23 @@ const loadOrderDetail = async (row) => {
 }
 
 const handleSearch = async () => {
+  orderDetailDrawerVisible.value = false
+  orderDetailRows.value = []
+  orderDetailTotal.value = 0
+  orderDetailPage.value = 1
   await Promise.all([loadOverview(), loadShopMonth()])
 }
 
 const handleViewOrderDetail = async (row) => {
   selectedShopMonthRow.value = row
+  orderDetailPage.value = 1
   orderDetailDrawerVisible.value = true
   await loadOrderDetail(row)
+}
+
+const handleOrderDetailPageChange = async (page) => {
+  orderDetailPage.value = page
+  await loadOrderDetail(selectedShopMonthRow.value)
 }
 
 onMounted(async () => {
@@ -342,5 +438,11 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.order-detail-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 16px;
 }
 </style>

@@ -247,6 +247,117 @@ test('view uses backend field names for KPI, shop-month, and order-detail data',
   )
 })
 
+test('shop-month table consumes the existing B cost breakdown fields', () => {
+  const requiredLabels = [
+    '采购金额',
+    '仓库操作费',
+    '平台费用合计',
+    'B类成本占比',
+    '毛利率参考',
+    '净利率参考'
+  ]
+
+  for (const label of requiredLabels) {
+    assert.equal(
+      viewSource.includes(label),
+      true,
+      `shop-month table should expose ${label}`
+    )
+  }
+
+  const requiredFields = [
+    'purchase_amount',
+    'warehouse_operation_fee',
+    'platform_total_cost_itemized',
+    'gross_margin_ref',
+    'net_margin_ref'
+  ]
+
+  for (const field of requiredFields) {
+    assert.equal(
+      viewSource.includes(`row.${field}`),
+      true,
+      `shop-month table should consume row.${field}`
+    )
+  }
+})
+
+test('order-detail drawer consumes order-level cost fields exposed by the API', () => {
+  const requiredLabels = [
+    '下单时间',
+    '平台',
+    '店铺ID',
+    '订单原始金额',
+    '实付金额',
+    '运费',
+    '推广费',
+    '平台佣金',
+    '平台扣费',
+    '平台代金券',
+    '平台服务费',
+    '订单B类成本'
+  ]
+
+  for (const label of requiredLabels) {
+    assert.equal(
+      viewSource.includes(label),
+      true,
+      `order-detail drawer should expose ${label}`
+    )
+  }
+
+  const requiredFields = [
+    'order_time',
+    'platform_code',
+    'shop_id',
+    'order_original_amount',
+    'gmv',
+    'shipping_fee',
+    'promotion_fee',
+    'platform_commission',
+    'platform_deduction_fee',
+    'platform_voucher',
+    'platform_service_fee',
+    'total_cost_b'
+  ]
+
+  for (const field of requiredFields) {
+    assert.equal(
+      viewSource.includes(`row.${field}`),
+      true,
+      `order-detail drawer should consume row.${field}`
+    )
+  }
+})
+
+test('order-detail pagination preserves backend page metadata and can request another page', () => {
+  assert.equal(
+    viewSource.includes('const orderDetailTotal = ref(0)'),
+    true,
+    'order detail should track total rows from backend payload'
+  )
+  assert.equal(
+    viewSource.includes('orderDetailTotal.value = payload.total || 0'),
+    true,
+    'order detail should copy total from backend payload'
+  )
+  assert.equal(
+    viewSource.includes('<el-pagination'),
+    true,
+    'order-detail drawer should render an Element Plus pagination control'
+  )
+  assert.equal(
+    viewSource.includes('@current-change="handleOrderDetailPageChange"'),
+    true,
+    'pagination should request another backend page on current-page changes'
+  )
+  assert.equal(
+    viewSource.includes('const handleOrderDetailPageChange = async (page) => {'),
+    true,
+    'page change handler should exist'
+  )
+})
+
 test('KPI section shows explicit error state when overview fails', () => {
   assert.equal(
     viewSource.includes('v-if="overviewError"'),
