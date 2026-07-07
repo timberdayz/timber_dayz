@@ -55,6 +55,11 @@ from backend.services.deduplication_service import DeduplicationService
 from backend.services.currency_extractor import (
     get_currency_extractor,
 )  # [*] v4.15.0新增
+from backend.services.orders_ingestion_normalizer import (
+    extend_orders_deduplication_fields,
+    merge_hash_identity_values,
+    prepare_orders_rows_for_b_class,
+)
 
 # [*] DSS架构:移除验证、标准化、隔离相关导入
 # 这些功能在DSS架构下不再使用,数据处理在 PostgreSQL semantic/api 层完成
@@ -696,6 +701,15 @@ class DataIngestionService:
                         final_deduplication_fields,
                         field_parse_rules,
                     )
+                    orders_identity_values = []
+                    if domain.lower() == "orders":
+                        valid_rows, orders_identity_values = prepare_orders_rows_for_b_class(
+                            valid_rows
+                        )
+                        final_deduplication_fields = extend_orders_deduplication_fields(
+                            domain,
+                            final_deduplication_fields,
+                        )
 
                     if final_deduplication_fields:
                         logger.info(
@@ -727,6 +741,10 @@ class DataIngestionService:
                         raw_importer,
                         valid_rows,
                         field_parse_rules,
+                    )
+                    hash_identity_values = merge_hash_identity_values(
+                        hash_identity_values,
+                        orders_identity_values,
                     )
                     data_hashes = dedup_service.batch_calculate_data_hash(
                         valid_rows,

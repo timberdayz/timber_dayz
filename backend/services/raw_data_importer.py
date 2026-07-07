@@ -35,6 +35,9 @@ from backend.services.deduplication_fields_config import (  # [*] v4.15.0新增
     get_deduplication_strategy,
     get_upsert_update_fields,
 )
+from backend.services.orders_ingestion_normalizer import (
+    merge_orders_raw_data_prefer_non_empty,
+)
 from backend.services.platform_table_manager import (
     get_platform_table_manager,
 )  # [*] v4.17.0新增
@@ -822,6 +825,7 @@ class RawDataImporter:
 
             # 查询已存在的data_hash(仅UPSERT策略需要)
             existing_hashes = set()
+            existing_raw_data_by_hash = {}
             if is_upsert:
                 # [*] v4.17.0修复:确保在查询existing_hashes之前,前一个事务已提交
                 # 显式刷新事务状态,确保能看到已提交的数据
@@ -890,11 +894,22 @@ class RawDataImporter:
 
                 # [*] v4.17.1优化:使用LIMIT优化查询(如果只需要检查是否存在,不需要全部数据)
                 # 但为了准确统计INSERT/UPDATE,我们需要查询所有匹配的data_hash
+                select_columns = (
+                    "data_hash, raw_data"
+                    if data_domain.lower() == "orders"
+                    else "data_hash"
+                )
                 query_sql = text(
-                    f'SELECT data_hash FROM b_class."{table_name}" WHERE {where_clause}'
+                    f'SELECT {select_columns} FROM b_class."{table_name}" WHERE {where_clause}'
                 )
                 existing_records = self.db.execute(query_sql, where_params).fetchall()
                 existing_hashes = {row[0] for row in existing_records}
+                if data_domain.lower() == "orders":
+                    existing_raw_data_by_hash = {
+                        row[0]: row[1]
+                        for row in existing_records
+                        if len(row) > 1 and row[1] is not None
+                    }
                 logger.info(
                     f"[RawDataImporter] [v4.17.1] UPSERT策略:查询到{len(existing_hashes)}个已存在的data_hash "
                     f"(表={table_name}, platform={platform_code}, shop_id={shop_id or 'NULL'}, "
@@ -1142,6 +1157,17 @@ class RawDataImporter:
                 prepared_records = []
                 for record in insert_data_prepared:
                     record_copy = record.copy()  # 避免修改原始记录
+                    if data_domain.lower() == "orders":
+                        existing_raw_data = existing_raw_data_by_hash.get(
+                            record_copy.get("data_hash")
+                        )
+                        if existing_raw_data and isinstance(
+                            record_copy.get("raw_data"), dict
+                        ):
+                            record_copy["raw_data"] = merge_orders_raw_data_prefer_non_empty(
+                                existing_raw_data,
+                                record_copy["raw_data"],
+                            )
 
                     # 转换raw_data(dict -> JSON字符串)
                     if "raw_data" in record_copy and isinstance(

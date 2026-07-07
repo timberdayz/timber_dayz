@@ -31,6 +31,11 @@ from backend.services.data_importer import (
 from backend.services.data_standardizer import standardize_rows
 from backend.services.currency_extractor import get_currency_extractor
 from backend.services.data_ingestion_service import normalize_row_fields_for_domain
+from backend.services.orders_ingestion_normalizer import (
+    extend_orders_deduplication_fields,
+    merge_hash_identity_values,
+    prepare_orders_rows_for_b_class,
+)
 from backend.services.excel_parser import ExcelParser
 from backend.services.spreadsheet_normalization_service import get_spreadsheet_normalization_service
 from backend.services.template_family_service import get_template_resolver
@@ -772,6 +777,15 @@ async def ingest_file(
                     final_deduplication_fields,
                     field_parse_rules,
                 )
+                orders_identity_values = []
+                if (domain or "").lower() == "orders":
+                    valid_rows, orders_identity_values = prepare_orders_rows_for_b_class(
+                        valid_rows
+                    )
+                    final_deduplication_fields = extend_orders_deduplication_fields(
+                        domain,
+                        final_deduplication_fields,
+                    )
                 hash_scope_values = {
                     "platform_code": file_record.platform_code or platform,
                     "shop_id": file_record.shop_id,
@@ -783,6 +797,10 @@ async def ingest_file(
                     raw_data_importer,
                     valid_rows,
                     field_parse_rules,
+                )
+                hash_identity_values = merge_hash_identity_values(
+                    hash_identity_values,
+                    orders_identity_values,
                 )
                 data_hashes = deduplication_service.batch_calculate_data_hash(
                     valid_rows,
