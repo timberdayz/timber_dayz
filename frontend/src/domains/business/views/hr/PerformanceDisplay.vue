@@ -215,6 +215,9 @@
         <el-table-column v-if="filters.groupBy === 'shop'" label="赛马池" width="100" align="center">
           <template #default="{ row }">{{ rankingPoolText(row) }}</template>
         </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'shop'" label="数据覆盖" width="110" align="center">
+          <template #default="{ row }">{{ dataCoverageText(row) }}</template>
+        </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" label="预警" width="120" align="center">
           <template #default="{ row }">{{ performanceAlertText(row) }}</template>
         </el-table-column>
@@ -405,7 +408,7 @@ const filteredPerformanceData = computed(() => {
     return performanceList.data || []
   }
   return (performanceList.data || []).filter((row) => {
-    const pool = row?.score_details?.summary?.ranking_pool_status || 'unknown'
+    const pool = row?.score_details?.summary?.ranking_pool || 'unknown'
     const alertTypes = row?.score_details?.summary?.performance_alert_types || []
     const alert = alertTypes.includes('performance_elimination_review')
       ? 'elimination'
@@ -560,10 +563,14 @@ function metricMessageText(metric) {
 }
 
 function rankingPoolText(row) {
-  const status = row?.score_details?.summary?.ranking_pool_status
+  const status = row?.score_details?.summary?.ranking_pool
   if (status === 'official') return '正式池'
   if (status === 'observation') return '观察池'
   return '—'
+}
+
+function dataCoverageText(row) {
+  return row?.score_details?.summary?.data_coverage_warning ? '覆盖不足提示' : '完整'
 }
 
 function performanceAlertText(row) {

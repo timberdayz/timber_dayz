@@ -22,6 +22,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from copy import copy
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, text
@@ -140,6 +141,35 @@ async def _load_valid_performance_shop_keys(
         }
     except Exception as e:
         logger.warning("绩效计算有效店铺集合加载失败，降级为仅过滤明显无效 shop_id: %s", e)
+        return None
+
+
+async def _load_monthly_source_shop_keys(
+    db: AsyncSession,
+    year_month: str,
+) -> Optional[set[str]]:
+    """Return shops backed by the authoritative monthly order mart."""
+    try:
+        period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+        rows = (
+            await db.execute(
+                text(
+                    """
+                    SELECT LOWER(platform_code) AS platform_code, shop_id
+                    FROM api.business_overview_shop_racing_module
+                    WHERE granularity = 'monthly' AND period_key = :period_start
+                    """
+                ),
+                {"period_start": period_start},
+            )
+        ).mappings().all()
+        return {
+            f"{str(row['platform_code']).lower()}|{row['shop_id']}"
+            for row in rows
+            if not _is_invalid_performance_shop_id(row.get("shop_id"))
+        }
+    except Exception as e:
+        logger.warning("绩效计算月订单店铺集合加载失败，跳过月订单范围校验: %s", e)
         return None
 
 
@@ -495,7 +525,18 @@ def _metric_is_calculated(details: Dict[str, Any], metric: str) -> bool:
 
 
 def _summary_is_complete(details: Dict[str, Any]) -> bool:
-    return _score_details_field(details, "summary", "status") == "complete"
+    summary = _score_details_field(details, "summary")
+    return isinstance(summary, dict) and summary.get("calculation_status") == "complete"
+
+
+def _summary_is_formal_ready(details: Dict[str, Any]) -> bool:
+    summary = _score_details_field(details, "summary")
+    return bool(
+        isinstance(summary, dict)
+        and summary.get("calculation_status") == "complete"
+        and summary.get("ranking_pool") == "official"
+        and summary.get("formal_ready") is True
+    )
 
 
 def _public_metric_score(score_value: Optional[float], details: Dict[str, Any], metric: str) -> Optional[float]:
@@ -507,11 +548,11 @@ def _public_total_score(total_score: Optional[float], details: Dict[str, Any]) -
 
 
 def _public_rank(rank: Optional[int], details: Dict[str, Any]) -> Optional[int]:
-    return rank if _summary_is_complete(details) else None
+    return rank if _summary_is_formal_ready(details) else None
 
 
 def _public_coefficient(coefficient: Optional[float], details: Dict[str, Any]) -> Optional[float]:
-    return coefficient if _summary_is_complete(details) else None
+    return coefficient if _summary_is_formal_ready(details) else None
 
 
 def _apply_ranking_policy(
@@ -524,8 +565,10 @@ def _apply_ranking_policy(
         operating_days = int(operating_days_by_shop.get(key, 31) or 0)
         summary = row.setdefault("score_details", {}).setdefault("summary", {})
         summary["operating_days"] = operating_days
-        eligible = summary.get("status") == "complete" and operating_days >= 15
-        summary["ranking_pool_status"] = "official" if eligible else "observation"
+        eligible = summary.get("calculation_status") == "complete"
+        summary["ranking_pool"] = "official" if eligible else "observation"
+        summary["formal_ready"] = eligible
+        summary["data_coverage_warning"] = operating_days < 15
         if eligible:
             eligible_rows.append(row)
         else:
@@ -560,7 +603,7 @@ def _build_performance_alert_payloads(
         summary = row.get("score_details", {}).get("summary", {})
         summary["performance_alert_level"] = None
         summary["performance_alert_types"] = []
-        if summary.get("ranking_pool_status") != "official":
+        if summary.get("ranking_pool") != "official" or summary.get("formal_ready") is not True:
             continue
         total_score = float(row.get("total_score") or 0.0)
         shop_key = f"{(row.get('platform_code') or '').lower()}|{row.get('shop_id') or ''}"
@@ -882,6 +925,31 @@ def _calculate_operation_metric_score(target: Any) -> tuple[float, Dict[str, Any
     }
 
 
+def _calculate_operation_metric_score_for_shop(
+    operation_target: Any,
+    shop_breakdown: Any | None,
+) -> tuple[float, Dict[str, Any]]:
+    """Calculate a shop-specific operation score from a target breakdown."""
+    if shop_breakdown is None:
+        return _calculate_operation_metric_score(operation_target)
+
+    scoped_target = copy(operation_target)
+    manual_score_value = getattr(shop_breakdown, "manual_score_value", None)
+    if manual_score_value is not None:
+        scoped_target.manual_score_enabled = True
+        scoped_target.metric_direction = "manual_score"
+        scoped_target.manual_score_value = manual_score_value
+    for field in ("target_value", "achieved_value"):
+        value = getattr(shop_breakdown, field, None)
+        if value is not None:
+            setattr(scoped_target, field, value)
+
+    score, details = _calculate_operation_metric_score(scoped_target)
+    if details.get("status") == "calculated":
+        details["source"] = "target_management_shop_breakdown"
+    return score, details
+
+
 async def invalidate_performance_related_caches(cache_service) -> None:
     await cache_service.invalidate("performance_scores")
     await cache_service.invalidate("performance_scores_shop")
@@ -926,6 +994,53 @@ async def _load_effective_target_for_month(
         rows = scalars().all()
         return rows[0] if rows else None
     return None
+
+
+async def _load_operation_target_breakdown_by_shop(
+    db: AsyncSession,
+    operation_target: Any | None,
+) -> Dict[str, Any]:
+    """Load the active operation target's shop-scoped score overrides."""
+    target_id = getattr(operation_target, "id", None)
+    if target_id is None:
+        return {}
+
+    query = select(TargetBreakdown).where(
+        TargetBreakdown.target_id == target_id,
+        TargetBreakdown.breakdown_type.in_(("shop", "shop_time")),
+        TargetBreakdown.platform_code.is_not(None),
+        TargetBreakdown.shop_id.is_not(None),
+    )
+    rows = (await db.execute(query)).scalars().all()
+    return {
+        f"{str(row.platform_code).lower()}|{row.shop_id}": row
+        for row in rows
+    }
+
+
+async def _verify_persisted_shop_performance_keys(
+    db: AsyncSession,
+    *,
+    period: str,
+    expected_keys: set[str],
+) -> None:
+    """Assert that the flushed business-key set exactly matches this settlement."""
+    rows = (
+        await db.execute(
+            select(PerformanceScore.platform_code, PerformanceScore.shop_id).where(
+                PerformanceScore.period == period
+            )
+        )
+    ).all()
+    actual_keys = {
+        f"{str(row[0]).lower()}|{row[1]}"
+        for row in rows
+    }
+    if actual_keys != expected_keys:
+        raise RuntimeError(
+            "Persisted performance business keys do not match the expected settlement "
+            f"set: expected={sorted(expected_keys)}, actual={sorted(actual_keys)}"
+        )
 
 
 @router.get("/scores", response_model=Dict[str, Any])
@@ -1565,7 +1680,14 @@ async def calculate_performance_scores(
             target_type="operation",
             scope_type="shop",
         )
+        operation_breakdowns_by_shop = await _load_operation_target_breakdown_by_shop(
+            db,
+            operation_target,
+        )
         valid_shop_keys = await _load_valid_performance_shop_keys(db, source_rows)
+        monthly_source_shop_keys = await _load_monthly_source_shop_keys(db, period)
+        if valid_shop_keys is not None and monthly_source_shop_keys is not None:
+            valid_shop_keys &= monthly_source_shop_keys
         calc_list = []
         for rec in source_rows.values():
             platform_code = rec["platform_code"]
@@ -1604,7 +1726,10 @@ async def calculate_performance_scores(
             key_product_rate_fraction = None
             key_product_rate = None
             key_product_score = 0.0
-            operation_score, operation_details = _calculate_operation_metric_score(operation_target) if operation_target else (
+            operation_score, operation_details = _calculate_operation_metric_score_for_shop(
+                operation_target,
+                operation_breakdowns_by_shop.get(key),
+            ) if operation_target else (
                 0.0,
                 {
                     "status": "pending_design",
@@ -1665,7 +1790,7 @@ async def calculate_performance_scores(
                             "message": operation_details["message"],
                         },
                         "summary": {
-                            "status": "complete" if (target_profit > 0 and operation_details["status"] == "calculated") else "partial",
+                            "calculation_status": "complete" if (target_profit > 0 and operation_details["status"] == "calculated") else "partial",
                             "ready_dimensions": [
                                 dimension
                                 for dimension, ready in [
@@ -1748,6 +1873,14 @@ async def calculate_performance_scores(
             upserts += 1
         await _sync_performance_alerts(db, calc_list, alerts_by_shop)
         await db.flush()
+        await _verify_persisted_shop_performance_keys(
+            db,
+            period=period,
+            expected_keys={
+                f"{str(row['platform_code']).lower()}|{row['shop_id']}"
+                for row in calc_list
+            },
+        )
 
         income_service = HRIncomeCalculationService(db=db)
         income_result = await income_service.calculate_month(period, commit=False)
@@ -1807,6 +1940,7 @@ async def calculate_performance_scores(
     except HTTPException:
         raise
     except ValueError as e:
+        await db.rollback()
         logger.warning(f"考核周期格式无效: {e}")
         return error_response(
             code=ErrorCode.DATA_FORMAT_INVALID,
@@ -1826,4 +1960,3 @@ async def calculate_performance_scores(
             recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
-

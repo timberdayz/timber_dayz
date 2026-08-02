@@ -629,7 +629,7 @@ def test_calculate_month_employee_performance_uses_store_total_score():
             performance_coefficient=1.2,
             score_details={
                 "sales": {"target": 900.0},
-                "summary": {"status": "complete"},
+                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
             },
         ),
         SimpleNamespace(
@@ -640,7 +640,7 @@ def test_calculate_month_employee_performance_uses_store_total_score():
             performance_coefficient=0.9,
             score_details={
                 "sales": {"target": 100.0},
-                "summary": {"status": "complete"},
+                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
             },
         ),
     ]
@@ -698,6 +698,47 @@ def test_calculate_month_employee_performance_uses_store_total_score():
     assert perf.actual_sales == pytest.approx(1200.0)
     assert perf.achievement_rate == pytest.approx((60.0 * 1000.0 + 50.0 * 200.0) / 1200.0 / 100.0)
     assert perf.performance_score == pytest.approx(90.8)
+
+
+def test_load_store_performance_requires_canonical_formal_ready_state():
+    db = AsyncMock()
+    assignments = [
+        SimpleNamespace(platform_code="Shopee", shop_id="legacy"),
+        SimpleNamespace(platform_code="Shopee", shop_id="formal"),
+    ]
+    rows = [
+        SimpleNamespace(
+            platform_code="shopee",
+            shop_id="legacy",
+            total_score=90.0,
+            performance_coefficient=1.3,
+            score_details={"summary": {"status": "complete"}},
+        ),
+        SimpleNamespace(
+            platform_code="shopee",
+            shop_id="formal",
+            total_score=80.0,
+            performance_coefficient=1.1,
+            score_details={
+                "summary": {
+                    "calculation_status": "complete",
+                    "ranking_pool": "official",
+                    "formal_ready": True,
+                }
+            },
+        ),
+    ]
+    db.execute = AsyncMock(return_value=_MockResult(rows=rows))
+
+    result = asyncio.run(
+        HRIncomeCalculationService(db=db)._load_store_performance_by_shop(
+            "2026-03",
+            assignments,
+        )
+    )
+
+    assert set(result) == {"shopee|formal"}
+    assert result["shopee|formal"]["performance_coefficient"] == 1.1
 
 
 def test_calculate_month_employee_performance_does_not_fallback_to_achievement_rate_without_store_score():
@@ -801,7 +842,7 @@ def test_calculate_month_employee_performance_applies_attendance_penalties():
             total_score=92.0,
             score_details={
                 "sales": {"target": 1000.0},
-                "summary": {"status": "complete"},
+                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
             },
         ),
     ]
@@ -885,7 +926,7 @@ def test_calculate_month_employee_performance_falls_back_to_chinese_attendance_c
             total_score=92.0,
             score_details={
                 "sales": {"target": 1000.0},
-                "summary": {"status": "complete"},
+                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
             },
         ),
     ]
@@ -899,6 +940,13 @@ def test_calculate_month_employee_performance_falls_back_to_chinese_attendance_c
 
         def all(self):
             return self._rows
+
+    class _NestedTransaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
 
     async def _execute(stmt, params=None):
         if hasattr(stmt, "column_descriptions"):
@@ -943,6 +991,7 @@ def test_calculate_month_employee_performance_falls_back_to_chinese_attendance_c
     db.add = lambda obj: added.append(obj)
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
+    db.begin_nested = lambda: _NestedTransaction()
 
     service = HRIncomeCalculationService(db=db)
     service._load_profit_basis_by_shop = AsyncMock(
@@ -951,6 +1000,7 @@ def test_calculate_month_employee_performance_falls_back_to_chinese_attendance_c
     result = asyncio.run(service.calculate_month("2026-03"))
 
     assert result["employee_count"] == 1
+    assert db.rollback.await_count == 0
     perf = next(x for x in added if isinstance(x, EmployeePerformance))
     assert perf.performance_score == pytest.approx(86.0)
 
@@ -985,7 +1035,7 @@ def test_calculate_month_employee_performance_applies_manual_adjustments():
             total_score=92.0,
             score_details={
                 "sales": {"target": 1000.0},
-                "summary": {"status": "complete"},
+                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
             },
         ),
     ]

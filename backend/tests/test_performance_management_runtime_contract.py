@@ -272,6 +272,11 @@ def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
     )
     monkeypatch.setattr(performance_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={}))
     monkeypatch.setattr(performance_module, "_sync_performance_alerts", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        performance_module,
+        "_verify_persisted_shop_performance_keys",
+        AsyncMock(return_value=None),
+    )
     monkeypatch.setattr(performance_module, "HRIncomeCalculationService", _FakeIncomeService)
     monkeypatch.setattr(performance_module, "PayrollGenerationService", _FakePayrollService)
     monkeypatch.setattr(performance_module, "sync_performance_confirmation_task", AsyncMock(return_value=None))
@@ -286,6 +291,150 @@ def _config():
         key_product_max_score=999,
         operation_max_score=20,
     )
+
+
+def test_shop_operation_breakdown_overrides_global_manual_score():
+    operation_target = SimpleNamespace(
+        metric_direction="manual_score",
+        target_value=20.0,
+        achieved_value=None,
+        max_score=20.0,
+        manual_score_enabled=True,
+        manual_score_value=20.0,
+    )
+    shop_breakdown = SimpleNamespace(
+        target_value=None,
+        achieved_value=None,
+        manual_score_value=7.25,
+    )
+
+    score, details = performance_module._calculate_operation_metric_score_for_shop(
+        operation_target,
+        shop_breakdown,
+    )
+
+    assert score == 7.25
+    assert details["source"] == "target_management_shop_breakdown"
+    assert details["calculation"] == "manual_score=7.25"
+
+
+def test_recalculation_uses_shop_operation_breakdown(monkeypatch):
+    _patch_successful_shop_recalc(monkeypatch)
+    monkeypatch.setattr(
+        performance_module,
+        "_load_operation_target_breakdown_by_shop",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": SimpleNamespace(
+                    target_value=None,
+                    achieved_value=None,
+                    manual_score_value=7.25,
+                )
+            }
+        ),
+        raising=False,
+    )
+    db = _CalcDb(_config())
+
+    resp = asyncio.run(
+        performance_module.calculate_performance_scores(
+            period="2025-01",
+            config_id=None,
+            db=db,
+        )
+    )
+
+    assert _json_body(resp)["success"] is True
+    created = next(item for item in db.added if isinstance(item, PerformanceScore))
+    assert created.operation_score == 7.25
+    assert created.score_details["operation"]["source"] == "target_management_shop_breakdown"
+
+
+def test_ranking_policy_writes_canonical_formal_state():
+    formal = {
+        "platform_code": "shopee",
+        "shop_id": "formal",
+        "total_score": 90.0,
+        "operation_score": 10.0,
+        "profit_score": 30.0,
+        "sales_score": 50.0,
+        "score_details": {"summary": {"calculation_status": "complete"}},
+    }
+    low_coverage = {
+        "platform_code": "shopee",
+        "shop_id": "observation",
+        "total_score": 80.0,
+        "operation_score": 10.0,
+        "profit_score": 30.0,
+        "sales_score": 40.0,
+        "score_details": {"summary": {"calculation_status": "complete"}},
+    }
+
+    performance_module._apply_ranking_policy(
+        [formal, low_coverage],
+        {"shopee|formal": 31, "shopee|observation": 14},
+    )
+
+    assert formal["score_details"]["summary"] == {
+        "calculation_status": "complete",
+        "operating_days": 31,
+        "ranking_pool": "official",
+        "formal_ready": True,
+        "data_coverage_warning": False,
+    }
+    assert low_coverage["score_details"]["summary"] == {
+        "calculation_status": "complete",
+        "operating_days": 14,
+        "ranking_pool": "official",
+        "formal_ready": True,
+        "data_coverage_warning": True,
+    }
+    assert low_coverage["rank"] == 2
+    assert low_coverage["performance_coefficient"] is not None
+
+
+def test_recalculation_rolls_back_on_invalid_period_value_error():
+    db = _CalcDb(_config())
+
+    response = asyncio.run(
+        performance_module.calculate_performance_scores(
+            period="2026-invalid",
+            config_id=None,
+            db=db,
+        )
+    )
+
+    assert _json_body(response)["success"] is False
+    db.rollback.assert_awaited_once()
+
+
+def test_persisted_shop_performance_validation_rejects_missing_business_key():
+    class _Db:
+        async def execute(self, _stmt):
+            return _Result(rows=[("shopee", "shop-1")])
+
+    with pytest.raises(RuntimeError, match="business keys"):
+        asyncio.run(
+            performance_module._verify_persisted_shop_performance_keys(
+                _Db(),
+                period="2026-06",
+                expected_keys={"shopee|shop-1", "shopee|shop-2"},
+            )
+        )
+
+
+def test_public_performance_coefficient_is_hidden_for_observation_result():
+    details = {
+        "summary": {
+            "calculation_status": "complete",
+            "ranking_pool": "observation",
+            "formal_ready": False,
+        }
+    }
+
+    assert performance_module._public_total_score(80.0, details) == 80.0
+    assert performance_module._public_rank(2, details) is None
+    assert performance_module._public_coefficient(1.2, details) is None
 
 
 def test_current_shop_formula_ignores_legacy_key_product_fields(monkeypatch):

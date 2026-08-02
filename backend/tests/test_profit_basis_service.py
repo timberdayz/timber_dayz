@@ -432,3 +432,25 @@ async def test_upsert_profit_basis_snapshot_ensures_period_before_insert():
     assert getattr(added[1], "period_month") == "2026-04"
     assert getattr(added[1], "shop_id") == "shop-1"
     assert db.commit.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_upsert_profit_basis_snapshot_can_join_outer_settlement_transaction():
+    db = AsyncMock()
+    db.add = lambda _row: None
+    service = ProfitBasisService(db)
+    db.execute = AsyncMock(return_value=_MockMappingsResult([]))
+    payload = {
+        "period_month": "2026-04",
+        "platform_code": "shopee",
+        "shop_id": "shop-1",
+        "orders_profit_amount": 0.0,
+        "a_class_cost_amount": 0.0,
+        "b_class_cost_amount": 0.0,
+        "profit_basis_amount": 0.0,
+        "basis_version": "A_ONLY_V1",
+    }
+
+    await service.upsert_profit_basis_snapshot(payload, commit=False)
+
+    assert db.commit.await_count == 0

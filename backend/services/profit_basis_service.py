@@ -30,7 +30,7 @@ class ProfitBasisService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def ensure_fiscal_period_exists(self, year_month: str) -> None:
+    async def ensure_fiscal_period_exists(self, year_month: str, *, commit: bool = True) -> None:
         existing_period = (
             await self.db.execute(
                 select(DimFiscalCalendar).where(DimFiscalCalendar.period_code == year_month)
@@ -49,7 +49,8 @@ class ProfitBasisService:
             status="open",
         )
         self.db.add(period)
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
 
     async def _load_orders_profit_amount(
         self,
@@ -140,8 +141,13 @@ class ProfitBasisService:
             "basis_version": basis_version,
         }
 
-    async def upsert_profit_basis_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
-        await self.ensure_fiscal_period_exists(payload["period_month"])
+    async def upsert_profit_basis_snapshot(
+        self,
+        payload: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> dict[str, Any]:
+        await self.ensure_fiscal_period_exists(payload["period_month"], commit=commit)
 
         record = (
             await self.db.execute(
@@ -163,7 +169,8 @@ class ProfitBasisService:
             record.b_class_cost_amount = payload["b_class_cost_amount"]
             record.profit_basis_amount = payload["profit_basis_amount"]
 
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return payload
 
     @staticmethod

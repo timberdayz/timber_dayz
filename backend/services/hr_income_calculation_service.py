@@ -11,6 +11,7 @@ Sources:
 
 from __future__ import annotations
 
+import inspect
 from calendar import monthrange
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -96,6 +97,17 @@ class HRIncomeCalculationService:
             if current is None:
                 return None
         return current
+
+    @classmethod
+    def _is_formal_store_performance(cls, details: Dict[str, Any] | None) -> bool:
+        """Only canonical formal results may feed employee income calculations."""
+        summary = cls._score_details_field(details, "summary")
+        return bool(
+            isinstance(summary, dict)
+            and summary.get("calculation_status") == "complete"
+            and summary.get("ranking_pool") == "official"
+            and summary.get("formal_ready") is True
+        )
 
     @staticmethod
     def _normalize_metric_direction(direction: Any) -> str:
@@ -234,11 +246,10 @@ class HRIncomeCalculationService:
         performance_by_shop: Dict[str, Dict[str, float]] = {}
         for row in rows:
             details = getattr(row, "score_details", None) or {}
-            summary_status = self._score_details_field(details, "summary", "status")
             total_score = getattr(row, "total_score", None)
             if total_score is None:
                 continue
-            if summary_status not in (None, "complete"):
+            if not self._is_formal_store_performance(details):
                 continue
             sales_target = self._to_float(
                 self._score_details_field(details, "sales", "target"),
@@ -276,60 +287,55 @@ class HRIncomeCalculationService:
             next_month = period_start.replace(month=period_start.month + 1, day=1)
 
         try:
+            # A failed ORM probe must not roll back pending shop-performance rows
+            # held by the outer monthly settlement transaction.
+            nested_transaction = self.db.begin_nested()
+            if inspect.isawaitable(nested_transaction):
+                # AsyncSession.begin_nested() is synchronous.  This branch keeps
+                # lightweight session doubles usable without changing production
+                # transaction semantics.
+                nested_transaction.close()
+                rows = (
+                    await self.db.execute(
+                        select(AttendanceRecord).where(
+                            AttendanceRecord.employee_code.in_(employee_codes),
+                            AttendanceRecord.attendance_date >= period_start,
+                            AttendanceRecord.attendance_date < next_month,
+                        )
+                    )
+                ).scalars().all()
+            else:
+                async with nested_transaction:
+                    rows = (
+                        await self.db.execute(
+                            select(AttendanceRecord).where(
+                                AttendanceRecord.employee_code.in_(employee_codes),
+                                AttendanceRecord.attendance_date >= period_start,
+                                AttendanceRecord.attendance_date < next_month,
+                            )
+                        )
+                    ).scalars().all()
+        except Exception:
             rows = (
                 await self.db.execute(
-                    select(AttendanceRecord).where(
-                        AttendanceRecord.employee_code.in_(employee_codes),
-                        AttendanceRecord.attendance_date >= period_start,
-                        AttendanceRecord.attendance_date < next_month,
-                    )
+                    text(
+                        """
+                        select
+                          "员工编号" as employee_code,
+                          "状态" as status
+                        from a_class.attendance_records
+                        where "员工编号" = any(:employee_codes)
+                          and "考勤日期" >= :period_start
+                          and "考勤日期" < :next_month
+                        """
+                    ),
+                    {
+                        "employee_codes": employee_codes,
+                        "period_start": period_start,
+                        "next_month": next_month,
+                    },
                 )
-            ).scalars().all()
-        except Exception:
-            await self.db.rollback()
-            try:
-                rows = (
-                    await self.db.execute(
-                        text(
-                            """
-                            select
-                              "员工编号" as employee_code,
-                              "状态" as status
-                            from a_class.attendance_records
-                            where "员工编号" = any(:employee_codes)
-                              and "考勤日期" >= :period_start
-                              and "考勤日期" < :next_month
-                            """
-                        ),
-                        {
-                            "employee_codes": employee_codes,
-                            "period_start": period_start,
-                            "next_month": next_month,
-                        },
-                    )
-                ).mappings().all()
-            except Exception:
-                await self.db.rollback()
-                rows = (
-                    await self.db.execute(
-                        text(
-                            """
-                            select
-                              "员工编号" as employee_code,
-                              "状态" as status
-                            from a_class.attendance_records
-                            where "员工编号" = any(:employee_codes)
-                              and "考勤日期" >= :period_start
-                              and "考勤日期" < :next_month
-                            """
-                        ),
-                        {
-                            "employee_codes": employee_codes,
-                            "period_start": period_start,
-                            "next_month": next_month,
-                        },
-                    )
-                ).mappings().all()
+            ).mappings().all()
 
         adjustment_by_employee: Dict[str, float] = {}
         for row in rows:
@@ -729,4 +735,3 @@ class HRIncomeCalculationService:
             "performance_upserts": performance_upserts,
             "source": "employee_shop_assignments + employee_performance_inputs + performance_scores + shop_profit_basis",
         }
-
