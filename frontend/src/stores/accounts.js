@@ -15,6 +15,7 @@ function normalizeShopAccount(shopAccount) {
     platform_shop_id: shopAccount.platform_shop_id || '',
     platform_shop_id_status: shopAccount.platform_shop_id_status || 'missing',
     capabilities: shopAccount.capabilities || {},
+    business_role: shopAccount.business_role || 'operating_store',
   }
 }
 
@@ -45,12 +46,15 @@ export const useAccountsStore = defineStore('accounts', {
       inactive: 0,
       platforms: 0,
       platform_breakdown: {},
+      operating_store: 0,
+      collection_source: 0,
     },
     loading: false,
     filters: {
       platform: null,
       enabled: null,
       shop_type: null,
+      business_role: null,
       search: '',
     },
   }),
@@ -191,6 +195,7 @@ export const useAccountsStore = defineStore('accounts', {
           platform_shop_id: data.shop_id || null,
           shop_region: data.shop_region,
           shop_type: data.shop_type,
+          business_role: data.business_role,
           capabilities: data.capabilities,
           enabled: data.enabled,
           notes: data.notes,
@@ -224,6 +229,7 @@ export const useAccountsStore = defineStore('accounts', {
           platform_shop_id_status: data.shop_id ? 'manual_confirmed' : current.platform_shop_id_status,
           shop_region: data.shop_region,
           shop_type: data.shop_type,
+          business_role: data.business_role,
           capabilities: data.capabilities,
           enabled: data.enabled,
           notes: data.notes,
@@ -327,6 +333,7 @@ export const useAccountsStore = defineStore('accounts', {
           store_name: shop.store_name,
           shop_region: shop.shop_region,
           shop_type: shop.shop_type || 'local',
+          business_role: batchData.business_role || 'operating_store',
           enabled: true,
         }))
 
@@ -360,6 +367,7 @@ export const useAccountsStore = defineStore('accounts', {
         platform: null,
         enabled: null,
         shop_type: null,
+        business_role: null,
         search: '',
       }
     },

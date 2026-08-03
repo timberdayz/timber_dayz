@@ -76,9 +76,17 @@ export default {
   async getStats() {
     const shopAccounts = await this.listShopAccounts({ include_disabled: true })
     const platformBreakdown = {}
+    const businessRoleBreakdown = {
+      operating_store: 0,
+      collection_source: 0,
+    }
     for (const item of shopAccounts || []) {
       const key = item.platform || 'unknown'
       platformBreakdown[key] = (platformBreakdown[key] || 0) + 1
+      const businessRole = item.business_role || 'operating_store'
+      if (businessRole in businessRoleBreakdown) {
+        businessRoleBreakdown[businessRole] += 1
+      }
     }
     return {
       total: (shopAccounts || []).length,
@@ -86,6 +94,8 @@ export default {
       inactive: (shopAccounts || []).filter((item) => !item.enabled).length,
       platforms: Object.keys(platformBreakdown).length,
       platform_breakdown: platformBreakdown,
+      operating_store: businessRoleBreakdown.operating_store,
+      collection_source: businessRoleBreakdown.collection_source,
     }
   },
 

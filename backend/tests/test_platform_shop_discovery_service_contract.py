@@ -80,3 +80,38 @@ async def test_record_manual_discovery_marks_pending_confirm_when_multiple_candi
     assert result.match.status == "pending_confirm"
     assert result.match.candidate_count == 2
     assert result.discovery.detected_store_name == "HongXi SG"
+
+
+@pytest.mark.asyncio
+async def test_collection_source_is_not_a_shop_candidate(discovery_session):
+    discovery_session.add(
+        MainAccount(
+            platform="miaoshou",
+            main_account_id="miaoshou:main",
+            username="collector",
+            password_encrypted="enc:collector",
+            enabled=True,
+        )
+    )
+    discovery_session.add(
+        ShopAccount(
+            platform="miaoshou",
+            shop_account_id="miaoshou_real_001",
+            main_account_id="miaoshou:main",
+            store_name="妙手采集",
+            enabled=True,
+            business_role="collection_source",
+        )
+    )
+    await discovery_session.commit()
+
+    service = PlatformShopDiscoveryService()
+    candidates = await service._candidate_shop_account_ids(
+        discovery_session,
+        platform="miaoshou",
+        detected_store_name="妙手采集",
+        detected_platform_shop_id=None,
+        detected_region=None,
+    )
+
+    assert candidates == []

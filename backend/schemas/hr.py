@@ -689,6 +689,36 @@ class EmployeeTargetResponse(BaseModel):
         from_attributes = True
 
 
+class EmployeeTargetAllocationShopResponse(BaseModel):
+    platform_code: str
+    shop_id: str
+    shop_name: Optional[str] = None
+    target_allocation_ratio: float
+    target_allocation_ratio_source: str
+    allocation_ratio_total: float
+    has_allocation_risk: bool
+    sales_target: float
+    sales_actual: float
+    sales_achievement_rate: float
+    gross_profit_target: float
+    gross_profit_actual: float
+    gross_profit_achievement_rate: float
+
+
+class EmployeeTargetSummaryResponse(BaseModel):
+    employee_code: str
+    employee_name: Optional[str] = None
+    sales_target: float
+    sales_actual: float
+    sales_achievement_rate: float
+    gross_profit_target: float
+    gross_profit_actual: float
+    gross_profit_achievement_rate: float
+    has_allocation_risk: bool
+    allocation_risk_shops: List[str]
+    shops: List[EmployeeTargetAllocationShopResponse]
+
+
 # ================================================================
 # 绩效与提成查询（只读）
 # ================================================================
@@ -764,6 +794,7 @@ class EmployeeShopAssignmentCreate(BaseModel):
     shop_id: str = Field(..., min_length=1, max_length=256)
     commission_ratio: Optional[float] = Field(None, ge=0, le=1)
     target_allocation_ratio: float = Field(1.0, ge=0, le=1)
+    target_allocation_ratio_source: str = Field("manual", min_length=1, max_length=64)
     role: Optional[str] = Field(None, max_length=32)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
@@ -782,6 +813,7 @@ class EmployeeShopAssignmentUpdate(BaseModel):
 
     commission_ratio: Optional[float] = Field(None, ge=0, le=1)
     target_allocation_ratio: Optional[float] = Field(None, ge=0, le=1)
+    target_allocation_ratio_source: Optional[str] = Field(None, min_length=1, max_length=64)
     role: Optional[str] = Field(None, max_length=32)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None

@@ -78,6 +78,26 @@ async def test_ensure_dim_shop_exists_autosyncs_from_shop_account(hr_shop_assign
     assert loaded.shop_name == "Shop One"
 
 
+@pytest.mark.asyncio
+async def test_ensure_dim_shop_exists_rejects_collection_source(hr_shop_assignment_session):
+    await _seed_shop_account(hr_shop_assignment_session)
+    account = (
+        await hr_shop_assignment_session.execute(
+            select(ShopAccount).where(ShopAccount.shop_account_id == "shop-account-1")
+        )
+    ).scalar_one()
+    account.business_role = "collection_source"
+    await hr_shop_assignment_session.commit()
+
+    shop = await _ensure_dim_shop_exists(
+        hr_shop_assignment_session,
+        platform_code="shopee",
+        shop_id="shop-1",
+    )
+
+    assert shop is None
+
+
 def test_shop_assignment_dialog_role_is_not_disabled():
     source = Path(
         "frontend/src/domains/business/views/hr/ShopAssignment.vue"

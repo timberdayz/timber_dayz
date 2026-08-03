@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from enum import Enum
 from typing import Optional
 
 from sqlalchemy import (
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Enum as SAEnum,
     Float,
     ForeignKey,
     ForeignKeyConstraint,
@@ -28,6 +30,11 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from .base import Base, JSON_COMPAT
+
+
+class ShopAccountBusinessRole(str, Enum):
+    operating_store = "operating_store"
+    collection_source = "collection_source"
 
 class Account(Base):
     """账号管理表"""
@@ -188,6 +195,21 @@ class ShopAccount(Base):
     )
     shop_region = Column(String(50), nullable=True, comment="店铺区域")
     shop_type = Column(String(50), nullable=True, comment="店铺类型")
+    business_role = Column(
+        SAEnum(
+            ShopAccountBusinessRole,
+            name="shop_account_business_role",
+            native_enum=True,
+            schema="core",
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
+        nullable=False,
+        default="operating_store",
+        server_default=text("'operating_store'"),
+        comment="业务身份：经营店铺或采集来源",
+    )
     enabled = Column(Boolean, default=True, nullable=False, comment="是否启用")
     notes = Column(Text, nullable=True, comment="备注")
     extra_config = Column(JSON_COMPAT, nullable=True, default={}, comment="扩展配置")

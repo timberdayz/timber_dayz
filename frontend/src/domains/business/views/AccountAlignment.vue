@@ -389,7 +389,7 @@ async function loadData() {
     const [unmatchedResponse, aliasResponse, shopAccountResponse] = await Promise.all([
       accountsApi.getUnmatchedShopAliases(),
       accountsApi.listShopAccountAliases(),
-      accountsApi.listShopAccounts(),
+      accountsApi.listShopAccounts({ business_role: 'operating_store' }),
     ])
 
     unmatchedStores.value = unmatchedResponse?.items || []

@@ -131,6 +131,18 @@
               </template>
               <template v-else>
                 <span class="person-cell">
+                  <el-input-number
+                    v-if="row._person"
+                    :model-value="((row._person && row._person.target_allocation_ratio) ?? 0) * 100"
+                    @update:model-value="(v) => { if (row._person) { row._person.target_allocation_ratio = v != null ? Number(v) / 100 : 0; row._person.target_allocation_ratio_source = 'manual' } }"
+                    :min="0"
+                    :max="100"
+                    :step="0.01"
+                    :precision="2"
+                    :controls="false"
+                    size="small"
+                    style="width: 92px; margin-right: 6px;"
+                  />
                   {{ (row._person && (row._person.employee_name || row._person.employee_code)) || '' }}
                   <el-tag v-if="row._person" size="small" type="info" style="margin-left: 4px;">
                     {{ row._person.role === 'supervisor' ? '主管' : '操作员' }}
@@ -366,6 +378,21 @@
             <span class="allocatable-rate-suffix">%</span>
           </span>
         </el-form-item>
+        <el-form-item label="目标分配比例" required>
+          <span class="allocatable-rate-wrap">
+            <el-input-number
+              :model-value="(form.target_allocation_ratio ?? 1) * 100"
+              @update:model-value="(v) => { form.target_allocation_ratio = v != null ? Number(v) / 100 : 0 }"
+              :min="0"
+              :max="100"
+              :step="0.01"
+              :precision="2"
+              placeholder="0-100%"
+              style="width: 100%;"
+            />
+            <span class="allocatable-rate-suffix">%</span>
+          </span>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -424,6 +451,8 @@ const form = ref({
   platform_code: '',
   shop_id: '',
   commission_ratio: 0.05,
+  target_allocation_ratio: 1,
+  target_allocation_ratio_source: 'manual',
   role: 'supervisor'
 })
 
@@ -493,7 +522,7 @@ function handleEmployeeChange(employeeCode) {
 }
 
 function resetForm() {
-  form.value = { employee_code: '', platform_code: '', shop_id: '', commission_ratio: 0.05, role: 'operator' }
+  form.value = { employee_code: '', platform_code: '', shop_id: '', commission_ratio: 0.05, target_allocation_ratio: 1, target_allocation_ratio_source: 'manual', role: 'operator' }
   editId.value = null
   isEdit.value = false
   addForShopRow.value = null
@@ -559,7 +588,9 @@ async function handleSaveRow(row) {
       id: p.id,
       employee_code: p.employee_code,
       role: p.role === 'supervisor' ? 'supervisor' : 'operator',
-      commission_ratio: p.commission_ratio ?? 0
+      commission_ratio: p.commission_ratio ?? 0,
+      target_allocation_ratio: p.target_allocation_ratio ?? 1,
+      target_allocation_ratio_source: p.target_allocation_ratio_source || 'manual'
     }))
     const assRes = await api.getHrEmployeeShopAssignments({ year_month: configMonth.value, platform_code: shop.platform_code, shop_id: shop.shop_id, page: 1, page_size: 100 })
     const assData = assRes?.data ?? assRes ?? {}
@@ -568,8 +599,16 @@ async function handleSaveRow(row) {
       const ar = a.role || 'operator'
       const found = targetAssignments.find((t) => t.employee_code === a.employee_code && ((t.role || 'operator') === ar))
       if (found) {
-        if (Math.abs((a.commission_ratio ?? 0) - (found.commission_ratio ?? 0)) > 0.001) {
-          await api.updateHrEmployeeShopAssignment(a.id, { commission_ratio: found.commission_ratio })
+        if (
+          Math.abs((a.commission_ratio ?? 0) - (found.commission_ratio ?? 0)) > 0.001 ||
+          Math.abs((a.target_allocation_ratio ?? 1) - (found.target_allocation_ratio ?? 1)) > 0.001 ||
+          (a.target_allocation_ratio_source || 'manual') !== found.target_allocation_ratio_source
+        ) {
+          await api.updateHrEmployeeShopAssignment(a.id, {
+            commission_ratio: found.commission_ratio,
+            target_allocation_ratio: found.target_allocation_ratio,
+            target_allocation_ratio_source: found.target_allocation_ratio_source
+          })
         }
       } else {
         await api.deleteHrEmployeeShopAssignment(a.id)
@@ -579,7 +618,7 @@ async function handleSaveRow(row) {
       const pr = p.role || 'operator'
       const exists = items.find((a) => a.employee_code === p.employee_code && ((a.role || 'operator') === pr))
       if (!exists) {
-        await api.createHrEmployeeShopAssignment({ year_month: configMonth.value, employee_code: p.employee_code, platform_code: shop.platform_code, shop_id: shop.shop_id, commission_ratio: p.commission_ratio, role: p.role })
+        await api.createHrEmployeeShopAssignment({ year_month: configMonth.value, employee_code: p.employee_code, platform_code: shop.platform_code, shop_id: shop.shop_id, commission_ratio: p.commission_ratio, target_allocation_ratio: p.target_allocation_ratio, target_allocation_ratio_source: p.target_allocation_ratio_source, role: p.role })
       }
     }
     // 保存可分配利润率
@@ -747,7 +786,9 @@ async function loadConfigData() {
         employee_code: a.employee_code,
         employee_name: a.employee_name,
         role: a.role === 'supervisor' ? 'supervisor' : 'operator',
-        commission_ratio: a.commission_ratio ?? 0
+        commission_ratio: a.commission_ratio ?? 0,
+        target_allocation_ratio: a.target_allocation_ratio ?? 1,
+        target_allocation_ratio_source: a.target_allocation_ratio_source || 'manual'
       }
       byShop[key].assignments.push(p)
     }
@@ -826,7 +867,9 @@ async function submitForm() {
       employee_code: form.value.employee_code,
       employee_name: emp?.name,
       role: form.value.role || 'operator',
-      commission_ratio: form.value.commission_ratio ?? 0
+      commission_ratio: form.value.commission_ratio ?? 0,
+      target_allocation_ratio: form.value.target_allocation_ratio ?? 1,
+      target_allocation_ratio_source: form.value.target_allocation_ratio_source || 'manual'
     }
     if ((shop.assignments || []).some((x) => x.employee_code === p.employee_code && x.role === p.role)) {
       ElMessage.warning('该人员已添加')
@@ -848,6 +891,8 @@ async function submitForm() {
         platform_code: form.value.platform_code,
         shop_id: form.value.shop_id,
         commission_ratio: form.value.commission_ratio ?? 0,
+        target_allocation_ratio: form.value.target_allocation_ratio ?? 1,
+        target_allocation_ratio_source: form.value.target_allocation_ratio_source,
         role: form.value.role || 'operator'
       })
       ElMessage.success('已新增')

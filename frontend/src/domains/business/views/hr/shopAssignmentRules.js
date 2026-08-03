@@ -5,6 +5,14 @@ export function sumCommissionRatio(assignments = []) {
   }, 0)
 }
 
+export function summarizeTargetAllocationRisk(assignments = []) {
+  const total = assignments.reduce((sum, assignment) => {
+    const value = Number(assignment?.target_allocation_ratio ?? 0)
+    return sum + (Number.isFinite(value) ? value : 0)
+  }, 0)
+  return { total, hasRisk: Math.abs(total - 1) > 1e-9 }
+}
+
 export function exceedsCommissionRatioLimit(assignments = [], nextRatio = 0, excludePredicate = null) {
   const filteredAssignments = typeof excludePredicate === 'function'
     ? assignments.filter((assignment) => !excludePredicate(assignment))

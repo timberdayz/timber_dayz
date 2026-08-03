@@ -116,3 +116,38 @@ def test_shop_account_loader_service_exposes_region_and_contact_fields_for_runti
     assert payload["compat_account"]["shop_region"] == "SG"
     assert payload["compat_account"]["email"] == "demo@example.com"
     assert payload["compat_account"]["phone"] == "+6588889999"
+
+
+def test_account_loader_keeps_collection_source_accounts_loadable():
+    from backend.services.account_loader_service import AccountLoaderService
+
+    service = AccountLoaderService()
+    service._decrypt_password = lambda encrypted: "plain-password"
+
+    payload = service._build_account_dict(
+        SimpleNamespace(
+            platform="miaoshou",
+            main_account_id="miaoshou:main",
+            username="demo-user",
+            password_encrypted="enc",
+            login_url="https://example.test/login",
+        ),
+        SimpleNamespace(
+            platform="miaoshou",
+            shop_account_id="miaoshou_collection_source",
+            main_account_id="miaoshou:main",
+            store_name="Collection Source",
+            platform_shop_id="",
+            shop_region="CN",
+            shop_type="local",
+            business_role="collection_source",
+            enabled=True,
+            notes="",
+            extra_config={},
+        ),
+        {"orders": True},
+    )
+
+    assert payload is not None
+    assert payload["account_id"] == "miaoshou_collection_source"
+    assert payload["capabilities"] == {"orders": True}

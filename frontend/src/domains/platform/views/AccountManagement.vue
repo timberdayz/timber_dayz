@@ -66,6 +66,16 @@
           </el-statistic>
         </el-card>
       </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover" data-testid="business-role-operating-store">
+          <el-statistic title="经营店铺账号" :value="accountsStore.stats.operating_store" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover" data-testid="business-role-collection-source">
+          <el-statistic title="采集账号" :value="accountsStore.stats.collection_source" />
+        </el-card>
+      </el-col>
     </el-row>
 
     <!-- 操作工具栏 -->
@@ -96,6 +106,12 @@
           <el-select v-model="filters.shop_type" placeholder="店铺类型" clearable @change="handleFilterChange">
             <el-option label="本地店" value="local" />
             <el-option label="全球店" value="global" />
+          </el-select>
+        </el-col>
+        <el-col :span="4">
+          <el-select v-model="filters.business_role" placeholder="业务身份" clearable @change="handleFilterChange">
+            <el-option label="经营店铺" value="operating_store" />
+            <el-option label="采集账号" value="collection_source" />
           </el-select>
         </el-col>
         <el-col :span="6">
@@ -320,6 +336,12 @@
           >
             <el-table-column prop="store_name" label="店铺名称" min-width="220" show-overflow-tooltip />
             <el-table-column prop="account_id" label="店铺账号ID" min-width="180" show-overflow-tooltip />
+            <el-table-column label="业务身份" width="120">
+              <template #default="{ row }">
+                <el-tag v-if="row.business_role === 'collection_source'" type="warning" size="small">采集账号</el-tag>
+                <el-tag v-else type="success" size="small">经营店铺</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="account_alias" label="店铺别名" min-width="160" show-overflow-tooltip>
               <template #default="{ row }">
                 <span v-if="row.account_alias">{{ row.account_alias }}</span>
@@ -431,6 +453,12 @@
               </el-radio-group>
             </el-form-item>
             
+            <el-form-item label="业务身份">
+              <el-radio-group v-model="accountForm.business_role">
+                <el-radio label="operating_store">经营店铺</el-radio>
+                <el-radio label="collection_source">采集账号</el-radio>
+              </el-radio-group>
+            </el-form-item>
             <el-form-item label="店铺区域">
               <el-input v-model="accountForm.shop_region" placeholder="如：SG, MY, GLOBAL" />
               <div class="form-tip">新加坡: SG, 马来西亚: MY, 全球: GLOBAL</div>
@@ -548,6 +576,13 @@
             <el-option label="Shopee" value="shopee" />
             <el-option label="TikTok" value="tiktok" />
           </el-select>
+        </el-form-item>
+
+        <el-form-item label="业务身份">
+          <el-radio-group v-model="batchForm.business_role">
+            <el-radio label="operating_store">经营店铺</el-radio>
+            <el-radio label="collection_source">采集账号</el-radio>
+          </el-radio-group>
         </el-form-item>
         
         <el-form-item label="用户名" required>
@@ -676,6 +711,7 @@ const filters = reactive({
   enabled: null,
   include_disabled: false,
   shop_type: null,
+  business_role: null,
   search: ''
 })
 
@@ -706,6 +742,7 @@ const accountForm = reactive({
   account_alias: '',
   store_name: '',
   shop_type: 'local',
+  business_role: 'operating_store',
   shop_region: '',
   shop_id: '',  // ⭐ v4.18.1新增
   username: '',
@@ -743,6 +780,7 @@ const batchForm = reactive({
   platform: 'shopee',
   username: '',
   password: '',
+  business_role: 'operating_store',
   shops: [
     { store_name: '', shop_type: 'local', shop_region: 'SG' }
   ]
@@ -901,6 +939,7 @@ function resetBatchForm() {
     platform: 'shopee',
     username: '',
     password: '',
+    business_role: 'operating_store',
     shops: [{ store_name: '', shop_type: 'local', shop_region: 'SG' }],
   })
 }
@@ -1000,6 +1039,7 @@ function handleEdit(account) {
     account_alias: account.account_alias || '',
     store_name: account.store_name,
     shop_type: account.shop_type || 'local',
+    business_role: account.business_role || 'operating_store',
     shop_region: account.shop_region || '',
     shop_id: account.shop_id || '',  // ⭐ v4.18.1新增
     username: mainAccount?.username || account.username || '',
@@ -1066,6 +1106,7 @@ function resetForm() {
     account_alias: '',
     store_name: '',
     shop_type: 'local',
+    business_role: 'operating_store',
     shop_region: '',
     shop_id: '',  // ⭐ v4.18.1新增
     username: '',

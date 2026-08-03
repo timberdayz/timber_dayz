@@ -132,6 +132,7 @@ async def _ensure_dim_shop_exists(
             select(ShopAccount).where(
                 func.lower(ShopAccount.platform) == normalized_platform_code,
                 ShopAccount.enabled == True,
+                ShopAccount.business_role == "operating_store",
                 or_(
                     ShopAccount.platform_shop_id == normalized_shop_id,
                     ShopAccount.shop_account_id == normalized_shop_id,
@@ -1146,7 +1147,7 @@ async def create_employee_shop_assignment(
             shop_id=body.shop_id,
             commission_ratio=body.commission_ratio,
             target_allocation_ratio=body.target_allocation_ratio,
-            target_allocation_ratio_source="manual",
+            target_allocation_ratio_source=body.target_allocation_ratio_source,
             role=body.role,
             effective_from=body.effective_from,
             effective_to=body.effective_to,
@@ -1196,9 +1197,13 @@ async def update_employee_shop_assignment(
         )
         if validation_error:
             return error_response(ErrorCode.DATA_VALIDATION_FAILED, validation_error, status_code=400)
-        for k, v in body.model_dump(exclude_unset=True).items():
+        update_data = body.model_dump(exclude_unset=True)
+        for k, v in update_data.items():
             setattr(rec, k, v)
-        if "target_allocation_ratio" in body.model_dump(exclude_unset=True):
+        if (
+            "target_allocation_ratio" in update_data
+            and "target_allocation_ratio_source" not in update_data
+        ):
             rec.target_allocation_ratio_source = "manual"
         await db.commit()
         await db.refresh(rec)
