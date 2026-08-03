@@ -12,18 +12,18 @@ class PerformanceConfigCreateRequest(BaseModel):
     """创建绩效配置请求"""
 
     config_name: str = Field("default", description="配置名称")
-    sales_weight: int = Field(30, ge=0, le=100, description="销售额权重(%)")
-    profit_weight: int = Field(25, ge=0, le=100, description="毛利权重(%)")
+    sales_weight: int = Field(40, ge=0, le=100, description="销售额权重(%)")
+    profit_weight: int = Field(40, ge=0, le=100, description="毛利权重(%)")
     key_product_weight: int = Field(
-        25, ge=0, le=100, description="重点产品权重(%)"
+        0, ge=0, le=100, description="重点产品权重(%)，当前暂不启用"
     )
     operation_weight: int = Field(20, ge=0, le=100, description="运营权重(%)")
     sales_max_score: int = Field(
-        30, ge=0, le=100, description="销售额满分(达成率>100%得满分)"
+        40, ge=0, le=100, description="销售额满分(达成率>100%得满分)"
     )
-    profit_max_score: int = Field(25, ge=0, le=100, description="毛利满分")
+    profit_max_score: int = Field(40, ge=0, le=100, description="毛利满分")
     key_product_max_score: int = Field(
-        25, ge=0, le=100, description="重点产品满分"
+        0, ge=0, le=100, description="重点产品满分，当前暂不启用"
     )
     operation_max_score: int = Field(20, ge=0, le=100, description="运营满分")
     effective_from: date = Field(..., description="生效开始日期")
@@ -56,9 +56,9 @@ class PerformanceConfigResponse(BaseModel):
     profit_weight: int
     key_product_weight: int
     operation_weight: int
-    sales_max_score: int = 30
-    profit_max_score: int = 25
-    key_product_max_score: int = 25
+    sales_max_score: int = 40
+    profit_max_score: int = 40
+    key_product_max_score: int = 0
     operation_max_score: int = 20
     is_active: bool
     effective_from: date

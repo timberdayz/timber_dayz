@@ -38,7 +38,7 @@
       <el-select v-if="filters.groupBy === 'shop'" v-model="poolFilter" size="default" style="width: 120px;" @change="() => {}">
         <el-option label="全部池" value="all" />
         <el-option label="正式池" value="official" />
-        <el-option label="观察池" value="observation" />
+        <el-option label="非正式（历史兼容）" value="observation" />
       </el-select>
       <el-select v-if="filters.groupBy === 'shop'" v-model="alertFilter" size="default" style="width: 130px;" @change="() => {}">
         <el-option label="全部预警" value="all" />
@@ -71,7 +71,7 @@
       <div class="policy-grid">
         <div class="policy-item">
           <div class="policy-label">赛马池</div>
-          <div class="policy-text">正式池参与公司总榜赛马并生成系数；观察池仅展示绩效，不参与正式奖惩。</div>
+          <div class="policy-text">月度数据完整的经营店铺进入统一正式排名；经营天数只显示覆盖风险，不作为 15 天门槛。</div>
         </div>
         <div class="policy-item">
           <div class="policy-label">预警规则</div>
@@ -620,23 +620,23 @@ const adjustmentList = reactive({
 
 // 配置表单
 const configForm = reactive({
-  sales_weight: 30,
-  profit_weight: 25,
-  key_product_weight: 25,
+  sales_weight: 40,
+  profit_weight: 40,
+  key_product_weight: 0,
   operation_weight: 20,
-  sales_max_score: 30,
-  profit_max_score: 25,
-  key_product_max_score: 25,
+  sales_max_score: 40,
+  profit_max_score: 40,
+  key_product_max_score: 0,
   operation_max_score: 20
 })
 const weightConfig = reactive({
-  sales_weight: 30,
-  profit_weight: 25,
-  key_product_weight: 25,
+  sales_weight: 40,
+  profit_weight: 40,
+  key_product_weight: 0,
   operation_weight: 20,
-  sales_max_score: 30,
-  profit_max_score: 25,
-  key_product_max_score: 25,
+  sales_max_score: 40,
+  profit_max_score: 40,
+  key_product_max_score: 0,
   operation_max_score: 20
 })
 const inputForm = reactive({
@@ -674,7 +674,7 @@ const formulaText = computed(() => {
   if (filters.groupBy === 'person') {
     return '个人绩效输入项得分 + 个人调整项 + 考勤扣分；无输入项时才回退至店铺汇总绩效'
   }
-  return `销售额满分${weightConfig.sales_max_score} + 毛利满分${weightConfig.profit_max_score} + 店铺运营满分${weightConfig.operation_max_score}`
+  return `销售满分${weightConfig.sales_max_score} + 毛利满分${weightConfig.profit_max_score} + 运营满分${weightConfig.operation_max_score} = 100 分；重点产品暂不计分`
 })
 
 const currentGroupPolicyText = computed(() => {
@@ -749,7 +749,7 @@ function metricMessageText(metric) {
 function rankingPoolText(row) {
   const status = row?.score_details?.summary?.ranking_pool
   if (status === 'official') return '正式池'
-  if (status === 'observation') return '观察池'
+  if (status === 'observation') return '非正式（历史兼容）'
   return '—'
 }
 
@@ -1253,13 +1253,13 @@ const handleConfig = async () => {
   const response = await api.getPerformanceConfigs({ is_active: true, page: 1, page_size: 1 })
   const setForm = (config) => {
     currentConfigId.value = config.id || null
-    configForm.sales_weight = config.sales_weight ?? 30
-    configForm.profit_weight = config.profit_weight ?? 25
-    configForm.key_product_weight = config.key_product_weight ?? 25
+    configForm.sales_weight = config.sales_weight ?? 40
+    configForm.profit_weight = config.profit_weight ?? 40
+    configForm.key_product_weight = config.key_product_weight ?? 0
     configForm.operation_weight = config.operation_weight ?? 20
-    configForm.sales_max_score = config.sales_max_score ?? 30
-    configForm.profit_max_score = config.profit_max_score ?? 25
-    configForm.key_product_max_score = config.key_product_max_score ?? 25
+    configForm.sales_max_score = config.sales_max_score ?? 40
+    configForm.profit_max_score = config.profit_max_score ?? 40
+    configForm.key_product_max_score = config.key_product_max_score ?? 0
     configForm.operation_max_score = config.operation_max_score ?? 20
   }
   const currentConfig = extractPerformanceConfigRow(response)
@@ -1409,4 +1409,3 @@ onMounted(async () => {
   text-overflow: ellipsis;
 }
 </style>
-

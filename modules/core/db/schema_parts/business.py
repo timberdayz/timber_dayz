@@ -1635,14 +1635,14 @@ class PerformanceConfig(Base):
     config_name = Column(String(64), nullable=False, default="default", comment="配置名称")
     
     # 权重配置(百分比,总和必须为100)
-    sales_weight = Column(Integer, nullable=False, default=30, comment="销售额权重(%)")
-    profit_weight = Column(Integer, nullable=False, default=25, comment="毛利权重(%)")
-    key_product_weight = Column(Integer, nullable=False, default=25, comment="重点产品权重(%)")
+    sales_weight = Column(Integer, nullable=False, default=40, comment="销售额权重(%)")
+    profit_weight = Column(Integer, nullable=False, default=40, comment="毛利权重(%)")
+    key_product_weight = Column(Integer, nullable=False, default=0, comment="重点产品权重(%)，当前暂不启用")
     operation_weight = Column(Integer, nullable=False, default=20, comment="运营权重(%)")
     # 得分比例配置(达成率>100%得满分,<=100%得达成率*满分)
-    sales_max_score = Column(Integer, nullable=False, default=30, comment="销售额满分")
-    profit_max_score = Column(Integer, nullable=False, default=25, comment="毛利满分")
-    key_product_max_score = Column(Integer, nullable=False, default=25, comment="重点产品满分")
+    sales_max_score = Column(Integer, nullable=False, default=40, comment="销售额满分")
+    profit_max_score = Column(Integer, nullable=False, default=40, comment="毛利满分")
+    key_product_max_score = Column(Integer, nullable=False, default=0, comment="重点产品满分，当前暂不启用")
     operation_max_score = Column(Integer, nullable=False, default=20, comment="运营满分")
     
     # 生效时间

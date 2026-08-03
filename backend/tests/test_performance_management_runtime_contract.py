@@ -286,8 +286,8 @@ def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
 def _config():
     return SimpleNamespace(
         id=1,
-        sales_max_score=30,
-        profit_max_score=25,
+        sales_max_score=40,
+        profit_max_score=40,
         key_product_max_score=999,
         operation_max_score=20,
     )
@@ -451,11 +451,11 @@ def test_current_shop_formula_ignores_legacy_key_product_fields(monkeypatch):
 
     assert _json_body(resp)["success"] is True
     created = next(item for item in db.added if isinstance(item, PerformanceScore))
-    assert created.sales_score == 30
-    assert created.profit_score == 25
+    assert created.sales_score == 40
+    assert created.profit_score == 40
     assert created.operation_score == 20
     assert created.key_product_score == 0
-    assert created.total_score == 75
+    assert created.total_score == 100
     assert created.score_details["key_product"]["status"] == "not_in_scope"
     assert "key_product" not in created.score_details["summary"]["ready_dimensions"]
 

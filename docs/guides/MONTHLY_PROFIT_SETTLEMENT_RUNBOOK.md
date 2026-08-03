@@ -1,6 +1,6 @@
 ﻿# Monthly Profit Settlement Runbook
 
-> 涉及店铺赛马、观察池、黄牌/红牌、淘汰评估与挂店人提成继承口径时，请优先参见 `docs/guides/PERFORMANCE_RACING_POLICY.md`。
+> 涉及店铺赛马、黄牌/红牌、淘汰评估与挂店人提成继承口径时，请优先参见 `docs/guides/PERFORMANCE_RACING_POLICY.md`。历史“观察池”结果仅作兼容展示。
 
 ## 1. 目的
 
@@ -352,7 +352,7 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 - 月结中心继续只汇总上游结果，不重新定义绩效赛马规则。
 - 当前上游绩效已引入全公司店铺赛马机制，月结读取到的人员提成金额已经包含赛马奖惩结果。
 - 当前赛马补充规则如下：
-  - 经营天数少于 15 天的店铺进入观察池，不参与正式排名系数。
+  - 经营天数少于 15 天只生成数据覆盖风险提示，不影响正式排名系数；月度数据完整性决定正式资格。
   - 正式赛马池中的店铺会按公司总榜排名生成绩效系数，并叠加绝对分数底线。
   - 绩效低于 70 分生成黄牌预警。
   - 绩效低于 60 分生成红牌预警。
@@ -418,4 +418,3 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 - 月结 `approved` 后，`/api/hr/me/income` 读取 `payroll_snapshot`
 - 月结 `reopen` 后，`/api/hr/me/income` 回退为 `payroll_record`
 - 再次 `rebuild -> approve` 后，会生成新的 active snapshot，并保留 superseded 历史版本
-
