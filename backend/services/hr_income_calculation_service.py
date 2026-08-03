@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -31,6 +31,7 @@ from modules.core.db import (
     SalaryStructure,
     ShopCommissionConfig,
     ShopProfitBasis,
+    ShopAccount,
 )
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
@@ -485,6 +486,18 @@ class HRIncomeCalculationService:
         assignment_rows = (
             await self.db.execute(
                 select(EmployeeShopAssignment)
+                .join(
+                    ShopAccount,
+                    and_(
+                        func.lower(ShopAccount.platform) == func.lower(EmployeeShopAssignment.platform_code),
+                        ShopAccount.enabled == True,
+                        ShopAccount.business_role == "operating_store",
+                        or_(
+                            ShopAccount.platform_shop_id == EmployeeShopAssignment.shop_id,
+                            ShopAccount.shop_account_id == EmployeeShopAssignment.shop_id,
+                        ),
+                    ),
+                )
                 .where(EmployeeShopAssignment.status == "active")
                 .where(EmployeeShopAssignment.year_month == year_month)
             )

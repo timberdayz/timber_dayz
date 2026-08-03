@@ -54,6 +54,7 @@ class PlatformShopDiscoveryService:
                     func.lower(ShopAccount.platform) == platform.lower(),
                     ShopAccount.platform_shop_id == detected_platform_shop_id,
                     ShopAccount.enabled == True,
+                    ShopAccount.business_role == "operating_store",
                 )
             )
             candidates.extend(result.scalars().all())
@@ -68,6 +69,7 @@ class PlatformShopDiscoveryService:
                     ShopAccountAlias.alias_normalized == normalized_alias,
                     ShopAccountAlias.is_active == True,
                     ShopAccount.enabled == True,
+                    ShopAccount.business_role == "operating_store",
                 )
             )
             candidates.extend(alias_result.scalars().all())
@@ -76,6 +78,7 @@ class PlatformShopDiscoveryService:
                 func.lower(ShopAccount.platform) == platform.lower(),
                 ShopAccount.store_name == detected_store_name,
                 ShopAccount.enabled == True,
+                ShopAccount.business_role == "operating_store",
             )
             if detected_region:
                 shop_stmt = shop_stmt.where(ShopAccount.shop_region == detected_region)

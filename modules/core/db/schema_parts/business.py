@@ -2308,6 +2308,8 @@ class EmployeeShopAssignment(Base):
     shop_id = Column(String(256), nullable=False)  # 店铺ID
     
     commission_ratio = Column(Float, nullable=True)  # 提成比例(0-1)，NULL时使用薪资结构默认
+    target_allocation_ratio = Column(Float, nullable=False, default=1.0, server_default="1.0")  # 目标分配比例(0-1)
+    target_allocation_ratio_source = Column(String(64), nullable=False, default="manual", server_default="manual")
     role = Column(String(32), nullable=True)  # 角色：supervisor/operator
     effective_from = Column(Date, nullable=True)  # 保留，可选
     effective_to = Column(Date, nullable=True)  # 保留，可选
@@ -3248,4 +3250,3 @@ class SystemConfig(Base):
         Index('ix_system_config_key', 'config_key'),  # 索引
         ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_system_config_updated_by'),
     )
-

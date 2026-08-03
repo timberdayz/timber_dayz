@@ -17,7 +17,13 @@ from backend.schemas.shop_account import (
 from backend.services.cache_service import get_cache_service
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 from backend.utils.text_normalization import normalize_alias_text
-from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
+from modules.core.db import (
+    MainAccount,
+    ShopAccount,
+    ShopAccountAlias,
+    ShopAccountBusinessRole,
+    ShopAccountCapability,
+)
 from modules.core.logger import get_logger
 
 
@@ -139,6 +145,7 @@ async def _serialize_shop_account(
         platform_shop_id_status=record.platform_shop_id_status,
         shop_region=record.shop_region,
         shop_type=record.shop_type,
+        business_role=record.business_role,
         enabled=record.enabled,
         notes=record.notes,
         created_at=record.created_at,
@@ -240,6 +247,7 @@ async def _enqueue_shop_identity_refresh(
 async def list_shop_accounts(
     platform: Optional[str] = Query(None),
     main_account_id: Optional[str] = Query(None),
+    business_role: Optional[ShopAccountBusinessRole] = Query(None),
     enabled: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -248,6 +256,8 @@ async def list_shop_accounts(
         stmt = stmt.where(ShopAccount.platform == platform)
     if main_account_id:
         stmt = stmt.where(ShopAccount.main_account_id == main_account_id)
+    if business_role is not None:
+        stmt = stmt.where(ShopAccount.business_role == business_role)
     if enabled is not None:
         stmt = stmt.where(ShopAccount.enabled == enabled)
     result = await db.execute(stmt)
@@ -284,6 +294,7 @@ async def create_shop_account(
         platform_shop_id_status="manual_confirmed" if payload.platform_shop_id else "missing",
         shop_region=payload.shop_region,
         shop_type=payload.shop_type,
+        business_role=payload.business_role,
         enabled=payload.enabled,
         notes=payload.notes,
         created_by="system",
@@ -327,6 +338,7 @@ async def batch_create_shop_accounts(
             platform_shop_id_status="manual_confirmed" if payload.platform_shop_id else "missing",
             shop_region=payload.shop_region,
             shop_type=payload.shop_type,
+            business_role=payload.business_role,
             enabled=payload.enabled,
             notes=payload.notes,
             created_by="system",
@@ -355,6 +367,7 @@ async def update_shop_account(
 ):
     record = await _get_shop_account_or_404(db, shop_account_id)
     update_data = payload.model_dump(exclude_unset=True)
+    capabilities_submitted = "capabilities" in update_data
     capabilities = update_data.pop("capabilities", None)
     if "platform_shop_id" in update_data:
         await _assert_platform_shop_id_unique(
@@ -365,12 +378,13 @@ async def update_shop_account(
         )
     for field, value in update_data.items():
         setattr(record, field, value)
-    await _ensure_capability_rows(
-        db,
-        record,
-        shop_type=update_data.get("shop_type", record.shop_type),
-        capabilities=capabilities,
-    )
+    if capabilities_submitted or "shop_type" in update_data:
+        await _ensure_capability_rows(
+            db,
+            record,
+            shop_type=update_data.get("shop_type", record.shop_type),
+            capabilities=capabilities,
+        )
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = "system"
     try:

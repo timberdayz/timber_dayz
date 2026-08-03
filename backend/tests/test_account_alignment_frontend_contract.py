@@ -9,8 +9,17 @@ def test_account_alignment_view_uses_current_alias_workflow():
 
     assert "accountsApi.getUnmatchedShopAliases()" in text
     assert "accountsApi.claimShopAccountAlias({" in text
-    assert "accountsApi.listShopAccounts()" in text
+    assert "accountsApi.listShopAccounts({ business_role: 'operating_store' })" in text
     assert "accountsApi.listShopAccountAliases()" in text
+
+
+def test_account_alignment_candidates_request_only_operating_store_accounts():
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "frontend/src/domains/business/views/AccountAlignment.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "accountsApi.listShopAccounts({ business_role: 'operating_store' })" in text
 
 
 def test_account_alignment_view_no_longer_depends_on_legacy_account_alignment_endpoints():

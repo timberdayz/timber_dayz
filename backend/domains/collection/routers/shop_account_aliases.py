@@ -15,7 +15,7 @@ from backend.schemas.shop_account_alias import ShopAccountAliasCreate, ShopAccou
 from backend.services.cache_service import get_cache_service
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 from backend.utils.text_normalization import normalize_alias_key, normalize_alias_text
-from modules.core.db import ShopAccount, ShopAccountAlias
+from modules.core.db import ShopAccount, ShopAccountAlias, ShopAccountBusinessRole
 from modules.core.logger import get_logger
 
 
@@ -274,6 +274,11 @@ async def claim_shop_account_alias(
     db: AsyncSession = Depends(get_async_db),
 ):
     shop_account = await _get_shop_account_or_404(db, payload.shop_account_id)
+    if shop_account.business_role == ShopAccountBusinessRole.collection_source:
+        raise HTTPException(
+            status_code=422,
+            detail="collection_source shop accounts cannot claim aliases",
+        )
 
     alias_value = normalize_alias_text(payload.alias_value)
     if not alias_value:

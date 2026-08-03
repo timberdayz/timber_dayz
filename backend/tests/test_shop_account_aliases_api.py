@@ -127,6 +127,44 @@ async def test_claim_unmatched_alias_binds_to_shop_account(alias_client):
 
 
 @pytest.mark.asyncio
+async def test_claim_alias_rejects_collection_source_shop_account(alias_client):
+    await alias_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "hongxikeji:collection-main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    create_shop = await alias_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_collection_source",
+            "main_account_id": "hongxikeji:collection-main",
+            "store_name": "Collection Source",
+            "business_role": "collection_source",
+            "enabled": True,
+        },
+    )
+    assert create_shop.status_code == 200
+
+    response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": "Collection Source Raw",
+            "shop_account_id": "shopee_collection_source",
+        },
+    )
+
+    assert response.status_code in {400, 422}
+    assert "collection_source" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_claim_alias_repairs_mojibake_value(alias_client):
     await _seed_shop_account(alias_client)
     expected = "\u0033\u0043\u5e97"

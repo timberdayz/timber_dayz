@@ -103,9 +103,6 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         def scalar_one_or_none(self):
             return self._rows[0] if self._rows else None
 
-        def scalar_one_or_none(self):
-            return self._rows[0] if self._rows else None
-
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
@@ -124,6 +121,8 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         execute_calls["n"] += 1
         if execute_calls["n"] == 1:
             return _ScalarOneResult(config)
+        if execute_calls["n"] == 7:
+            return _ScalarsResult([("shopee", "shop-1")])
         return _ScalarsResult([])
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -301,6 +300,8 @@ def test_calculate_rolls_back_when_payroll_generation_fails(monkeypatch):
         execute_calls["n"] += 1
         if execute_calls["n"] == 1:
             return _ScalarOneResult(config)
+        if execute_calls["n"] == 7:
+            return _ScalarsResult([("shopee", "shop-1")])
         return _ScalarsResult([])
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -444,7 +445,9 @@ def test_calculate_uses_operation_target_achieved_value(monkeypatch):
         if n == 4:
             return _ScalarOneResult(None)
         if n == 5:
-            return _ScalarsResult([])
+            return _ScalarOneResult(None)
+        if n == 6:
+            return _ScalarsResult([("shopee", "shop-1")])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -627,7 +630,9 @@ def test_calculate_skips_invalid_unknown_shop_ids(monkeypatch):
         if n == 4:
             return _ScalarOneResult(None)
         if n == 5:
-            return _ScalarsResult([])
+            return _ScalarOneResult(None)
+        if n == 6:
+            return _ScalarsResult([("shopee", "shop-1")])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -815,7 +820,9 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
         if n == 4:
             return _ScalarOneResult(None)
         if n == 5:
-            return _ScalarsResult([])
+            return _ScalarOneResult(None)
+        if n == 6:
+            return _ScalarsResult([("shopee", "shop-1")])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -1037,7 +1044,7 @@ def test_list_scores_shop_hides_pending_dimensions_from_partial_results():
     assert row["performance_coefficient"] is None
 
 
-def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
+def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_zero(monkeypatch):
     class _ScalarOneResult:
         def __init__(self, value):
             self._value = value
@@ -1075,7 +1082,7 @@ def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
         platform_code="shopee",
         shop_id="shop-1",
         target_amount=1000.0,
-        achieved_amount=800.0,
+        achieved_amount=0.0,
         target_profit_amount=500.0,
         achieved_profit_amount=200.0,
     )
@@ -1095,6 +1102,8 @@ def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
             return _ScalarOneResult(None)
         if n == 5:
             return _ScalarsResult([])
+        if n == 6:
+            return _ScalarsResult([("shopee", "shop-1")])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -1246,9 +1255,7 @@ def test_calculate_profit_score_allocates_parent_profit_target_when_breakdown_pr
         if n == 5:
             return _ScalarsResult([])
         if n == 6:
-            return _ScalarOneResult(None)
-        if n == 7:
-            return _ScalarsResult([])
+            return _ScalarsResult([("shopee", "shop-1")])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -1429,7 +1436,9 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
         if n == 5:
             return _ScalarOneResult(None)
         if n == 6:
-            return _ScalarsResult([])
+            return _ScalarOneResult(None)
+        if n == 7:
+            return _ScalarsResult([("shopee", "shop-1")])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -1556,6 +1565,10 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
             return _ScalarsResult([])
         if n == 4:
             return _ScalarOneResult(None)
+        if n == 5:
+            return _ScalarOneResult(None)
+        if n == 6:
+            return _ScalarsResult([("shopee", "shop-1")])
         raise AssertionError(f"unexpected execute call #{n}")
 
     db.execute = AsyncMock(side_effect=_execute)
@@ -2045,7 +2058,3 @@ def test_my_income_prefers_payroll_snapshot_for_approved_month(monkeypatch):
     assert resp.breakdown.payroll.status == "approved"
     assert resp.breakdown.payroll.remark == "snapshot"
     assert called["count"] == 1
-
-
-
-

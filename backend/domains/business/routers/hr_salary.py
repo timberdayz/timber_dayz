@@ -18,6 +18,7 @@ from backend.models.database import get_async_db
 from backend.schemas.hr import (
     EmployeeTargetCreate,
     EmployeeTargetResponse,
+    EmployeeTargetSummaryResponse,
     EmployeeTargetUpdate,
     PayrollRecordManualUpdate,
     PayrollRecordResponse,
@@ -27,6 +28,10 @@ from backend.schemas.hr import (
 )
 from backend.services.audit_service import audit_service
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
+from backend.services.employee_target_allocation_service import (
+    EmployeeTargetAllocationService,
+    build_employee_target_summary,
+)
 from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
@@ -566,6 +571,25 @@ async def list_employee_targets(
     except Exception as e:
         logger.error("获取员工目标列表失败: %s", e, exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工目标列表失败: {str(e)}", status_code=500)
+
+
+@router.get("/employee-target-summary", response_model=List[EmployeeTargetSummaryResponse])
+async def list_employee_target_summary(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    employee_code: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """按店铺目标和目标分配比例汇总个人销售/毛利目标，不参与绩效或工资计算。"""
+    try:
+        return await EmployeeTargetAllocationService(db).list_summaries(
+            year_month=year_month,
+            employee_code=employee_code,
+        )
+    except ValueError:
+        return error_response(ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400)
+    except Exception as e:
+        logger.error("获取个人目标汇总失败: %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人目标汇总失败: {str(e)}", status_code=500)
 
 
 @router.post("/employee-targets", response_model=EmployeeTargetResponse, status_code=201)

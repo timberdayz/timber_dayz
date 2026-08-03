@@ -352,3 +352,120 @@ async def test_update_shop_identity_enqueues_business_overview_refresh_and_inval
         "platform_shop_id_status",
     ]
     assert cache_calls == ["invalidate_dashboard_business_overview"]
+
+
+@pytest.mark.asyncio
+async def test_shop_accounts_support_business_role_create_update_response_and_filtering(
+    shop_account_client,
+):
+    create_main = await shop_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "miaoshou",
+            "main_account_id": "miaoshou:main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    assert create_main.status_code == 200
+
+    operating_response = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "miaoshou",
+            "shop_account_id": "miaoshou_operating_store",
+            "main_account_id": "miaoshou:main",
+            "store_name": "Operating Store",
+            "enabled": True,
+        },
+    )
+    assert operating_response.status_code == 200
+    assert operating_response.json()["business_role"] == "operating_store"
+
+    collection_response = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "miaoshou",
+            "shop_account_id": "miaoshou_collection_source",
+            "main_account_id": "miaoshou:main",
+            "store_name": "Collection Source",
+            "business_role": "collection_source",
+            "enabled": True,
+        },
+    )
+    assert collection_response.status_code == 200
+    assert collection_response.json()["business_role"] == "collection_source"
+
+    update_response = await shop_account_client.put(
+        "/api/shop-accounts/miaoshou_collection_source",
+        json={"business_role": "operating_store"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["business_role"] == "operating_store"
+
+    filtered_response = await shop_account_client.get(
+        "/api/shop-accounts",
+        params={"business_role": "collection_source"},
+    )
+    assert filtered_response.status_code == 200
+    assert filtered_response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_update_business_role_preserves_capabilities_without_syncing_rows(
+    shop_account_client,
+    monkeypatch,
+):
+    create_main = await shop_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "shopee:main-capability-guard",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    assert create_main.status_code == 200
+
+    capabilities = {
+        "orders": True,
+        "products": False,
+        "services": False,
+        "analytics": True,
+        "finance": False,
+        "inventory": True,
+    }
+    create_shop = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_capability_guard",
+            "main_account_id": "shopee:main-capability-guard",
+            "store_name": "Capability Guard",
+            "capabilities": capabilities,
+            "enabled": True,
+        },
+    )
+    assert create_shop.status_code == 200
+
+    calls = []
+
+    async def fail_if_capabilities_are_synced(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.shop_accounts._ensure_capability_rows",
+        fail_if_capabilities_are_synced,
+    )
+
+    update_response = await shop_account_client.put(
+        "/api/shop-accounts/shopee_capability_guard",
+        json={"business_role": "collection_source"},
+    )
+
+    assert update_response.status_code == 200
+    assert calls == []
+    assert update_response.json()["business_role"] == "collection_source"
+    assert update_response.json()["capabilities"] == capabilities

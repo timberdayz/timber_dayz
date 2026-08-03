@@ -2015,6 +2015,10 @@ export default {
   async getHrEmployeeTargets(params = {}) {
     return await this._get('/hr/employee-targets', { params })
   },
+
+  async getHrEmployeeTargetSummary(params = {}) {
+    return await this._get('/hr/employee-target-summary', { params })
+  },
   async createHrEmployeeTarget(data) {
     return await this._post('/hr/employee-targets', data)
   },

@@ -3,6 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from modules.core.db import ShopAccountBusinessRole
+
 
 class ShopAccountCreate(BaseModel):
     platform: str = Field(..., description="平台代码")
@@ -12,6 +14,10 @@ class ShopAccountCreate(BaseModel):
     platform_shop_id: Optional[str] = Field(None, description="平台店铺ID")
     shop_region: Optional[str] = Field(None, description="店铺区域")
     shop_type: Optional[str] = Field(None, description="店铺类型")
+    business_role: ShopAccountBusinessRole = Field(
+        default=ShopAccountBusinessRole.operating_store,
+        description="业务身份",
+    )
     capabilities: Optional[dict[str, bool]] = Field(None, description="店铺数据域能力配置")
     enabled: bool = Field(default=True, description="是否启用")
     notes: Optional[str] = Field(None, description="备注")
@@ -23,6 +29,7 @@ class ShopAccountUpdate(BaseModel):
     platform_shop_id_status: Optional[str] = None
     shop_region: Optional[str] = None
     shop_type: Optional[str] = None
+    business_role: Optional[ShopAccountBusinessRole] = None
     capabilities: Optional[dict[str, bool]] = None
     enabled: Optional[bool] = None
     notes: Optional[str] = None
@@ -41,6 +48,7 @@ class ShopAccountResponse(BaseModel):
     platform_shop_id_status: str
     shop_region: Optional[str]
     shop_type: Optional[str]
+    business_role: ShopAccountBusinessRole
     enabled: bool
     notes: Optional[str]
     created_at: datetime

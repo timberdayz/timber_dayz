@@ -129,19 +129,33 @@ async def _load_valid_performance_shop_keys(
         shop_ids = sorted({shop_id for _, shop_id in pairs})
         rows = (
             await db.execute(
-                select(DimShop.platform_code, DimShop.shop_id).where(
+                select(DimShop.platform_code, DimShop.shop_id)
+                .join(
+                    ShopAccount,
+                    and_(
+                        func.lower(ShopAccount.platform) == func.lower(DimShop.platform_code),
+                        ShopAccount.enabled == True,
+                        ShopAccount.business_role == "operating_store",
+                        or_(
+                            ShopAccount.platform_shop_id == DimShop.shop_id,
+                            ShopAccount.shop_account_id == DimShop.shop_id,
+                        ),
+                    ),
+                )
+                .where(
                     DimShop.platform_code.in_(platform_codes),
                     DimShop.shop_id.in_(shop_ids),
                 )
             )
         ).all()
-        return {
+        dim_shop_keys = {
             f"{str(platform_code or '').lower()}|{shop_id}"
             for platform_code, shop_id in rows
         }
+        return dim_shop_keys
     except Exception as e:
-        logger.warning("绩效计算有效店铺集合加载失败，降级为仅过滤明显无效 shop_id: %s", e)
-        return None
+        logger.error("绩效计算有效经营店铺集合加载失败，拒绝生成店铺绩效: %s", e)
+        return set()
 
 
 async def _load_monthly_source_shop_keys(
@@ -1340,7 +1354,10 @@ async def list_performance_scores(
         # 按店铺：以 shop_accounts（正在经营店铺）为主，合并 performance_scores
         shop_query = (
             select(ShopAccount)
-            .where(ShopAccount.enabled == True)
+            .where(
+                ShopAccount.enabled == True,
+                ShopAccount.business_role == "operating_store",
+            )
             .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
@@ -1708,14 +1725,20 @@ async def calculate_performance_scores(
                 )
                 continue
             target = float(rec["target"] or 0)
-            achieved = float(rec["achieved"] or 0)
+            monthly_metrics = metrics_by_shop.get(key, {})
+            monthly_sales = monthly_metrics.get("monthly_sales")
+            achieved = (
+                float(monthly_sales)
+                if monthly_sales is not None
+                else float(rec["achieved"] or 0)
+            )
             target_profit = float(rec.get("target_profit_amount") or 0)
             rate = (achieved / target) if target > 0 else _rate_percent_to_fraction(rec.get("achievement_rate"))
             sales_rate = _normalize_rate_percent(rate)
             sales_score = _score_by_rate(config.sales_max_score, rate)
             profit_achieved = float(
                 rec.get("achieved_profit_amount")
-                or metrics_by_shop.get(key, {}).get("monthly_profit")
+                or monthly_metrics.get("monthly_profit")
                 or 0.0
             )
             profit_rate_fraction = (profit_achieved / target_profit) if target_profit > 0 else None
@@ -1756,7 +1779,7 @@ async def calculate_performance_scores(
                     "score_details": {
                         "sales": {
                             "status": "calculated",
-                            "source": "target_breakdown" if tb_rows else "api.business_overview_shop_racing_module",
+                            "source": "target_breakdown + api.business_overview_shop_racing_module" if monthly_sales is not None and tb_rows else "api.business_overview_shop_racing_module" if monthly_sales is not None else "target_breakdown",
                             "target": target,
                             "achieved": achieved,
                             "rate": sales_rate,
