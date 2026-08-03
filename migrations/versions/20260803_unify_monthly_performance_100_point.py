@@ -14,7 +14,24 @@ branch_labels = None
 depends_on = None
 
 
+def _performance_config_exists(connection) -> bool:
+    return connection.execute(
+        sa.text(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'a_class'
+              AND table_name = 'performance_config'
+            LIMIT 1
+            """
+        )
+    ).scalar() is not None
+
+
 def upgrade() -> None:
+    if not _performance_config_exists(op.get_bind()):
+        return
+
     op.alter_column(
         "performance_config",
         "sales_weight",
@@ -69,6 +86,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if not _performance_config_exists(op.get_bind()):
+        return
+
     op.execute(
         sa.text(
             """
