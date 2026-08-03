@@ -43,6 +43,16 @@ def test_target_ratio_backfill_migration_assigns_single_and_equal_split_sources(
     assert "'backfill_equal'" in source
 
 
+def test_target_ratio_backfill_migration_covers_inactive_history_before_not_null():
+    migration = Path("migrations/versions/20260803_add_target_allocation_ratio.py")
+
+    source = migration.read_text(encoding="utf-8")
+
+    assert "backfill_inactive_history" in source
+    assert "WHERE target_allocation_ratio IS NULL" in source
+    assert "target_allocation_ratio_source IS NULL" in source
+
+
 def test_personal_target_summary_route_is_exposed():
     from backend.domains.business.routers.hr_salary import router
 

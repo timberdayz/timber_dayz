@@ -1,8 +1,8 @@
 """Add independent employee target allocation ratios.
 
-Existing active rows are backfilled by monthly shop ownership: a sole assignee
-gets 1.0, while shared shops receive an equal split and an auditable source
-marker. Historical inactive assignments are left unchanged.
+Active rows are backfilled by monthly shop ownership: a sole assignee gets
+1.0, while shared shops receive an equal split and an auditable source marker.
+Historical inactive assignments are retained and receive a safe 1.0 ratio.
 """
 
 from alembic import op
@@ -49,6 +49,23 @@ def upgrade() -> None:
               AND assignment.year_month = assignment_counts.year_month
               AND assignment.platform_code = assignment_counts.platform_code
               AND assignment.shop_id = assignment_counts.shop_id
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            UPDATE a_class.employee_shop_assignments
+            SET target_allocation_ratio = COALESCE(target_allocation_ratio, 1.0),
+                target_allocation_ratio_source = COALESCE(
+                    target_allocation_ratio_source,
+                    CASE
+                        WHEN status = 'inactive' THEN 'backfill_inactive_history'
+                        ELSE 'backfill_single'
+                    END
+                )
+            WHERE target_allocation_ratio IS NULL
+               OR target_allocation_ratio_source IS NULL
             """
         )
     )
