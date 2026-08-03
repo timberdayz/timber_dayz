@@ -763,6 +763,7 @@ class EmployeeShopAssignmentCreate(BaseModel):
     platform_code: str = Field(..., min_length=1, max_length=32)
     shop_id: str = Field(..., min_length=1, max_length=256)
     commission_ratio: Optional[float] = Field(None, ge=0, le=1)
+    target_allocation_ratio: float = Field(1.0, ge=0, le=1)
     role: Optional[str] = Field(None, max_length=32)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
@@ -780,6 +781,7 @@ class EmployeeShopAssignmentUpdate(BaseModel):
     """更新归属"""
 
     commission_ratio: Optional[float] = Field(None, ge=0, le=1)
+    target_allocation_ratio: Optional[float] = Field(None, ge=0, le=1)
     role: Optional[str] = Field(None, max_length=32)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
@@ -805,6 +807,8 @@ class EmployeeShopAssignmentResponse(BaseModel):
     shop_id: str
     shop_name: Optional[str] = None
     commission_ratio: Optional[float] = None
+    target_allocation_ratio: float = 1.0
+    target_allocation_ratio_source: str = "manual"
     role: Optional[str] = None
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
