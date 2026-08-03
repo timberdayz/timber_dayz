@@ -142,4 +142,15 @@ def test_remote_deploy_script_restores_requested_image_tag_after_loading_env():
     assert 'REQUESTED_IMAGE_TAG="$(echo "${IMAGE_TAG}"' in text
     assert 'if [ "${IMAGE_TAG:-}" != "${REQUESTED_IMAGE_TAG}" ]; then' in text
     assert 'IMAGE_TAG="${REQUESTED_IMAGE_TAG}"' in text
+
+
+def test_remote_deploy_initializes_cloud_sync_receiver_when_worker_enabled():
+    text = Path("scripts/deploy_remote_production.sh").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "ensure_cloud_sync_target_tables" in text
+    assert "CLOUD_SYNC_WORKER_ENABLED" in text
+    assert "migrate_cloud_sync_tables.py --target" in text
     assert '# [FIX] 鍚屾椂鎺ㄩ€佸甫 v 鍓嶇紑鐨?tag锛坴4.20.5 / 4.20.5锛?            type=semver,pattern=v{{version}}' not in text

@@ -73,8 +73,13 @@ def run_verification(*, verify_db: str, table: str | None) -> bool:
     _run_command([sys.executable, "scripts/sync_b_class_to_cloud.py", "--dry-run", "--batch-size", "10"])
 
     if table:
+        verify_database_url = _build_verify_database_url(verify_db)
         env = dict(os.environ)
-        env["CLOUD_DATABASE_URL"] = _build_verify_database_url(verify_db)
+        env["CLOUD_DATABASE_URL"] = verify_database_url
+        _run_command(
+            [sys.executable, "scripts/migrate_cloud_sync_tables.py", "--target"],
+            env=env,
+        )
         _run_command(
             [
                 sys.executable,

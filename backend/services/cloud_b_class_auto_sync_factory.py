@@ -4,8 +4,6 @@ import hashlib
 import logging
 import os
 import socket
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -105,28 +103,10 @@ def _get_database_alembic_revisions(engine) -> set[str]:
     return revisions
 
 
-def _run_alembic_upgrade(database_url: str, target: str = "heads") -> None:
-    env = dict(os.environ)
-    env["DATABASE_URL"] = database_url
-    completed = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", target],
-        cwd=_project_root(),
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()
-        raise RuntimeError(detail or f"alembic upgrade {target} failed")
-
-
 def _check_alembic_revision(
     engine,
     *,
     label: str,
-    database_url: str | None = None,
-    allow_auto_migration: bool = False,
 ) -> dict[str, str | bool | None]:
     expected_heads = _get_code_alembic_heads()
     current_revisions = _get_database_alembic_revisions(engine)
@@ -140,15 +120,24 @@ def _check_alembic_revision(
         f"{label} revision mismatch: current={','.join(sorted(current_revisions)) or 'missing'} "
         f"expected={','.join(sorted(expected_heads)) or 'missing'}"
     )
-    if allow_auto_migration and database_url:
-        _run_alembic_upgrade(database_url, "heads")
-        return {
-            "ok": True,
-            "detail": "auto-migrated to heads",
-        }
     return {
         "ok": False,
         "detail": detail,
+    }
+
+
+def _check_cloud_receiver_tables(cloud_inspector) -> dict[str, str | bool | None]:
+    required_tables = {
+        "ops": {"cloud_sync_receive_log"},
+        "core": {"refresh_queue_tasks"},
+    }
+    missing = []
+    for schema, tables in required_tables.items():
+        existing_tables = set(cloud_inspector.get_table_names(schema=schema))
+        missing.extend(f"{schema}.{table}" for table in sorted(tables - existing_tables))
+    return {
+        "ok": not missing,
+        "detail": None if not missing else f"missing {', '.join(missing)}",
     }
 
 
@@ -182,8 +171,6 @@ def run_cloud_sync_startup_checks_from_env() -> dict:
         revision_check = _check_alembic_revision(
             local_engine,
             label="local",
-            database_url=DATABASE_URL,
-            allow_auto_migration=False,
         )
         checks["local_alembic_revision"] = revision_check
         if not revision_check["ok"]:
@@ -226,38 +213,14 @@ def run_cloud_sync_startup_checks_from_env() -> dict:
             cloud_engine = None
             try:
                 cloud_engine = create_engine(cloud_database_url)
-                revision_check = _check_alembic_revision(
-                    cloud_engine,
-                    label="cloud",
-                    database_url=cloud_database_url,
-                    allow_auto_migration=str(
-                        os.getenv("ENABLE_CLOUD_SYNC_AUTO_MIGRATION", "")
-                    ).lower()
-                    in {"1", "true", "yes", "on"},
-                )
-                checks["cloud_alembic_revision"] = revision_check
-                if not revision_check["ok"]:
-                    status = "error"
-                if revision_check.get("detail") == "auto-migrated to heads":
-                    cloud_engine.dispose()
-                    cloud_engine = create_engine(cloud_database_url)
                 cloud_inspector = sa_inspect(cloud_engine)
-                receive_tables = set(cloud_inspector.get_table_names(schema="ops"))
-                checks["cloud_receive_log_table"] = {
-                    "ok": "cloud_sync_receive_log" in receive_tables,
-                    "detail": None
-                    if "cloud_sync_receive_log" in receive_tables
-                    else "missing ops.cloud_sync_receive_log",
-                }
-                if not checks["cloud_receive_log_table"]["ok"]:
+                receiver_check = _check_cloud_receiver_tables(cloud_inspector)
+                checks["cloud_receiver_tables"] = receiver_check
+                if not receiver_check["ok"]:
                     status = "error"
             except Exception as exc:
-                checks["cloud_alembic_revision"] = {
-                    "ok": False,
-                    "detail": str(exc),
-                }
                 checks.setdefault(
-                    "cloud_receive_log_table",
+                    "cloud_receiver_tables",
                     {
                         "ok": False,
                         "detail": str(exc),
@@ -276,11 +239,7 @@ def run_cloud_sync_startup_checks_from_env() -> dict:
                 "ok": False,
                 "detail": "cloud database url invalid",
             }
-            checks["cloud_alembic_revision"] = {
-                "ok": False,
-                "detail": "cloud database url invalid",
-            }
-            checks["cloud_receive_log_table"] = {
+            checks["cloud_receiver_tables"] = {
                 "ok": False,
                 "detail": "cloud database url invalid",
             }
@@ -294,11 +253,7 @@ def run_cloud_sync_startup_checks_from_env() -> dict:
             "ok": False,
             "detail": "missing",
         }
-        checks["cloud_alembic_revision"] = {
-            "ok": False,
-            "detail": "missing CLOUD_DATABASE_URL",
-        }
-        checks["cloud_receive_log_table"] = {
+        checks["cloud_receiver_tables"] = {
             "ok": False,
             "detail": "missing CLOUD_DATABASE_URL",
         }

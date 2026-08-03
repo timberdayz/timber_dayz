@@ -710,6 +710,27 @@ if ! verify_schema_gate; then
   exit 1
 fi
 
+ensure_cloud_sync_target_tables() {
+  local cloud_sync_enabled
+  cloud_sync_enabled="$("${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 -c "import os; print('true' if os.getenv('CLOUD_SYNC_WORKER_ENABLED', '').lower() in {'1', 'true', 'yes', 'on'} and os.getenv('CLOUD_DATABASE_URL', '').strip() else 'false')")"
+  if [ "${cloud_sync_enabled}" != "true" ]; then
+    echo "[INFO] Cloud sync receiver initialization skipped (worker disabled or target not configured)"
+    return 0
+  fi
+
+  echo "[INFO] Initializing cloud sync receiver tables..."
+  "${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 /app/scripts/migrate_cloud_sync_tables.py --target || {
+    echo "[FAIL] Cloud sync receiver initialization failed"
+    return 1
+  }
+  echo "[OK] Cloud sync receiver tables are ready"
+}
+
+if ! ensure_cloud_sync_target_tables; then
+  echo "[INFO] Deployment blocked before backend startup"
+  exit 1
+fi
+
 # [BOOTSTRAP] Phase 2.5: Bootstrap initialization (after migrations, before application layer)
 # Note: Schema verification is now integrated into smart_database_migrate() function above
 echo "[INFO] Phase 2.5: Running production bootstrap..."

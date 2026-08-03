@@ -282,6 +282,8 @@ def test_run_cloud_sync_startup_checks_reports_ok_when_tunnel_and_cloud_db_are_r
         def get_table_names(self, schema=None):
             if schema == "ops":
                 return ["cloud_sync_receive_log"]
+            if schema == "core":
+                return ["refresh_queue_tasks"]
             return [
                 "cloud_b_class_sync_checkpoints",
                 "cloud_b_class_sync_runs",
@@ -305,7 +307,7 @@ def test_run_cloud_sync_startup_checks_reports_ok_when_tunnel_and_cloud_db_are_r
     assert payload["checks"]["cloud_sync_tunnel"]["ok"] is True
 
 
-def test_run_cloud_sync_startup_checks_auto_migrates_cloud_when_enabled(monkeypatch):
+def test_run_cloud_sync_startup_checks_does_not_migrate_cloud_receiver_when_enabled(monkeypatch):
     class FakeConnection:
         def __init__(self, revision):
             self.revision = revision
@@ -336,13 +338,13 @@ def test_run_cloud_sync_startup_checks_auto_migrates_cloud_when_enabled(monkeypa
         def get_table_names(self, schema=None):
             if self.cloud and schema == "ops":
                 return ["cloud_sync_receive_log"]
+            if self.cloud and schema == "core":
+                return ["refresh_queue_tasks"]
             return [
                 "cloud_b_class_sync_checkpoints",
                 "cloud_b_class_sync_runs",
                 "cloud_b_class_sync_tasks",
             ]
-
-    upgrades = []
 
     def fake_create_engine(url, *args, **kwargs):
         if str(url).startswith("postgresql://cloud"):
@@ -362,20 +364,13 @@ def test_run_cloud_sync_startup_checks_auto_migrates_cloud_when_enabled(monkeypa
         "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
         lambda engine: {getattr(engine, "revision", "head-revision")},
     )
-    monkeypatch.setattr(
-        "backend.services.cloud_b_class_auto_sync_factory._run_alembic_upgrade",
-        lambda database_url, target="heads": upgrades.append((database_url, target)),
-    )
-
     payload = run_cloud_sync_startup_checks_from_env()
 
     assert payload["status"] == "ok"
-    assert upgrades == [("postgresql://cloud:pass@127.0.0.1:15433/xihong_erp", "heads")]
-    assert payload["checks"]["cloud_alembic_revision"]["ok"] is True
-    assert payload["checks"]["cloud_alembic_revision"]["detail"] == "auto-migrated to heads"
+    assert payload["checks"]["cloud_receiver_tables"]["ok"] is True
 
 
-def test_run_cloud_sync_startup_checks_rechecks_receive_log_after_auto_migration(monkeypatch):
+def test_run_cloud_sync_startup_checks_errors_when_receiver_log_missing(monkeypatch):
     class FakeConnection:
         def __enter__(self):
             return self
@@ -396,15 +391,13 @@ def test_run_cloud_sync_startup_checks_rechecks_receive_log_after_auto_migration
         def dispose(self):
             return None
 
-    migrated = {"done": False}
-
     class FakeInspector:
         def __init__(self, *, cloud=False):
             self.cloud = cloud
 
         def get_table_names(self, schema=None):
             if self.cloud and schema == "ops":
-                return ["cloud_sync_receive_log"] if migrated["done"] else []
+                return []
             return [
                 "cloud_b_class_sync_checkpoints",
                 "cloud_b_class_sync_runs",
@@ -417,7 +410,6 @@ def test_run_cloud_sync_startup_checks_rechecks_receive_log_after_auto_migration
         return FakeEngine("head-revision")
 
     monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp")
-    monkeypatch.setenv("ENABLE_CLOUD_SYNC_AUTO_MIGRATION", "true")
     monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", fake_create_engine)
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
@@ -430,18 +422,14 @@ def test_run_cloud_sync_startup_checks_rechecks_receive_log_after_auto_migration
         lambda engine: {getattr(engine, "revision", "head-revision")},
     )
 
-    def fake_upgrade(database_url, target="heads"):
-        migrated["done"] = True
-
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._run_alembic_upgrade", fake_upgrade)
-
     payload = run_cloud_sync_startup_checks_from_env()
 
-    assert payload["status"] == "ok"
-    assert payload["checks"]["cloud_receive_log_table"]["ok"] is True
+    assert payload["status"] == "error"
+    assert payload["checks"]["cloud_receiver_tables"]["ok"] is False
+    assert "ops.cloud_sync_receive_log" in payload["checks"]["cloud_receiver_tables"]["detail"]
 
 
-def test_run_cloud_sync_startup_checks_errors_when_cloud_revision_stale_without_auto_migration(monkeypatch):
+def test_run_cloud_sync_startup_checks_errors_when_receiver_queue_missing(monkeypatch):
     class FakeConnection:
         def __enter__(self):
             return self
@@ -497,8 +485,125 @@ def test_run_cloud_sync_startup_checks_errors_when_cloud_revision_stale_without_
     payload = run_cloud_sync_startup_checks_from_env()
 
     assert payload["status"] == "error"
-    assert payload["checks"]["cloud_alembic_revision"]["ok"] is False
-    assert "old-revision" in payload["checks"]["cloud_alembic_revision"]["detail"]
+    assert payload["checks"]["cloud_receiver_tables"]["ok"] is False
+    assert "core.refresh_queue_tasks" in payload["checks"]["cloud_receiver_tables"]["detail"]
+
+
+def test_run_cloud_sync_startup_checks_accepts_receiver_target_without_erp_alembic_history(monkeypatch):
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def exec_driver_sql(self, sql: str):
+            return 1
+
+    class FakeEngine:
+        def __init__(self, cloud=False):
+            self.cloud = cloud
+
+        def begin(self):
+            return FakeConnection()
+
+        def dispose(self):
+            return None
+
+    class FakeInspector:
+        def __init__(self, cloud=False):
+            self.cloud = cloud
+
+        def get_table_names(self, schema=None):
+            if self.cloud and schema == "ops":
+                return ["cloud_sync_receive_log"]
+            if self.cloud and schema == "core":
+                return ["refresh_queue_tasks"]
+            return [
+                "cloud_b_class_sync_checkpoints",
+                "cloud_b_class_sync_runs",
+                "cloud_b_class_sync_tasks",
+            ]
+
+    def fake_create_engine(url, *args, **kwargs):
+        return FakeEngine(cloud=str(url).startswith("postgresql://cloud"))
+
+    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp")
+    monkeypatch.setenv("ENABLE_CLOUD_SYNC_AUTO_MIGRATION", "true")
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
+        lambda engine: FakeInspector(cloud=engine.cloud),
+    )
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
+        lambda engine: {"head-revision"} if not engine.cloud else set(),
+    )
+    payload = run_cloud_sync_startup_checks_from_env()
+
+    assert payload["status"] == "ok"
+    assert payload["checks"]["cloud_receiver_tables"]["ok"] is True
+
+
+def test_run_cloud_sync_startup_checks_rejects_receiver_target_missing_refresh_queue(monkeypatch):
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def exec_driver_sql(self, sql: str):
+            return 1
+
+    class FakeEngine:
+        def __init__(self, cloud=False):
+            self.cloud = cloud
+
+        def begin(self):
+            return FakeConnection()
+
+        def dispose(self):
+            return None
+
+    class FakeInspector:
+        def __init__(self, cloud=False):
+            self.cloud = cloud
+
+        def get_table_names(self, schema=None):
+            if self.cloud and schema == "ops":
+                return ["cloud_sync_receive_log"]
+            if self.cloud and schema == "core":
+                return []
+            return [
+                "cloud_b_class_sync_checkpoints",
+                "cloud_b_class_sync_runs",
+                "cloud_b_class_sync_tasks",
+            ]
+
+    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp")
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.create_engine",
+        lambda url, *args, **kwargs: FakeEngine(cloud=str(url).startswith("postgresql://cloud")),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
+        lambda engine: FakeInspector(cloud=engine.cloud),
+    )
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
+    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
+        lambda engine: {"head-revision"},
+    )
+
+    payload = run_cloud_sync_startup_checks_from_env()
+
+    assert payload["status"] == "error"
+    assert payload["checks"]["cloud_receiver_tables"]["ok"] is False
+    assert payload["checks"]["cloud_receiver_tables"]["detail"] == "missing core.refresh_queue_tasks"
 
 
 def test_worker_factory_recover_stale_running_tasks_recovers_legacy_scope(
