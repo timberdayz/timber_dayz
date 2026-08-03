@@ -138,17 +138,22 @@
         <el-table-column v-if="filters.groupBy === 'shop'" label="销售额得分" width="100" align="right">
           <template #default="{ row }">{{ scoreText(row.sales_score) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利目标" width="100" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="结算利润目标" width="120" align="right">
           <template #default="{ row }">{{ formatCell(row.profit_target) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利达成" width="100" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="结算利润达成" width="120" align="right">
           <template #default="{ row }">{{ formatCell(row.profit_achieved) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利达成率" width="110" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="结算利润达成率" width="130" align="right">
           <template #default="{ row }">{{ formatPercent(row.profit_rate) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利得分" width="90" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="结算利润得分" width="110" align="right">
           <template #default="{ row }">{{ scoreText(row.profit_score) }}</template>
+        </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'shop'" label="计算状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="calculationModeType(row)" size="small">{{ calculationModeText(row) }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" prop="operation_score" label="店铺运营得分" width="120" align="right" sortable>
           <template #default="{ row }">{{ scoreText(row.operation_score) }}</template>
@@ -393,7 +398,7 @@ const formulaText = computed(() => {
   if (filters.groupBy === 'person') {
     return '优先取个人绩效输入项得分，再叠加个人调整项与考勤扣分；无输入项时才回退到店铺汇总绩效'
   }
-  return `销售满分${weightConfig.sales_max_score} + 毛利满分${weightConfig.profit_max_score} + 运营满分${weightConfig.operation_max_score} = 100 分；重点产品暂不计分`
+  return `销售满分${weightConfig.sales_max_score} + 结算利润满分${weightConfig.profit_max_score} + 运营满分${weightConfig.operation_max_score} = 100 分；重点产品暂不计分`
 })
 
 const currentGroupPolicyText = computed(() => {
@@ -448,7 +453,7 @@ const detailMetricCards = computed(() => {
     },
     {
       key: 'profit_score',
-      label: '毛利得分',
+      label: '结算利润得分',
       maxScore: weightConfig.profit_max_score,
       metric: data.profit_score,
       successThreshold: 22.5,
@@ -560,6 +565,17 @@ function metricValueText(metric, field, valueType = 'text') {
 
 function metricMessageText(metric) {
   return metric?.calculation || metric?.message || '—'
+}
+
+function calculationModeText(row) {
+  const mode = row?.score_details?.summary?.calculation_mode
+  if (mode === 'formal') return '正式'
+  if (mode === 'forecast') return '预估'
+  return '待计算'
+}
+
+function calculationModeType(row) {
+  return row?.score_details?.summary?.calculation_mode === 'formal' ? 'success' : 'warning'
 }
 
 function rankingPoolText(row) {

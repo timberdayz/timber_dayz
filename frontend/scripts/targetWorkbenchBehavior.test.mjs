@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   buildPersonTargetRows,
@@ -39,6 +40,35 @@ test('shop ratio split keeps exact monthly totals when ratio reaches 100 percent
   assert.equal(totals.ratioPercent, 100)
   assert.equal(totals.amount, 1000)
   assert.equal(totals.quantity, 101)
+})
+
+test('shop ratio split keeps settlement profit targets aligned with the company target', () => {
+  const result = splitShopTargetsByPercent(
+    [
+      { shop_id: 'A', ratio_percent: 33.33 },
+      { shop_id: 'B', ratio_percent: 33.33 },
+      { shop_id: 'C', ratio_percent: 33.34 }
+    ],
+    1000,
+    101,
+    180
+  )
+  const totals = calculateShopTargetTotals(result)
+
+  assert.equal(totals.profitBasisAmount, 180)
+  assert.equal(result[2].target_profit_basis_amount, 60.02)
+})
+
+test('shop target workbench exposes settlement profit target inputs and target margin', () => {
+  const source = readFileSync(
+    new URL('../src/domains/business/views/target/TargetShopWorkbench.vue', import.meta.url),
+    'utf8'
+  )
+
+  assert.equal(source.includes('结算利润目标'), true)
+  assert.equal(source.includes('目标结算利润率'), true)
+  assert.equal(source.includes('company_target_profit_basis_amount'), true)
+  assert.equal(source.includes('target_profit_basis_amount'), true)
 })
 
 test('daily preview renders one calendar item per natural day and reconciles totals', () => {

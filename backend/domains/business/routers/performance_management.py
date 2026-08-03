@@ -37,6 +37,7 @@ from modules.core.db import (
     PerformanceConfig,
     PerformanceScore,
     SalesTarget,
+    ShopProfitBasis,
     ShopAlert,
     TargetBreakdown,
     Employee,
@@ -59,6 +60,7 @@ from backend.dependencies.auth import get_current_user, require_admin
 from backend.services.rbac_service import get_rbac_service
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.payroll_generation_service import PayrollGenerationService
+from backend.services.profit_basis_service import ProfitBasisService
 from backend.services.postgresql_shop_metrics_service import (
     load_shop_monthly_metrics,
     load_shop_monthly_target_achievement,
@@ -71,6 +73,56 @@ from backend.services.employee_task_sources import sync_performance_confirmation
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
+
+
+async def _load_profit_basis_for_performance(
+    db: AsyncSession,
+    period: str,
+    source_rows: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Return locked formal bases where available, otherwise a current forecast basis."""
+    source_keys = {
+        f"{str(row.get('platform_code') or '').lower()}|{row.get('shop_id') or ''}"
+        for row in source_rows.values()
+        if row.get("platform_code") and row.get("shop_id")
+    }
+    snapshot_rows = (
+        await db.execute(
+            select(ShopProfitBasis).where(
+                ShopProfitBasis.period_month == period,
+                ShopProfitBasis.basis_version == "A_ONLY_V1",
+            )
+        )
+    ).scalars().all()
+    basis_by_shop: Dict[str, Dict[str, Any]] = {}
+    for row in snapshot_rows:
+        key = f"{str(getattr(row, 'platform_code', '') or '').lower()}|{getattr(row, 'shop_id', '') or ''}"
+        if key not in source_keys or not bool(getattr(row, "is_locked", False)):
+            continue
+        basis_by_shop[key] = {
+            "profit_basis_amount": float(getattr(row, "profit_basis_amount", 0.0) or 0.0),
+            "basis_version": getattr(row, "basis_version", "A_ONLY_V1"),
+            "calculation_mode": "formal",
+            "source": "finance.shop_profit_basis",
+        }
+
+    basis_service = ProfitBasisService(db)
+    for key in source_keys:
+        if key in basis_by_shop:
+            continue
+        platform_code, shop_id = key.split("|", 1)
+        forecast = await basis_service.build_profit_basis(
+            year_month=period,
+            platform_code=platform_code,
+            shop_id=shop_id,
+        )
+        basis_by_shop[key] = {
+            "profit_basis_amount": float(forecast.get("profit_basis_amount") or 0.0),
+            "basis_version": forecast.get("basis_version", "A_ONLY_V1"),
+            "calculation_mode": "forecast",
+            "source": "forecast.profit_basis",
+        }
+    return basis_by_shop
 
 
 def _performance_config_ordering():
@@ -1617,30 +1669,11 @@ async def calculate_performance_scores(
         if effective_shop_target is not None:
             tb_query = select(TargetBreakdown).where(
                 TargetBreakdown.target_id == getattr(effective_shop_target, "id", None),
-                TargetBreakdown.breakdown_type.in_(["shop", "shop_time"]),
+                TargetBreakdown.breakdown_type == "shop",
                 TargetBreakdown.platform_code.is_not(None),
                 TargetBreakdown.shop_id.is_not(None),
             )
             tb_rows = (await db.execute(tb_query)).scalars().all()
-        target_ids = sorted(
-            {
-                getattr(row, "target_id", None)
-                for row in tb_rows
-                if getattr(row, "target_id", None) is not None
-            }
-        )
-        parent_target_by_id: Dict[int, Any] = {}
-        if target_ids:
-            parent_targets = (
-                await db.execute(
-                    select(SalesTarget).where(SalesTarget.id.in_(target_ids))
-                )
-            ).scalars().all()
-            parent_target_by_id = {
-                getattr(target, "id", None): target
-                for target in parent_targets
-                if getattr(target, "id", None) is not None
-            }
         for row in tb_rows:
             key = f"{(row.platform_code or '').lower()}|{row.shop_id or ''}"
             rec = source_rows.setdefault(
@@ -1650,22 +1683,14 @@ async def calculate_performance_scores(
                     "shop_id": row.shop_id,
                     "target": 0.0,
                     "achieved": 0.0,
-                    "target_profit_amount": 0.0,
-                    "achieved_profit_amount": 0.0,
+                    "target_profit_basis_amount": 0.0,
                 },
             )
             rec["target"] += float(row.target_amount or 0)
             rec["achieved"] += float(row.achieved_amount or 0)
-            row_target_profit_amount = float(getattr(row, "target_profit_amount", 0) or 0)
-            if row_target_profit_amount <= 0:
-                parent_target = parent_target_by_id.get(getattr(row, "target_id", None))
-                parent_profit_target = float(getattr(parent_target, "target_profit_amount", 0) or 0)
-                parent_sales_target = float(getattr(parent_target, "target_amount", 0) or 0)
-                row_sales_target = float(getattr(row, "target_amount", 0) or 0)
-                if parent_profit_target > 0 and parent_sales_target > 0 and row_sales_target > 0:
-                    row_target_profit_amount = parent_profit_target * (row_sales_target / parent_sales_target)
-            rec["target_profit_amount"] += row_target_profit_amount
-            rec["achieved_profit_amount"] += float(getattr(row, "achieved_profit_amount", 0) or 0)
+            rec["target_profit_basis_amount"] += float(
+                getattr(row, "target_profit_basis_amount", 0) or 0
+            )
 
         # 2) 若目标分解为空，回退 PostgreSQL 店铺赛马模块
         if not source_rows:
@@ -1690,6 +1715,12 @@ async def calculate_performance_scores(
             metrics_by_shop = await load_shop_monthly_metrics(db, period)
         except Exception as e:
             logger.warning("缁╂晥璁＄畻 PostgreSQL 搴楅摵鏈堝害鎸囨爣鍔犺浇澶辫触: %s", e)
+
+        profit_basis_by_shop = await _load_profit_basis_for_performance(
+            db,
+            period,
+            source_rows,
+        )
 
         operation_target = await _load_effective_target_for_month(
             db,
@@ -1732,15 +1763,13 @@ async def calculate_performance_scores(
                 if monthly_sales is not None
                 else float(rec["achieved"] or 0)
             )
-            target_profit = float(rec.get("target_profit_amount") or 0)
+            target_profit = float(rec.get("target_profit_basis_amount") or 0)
             rate = (achieved / target) if target > 0 else _rate_percent_to_fraction(rec.get("achievement_rate"))
             sales_rate = _normalize_rate_percent(rate)
             sales_score = _score_by_rate(config.sales_max_score, rate)
-            profit_achieved = float(
-                rec.get("achieved_profit_amount")
-                or monthly_metrics.get("monthly_profit")
-                or 0.0
-            )
+            profit_basis = profit_basis_by_shop.get(key, {})
+            profit_achieved = float(profit_basis.get("profit_basis_amount") or 0.0)
+            profit_mode = profit_basis.get("calculation_mode", "forecast")
             profit_rate_fraction = (profit_achieved / target_profit) if target_profit > 0 else None
             profit_rate = _normalize_rate_percent(profit_rate_fraction)
             profit_score = _score_by_rate(config.profit_max_score, profit_rate_fraction) if target_profit > 0 else 0.0
@@ -1764,6 +1793,11 @@ async def calculate_performance_scores(
                     "message": "Operation target pipeline is not ready.",
                 },
             )
+            is_formal = (
+                target_profit > 0
+                and profit_mode == "formal"
+                and operation_details["status"] == "calculated"
+            )
 
             calc_list.append(
                 {
@@ -1786,13 +1820,13 @@ async def calculate_performance_scores(
                             "calculation": f"min(rate {sales_rate or 0:.2f}%, 100%) * sales max {config.sales_max_score}",
                         },
                         "profit": {
-                            "status": "calculated" if target_profit > 0 else "pending_design",
-                            "source": "target_breakdown + api.business_overview_shop_racing_module" if target_profit > 0 else "api.business_overview_shop_racing_module",
+                            "status": "calculated" if is_formal else "forecast" if target_profit > 0 else "pending_target",
+                            "source": profit_basis.get("source") if target_profit > 0 else None,
                             "target": target_profit if target_profit > 0 else None,
                             "achieved": profit_achieved,
                             "rate": profit_rate,
                             "calculation": f"min(rate {profit_rate or 0:.2f}%, 100%) * profit max {config.profit_max_score}" if target_profit > 0 else None,
-                            "message": None if target_profit > 0 else "Profit target pipeline is not ready.",
+                            "message": None if is_formal else "Settlement profit basis is not locked yet; this result is forecast only." if target_profit > 0 else "Settlement profit target is not configured.",
                         },
                         "key_product": {
                             "status": "not_in_scope",
@@ -1813,12 +1847,15 @@ async def calculate_performance_scores(
                             "message": operation_details["message"],
                         },
                         "summary": {
-                            "calculation_status": "complete" if (target_profit > 0 and operation_details["status"] == "calculated") else "partial",
+                            "calculation_status": "complete" if is_formal else "partial",
+                            "calculation_mode": "formal" if is_formal else "forecast",
+                            "formula_version": "SETTLEMENT_PROFIT_V1",
+                            "profit_basis_version": profit_basis.get("basis_version"),
                             "ready_dimensions": [
                                 dimension
                                 for dimension, ready in [
                                     ("sales", True),
-                                    ("profit", target_profit > 0),
+                                    ("profit", is_formal),
                                     ("operation", operation_details["status"] == "calculated"),
                                 ]
                                 if ready
@@ -1826,12 +1863,12 @@ async def calculate_performance_scores(
                             "pending_dimensions": [
                                 dimension
                                 for dimension, ready in [
-                                    ("profit", target_profit > 0),
+                                    ("profit", is_formal),
                                     ("operation", operation_details["status"] == "calculated"),
                                 ]
                                 if not ready
                             ],
-                            "message": "Sales, profit, and operation dimensions are independently calculated. Key product is not in current formal scope." if (target_profit > 0 and operation_details["status"] == "calculated") else "Current formal scope is partially calculated; key product is not in current formal scope.",
+                            "message": "Sales, settlement profit, and operation dimensions are formally calculated." if is_formal else "Current result is forecast only and cannot create ranking, coefficient, income, or payroll.",
                         },
                     },
                 }
@@ -1866,11 +1903,7 @@ async def calculate_performance_scores(
                 existed.key_product_score = row["key_product_score"]
                 existed.operation_score = row["operation_score"]
                 existed.rank = row["rank"]
-                existed.performance_coefficient = (
-                    row["performance_coefficient"]
-                    if row.get("performance_coefficient") is not None
-                    else 1.0
-                )
+                existed.performance_coefficient = row.get("performance_coefficient")
                 existed.score_details = details
                 existed.updated_at = datetime.now(timezone.utc)
             else:
@@ -1885,11 +1918,7 @@ async def calculate_performance_scores(
                         key_product_score=row["key_product_score"],
                         operation_score=row["operation_score"],
                         rank=row["rank"],
-                        performance_coefficient=(
-                            row["performance_coefficient"]
-                            if row.get("performance_coefficient") is not None
-                            else 1.0
-                        ),
+                        performance_coefficient=row.get("performance_coefficient"),
                         score_details=details,
                     )
                 )
@@ -1905,16 +1934,29 @@ async def calculate_performance_scores(
             },
         )
 
-        income_service = HRIncomeCalculationService(db=db)
-        income_result = await income_service.calculate_month(period, commit=False)
         payroll_result: Dict[str, Any] = {
             "year_month": period,
             "payroll_upserts": 0,
             "locked_conflicts": 0,
             "locked_conflict_details": [],
         }
-        payroll_service = PayrollGenerationService(db=db)
-        payroll_result = await payroll_service.generate_month(period)
+        income_result: Dict[str, Any] = {
+            "year_month": period,
+            "employee_count": 0,
+            "commission_upserts": 0,
+            "performance_upserts": 0,
+            "blocked": True,
+            "blocker": "Formal shop performance is not ready for every calculated store.",
+        }
+        all_rows_formal = bool(calc_list) and all(
+            _summary_is_formal_ready(row.get("score_details", {}))
+            for row in calc_list
+        )
+        if all_rows_formal:
+            income_service = HRIncomeCalculationService(db=db)
+            income_result = await income_service.calculate_month(period, commit=False)
+            payroll_service = PayrollGenerationService(db=db)
+            payroll_result = await payroll_service.generate_month(period)
 
         await db.commit()
         try:

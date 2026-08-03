@@ -503,12 +503,15 @@ async def test_reopen_supersedes_active_snapshots_before_setting_draft(monkeypat
     db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: record))
 
     mark_active_snapshots_superseded = AsyncMock()
+    invalidate_settlement_performance = AsyncMock()
     monkeypatch.setattr(service, "mark_active_snapshots_superseded", mark_active_snapshots_superseded)
+    monkeypatch.setattr(service, "invalidate_settlement_performance", invalidate_settlement_performance)
 
     payload = await service.reopen(12)
 
     assert payload["status"] == "draft"
     mark_active_snapshots_superseded.assert_awaited_once_with(12)
+    invalidate_settlement_performance.assert_awaited_once_with("2026-04")
 
 
 @pytest.mark.asyncio

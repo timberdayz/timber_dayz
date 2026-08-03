@@ -20,6 +20,7 @@ from modules.core.db import (
     MonthlyProfitShopBasisSnapshot,
     MonthlyProfitSettlement,
     PayrollRecord,
+    PerformanceScore,
     ShopProfitBasis,
 )
 
@@ -767,9 +768,43 @@ class MonthlyProfitSettlementService:
         if record.status != "approved":
             raise MonthlyProfitSettlementConflictError("only approved settlement can be reopened")
         await self.mark_active_snapshots_superseded(settlement_id)
+        await self.invalidate_settlement_performance(record.period_month)
         record.status = "draft"
         record.locked_at = None
         record.approved_by = None
         record.approved_at = None
         await self.db.commit()
         return {"id": settlement_id, "status": "draft"}
+
+    async def invalidate_settlement_performance(self, period_month: str) -> None:
+        """Reopen the inputs that made a period's formal performance result official."""
+        basis_rows = (
+            await self.db.execute(
+                select(ShopProfitBasis).where(ShopProfitBasis.period_month == period_month)
+            )
+        ).scalars().all()
+        for basis in basis_rows:
+            basis.is_locked = False
+
+        score_rows = (
+            await self.db.execute(
+                select(PerformanceScore).where(PerformanceScore.period == period_month)
+            )
+        ).scalars().all()
+        for score in score_rows:
+            details = dict(getattr(score, "score_details", None) or {})
+            summary = dict(details.get("summary") or {})
+            summary.update(
+                {
+                    "calculation_status": "partial",
+                    "calculation_mode": "forecast",
+                    "ranking_pool": "observation",
+                    "formal_ready": False,
+                    "blockers": ["monthly_settlement_reopened"],
+                    "message": "Monthly settlement was reopened; formal performance must be recalculated after profit basis is relocked.",
+                }
+            )
+            details["summary"] = summary
+            score.score_details = details
+            score.rank = None
+            score.performance_coefficient = None

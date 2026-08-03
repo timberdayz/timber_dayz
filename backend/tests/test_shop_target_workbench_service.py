@@ -214,6 +214,51 @@ def test_apply_shop_workbench_creates_shop_and_daily_breakdowns_then_syncs_proje
     assert db.commit.await_count == 1
 
 
+def test_apply_shop_workbench_persists_settlement_profit_targets():
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_ScalarsResult([]), None])
+    db.add = AsyncMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    async def _flush_assign_id():
+        for call in db.add.call_args_list:
+            target = call.args[0]
+            if hasattr(target, "target_name") and not getattr(target, "id", None):
+                target.id = 78
+
+    db.flush.side_effect = _flush_assign_id
+    service = ShopTargetWorkbenchService(db)
+    service.cleanup_projection = AsyncMock(return_value={"deleted": 0, "errors": []})
+    service.sync_projection = AsyncMock(return_value={"synced": 1, "errors": []})
+    request = ShopTargetWorkbenchApplyRequest(
+        year_month="2026-03",
+        company_target_amount=1000.0,
+        company_target_quantity=100,
+        company_target_profit_basis_amount=180.0,
+        weekday_ratios={"1": 0.2, "2": 0.2, "3": 0.2, "4": 0.2, "5": 0.1, "6": 0.05, "7": 0.05},
+        shops=[
+            ShopTargetWorkbenchShopInput(
+                platform_code="shopee",
+                shop_id="SHP-1",
+                ratio=1.0,
+                target_amount=1000.0,
+                target_quantity=100,
+                target_profit_basis_amount=180.0,
+            )
+        ],
+    )
+
+    asyncio.run(service.apply(request, username="admin"))
+
+    added_objects = [call.args[0] for call in db.add.call_args_list]
+    target = next(obj for obj in added_objects if hasattr(obj, "target_name"))
+    shop_breakdown = next(obj for obj in added_objects if getattr(obj, "breakdown_type", None) == "shop")
+    assert target.target_profit_basis_amount == 180.0
+    assert shop_breakdown.target_profit_basis_amount == 180.0
+
+
 def test_find_month_target_uses_latest_updated_record_when_month_has_multiple_versions():
     older = SimpleNamespace(id=1, updated_at=datetime(2026, 3, 1, tzinfo=timezone.utc))
     latest = SimpleNamespace(id=2, updated_at=datetime(2026, 3, 15, tzinfo=timezone.utc))

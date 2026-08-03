@@ -35,7 +35,6 @@ from modules.core.db import (
 )
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
-from backend.services.profit_basis_service import ProfitBasisService
 
 logger = get_logger(__name__)
 
@@ -167,7 +166,6 @@ class HRIncomeCalculationService:
         year_month: str,
         assignments: list[Any],
     ) -> Dict[str, Dict[str, float]]:
-        basis_service = ProfitBasisService(self.db)
         shop_keys = {
             self._shop_key(row.platform_code, row.shop_id): (
                 (row.platform_code or "").lower(),
@@ -201,20 +199,6 @@ class HRIncomeCalculationService:
                 )
             }
 
-        for key, (platform_code, shop_id) in shop_keys.items():
-            if key in basis_by_shop:
-                continue
-            basis = await basis_service.build_profit_basis(
-                year_month=year_month,
-                platform_code=platform_code,
-                shop_id=shop_id,
-            )
-            basis_by_shop[key] = {
-                "profit_basis_amount": self._to_float(
-                    basis.get("profit_basis_amount"),
-                    0.0,
-                )
-            }
         return basis_by_shop
 
     async def _load_store_performance_by_shop(

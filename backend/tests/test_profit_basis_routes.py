@@ -44,7 +44,7 @@ async def test_profit_basis_routes_return_service_payload(monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.profit_basis.ProfitBasisService",
+        "backend.domains.business.routers.profit_basis.ProfitBasisService",
         lambda db: _ServiceStub(),
     )
 
@@ -115,7 +115,7 @@ async def test_profit_basis_rebuild_route_persists_snapshot(monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(
-        "backend.routers.profit_basis.ProfitBasisService",
+        "backend.domains.business.routers.profit_basis.ProfitBasisService",
         lambda db: stub,
     )
 
@@ -127,3 +127,66 @@ async def test_profit_basis_rebuild_route_persists_snapshot(monkeypatch):
 
     assert response.status_code == 200
     assert stub.persisted[0]["profit_basis_amount"] == 2500
+
+
+@pytest.mark.asyncio
+async def test_profit_basis_rebuild_returns_conflict_for_locked_snapshot(monkeypatch):
+    from backend.routers import profit_basis as profit_basis_router
+
+    class _ServiceStub:
+        async def build_profit_basis(self, **_kwargs):
+            return {"profit_basis_amount": 2500}
+
+        async def upsert_profit_basis_snapshot(self, _payload):
+            raise ValueError("profit basis is locked; reopen settlement before rebuild")
+
+    async def _override_db():
+        yield object()
+
+    app = FastAPI()
+    app.include_router(profit_basis_router.router)
+    app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
+    app.dependency_overrides[get_async_db] = _override_db
+    monkeypatch.setattr(
+        "backend.domains.business.routers.profit_basis.ProfitBasisService",
+        lambda _db: _ServiceStub(),
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/finance/profit-basis/rebuild",
+            json={"period_month": "2026-03", "platform_code": "shopee", "shop_id": "shop-1"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "profit basis is locked; reopen settlement before rebuild"
+
+
+@pytest.mark.asyncio
+async def test_profit_basis_lock_route_returns_locked_snapshot(monkeypatch):
+    from backend.routers import profit_basis as profit_basis_router
+
+    class _ServiceStub:
+        async def lock_profit_basis_snapshot(self, **kwargs):
+            return {**kwargs, "basis_version": "A_ONLY_V1", "is_locked": True}
+
+    async def _override_db():
+        yield object()
+
+    app = FastAPI()
+    app.include_router(profit_basis_router.router)
+    app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
+    app.dependency_overrides[get_async_db] = _override_db
+    monkeypatch.setattr(
+        "backend.domains.business.routers.profit_basis.ProfitBasisService",
+        lambda _db: _ServiceStub(),
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/finance/profit-basis/lock",
+            json={"period_month": "2026-03", "platform_code": "shopee", "shop_id": "shop-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["is_locked"] is True

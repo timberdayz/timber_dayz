@@ -44,6 +44,7 @@ class ShopTargetWorkbenchService:
         daily_counts = {key: len(days) for key, days in daily_dates.items()}
 
         total_amount = float(target.target_amount or 0.0) if target else 0.0
+        total_profit_basis_amount = float(getattr(target, "target_profit_basis_amount", 0.0) or 0.0) if target else 0.0
         response_shops = []
         for shop in shops:
             key = (shop.platform_code, shop.shop_id)
@@ -58,6 +59,7 @@ class ShopTargetWorkbenchService:
                     ratio=(amount / total_amount) if total_amount else 0.0,
                     target_amount=amount,
                     target_quantity=int(getattr(breakdown, "target_quantity", 0) or 0),
+                    target_profit_basis_amount=float(getattr(breakdown, "target_profit_basis_amount", 0.0) or 0.0),
                     daily_target_count=daily_counts.get(key, 0),
                 )
             )
@@ -67,6 +69,7 @@ class ShopTargetWorkbenchService:
             target_id=getattr(target, "id", None),
             company_target_amount=total_amount,
             company_target_quantity=int(getattr(target, "target_quantity", 0) or 0) if target else 0,
+            company_target_profit_basis_amount=total_profit_basis_amount,
             weekday_ratios=getattr(target, "weekday_ratios", None) or self._default_weekday_ratios(),
             shops=response_shops,
         )
@@ -96,6 +99,7 @@ class ShopTargetWorkbenchService:
         target.target_amount = request.company_target_amount
         target.target_quantity = request.company_target_quantity
         target.target_profit_amount = getattr(target, "target_profit_amount", 0.0) or 0.0
+        target.target_profit_basis_amount = request.company_target_profit_basis_amount
         target.weekday_ratios = self._normalize_weekday_ratios(request.weekday_ratios)
         target.description = "店铺目标工作台维护"
         target.updated_at = datetime.now(timezone.utc)
@@ -132,6 +136,7 @@ class ShopTargetWorkbenchService:
             year_month=year_month,
             company_target_amount=previous.company_target_amount,
             company_target_quantity=previous.company_target_quantity,
+            company_target_profit_basis_amount=previous.company_target_profit_basis_amount,
             weekday_ratios=previous.weekday_ratios,
             shops=[
                 {
@@ -140,6 +145,7 @@ class ShopTargetWorkbenchService:
                     "ratio": shop.ratio,
                     "target_amount": shop.target_amount,
                     "target_quantity": shop.target_quantity,
+                    "target_profit_basis_amount": shop.target_profit_basis_amount,
                 }
                 for shop in previous.shops
                 if shop.target_amount or shop.target_quantity
@@ -256,6 +262,11 @@ class ShopTargetWorkbenchService:
 
         company_daily_amounts = self._split_amount_by_weights(request.company_target_amount, day_weights, total_weight)
         company_daily_quantities = self._split_quantity_by_weights(request.company_target_quantity, day_weights, total_weight)
+        company_daily_profit_basis_amounts = self._split_amount_by_weights(
+            request.company_target_profit_basis_amount,
+            day_weights,
+            total_weight,
+        )
         for idx, (current, _) in enumerate(day_weights):
             await self._add(
                 TargetBreakdown(
@@ -266,6 +277,7 @@ class ShopTargetWorkbenchService:
                     period_label=current.isoformat(),
                     target_amount=company_daily_amounts[idx],
                     target_quantity=company_daily_quantities[idx],
+                    target_profit_basis_amount=company_daily_profit_basis_amounts[idx],
                 )
             )
 
@@ -281,10 +293,16 @@ class ShopTargetWorkbenchService:
                     period_label=request.year_month,
                     target_amount=shop.target_amount,
                     target_quantity=shop.target_quantity,
+                    target_profit_basis_amount=shop.target_profit_basis_amount,
                 )
             )
             shop_daily_amounts = self._split_amount_by_weights(shop.target_amount, day_weights, total_weight)
             shop_daily_quantities = self._split_quantity_by_weights(shop.target_quantity, day_weights, total_weight)
+            shop_daily_profit_basis_amounts = self._split_amount_by_weights(
+                shop.target_profit_basis_amount,
+                day_weights,
+                total_weight,
+            )
             for idx, (current, _) in enumerate(day_weights):
                 await self._add(
                     TargetBreakdown(
@@ -296,7 +314,8 @@ class ShopTargetWorkbenchService:
                         period_end=current,
                         period_label=current.isoformat(),
                         target_amount=shop_daily_amounts[idx],
-                        target_quantity=shop_daily_quantities[idx],
+                    target_quantity=shop_daily_quantities[idx],
+                    target_profit_basis_amount=shop_daily_profit_basis_amounts[idx],
                     )
                 )
 
@@ -313,12 +332,15 @@ class ShopTargetWorkbenchService:
         ratio_total = sum(float(shop.ratio or 0.0) for shop in request.shops)
         amount_total = round(sum(float(shop.target_amount or 0.0) for shop in request.shops), 2)
         quantity_total = sum(int(shop.target_quantity or 0) for shop in request.shops)
+        profit_basis_total = round(sum(float(shop.target_profit_basis_amount or 0.0) for shop in request.shops), 2)
         if abs(ratio_total - 1.0) > 0.0001:
             raise ValueError("店铺拆分比例合计必须等于100%")
         if abs(amount_total - round(float(request.company_target_amount or 0.0), 2)) > 0.01:
             raise ValueError("店铺目标销售额合计必须等于公司总销售额")
         if quantity_total != int(request.company_target_quantity or 0):
             raise ValueError("店铺订单目标合计必须等于公司订单目标")
+        if abs(profit_basis_total - round(float(request.company_target_profit_basis_amount or 0.0), 2)) > 0.01:
+            raise ValueError("店铺结算利润目标合计必须等于公司结算利润目标")
 
     def _default_weekday_ratios(self) -> dict[str, float]:
         return {str(day): 1 / 7 for day in range(1, 8)}

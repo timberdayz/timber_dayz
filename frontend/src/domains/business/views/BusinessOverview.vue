@@ -288,14 +288,14 @@
                 </el-tag>
               </div>
             </div>
-            <!-- 经营结果：最右侧竖状，跨两行 -->
+            <!-- 预估结算利润基数：订单利润减当前已归集费用 -->
             <div class="metric-item metric-result-vertical">
-              <div class="metric-label">经营结果</div>
+              <div class="metric-label">预估结算利润基数</div>
               <div class="metric-value">
-                <el-tag
-                  :type="getOperatingResultTagType(operationalMetrics.operating_result)"
-                  size="small"
-                >
+                {{ formatNumber(operationalMetrics.operating_result) }}
+              </div>
+              <div>
+                <el-tag :type="getOperatingResultTagType(operationalMetrics.operating_result)" size="small">
                   {{ operationalMetrics.operating_result_text }}
                 </el-tag>
               </div>

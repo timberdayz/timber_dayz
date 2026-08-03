@@ -47,7 +47,10 @@ async def get_profit_basis(
         platform_code=platform_code,
         shop_id=shop_id,
     )
-    await service.upsert_profit_basis_snapshot(payload)
+    try:
+        await service.upsert_profit_basis_snapshot(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return success_response(data=payload)
 
 
@@ -64,5 +67,27 @@ async def rebuild_profit_basis(
         shop_id=body.shop_id,
         basis_version=body.basis_version,
     )
-    await service.upsert_profit_basis_snapshot(payload)
+    try:
+        await service.upsert_profit_basis_snapshot(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return success_response(data=payload)
+
+
+@router.post("/profit-basis/lock")
+async def lock_profit_basis(
+    body: ProfitBasisRebuildRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    service = ProfitBasisService(db)
+    try:
+        payload = await service.lock_profit_basis_snapshot(
+            year_month=body.period_month,
+            platform_code=body.platform_code,
+            shop_id=body.shop_id,
+            basis_version=body.basis_version,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return success_response(data=payload)

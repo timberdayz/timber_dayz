@@ -117,17 +117,22 @@
         <el-table-column v-if="filters.groupBy === 'shop'" label="销售额得分" width="100" align="right">
           <template #default="{ row }">{{ row.sales_score != null ? Number(row.sales_score).toFixed(1) : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利目标" width="100" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="结算利润目标" width="120" align="right">
           <template #default="{ row }">{{ formatCell(row.profit_target) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利达成" width="100" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="结算利润达成" width="120" align="right">
           <template #default="{ row }">{{ formatCell(row.profit_achieved) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利达成率" width="110" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="结算利润达成率" width="130" align="right">
           <template #default="{ row }">{{ formatPercent(row.profit_rate) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" label="毛利得分" width="90" align="right">
+        <el-table-column v-if="filters.groupBy === 'shop'" label="结算利润得分" width="110" align="right">
           <template #default="{ row }">{{ row.profit_score != null ? Number(row.profit_score).toFixed(1) : '—' }}</template>
+        </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'shop'" label="计算状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="calculationModeType(row)" size="small">{{ calculationModeText(row) }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" prop="operation_score" label="店铺运营得分" width="120" align="right" sortable>
           <template #default="{ row }">{{ row.operation_score != null ? Number(row.operation_score).toFixed(1) : '—' }}</template>
@@ -379,11 +384,11 @@
         :rules="configRules"
         label-width="150px"
       >
-        <el-divider content-position="left">正式公式满分配置（销售额 + 毛利 + 店铺运营）</el-divider>
+        <el-divider content-position="left">正式公式满分配置（销售额 + 结算利润 + 店铺运营）</el-divider>
         <el-form-item label="销售额满分" prop="sales_max_score">
           <el-input-number v-model="configForm.sales_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
         </el-form-item>
-        <el-form-item label="毛利满分" prop="profit_max_score">
+        <el-form-item label="结算利润满分" prop="profit_max_score">
           <el-input-number v-model="configForm.profit_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
         </el-form-item>
         <el-form-item label="运营满分" prop="operation_max_score">
@@ -746,6 +751,17 @@ function metricMessageText(metric) {
   return metric?.calculation || metric?.message || '—'
 }
 
+function calculationModeText(row) {
+  const mode = row?.score_details?.summary?.calculation_mode
+  if (mode === 'formal') return '正式'
+  if (mode === 'forecast') return '预估'
+  return '待计算'
+}
+
+function calculationModeType(row) {
+  return row?.score_details?.summary?.calculation_mode === 'formal' ? 'success' : 'warning'
+}
+
 function rankingPoolText(row) {
   const status = row?.score_details?.summary?.ranking_pool
   if (status === 'official') return '正式池'
@@ -811,7 +827,7 @@ const detailMetricCards = computed(() => {
     },
     {
       key: 'profit_score',
-      label: '毛利得分',
+      label: '结算利润得分',
       maxScore: weightConfig.profit_max_score,
       metric: data.profit_score,
       successThreshold: 22.5,

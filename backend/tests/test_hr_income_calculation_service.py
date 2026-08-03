@@ -536,7 +536,7 @@ def test_load_profit_basis_by_shop_prefers_locked_shop_profit_basis_snapshot(mon
     assert result == {"shopee|s1": {"profit_basis_amount": 1800.0}}
 
 
-def test_load_profit_basis_by_shop_rebuilds_unlocked_shop_profit_basis_snapshot(monkeypatch):
+def test_load_profit_basis_by_shop_excludes_unlocked_shop_profit_basis_snapshot(monkeypatch):
     db = AsyncMock()
 
     snapshot_row = SimpleNamespace(
@@ -565,23 +565,17 @@ def test_load_profit_basis_by_shop_rebuilds_unlocked_shop_profit_basis_snapshot(
     db.execute = AsyncMock(side_effect=_execute)
     service = HRIncomeCalculationService(db=db)
 
-    async def _fake_build(self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"):
-        return {
-            "period_month": year_month,
-            "platform_code": platform_code,
-            "shop_id": shop_id,
-            "profit_basis_amount": 2400.0,
-            "basis_version": basis_version,
-        }
+    async def _unexpected_build(*args, **kwargs):
+        raise AssertionError("formal income must not rebuild an unlocked profit basis")
 
     monkeypatch.setattr(
         "backend.services.profit_basis_service.ProfitBasisService.build_profit_basis",
-        _fake_build,
+        _unexpected_build,
     )
 
     result = asyncio.run(service._load_profit_basis_by_shop("2026-03", [assignment]))
 
-    assert result == {"shopee|s1": {"profit_basis_amount": 2400.0}}
+    assert result == {}
 
 
 def test_calculate_month_employee_performance_uses_store_total_score():

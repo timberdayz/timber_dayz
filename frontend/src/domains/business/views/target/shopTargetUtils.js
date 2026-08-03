@@ -13,11 +13,12 @@ export function calculateShopTargetTotals(shops = []) {
     acc.ratioPercent = round(acc.ratioPercent + Number(shop.ratio_percent || 0), 4)
     acc.amount = round(acc.amount + Number(shop.target_amount || 0), 2)
     acc.quantity += Number(shop.target_quantity || 0)
+    acc.profitBasisAmount = round(acc.profitBasisAmount + Number(shop.target_profit_basis_amount || 0), 2)
     return acc
-  }, { ratioPercent: 0, amount: 0, quantity: 0 })
+  }, { ratioPercent: 0, amount: 0, quantity: 0, profitBasisAmount: 0 })
 }
 
-export function splitShopTargetsByPercent(shops = [], companyAmount = 0, companyQuantity = 0) {
+export function splitShopTargetsByPercent(shops = [], companyAmount = 0, companyQuantity = 0, companyProfitBasisAmount = 0) {
   const result = shops.map((shop) => {
     const percent = Number(shop.ratio_percent || 0)
     const ratio = percent / 100
@@ -25,7 +26,8 @@ export function splitShopTargetsByPercent(shops = [], companyAmount = 0, company
       ...shop,
       ratio,
       target_amount: round(Number(companyAmount || 0) * ratio, 2),
-      target_quantity: Math.floor(Number(companyQuantity || 0) * ratio)
+      target_quantity: Math.floor(Number(companyQuantity || 0) * ratio),
+      target_profit_basis_amount: round(Number(companyProfitBasisAmount || 0) * ratio, 2)
     }
   })
 
@@ -33,14 +35,19 @@ export function splitShopTargetsByPercent(shops = [], companyAmount = 0, company
   if (Math.abs(totals.ratioPercent - 100) < 0.01 && result.length) {
     const amountDiff = round(Number(companyAmount || 0) - totals.amount, 2)
     const quantityDiff = Number(companyQuantity || 0) - totals.quantity
+    const profitBasisDiff = round(Number(companyProfitBasisAmount || 0) - totals.profitBasisAmount, 2)
     result[result.length - 1].target_amount = round(Number(result[result.length - 1].target_amount || 0) + amountDiff, 2)
     result[result.length - 1].target_quantity = Number(result[result.length - 1].target_quantity || 0) + quantityDiff
+    result[result.length - 1].target_profit_basis_amount = round(
+      Number(result[result.length - 1].target_profit_basis_amount || 0) + profitBasisDiff,
+      2
+    )
   }
 
   return result
 }
 
-export function splitShopTargetsEqually(shops = [], companyAmount = 0, companyQuantity = 0) {
+export function splitShopTargetsEqually(shops = [], companyAmount = 0, companyQuantity = 0, companyProfitBasisAmount = 0) {
   if (!shops.length) return []
   const basePercent = round(100 / shops.length, 2)
   let usedPercent = 0
@@ -49,7 +56,7 @@ export function splitShopTargetsEqually(shops = [], companyAmount = 0, companyQu
     usedPercent = round(usedPercent + ratioPercent, 2)
     return { ...shop, ratio_percent: ratioPercent }
   })
-  return splitShopTargetsByPercent(withRatios, companyAmount, companyQuantity)
+  return splitShopTargetsByPercent(withRatios, companyAmount, companyQuantity, companyProfitBasisAmount)
 }
 
 export function normalizeWeekdayRatiosToPercents(ratios = {}) {

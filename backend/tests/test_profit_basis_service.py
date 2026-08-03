@@ -375,6 +375,65 @@ async def test_upsert_profit_basis_snapshot_updates_existing_snapshot():
 
 
 @pytest.mark.asyncio
+async def test_upsert_profit_basis_snapshot_rejects_locked_snapshot_overwrite():
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+    existing = SimpleNamespace(
+        period_month="2026-03",
+        platform_code="shopee",
+        shop_id="shop-1",
+        orders_profit_amount=100.0,
+        a_class_cost_amount=50.0,
+        b_class_cost_amount=0.0,
+        profit_basis_amount=50.0,
+        basis_version="A_ONLY_V1",
+        is_locked=True,
+    )
+    db.execute = AsyncMock(return_value=_MockMappingsResult([existing]))
+    payload = {
+        "period_month": "2026-03",
+        "platform_code": "shopee",
+        "shop_id": "shop-1",
+        "orders_profit_amount": 4000.0,
+        "a_class_cost_amount": 1500.0,
+        "b_class_cost_amount": 0.0,
+        "profit_basis_amount": 2500.0,
+        "basis_version": "A_ONLY_V1",
+    }
+
+    with pytest.raises(ValueError, match="locked"):
+        await service.upsert_profit_basis_snapshot(payload)
+
+    assert existing.profit_basis_amount == pytest.approx(50.0)
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lock_profit_basis_snapshot_marks_existing_basis_locked():
+    db = AsyncMock()
+    db.commit = AsyncMock()
+    existing = SimpleNamespace(
+        period_month="2026-03",
+        platform_code="shopee",
+        shop_id="shop-1",
+        basis_version="A_ONLY_V1",
+        profit_basis_amount=2500.0,
+        is_locked=False,
+    )
+    db.execute = AsyncMock(return_value=_MockMappingsResult([existing]))
+
+    result = await ProfitBasisService(db).lock_profit_basis_snapshot(
+        year_month="2026-03",
+        platform_code="shopee",
+        shop_id="shop-1",
+    )
+
+    assert existing.is_locked is True
+    assert result["is_locked"] is True
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_ensure_fiscal_period_exists_creates_missing_period():
     db = AsyncMock()
     added = []

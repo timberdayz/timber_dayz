@@ -227,8 +227,7 @@ def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
                 "shop_id": "shop-1",
                 "target": 1000.0,
                 "achieved": 1000.0,
-                "target_profit_amount": 100.0,
-                "achieved_profit_amount": 100.0,
+                "target_profit_basis_amount": 100.0,
                 "key_product_target": 1_000_000.0,
                 "key_product_achieved": 1_000_000.0,
             }
@@ -264,6 +263,20 @@ def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
     monkeypatch.setattr(performance_module, "_load_effective_target_for_month", _fake_target)
     monkeypatch.setattr(performance_module, "load_shop_monthly_target_achievement", _fake_source_rows)
     monkeypatch.setattr(performance_module, "load_shop_monthly_metrics", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        performance_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {
+                    "profit_basis_amount": 100.0,
+                    "basis_version": "A_ONLY_V1",
+                    "calculation_mode": "formal",
+                    "source": "finance.shop_profit_basis",
+                }
+            }
+        ),
+    )
     monkeypatch.setattr(performance_module, "_load_valid_performance_shop_keys", AsyncMock(return_value=None))
     monkeypatch.setattr(
         performance_module,
@@ -476,6 +489,140 @@ def test_recalculation_commits_once_after_income_and_payroll(monkeypatch):
     assert db.flush.await_count == 1
     assert db.commit.await_count == 1
     assert db.rollback.await_count == 0
+
+
+def test_partial_recalculation_does_not_write_income_or_payroll(monkeypatch):
+    _patch_successful_shop_recalc(monkeypatch)
+    downstream_calls = []
+
+    async def _partial_source_rows(_db, _period):
+        return {
+            "shopee|shop-1": {
+                "platform_code": "shopee",
+                "shop_id": "shop-1",
+                "target": 1000.0,
+                "achieved": 1000.0,
+                "target_profit_amount": 0.0,
+                "achieved_profit_amount": 0.0,
+            }
+        }
+
+    class _IncomeService:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def calculate_month(self, *_args, **_kwargs):
+            downstream_calls.append("income")
+            return {}
+
+    class _PayrollService:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def generate_month(self, *_args, **_kwargs):
+            downstream_calls.append("payroll")
+            return {}
+
+    monkeypatch.setattr(performance_module, "load_shop_monthly_target_achievement", _partial_source_rows)
+    monkeypatch.setattr(performance_module, "HRIncomeCalculationService", _IncomeService)
+    monkeypatch.setattr(performance_module, "PayrollGenerationService", _PayrollService)
+    db = _CalcDb(_config())
+
+    response = asyncio.run(
+        performance_module.calculate_performance_scores(
+            period="2025-01",
+            config_id=None,
+            db=db,
+        )
+    )
+
+    assert _json_body(response)["success"] is True
+    assert downstream_calls == []
+    created = next(item for item in db.added if isinstance(item, PerformanceScore))
+    assert created.performance_coefficient is None
+
+
+def test_monthly_score_uses_shop_target_and_locked_profit_basis(monkeypatch):
+    _patch_successful_shop_recalc(monkeypatch)
+    shop_target = SimpleNamespace(id=11)
+    monthly_shop = SimpleNamespace(
+        target_id=11,
+        breakdown_type="shop",
+        platform_code="shopee",
+        shop_id="shop-1",
+        target_amount=1000.0,
+        achieved_amount=1000.0,
+        target_profit_basis_amount=100.0,
+    )
+    daily_projection = SimpleNamespace(
+        target_id=11,
+        breakdown_type="shop_time",
+        platform_code="shopee",
+        shop_id="shop-1",
+        target_amount=1000.0,
+        achieved_amount=1000.0,
+        target_profit_basis_amount=100.0,
+    )
+    locked_basis = SimpleNamespace(
+        period_month="2025-01",
+        platform_code="shopee",
+        shop_id="shop-1",
+        basis_version="A_ONLY_V1",
+        is_locked=True,
+        profit_basis_amount=100.0,
+    )
+
+    class _BasisDb(_CalcDb):
+        def __init__(self):
+            super().__init__(_config())
+            self.target_breakdown_statement = None
+
+        async def execute(self, statement, *_args, **_kwargs):
+            text = str(statement)
+            if "performance_config" in text:
+                return _Result(scalar_value=self.config)
+            if "target_breakdown" in text:
+                self.target_breakdown_statement = statement
+                if "POSTCOMPILE" in text:
+                    return _Result(rows=[monthly_shop, daily_projection])
+                return _Result(rows=[monthly_shop])
+            if "shop_profit_basis" in text:
+                return _Result(rows=[locked_basis])
+            if "sales_targets" in text:
+                return _Result(rows=[shop_target])
+            return _Result(rows=[], scalar_value=None)
+
+    monkeypatch.setattr(
+        performance_module,
+        "_load_effective_target_for_month",
+        AsyncMock(return_value=shop_target),
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "load_shop_monthly_metrics",
+        AsyncMock(return_value={"shopee|shop-1": {"monthly_sales": 1000.0, "monthly_profit": 500.0}}),
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "_load_operation_target_breakdown_by_shop",
+        AsyncMock(return_value={}),
+    )
+    db = _BasisDb()
+
+    response = asyncio.run(
+        performance_module.calculate_performance_scores(
+            period="2025-01",
+            config_id=None,
+            db=db,
+        )
+    )
+
+    assert _json_body(response)["success"] is True
+    score = next(item for item in db.added if isinstance(item, PerformanceScore))
+    assert score.sales_score == 40.0
+    assert score.profit_score == 40.0
+    assert score.score_details["profit"]["source"] == "finance.shop_profit_basis"
+    assert "POSTCOMPILE" not in str(db.target_breakdown_statement)
 
 
 def test_recalculation_rolls_back_when_payroll_generation_fails(monkeypatch):

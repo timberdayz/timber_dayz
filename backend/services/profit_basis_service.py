@@ -164,6 +164,8 @@ class ProfitBasisService:
             record = ShopProfitBasis(**payload)
             self.db.add(record)
         else:
+            if bool(getattr(record, "is_locked", False)):
+                raise ValueError("profit basis is locked; reopen settlement before rebuild")
             record.orders_profit_amount = payload["orders_profit_amount"]
             record.a_class_cost_amount = payload["a_class_cost_amount"]
             record.b_class_cost_amount = payload["b_class_cost_amount"]
@@ -172,6 +174,37 @@ class ProfitBasisService:
         if commit:
             await self.db.commit()
         return payload
+
+    async def lock_profit_basis_snapshot(
+        self,
+        *,
+        year_month: str,
+        platform_code: str,
+        shop_id: str,
+        basis_version: str = "A_ONLY_V1",
+    ) -> dict[str, Any]:
+        record = (
+            await self.db.execute(
+                select(ShopProfitBasis).where(
+                    ShopProfitBasis.period_month == year_month,
+                    ShopProfitBasis.platform_code == (platform_code or "").lower(),
+                    ShopProfitBasis.shop_id == shop_id,
+                    ShopProfitBasis.basis_version == basis_version,
+                )
+            )
+        ).scalar_one_or_none()
+        if record is None:
+            raise ValueError("profit basis snapshot not found; rebuild before locking")
+        record.is_locked = True
+        await self.db.commit()
+        return {
+            "period_month": record.period_month,
+            "platform_code": record.platform_code,
+            "shop_id": record.shop_id,
+            "basis_version": record.basis_version,
+            "profit_basis_amount": _to_float(record.profit_basis_amount),
+            "is_locked": True,
+        }
 
     @staticmethod
     def calculate_distributable_amount(

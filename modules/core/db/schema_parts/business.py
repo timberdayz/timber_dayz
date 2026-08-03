@@ -1355,6 +1355,7 @@ class SalesTarget(Base):
     target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
     target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
     target_profit_amount = Column(Float, nullable=False, default=0.0, comment="目标毛利(CNY)")
+    target_profit_basis_amount = Column(Float, nullable=False, default=0.0, comment="目标结算利润基数(CNY)")
     product_id = Column(Integer, nullable=True, comment="产品ID")
     platform_sku = Column(String(128), nullable=True, comment="平台SKU")
     company_sku = Column(String(128), nullable=True, comment="公司SKU")
@@ -1397,6 +1398,7 @@ class SalesTarget(Base):
         CheckConstraint("target_amount >= 0", name="chk_target_amount"),
         CheckConstraint("target_quantity >= 0", name="chk_target_quantity"),
         CheckConstraint("target_profit_amount >= 0", name="chk_target_profit_amount"),
+        CheckConstraint("target_profit_basis_amount >= 0", name="chk_target_profit_basis_amount"),
         Index("ix_sales_targets_type", "target_type"),
         Index("ix_sales_targets_status", "status"),
         Index("ix_sales_targets_period", "period_start", "period_end"),
@@ -1436,6 +1438,7 @@ class TargetBreakdown(Base):
     target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
     target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
     target_profit_amount = Column(Float, nullable=False, default=0.0, comment="目标毛利(CNY)")
+    target_profit_basis_amount = Column(Float, nullable=False, default=0.0, comment="目标结算利润基数(CNY)")
     product_id = Column(Integer, nullable=True, comment="产品ID")
     platform_sku = Column(String(128), nullable=True, comment="平台SKU")
     company_sku = Column(String(128), nullable=True, comment="公司SKU")
@@ -1599,7 +1602,7 @@ class PerformanceScore(Base):
     
     # 排名和系数
     rank = Column(Integer, nullable=True, comment="排名")
-    performance_coefficient = Column(Float, nullable=False, default=1.0, comment="绩效系数")
+    performance_coefficient = Column(Float, nullable=True, comment="绩效系数；仅正式结算结果写入")
     
     # 审计字段
     calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

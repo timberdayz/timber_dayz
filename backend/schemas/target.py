@@ -173,12 +173,14 @@ class ShopTargetWorkbenchShopInput(BaseModel):
     ratio: float = Field(0.0, ge=0)
     target_amount: float = Field(0.0, ge=0)
     target_quantity: int = Field(0, ge=0)
+    target_profit_basis_amount: float = Field(0.0, ge=0)
 
 
 class ShopTargetWorkbenchApplyRequest(BaseModel):
     year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
     company_target_amount: float = Field(0.0, ge=0)
     company_target_quantity: int = Field(0, ge=0)
+    company_target_profit_basis_amount: float = Field(0.0, ge=0)
     weekday_ratios: Dict[str, float] = Field(default_factory=dict)
     shops: List[ShopTargetWorkbenchShopInput] = Field(default_factory=list)
 
@@ -191,6 +193,7 @@ class ShopTargetWorkbenchShopResponse(BaseModel):
     ratio: float = 0.0
     target_amount: float = 0.0
     target_quantity: int = 0
+    target_profit_basis_amount: float = 0.0
     daily_target_count: int = 0
 
 
@@ -199,6 +202,7 @@ class ShopTargetWorkbenchResponse(BaseModel):
     target_id: Optional[int] = None
     company_target_amount: float = 0.0
     company_target_quantity: int = 0
+    company_target_profit_basis_amount: float = 0.0
     weekday_ratios: Dict[str, float] = Field(default_factory=dict)
     shops: List[ShopTargetWorkbenchShopResponse] = Field(default_factory=list)
 
