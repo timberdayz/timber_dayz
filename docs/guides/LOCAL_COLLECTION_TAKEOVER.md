@@ -7,6 +7,15 @@ browser on the Windows desktop.
 
 ## Mode Selection
 
+For daily Windows operation, prefer double-clicking `local_console.cmd` in the
+repository root. The browser console wraps the two supported daily entrypoints:
+
+- `本地采集系统` starts the formal collection laptop mode below
+- `巡店与会话` starts `python scripts\pwcli_inspection_panel.py`
+
+The command-line paths remain available for troubleshooting and direct runtime
+inspection.
+
 Use formal mode for daily collection work:
 
 ```powershell
@@ -23,6 +32,20 @@ Both modes keep Docker `backend-api` and Docker `backend-collector` stopped.
 Docker owns only `postgres`, `redis`, `celery-worker`, and `celery-beat`.
 The Windows host owns the backend process, frontend dev server, visible
 Playwright browser, and SSH tunnel.
+
+## Local Console Stop Boundaries
+
+- Stopping `本地采集系统` ends only the local process tree started by the
+  console. PostgreSQL, Redis, Celery, and the SSH tunnel remain running.
+- Stopping `巡店与会话` ends only the inspection-panel server. It does not
+  close PWCLI platform browsers, save a session, delete a profile, or alter a
+  stored session.
+- `停止全部` applies only to those two console-managed processes.
+- Processes started outside the console are shown as external and are never
+  terminated by the console.
+- Closing the control-console browser tab changes no runtime state. Double-click
+  `local_console.cmd` to reopen the same controller.
+- Controller and child-process logs are under `logs/local-console/`.
 
 ## Files
 

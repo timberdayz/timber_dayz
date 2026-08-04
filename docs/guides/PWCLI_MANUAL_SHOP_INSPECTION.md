@@ -45,6 +45,12 @@
 python scripts\pwcli_inspection_panel.py
 ```
 
+For routine Windows use, the same panel can be started from the repository-root
+`local_console.cmd` entry under `巡店与会话`. Stopping that panel from the local
+console only stops the panel server; it does not close platform browser sessions,
+save state automatically, or delete account profiles. The direct Python command
+remains the troubleshooting fallback.
+
 面板会自动打开 `http://127.0.0.1:<port>/?token=<一次性token>`，只允许本机访问。点击账号卡片里的“打开巡店”后，在浏览器里人工巡店、关闭弹窗、处理验证；是否保存由人工判断，确认页面状态值得保留时，回到面板点击“保存会话”。
 
 巡店面板只负责打开账号会话、等待人工确认后保存。它不会自动点击页面、关闭弹窗或处理验证码。在页面停留于登录页、验证页、报错页或明显异常页时，请选择“跳过/清除状态”。

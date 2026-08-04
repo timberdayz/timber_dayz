@@ -4,6 +4,18 @@ This file contains operational commands. Repository rules live in `AGENTS.md`.
 
 ## Startup
 
+For routine Windows collection and session operations, double-click the
+repository-root launcher:
+
+```text
+local_console.cmd
+```
+
+It opens the loopback-only browser console for the formal local collection
+system and PWCLI inspection panel. Closing the browser tab does not stop either
+managed process; double-click the launcher again to reopen the existing console.
+Runtime logs are written under `logs/local-console/`.
+
 Default local startup:
 
 ```bash
@@ -18,6 +30,9 @@ Formal collection laptop mode:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start_collection_formal.ps1
 ```
+
+The command remains the supported troubleshooting fallback behind the local
+console's `本地采集系统` action.
 
 Development collection takeover mode:
 
