@@ -693,10 +693,7 @@ class EmployeeTargetAllocationShopResponse(BaseModel):
     platform_code: str
     shop_id: str
     shop_name: Optional[str] = None
-    target_allocation_ratio: float
-    target_allocation_ratio_source: str
-    allocation_ratio_total: float
-    has_allocation_risk: bool
+    responsibility_mode: str
     sales_target: float
     sales_actual: float
     sales_achievement_rate: float
@@ -714,8 +711,6 @@ class EmployeeTargetSummaryResponse(BaseModel):
     gross_profit_target: float
     gross_profit_actual: float
     gross_profit_achievement_rate: float
-    has_allocation_risk: bool
-    allocation_risk_shops: List[str]
     shops: List[EmployeeTargetAllocationShopResponse]
 
 
@@ -794,7 +789,6 @@ class EmployeeShopAssignmentCreate(BaseModel):
     shop_id: str = Field(..., min_length=1, max_length=256)
     commission_ratio: Optional[float] = Field(None, ge=0, le=1)
     target_allocation_ratio: float = Field(1.0, ge=0, le=1)
-    target_allocation_ratio_source: str = Field("manual", min_length=1, max_length=64)
     role: Optional[str] = Field(None, max_length=32)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
@@ -807,13 +801,19 @@ class EmployeeShopAssignmentCreate(BaseModel):
                 raise ValueError("effective_to 须 >= effective_from")
         return v
 
+    @field_validator("target_allocation_ratio")
+    @classmethod
+    def target_allocation_must_be_shared(cls, v):
+        if abs(v - 1.0) > 1e-9:
+            raise ValueError("当前仅支持共同承接店铺目标，目标分配比例必须为100%")
+        return v
+
 
 class EmployeeShopAssignmentUpdate(BaseModel):
     """更新归属"""
 
     commission_ratio: Optional[float] = Field(None, ge=0, le=1)
     target_allocation_ratio: Optional[float] = Field(None, ge=0, le=1)
-    target_allocation_ratio_source: Optional[str] = Field(None, min_length=1, max_length=64)
     role: Optional[str] = Field(None, max_length=32)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
@@ -825,6 +825,13 @@ class EmployeeShopAssignmentUpdate(BaseModel):
         if v is not None and info.data.get("effective_from") is not None:
             if v < info.data["effective_from"]:
                 raise ValueError("effective_to 须 >= effective_from")
+        return v
+
+    @field_validator("target_allocation_ratio")
+    @classmethod
+    def target_allocation_must_be_shared(cls, v):
+        if v is not None and abs(v - 1.0) > 1e-9:
+            raise ValueError("当前仅支持共同承接店铺目标，目标分配比例必须为100%")
         return v
 
 

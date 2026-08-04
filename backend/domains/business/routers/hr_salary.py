@@ -579,7 +579,7 @@ async def list_employee_target_summary(
     employee_code: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """按店铺目标和目标分配比例汇总个人销售/毛利目标，不参与绩效或工资计算。"""
+    """按完整店铺目标和实际汇总人员负责店铺概览，不参与绩效或工资计算。"""
     try:
         return await EmployeeTargetAllocationService(db).list_summaries(
             year_month=year_month,

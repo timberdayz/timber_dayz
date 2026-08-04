@@ -36,22 +36,9 @@ def build_employee_target_summary(
     employee_code: str,
     employee_name: str | None,
     assignments: list[Any],
-    all_assignments: list[Any],
     shop_targets: dict[tuple[str, str], dict[str, Any]],
     shop_actuals: dict[tuple[str, str], dict[str, Any]],
 ) -> dict[str, Any]:
-    active_assignment_totals: dict[tuple[str, str], float] = {}
-    for assignment in all_assignments:
-        if getattr(assignment, "status", "active") != "active":
-            continue
-        key = _shop_key(
-            getattr(assignment, "platform_code", None),
-            getattr(assignment, "shop_id", None),
-        )
-        active_assignment_totals[key] = active_assignment_totals.get(key, 0.0) + _number(
-            getattr(assignment, "target_allocation_ratio", 0)
-        )
-
     shops: list[dict[str, Any]] = []
     for assignment in assignments:
         key = _shop_key(
@@ -60,24 +47,16 @@ def build_employee_target_summary(
         )
         source = shop_targets.get(key, {})
         actuals = shop_actuals.get(key, {})
-        ratio = _number(getattr(assignment, "target_allocation_ratio", 0))
-        allocation_ratio_total = active_assignment_totals.get(key, 0.0)
-        sales_target = _number(source.get("sales_target")) * ratio
-        sales_actual = _number(actuals.get("monthly_sales")) * ratio
-        gross_profit_target = _number(source.get("gross_profit_target")) * ratio
-        gross_profit_actual = _number(actuals.get("monthly_profit")) * ratio
+        sales_target = _number(source.get("sales_target"))
+        sales_actual = _number(actuals.get("monthly_sales"))
+        gross_profit_target = _number(source.get("gross_profit_target"))
+        gross_profit_actual = _number(actuals.get("monthly_profit"))
         shops.append(
             {
                 "platform_code": key[0],
                 "shop_id": key[1],
                 "shop_name": source.get("shop_name") or key[1],
-                "target_allocation_ratio": ratio,
-                "target_allocation_ratio_source": getattr(
-                    assignment, "target_allocation_ratio_source", "manual"
-                )
-                or "manual",
-                "allocation_ratio_total": allocation_ratio_total,
-                "has_allocation_risk": abs(allocation_ratio_total - 1.0) > 1e-9,
+                "responsibility_mode": "shared_shop_target",
                 "sales_target": sales_target,
                 "sales_actual": sales_actual,
                 "sales_achievement_rate": _achievement_rate(sales_actual, sales_target),
@@ -93,11 +72,6 @@ def build_employee_target_summary(
     sales_actual = sum(row["sales_actual"] for row in shops)
     gross_profit_target = sum(row["gross_profit_target"] for row in shops)
     gross_profit_actual = sum(row["gross_profit_actual"] for row in shops)
-    risk_shops = [
-        f"{row['platform_code']}:{row['shop_id']}"
-        for row in shops
-        if row["has_allocation_risk"]
-    ]
     return {
         "employee_code": employee_code,
         "employee_name": employee_name,
@@ -109,8 +83,6 @@ def build_employee_target_summary(
         "gross_profit_achievement_rate": _achievement_rate(
             gross_profit_actual, gross_profit_target
         ),
-        "has_allocation_risk": bool(risk_shops),
-        "allocation_risk_shops": risk_shops,
         "shops": shops,
     }
 
@@ -174,7 +146,6 @@ class EmployeeTargetAllocationService:
                 employee_code=code,
                 employee_name=employee_names.get(code),
                 assignments=employee_assignments,
-                all_assignments=assignments,
                 shop_targets=shop_targets,
                 shop_actuals=shop_actuals,
             )

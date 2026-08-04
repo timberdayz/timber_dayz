@@ -1146,8 +1146,8 @@ async def create_employee_shop_assignment(
             platform_code=body.platform_code.lower(),
             shop_id=body.shop_id,
             commission_ratio=body.commission_ratio,
-            target_allocation_ratio=body.target_allocation_ratio,
-            target_allocation_ratio_source=body.target_allocation_ratio_source,
+            target_allocation_ratio=1.0,
+            target_allocation_ratio_source="manual",
             role=body.role,
             effective_from=body.effective_from,
             effective_to=body.effective_to,
@@ -1200,11 +1200,6 @@ async def update_employee_shop_assignment(
         update_data = body.model_dump(exclude_unset=True)
         for k, v in update_data.items():
             setattr(rec, k, v)
-        if (
-            "target_allocation_ratio" in update_data
-            and "target_allocation_ratio_source" not in update_data
-        ):
-            rec.target_allocation_ratio_source = "manual"
         await db.commit()
         await db.refresh(rec)
         emp = (await db.execute(select(Employee.name).where(Employee.employee_code == rec.employee_code))).scalar_one_or_none()
@@ -1373,8 +1368,8 @@ async def copy_employee_shop_assignments_from_prev_month(
                 platform_code=r.platform_code,
                 shop_id=r.shop_id,
                 commission_ratio=r.commission_ratio,
-                target_allocation_ratio=r.target_allocation_ratio,
-                target_allocation_ratio_source=r.target_allocation_ratio_source,
+                target_allocation_ratio=1.0,
+                target_allocation_ratio_source="manual",
                 role=r.role,
                 effective_from=r.effective_from,
                 effective_to=r.effective_to,
