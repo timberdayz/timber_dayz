@@ -348,6 +348,16 @@
               </div>
             </div>
           </div>
+          <div class="operational-cost-breakdown" v-if="operationalMetrics.estimated_expenses != null">
+            <span>其他经营成本 {{ formatNumber(operationalMetrics.other_operating_cost) }}</span>
+            <span>提成前人力 {{ formatNumber(operationalMetrics.pre_commission_labor_cost) }}</span>
+            <span>绩效 {{ formatNumber(operationalMetrics.performance_labor_cost) }}</span>
+            <span>提成 {{ formatNumber(operationalMetrics.commission_labor_cost) }}</span>
+            <span v-if="operationalMetrics.company_public_labor_cost">公共人力 {{ formatNumber(operationalMetrics.company_public_labor_cost) }}</span>
+            <el-tag size="small" :type="operationalMetrics.cost_status === 'confirmed' ? 'success' : 'info'">
+              {{ operationalMetrics.cost_status === 'confirmed' ? '已确认' : '预计' }}
+            </el-tag>
+          </div>
         </div>
           </el-card>
         </el-col>
@@ -2532,6 +2542,13 @@ const operationalMetrics = ref({
   monthly_achievement_rate: null,
   time_gap: null,
   estimated_gross_profit: null,
+  other_operating_cost: null,
+  pre_commission_labor_cost: null,
+  performance_labor_cost: null,
+  commission_labor_cost: null,
+  total_labor_cost: null,
+  company_public_labor_cost: 0,
+  cost_status: 'legacy',
   estimated_expenses: null,
   operating_result: null,
   operating_result_text: '--',
@@ -2575,7 +2592,7 @@ const operationalExpensesTooltip = computed(() => {
     : warnings.length
       ? ` 警告：${warnings.join('；')}`
       : ''
-  return `${sourceLabel} 口径：租金+营销费用+水电费+AI Token费用+人力费用+其他成本。${warningLabel}`
+  return `${sourceLabel} 口径：其他经营成本+提成前人力+绩效+提成；提成本身不参与提成计算基数。${warningLabel}`
 })
 
 // 获取变化类型
@@ -3076,6 +3093,13 @@ const loadOperationalMetrics = async () => {
         monthly_achievement_rate: response.monthly_achievement_rate ?? null,
         time_gap: response.time_gap ?? null,
         estimated_gross_profit: response.estimated_gross_profit ?? null,
+        other_operating_cost: response.other_operating_cost ?? null,
+        pre_commission_labor_cost: response.pre_commission_labor_cost ?? null,
+        performance_labor_cost: response.performance_labor_cost ?? null,
+        commission_labor_cost: response.commission_labor_cost ?? null,
+        total_labor_cost: response.total_labor_cost ?? null,
+        company_public_labor_cost: response.company_public_labor_cost ?? 0,
+        cost_status: response.cost_status ?? 'legacy',
         estimated_expenses: response.estimated_expenses ?? null,
         operating_result: response.operating_result ?? null,
         operating_result_text: response.operating_result_text ?? '--',
@@ -3289,6 +3313,13 @@ const loadCriticalTierBootstrap = async () => {
         monthly_achievement_rate: data.monthly_achievement_rate ?? null,
         time_gap: data.time_gap ?? null,
         estimated_gross_profit: data.estimated_gross_profit ?? null,
+        other_operating_cost: data.other_operating_cost ?? null,
+        pre_commission_labor_cost: data.pre_commission_labor_cost ?? null,
+        performance_labor_cost: data.performance_labor_cost ?? null,
+        commission_labor_cost: data.commission_labor_cost ?? null,
+        total_labor_cost: data.total_labor_cost ?? null,
+        company_public_labor_cost: data.company_public_labor_cost ?? 0,
+        cost_status: data.cost_status ?? 'legacy',
         estimated_expenses: data.estimated_expenses ?? null,
         operating_result: data.operating_result ?? null,
         operating_result_text: data.operating_result_text ?? '--',
@@ -3964,6 +3995,19 @@ watch(
 
 .metrics-row .metric-item {
   margin-bottom: 0;
+}
+
+.operational-cost-breakdown {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 10px;
+  color: #606266;
+  font-size: 12px;
+  background: #f8f9fa;
+  border-top: 1px solid #ebeef5;
 }
 
 .metric-item {

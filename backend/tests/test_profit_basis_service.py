@@ -9,6 +9,17 @@ from backend.services.profit_basis_service import ProfitBasisService
 from modules.core.db import DimFiscalCalendar
 
 
+@pytest.fixture(autouse=True)
+def default_to_legacy_basis_version(monkeypatch):
+    async def resolve_legacy_version(*_args, **_kwargs):
+        return "A_ONLY_V1"
+
+    monkeypatch.setattr(
+        "backend.services.labor_cost_policy_service.LaborCostPolicyService.get_profit_basis_version",
+        resolve_legacy_version,
+    )
+
+
 class _MockMappingsResult:
     def __init__(self, rows=None):
         self._rows = rows or []
@@ -64,6 +75,155 @@ async def test_build_profit_basis_uses_orders_profit_minus_a_class_costs(monkeyp
     assert basis["b_class_cost_amount"] == pytest.approx(0)
     assert basis["profit_basis_amount"] == pytest.approx(2500)
     assert basis["basis_version"] == "A_ONLY_V1"
+
+
+@pytest.mark.asyncio
+async def test_build_profit_basis_v2_adds_only_pre_commission_labor_cost(monkeypatch):
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+
+    async def fake_load_shop_metrics(db_arg, year_month):
+        return {"shopee|shop-1": {"monthly_profit": 4000}}
+
+    async def fake_load_other_cost(*_args, **_kwargs):
+        return 1500.0
+
+    async def fake_load_pre_commission_labor(*_args, **_kwargs):
+        return 500.0
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.load_shop_monthly_metrics",
+        fake_load_shop_metrics,
+    )
+    monkeypatch.setattr(service, "_load_other_a_class_cost_amount", fake_load_other_cost)
+    monkeypatch.setattr(
+        service,
+        "_load_pre_commission_labor_amount",
+        fake_load_pre_commission_labor,
+        raising=False,
+    )
+
+    basis = await service.build_profit_basis(
+        year_month="2026-09",
+        platform_code="Shopee",
+        shop_id="shop-1",
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+    )
+
+    assert basis["other_a_class_cost_amount"] == pytest.approx(1500)
+    assert basis["pre_commission_labor_cost_amount"] == pytest.approx(500)
+    assert basis["a_class_cost_amount"] == pytest.approx(2000)
+    assert basis["profit_basis_amount"] == pytest.approx(2000)
+    assert basis["cost_status"] == "projected"
+
+
+@pytest.mark.asyncio
+async def test_v2_other_a_cost_excludes_legacy_manual_labor_cost(monkeypatch):
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+
+    async def fake_load_shop_metrics(db_arg, year_month):
+        return {"shopee|shop-1": {"monthly_profit": 4000}}
+
+    async def fake_execute(stmt, params=None):
+        sql = str(stmt)
+        assert "fact_expenses_allocated_day_shop_sku" not in sql
+        assert '"人力费用"' in sql
+        return _MockMappingsResult([{"a_class_cost_amount": Decimal("1500")}])
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.load_shop_monthly_metrics",
+        fake_load_shop_metrics,
+    )
+    monkeypatch.setattr(service, "_load_pre_commission_labor_amount", AsyncMock(return_value=500.0))
+    db.execute = AsyncMock(side_effect=fake_execute)
+
+    basis = await service.build_profit_basis(
+        year_month="2026-08",
+        platform_code="Shopee",
+        shop_id="shop-1",
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+    )
+
+    assert basis["other_a_class_cost_amount"] == pytest.approx(1500)
+    assert basis["profit_basis_amount"] == pytest.approx(2000)
+
+
+@pytest.mark.asyncio
+async def test_build_profit_basis_uses_effective_month_policy_when_version_not_explicit(monkeypatch):
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+
+    async def fake_load_shop_metrics(db_arg, year_month):
+        return {"shopee|shop-1": {"monthly_profit": 4000}}
+
+    async def fake_load_other_cost(*_args, **_kwargs):
+        return 1500.0
+
+    async def fake_load_pre_commission_labor(*_args, **_kwargs):
+        return 500.0
+
+    async def fake_version(*_args, **_kwargs):
+        return "A_PRE_COMMISSION_LABOR_V2"
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.load_shop_monthly_metrics",
+        fake_load_shop_metrics,
+    )
+    monkeypatch.setattr(service, "_load_other_a_class_cost_amount", fake_load_other_cost)
+    monkeypatch.setattr(service, "_load_pre_commission_labor_amount", fake_load_pre_commission_labor)
+    monkeypatch.setattr(
+        "backend.services.labor_cost_policy_service.LaborCostPolicyService.get_profit_basis_version",
+        fake_version,
+    )
+
+    basis = await service.build_profit_basis(
+        year_month="2026-08",
+        platform_code="Shopee",
+        shop_id="shop-1",
+    )
+
+    assert basis["basis_version"] == "A_PRE_COMMISSION_LABOR_V2"
+    assert basis["profit_basis_amount"] == pytest.approx(2000)
+
+
+@pytest.mark.asyncio
+async def test_lock_v2_profit_basis_locks_pre_commission_labor_allocations():
+    class _ScalarRows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalar_one_or_none(self):
+            return self._rows[0] if self._rows else None
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    basis = SimpleNamespace(
+        period_month="2026-08",
+        platform_code="shopee",
+        shop_id="shop-1",
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        profit_basis_amount=500,
+        is_locked=False,
+    )
+    allocation = SimpleNamespace(pre_commission_locked_at=None)
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_ScalarRows([basis]), _ScalarRows([allocation])])
+    service = ProfitBasisService(db)
+
+    await service.lock_profit_basis_snapshot(
+        year_month="2026-08",
+        platform_code="shopee",
+        shop_id="shop-1",
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+    )
+
+    assert basis.is_locked is True
+    assert allocation.pre_commission_locked_at is not None
 
 
 @pytest.mark.asyncio

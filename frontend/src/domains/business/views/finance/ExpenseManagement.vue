@@ -259,19 +259,12 @@
           </el-table-column>
           <el-table-column
             prop="labor_cost"
-            label="人力费用"
+            label="系统人力成本"
             width="130"
             align="right"
           >
             <template #default="{ row }">
-              <el-input-number
-                v-model="row.labor_cost"
-                :min="0"
-                :precision="2"
-                :controls="false"
-                class="erp-w-full"
-                @change="updateRowTotal(row)"
-              />
+              <span>{{ formatNumber(row.labor_cost) }}</span>
             </template>
           </el-table-column>
           <el-table-column
@@ -411,15 +404,6 @@
           <el-form-item label="总AI Token费用">
             <el-input-number
               v-model="quickSplitForm.ai_token_cost"
-              :min="0"
-              :precision="2"
-              :controls="false"
-              class="erp-w-full"
-            />
-          </el-form-item>
-          <el-form-item label="总人力费用">
-            <el-input-number
-              v-model="quickSplitForm.labor_cost"
               :min="0"
               :precision="2"
               :controls="false"
@@ -661,19 +645,12 @@
           </el-table-column>
           <el-table-column
             prop="labor_cost"
-            label="人力费用"
+            label="系统人力成本"
             width="130"
             align="right"
           >
             <template #default="{ row }">
-              <el-input-number
-                v-model="row.labor_cost"
-                :min="0"
-                :precision="2"
-                :controls="false"
-                class="erp-w-full"
-                @change="updateShopRowTotal(row)"
-              />
+              <span>{{ formatNumber(row.labor_cost) }}</span>
             </template>
           </el-table-column>
           <el-table-column
@@ -816,7 +793,6 @@ const quickSplitForm = reactive({
   marketing_fee: 0,
   utilities: 0,
   ai_token_cost: 0,
-  labor_cost: 0,
   other_costs: 0
 })
 
@@ -912,6 +888,9 @@ const isMeaningfulExpenseRow = (row = {}) => {
     attachments.length > 0
   )
 }
+
+const laborCostForPayload = (row = {}) =>
+  row.labor_cost_source === 'system' ? 0 : (Number(row.labor_cost) || 0)
 
 const initTaskContext = () => {
   taskContext.taskId = typeof route.query.task_id === 'string' ? route.query.task_id : ''
@@ -1142,7 +1121,6 @@ const resetQuickSplitForm = () => {
   quickSplitForm.marketing_fee = 0
   quickSplitForm.utilities = 0
   quickSplitForm.ai_token_cost = 0
-  quickSplitForm.labor_cost = 0
   quickSplitForm.other_costs = 0
 }
 
@@ -1202,7 +1180,6 @@ const handleApplyQuickSplit = async () => {
   const marketingAllocations = distributeEvenly(quickSplitForm.marketing_fee, rowCount)
   const utilityAllocations = distributeEvenly(quickSplitForm.utilities, rowCount)
   const aiTokenAllocations = distributeEvenly(quickSplitForm.ai_token_cost, rowCount)
-  const laborAllocations = distributeEvenly(quickSplitForm.labor_cost, rowCount)
   const otherAllocations = distributeEvenly(quickSplitForm.other_costs, rowCount)
 
   monthlyTableData.value.forEach((row, index) => {
@@ -1210,7 +1187,6 @@ const handleApplyQuickSplit = async () => {
     row.marketing_fee = marketingAllocations[index]
     row.utilities = utilityAllocations[index]
     row.ai_token_cost = aiTokenAllocations[index]
-    row.labor_cost = laborAllocations[index]
     row.other_costs = otherAllocations[index]
     updateRowTotal(row)
   })
@@ -1245,7 +1221,7 @@ const handleSaveRow = async (row) => {
       marketing_fee: Number(row.marketing_fee) || 0,
       utilities: Number(row.utilities) || 0,
       ai_token_cost: Number(row.ai_token_cost) || 0,
-      labor_cost: Number(row.labor_cost) || 0,
+      labor_cost: laborCostForPayload(row),
       other_costs: Number(row.other_costs) || 0,
       note: row.note || null
     }
@@ -1302,7 +1278,7 @@ const handleBatchSave = async () => {
         row.marketing_fee > 0 ||
         row.utilities > 0 ||
         row.ai_token_cost > 0 ||
-        row.labor_cost > 0 ||
+        laborCostForPayload(row) > 0 ||
         row.other_costs > 0 ||
         (row.note && String(row.note).trim().length > 0))
   )
@@ -1333,7 +1309,7 @@ const handleBatchSave = async () => {
           marketing_fee: Number(row.marketing_fee) || 0,
           utilities: Number(row.utilities) || 0,
           ai_token_cost: Number(row.ai_token_cost) || 0,
-          labor_cost: Number(row.labor_cost) || 0,
+          labor_cost: laborCostForPayload(row),
           other_costs: Number(row.other_costs) || 0,
           note: row.note || null
         }
@@ -1508,7 +1484,7 @@ const handleSaveShopRow = async (row) => {
       marketing_fee: Number(row.marketing_fee) || 0,
       utilities: Number(row.utilities) || 0,
       ai_token_cost: Number(row.ai_token_cost) || 0,
-      labor_cost: Number(row.labor_cost) || 0,
+      labor_cost: laborCostForPayload(row),
       other_costs: Number(row.other_costs) || 0,
       note: row.note || null
     }

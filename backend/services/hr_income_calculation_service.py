@@ -611,6 +611,7 @@ class HRIncomeCalculationService:
 
         commission_upserts = 0
         performance_upserts = 0
+        commission_allocations: list[dict[str, Any]] = []
 
         for employee_code, rec in commission_agg.items():
             sales_amount = rec["sales_amount"]
@@ -646,6 +647,38 @@ class HRIncomeCalculationService:
             commission_amount = raw_commission_amount * inherited_coefficient
             if sales_amount > 0:
                 commission_rate = commission_amount / sales_amount
+
+            for row in assignments:
+                if (row.employee_code or "").strip() != employee_code:
+                    continue
+                ratio = self._to_float(row.commission_ratio, 0.0)
+                if ratio <= 0:
+                    ratio = self._to_float(
+                        default_commission_ratio_by_employee.get(employee_code),
+                        0.0,
+                    )
+                if ratio <= 0:
+                    continue
+                shop_key = self._shop_key(row.platform_code, row.shop_id)
+                profit_basis_amount = self._to_float(
+                    profit_basis_by_shop.get(shop_key, {}).get("profit_basis_amount"),
+                    0.0,
+                )
+                alloc_rate = self._to_float(
+                    allocatable_by_shop.get(shop_key, 1.0),
+                    1.0,
+                )
+                commission_allocations.append(
+                    {
+                        "employee_code": employee_code,
+                        "platform_code": str(row.platform_code or "").lower(),
+                        "shop_id": row.shop_id,
+                        "commission_amount": max(profit_basis_amount, 0.0)
+                        * alloc_rate
+                        * ratio
+                        * inherited_coefficient,
+                    }
+                )
 
             comm = (
                 await self.db.execute(
@@ -730,5 +763,6 @@ class HRIncomeCalculationService:
             "employee_count": len(performance_agg),
             "commission_upserts": commission_upserts,
             "performance_upserts": performance_upserts,
+            "commission_allocations": commission_allocations,
             "source": "employee_shop_assignments + employee_performance_inputs + performance_scores + shop_profit_basis",
         }

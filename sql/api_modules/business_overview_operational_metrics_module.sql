@@ -42,26 +42,21 @@ monthly_targets AS (
 ),
 monthly_costs AS (
     SELECT
-        to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
-        LOWER(TRIM(COALESCE(platform_code, ''))) AS platform_code,
-        "店铺ID" AS shop_id,
-        SUM(
-            COALESCE(
-                "成本合计",
-                COALESCE("租金", 0)
-                + COALESCE("营销费用", 0)
-                + COALESCE("水电费", 0)
-                + COALESCE("AI Token费用", 0)
-                + COALESCE("人力费用", 0)
-                + COALESCE("其他成本", 0)
-            )
-        ) AS estimated_expenses
-    FROM a_class.operating_costs
-    WHERE "删除时间" IS NULL
-    GROUP BY
-        to_date("年月" || '-01', 'YYYY-MM-DD'),
-        LOWER(TRIM(COALESCE(platform_code, ''))),
-        "店铺ID"
+        COALESCE(o.period_month, l.period_month) AS period_month,
+        COALESCE(o.platform_code, l.platform_code) AS platform_code,
+        COALESCE(o.shop_id, l.shop_id) AS shop_id,
+        COALESCE(o.other_operating_cost, 0) AS other_operating_cost,
+        COALESCE(l.pre_commission_labor_cost, 0) AS pre_commission_labor_cost,
+        COALESCE(l.performance_labor_cost, 0) AS performance_labor_cost,
+        COALESCE(l.commission_labor_cost, 0) AS commission_labor_cost,
+        COALESCE(l.total_labor_cost, 0) AS total_labor_cost,
+        COALESCE(o.other_operating_cost, 0) + COALESCE(l.total_labor_cost, 0) AS estimated_expenses,
+        COALESCE(l.cost_status, 'legacy') AS cost_status
+    FROM semantic.shop_month_other_operating_cost o
+    FULL OUTER JOIN mart.shop_month_labor_cost l
+        ON o.period_month = l.period_month
+       AND o.platform_code = l.platform_code
+       AND COALESCE(o.shop_id, '') = COALESCE(l.shop_id, '')
 )
 SELECT
     m.period_month,
@@ -83,6 +78,12 @@ SELECT
         ELSE NULL
     END AS time_gap,
     m.profit AS estimated_gross_profit,
+    c.other_operating_cost,
+    c.pre_commission_labor_cost,
+    c.performance_labor_cost,
+    c.commission_labor_cost,
+    c.total_labor_cost,
+    c.cost_status,
     c.estimated_expenses AS estimated_expenses,
     CASE
         WHEN m.profit IS NULL OR c.estimated_expenses IS NULL THEN NULL

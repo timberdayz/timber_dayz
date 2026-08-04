@@ -15,10 +15,15 @@ def test_operational_metrics_sql_uses_platform_code_and_ai_token_fallback():
     source = Path(
         "sql/api_modules/business_overview_operational_metrics_module.sql"
     ).read_text(encoding="utf-8")
+    other_cost_source = Path(
+        "sql/semantic/shop_month_other_operating_cost.sql"
+    ).read_text(encoding="utf-8")
 
     assert '"platform_code"' in source or "platform_code" in source
-    assert 'COALESCE("AI Token费用", 0)' in source
-    assert 'COALESCE("人力费用", 0)' in source
+    assert "semantic.shop_month_other_operating_cost" in source
+    assert "mart.shop_month_labor_cost" in source
+    assert 'COALESCE("AI Token费用", 0)' in other_cost_source
+    assert 'COALESCE("人力费用", 0)' in other_cost_source
 
 
 def test_operational_metrics_target_join_uses_platform_shop_month_identity():

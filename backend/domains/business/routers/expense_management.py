@@ -49,6 +49,7 @@ from backend.schemas.expense import (
 )
 from backend.dependencies.auth import get_current_user
 from backend.services.employee_task_sources import sync_monthly_cost_entry_task
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/expenses", tags=["费用管理"])
@@ -70,6 +71,111 @@ def _calc_total_cost(
         + float(labor_cost or 0)
         + float(other_costs or 0)
     )
+
+
+def _merge_labor_cost_for_response(
+    *,
+    stored_labor_cost: float,
+    stored_total_cost: float,
+    system_labor_cost: float,
+    use_system_labor_cost: bool,
+) -> Dict[str, float | str]:
+    """Build the displayed cost total without carrying legacy labor into V2."""
+    legacy_labor_cost = float(stored_labor_cost or 0)
+    stored_total = float(stored_total_cost or 0)
+    manual_cost_total = stored_total - legacy_labor_cost
+    if not use_system_labor_cost:
+        return {
+            "labor_cost": legacy_labor_cost,
+            "manual_cost_total": manual_cost_total,
+            "total_cost": stored_total,
+            "labor_cost_source": "manual_legacy",
+        }
+
+    projected_labor_cost = float(system_labor_cost or 0)
+    return {
+        "labor_cost": projected_labor_cost,
+        "manual_cost_total": manual_cost_total,
+        "total_cost": manual_cost_total + projected_labor_cost,
+        "labor_cost_source": "system",
+    }
+
+
+def _expense_labor_key(year_month: str, platform_code: str, shop_id: str) -> tuple[str, str, str]:
+    return (
+        str(year_month or ""),
+        str(platform_code or "").strip().lower(),
+        str(shop_id or ""),
+    )
+
+
+async def _apply_projected_labor_costs(
+    db: AsyncSession,
+    items: list[Dict[str, Any]],
+) -> None:
+    """Overlay system labor cost onto V2 expense responses in a single query."""
+    if not items:
+        return
+
+    effective_month = await LaborCostPolicyService(db).get_effective_month()
+    eligible_months = sorted(
+        {
+            str(item.get("year_month") or "")
+            for item in items
+            if effective_month is not None
+            and str(item.get("year_month") or "") >= effective_month
+        }
+    )
+    labor_cost_by_shop: Dict[tuple[str, str, str], float] = {}
+    if eligible_months:
+        result = await db.execute(
+            text(
+                """
+                SELECT
+                    period_month,
+                    LOWER(COALESCE(platform_code, '')) AS platform_code,
+                    shop_id,
+                    COALESCE(SUM(total_amount), 0) AS labor_cost
+                FROM finance.employee_labor_cost_allocations
+                WHERE allocation_scope = 'shop'
+                  AND period_month = ANY(:period_months)
+                GROUP BY
+                    period_month,
+                    LOWER(COALESCE(platform_code, '')),
+                    shop_id
+                """
+            ),
+            {"period_months": eligible_months},
+        )
+        labor_cost_by_shop = {
+            _expense_labor_key(
+                row.get("period_month"),
+                row.get("platform_code"),
+                row.get("shop_id"),
+            ): float(row.get("labor_cost") or 0)
+            for row in result.mappings().all()
+        }
+
+    for item in items:
+        use_system_labor_cost = bool(
+            effective_month is not None
+            and str(item.get("year_month") or "") >= effective_month
+        )
+        merged = _merge_labor_cost_for_response(
+            stored_labor_cost=float(item.get("labor_cost") or 0),
+            stored_total_cost=float(item.get("total_cost") or 0),
+            system_labor_cost=labor_cost_by_shop.get(
+                _expense_labor_key(
+                    item.get("year_month"),
+                    item.get("platform_code"),
+                    item.get("shop_id"),
+                ),
+                0.0,
+            ),
+            use_system_labor_cost=use_system_labor_cost,
+        )
+        item.update(merged)
+        item["total"] = merged["total_cost"]
 
 
 async def _resolve_shop_platform_code(db: AsyncSession, shop_id: str) -> Optional[str]:
@@ -416,6 +522,8 @@ async def list_expenses_by_shop(
             })
         
         # 计算汇总
+        await _apply_projected_labor_costs(db, items)
+        total_amount = sum(float(item["total_cost"] or 0) for item in items)
         summary = {
             "total_amount": total_amount,
             "total_rent": sum(item["rent"] for item in items),
@@ -547,6 +655,7 @@ async def list_expenses(
                 "updated_at": row.updated_at,
             })
         
+        await _apply_projected_labor_costs(db, items)
         return {
             "success": True,
             "data": {
@@ -759,6 +868,16 @@ async def create_or_update_expense(
     注意:使用原始SQL执行upsert，因为数据库表使用中文字段名
     """
     try:
+        if request.labor_cost > 0 and not await LaborCostPolicyService(
+            db
+        ).is_manual_labor_cost_allowed(request.year_month):
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="Manual labor cost is disabled for this month",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="Refresh payroll allocations instead of entering labor cost here",
+                status_code=400,
+            )
         lock_check = text(
             """
             SELECT COALESCE("是否锁定", false) AS locked

@@ -325,25 +325,32 @@ async def test_load_follow_payload_preserves_zero_approved_income():
 
 
 @pytest.mark.asyncio
-async def test_load_personnel_payload_uses_only_payroll_total_cost():
+async def test_load_personnel_payload_uses_confirmed_post_commission_labor_cost_only():
     module = _load_service_module()
     db = _make_db()
     service = module.MonthlyProfitSettlementService(db)
 
-    payroll_rows = [
-        SimpleNamespace(id=10, employee_code="EMP001", total_cost=26000.0),
+    allocation_rows = [
+        SimpleNamespace(
+            id=10,
+            employee_code="EMP001",
+            performance_amount=6000.0,
+            commission_amount=20000.0,
+        ),
     ]
-    db.execute = AsyncMock(return_value=_ScalarResult(payroll_rows))
+    db.execute = AsyncMock(return_value=_ScalarResult(allocation_rows))
 
     payload = await service._load_personnel_payload("2026-04")
 
     assert payload["actual_amount"] == pytest.approx(26000.0)
     assert payload["details"] == [
         {
-            "detail_type": "payroll_total_cost",
-            "amount": 26000.0,
-            "employee_code": "EMP001",
-            "source_module": "payroll_records",
+                "detail_type": "post_commission_labor_cost",
+                "amount": 26000.0,
+                "employee_code": "EMP001",
+                "platform_code": None,
+                "shop_id": None,
+                "source_module": "employee_labor_cost_allocations",
             "source_record_id": "10",
             "remark": None,
         }
@@ -351,18 +358,18 @@ async def test_load_personnel_payload_uses_only_payroll_total_cost():
 
 
 @pytest.mark.asyncio
-async def test_load_personnel_payload_queries_only_confirmed_or_paid_payroll_records():
+async def test_load_personnel_payload_queries_only_confirmed_or_paid_labor_allocations():
     module = _load_service_module()
     db = _make_db()
     service = module.MonthlyProfitSettlementService(db)
 
     async def fake_execute(stmt):
         sql = str(stmt)
-        assert "payroll_records" in sql
-        assert "year_month" in sql
-        assert "status" in sql
+        assert "employee_labor_cost_allocations" in sql
+        assert "period_month" in sql
+        assert "source_payroll_status" in sql
         params = stmt.compile().params
-        assert tuple(params["status_1"]) == ("confirmed", "paid")
+        assert any(tuple(value) == ("confirmed", "paid") for value in params.values())
         return _ScalarResult([])
 
     db.execute = AsyncMock(side_effect=fake_execute)
@@ -393,6 +400,23 @@ async def test_reopen_rejects_non_approved_settlement():
 
     with pytest.raises(ValueError, match="only approved settlement can be reopened"):
         await service.reopen(12)
+
+
+@pytest.mark.asyncio
+async def test_reopen_rejects_settlement_when_paid_payroll_exists():
+    module = _load_service_module()
+    db = _make_db()
+    service = module.MonthlyProfitSettlementService(db)
+    record = SimpleNamespace(id=12, period_month="2026-08", status="approved")
+    paid_payroll = SimpleNamespace(id=88, status="paid")
+    db.execute = AsyncMock(
+        side_effect=[_ScalarResult([record]), _ScalarResult([paid_payroll])]
+    )
+
+    with pytest.raises(ValueError, match="paid payroll"):
+        await service.reopen(12)
+
+    assert db.commit.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -500,7 +524,12 @@ async def test_reopen_supersedes_active_snapshots_before_setting_draft(monkeypat
         approved_by="9",
         approved_at=datetime.now(timezone.utc),
     )
-    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: record))
+    db.execute = AsyncMock(
+        side_effect=[
+            SimpleNamespace(scalar_one_or_none=lambda: record),
+            SimpleNamespace(scalar_one_or_none=lambda: None),
+        ]
+    )
 
     mark_active_snapshots_superseded = AsyncMock()
     invalidate_settlement_performance = AsyncMock()

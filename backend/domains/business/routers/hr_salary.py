@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,15 +34,68 @@ from backend.services.employee_target_allocation_service import (
     build_employee_target_summary,
 )
 from backend.services.payroll_generation_service import PayrollGenerationService
+from backend.services.labor_cost_projection_service import LaborCostProjectionService
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
-from modules.core.db import DimUser, Employee, EmployeeTarget, PayrollRecord, SalaryStructure
+from modules.core.db import (
+    DimUser,
+    Employee,
+    EmployeeLaborCostAllocation,
+    EmployeeTarget,
+    PayrollRecord,
+    SalaryStructure,
+)
 from modules.core.db import EmployeeCommission, EmployeePerformance
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+class LaborCostPolicyUpdateRequest(BaseModel):
+    effective_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+
 router = APIRouter(prefix="/api/hr", tags=["HR-薪资目标"])
+
+
+@router.get("/labor-cost-policy")
+async def get_labor_cost_policy(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    if not is_admin_user(current_user):
+        return error_response(
+            ErrorCode.PERMISSION_DENIED,
+            "Administrator permission is required",
+            status_code=403,
+        )
+    service = LaborCostPolicyService(db)
+    return {
+        "success": True,
+        "data": {
+            "effective_month": await service.get_effective_month(),
+            "v2_basis_version": LaborCostPolicyService.V2,
+        },
+    }
+
+
+@router.put("/labor-cost-policy")
+async def update_labor_cost_policy(
+    body: LaborCostPolicyUpdateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    if not is_admin_user(current_user):
+        return error_response(
+            ErrorCode.PERMISSION_DENIED,
+            "Administrator permission is required",
+            status_code=403,
+        )
+    effective_month = await LaborCostPolicyService(db).set_effective_month(
+        body.effective_month,
+        updated_by_user_id=getattr(current_user, "user_id", None),
+    )
+    return {"success": True, "data": {"effective_month": effective_month}}
 
 
 def _payroll_success(record: PayrollRecord) -> Dict[str, Any]:
@@ -343,13 +397,24 @@ async def refresh_payroll_records_for_month(
     try:
         income_result = await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
         payroll_result = await PayrollGenerationService(db).generate_month(year_month)
-
-        if (
-            income_result.get("commission_upserts", 0) > 0
-            or income_result.get("performance_upserts", 0) > 0
-            or payroll_result.get("payroll_upserts", 0) > 0
-        ):
-            await db.commit()
+        commission_by_employee_shop: Dict[str, Dict[tuple[str, str], float]] = {}
+        for item in income_result.get("commission_allocations", []):
+            employee_code = str(item.get("employee_code") or "").strip()
+            if not employee_code:
+                continue
+            shop_key = (
+                str(item.get("platform_code") or "").lower(),
+                str(item.get("shop_id") or ""),
+            )
+            commission_by_employee_shop.setdefault(employee_code, {})[shop_key] = float(
+                item.get("commission_amount") or 0
+            )
+        labor_result = await LaborCostProjectionService(db).refresh_month(
+            year_month,
+            commission_by_employee_shop=commission_by_employee_shop,
+            commit=False,
+        )
+        await db.commit()
 
         return {
             "success": True,
@@ -360,10 +425,61 @@ async def refresh_payroll_records_for_month(
             "payroll_upserts": payroll_result.get("payroll_upserts", 0),
             "locked_conflicts": payroll_result.get("locked_conflicts", 0),
             "locked_conflict_details": payroll_result.get("locked_conflict_details", []),
+            "labor_cost_allocation_upserts": labor_result.get("allocation_upserts", 0),
         }
     except Exception as e:
         logger.error("鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: %s", e, exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: {str(e)}", status_code=500)
+
+
+@router.get("/labor-cost-allocations", response_model=List[Dict[str, Any]])
+async def list_labor_cost_allocations(
+    year_month: str = Query(..., description="工资月份筛选(YYYY-MM)"),
+    employee_code: Optional[str] = Query(None, description="员工编号筛选"),
+    platform_code: Optional[str] = Query(None, description="平台筛选"),
+    shop_id: Optional[str] = Query(None, description="店铺筛选"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    query = select(EmployeeLaborCostAllocation).where(
+        EmployeeLaborCostAllocation.period_month == year_month
+    )
+    if employee_code:
+        query = query.where(EmployeeLaborCostAllocation.employee_code == employee_code)
+    if platform_code:
+        query = query.where(
+            EmployeeLaborCostAllocation.platform_code == platform_code.lower()
+        )
+    if shop_id:
+        query = query.where(EmployeeLaborCostAllocation.shop_id == shop_id)
+    rows = (
+        await db.execute(
+            query.order_by(
+                EmployeeLaborCostAllocation.allocation_scope,
+                EmployeeLaborCostAllocation.employee_code,
+                EmployeeLaborCostAllocation.platform_code,
+                EmployeeLaborCostAllocation.shop_id,
+            )
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": row.id,
+            "year_month": row.period_month,
+            "employee_code": row.employee_code,
+            "platform_code": row.platform_code,
+            "shop_id": row.shop_id,
+            "allocation_scope": row.allocation_scope,
+            "allocation_ratio": float(row.allocation_ratio or 0),
+            "pre_commission_amount": float(row.pre_commission_amount or 0),
+            "performance_amount": float(row.performance_amount or 0),
+            "commission_amount": float(row.commission_amount or 0),
+            "total_amount": float(row.total_amount or 0),
+            "source_payroll_status": row.source_payroll_status,
+            "calculation_status": row.calculation_status,
+            "pre_commission_locked_at": row.pre_commission_locked_at,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/payroll-records", response_model=List[PayrollRecordResponse])

@@ -120,6 +120,14 @@ def test_calculate_month_upsert_writes():
     assert commission.sales_amount == pytest.approx(1000.0)
     assert commission.commission_amount == pytest.approx(120.0)
     assert commission.commission_rate == pytest.approx(0.12)
+    assert result["commission_allocations"] == [
+        {
+            "employee_code": "E001",
+            "platform_code": "shopee",
+            "shop_id": "S1",
+            "commission_amount": 120.0,
+        }
+    ]
 
 
 def test_calculate_month_floors_negative_profit_basis_before_commission():

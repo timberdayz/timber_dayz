@@ -2790,6 +2790,12 @@ class PostgresqlDashboardService:
             "monthly_achievement_rate": None,
             "time_gap": None,
             "estimated_gross_profit": None,
+            "other_operating_cost": None,
+            "pre_commission_labor_cost": None,
+            "performance_labor_cost": None,
+            "commission_labor_cost": None,
+            "total_labor_cost": None,
+            "company_public_labor_cost": 0.0,
             "estimated_expenses": None,
             "operating_result": None,
             "monthly_order_count": None,
@@ -2803,12 +2809,21 @@ class PostgresqlDashboardService:
             "service_enriched_fields": [],
             "warnings": [],
         }
+        numeric_total_keys = tuple(key for key in total if key != "company_public_labor_cost")
+        cost_statuses: list[str] = []
         for row in rows:
-            for key in total.keys():
+            for key in numeric_total_keys:
                 value = _to_optional_float(row.get(key))
                 if value is None:
                     continue
                 total[key] = value if total[key] is None else total[key] + value
+            if row.get("cost_status"):
+                cost_statuses.append(str(row["cost_status"]))
+        total["cost_status"] = (
+            "confirmed"
+            if cost_statuses and all(status == "confirmed" for status in cost_statuses)
+            else "projected" if cost_statuses else "legacy"
+        )
 
         month_end = (period_month + timedelta(days=31)).replace(day=1) - timedelta(days=1)
         target_summary = await self._load_target_summary(
@@ -2824,9 +2839,31 @@ class PostgresqlDashboardService:
             meta["service_enriched_fields"].append("monthly_target")
         loaded_expenses: float | None = None
         if platform is None and shop_id is None:
+            public_labor_rows = await self._fetch_rows(
+                """
+                SELECT
+                    COALESCE(SUM(total_amount), 0) AS company_public_labor_cost
+                FROM finance.employee_labor_cost_allocations
+                WHERE period_month = :period_month
+                  AND allocation_scope = 'company'
+                """,
+                {"period_month": period_month.strftime("%Y-%m")},
+            )
+            if public_labor_rows:
+                public_labor_cost = _to_optional_float(
+                    public_labor_rows[0].get("company_public_labor_cost")
+                ) or 0.0
+                total["company_public_labor_cost"] = public_labor_cost
+                if total["estimated_expenses"] is not None:
+                    total["estimated_expenses"] += public_labor_cost
+                if total["total_labor_cost"] is not None:
+                    total["total_labor_cost"] += public_labor_cost
+                meta["service_enriched_fields"].append("company_public_labor_cost")
             loaded_expenses = await self._load_operating_expenses_summary(period_month)
             if loaded_expenses is not None and total["estimated_expenses"] in (None, 0, 0.0):
-                total["estimated_expenses"] = round(loaded_expenses, 2)
+                total["estimated_expenses"] = round(
+                    loaded_expenses + total["company_public_labor_cost"], 2
+                )
                 meta["expenses_source"] = "company_month_fallback_sum"
                 meta["service_enriched_fields"].append("estimated_expenses")
         elif total["estimated_expenses"] in (None, 0, 0.0):

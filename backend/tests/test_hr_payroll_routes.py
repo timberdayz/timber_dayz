@@ -513,6 +513,14 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
                 "year_month": year_month,
                 "commission_upserts": 3,
                 "performance_upserts": 3,
+                "commission_allocations": [
+                    {
+                        "employee_code": "EMP001",
+                        "platform_code": "shopee",
+                        "shop_id": "shop-1",
+                        "commission_amount": 120.0,
+                    }
+                ],
             }
 
     class _FakePayrollService:
@@ -529,8 +537,17 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
                 "locked_conflict_details": [{"employee_code": "EMP900", "payroll_status": "confirmed"}],
             }
 
+    class _FakeLaborCostService:
+        def __init__(self, db):
+            self.db = db
+
+        async def refresh_month(self, year_month, *, commission_by_employee_shop=None, commit=True):
+            calls.append(("labor", year_month, commission_by_employee_shop, commit))
+            return {"year_month": year_month, "allocation_upserts": 4}
+
     module.HRIncomeCalculationService = _FakeIncomeService
     module.PayrollGenerationService = _FakePayrollService
+    module.LaborCostProjectionService = _FakeLaborCostService
     db.commit = AsyncMock()
 
     resp = asyncio.run(module.refresh_payroll_records_for_month("2025-04", db=db))
@@ -542,10 +559,12 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
     assert resp["employee_count"] == 4
     assert resp["payroll_upserts"] == 3
     assert resp["locked_conflicts"] == 1
+    assert resp["labor_cost_allocation_upserts"] == 4
     assert resp["locked_conflict_details"] == [{"employee_code": "EMP900", "payroll_status": "confirmed"}]
     assert calls == [
         ("income", "2025-04", False),
         ("payroll", "2025-04"),
+        ("labor", "2025-04", {"EMP001": {("shopee", "shop-1"): 120.0}}, False),
     ]
     assert db.commit.await_count == 1
 
