@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
     EmployeeCommission,
+    EmployeeLaborCostAllocation,
     EmployeePerformance,
     FollowInvestmentDetail,
     FollowInvestmentSettlement,
@@ -120,14 +121,41 @@ class MonthlyProfitSettlementService:
                 select(ShopProfitBasis).where(ShopProfitBasis.period_month == period_month)
             )
         ).scalars().all()
-        return sum(self._to_float(row.profit_basis_amount) for row in rows)
+        basis_by_shop: dict[tuple[str, str], Any] = {}
+        for row in rows:
+            key = (
+                str(getattr(row, "platform_code", "") or "").lower(),
+                str(getattr(row, "shop_id", "") or ""),
+            )
+            current = basis_by_shop.get(key)
+            if current is None or (
+                getattr(row, "basis_version", "") == "A_PRE_COMMISSION_LABOR_V2"
+                and getattr(current, "basis_version", "") != "A_PRE_COMMISSION_LABOR_V2"
+            ):
+                basis_by_shop[key] = row
+        shop_profit_amount = sum(
+            self._to_float(row.profit_basis_amount) for row in basis_by_shop.values()
+        )
+        public_labor_result = await self.db.execute(
+            select(
+                func.coalesce(
+                    func.sum(EmployeeLaborCostAllocation.pre_commission_amount),
+                    0,
+                )
+            ).where(
+                EmployeeLaborCostAllocation.period_month == period_month,
+                EmployeeLaborCostAllocation.allocation_scope == "company",
+            )
+        )
+        public_labor_amount = self._to_float(public_labor_result.scalar_one_or_none())
+        return shop_profit_amount - public_labor_amount
 
     async def _load_personnel_payload(self, period_month: str) -> dict[str, Any]:
-        payroll_rows = (
+        allocation_rows = (
             await self.db.execute(
-                select(PayrollRecord).where(
-                    PayrollRecord.year_month == period_month,
-                    PayrollRecord.status.in_(("confirmed", "paid")),
+                select(EmployeeLaborCostAllocation).where(
+                    EmployeeLaborCostAllocation.period_month == period_month,
+                    EmployeeLaborCostAllocation.source_payroll_status.in_(("confirmed", "paid")),
                 )
             )
         ).scalars().all()
@@ -135,15 +163,19 @@ class MonthlyProfitSettlementService:
         details: list[dict[str, Any]] = []
         total = 0.0
 
-        for row in payroll_rows:
-            amount = self._to_float(getattr(row, "total_cost", 0))
+        for row in allocation_rows:
+            amount = self._to_float(getattr(row, "performance_amount", 0)) + self._to_float(
+                getattr(row, "commission_amount", 0)
+            )
             total += amount
             details.append(
                 {
-                    "detail_type": "payroll_total_cost",
+                    "detail_type": "post_commission_labor_cost",
                     "amount": amount,
                     "employee_code": getattr(row, "employee_code", None),
-                    "source_module": "payroll_records",
+                    "platform_code": getattr(row, "platform_code", None),
+                    "shop_id": getattr(row, "shop_id", None),
+                    "source_module": "employee_labor_cost_allocations",
                     "source_record_id": str(getattr(row, "id", "") or ""),
                     "remark": None,
                 }
@@ -767,6 +799,18 @@ class MonthlyProfitSettlementService:
             raise MonthlyProfitSettlementNotFoundError("settlement not found")
         if record.status != "approved":
             raise MonthlyProfitSettlementConflictError("only approved settlement can be reopened")
+        paid_payroll = (
+            await self.db.execute(
+                select(PayrollRecord).where(
+                    PayrollRecord.year_month == record.period_month,
+                    PayrollRecord.status == "paid",
+                )
+            )
+        ).scalar_one_or_none()
+        if paid_payroll is not None:
+            raise MonthlyProfitSettlementConflictError(
+                "paid payroll exists; settlement cannot be reopened"
+            )
         await self.mark_active_snapshots_superseded(settlement_id)
         await self.invalidate_settlement_performance(record.period_month)
         record.status = "draft"

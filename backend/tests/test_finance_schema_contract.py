@@ -4,6 +4,7 @@ import modules.core.db as core_db
 from modules.core.db import (
     AllocationRule,
     ApprovalLog,
+    EmployeeLaborCostAllocation,
     FactExpensesAllocated,
     FactExpensesMonth,
     FollowInvestment,
@@ -47,6 +48,7 @@ MonthlyProfitPayrollSnapshot = getattr(core_db, "MonthlyProfitPayrollSnapshot", 
     [
         (AllocationRule, "allocation_rules"),
         (ApprovalLog, "approval_logs"),
+        (EmployeeLaborCostAllocation, "employee_labor_cost_allocations"),
         (FactExpensesAllocated, "fact_expenses_allocated_day_shop_sku"),
         (FactExpensesMonth, "fact_expenses_month"),
         (FollowInvestment, "follow_investments"),
@@ -171,3 +173,16 @@ def test_finance_external_foreign_keys_keep_core_targets():
     assert "core.dim_fiscal_calendar.period_code" in journal_entry_targets
     assert "core.dim_users.user_id" in follow_investment_targets
     assert "core.dim_fiscal_calendar.period_code" in shop_profit_basis_targets
+
+
+def test_employee_labor_cost_allocation_keeps_pre_and_post_commission_components_separate():
+    columns = EmployeeLaborCostAllocation.__table__.c
+
+    assert columns["period_month"].nullable is False
+    assert columns["employee_code"].nullable is False
+    assert columns["allocation_scope"].nullable is False
+    assert columns["pre_commission_amount"].nullable is False
+    assert columns["performance_amount"].nullable is False
+    assert columns["commission_amount"].nullable is False
+    assert columns["total_amount"].nullable is False
+    assert columns["pre_commission_locked_at"].nullable is True

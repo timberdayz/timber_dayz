@@ -18,6 +18,7 @@ from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.profit_basis_service import ProfitBasisService
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
 
 logger = get_logger(__name__)
@@ -678,8 +679,11 @@ async def _load_profit_basis_map(
     db: AsyncSession,
     year_month: str,
     shop_list: List[Dict[str, Any]],
-    basis_version: str = "A_ONLY_V1",
+    basis_version: str | None = None,
 ) -> Dict[str, Dict[str, float]]:
+    basis_version = basis_version or await LaborCostPolicyService(
+        db
+    ).get_profit_basis_version(year_month)
     rows = (
         await db.execute(
             select(ShopProfitBasis).where(

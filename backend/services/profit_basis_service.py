@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
-from modules.core.db import DimFiscalCalendar, ShopProfitBasis
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
+from modules.core.db import DimFiscalCalendar, EmployeeLaborCostAllocation, ShopProfitBasis
 
 
 def _shop_key(platform_code: Any, shop_id: Any) -> str:
@@ -118,15 +119,95 @@ class ProfitBasisService:
         fallback_row = fallback_result.mappings().first()
         return _to_float(fallback_row.get("a_class_cost_amount") if fallback_row else 0.0)
 
+    async def _load_other_a_class_cost_amount(
+        self,
+        year_month: str,
+        platform_code: str,
+        shop_id: str,
+    ) -> float:
+        """V2 uses stored operating cost minus legacy manual labor only."""
+        result = await self.db.execute(
+            text(
+                """
+                SELECT COALESCE(SUM(
+                    COALESCE(
+                        "成本合计",
+                        COALESCE("租金", 0)
+                        + COALESCE("营销费用", 0)
+                        + COALESCE("水电费", 0)
+                        + COALESCE("AI Token费用", 0)
+                        + COALESCE("人力费用", 0)
+                        + COALESCE("其他成本", 0)
+                    ) - COALESCE("人力费用", 0)
+                ), 0) AS a_class_cost_amount
+                FROM a_class.operating_costs
+                WHERE "年月" = :year_month
+                  AND "删除时间" IS NULL
+                  AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform_code)
+                  AND "店铺ID" = :shop_id
+                """
+            ),
+            {
+                "year_month": year_month,
+                "platform_code": platform_code,
+                "shop_id": shop_id,
+            },
+        )
+        row = result.mappings().first()
+        return _to_float(row.get("a_class_cost_amount") if row else 0.0)
+
+    async def _load_pre_commission_labor_amount(
+        self,
+        year_month: str,
+        platform_code: str,
+        shop_id: str,
+    ) -> float:
+        result = await self.db.execute(
+            text(
+                """
+                SELECT COALESCE(SUM(pre_commission_amount), 0) AS labor_cost_amount
+                FROM finance.employee_labor_cost_allocations
+                WHERE period_month = :year_month
+                  AND allocation_scope = 'shop'
+                  AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform_code)
+                  AND shop_id = :shop_id
+                """
+            ),
+            {
+                "year_month": year_month,
+                "platform_code": platform_code,
+                "shop_id": shop_id,
+            },
+        )
+        row = result.mappings().first()
+        return _to_float(row.get("labor_cost_amount") if row else 0.0)
+
     async def build_profit_basis(
         self,
         year_month: str,
         platform_code: str,
         shop_id: str,
-        basis_version: str = "A_ONLY_V1",
+        basis_version: str | None = None,
     ) -> dict[str, Any]:
+        basis_version = basis_version or await LaborCostPolicyService(
+            self.db
+        ).get_profit_basis_version(year_month)
         orders_profit_amount = await self._load_orders_profit_amount(year_month, platform_code, shop_id)
-        a_class_cost_amount = await self._load_a_class_cost_amount(year_month, platform_code, shop_id)
+        other_a_class_cost_amount = await (
+            self._load_other_a_class_cost_amount(
+                year_month, platform_code, shop_id
+            )
+            if basis_version == "A_PRE_COMMISSION_LABOR_V2"
+            else self._load_a_class_cost_amount(year_month, platform_code, shop_id)
+        )
+        pre_commission_labor_cost_amount = 0.0
+        cost_status = "legacy"
+        if basis_version == "A_PRE_COMMISSION_LABOR_V2":
+            pre_commission_labor_cost_amount = await self._load_pre_commission_labor_amount(
+                year_month, platform_code, shop_id
+            )
+            cost_status = "projected"
+        a_class_cost_amount = other_a_class_cost_amount + pre_commission_labor_cost_amount
         b_class_cost_amount = 0.0
         profit_basis_amount = orders_profit_amount - a_class_cost_amount
 
@@ -136,9 +217,12 @@ class ProfitBasisService:
             "shop_id": shop_id,
             "orders_profit_amount": orders_profit_amount,
             "a_class_cost_amount": a_class_cost_amount,
+            "other_a_class_cost_amount": other_a_class_cost_amount,
+            "pre_commission_labor_cost_amount": pre_commission_labor_cost_amount,
             "b_class_cost_amount": b_class_cost_amount,
             "profit_basis_amount": profit_basis_amount,
             "basis_version": basis_version,
+            "cost_status": cost_status,
         }
 
     async def upsert_profit_basis_snapshot(
@@ -181,8 +265,11 @@ class ProfitBasisService:
         year_month: str,
         platform_code: str,
         shop_id: str,
-        basis_version: str = "A_ONLY_V1",
+        basis_version: str | None = None,
     ) -> dict[str, Any]:
+        basis_version = basis_version or await LaborCostPolicyService(
+            self.db
+        ).get_profit_basis_version(year_month)
         record = (
             await self.db.execute(
                 select(ShopProfitBasis).where(
@@ -196,6 +283,20 @@ class ProfitBasisService:
         if record is None:
             raise ValueError("profit basis snapshot not found; rebuild before locking")
         record.is_locked = True
+        if basis_version == "A_PRE_COMMISSION_LABOR_V2":
+            allocations = (
+                await self.db.execute(
+                    select(EmployeeLaborCostAllocation).where(
+                        EmployeeLaborCostAllocation.period_month == year_month,
+                        EmployeeLaborCostAllocation.allocation_scope == "shop",
+                        EmployeeLaborCostAllocation.platform_code == (platform_code or "").lower(),
+                        EmployeeLaborCostAllocation.shop_id == shop_id,
+                    )
+                )
+            ).scalars().all()
+            locked_at = datetime.now(timezone.utc)
+            for allocation in allocations:
+                allocation.pre_commission_locked_at = locked_at
         await self.db.commit()
         return {
             "period_month": record.period_month,

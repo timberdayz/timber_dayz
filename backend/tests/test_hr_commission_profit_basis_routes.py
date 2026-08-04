@@ -4,6 +4,19 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def use_legacy_profit_basis_policy(monkeypatch):
+    async def resolve_legacy_version(*_args, **_kwargs):
+        return "A_ONLY_V1"
+
+    monkeypatch.setattr(
+        "backend.services.labor_cost_policy_service.LaborCostPolicyService.get_profit_basis_version",
+        resolve_legacy_version,
+    )
+
 
 class _ScalarResult:
     def __init__(self, rows):

@@ -10,9 +10,9 @@ const source = fs.readFileSync(
   'utf8'
 )
 
-test('ShopAssignment page shows both analysis profit and settlement net profit', () => {
+test('ShopAssignment page shows order profit and commission calculation basis', () => {
   assert.equal(source.includes('当月利润'), true)
-  assert.equal(source.includes('当月净利润'), true)
+  assert.equal(source.includes('提成计算基数'), true)
   assert.equal(source.includes('profit_basis_amount'), true)
 })
 

@@ -2007,6 +2007,9 @@ export default {
   async markHrPayrollRecordPaid(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/pay`)
   },
+  async getHrLaborCostAllocations(params = {}) {
+    return await this._get('/hr/labor-cost-allocations', { params })
+  },
   async getHrIncomeAudit(employeeCode, yearMonth) {
     return await this._get(`/hr/income-audit/${employeeCode}/${yearMonth}`)
   },

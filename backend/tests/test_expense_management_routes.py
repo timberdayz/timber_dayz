@@ -9,6 +9,17 @@ from backend.dependencies.auth import get_current_user
 from backend.models.database import get_async_db
 
 
+@pytest.fixture(autouse=True)
+def allow_legacy_manual_labor_cost(monkeypatch):
+    async def allow_manual_labor(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(
+        "backend.services.labor_cost_policy_service.LaborCostPolicyService.is_manual_labor_cost_allowed",
+        allow_manual_labor,
+    )
+
+
 def _make_user(role_code: str = "finance", user_id: int = 1) -> SimpleNamespace:
     return SimpleNamespace(
         user_id=user_id,
@@ -160,6 +171,122 @@ async def test_expense_create_rejects_missing_platform_code_when_lookup_fails(mo
     assert response.status_code == 400
     assert body["success"] is False
     assert body["message"] == "无法识别店铺所属平台"
+
+
+@pytest.mark.asyncio
+async def test_expense_create_rejects_manual_labor_cost_in_effective_month(monkeypatch):
+    from backend.domains.business.routers import expense_management as module
+
+    class _DB:
+        async def execute(self, query, params=None):
+            raise AssertionError(f"expense write must be blocked: {query}")
+
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+    async def _override_db():
+        yield _DB()
+
+    async def disallow_manual_labor(*_args, **_kwargs):
+        return False
+
+    app = FastAPI()
+    app.include_router(module.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: _make_user()
+    app.dependency_overrides[get_async_db] = _override_db
+    monkeypatch.setattr(
+        "backend.services.labor_cost_policy_service.LaborCostPolicyService.is_manual_labor_cost_allowed",
+        disallow_manual_labor,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/expenses",
+            json={
+                "shop_id": "shop-1",
+                "platform_code": "shopee",
+                "year_month": "2026-08",
+                "labor_cost": 100,
+            },
+        )
+
+    body = json.loads(response.content.decode("utf-8"))
+    assert response.status_code == 400
+    assert body["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_expense_list_applies_projected_labor_cost(monkeypatch):
+    from backend.domains.business.routers import expense_management as module
+
+    class _Result:
+        def __init__(self, *, scalar=None, rows=None):
+            self._scalar = scalar
+            self._rows = rows or []
+
+        def scalar(self):
+            return self._scalar
+
+        def fetchall(self):
+            return self._rows
+
+    class _DB:
+        async def execute(self, query, params=None):
+            sql = str(query)
+            if "SELECT COUNT(*)" in sql:
+                return _Result(scalar=1)
+            if "FROM a_class.operating_costs" in sql:
+                return _Result(
+                    rows=[
+                        SimpleNamespace(
+                            id=1,
+                            shop_id="shop-1",
+                            platform_code="shopee",
+                            year_month="2026-08",
+                            rent=100,
+                            marketing_fee=200,
+                            utilities=0,
+                            ai_token_cost=0,
+                            labor_cost=200,
+                            other_costs=0,
+                            total_cost=500,
+                            note=None,
+                            attachments=[],
+                            locked=False,
+                            created_at=None,
+                            updated_at=None,
+                        )
+                    ]
+                )
+            raise AssertionError(sql)
+
+    async def _override_db():
+        yield _DB()
+
+    async def apply_projected_labor(_db, items):
+        items[0].update(
+            labor_cost=350,
+            total_cost=650,
+            total=650,
+            labor_cost_source="system",
+        )
+
+    app = FastAPI()
+    app.include_router(module.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: _make_user()
+    app.dependency_overrides[get_async_db] = _override_db
+    monkeypatch.setattr(module, "_apply_projected_labor_costs", apply_projected_labor)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/api/expenses?year_month=2026-08")
+
+    body = json.loads(response.content.decode("utf-8"))
+    assert response.status_code == 200
+    assert body["data"]["items"][0]["labor_cost"] == 350
+    assert body["data"]["items"][0]["total_cost"] == 650
 
 
 @pytest.mark.asyncio

@@ -883,6 +883,65 @@ class ShopProfitBasis(Base):
         {"schema": "finance"},
     )
 
+
+class EmployeeLaborCostAllocation(Base):
+    """Employee payroll costs allocated to operating shops or company overhead."""
+
+    __tablename__ = "employee_labor_cost_allocations"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    period_month = Column(
+        String(16),
+        ForeignKey("core.dim_fiscal_calendar.period_code"),
+        nullable=False,
+    )
+    employee_code = Column(String(64), nullable=False)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(256), nullable=True)
+    allocation_scope = Column(String(16), nullable=False)  # shop/company
+    allocation_ratio = Column(Numeric(12, 6), nullable=False, default=0)
+
+    pre_commission_amount = Column(Numeric(15, 2), nullable=False, default=0)
+    performance_amount = Column(Numeric(15, 2), nullable=False, default=0)
+    commission_amount = Column(Numeric(15, 2), nullable=False, default=0)
+    total_amount = Column(Numeric(15, 2), nullable=False, default=0)
+
+    source_payroll_record_id = Column(BigInteger, nullable=True)
+    source_payroll_status = Column(String(32), nullable=False, default="draft")
+    calculation_status = Column(String(32), nullable=False, default="projected")
+    calculation_version = Column(String(64), nullable=False, default="LABOR_COST_V1")
+    pre_commission_locked_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("allocation_scope IN ('shop', 'company')", name="ck_employee_labor_cost_scope"),
+        Index("ix_employee_labor_cost_period", "period_month"),
+        Index("ix_employee_labor_cost_employee", "employee_code", "period_month"),
+        Index("ix_employee_labor_cost_shop", "platform_code", "shop_id", "period_month"),
+        Index(
+            "uq_employee_labor_cost_shop_scope",
+            "period_month",
+            "employee_code",
+            "platform_code",
+            "shop_id",
+            "calculation_version",
+            unique=True,
+            postgresql_where=text("allocation_scope = 'shop'"),
+        ),
+        Index(
+            "uq_employee_labor_cost_company_scope",
+            "period_month",
+            "employee_code",
+            "calculation_version",
+            unique=True,
+            postgresql_where=text("allocation_scope = 'company'"),
+        ),
+        {"schema": "finance"},
+    )
+
+
 class FollowInvestment(Base):
     """店铺跟投本金记录表"""
     __tablename__ = "follow_investments"

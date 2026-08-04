@@ -29,6 +29,23 @@ def test_refresh_registry_includes_b_cost_analysis_targets():
     assert expected_targets.issubset(SQL_TARGET_PATHS.keys())
 
 
+def test_refresh_registry_includes_labor_cost_dashboard_pipeline():
+    expected_targets = {
+        "semantic.shop_month_other_operating_cost",
+        "mart.shop_month_labor_cost",
+        "api.business_overview_operational_metrics_module",
+    }
+
+    assert expected_targets.issubset(PIPELINE_DEPENDENCIES.keys())
+    assert expected_targets.issubset(SQL_TARGET_PATHS.keys())
+    assert "semantic.shop_month_other_operating_cost" in PIPELINE_DEPENDENCIES[
+        "api.business_overview_operational_metrics_module"
+    ]
+    assert "mart.shop_month_labor_cost" in PIPELINE_DEPENDENCIES[
+        "api.business_overview_operational_metrics_module"
+    ]
+
+
 def test_expand_downstream_targets_includes_all_order_dashboard_dependents():
     from backend.services.data_pipeline.refresh_registry import expand_downstream_targets
 

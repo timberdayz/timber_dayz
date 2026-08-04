@@ -362,6 +362,32 @@
               style="margin-top: 16px;"
             />
           </el-card>
+
+          <el-card class="section-card" shadow="hover">
+            <template #header>
+              <div class="section-header">
+                <span>成本分摊预览</span>
+                <el-tag type="info">自动汇总至费用管理</el-tag>
+              </div>
+            </template>
+            <el-table :data="laborAllocations" size="small" empty-text="刷新当月工资单后生成分摊结果">
+              <el-table-column prop="allocation_scope" label="归属" width="100">
+                <template #default="{ row }">{{ row.allocation_scope === 'company' ? '公司公共成本' : '店铺成本' }}</template>
+              </el-table-column>
+              <el-table-column label="店铺" min-width="150">
+                <template #default="{ row }">{{ row.shop_id || '未归属店铺' }}</template>
+              </el-table-column>
+              <el-table-column label="提成前人力" width="130" align="right">
+                <template #default="{ row }">{{ formatMoney(row.pre_commission_amount) }}</template>
+              </el-table-column>
+              <el-table-column label="绩效与提成" width="130" align="right">
+                <template #default="{ row }">{{ formatMoney((row.performance_amount || 0) + (row.commission_amount || 0)) }}</template>
+              </el-table-column>
+              <el-table-column label="总人力成本" width="130" align="right">
+                <template #default="{ row }">{{ formatMoney(row.total_amount) }}</template>
+              </el-table-column>
+            </el-table>
+          </el-card>
         </template>
       </div>
     </div>
@@ -396,6 +422,7 @@ const salaryStructureEmpty = ref(true)
 const salaryHistory = ref([])
 const payrollRecord = ref(null)
 const lockedConflicts = ref([])
+const laborAllocations = ref([])
 
 const salaryForm = reactive({
   base_salary: 0,
@@ -695,6 +722,7 @@ const refreshPayrollResult = async () => {
     const record = response?.data || response || null
     lockedConflicts.value = response?.locked_conflict_details || response?.lockedConflicts || []
     applyPayrollRecord(record)
+    await loadLaborAllocations()
     ElMessage.success('工资单结果已刷新')
   } catch (error) {
     console.error('刷新工资单结果失败:', error)
@@ -724,6 +752,7 @@ const handleBatchRefreshPayroll = async () => {
     const conflictDetails = response?.locked_conflict_details || []
     if (selectedEmployee.value) {
       await loadPayrollRecord()
+      await loadLaborAllocations()
     }
     ElMessage.success(
       `${selectedMonth.value} 批量刷新完成：更新 ${response?.payroll_upserts || 0} 份工资单，重算 ${response?.commission_upserts || 0} 条提成`
@@ -742,6 +771,18 @@ const handleBatchRefreshPayroll = async () => {
   } finally {
     batchRefreshingPayroll.value = false
   }
+}
+
+const loadLaborAllocations = async () => {
+  if (!selectedEmployee.value || !selectedMonth.value) {
+    laborAllocations.value = []
+    return
+  }
+  const response = await api.getHrLaborCostAllocations({
+    year_month: selectedMonth.value,
+    employee_code: selectedEmployee.value.employee_code
+  })
+  laborAllocations.value = response?.data || response || []
 }
 
 const ensurePayrollRecord = async () => {

@@ -61,6 +61,7 @@ from backend.services.rbac_service import get_rbac_service
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.services.profit_basis_service import ProfitBasisService
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.postgresql_shop_metrics_service import (
     load_shop_monthly_metrics,
     load_shop_monthly_target_achievement,
@@ -86,11 +87,12 @@ async def _load_profit_basis_for_performance(
         for row in source_rows.values()
         if row.get("platform_code") and row.get("shop_id")
     }
+    basis_version = await LaborCostPolicyService(db).get_profit_basis_version(period)
     snapshot_rows = (
         await db.execute(
             select(ShopProfitBasis).where(
                 ShopProfitBasis.period_month == period,
-                ShopProfitBasis.basis_version == "A_ONLY_V1",
+                ShopProfitBasis.basis_version == basis_version,
             )
         )
     ).scalars().all()
