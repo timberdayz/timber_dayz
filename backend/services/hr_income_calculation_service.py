@@ -35,6 +35,7 @@ from modules.core.db import (
 )
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
+from backend.services.payroll_period_lock_service import PayrollPeriodLockService
 
 logger = get_logger(__name__)
 
@@ -466,6 +467,10 @@ class HRIncomeCalculationService:
             datetime.strptime(year_month, "%Y-%m")
         except ValueError as exc:
             raise ValueError("year_month format must be YYYY-MM") from exc
+
+        await PayrollPeriodLockService(self.db).assert_month_mutable(
+            year_month=year_month,
+        )
 
         assignment_rows = (
             await self.db.execute(

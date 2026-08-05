@@ -277,6 +277,22 @@ async def _list_employee_performance_adjustments(
     return {"success": True, "data": {"items": items, "total": total}}
 
 
+async def _employee_month_lock_conflict(
+    *,
+    db: AsyncSession,
+    employee_code: str,
+    year_month: str,
+):
+    try:
+        await PayrollPeriodLockService(db).assert_employee_month_mutable(
+            employee_code=employee_code,
+            year_month=year_month,
+        )
+    except PayrollPeriodLockedError as exc:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
+    return None
+
+
 async def _create_employee_performance_adjustment(
     *,
     body: EmployeePerformanceAdjustmentCreate,
@@ -288,6 +304,14 @@ async def _create_employee_performance_adjustment(
     ).scalar_one_or_none()
     if not employee:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+
+    conflict = await _employee_month_lock_conflict(
+        db=db,
+        employee_code=body.employee_code,
+        year_month=body.year_month,
+    )
+    if conflict:
+        return conflict
 
     record = EmployeePerformanceAdjustment(
         employee_code=body.employee_code,
@@ -321,6 +345,14 @@ async def _update_employee_performance_adjustment(
     if not record:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效调整项不存在: {adjustment_id}", status_code=404)
 
+    conflict = await _employee_month_lock_conflict(
+        db=db,
+        employee_code=record.employee_code,
+        year_month=record.year_month,
+    )
+    if conflict:
+        return conflict
+
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(record, key, value)
     record.updated_at = datetime.now(timezone.utc)
@@ -346,6 +378,14 @@ async def _delete_employee_performance_adjustment(
     ).scalar_one_or_none()
     if not record:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效调整项不存在: {adjustment_id}", status_code=404)
+
+    conflict = await _employee_month_lock_conflict(
+        db=db,
+        employee_code=record.employee_code,
+        year_month=record.year_month,
+    )
+    if conflict:
+        return conflict
 
     record.status = "inactive"
     record.updated_at = datetime.now(timezone.utc)
@@ -422,6 +462,14 @@ async def _create_employee_performance_input(
     if not employee:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
 
+    conflict = await _employee_month_lock_conflict(
+        db=db,
+        employee_code=body.employee_code,
+        year_month=body.year_month,
+    )
+    if conflict:
+        return conflict
+
     existing = (
         await db.execute(
             select(EmployeePerformanceInput).where(
@@ -476,6 +524,14 @@ async def _update_employee_performance_input(
     if not record:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"个人绩效输入项不存在: {input_id}", status_code=404)
 
+    conflict = await _employee_month_lock_conflict(
+        db=db,
+        employee_code=record.employee_code,
+        year_month=record.year_month,
+    )
+    if conflict:
+        return conflict
+
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(record, key, value)
     record.updated_at = datetime.now(timezone.utc)
@@ -501,6 +557,14 @@ async def _delete_employee_performance_input(
     ).scalar_one_or_none()
     if not record:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"个人绩效输入项不存在: {input_id}", status_code=404)
+
+    conflict = await _employee_month_lock_conflict(
+        db=db,
+        employee_code=record.employee_code,
+        year_month=record.year_month,
+    )
+    if conflict:
+        return conflict
 
     record.status = "inactive"
     record.updated_at = datetime.now(timezone.utc)
@@ -565,6 +629,14 @@ async def _apply_employee_performance_template(
     ).scalar_one_or_none()
     if not employee:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+
+    conflict = await _employee_month_lock_conflict(
+        db=db,
+        employee_code=body.employee_code,
+        year_month=body.year_month,
+    )
+    if conflict:
+        return conflict
 
     position_name = None
     if employee and getattr(employee, "position_id", None):

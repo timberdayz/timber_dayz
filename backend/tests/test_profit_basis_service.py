@@ -227,6 +227,60 @@ async def test_lock_v2_profit_basis_locks_pre_commission_labor_allocations():
 
 
 @pytest.mark.asyncio
+async def test_lock_profit_basis_snapshots_for_assignments_builds_then_locks_each_shop_once(monkeypatch):
+    service = ProfitBasisService(AsyncMock())
+    built = []
+    upserted = []
+    locked = []
+
+    async def fake_build(year_month, platform_code, shop_id, basis_version=None):
+        built.append((year_month, platform_code, shop_id, basis_version))
+        return {
+            "period_month": year_month,
+            "platform_code": platform_code.lower(),
+            "shop_id": shop_id,
+            "basis_version": basis_version or "A_PRE_COMMISSION_LABOR_V2",
+        }
+
+    async def fake_upsert(payload, *, commit=True):
+        upserted.append((payload, commit))
+        return payload
+
+    async def fake_lock(*, year_month, platform_code, shop_id, basis_version=None, commit=True):
+        locked.append((year_month, platform_code, shop_id, basis_version, commit))
+        return {"shop_id": shop_id, "is_locked": True}
+
+    monkeypatch.setattr(service, "build_profit_basis", fake_build)
+    monkeypatch.setattr(service, "upsert_profit_basis_snapshot", fake_upsert)
+    monkeypatch.setattr(service, "lock_profit_basis_snapshot", fake_lock)
+
+    result = await service.lock_profit_basis_snapshots_for_assignments(
+        year_month="2025-07",
+        assignments=[
+            SimpleNamespace(platform_code="Shopee", shop_id="shop-1"),
+            SimpleNamespace(platform_code="shopee", shop_id="shop-1"),
+            SimpleNamespace(platform_code="TikTok", shop_id="shop-2"),
+        ],
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        commit=False,
+    )
+
+    assert built == [
+        ("2025-07", "shopee", "shop-1", "A_PRE_COMMISSION_LABOR_V2"),
+        ("2025-07", "tiktok", "shop-2", "A_PRE_COMMISSION_LABOR_V2"),
+    ]
+    assert [item[1] for item in upserted] == [False, False]
+    assert locked == [
+        ("2025-07", "shopee", "shop-1", "A_PRE_COMMISSION_LABOR_V2", False),
+        ("2025-07", "tiktok", "shop-2", "A_PRE_COMMISSION_LABOR_V2", False),
+    ]
+    assert result == [
+        {"shop_id": "shop-1", "is_locked": True},
+        {"shop_id": "shop-2", "is_locked": True},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_build_profit_basis_prefers_allocated_costs_when_rows_exist(monkeypatch):
     db = AsyncMock()
     service = ProfitBasisService(db)
@@ -565,6 +619,40 @@ async def test_upsert_profit_basis_snapshot_rejects_locked_snapshot_overwrite():
         await service.upsert_profit_basis_snapshot(payload)
 
     assert existing.profit_basis_amount == pytest.approx(50.0)
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upsert_locked_profit_basis_accepts_equivalent_decimal_money_values():
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+    existing = SimpleNamespace(
+        period_month="2026-03",
+        platform_code="shopee",
+        shop_id="shop-1",
+        orders_profit_amount=Decimal("4000.10"),
+        a_class_cost_amount=Decimal("1500.20"),
+        b_class_cost_amount=Decimal("0.00"),
+        profit_basis_amount=Decimal("2499.90"),
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        is_locked=True,
+    )
+    db.execute = AsyncMock(return_value=_MockMappingsResult([existing]))
+
+    payload = {
+        "period_month": "2026-03",
+        "platform_code": "shopee",
+        "shop_id": "shop-1",
+        "orders_profit_amount": 4000.10,
+        "a_class_cost_amount": 1500.20,
+        "b_class_cost_amount": 0.0,
+        "profit_basis_amount": 2499.90,
+        "basis_version": "A_PRE_COMMISSION_LABOR_V2",
+    }
+
+    result = await service.upsert_profit_basis_snapshot(payload)
+
+    assert result == payload
     db.commit.assert_not_awaited()
 
 

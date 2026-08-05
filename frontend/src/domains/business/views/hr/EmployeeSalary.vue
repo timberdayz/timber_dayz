@@ -266,6 +266,21 @@
 
               <el-row :gutter="16">
                 <el-col :span="12">
+                  <el-form-item label="补录来源月份">
+                    <el-select v-model="payrollForm.backfill_source_month" clearable :disabled="isLockedPayroll" style="width: 100%;">
+                      <el-option v-for="month in recentMonths" :key="month" :label="month" :value="month" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="补录说明">
+                    <el-input v-model="payrollForm.backfill_note" maxlength="512" show-word-limit :disabled="isLockedPayroll" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <el-row :gutter="16">
+                <el-col :span="12">
                   <el-form-item label="个人社保">
                     <el-input-number v-model="payrollForm.social_insurance_personal" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
                   </el-form-item>
@@ -451,7 +466,9 @@ const payrollForm = reactive({
   social_insurance_company: 0,
   housing_fund_company: 0,
   pay_date: '',
-  remark: ''
+  remark: '',
+  backfill_source_month: '',
+  backfill_note: ''
 })
 
 const recentMonths = computed(() => {
@@ -537,7 +554,9 @@ const resetPayrollForm = () => {
     social_insurance_company: 0,
     housing_fund_company: 0,
     pay_date: '',
-    remark: ''
+    remark: '',
+    backfill_source_month: '',
+    backfill_note: ''
   })
 }
 
@@ -580,7 +599,9 @@ const applyPayrollRecord = (record) => {
     social_insurance_company: Number(record.social_insurance_company || 0),
     housing_fund_company: Number(record.housing_fund_company || 0),
     pay_date: record.pay_date || '',
-    remark: record.remark || ''
+    remark: record.remark || '',
+    backfill_source_month: record.backfill_source_month || '',
+    backfill_note: record.backfill_note || ''
   })
 }
 
@@ -814,7 +835,9 @@ const saveMonthlyDraft = async () => {
       social_insurance_company: payrollForm.social_insurance_company,
       housing_fund_company: payrollForm.housing_fund_company,
       pay_date: payrollForm.pay_date || null,
-      remark: payrollForm.remark || null
+      remark: payrollForm.remark || null,
+      backfill_source_month: payrollForm.backfill_source_month || null,
+      backfill_note: payrollForm.backfill_note || null
     })
     ElMessage.success('月度草稿已保存')
     await loadPayrollRecord()

@@ -36,15 +36,22 @@ from backend.services.employee_target_allocation_service import (
 from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.services.labor_cost_projection_service import LaborCostProjectionService
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
+from backend.services.payroll_period_lock_service import (
+    PayrollPeriodLockedError,
+    PayrollPeriodLockService,
+)
+from backend.services.profit_basis_service import ProfitBasisService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.db import (
     DimUser,
     Employee,
     EmployeeLaborCostAllocation,
+    EmployeeShopAssignment,
     EmployeeTarget,
     PayrollRecord,
     SalaryStructure,
+    ShopProfitBasis,
 )
 from modules.core.db import EmployeeCommission, EmployeePerformance
 from modules.core.logger import get_logger
@@ -305,11 +312,18 @@ async def create_salary_structure(
         if existing.scalar_one_or_none():
             return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"薪资结构已存在: {structure.employee_code}", status_code=400)
 
+        await PayrollPeriodLockService(db).assert_salary_effective_date_mutable(
+            employee_code=structure.employee_code,
+            effective_date=structure.effective_date,
+        )
         record = SalaryStructure(**structure.model_dump())
         db.add(record)
         await db.commit()
         await db.refresh(record)
         return SalaryStructureResponse.model_validate(record)
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
         logger.error("创建薪资结构失败: %s", e, exc_info=True)
@@ -336,11 +350,18 @@ async def update_salary_structure(
         record = _pick_current_salary_structure(rows)
         if not record:
             return error_response(ErrorCode.DATA_NOT_FOUND, f"钖祫缁撴瀯涓嶅瓨鍦? {employee_code}", status_code=404)
+        await PayrollPeriodLockService(db).assert_salary_effective_date_mutable(
+            employee_code=employee_code,
+            effective_date=record.effective_date,
+        )
         for key, value in body.model_dump(exclude_unset=True).items():
             setattr(record, key, value)
         await db.commit()
         await db.refresh(record)
         return SalaryStructureResponse.model_validate(record)
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
         logger.error("鏇存柊钖祫缁撴瀯澶辫触: %s", e, exc_info=True)
@@ -365,6 +386,10 @@ async def refresh_payroll_record(
         if not _employee_identity_allows_salary(employee):
             return _salary_identity_rejection()
 
+        await PayrollPeriodLockService(db).assert_employee_month_mutable(
+            employee_code=employee_code,
+            year_month=year_month,
+        )
         await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
         result = await PayrollGenerationService(db).generate_employee_month(employee_code, year_month)
         record = result.get("payroll_record")
@@ -384,6 +409,8 @@ async def refresh_payroll_record(
             "latest_calculated_at": stale_flags["latest_calculated_at"],
             "data": PayrollRecordResponse.model_validate(record).model_dump(mode="json") if record else None,
         }
+    except PayrollPeriodLockedError as exc:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         logger.error("鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? %s", e, exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? {str(e)}", status_code=500)
@@ -395,6 +422,7 @@ async def refresh_payroll_records_for_month(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
+        await PayrollPeriodLockService(db).assert_month_mutable(year_month=year_month)
         income_result = await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
         payroll_result = await PayrollGenerationService(db).generate_month(year_month)
         commission_by_employee_shop: Dict[str, Dict[tuple[str, str], float]] = {}
@@ -427,6 +455,8 @@ async def refresh_payroll_records_for_month(
             "locked_conflict_details": payroll_result.get("locked_conflict_details", []),
             "labor_cost_allocation_upserts": labor_result.get("allocation_upserts", 0),
         }
+    except PayrollPeriodLockedError as exc:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         logger.error("鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: %s", e, exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: {str(e)}", status_code=500)
@@ -556,6 +586,9 @@ async def update_payroll_record(
         await db.commit()
         await db.refresh(record)
         return _payroll_success(record)
+    except (PayrollPeriodLockedError, ValueError) as exc:
+        await db.rollback()
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
         logger.error("更新工资单失败: %s", e, exc_info=True)
@@ -592,6 +625,65 @@ async def confirm_payroll_record(
                 "请先刷新当月工资和人力成本分摊，再确认工资单",
                 status_code=409,
             )
+        assignments = (
+            await db.execute(
+                select(EmployeeShopAssignment).where(
+                    EmployeeShopAssignment.year_month == record.year_month,
+                    EmployeeShopAssignment.employee_code == record.employee_code,
+                    EmployeeShopAssignment.status == "active",
+                )
+            )
+        ).scalars().all()
+        assigned_shop_keys = {
+            (
+                str(assignment.platform_code or "").lower(),
+                str(assignment.shop_id or ""),
+            )
+            for assignment in assignments
+        }
+        if assigned_shop_keys:
+            month_assignments = (
+                await db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.year_month == record.year_month,
+                        EmployeeShopAssignment.status == "active",
+                    )
+                )
+            ).scalars().all()
+            ratio_by_shop: Dict[tuple[str, str], float] = {}
+            for assignment in month_assignments:
+                shop_key = (
+                    str(assignment.platform_code or "").lower(),
+                    str(assignment.shop_id or ""),
+                )
+                if shop_key not in assigned_shop_keys:
+                    continue
+                ratio_by_shop[shop_key] = ratio_by_shop.get(shop_key, 0.0) + float(
+                    getattr(assignment, "commission_ratio", 0) or 0
+                )
+            over_allocated_shop = next(
+                (
+                    shop_key
+                    for shop_key, total_ratio in ratio_by_shop.items()
+                    if total_ratio > 1.000001
+                ),
+                None,
+            )
+            if over_allocated_shop is not None:
+                return error_response(
+                    ErrorCode.PARAMETER_INVALID,
+                    f"店铺 {over_allocated_shop[1]} 的员工提成比例总和不能超过 100%",
+                    status_code=409,
+                )
+        basis_version = await LaborCostPolicyService(db).get_profit_basis_version(
+            record.year_month
+        )
+        await ProfitBasisService(db).lock_profit_basis_snapshots_for_assignments(
+            year_month=record.year_month,
+            assignments=assignments,
+            basis_version=basis_version,
+            commit=False,
+        )
         record.status = "confirmed"
         locked_at = datetime.now(timezone.utc)
         for allocation in allocations:
@@ -601,6 +693,9 @@ async def confirm_payroll_record(
         await db.commit()
         await db.refresh(record)
         return _payroll_success(record)
+    except (PayrollPeriodLockedError, ValueError) as exc:
+        await db.rollback()
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
         logger.error("确认工资单失败: %s", e, exc_info=True)
@@ -622,6 +717,37 @@ async def reopen_payroll_record(
         if record.status == "paid":
             return error_response(ErrorCode.PARAMETER_INVALID, "已发放工资单不可退回 draft", status_code=409)
         record.status = "draft"
+        remaining_locked_records = (
+            await db.execute(
+                select(PayrollRecord).where(
+                    PayrollRecord.year_month == record.year_month,
+                    PayrollRecord.status.in_(("confirmed", "paid")),
+                )
+            )
+        ).scalars().all()
+        if not remaining_locked_records:
+            allocations = (
+                await db.execute(
+                    select(EmployeeLaborCostAllocation).where(
+                        EmployeeLaborCostAllocation.period_month == record.year_month,
+                    )
+                )
+            ).scalars().all()
+            for allocation in allocations:
+                allocation.source_payroll_status = "draft"
+                allocation.calculation_status = "projected"
+                allocation.pre_commission_locked_at = None
+
+            snapshots = (
+                await db.execute(
+                    select(ShopProfitBasis).where(
+                        ShopProfitBasis.period_month == record.year_month,
+                        ShopProfitBasis.is_locked == True,
+                    )
+                )
+            ).scalars().all()
+            for snapshot in snapshots:
+                snapshot.is_locked = False
         await db.commit()
         await db.refresh(record)
         return _payroll_success(record)

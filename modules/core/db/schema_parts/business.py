@@ -2744,6 +2744,8 @@ class PayrollRecord(Base):
     status = Column(String(32), nullable=False, default="draft")  # 状态:draft/confirmed/paid
     pay_date = Column(Date, nullable=True)  # 发薪日期
     remark = Column(Text, nullable=True)  # 备注
+    backfill_source_month = Column(String(7), nullable=True)  # 补录来源月份
+    backfill_note = Column(Text, nullable=True)  # 补录说明
     
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

@@ -249,7 +249,24 @@ class ProfitBasisService:
             self.db.add(record)
         else:
             if bool(getattr(record, "is_locked", False)):
-                raise ValueError("profit basis is locked; reopen settlement before rebuild")
+                locked_values = (
+                    record.orders_profit_amount,
+                    record.a_class_cost_amount,
+                    record.b_class_cost_amount,
+                    record.profit_basis_amount,
+                )
+                requested_values = (
+                    payload["orders_profit_amount"],
+                    payload["a_class_cost_amount"],
+                    payload["b_class_cost_amount"],
+                    payload["profit_basis_amount"],
+                )
+                if any(
+                    round(_to_float(locked), 2) != round(_to_float(requested), 2)
+                    for locked, requested in zip(locked_values, requested_values)
+                ):
+                    raise ValueError("profit basis is locked; reopen settlement before rebuild")
+                return payload
             record.orders_profit_amount = payload["orders_profit_amount"]
             record.a_class_cost_amount = payload["a_class_cost_amount"]
             record.b_class_cost_amount = payload["b_class_cost_amount"]
@@ -266,6 +283,7 @@ class ProfitBasisService:
         platform_code: str,
         shop_id: str,
         basis_version: str | None = None,
+        commit: bool = True,
     ) -> dict[str, Any]:
         basis_version = basis_version or await LaborCostPolicyService(
             self.db
@@ -297,7 +315,8 @@ class ProfitBasisService:
             locked_at = datetime.now(timezone.utc)
             for allocation in allocations:
                 allocation.pre_commission_locked_at = locked_at
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return {
             "period_month": record.period_month,
             "platform_code": record.platform_code,
@@ -306,6 +325,47 @@ class ProfitBasisService:
             "profit_basis_amount": _to_float(record.profit_basis_amount),
             "is_locked": True,
         }
+
+    async def lock_profit_basis_snapshots_for_assignments(
+        self,
+        *,
+        year_month: str,
+        assignments: list[Any],
+        basis_version: str,
+        commit: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Persist and lock one profit-basis snapshot per assigned operating shop."""
+        unique_shops: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for assignment in assignments:
+            platform_code = str(getattr(assignment, "platform_code", "") or "").lower()
+            shop_id = str(getattr(assignment, "shop_id", "") or "")
+            if not platform_code or not shop_id or (platform_code, shop_id) in seen:
+                continue
+            seen.add((platform_code, shop_id))
+            unique_shops.append((platform_code, shop_id))
+
+        locked_snapshots: list[dict[str, Any]] = []
+        for platform_code, shop_id in unique_shops:
+            payload = await self.build_profit_basis(
+                year_month,
+                platform_code,
+                shop_id,
+                basis_version=basis_version,
+            )
+            await self.upsert_profit_basis_snapshot(payload, commit=False)
+            locked_snapshots.append(
+                await self.lock_profit_basis_snapshot(
+                    year_month=year_month,
+                    platform_code=platform_code,
+                    shop_id=shop_id,
+                    basis_version=basis_version,
+                    commit=False,
+                )
+            )
+        if commit:
+            await self.db.commit()
+        return locked_snapshots
 
     @staticmethod
     def calculate_distributable_amount(

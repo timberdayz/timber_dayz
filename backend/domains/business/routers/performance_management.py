@@ -60,6 +60,10 @@ from backend.dependencies.auth import get_current_user, require_admin
 from backend.services.rbac_service import get_rbac_service
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.payroll_generation_service import PayrollGenerationService
+from backend.services.payroll_period_lock_service import (
+    PayrollPeriodLockedError,
+    PayrollPeriodLockService,
+)
 from backend.services.profit_basis_service import ProfitBasisService
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.postgresql_shop_metrics_service import (
@@ -1621,6 +1625,7 @@ async def calculate_performance_scores(
     - 写入 c_class.performance_scores（按 platform_code+shop_id+period upsert）
     """
     try:
+        await PayrollPeriodLockService(db).assert_month_mutable(year_month=period)
         # 按考核周期校验配置是否存在(契约: 无配置时返回 404 + PERF_CONFIG_NOT_FOUND)
         period_start = datetime.strptime(period, "%Y-%m").date().replace(day=1)
         if period_start.month == 12:
@@ -2006,6 +2011,15 @@ async def calculate_performance_scores(
         )
     except HTTPException:
         raise
+    except PayrollPeriodLockedError as e:
+        await db.rollback()
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message=str(e),
+            error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
+            detail=str(e),
+            status_code=409,
+        )
     except ValueError as e:
         await db.rollback()
         logger.warning(f"考核周期格式无效: {e}")

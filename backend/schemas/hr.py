@@ -630,6 +630,8 @@ class PayrollRecordResponse(BaseModel):
     status: str
     pay_date: Optional[date]
     remark: Optional[str]
+    backfill_source_month: Optional[str] = None
+    backfill_note: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -648,6 +650,8 @@ class PayrollRecordManualUpdate(BaseModel):
     housing_fund_company: Optional[Decimal] = Field(None, ge=0)
     pay_date: Optional[date] = None
     remark: Optional[str] = None
+    backfill_source_month: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}$")
+    backfill_note: Optional[str] = Field(None, max_length=512)
 
 
 # ================================================================

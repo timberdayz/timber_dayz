@@ -63,6 +63,53 @@ def test_shop_month_lock_rejects_config_changes_when_an_assignee_is_confirmed():
         )
     )
 
+
+def test_month_lock_rejects_recalculation_after_any_payroll_confirmation():
+    from backend.services.payroll_period_lock_service import (
+        PayrollPeriodLockedError,
+        PayrollPeriodLockService,
+    )
+
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            return_value=_Result(
+                SimpleNamespace(employee_code="EMP001", status="confirmed")
+            )
+        )
+    )
+
+    with pytest.raises(PayrollPeriodLockedError, match="2025-07.*下一工资月份"):
+        asyncio.run(
+            PayrollPeriodLockService(db).assert_month_mutable(
+                year_month="2025-07",
+            )
+        )
+
+
+def test_salary_effective_date_lock_rejects_backdated_change_over_confirmed_month():
+    from datetime import date
+
+    from backend.services.payroll_period_lock_service import (
+        PayrollPeriodLockedError,
+        PayrollPeriodLockService,
+    )
+
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            return_value=_Result(
+                SimpleNamespace(employee_code="EMP001", year_month="2025-07", status="confirmed")
+            )
+        )
+    )
+
+    with pytest.raises(PayrollPeriodLockedError, match="2025-07.*下一工资月份"):
+        asyncio.run(
+            PayrollPeriodLockService(db).assert_salary_effective_date_mutable(
+                employee_code="EMP001",
+                effective_date=date(2025, 7, 1),
+            )
+        )
+
     with pytest.raises(PayrollPeriodLockedError, match="2025-07.*店铺归属"):
         asyncio.run(
             PayrollPeriodLockService(db).assert_shop_month_mutable(

@@ -37,6 +37,20 @@ def _json_body(resp):
     return json.loads(resp.body.decode("utf-8"))
 
 
+class _MutablePayrollPeriodLockService:
+    def __init__(self, _db):
+        pass
+
+    async def assert_employee_month_mutable(self, **_kwargs):
+        return None
+
+    async def assert_month_mutable(self, **_kwargs):
+        return None
+
+    async def assert_salary_effective_date_mutable(self, **_kwargs):
+        return None
+
+
 def test_get_salary_structure_returns_current_effective_version():
     module = _load_hr_salary_module()
     db = AsyncMock()
@@ -120,7 +134,7 @@ def test_list_salary_structure_history_returns_versions_desc():
     assert [item.id for item in resp] == [22, 21]
 
 
-def test_create_salary_structure_allows_new_version_for_same_employee():
+def test_create_salary_structure_allows_new_version_for_same_employee(monkeypatch):
     module = _load_hr_salary_module()
     db = AsyncMock()
     employee = SimpleNamespace(employee_code="EMP102")
@@ -141,6 +155,7 @@ def test_create_salary_structure_allows_new_version_for_same_employee():
         status="active",
     )
 
+    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
     db.execute = AsyncMock(side_effect=[_ResultOne(employee), _ResultOne(None)])
     def _add(obj):
         obj.id = 32
@@ -186,7 +201,7 @@ def test_create_salary_structure_rejects_non_employee_identity():
     assert _json_body(resp)["success"] is False
 
 
-def test_update_salary_structure_updates_selected_version():
+def test_update_salary_structure_updates_selected_version(monkeypatch):
     module = _load_hr_salary_module()
     db = AsyncMock()
     record = SimpleNamespace(
@@ -216,6 +231,7 @@ def test_update_salary_structure_updates_selected_version():
         }
     )
     db.execute = AsyncMock(return_value=_ResultRows([record]))
+    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
@@ -250,7 +266,7 @@ def test_refresh_payroll_record_rejects_non_employee_identity():
     assert _json_body(resp)["success"] is False
 
 
-def test_confirm_payroll_record_marks_draft_as_confirmed():
+def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_basis(monkeypatch):
     module = _load_hr_salary_module()
     db = AsyncMock()
     record = SimpleNamespace(
@@ -285,9 +301,37 @@ def test_confirm_payroll_record_marks_draft_as_confirmed():
         calculation_status="projected",
         pre_commission_locked_at=None,
     )
-    db.execute = AsyncMock(side_effect=[_ResultOne(record), _ResultRows([allocation])])
+    assignment = SimpleNamespace(platform_code="shopee", shop_id="shop-1")
+    db.execute = AsyncMock(
+        side_effect=[
+            _ResultOne(record),
+            _ResultRows([allocation]),
+            _ResultRows([assignment]),
+            _ResultRows([assignment]),
+        ]
+    )
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
+
+    locked = []
+
+    class _ProfitBasisService:
+        def __init__(self, db):
+            self.db = db
+
+        async def lock_profit_basis_snapshots_for_assignments(self, **kwargs):
+            locked.append(kwargs)
+            return [{"shop_id": "shop-1", "is_locked": True}]
+
+    async def _get_profit_basis_version(_self, _year_month):
+        return "A_PRE_COMMISSION_LABOR_V2"
+
+    monkeypatch.setattr(module, "ProfitBasisService", _ProfitBasisService)
+    monkeypatch.setattr(
+        module.LaborCostPolicyService,
+        "get_profit_basis_version",
+        _get_profit_basis_version,
+    )
 
     resp = asyncio.run(module.confirm_payroll_record(1, db=db))
 
@@ -295,6 +339,12 @@ def test_confirm_payroll_record_marks_draft_as_confirmed():
     assert allocation.source_payroll_status == "confirmed"
     assert allocation.calculation_status == "confirmed"
     assert allocation.pre_commission_locked_at is not None
+    assert locked == [{
+        "year_month": "2025-01",
+        "assignments": [assignment],
+        "basis_version": "A_PRE_COMMISSION_LABOR_V2",
+        "commit": False,
+    }]
     assert db.commit.await_count == 1
     assert resp["success"] is True
 
@@ -311,6 +361,32 @@ def test_confirm_payroll_record_requires_labor_cost_projection():
     assert resp.status_code == 409
     assert record.status == "draft"
     assert db.commit.await_count == 0
+
+
+def test_confirm_payroll_record_rejects_shop_commission_ratios_above_one():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    record = SimpleNamespace(id=10, employee_code="EMP010", year_month="2025-01", status="draft")
+    allocation = SimpleNamespace()
+    assignment = SimpleNamespace(platform_code="shopee", shop_id="shop-1")
+    db.execute = AsyncMock(
+        side_effect=[
+            _ResultOne(record),
+            _ResultRows([allocation]),
+            _ResultRows([assignment]),
+            _ResultRows([
+                SimpleNamespace(platform_code="shopee", shop_id="shop-1", commission_ratio=0.7),
+                SimpleNamespace(platform_code="shopee", shop_id="shop-1", commission_ratio=0.4),
+            ]),
+        ]
+    )
+    db.rollback = AsyncMock()
+
+    response = asyncio.run(module.confirm_payroll_record(10, db=db))
+
+    assert response.status_code == 409
+    assert "提成比例" in _json_body(response)["message"]
+    assert record.status == "draft"
 
 
 def test_update_payroll_record_rejects_confirmed_record():
@@ -338,6 +414,63 @@ def test_reopen_payroll_record_rejects_paid_record():
 
     assert resp.status_code == 409
     assert _json_body(resp)["success"] is False
+
+
+def test_reopen_last_confirmed_payroll_unlocks_monthly_cost_and_profit_snapshots():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    record = SimpleNamespace(
+        id=5,
+        employee_code="EMP005",
+        year_month="2025-01",
+        base_salary=1000.0,
+        position_salary=200.0,
+        performance_salary=100.0,
+        overtime_pay=0.0,
+        commission=50.0,
+        allowances=20.0,
+        bonus=0.0,
+        gross_salary=1370.0,
+        social_insurance_personal=10.0,
+        housing_fund_personal=10.0,
+        income_tax=5.0,
+        other_deductions=0.0,
+        total_deductions=25.0,
+        net_salary=1345.0,
+        social_insurance_company=30.0,
+        housing_fund_company=30.0,
+        total_cost=1430.0,
+        status="confirmed",
+        pay_date=None,
+        remark=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    allocation = SimpleNamespace(
+        source_payroll_status="confirmed",
+        calculation_status="confirmed",
+        pre_commission_locked_at=datetime.now(timezone.utc),
+    )
+    basis = SimpleNamespace(is_locked=True)
+    db.execute = AsyncMock(
+        side_effect=[
+            _ResultOne(record),
+            _ResultRows([]),
+            _ResultRows([allocation]),
+            _ResultRows([basis]),
+        ]
+    )
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    response = asyncio.run(module.reopen_payroll_record(5, db=db))
+
+    assert response["success"] is True
+    assert record.status == "draft"
+    assert allocation.source_payroll_status == "draft"
+    assert allocation.calculation_status == "projected"
+    assert allocation.pre_commission_locked_at is None
+    assert basis.is_locked is False
 
 
 def test_mark_payroll_record_paid_requires_confirmed_and_sets_pay_date():
@@ -418,7 +551,7 @@ def test_mark_payroll_record_paid_rejects_non_admin_user():
     assert db.commit.await_count == 0
 
 
-def test_refresh_payroll_record_returns_latest_payload():
+def test_refresh_payroll_record_returns_latest_payload(monkeypatch):
     module = _load_hr_salary_module()
     db = AsyncMock()
     calls = []
@@ -479,6 +612,7 @@ def test_refresh_payroll_record_returns_latest_payload():
 
     module.PayrollGenerationService = _FakeService
     module.HRIncomeCalculationService = _FakeIncomeService
+    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
 
     resp = asyncio.run(module.refresh_payroll_record("EMP200", "2025-04", db=db))
 
@@ -493,7 +627,7 @@ def test_refresh_payroll_record_returns_latest_payload():
     ]
 
 
-def test_refresh_payroll_record_returns_locked_conflicts():
+def test_refresh_payroll_record_returns_locked_conflicts(monkeypatch):
     module = _load_hr_salary_module()
     db = AsyncMock()
 
@@ -512,6 +646,7 @@ def test_refresh_payroll_record_returns_locked_conflicts():
             }
 
     module.PayrollGenerationService = _FakeService
+    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
 
     resp = asyncio.run(module.refresh_payroll_record("EMP201", "2025-04", db=db))
 
@@ -520,7 +655,7 @@ def test_refresh_payroll_record_returns_locked_conflicts():
     assert resp["locked_conflict_details"] == [{"employee_code": "EMP201"}]
 
 
-def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_payrolls():
+def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_payrolls(monkeypatch):
     module = _load_hr_salary_module()
     db = AsyncMock()
     calls = []
@@ -570,6 +705,7 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
     module.HRIncomeCalculationService = _FakeIncomeService
     module.PayrollGenerationService = _FakePayrollService
     module.LaborCostProjectionService = _FakeLaborCostService
+    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
     db.commit = AsyncMock()
 
     resp = asyncio.run(module.refresh_payroll_records_for_month("2025-04", db=db))
@@ -591,7 +727,7 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
     assert db.commit.await_count == 1
 
 
-def test_refresh_payroll_record_persists_new_record_before_serializing():
+def test_refresh_payroll_record_persists_new_record_before_serializing(monkeypatch):
     module = _load_hr_salary_module()
     db = AsyncMock()
     record = SimpleNamespace(
@@ -642,6 +778,7 @@ def test_refresh_payroll_record_persists_new_record_before_serializing():
         obj.updated_at = datetime.now(timezone.utc)
 
     module.PayrollGenerationService = _FakeService
+    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
     db.commit = AsyncMock()
     db.refresh = AsyncMock(side_effect=_refresh)
 
