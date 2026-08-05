@@ -125,13 +125,14 @@ def is_docker_bind_error(message: str) -> bool:
 
 
 def choose_temp_postgres_port(preferred_port: int) -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            probe.bind(("0.0.0.0", preferred_port))
-            return preferred_port
-        except OSError:
-            pass
+    if preferred_port > 0:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                probe.bind(("0.0.0.0", preferred_port))
+                return preferred_port
+            except OSError:
+                pass
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as fallback:
         fallback.bind(("0.0.0.0", 0))
