@@ -1461,7 +1461,7 @@ async def copy_employee_shop_assignments_from_prev_month(
             return {"success": True, "data": {"copied": 0, "message": f"上月 {prev_month} 无配置可复制"}}
         # 查目标月已有 (employee_code, platform_code, shop_id)
         target_query = (
-            select(EmployeeShopAssignment.employee_code, EmployeeShopAssignment.platform_code, EmployeeShopAssignment.shop_id)
+            select(EmployeeShopAssignment)
             .where(EmployeeShopAssignment.year_month == body.year_month)
         )
         target_set = {(r.employee_code, r.platform_code, r.shop_id) for r in (await db.execute(target_query)).scalars().all()}
