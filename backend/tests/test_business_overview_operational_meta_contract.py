@@ -34,3 +34,15 @@ def test_operational_metrics_target_join_uses_platform_shop_month_identity():
     assert "LOWER(TRIM(COALESCE(platform_code, '')))" in source
     assert "LOWER(COALESCE(m.platform_code, '')) = COALESCE(t.platform_code, '')" in source
     assert "COALESCE(m.shop_id, '') = COALESCE(t.shop_id, '')" in source
+
+
+def test_business_overview_expenses_use_expense_management_columns_and_system_labor():
+    source = Path(
+        "backend/services/postgresql_dashboard_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"成本合计"' in source
+    assert '"人力费用"' in source
+    assert "finance.employee_labor_cost_allocations" in source
+    assert "expense_management_month_summary" in source
+    assert 'CASE WHEN COALESCE("成本合计", 0) <> 0' in source

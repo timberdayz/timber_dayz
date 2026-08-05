@@ -76,8 +76,8 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
         side_effect=[
             _ScalarResult([shop_row]),
             _ScalarResult([config_row]),
-            _ScalarResult([]),
             _ScalarResult([assign_row]),
+            _ScalarResult([]),
         ]
     )
     domain_module.load_shop_monthly_metrics = AsyncMock(
@@ -127,6 +127,20 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     assert row["operator_profit"] == 0
 
 
+def test_shop_profit_statistics_uses_active_operating_stores_and_preserves_month_assignments():
+    from pathlib import Path
+
+    source = Path("backend/domains/business/routers/hr_commission.py").read_text(
+        encoding="utf-8"
+    )
+    start = source.index("async def get_shop_profit_statistics")
+    end = source.index("async def get_annual_profit_statistics", start)
+    section = source[start:end]
+
+    assert 'ShopAccount.business_role == "operating_store"' in section
+    assert "assigned_shop_keys" in section
+
+
 def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commission():
     module = _load_module()
     domain_module = module.domain_module
@@ -158,8 +172,8 @@ def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commi
         side_effect=[
             _ScalarResult([shop_row]),
             _ScalarResult([config_row]),
-            _ScalarResult([]),
             _ScalarResult([assign_row]),
+            _ScalarResult([]),
         ]
     )
     domain_module.load_shop_monthly_metrics = AsyncMock(

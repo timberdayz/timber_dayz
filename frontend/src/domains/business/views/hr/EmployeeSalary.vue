@@ -331,6 +331,8 @@
                 <span>工资单结果</span>
                 <div class="section-actions">
                   <el-tag :type="payrollStatusTagType">{{ payrollRecord?.status || 'draft' }}</el-tag>
+                  <el-tag v-if="payrollRecord?.status === 'draft'" type="info">提成预览，未锁定</el-tag>
+                  <el-tag v-else-if="payrollRecord" type="warning">成本与提成已锁定</el-tag>
                   <el-tag v-if="payrollRecord?.is_stale_against_latest_calc" type="warning">结果已过期</el-tag>
                   <el-button size="small" type="success" @click="confirmPayroll" :disabled="!payrollRecord || payrollRecord.status !== 'draft'">
                     确认工资单

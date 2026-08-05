@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from backend.models.database import AsyncSessionLocal
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
 
 
 def _to_float(value: Any) -> float:
@@ -1307,119 +1308,70 @@ class PostgresqlDashboardService:
     async def _load_operating_expenses_summary(
         self,
         period_month: date_cls,
+        *,
+        platform: str | None = None,
+        shop_id: str | None = None,
     ) -> float | None:
+        """Use the same persisted expense and projected-labor sources as expense management."""
         year_month = period_month.strftime("%Y-%m")
         async with AsyncSessionLocal() as session:
-            columns = await self._get_table_columns("a_class", "operating_costs")
-            deleted_filter = ' AND "删除时间" IS NULL' if "删除时间" in columns else ""
-            if {"year_month", "total_cost"}.issubset(columns):
-                result = await session.execute(
-                    text(
-                        f"""
-                        SELECT SUM(total_cost)
-                        FROM a_class.operating_costs
-                        WHERE year_month = :year_month
-                        {deleted_filter}
-                        """
-                    ),
-                    {"year_month": year_month},
-                )
-            elif {
-                "year_month",
-                "rent",
-                "marketing_fee",
-                "utilities",
-                "other_costs",
-                "ai_token_cost",
-                "labor_cost",
-            }.issubset(columns):
-                result = await session.execute(
-                    text(
-                        f"""
-                        SELECT SUM(rent + marketing_fee + utilities + ai_token_cost + labor_cost + other_costs)
-                        FROM a_class.operating_costs
-                        WHERE year_month = :year_month
-                        {deleted_filter}
-                        """
-                    ),
-                    {"year_month": year_month},
-                )
-            elif {"year_month", "rent", "marketing_fee", "utilities", "other_costs", "ai_token_cost"}.issubset(columns):
-                result = await session.execute(
-                    text(
-                        f"""
-                        SELECT SUM(rent + marketing_fee + utilities + ai_token_cost + other_costs)
-                        FROM a_class.operating_costs
-                        WHERE year_month = :year_month
-                        {deleted_filter}
-                        """
-                    ),
-                    {"year_month": year_month},
-                )
-            elif {"year_month", "rent", "marketing_fee", "utilities", "other_costs"}.issubset(columns):
-                result = await session.execute(
-                    text(
-                        f"""
-                        SELECT SUM(rent + marketing_fee + utilities + other_costs)
-                        FROM a_class.operating_costs
-                        WHERE year_month = :year_month
-                        {deleted_filter}
-                        """
-                    ),
-                    {"year_month": year_month},
-                )
-            elif {"年月", "成本合计"}.issubset(columns):
-                result = await session.execute(
-                    text(
-                        f"""
-                        SELECT COALESCE(SUM("成本合计"), 0)
-                        FROM a_class.operating_costs
-                        WHERE "年月" = :year_month
-                        {deleted_filter}
-                        """
-                    ),
-                    {"year_month": year_month},
-                )
-            elif {"年月", "租金", "营销费用", "水电费", "其他成本", "AI Token费用", "人力费用"}.issubset(columns):
-                result = await session.execute(
-                    text(
-                        f"""
-                        SELECT COALESCE(SUM("租金" + "营销费用" + "水电费" + "AI Token费用" + "人力费用" + "其他成本"), 0)
-                        FROM a_class.operating_costs
-                        WHERE "年月" = :year_month
-                        {deleted_filter}
-                        """
-                    ),
-                    {"year_month": year_month},
-                )
-            elif {"年月", "租金", "营销费用", "水电费", "其他成本", "AI Token费用"}.issubset(columns):
-                result = await session.execute(
-                    text(
-                        f"""
-                        SELECT COALESCE(SUM("租金" + "营销费用" + "水电费" + "AI Token费用" + "其他成本"), 0)
-                        FROM a_class.operating_costs
-                        WHERE "年月" = :year_month
-                        {deleted_filter}
-                        """
-                    ),
-                    {"year_month": year_month},
-                )
-            elif {"年月", "租金", "营销费用", "水电费", "其他成本"}.issubset(columns):
-                result = await session.execute(
-                    text(
-                        f"""
-                        SELECT COALESCE(SUM("租金" + "营销费用" + "水电费" + "其他成本"), 0)
-                        FROM a_class.operating_costs
-                        WHERE "年月" = :year_month
-                        {deleted_filter}
-                        """
-                    ),
-                    {"year_month": year_month},
-                )
-            else:
-                return None
-            value = result.scalar_one_or_none()
-            return _to_optional_float(value)
+            effective_month = await LaborCostPolicyService(session).get_effective_month()
+            use_projected_labor = bool(
+                effective_month is not None and year_month >= effective_month
+            )
+            params: dict[str, Any] = {"year_month": year_month}
+            filters = ['"年月" = :year_month', '"删除时间" IS NULL']
+            if platform:
+                filters.append('LOWER(COALESCE(platform_code, \'\')) = :platform_code')
+                params["platform_code"] = platform.lower()
+            if shop_id:
+                filters.append('"店铺ID" = :shop_id')
+                params["shop_id"] = shop_id
+
+            manual_result = await session.execute(
+                text(
+                    f"""
+                    SELECT COALESCE(SUM(
+                        CASE WHEN COALESCE("成本合计", 0) <> 0
+                            THEN "成本合计"
+                            ELSE COALESCE("租金", 0)
+                                + COALESCE("营销费用", 0)
+                                + COALESCE("水电费", 0)
+                                + COALESCE("AI Token费用", 0)
+                                + COALESCE("人力费用", 0)
+                                + COALESCE("其他成本", 0)
+                        END
+                        - CASE WHEN :use_projected_labor THEN COALESCE("人力费用", 0) ELSE 0 END
+                    ), 0)
+                    FROM a_class.operating_costs
+                    WHERE {' AND '.join(filters)}
+                    """
+                ),
+                {**params, "use_projected_labor": use_projected_labor},
+            )
+            manual_total = _to_optional_float(manual_result.scalar_one_or_none()) or 0.0
+            if not use_projected_labor:
+                return manual_total
+
+            labor_filters = ["period_month = :year_month"]
+            if platform:
+                labor_filters.append("LOWER(COALESCE(platform_code, '')) = :platform_code")
+            if shop_id:
+                labor_filters.append("shop_id = :shop_id")
+            if platform or shop_id:
+                labor_filters.append("allocation_scope = 'shop'")
+            labor_result = await session.execute(
+                text(
+                    f"""
+                    SELECT COALESCE(SUM(total_amount), 0)
+                    FROM finance.employee_labor_cost_allocations
+                    WHERE {' AND '.join(labor_filters)}
+                    """
+                ),
+                params,
+            )
+            projected_total = _to_optional_float(labor_result.scalar_one_or_none()) or 0.0
+            return round(manual_total + projected_total, 2)
 
     def _business_overview_kpi_period_key(self, granularity: str, period_key: date_cls) -> date_cls:
         if granularity == "daily":
@@ -2837,7 +2789,11 @@ class PostgresqlDashboardService:
             total["monthly_target"] = round(target_summary["target_amount"], 2)
             meta["target_source"] = "service_target_summary"
             meta["service_enriched_fields"].append("monthly_target")
-        loaded_expenses: float | None = None
+        loaded_expenses = await self._load_operating_expenses_summary(
+            period_month,
+            platform=platform,
+            shop_id=shop_id,
+        )
         if platform is None and shop_id is None:
             public_labor_rows = await self._fetch_rows(
                 """
@@ -2854,27 +2810,13 @@ class PostgresqlDashboardService:
                     public_labor_rows[0].get("company_public_labor_cost")
                 ) or 0.0
                 total["company_public_labor_cost"] = public_labor_cost
-                if total["estimated_expenses"] is not None:
-                    total["estimated_expenses"] += public_labor_cost
                 if total["total_labor_cost"] is not None:
                     total["total_labor_cost"] += public_labor_cost
                 meta["service_enriched_fields"].append("company_public_labor_cost")
-            loaded_expenses = await self._load_operating_expenses_summary(period_month)
-            if loaded_expenses is not None and total["estimated_expenses"] in (None, 0, 0.0):
-                total["estimated_expenses"] = round(
-                    loaded_expenses + total["company_public_labor_cost"], 2
-                )
-                meta["expenses_source"] = "company_month_fallback_sum"
-                meta["service_enriched_fields"].append("estimated_expenses")
-        elif total["estimated_expenses"] in (None, 0, 0.0):
-            total["estimated_expenses"] = None
-            meta["expenses_source"] = None
-            warning = (
-                "estimated_expenses_missing_for_platform: expenses fallback is disabled when platform_code is provided"
-                if platform
-                else "estimated_expenses_missing_for_shop: expenses fallback is disabled when shop_id is provided"
-            )
-            meta["warnings"].append(warning)
+        if loaded_expenses is not None:
+            total["estimated_expenses"] = loaded_expenses
+            meta["expenses_source"] = "expense_management_month_summary"
+            meta["service_enriched_fields"].append("estimated_expenses")
         if total["estimated_gross_profit"] is not None and total["estimated_expenses"] is not None:
             total["operating_result"] = round(total["estimated_gross_profit"] - total["estimated_expenses"], 2)
             meta["operating_result_source"] = "service_calculated_from_profit_and_expenses"

@@ -4,7 +4,7 @@ from __future__ import annotations
 HR - 薪资与目标管理
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 import inspect
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -576,7 +576,28 @@ async def confirm_payroll_record(
             return error_response(ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404)
         if record.status == "paid":
             return error_response(ErrorCode.PARAMETER_INVALID, "已发放工资单不可再次确认", status_code=409)
+        if record.status != "draft":
+            return error_response(ErrorCode.PARAMETER_INVALID, "仅草稿工资单可以确认", status_code=409)
+        allocations = (
+            await db.execute(
+                select(EmployeeLaborCostAllocation).where(
+                    EmployeeLaborCostAllocation.period_month == record.year_month,
+                    EmployeeLaborCostAllocation.employee_code == record.employee_code,
+                )
+            )
+        ).scalars().all()
+        if not allocations:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "请先刷新当月工资和人力成本分摊，再确认工资单",
+                status_code=409,
+            )
         record.status = "confirmed"
+        locked_at = datetime.now(timezone.utc)
+        for allocation in allocations:
+            allocation.source_payroll_status = "confirmed"
+            allocation.calculation_status = "confirmed"
+            allocation.pre_commission_locked_at = locked_at
         await db.commit()
         await db.refresh(record)
         return _payroll_success(record)

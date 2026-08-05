@@ -19,6 +19,10 @@ from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.profit_basis_service import ProfitBasisService
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
+from backend.services.payroll_period_lock_service import (
+    PayrollPeriodLockedError,
+    PayrollPeriodLockService,
+)
 from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
 
 logger = get_logger(__name__)
@@ -1101,6 +1105,10 @@ async def create_employee_shop_assignment(
 ):
     """新增归属"""
     try:
+        await PayrollPeriodLockService(db).assert_employee_month_mutable(
+            employee_code=body.employee_code,
+            year_month=body.year_month,
+        )
         emp_res = await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
         if not emp_res.scalar_one_or_none():
             return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
@@ -1165,6 +1173,8 @@ async def create_employee_shop_assignment(
         resp.employee_name = emp
         resp.shop_name = shop
         return {"success": True, "data": resp}
+    except PayrollPeriodLockedError as exc:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
         logger.error(f"新增归属失败: {e}", exc_info=True)
@@ -1183,6 +1193,10 @@ async def update_employee_shop_assignment(
         rec = result.scalar_one_or_none()
         if not rec:
             return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
+        await PayrollPeriodLockService(db).assert_employee_month_mutable(
+            employee_code=rec.employee_code,
+            year_month=rec.year_month,
+        )
         same_shop_rows = (
             await db.execute(
                 select(EmployeeShopAssignment).where(
@@ -1212,6 +1226,8 @@ async def update_employee_shop_assignment(
         resp.employee_name = emp
         resp.shop_name = shop
         return {"success": True, "data": resp}
+    except PayrollPeriodLockedError as exc:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
         logger.error(f"更新归属失败: {e}", exc_info=True)
@@ -1229,9 +1245,15 @@ async def delete_employee_shop_assignment(
         rec = result.scalar_one_or_none()
         if not rec:
             return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
+        await PayrollPeriodLockService(db).assert_employee_month_mutable(
+            employee_code=rec.employee_code,
+            year_month=rec.year_month,
+        )
         await db.delete(rec)
         await db.commit()
         return None
+    except PayrollPeriodLockedError as exc:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
         logger.error(f"删除归属失败: {e}", exc_info=True)
@@ -1248,7 +1270,10 @@ async def get_shop_commission_config(
     try:
         shop_query = (
             select(ShopAccount)
-            .where(ShopAccount.enabled == True)
+            .where(
+                ShopAccount.enabled == True,
+                ShopAccount.business_role == "operating_store",
+            )
             .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
@@ -1296,6 +1321,11 @@ async def put_shop_commission_config(
         )
         if not shop:
             return error_response(ErrorCode.DATA_NOT_FOUND, "该店铺尚未同步至系统，请先在账号管理中同步", status_code=400)
+        await PayrollPeriodLockService(db).assert_shop_month_mutable(
+            platform_code=pc,
+            shop_id=sid,
+            year_month=body.year_month,
+        )
         existing = await db.execute(
             select(ShopCommissionConfig).where(
                 ShopCommissionConfig.year_month == body.year_month,
@@ -1326,6 +1356,8 @@ async def put_shop_commission_config(
                 "allocatable_profit_rate": rate,
             },
         }
+    except PayrollPeriodLockedError as exc:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
         logger.error(f"保存店铺可分配利润率失败: {e}", exc_info=True)
@@ -1416,7 +1448,10 @@ async def get_shop_profit_statistics(
         # 1. 获取店铺列表（platform_accounts）
         shop_query = (
             select(ShopAccount)
-            .where(ShopAccount.enabled == True)
+            .where(
+                ShopAccount.enabled == True,
+                ShopAccount.business_role == "operating_store",
+            )
             .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
@@ -1441,8 +1476,6 @@ async def get_shop_profit_statistics(
             f"{(c.platform_code or '').lower()}|{str(c.shop_id or '').lower()}": float(c.allocatable_profit_rate or 0)
             for c in config_rows
         }
-        basis_by_shop = await _load_profit_basis_map(db, month, shop_list)
-
         # 4. 获取归属配置（用于计算主管/操作员利润）：仅取该月的配置
         assign_query = (
             select(EmployeeShopAssignment)
@@ -1450,6 +1483,27 @@ async def get_shop_profit_statistics(
             .where(EmployeeShopAssignment.year_month == month)
         )
         assign_rows = (await db.execute(assign_query)).scalars().all()
+
+        active_shop_keys = {
+            f"{shop['platform_code']}|{str(shop['shop_id']).lower()}"
+            for shop in shop_list
+        }
+        assigned_shop_keys = set()
+        for assignment in assign_rows:
+            platform_code = str(assignment.platform_code or "").lower()
+            shop_id = str(assignment.shop_id or "")
+            key = f"{platform_code}|{shop_id.lower()}"
+            assigned_shop_keys.add(key)
+            if key not in active_shop_keys:
+                shop_list.append(
+                    {
+                        "platform_code": platform_code,
+                        "shop_id": shop_id,
+                        "shop_name": shop_id,
+                    }
+                )
+                active_shop_keys.add(key)
+        basis_by_shop = await _load_profit_basis_map(db, month, shop_list)
 
         # 按店铺分组：supervisors 和 operators，各自 commission_ratio 列表
         assign_by_shop: Dict[str, Dict] = {}

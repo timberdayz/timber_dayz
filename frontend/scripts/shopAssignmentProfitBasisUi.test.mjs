@@ -21,3 +21,13 @@ test('ShopAssignment page uses net-profit wording for allocation and payout labe
   assert.equal(source.includes('主管提成'), true)
   assert.equal(source.includes('操作员提成'), true)
 })
+
+test('Employee salary page distinguishes draft previews from locked payrolls', () => {
+  const salarySource = fs.readFileSync(
+    path.resolve(__dirname, '../src/domains/business/views/hr/EmployeeSalary.vue'),
+    'utf8'
+  )
+
+  assert.equal(salarySource.includes('提成预览，未锁定'), true)
+  assert.equal(salarySource.includes('成本与提成已锁定'), true)
+})

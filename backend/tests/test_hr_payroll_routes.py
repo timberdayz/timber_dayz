@@ -280,15 +280,37 @@ def test_confirm_payroll_record_marks_draft_as_confirmed():
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
-    db.execute = AsyncMock(return_value=_ResultOne(record))
+    allocation = SimpleNamespace(
+        source_payroll_status="draft",
+        calculation_status="projected",
+        pre_commission_locked_at=None,
+    )
+    db.execute = AsyncMock(side_effect=[_ResultOne(record), _ResultRows([allocation])])
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
     resp = asyncio.run(module.confirm_payroll_record(1, db=db))
 
     assert record.status == "confirmed"
+    assert allocation.source_payroll_status == "confirmed"
+    assert allocation.calculation_status == "confirmed"
+    assert allocation.pre_commission_locked_at is not None
     assert db.commit.await_count == 1
     assert resp["success"] is True
+
+
+def test_confirm_payroll_record_requires_labor_cost_projection():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    record = SimpleNamespace(id=9, employee_code="EMP009", year_month="2025-01", status="draft")
+    db.execute = AsyncMock(side_effect=[_ResultOne(record), _ResultRows([])])
+    db.commit = AsyncMock()
+
+    resp = asyncio.run(module.confirm_payroll_record(9, db=db))
+
+    assert resp.status_code == 409
+    assert record.status == "draft"
+    assert db.commit.await_count == 0
 
 
 def test_update_payroll_record_rejects_confirmed_record():
