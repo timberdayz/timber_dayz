@@ -129,6 +129,14 @@ def test_fixed_service_routes_delegate_without_accepting_commands(tmp_path: Path
     ).status_code == 404
 
 
+def test_log_api_is_removed_when_terminal_is_the_diagnostic_surface(tmp_path: Path):
+    client = _client(tmp_path, FakeSupervisor())
+
+    assert client.get(
+        "/api/services/local-collection/log", headers=_headers()
+    ).status_code == 404
+
+
 def test_ownership_error_is_sanitized_and_returned_as_conflict(tmp_path: Path):
     supervisor = FakeSupervisor()
     supervisor.fail_stop = True
@@ -141,23 +149,6 @@ def test_ownership_error_is_sanitized_and_returned_as_conflict(tmp_path: Path):
     assert response.status_code == 409
     assert response.json() == {"detail": "该进程不受本控制台管理，操作已拒绝"}
     assert "do-not-return" not in response.text
-
-
-def test_log_route_redacts_credentials_and_tokens(tmp_path: Path):
-    supervisor = FakeSupervisor()
-    client = _client(tmp_path, supervisor)
-
-    response = client.get(
-        "/api/services/local-collection/log", headers=_headers()
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["lines"][-1] == "normal status line"
-    assert "abc123" not in response.text
-    assert "hunter2" not in response.text
-    assert "db-secret" not in response.text
-    assert response.text.count("<redacted>") >= 3
 
 
 class FakeControllerProcess:
@@ -258,7 +249,10 @@ def test_root_launcher_starts_the_local_console_from_the_repository_root():
 
     assert 'cd /d "%~dp0"' in launcher
     assert "scripts\\local_console.py" in launcher
-    assert "pythonw.exe" in launcher
+    assert "title Xihong ERP Local Console" in launcher
+    assert "python.exe -u" in launcher
+    assert "pythonw.exe" not in launcher
+    assert "start " not in launcher.lower()
     assert "start_collection_formal.ps1" not in launcher
     assert "pwcli_inspection_panel.py" not in launcher
 
@@ -295,6 +289,10 @@ def test_static_console_has_the_approved_content_and_token_handling():
     assert "X-Local-Console-Token" in script
     assert ".textContent" in script
     assert ".innerHTML" not in script
+    assert 'data-action="log"' not in html
+    assert "logDialog" not in script
+    assert "查看日志" not in combined
+    assert "请查看本地控制台窗口" in script
     assert "@media" in styles
     assert "border-radius: 8px" in styles
 

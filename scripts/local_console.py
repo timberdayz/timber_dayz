@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import secrets
 import socket
 import sys
@@ -36,30 +35,6 @@ INDEX_PATH = STATIC_DIR / "index.html"
 PORT_RANGE = range(8740, 8765)
 STATE_FILENAME = "local-console-state.json"
 LOCK_FILENAME = "local-console.lock"
-
-CONNECTION_SECRET_PATTERN = re.compile(
-    r"(?P<prefix>[a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@]+(?P<suffix>@)",
-    re.IGNORECASE,
-)
-ASSIGNMENT_SECRET_PATTERN = re.compile(
-    r"(?P<name>password|secret|api[_-]?key|access[_-]?token|token)"
-    r"(?P<separator>\s*[:=]\s*)(?P<value>[^\s,;&]+)",
-    re.IGNORECASE,
-)
-QUERY_SECRET_PATTERN = re.compile(
-    r"(?P<prefix>[?&](?:access_token|token)=)[^&\s]+", re.IGNORECASE
-)
-
-
-def redact_log_line(line: str) -> str:
-    redacted = CONNECTION_SECRET_PATTERN.sub(
-        r"\g<prefix><redacted>\g<suffix>", line
-    )
-    redacted = QUERY_SECRET_PATTERN.sub(r"\g<prefix><redacted>", redacted)
-    return ASSIGNMENT_SECRET_PATTERN.sub(
-        r"\g<name>\g<separator><redacted>", redacted
-    )
-
 
 def build_app(
     *,
@@ -112,15 +87,8 @@ def build_app(
         except Exception:
             raise HTTPException(
                 status_code=500,
-                detail="操作失败，请查看本地控制台日志",
+                detail="操作失败，请查看本地控制台窗口",
             ) from None
-
-    def safe_log(service_id: str) -> dict[str, list[str]]:
-        return {
-            "lines": [
-                redact_log_line(line) for line in supervisor.read_log(service_id)
-            ]
-        }
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -165,13 +133,6 @@ def build_app(
     def stop_local_collection() -> Any:
         return run_action(lambda: supervisor.stop(LOCAL_COLLECTION))
 
-    @app.get(
-        "/api/services/local-collection/log",
-        dependencies=[Depends(require_token)],
-    )
-    def local_collection_log() -> dict[str, list[str]]:
-        return safe_log(LOCAL_COLLECTION)
-
     @app.post(
         "/api/services/inspection-panel/start",
         dependencies=[Depends(require_token)],
@@ -192,13 +153,6 @@ def build_app(
     )
     def stop_inspection_panel() -> Any:
         return run_action(lambda: supervisor.stop(INSPECTION_PANEL))
-
-    @app.get(
-        "/api/services/inspection-panel/log",
-        dependencies=[Depends(require_token)],
-    )
-    def inspection_panel_log() -> dict[str, list[str]]:
-        return safe_log(INSPECTION_PANEL)
 
     @app.post("/api/services/stop-all", dependencies=[Depends(require_token)])
     def stop_all() -> Any:
@@ -377,6 +331,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo_root=PROJECT_ROOT,
         state_path=state_path,
         log_dir=PROJECT_ROOT / "logs" / "local-console",
+        output_sink=lambda line: print(line, flush=True),
     )
     write_controller_state(
         state_path,

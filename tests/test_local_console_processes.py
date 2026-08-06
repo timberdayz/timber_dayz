@@ -12,6 +12,7 @@ from scripts.local_console_processes import (
     LocalProcessSupervisor,
     ProcessOwnershipError,
     build_service_specs,
+    decode_output_line,
 )
 
 
@@ -115,20 +116,56 @@ def test_service_specs_use_only_the_two_approved_commands(tmp_path: Path):
     specs = build_service_specs(tmp_path, python_executable="python-test")
 
     assert set(specs) == {LOCAL_COLLECTION, INSPECTION_PANEL}
-    assert specs[LOCAL_COLLECTION].command == (
+    assert specs[LOCAL_COLLECTION].command[:5] == (
         "powershell",
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
-        "-File",
-        str(tmp_path / "scripts" / "start_collection_formal.ps1"),
+        "-Command",
     )
+    assert "OutputEncoding" in specs[LOCAL_COLLECTION].command[5]
+    assert "start_collection_formal.ps1" in specs[LOCAL_COLLECTION].command[5]
     assert specs[INSPECTION_PANEL].command == (
         "python-test",
         "-u",
         str(tmp_path / "scripts" / "pwcli_inspection_panel.py"),
         "--no-browser",
     )
+
+
+def test_process_output_decodes_utf8_and_windows_fallback_bytes():
+    assert decode_output_line("迁移完成".encode("utf-8")) == "迁移完成"
+    assert decode_output_line("迁移完成".encode("gb18030")) == "迁移完成"
+
+
+def test_terminal_and_log_output_redact_sensitive_values(tmp_path: Path, runtime: FakeRuntime):
+    terminal_lines: list[str] = []
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda _service: False,
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+        output_sink=terminal_lines.append,
+    )
+    process = FakeProcess(5000, ["powershell"])
+    log_path = tmp_path / "logs" / "local-collection.log"
+    log_path.parent.mkdir()
+
+    supervisor._consume_output(
+        LOCAL_COLLECTION,
+        process,
+        io.BytesIO("迁移完成 token=abc123".encode("gb18030")),
+        log_path,
+    )
+
+    text = log_path.read_text(encoding="utf-8") + "\n".join(terminal_lines)
+    assert "迁移完成" in text
+    assert "abc123" not in text
+    assert "token=<redacted>" in text
 
 
 def test_start_is_idempotent_for_a_managed_process(supervisor: LocalProcessSupervisor, runtime: FakeRuntime):

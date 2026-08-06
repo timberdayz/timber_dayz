@@ -11,10 +11,13 @@ repository-root launcher:
 local_console.cmd
 ```
 
-It opens the loopback-only browser console for the formal local collection
-system and PWCLI inspection panel. Closing the browser tab does not stop either
-managed process; double-click the launcher again to reopen the existing console.
-Runtime logs are written under `logs/local-console/`.
+It opens a visible terminal and the loopback-only browser console for the formal
+local collection system and PWCLI inspection panel. Keep the terminal open to
+see real-time startup and diagnostic output. Closing the browser tab does not
+stop either managed process; double-click the launcher again to reopen the
+existing console. Closing the terminal stops only the local-console controller,
+not the managed collection or inspection processes. Runtime logs are written
+under `logs/local-console/`.
 
 Default local startup:
 

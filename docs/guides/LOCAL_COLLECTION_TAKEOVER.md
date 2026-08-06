@@ -45,7 +45,11 @@ Playwright browser, and SSH tunnel.
   terminated by the console.
 - Closing the control-console browser tab changes no runtime state. Double-click
   `local_console.cmd` to reopen the same controller.
-- Controller and child-process logs are under `logs/local-console/`.
+- Keep the visible local-console terminal open to view real-time output. Closing
+  that terminal ends only the console controller; it does not stop the two
+  managed business processes.
+- Browser log dialogs are intentionally not provided. Controller and
+  child-process logs are under `logs/local-console/`.
 
 ## Files
 

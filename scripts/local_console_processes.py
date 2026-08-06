@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import locale
 import os
 import re
 import subprocess
@@ -26,6 +27,40 @@ READY_URLS = (
     "http://127.0.0.1:18001/healthz/ready",
     "http://127.0.0.1:18011/healthz/ready",
 )
+
+CONNECTION_SECRET_PATTERN = re.compile(
+    r"(?P<prefix>[a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@]+(?P<suffix>@)",
+    re.IGNORECASE,
+)
+ASSIGNMENT_SECRET_PATTERN = re.compile(
+    r"(?P<name>password|secret|api[_-]?key|access[_-]?token|token)"
+    r"(?P<separator>\s*[:=]\s*)(?P<value>[^\s,;&]+)",
+    re.IGNORECASE,
+)
+QUERY_SECRET_PATTERN = re.compile(
+    r"(?P<prefix>[?&](?:access_token|token)=)[^&\s]+", re.IGNORECASE
+)
+
+
+def decode_output_line(value: bytes | str) -> str:
+    if isinstance(value, str):
+        return value
+    for encoding in ("utf-8", locale.getpreferredencoding(False), "gb18030"):
+        try:
+            return value.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return value.decode("utf-8", errors="replace")
+
+
+def redact_output_line(line: str) -> str:
+    redacted = CONNECTION_SECRET_PATTERN.sub(
+        r"\g<prefix><redacted>\g<suffix>", line
+    )
+    redacted = QUERY_SECRET_PATTERN.sub(r"\g<prefix><redacted>", redacted)
+    return ASSIGNMENT_SECRET_PATTERN.sub(
+        r"\g<name>\g<separator><redacted>", redacted
+    )
 
 
 class UnknownServiceError(ValueError):
@@ -62,6 +97,7 @@ def build_service_specs(
 ) -> dict[str, ServiceSpec]:
     python_executable = python_executable or sys.executable
     collection_script = repo_root / "scripts" / "start_collection_formal.ps1"
+    collection_script_text = str(collection_script).replace("'", "''")
     inspection_script = repo_root / "scripts" / "pwcli_inspection_panel.py"
     return {
         LOCAL_COLLECTION: ServiceSpec(
@@ -73,8 +109,12 @@ def build_service_specs(
                 "-NoProfile",
                 "-ExecutionPolicy",
                 "Bypass",
-                "-File",
-                str(collection_script),
+                "-Command",
+                (
+                    "$OutputEncoding=[Console]::OutputEncoding="
+                    "[System.Text.UTF8Encoding]::new($false); "
+                    f"& '{collection_script_text}'"
+                ),
             ),
             command_markers=("start_collection_formal.ps1",),
             stop_process_tree=True,
@@ -126,6 +166,7 @@ class LocalProcessSupervisor:
         url_opener: Callable[[str], Any] = webbrowser.open,
         time_provider: Callable[[], float] = time.time,
         startup_timeout_seconds: float = 240,
+        output_sink: Callable[[str], None] | None = None,
     ) -> None:
         self.repo_root = repo_root.resolve()
         self.state_path = state_path
@@ -139,6 +180,7 @@ class LocalProcessSupervisor:
         self._url_opener = url_opener
         self._time_provider = time_provider
         self._startup_timeout_seconds = startup_timeout_seconds
+        self._output_sink = output_sink or (lambda _line: None)
         self._records: dict[str, ManagedRecord] = {}
         self._handles: dict[str, Any] = {}
         self._lock = threading.RLock()
@@ -353,10 +395,7 @@ class LocalProcessSupervisor:
                 env=environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
+                bufsize=0,
             )
             resolved = self._process_resolver(process.pid)
             record = ManagedRecord(
@@ -382,12 +421,14 @@ class LocalProcessSupervisor:
         self,
         service_id: str,
         process: Any,
-        output: Iterable[str],
+        output: Iterable[bytes | str],
         log_path: Path,
     ) -> None:
         with log_path.open("a", encoding="utf-8", errors="replace") as log_file:
-            for line in output:
-                log_file.write(line)
+            for raw_line in output:
+                line = decode_output_line(raw_line)
+                safe_line = redact_output_line(line)
+                log_file.write(safe_line)
                 log_file.flush()
                 launch_url: str | None = None
                 if service_id == INSPECTION_PANEL and line.startswith(
@@ -406,6 +447,9 @@ class LocalProcessSupervisor:
                             if service_id == INSPECTION_PANEL:
                                 record.state = "running"
                             self._save_state()
+                self._output_sink(
+                    f"[{self._spec(service_id).label}] {safe_line.rstrip()}"
+                )
 
         exit_code = process.poll()
         if exit_code not in (None, 0):

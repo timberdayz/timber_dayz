@@ -37,7 +37,6 @@
           <button class="button primary" data-action="start">启动</button>
           <button class="button secondary" data-action="open" disabled>打开系统</button>
           <button class="button danger" data-action="stop" disabled>停止</button>
-          <button class="log-button" data-action="log" hidden>查看日志</button>
         </div>
       </article>
 
@@ -55,7 +54,6 @@
           <button class="button primary" data-action="start">启动面板</button>
           <button class="button secondary" data-action="open" disabled>打开面板</button>
           <button class="button danger" data-action="stop" disabled>停止</button>
-          <button class="log-button" data-action="log" hidden>查看日志</button>
         </div>
       </article>
     </section>
@@ -72,15 +70,5 @@
     </footer>
   </main>
 
-  <dialog id="logDialog" class="log-dialog">
-    <div class="dialog-header">
-      <div>
-        <p class="eyebrow">LOCAL LOG</p>
-        <h2 id="logTitle">运行日志</h2>
-      </div>
-      <button id="closeLogButton" class="icon-button" title="关闭日志" aria-label="关闭日志">×</button>
-    </div>
-    <pre id="logContent" tabindex="0"></pre>
-  </dialog>
 </body>
 </html>

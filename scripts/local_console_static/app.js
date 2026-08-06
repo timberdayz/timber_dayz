@@ -22,7 +22,7 @@ const DEFAULT_MESSAGES = {
   starting: '正在执行启动检查',
   running: '服务运行正常',
   stopping: '正在停止受控进程',
-  failed: '启动失败，请查看日志',
+  failed: '启动失败，请查看本地控制台窗口',
   'external-running': '检测到控制台外部启动的实例',
 };
 
@@ -31,13 +31,11 @@ const ROUTES = {
     start: '/api/services/local-collection/start',
     open: '/api/services/local-collection/open',
     stop: '/api/services/local-collection/stop',
-    log: '/api/services/local-collection/log',
   },
   'inspection-panel': {
     start: '/api/services/inspection-panel/start',
     open: '/api/services/inspection-panel/open',
     stop: '/api/services/inspection-panel/stop',
-    log: '/api/services/inspection-panel/log',
   },
 };
 
@@ -47,9 +45,6 @@ const globalNotice = document.querySelector('#globalNotice');
 const updatedAt = document.querySelector('#updatedAt');
 const refreshButton = document.querySelector('#refreshButton');
 const stopAllButton = document.querySelector('#stopAllButton');
-const logDialog = document.querySelector('#logDialog');
-const logTitle = document.querySelector('#logTitle');
-const logContent = document.querySelector('#logContent');
 
 async function api(path, options = {}) {
   const response = await window.fetch(path, {
@@ -87,7 +82,6 @@ function renderService(service) {
   const startButton = card.querySelector('[data-action="start"]');
   const openButton = card.querySelector('[data-action="open"]');
   const stopButton = card.querySelector('[data-action="stop"]');
-  const logButton = card.querySelector('[data-action="log"]');
 
   stateBadge.textContent = STATE_LABELS[state] || state;
   stateBadge.className = `state-badge ${state}`;
@@ -97,7 +91,6 @@ function renderService(service) {
   startButton.disabled = !['stopped', 'failed'].includes(state);
   openButton.disabled = state !== 'running' || !service.launch_url;
   stopButton.disabled = !service.managed || !['starting', 'running'].includes(state);
-  logButton.hidden = !service.log_available && state !== 'failed';
 }
 
 async function refreshStatus() {
@@ -132,30 +125,12 @@ async function runServiceAction(serviceId, action, button) {
   }
 }
 
-async function showLog(serviceId) {
-  const route = ROUTES[serviceId] && ROUTES[serviceId].log;
-  if (!route) return;
-  const card = document.querySelector(`[data-service="${serviceId}"]`);
-  try {
-    const payload = await api(route);
-    logTitle.textContent = `${card.querySelector('h2').textContent}运行日志`;
-    logContent.textContent = payload.lines.length ? payload.lines.join('\n') : '暂无日志';
-    logDialog.showModal();
-  } catch (error) {
-    showNotice(error.message);
-  }
-}
-
 document.querySelectorAll('.service-card').forEach((card) => {
   const serviceId = card.dataset.service;
   card.querySelectorAll('[data-action]').forEach((button) => {
     button.addEventListener('click', () => {
       const action = button.dataset.action;
-      if (action === 'log') {
-        showLog(serviceId);
-      } else {
-        runServiceAction(serviceId, action, button);
-      }
+      runServiceAction(serviceId, action, button);
     });
   });
 });
@@ -172,11 +147,6 @@ stopAllButton.addEventListener('click', async () => {
   } finally {
     stopAllButton.disabled = false;
   }
-});
-
-document.querySelector('#closeLogButton').addEventListener('click', () => logDialog.close());
-logDialog.addEventListener('click', (event) => {
-  if (event.target === logDialog) logDialog.close();
 });
 
 refreshStatus();
