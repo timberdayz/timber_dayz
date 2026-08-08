@@ -1439,6 +1439,10 @@ class SalesTarget(Base):
     penalty_max = Column(Float, nullable=True, comment="最大罚分")
     manual_score_enabled = Column(Boolean, nullable=False, default=False, comment="是否允许人工打分")
     manual_score_value = Column(Float, nullable=True, comment="人工打分值")
+    is_enabled = Column(Boolean, nullable=False, default=True, comment="运营指标是否参与当月计算")
+    metric_catalog_version = Column(Integer, nullable=True, comment="运营指标目录版本快照")
+    performance_config_id = Column(BigInteger, nullable=True, comment="保存时生效的绩效配置ID")
+    performance_config_updated_at = Column(DateTime(timezone=True), nullable=True, comment="保存时绩效配置版本")
     
     # 状态
     status = Column(String(32), nullable=False, default="active", comment="状态:active/completed/cancelled")
@@ -1523,6 +1527,38 @@ class TargetBreakdown(Base):
         Index("ix_target_breakdown_shop", "platform_code", "shop_id"),
         Index("ix_target_breakdown_period", "period_start", "period_end"),
         # A类数据表,放在 a_class schema 中
+        {"schema": "a_class"},
+    )
+
+
+class OperationMetricCatalog(Base):
+    """Versioned backend-owned catalog for operation performance metrics."""
+
+    __tablename__ = "operation_metric_catalog"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    catalog_version = Column(Integer, nullable=False, default=1)
+    metric_code = Column(String(64), nullable=False)
+    metric_name = Column(String(128), nullable=False)
+    metric_direction = Column(String(32), nullable=False)
+    default_target_value = Column(Float, nullable=True)
+    default_max_score = Column(Float, nullable=False, default=0.0)
+    default_penalty_enabled = Column(Boolean, nullable=False, default=False)
+    default_penalty_threshold = Column(Float, nullable=True)
+    default_penalty_per_unit = Column(Float, nullable=True)
+    default_penalty_max = Column(Float, nullable=True)
+    manual_score_enabled = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("catalog_version", "metric_code", name="uq_operation_metric_catalog_version_code"),
+        CheckConstraint(
+            "metric_direction IN ('higher_better', 'lower_better', 'manual_score')",
+            name="chk_operation_metric_catalog_direction",
+        ),
+        Index("ix_operation_metric_catalog_active", "is_active", "catalog_version"),
         {"schema": "a_class"},
     )
 
@@ -2471,7 +2507,7 @@ class EmployeePerformanceInput(Base):
     metric_name = Column(String(128), nullable=True)
     metric_direction = Column(String(32), nullable=False)
     target_value = Column(Float, nullable=False, default=0.0)
-    achieved_value = Column(Float, nullable=False, default=0.0)
+    achieved_value = Column(Float, nullable=True)
     max_score = Column(Float, nullable=False, default=0.0)
     manual_score_enabled = Column(Boolean, nullable=False, default=False)
     manual_score_value = Column(Float, nullable=True)
@@ -2843,7 +2879,9 @@ class EmployeePerformance(Base):
     year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
     actual_sales = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"实际销售额"
     achievement_rate = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"达成率"
-    performance_score = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"绩效得分"
+    performance_score = Column(Float, nullable=True)  # 迁移时将重命名为"绩效得分"
+    calculation_status = Column(String(32), nullable=False, default="historical_unknown")
+    performance_source_type = Column(String(32), nullable=False, default="historical")
     calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"计算时间"
     
     __table_args__ = (

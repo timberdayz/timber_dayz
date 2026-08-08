@@ -24,6 +24,7 @@ from modules.core.db import (
     PerformanceScore,
     ShopProfitBasis,
 )
+from backend.services.performance_readiness_service import PerformanceReadinessService
 
 
 class MonthlyProfitSettlementNotFoundError(LookupError):
@@ -555,6 +556,7 @@ class MonthlyProfitSettlementService:
         adjustment_amount: float = 0.0,
         adjustment_reason: str | None = None,
     ) -> dict[str, Any]:
+        await PerformanceReadinessService(self.db).assert_month_performance_ready(period_month)
         net_profit_amount = await self._load_net_profit_amount(period_month)
         personnel_payload = await self._load_personnel_payload(period_month)
         follow_payload = await self._load_follow_payload(period_month)
@@ -751,6 +753,9 @@ class MonthlyProfitSettlementService:
             raise MonthlyProfitSettlementNotFoundError("settlement not found")
         if record.status == "approved":
             raise MonthlyProfitSettlementConflictError("settlement already approved")
+        await PerformanceReadinessService(self.db).assert_month_performance_ready(
+            str(getattr(record, "period_month", ""))
+        )
         if (
             abs(self._to_float(getattr(record, "difference_amount", 0.0))) > self.APPROVAL_DIFFERENCE_AMOUNT_THRESHOLD
             or abs(self._to_float(getattr(record, "difference_ratio", 0.0))) > self.APPROVAL_DIFFERENCE_RATIO_THRESHOLD

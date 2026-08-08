@@ -405,7 +405,7 @@ const routes = [
   {
     path: '/target-management/operation',
     name: 'TargetManagementOperation',
-    component: () => import('@/domains/business/views/target/TargetOperationManagement.vue'),
+    component: () => import('@/domains/business/views/target/TargetOperationWorkbench.vue'),
     meta: {
       title: '运营目标管理',
       icon: 'Aim',

@@ -5,7 +5,7 @@
 from datetime import date, datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TargetCreateRequest(BaseModel):
@@ -212,3 +212,53 @@ class ShopTargetWorkbenchApplyResponse(BaseModel):
     target_id: int
     synced: int = 0
     errors: List[str] = Field(default_factory=list)
+
+
+class OperationWorkbenchMetricInput(BaseModel):
+    metric_code: str
+    is_enabled: bool = True
+    target_value: Optional[float] = None
+    achieved_value: Optional[float] = None
+    max_score: float = Field(0.0, ge=0)
+    penalty_enabled: bool = False
+    penalty_threshold: Optional[float] = None
+    penalty_per_unit: Optional[float] = None
+    penalty_max: Optional[float] = None
+    manual_score_value: Optional[float] = None
+
+
+class OperationWorkbenchShopOverrideInput(BaseModel):
+    metric_code: str
+    platform_code: str
+    shop_id: str
+    target_value: Optional[float] = None
+    achieved_value: Optional[float] = None
+    manual_score_value: Optional[float] = None
+
+
+class OperationWorkbenchApplyRequest(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    catalog_version: int = Field(..., ge=1)
+    performance_config_id: Optional[int] = None
+    expected_performance_config_updated_at: Optional[datetime] = None
+    expected_updated_at: Optional[datetime] = None
+    metrics: List[OperationWorkbenchMetricInput] = Field(default_factory=list)
+    shop_overrides: List[OperationWorkbenchShopOverrideInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_operation_keys(self):
+        metric_codes = [item.metric_code.strip() for item in self.metrics]
+        if len(metric_codes) != len(set(metric_codes)):
+            raise ValueError("运营指标不能重复")
+
+        override_keys = [
+            (
+                item.metric_code.strip(),
+                item.platform_code.strip().lower(),
+                item.shop_id.strip(),
+            )
+            for item in self.shop_overrides
+        ]
+        if len(override_keys) != len(set(override_keys)):
+            raise ValueError("店铺覆盖不能重复")
+        return self
