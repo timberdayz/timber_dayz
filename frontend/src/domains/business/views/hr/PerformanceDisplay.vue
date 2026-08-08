@@ -15,21 +15,26 @@
         placeholder="选择月份"
         size="default"
         style="width: 180px;"
-        @change="loadPerformanceList"
+        @change="handlePeriodChange"
       />
       <el-radio-group v-if="showGroupToggle" v-model="filters.groupBy" size="default" @change="loadPerformanceList">
         <el-radio-button value="shop">按店铺</el-radio-button>
         <el-radio-button value="person">按人员</el-radio-button>
       </el-radio-group>
-      <el-button :icon="Refresh" @click="loadPerformanceList">刷新</el-button>
+      <el-button :icon="Refresh" @click="handleRefreshAll">刷新</el-button>
       <el-button
         v-if="hasPermission('performance:config')"
         type="warning"
         :loading="calculating"
+        :disabled="!periodLockStatus.can_recalculate"
+        :title="periodLockStatus.reason"
         @click="handleRecalculate"
       >
         重新计算
       </el-button>
+      <el-tag :type="periodLockStatus.can_recalculate ? 'success' : 'danger'" effect="plain">
+        {{ periodLockLabel }}
+      </el-tag>
       <el-button
         v-if="taskContext.taskId"
         type="success"
@@ -357,6 +362,14 @@ const performanceList = reactive({
 })
 const loadError = ref(false)
 const calculating = ref(false)
+const periodLockStatus = reactive({
+  period: '',
+  is_locked: false,
+  can_recalculate: false,
+  locked_record_count: 0,
+  locked_statuses: [],
+  reason: '正在检查工资单锁定状态。'
+})
 const detailVisible = ref(false)
 const poolFilter = ref('all')
 const alertFilter = ref('all')
@@ -381,6 +394,18 @@ const filters = reactive({
   platform: '',
   shopId: null,
   groupBy: resolveGroupBy()
+})
+
+const selectedPeriod = () => (
+  typeof filters.period === 'string'
+    ? filters.period
+    : (filters.period ? `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : '')
+)
+
+const periodLockLabel = computed(() => {
+  if (periodLockStatus.can_recalculate) return '预览，可重算'
+  if (!periodLockStatus.is_locked) return '状态待确认'
+  return periodLockStatus.locked_statuses.includes('paid') ? '已支付，已锁定' : '已确认，已锁定'
 })
 
 const taskContext = reactive({
@@ -598,6 +623,51 @@ function performanceAlertText(row) {
   return '—'
 }
 
+const loadPeriodLockStatus = async () => {
+  const period = selectedPeriod()
+  if (!period) {
+    Object.assign(periodLockStatus, {
+      period: '',
+      is_locked: false,
+      can_recalculate: false,
+      locked_record_count: 0,
+      locked_statuses: [],
+      reason: '请选择考核月份后再重新计算。'
+    })
+    return
+  }
+
+  Object.assign(periodLockStatus, {
+    period,
+    is_locked: false,
+    can_recalculate: false,
+    locked_record_count: 0,
+    locked_statuses: [],
+    reason: '正在检查工资单锁定状态。'
+  })
+  try {
+    Object.assign(periodLockStatus, await api.getPerformancePeriodStatus(period))
+  } catch (_error) {
+    Object.assign(periodLockStatus, {
+      period,
+      is_locked: false,
+      can_recalculate: false,
+      locked_record_count: 0,
+      locked_statuses: [],
+      reason: '无法确认工资单锁定状态，请刷新后重试。'
+    })
+  }
+}
+
+const handleRefreshAll = async () => {
+  await loadPeriodLockStatus()
+  await loadPerformanceList()
+}
+
+const handlePeriodChange = async () => {
+  await handleRefreshAll()
+}
+
 const loadPerformanceList = async () => {
   performanceList.loading = true
   loadError.value = false
@@ -661,6 +731,10 @@ const handleRecalculate = async () => {
     ElMessage.warning('请选择考核月份')
     return
   }
+  if (!periodLockStatus.can_recalculate) {
+    ElMessage.warning(periodLockStatus.reason)
+    return
+  }
   calculating.value = true
   try {
     const result = await api.calculatePerformanceScores(period)
@@ -679,13 +753,24 @@ const handleRecalculate = async () => {
         confirmButtonText: '知道了'
       })
     }
-    await loadPerformanceList()
+    await handleRefreshAll()
   } catch (error) {
-    const code = error?.response?.data?.data?.error_code
+    const errorData = error?.response?.data?.data || {}
+    const code = error?.error_code || errorData.error_code
     if (code === 'PERF_CALC_NOT_READY') {
       ElMessage.warning('绩效计算能力未就绪，请联系管理员检查 PostgreSQL 数据链路与目标分解配置')
     } else if (code === 'PERF_CONFIG_NOT_FOUND') {
       ElMessage.warning('当前考核周期无可用绩效配置，请联系管理员完成配置后重试')
+    } else if (code === 'PAYROLL_PERIOD_LOCKED') {
+      Object.assign(periodLockStatus, {
+        period,
+        is_locked: true,
+        can_recalculate: false,
+        locked_record_count: errorData.locked_record_count || 0,
+        locked_statuses: errorData.locked_statuses || [],
+        reason: error?.message || '该月工资单已锁定，不能重新计算绩效。'
+      })
+      ElMessage.warning(periodLockStatus.reason)
     } else {
       handleApiError(error, { showMessage: true, logError: true })
     }
@@ -714,14 +799,14 @@ const handleViewDetail = async (row) => {
 
 watch(() => route.path, () => {
   filters.groupBy = resolveGroupBy()
-  loadPerformanceList()
+  handleRefreshAll()
 })
 
 onMounted(() => {
   initTaskContext()
   loadWeightConfig()
   loadShopDisplayLookup().finally(() => {
-    loadPerformanceList()
+    handleRefreshAll()
   })
 })
 </script>

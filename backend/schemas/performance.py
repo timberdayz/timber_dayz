@@ -89,3 +89,12 @@ class PerformanceScoreResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PerformancePeriodStatusResponse(BaseModel):
+    period: str
+    is_locked: bool
+    can_recalculate: bool
+    locked_record_count: int
+    locked_statuses: list[str]
+    reason: str
