@@ -44,6 +44,9 @@ class _MockResult:
     def scalar_one_or_none(self):
         return self._scalar_value
 
+    def scalar_one(self):
+        return self._scalar_value
+
 
 def test_calculate_month_no_assignments():
     db = AsyncMock()
@@ -425,7 +428,8 @@ def test_calculate_month_updates_existing_records_with_english_orm_path():
     assert result["commission_upserts"] == 1
     assert result["performance_upserts"] == 1
     assert existing_commission.commission_amount == pytest.approx(180.0)
-    assert existing_performance.performance_score == pytest.approx(0.0)
+    assert existing_performance.performance_score is None
+    assert existing_performance.calculation_status == "pending_store_performance"
     assert db.rollback.await_count == 0
     assert all("update c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
     assert all("insert into c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
@@ -811,7 +815,8 @@ def test_calculate_month_employee_performance_does_not_fallback_to_achievement_r
     assert result["employee_count"] == 1
     perf = next(x for x in added if isinstance(x, EmployeePerformance))
     assert perf.achievement_rate == pytest.approx(0.6)
-    assert perf.performance_score == pytest.approx(0.0)
+    assert perf.performance_score is None
+    assert perf.calculation_status == "pending_store_performance"
 
 
 def test_calculate_month_employee_performance_applies_attendance_penalties():

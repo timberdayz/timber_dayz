@@ -2043,6 +2043,16 @@ export default {
     return await this._post(`/targets/shop-workbench/copy-prev-month?year_month=${encodeURIComponent(yearMonth)}`)
   },
 
+  async getOperationPerformanceWorkbench(yearMonth) {
+    return await this._get('/targets/operation-workbench', { params: { year_month: yearMonth } })
+  },
+  async applyOperationPerformanceWorkbench(data) {
+    return await this._put('/targets/operation-workbench', data)
+  },
+  async copyPrevMonthOperationPerformanceWorkbench(yearMonth) {
+    return await this._post(`/targets/operation-workbench/copy-prev-month?year_month=${encodeURIComponent(yearMonth)}`)
+  },
+
   // === 绩效查询（只读） ===
   async getHrPerformance(params = {}) {
     return await this._get('/hr/performance', { params })

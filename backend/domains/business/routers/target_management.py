@@ -57,8 +57,14 @@ from backend.schemas.target import (
     TargetResponse,
     BreakdownResponse,
     ShopTargetWorkbenchApplyRequest,
+    OperationWorkbenchApplyRequest,
 )
 from backend.services.shop_target_workbench_service import ShopTargetWorkbenchService
+from backend.services.operation_performance_workbench_service import (
+    OperationPerformanceWorkbenchConflictError,
+    OperationPerformanceWorkbenchService,
+)
+from backend.services.payroll_period_lock_service import PayrollPeriodLockedError, PayrollPeriodLockService
 from backend.services.target_breakdown_selection import select_effective_shop_breakdowns
 from backend.dependencies.auth import get_current_user  # [OK] 2026-01-08: 添加用户认证
 
@@ -80,7 +86,7 @@ def _validate_operation_target_payload(
     if target_type != "operation":
         return None
 
-    if scope_type not in (None, "shop"):
+    if scope_type != "shop":
         return error_response(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="运营目标当前仅支持店铺作用域(scope_type=shop)",
@@ -117,7 +123,7 @@ def _validate_operation_target_payload(
         )
 
     is_manual_mode = bool(manual_score_enabled) or metric_direction == "manual_score"
-    if not is_manual_mode and achieved_value is None:
+    if False and not is_manual_mode and achieved_value is None:
         return error_response(
             code=ErrorCode.DATA_REQUIRED_FIELD_MISSING,
             message="运营目标缺少实际值",
@@ -127,6 +133,23 @@ def _validate_operation_target_payload(
         )
 
     return None
+
+
+async def _assert_operation_month_mutable(db: AsyncSession, target_type: str | None, period_start: date) -> None:
+    if target_type != "operation":
+        return
+    try:
+        await PayrollPeriodLockService(db).assert_month_mutable(
+            year_month=period_start.strftime("%Y-%m")
+        )
+    except PayrollPeriodLockedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _validate_operation_month_range(period_start: date, period_end: date) -> None:
+    month_end = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    if period_start.day != 1 or period_end != month_end:
+        raise HTTPException(status_code=400, detail="运营指标必须使用完整自然月周期")
 
 # [OK] 2026-01-08: 添加管理员权限检查
 async def require_admin(current_user: DimUser = Depends(get_current_user)):
@@ -195,6 +218,61 @@ async def copy_prev_month_shop_target_workbench(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"success": True, "data": data.model_dump(mode="json")}
+
+
+@router.get("/operation-workbench", response_model=Dict[str, Any])
+async def get_operation_performance_workbench(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(get_current_user),
+):
+    return {"success": True, "data": await OperationPerformanceWorkbenchService(db).get_workbench(year_month)}
+
+
+@router.put("/operation-workbench", response_model=Dict[str, Any])
+async def apply_operation_performance_workbench(
+    request: OperationWorkbenchApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        data = await OperationPerformanceWorkbenchService(db).apply(
+            request,
+            username=getattr(current_user, "username", None),
+        )
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OperationPerformanceWorkbenchConflictError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "data": data}
+
+
+@router.post("/operation-workbench/copy-prev-month", response_model=Dict[str, Any])
+async def copy_prev_month_operation_performance_workbench(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        data = await OperationPerformanceWorkbenchService(db).copy_prev_month(
+            year_month,
+            username=getattr(current_user, "username", None),
+        )
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OperationPerformanceWorkbenchConflictError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "data": data}
 
 @router.get("", response_model=Dict[str, Any])
 async def list_targets(
@@ -682,6 +760,10 @@ async def create_target(
                 status_code=400
             )
 
+        if request.target_type == "operation":
+            _validate_operation_month_range(request.period_start, request.period_end)
+            await _assert_operation_month_mutable(db, request.target_type, request.period_start)
+
         operation_validation_error = _validate_operation_target_payload(
             target_type=request.target_type,
             scope_type=(request.scope_type or "shop") if request.target_type == "operation" else request.scope_type,
@@ -806,6 +888,7 @@ async def update_target(
             )
         
         # 更新字段
+        await _assert_operation_month_mutable(db, target.target_type, target.period_start)
         update_data = request.model_dump(exclude_unset=True)
         
         # 验证日期
@@ -820,6 +903,12 @@ async def update_target(
                     recovery_suggestion="请调整日期范围,确保结束日期大于等于开始日期",
                     status_code=400
                 )
+
+        if update_data.get("target_type", target.target_type) == "operation":
+            _validate_operation_month_range(
+                update_data.get("period_start", target.period_start),
+                update_data.get("period_end", target.period_end),
+            )
 
         operation_validation_error = _validate_operation_target_payload(
             target_type=update_data.get("target_type", target.target_type),
@@ -938,6 +1027,7 @@ async def delete_target(
             )
         
         # 获取受影响的店铺和平台(删除前)
+        await _assert_operation_month_mutable(db, target.target_type, target.period_start)
         breakdowns = (await db.execute(
             select(TargetBreakdown).where(TargetBreakdown.target_id == target_id)
         )).scalars().all()
@@ -1029,6 +1119,13 @@ async def create_breakdown(
             )
         
         # [OK] 统一 platform_code 为小写(与 dim_shops 标准格式一致)
+        await _assert_operation_month_mutable(db, target.target_type, target.period_start)
+        if target.target_type == "operation":
+            if request.breakdown_type != "shop":
+                raise HTTPException(status_code=400, detail="运营指标仅允许店铺覆盖")
+            if request.period_start != target.period_start or request.period_end != target.period_end:
+                raise HTTPException(status_code=400, detail="运营店铺覆盖必须使用父指标的完整自然月")
+
         normalized_platform_code = request.platform_code.lower() if request.platform_code else None
         
         # 验证分解类型

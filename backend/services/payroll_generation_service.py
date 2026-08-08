@@ -16,6 +16,7 @@ from modules.core.db import (
     SalaryStructure,
 )
 from modules.core.logger import get_logger
+from backend.services.performance_readiness_service import PerformanceReadinessService
 
 logger = get_logger(__name__)
 
@@ -421,6 +422,7 @@ class PayrollGenerationService:
         }
 
     async def generate_employee_month(self, employee_code: str, year_month: str) -> Dict[str, Any]:
+        await PerformanceReadinessService(self.db).assert_month_performance_ready(year_month)
         if not await self._is_salary_eligible_employee(employee_code):
             return {
                 "employee_code": employee_code,
@@ -513,6 +515,7 @@ class PayrollGenerationService:
         }
 
     async def generate_month(self, year_month: str) -> Dict[str, Any]:
+        await PerformanceReadinessService(self.db).assert_month_performance_ready(year_month)
         salary_rows = (
             await self.db.execute(
                 select(SalaryStructure).where(SalaryStructure.status == "active")

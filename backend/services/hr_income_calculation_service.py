@@ -120,15 +120,20 @@ class HRIncomeCalculationService:
         return "up"
 
     @classmethod
-    def _calculate_input_metric_score(cls, row: Any) -> float:
+    def _calculate_input_metric_score(cls, row: Any) -> float | None:
         max_score = cls._to_float(getattr(row, "max_score", None), 0.0)
         if max_score <= 0:
-            return 0.0
+            return None
 
         manual_enabled = bool(getattr(row, "manual_score_enabled", False))
         manual_score_value = getattr(row, "manual_score_value", None)
-        if manual_enabled and manual_score_value is not None:
+        if manual_enabled or getattr(row, "metric_direction", None) == "manual_score":
+            if manual_score_value is None:
+                return None
             return min(max(cls._to_float(manual_score_value, 0.0), 0.0), max_score)
+
+        if getattr(row, "achieved_value", None) is None:
+            return None
 
         target_value = cls._to_float(getattr(row, "target_value", None), 0.0)
         achieved_value = cls._to_float(getattr(row, "achieved_value", None), 0.0)
@@ -145,7 +150,7 @@ class HRIncomeCalculationService:
             return max(ratio * max_score, 0.0)
 
         if target_value <= 0:
-            return 0.0
+            return None
         ratio = min(achieved_value / target_value, 1.0)
         return max(ratio * max_score, 0.0)
 
@@ -255,7 +260,7 @@ class HRIncomeCalculationService:
         self,
         year_month: str,
         assignments: list[Any],
-    ) -> Dict[str, float]:
+    ) -> tuple[Dict[str, float], set[str]]:
         employee_codes = sorted(
             {
                 (row.employee_code or "").strip()
@@ -264,7 +269,7 @@ class HRIncomeCalculationService:
             }
         )
         if not employee_codes:
-            return {}
+            return {}, set()
 
         period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
         if period_start.month == 12:
@@ -402,15 +407,21 @@ class HRIncomeCalculationService:
         ).scalars().all()
 
         score_by_employee: Dict[str, float] = {}
+        pending_employee_codes: set[str] = set()
         for row in rows:
             employee_code = (getattr(row, "employee_code", None) or "").strip()
             if not employee_code:
                 continue
-            score_by_employee[employee_code] = score_by_employee.get(employee_code, 0.0) + self._calculate_input_metric_score(row)
+            metric_score = self._calculate_input_metric_score(row)
+            if metric_score is None:
+                pending_employee_codes.add(employee_code)
+                continue
+            score_by_employee[employee_code] = score_by_employee.get(employee_code, 0.0) + metric_score
         return {
             employee_code: min(max(score, 0.0), 100.0)
             for employee_code, score in score_by_employee.items()
-        }
+            if employee_code not in pending_employee_codes
+        }, pending_employee_codes
 
     async def _load_default_commission_ratio_by_employee(
         self,
@@ -538,7 +549,7 @@ class HRIncomeCalculationService:
         manual_adjustment_by_employee = await self._load_manual_adjustment_by_employee(
             year_month, assignments
         )
-        input_score_by_employee = await self._load_employee_performance_input_score_by_employee(
+        input_score_by_employee, pending_input_employee_codes = await self._load_employee_performance_input_score_by_employee(
             year_month, assignments
         )
         default_commission_ratio_by_employee = await self._load_default_commission_ratio_by_employee(
@@ -717,23 +728,32 @@ class HRIncomeCalculationService:
                 achievement_rate = rec["weighted_rate_num"] / rec["weighted_rate_den"]
             else:
                 achievement_rate = 0.0
+            calculation_status = "complete"
+            performance_source_type = "shop_inherited"
             if employee_code in input_score_by_employee:
                 performance_score = input_score_by_employee[employee_code]
+                performance_source_type = "personal_inputs"
+            elif employee_code in pending_input_employee_codes:
+                performance_score = None
+                calculation_status = "pending_personal_input"
             elif rec["weighted_score_den"] > 0:
                 performance_score = (
                     rec["weighted_score_num"] / rec["weighted_score_den"]
                 )
             else:
-                performance_score = 0.0
-            performance_score += self._to_float(
-                attendance_adjustment_by_employee.get(employee_code),
-                0.0,
-            )
-            performance_score += self._to_float(
-                manual_adjustment_by_employee.get(employee_code),
-                0.0,
-            )
-            performance_score = min(max(performance_score, 0.0), 100.0)
+                performance_score = None
+                calculation_status = "pending_store_performance"
+                performance_source_type = "pending"
+            if performance_score is not None:
+                performance_score += self._to_float(
+                    attendance_adjustment_by_employee.get(employee_code),
+                    0.0,
+                )
+                performance_score += self._to_float(
+                    manual_adjustment_by_employee.get(employee_code),
+                    0.0,
+                )
+                performance_score = min(max(performance_score, 0.0), 100.0)
 
             perf = (
                 await self.db.execute(
@@ -747,6 +767,8 @@ class HRIncomeCalculationService:
                 perf.actual_sales = sales_amount
                 perf.achievement_rate = achievement_rate
                 perf.performance_score = performance_score
+                perf.calculation_status = calculation_status
+                perf.performance_source_type = performance_source_type
                 perf.calculated_at = datetime.now(timezone.utc)
             else:
                 self.db.add(
@@ -756,6 +778,8 @@ class HRIncomeCalculationService:
                         actual_sales=sales_amount,
                         achievement_rate=achievement_rate,
                         performance_score=performance_score,
+                        calculation_status=calculation_status,
+                        performance_source_type=performance_source_type,
                         calculated_at=datetime.now(timezone.utc),
                     )
                 )

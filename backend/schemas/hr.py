@@ -925,9 +925,9 @@ class EmployeePerformanceInputCreate(BaseModel):
     employee_code: str = Field(..., min_length=1, max_length=64)
     metric_code: str = Field(..., min_length=1, max_length=64)
     metric_name: Optional[str] = Field(None, max_length=128)
-    metric_direction: str = Field(..., pattern="^(up|down|higher_better|lower_better)$")
+    metric_direction: str = Field(..., pattern="^(up|down|higher_better|lower_better|manual_score)$")
     target_value: float = Field(0, ge=0)
-    achieved_value: float = Field(0, ge=0)
+    achieved_value: Optional[float] = Field(None, ge=0)
     max_score: float = Field(..., ge=0, le=100)
     manual_score_enabled: bool = False
     manual_score_value: Optional[float] = Field(None, ge=0, le=100)
@@ -937,7 +937,7 @@ class EmployeePerformanceInputCreate(BaseModel):
 
 class EmployeePerformanceInputUpdate(BaseModel):
     metric_name: Optional[str] = Field(None, max_length=128)
-    metric_direction: Optional[str] = Field(None, pattern="^(up|down|higher_better|lower_better)$")
+    metric_direction: Optional[str] = Field(None, pattern="^(up|down|higher_better|lower_better|manual_score)$")
     target_value: Optional[float] = Field(None, ge=0)
     achieved_value: Optional[float] = Field(None, ge=0)
     max_score: Optional[float] = Field(None, ge=0, le=100)
@@ -957,7 +957,7 @@ class EmployeePerformanceInputResponse(BaseModel):
     metric_name: Optional[str] = None
     metric_direction: str
     target_value: float
-    achieved_value: float
+    achieved_value: Optional[float] = None
     max_score: float
     manual_score_enabled: bool
     manual_score_value: Optional[float] = None

@@ -76,6 +76,8 @@ from backend.services.performance_coefficient import (
 )
 from backend.services.performance_coefficient import calculate_performance_coefficient
 from backend.services.employee_task_sources import sync_performance_confirmation_task
+from backend.services.operation_performance_workbench_service import OperationPerformanceWorkbenchService
+from backend.services.performance_readiness_service import PerformanceReadinessError
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
@@ -1023,6 +1025,78 @@ def _calculate_operation_metric_score_for_shop(
     return score, details
 
 
+def _calculate_operation_metrics_for_shop(
+    operation_targets: list[Any],
+    shop_overrides: dict[int, Any],
+    *,
+    expected_max_score: float,
+) -> tuple[float | None, dict[str, Any]]:
+    """Aggregate every enabled operation metric, applying one optional shop override per metric."""
+    scoped_metrics = []
+    for target in operation_targets:
+        scoped = copy(target)
+        override = shop_overrides.get(getattr(target, "id", None))
+        if override is not None:
+            for field in ("target_value", "achieved_value", "manual_score_value"):
+                value = getattr(override, field, None)
+                if value is not None:
+                    setattr(scoped, field, value)
+        scoped_metrics.append(scoped)
+    score, details = OperationPerformanceWorkbenchService.aggregate_metrics(
+        scoped_metrics,
+        expected_max_score=expected_max_score,
+    )
+    details.setdefault("source", "operation_workbench")
+    if shop_overrides:
+        details["source"] = "target_management_shop_breakdown"
+    details.setdefault("target", None)
+    details.setdefault("achieved", None)
+    details.setdefault("rate", None)
+    details.setdefault("calculation", "sum(operation.items[].score)")
+    details.setdefault("message", None if score is not None else "存在未完成的运营指标")
+    return score, details
+
+
+async def _load_operation_targets_for_month(db: AsyncSession, year_month: str) -> list[Any]:
+    month_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+    month_end = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    rows = await db.execute(
+        select(SalesTarget).where(
+            SalesTarget.target_type == "operation",
+            SalesTarget.scope_type == "shop",
+            SalesTarget.status == "active",
+            SalesTarget.is_enabled.is_(True),
+            SalesTarget.period_start == month_start,
+            SalesTarget.period_end == month_end,
+        ).order_by(SalesTarget.metric_code, SalesTarget.id)
+    )
+    return [
+        row for row in rows.scalars().all()
+        if getattr(row, "target_type", None) == "operation"
+    ]
+
+
+async def _load_operation_target_breakdowns_by_shop(
+    db: AsyncSession,
+    operation_targets: list[Any],
+) -> dict[str, dict[int, Any]]:
+    target_ids = [getattr(target, "id", None) for target in operation_targets if getattr(target, "id", None)]
+    if not target_ids:
+        return {}
+    rows = (await db.execute(
+        select(TargetBreakdown).where(
+            TargetBreakdown.target_id.in_(target_ids),
+            TargetBreakdown.breakdown_type == "shop",
+            TargetBreakdown.platform_code.is_not(None),
+            TargetBreakdown.shop_id.is_not(None),
+        )
+    )).scalars().all()
+    grouped: dict[str, dict[int, Any]] = {}
+    for row in rows:
+        grouped.setdefault(f"{str(row.platform_code).lower()}|{row.shop_id}", {})[row.target_id] = row
+    return grouped
+
+
 async def invalidate_performance_related_caches(cache_service) -> None:
     await cache_service.invalidate("performance_scores")
     await cache_service.invalidate("performance_scores_shop")
@@ -1162,7 +1236,10 @@ async def list_performance_scores(
                 query = query.where(EmployeePerformance.year_month == period)
             total_query = select(func.count()).select_from(query.subquery())
             total = (await db.execute(total_query)).scalar() or 0
-            query = query.order_by(EmployeePerformance.performance_score.desc())
+            query = query.order_by(
+                EmployeePerformance.performance_score.desc().nulls_last(),
+                EmployeePerformance.employee_code.asc(),
+            )
             query = query.offset((page - 1) * page_size).limit(page_size)
             rows = (await db.execute(query)).scalars().all()
             ep_list = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in rows]
@@ -1351,11 +1428,12 @@ async def list_performance_scores(
 
             # 计算排名
             sorted_ep = sorted(
-                all_ep,
-                key=lambda x: float(
-                    getattr(x, "performance_score", 0)
-                    or 0
-                ),
+                [
+                    item for item in all_ep
+                    if getattr(item, "calculation_status", None) == "complete"
+                    and getattr(item, "performance_score", None) is not None
+                ],
+                key=lambda x: float(getattr(x, "performance_score", 0) or 0),
                 reverse=True,
             )
             rank_by_code = {}
@@ -1367,7 +1445,8 @@ async def list_performance_scores(
             score_responses = []
             for ep in ep_list:
                 ec = getattr(ep, "employee_code", "")
-                scr = float(getattr(ep, "performance_score", 0) or 0)
+                raw_score = getattr(ep, "performance_score", None)
+                scr = float(raw_score) if raw_score is not None else None
                 ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
                 raw_sales_achieved = getattr(ep, "actual_sales", None)
                 sales_achieved = (
@@ -1392,7 +1471,8 @@ async def list_performance_scores(
                     "personal_input_score_total": round(input_score_total_by_code.get(ec, 0.0), 2)
                     if ec in input_score_total_by_code
                     else None,
-                    "performance_source_type": "personal_inputs" if input_items_by_code.get(ec) else "shop_inherited",
+                    "performance_source_type": getattr(ep, "performance_source_type", None) or ("personal_inputs" if input_items_by_code.get(ec) else "shop_inherited"),
+                    "calculation_status": getattr(ep, "calculation_status", None) or "historical_unknown",
                     "personal_adjustment_total": adjustment_total_by_code.get(ec),
                     "total_score": scr,
                     "rank": rank_by_code.get(ec),
@@ -1749,16 +1829,37 @@ async def calculate_performance_scores(
             source_rows,
         )
 
-        operation_target = await _load_effective_target_for_month(
+        operation_targets = await _load_operation_targets_for_month(db, period)
+        operation_breakdowns_by_shop = await _load_operation_target_breakdowns_by_shop(
             db,
-            year_month=period,
-            target_type="operation",
-            scope_type="shop",
+            operation_targets,
         )
-        operation_breakdowns_by_shop = await _load_operation_target_breakdown_by_shop(
-            db,
-            operation_target,
-        )
+        legacy_operation_breakdowns_by_shop = {}
+        if not operation_targets:
+            legacy_target = await _load_effective_target_for_month(
+                db,
+                year_month=period,
+                target_type="operation",
+                scope_type="shop",
+            )
+            if legacy_target is not None and hasattr(legacy_target, "metric_direction") and hasattr(legacy_target, "max_score"):
+                # Historical single-target rows remain readable until their month
+                # is explicitly managed by the workbench.
+                operation_targets = [legacy_target]
+                legacy_operation_breakdowns_by_shop = await _load_operation_target_breakdown_by_shop(
+                    db,
+                    legacy_target,
+                )
+        if operation_targets:
+            configured_operation_score = sum(float(getattr(target, "max_score", 0.0) or 0.0) for target in operation_targets)
+            if round(configured_operation_score, 4) != round(float(config.operation_max_score), 4):
+                return error_response(
+                    code=ErrorCode.DATA_VALIDATION_FAILED,
+                    message="运营指标满分之和必须等于绩效配置的运营满分",
+                    error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                    recovery_suggestion="请在运营绩效工作台调整启用指标的满分",
+                    status_code=400,
+                )
         valid_shop_keys = await _load_valid_performance_shop_keys(db, source_rows)
         monthly_source_shop_keys = await _load_monthly_source_shop_keys(db, period)
         if valid_shop_keys is not None and monthly_source_shop_keys is not None:
@@ -1805,19 +1906,25 @@ async def calculate_performance_scores(
             key_product_rate_fraction = None
             key_product_rate = None
             key_product_score = 0.0
-            operation_score, operation_details = _calculate_operation_metric_score_for_shop(
-                operation_target,
-                operation_breakdowns_by_shop.get(key),
-            ) if operation_target else (
+            operation_score, operation_details = _calculate_operation_metrics_for_shop(
+                operation_targets,
+                operation_breakdowns_by_shop.get(key, {}) or (
+                    {None: legacy_operation_breakdowns_by_shop[key]}
+                    if key in legacy_operation_breakdowns_by_shop
+                    else {}
+                ),
+                expected_max_score=float(config.operation_max_score),
+            ) if operation_targets else (
                 0.0,
                 {
-                    "status": "pending_design",
+                    "status": "pending",
                     "source": None,
                     "target": None,
                     "achieved": None,
                     "rate": None,
                     "calculation": None,
-                    "message": "Operation target pipeline is not ready.",
+                    "items": [],
+                    "message": "运营指标尚未配置。",
                 },
             )
             is_formal = (
@@ -1833,8 +1940,8 @@ async def calculate_performance_scores(
                     "sales_score": sales_score,
                     "profit_score": profit_score,
                     "key_product_score": key_product_score,
-                    "operation_score": operation_score,
-                    "total_score": round(sales_score + profit_score + operation_score, 4),
+                    "operation_score": float(operation_score or 0.0),
+                    "total_score": round(sales_score + profit_score + float(operation_score or 0.0), 4),
                     "rank": None,
                     "performance_coefficient": None,
                     "score_details": {
@@ -1872,6 +1979,8 @@ async def calculate_performance_scores(
                             "rate": operation_details["rate"],
                             "calculation": operation_details["calculation"],
                             "message": operation_details["message"],
+                            "items": operation_details.get("items", []),
+                            "score": operation_score,
                         },
                         "summary": {
                             "calculation_status": "complete" if is_formal else "partial",
@@ -2047,6 +2156,15 @@ async def calculate_performance_scores(
                 "locked_record_count": lock_status["locked_record_count"],
                 "locked_statuses": lock_status["locked_statuses"],
             },
+            status_code=409,
+        )
+    except PerformanceReadinessError as e:
+        await db.rollback()
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message=str(e),
+            error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
+            detail=str(e),
             status_code=409,
         )
     except ValueError as e:
