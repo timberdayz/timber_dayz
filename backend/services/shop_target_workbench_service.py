@@ -83,6 +83,13 @@ class ShopTargetWorkbenchService:
         month_start, month_end = self._month_range(request.year_month)
         month_targets = await self._list_month_targets(month_start, month_end)
         target = month_targets[0] if month_targets else None
+        existing_breakdowns = await self._list_breakdowns(target.id) if target else []
+        preserved_quantities = self._snapshot_order_quantities(
+            target,
+            existing_breakdowns,
+            month_start,
+            month_end,
+        )
         if target is None:
             target = SalesTarget(
                 target_name=f"{request.year_month} 店铺销售目标",
@@ -97,7 +104,7 @@ class ShopTargetWorkbenchService:
 
         target.status = "active"
         target.target_amount = request.company_target_amount
-        target.target_quantity = request.company_target_quantity
+        target.target_quantity = preserved_quantities["company"]
         target.target_profit_amount = getattr(target, "target_profit_amount", 0.0) or 0.0
         target.target_profit_basis_amount = request.company_target_profit_basis_amount
         target.weekday_ratios = self._normalize_weekday_ratios(request.weekday_ratios)
@@ -109,7 +116,13 @@ class ShopTargetWorkbenchService:
         cleanup_result = await self.cleanup_projection(target.id)
         if cleanup_result.get("errors"):
             raise RuntimeError("; ".join(cleanup_result["errors"]))
-        await self._replace_breakdowns(target.id, request, month_start, month_end)
+        await self._replace_breakdowns(
+            target.id,
+            request,
+            month_start,
+            month_end,
+            preserved_quantities,
+        )
 
         sync_result = await self.sync_projection(target.id)
         if sync_result.get("errors"):
@@ -135,7 +148,7 @@ class ShopTargetWorkbenchService:
         request = ShopTargetWorkbenchApplyRequest(
             year_month=year_month,
             company_target_amount=previous.company_target_amount,
-            company_target_quantity=previous.company_target_quantity,
+            company_target_quantity=0,
             company_target_profit_basis_amount=previous.company_target_profit_basis_amount,
             weekday_ratios=previous.weekday_ratios,
             shops=[
@@ -144,7 +157,7 @@ class ShopTargetWorkbenchService:
                     "shop_id": shop.shop_id,
                     "ratio": shop.ratio,
                     "target_amount": shop.target_amount,
-                    "target_quantity": shop.target_quantity,
+                    "target_quantity": 0,
                     "target_profit_basis_amount": shop.target_profit_basis_amount,
                 }
                 for shop in previous.shops
@@ -187,6 +200,7 @@ class ShopTargetWorkbenchService:
         result = await self.db.execute(
             select(ShopAccount)
             .where(ShopAccount.enabled.is_(True))
+            .where(ShopAccount.business_role == "operating_store")
             .order_by(ShopAccount.platform.asc(), ShopAccount.store_name.asc(), ShopAccount.shop_account_id.asc())
         )
         records = result.scalars().all()
@@ -254,6 +268,7 @@ class ShopTargetWorkbenchService:
         request: ShopTargetWorkbenchApplyRequest,
         month_start: date,
         month_end: date,
+        preserved_quantities: dict,
     ) -> None:
         await self.db.execute(delete(TargetBreakdown).where(TargetBreakdown.target_id == target_id))
         days = monthrange(month_start.year, month_start.month)[1]
@@ -261,7 +276,10 @@ class ShopTargetWorkbenchService:
         total_weight = sum(weight for _, weight in day_weights) or 1.0
 
         company_daily_amounts = self._split_amount_by_weights(request.company_target_amount, day_weights, total_weight)
-        company_daily_quantities = self._split_quantity_by_weights(request.company_target_quantity, day_weights, total_weight)
+        company_daily_quantities = [
+            preserved_quantities["time"].get(current, 0)
+            for current, _ in day_weights
+        ]
         company_daily_profit_basis_amounts = self._split_amount_by_weights(
             request.company_target_profit_basis_amount,
             day_weights,
@@ -281,7 +299,11 @@ class ShopTargetWorkbenchService:
                 )
             )
 
+        requested_shop_keys = set()
         for shop in request.shops:
+            shop_key = (shop.platform_code, shop.shop_id)
+            requested_shop_keys.add(shop_key)
+            shop_quantity = preserved_quantities["shop"].get(shop_key, 0)
             await self._add(
                 TargetBreakdown(
                     target_id=target_id,
@@ -292,12 +314,15 @@ class ShopTargetWorkbenchService:
                     period_end=month_end,
                     period_label=request.year_month,
                     target_amount=shop.target_amount,
-                    target_quantity=shop.target_quantity,
+                    target_quantity=shop_quantity,
                     target_profit_basis_amount=shop.target_profit_basis_amount,
                 )
             )
             shop_daily_amounts = self._split_amount_by_weights(shop.target_amount, day_weights, total_weight)
-            shop_daily_quantities = self._split_quantity_by_weights(shop.target_quantity, day_weights, total_weight)
+            shop_daily_quantities = [
+                preserved_quantities["shop_time"].get((shop.platform_code, shop.shop_id, current), 0)
+                for current, _ in day_weights
+            ]
             shop_daily_profit_basis_amounts = self._split_amount_by_weights(
                 shop.target_profit_basis_amount,
                 day_weights,
@@ -319,6 +344,85 @@ class ShopTargetWorkbenchService:
                     )
                 )
 
+        historical_shop_keys = set(preserved_quantities["shop"])
+        historical_shop_keys.update(
+            (platform_code, shop_id)
+            for platform_code, shop_id, _ in preserved_quantities["shop_time"]
+        )
+        for platform_code, shop_id in historical_shop_keys - requested_shop_keys:
+            await self._add(
+                TargetBreakdown(
+                    target_id=target_id,
+                    breakdown_type="shop",
+                    platform_code=platform_code,
+                    shop_id=shop_id,
+                    period_start=month_start,
+                    period_end=month_end,
+                    period_label=request.year_month,
+                    target_amount=0.0,
+                    target_quantity=preserved_quantities["shop"].get((platform_code, shop_id), 0),
+                    target_profit_basis_amount=0.0,
+                )
+            )
+            for current, _ in day_weights:
+                await self._add(
+                    TargetBreakdown(
+                        target_id=target_id,
+                        breakdown_type="shop_time",
+                        platform_code=platform_code,
+                        shop_id=shop_id,
+                        period_start=current,
+                        period_end=current,
+                        period_label=current.isoformat(),
+                        target_amount=0.0,
+                        target_quantity=preserved_quantities["shop_time"].get((platform_code, shop_id, current), 0),
+                        target_profit_basis_amount=0.0,
+                    )
+                )
+
+    def _snapshot_order_quantities(
+        self,
+        target: SalesTarget | None,
+        breakdowns: list[TargetBreakdown],
+        month_start: date,
+        month_end: date,
+    ) -> dict:
+        quantities = {"company": 0, "time": {}, "shop": {}, "shop_time": {}}
+        if target is None:
+            return quantities
+
+        quantities["company"] = int(getattr(target, "target_quantity", 0) or 0)
+        for breakdown in breakdowns:
+            quantity = int(getattr(breakdown, "target_quantity", 0) or 0)
+            if (
+                breakdown.breakdown_type == "time"
+                and breakdown.period_start
+                and breakdown.period_start == breakdown.period_end
+                and month_start <= breakdown.period_start <= month_end
+            ):
+                quantities["time"][breakdown.period_start] = quantity
+            elif (
+                breakdown.breakdown_type == "shop_time"
+                and breakdown.platform_code
+                and breakdown.shop_id
+                and breakdown.period_start
+                and breakdown.period_start == breakdown.period_end
+                and month_start <= breakdown.period_start <= month_end
+            ):
+                quantities["shop_time"][(
+                    breakdown.platform_code,
+                    breakdown.shop_id,
+                    breakdown.period_start,
+                )] = quantity
+
+        shop_rows = [item for item in breakdowns if item.breakdown_type == "shop"]
+        for breakdown in select_effective_shop_breakdowns(shop_rows, month_start, month_end):
+            if breakdown.platform_code and breakdown.shop_id:
+                quantities["shop"][(breakdown.platform_code, breakdown.shop_id)] = int(
+                    getattr(breakdown, "target_quantity", 0) or 0
+                )
+        return quantities
+
     async def _add(self, obj) -> None:
         result = self.db.add(obj)
         if inspect.isawaitable(result):
@@ -331,14 +435,11 @@ class ShopTargetWorkbenchService:
     def _validate_request(self, request: ShopTargetWorkbenchApplyRequest) -> None:
         ratio_total = sum(float(shop.ratio or 0.0) for shop in request.shops)
         amount_total = round(sum(float(shop.target_amount or 0.0) for shop in request.shops), 2)
-        quantity_total = sum(int(shop.target_quantity or 0) for shop in request.shops)
         profit_basis_total = round(sum(float(shop.target_profit_basis_amount or 0.0) for shop in request.shops), 2)
         if abs(ratio_total - 1.0) > 0.0001:
             raise ValueError("店铺拆分比例合计必须等于100%")
         if abs(amount_total - round(float(request.company_target_amount or 0.0), 2)) > 0.01:
             raise ValueError("店铺目标销售额合计必须等于公司总销售额")
-        if quantity_total != int(request.company_target_quantity or 0):
-            raise ValueError("店铺订单目标合计必须等于公司订单目标")
         if abs(profit_basis_total - round(float(request.company_target_profit_basis_amount or 0.0), 2)) > 0.01:
             raise ValueError("店铺结算利润目标合计必须等于公司结算利润目标")
 

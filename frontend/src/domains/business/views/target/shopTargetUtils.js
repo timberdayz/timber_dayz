@@ -12,13 +12,12 @@ export function calculateShopTargetTotals(shops = []) {
   return shops.reduce((acc, shop) => {
     acc.ratioPercent = round(acc.ratioPercent + Number(shop.ratio_percent || 0), 4)
     acc.amount = round(acc.amount + Number(shop.target_amount || 0), 2)
-    acc.quantity += Number(shop.target_quantity || 0)
     acc.profitBasisAmount = round(acc.profitBasisAmount + Number(shop.target_profit_basis_amount || 0), 2)
     return acc
-  }, { ratioPercent: 0, amount: 0, quantity: 0, profitBasisAmount: 0 })
+  }, { ratioPercent: 0, amount: 0, profitBasisAmount: 0 })
 }
 
-export function splitShopTargetsByPercent(shops = [], companyAmount = 0, companyQuantity = 0, companyProfitBasisAmount = 0) {
+export function splitShopTargetsByPercent(shops = [], companyAmount = 0, companyProfitBasisAmount = 0) {
   const result = shops.map((shop) => {
     const percent = Number(shop.ratio_percent || 0)
     const ratio = percent / 100
@@ -26,7 +25,6 @@ export function splitShopTargetsByPercent(shops = [], companyAmount = 0, company
       ...shop,
       ratio,
       target_amount: round(Number(companyAmount || 0) * ratio, 2),
-      target_quantity: Math.floor(Number(companyQuantity || 0) * ratio),
       target_profit_basis_amount: round(Number(companyProfitBasisAmount || 0) * ratio, 2)
     }
   })
@@ -34,10 +32,8 @@ export function splitShopTargetsByPercent(shops = [], companyAmount = 0, company
   const totals = calculateShopTargetTotals(result)
   if (Math.abs(totals.ratioPercent - 100) < 0.01 && result.length) {
     const amountDiff = round(Number(companyAmount || 0) - totals.amount, 2)
-    const quantityDiff = Number(companyQuantity || 0) - totals.quantity
     const profitBasisDiff = round(Number(companyProfitBasisAmount || 0) - totals.profitBasisAmount, 2)
     result[result.length - 1].target_amount = round(Number(result[result.length - 1].target_amount || 0) + amountDiff, 2)
-    result[result.length - 1].target_quantity = Number(result[result.length - 1].target_quantity || 0) + quantityDiff
     result[result.length - 1].target_profit_basis_amount = round(
       Number(result[result.length - 1].target_profit_basis_amount || 0) + profitBasisDiff,
       2
@@ -47,7 +43,7 @@ export function splitShopTargetsByPercent(shops = [], companyAmount = 0, company
   return result
 }
 
-export function splitShopTargetsEqually(shops = [], companyAmount = 0, companyQuantity = 0, companyProfitBasisAmount = 0) {
+export function splitShopTargetsEqually(shops = [], companyAmount = 0, companyProfitBasisAmount = 0) {
   if (!shops.length) return []
   const basePercent = round(100 / shops.length, 2)
   let usedPercent = 0
@@ -56,7 +52,7 @@ export function splitShopTargetsEqually(shops = [], companyAmount = 0, companyQu
     usedPercent = round(usedPercent + ratioPercent, 2)
     return { ...shop, ratio_percent: ratioPercent }
   })
-  return splitShopTargetsByPercent(withRatios, companyAmount, companyQuantity, companyProfitBasisAmount)
+  return splitShopTargetsByPercent(withRatios, companyAmount, companyProfitBasisAmount)
 }
 
 export function normalizeWeekdayRatiosToPercents(ratios = {}) {
@@ -76,7 +72,6 @@ export function buildWeekdayRatiosPayload(weekdayRatioPercents = {}) {
 export function buildMonthDailyPreview({
   yearMonth,
   amountTotal = 0,
-  quantityTotal = 0,
   weekdayRatioPercents = {}
 }) {
   const [year, month] = yearMonth.split('-').map(Number)
@@ -96,26 +91,13 @@ export function buildMonthDailyPreview({
   if (amounts.length) {
     amounts[amounts.length - 1] = round(amounts.at(-1) + round(Number(amountTotal || 0) - amounts.reduce((sum, value) => sum + value, 0), 2), 2)
   }
-  const rawQuantities = rawWeights.map((weight) => Number(quantityTotal || 0) * weight / totalWeight)
-  const quantities = rawQuantities.map((value) => Math.floor(value))
-  let remainder = Number(quantityTotal || 0) - quantities.reduce((sum, value) => sum + value, 0)
-  rawQuantities
-    .map((value, index) => ({ index, rest: value - Math.floor(value) }))
-    .sort((a, b) => b.rest - a.rest)
-    .forEach((item) => {
-      if (remainder > 0) {
-        quantities[item.index] += 1
-        remainder -= 1
-      }
-    })
   return monthDates.map((item, index) => ({
     date: item.dateText,
     day: item.date.getDate(),
     weekdayKey: item.weekdayKey,
     weekday: WEEKDAY_OPTIONS.find((day) => day.key === item.weekdayKey)?.label || '',
     ratioPercent: rawWeights[index],
-    amount: amounts[index],
-    quantity: quantities[index]
+    amount: amounts[index]
   }))
 }
 

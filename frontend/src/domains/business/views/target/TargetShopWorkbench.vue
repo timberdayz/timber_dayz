@@ -37,8 +37,6 @@
       <span :class="{ invalid: !ratioIsValid }">比例合计 {{ totals.ratioPercent.toFixed(2) }}%</span>
       <span :class="{ invalid: !amountIsValid }">销售额合计 {{ formatAmount(totals.amount) }}</span>
       <span :class="{ invalid: !amountIsValid }">销售额差额 {{ formatAmount(amountDiff) }}</span>
-      <span :class="{ invalid: !quantityIsValid }">订单合计 {{ totals.quantity }}</span>
-      <span :class="{ invalid: !quantityIsValid }">订单差额 {{ quantityDiff }}</span>
       <span :class="{ invalid: !profitBasisIsValid }">结算利润目标合计 {{ formatAmount(totals.profitBasisAmount) }}</span>
       <span :class="{ invalid: !profitBasisIsValid }">结算利润目标差额 {{ formatAmount(profitBasisDiff) }}</span>
       <span :class="{ invalid: !weekdayRatioIsValid }">周比例 {{ weekdayRatioTotal.toFixed(2) }}%</span>
@@ -52,16 +50,6 @@
             :min="0"
             :precision="2"
             :step="1000"
-            controls-position="right"
-            class="number-input"
-            @change="splitByRatio"
-          />
-        </el-form-item>
-        <el-form-item label="订单目标">
-          <el-input-number
-            v-model="summary.company_target_quantity"
-            :min="0"
-            :step="10"
             controls-position="right"
             class="number-input"
             @change="splitByRatio"
@@ -136,17 +124,6 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="订单目标" width="135" align="right">
-        <template #default="{ row }">
-          <el-input-number
-            v-model="row.target_quantity"
-            :min="0"
-            :step="10"
-            controls-position="right"
-            class="cell-number"
-          />
-        </template>
-      </el-table-column>
       <el-table-column label="结算利润目标" width="170" align="right">
         <template #default="{ row }">
           <el-input-number
@@ -167,6 +144,31 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <el-collapse v-model="reservedMetricPanels" class="reserved-metric-panel" data-testid="reserved-order-targets">
+      <el-collapse-item name="order-targets">
+        <template #title>
+          <span>预留指标：历史订单目标</span>
+          <el-tag size="small" type="info" effect="plain" class="reserved-metric-tag">只读，不参与保存</el-tag>
+        </template>
+        <el-descriptions :column="2" border size="small" class="reserved-metric-summary">
+          <el-descriptions-item label="公司订单目标">{{ summary.company_target_quantity }}</el-descriptions-item>
+          <el-descriptions-item label="说明">保留历史数据，当前不参与目标拆分、日预览或保存校验</el-descriptions-item>
+        </el-descriptions>
+        <el-table :data="shops" border stripe size="small" class="reserved-metric-table">
+          <el-table-column label="平台" prop="platform_code" width="105" />
+          <el-table-column label="经营店铺" min-width="240">
+            <template #default="{ row }">{{ row.standard_name || row.shop_id }}</template>
+          </el-table-column>
+          <el-table-column label="历史订单目标" width="150" align="right">
+            <template #default="{ row }">{{ row.target_quantity }}</template>
+          </el-table-column>
+          <el-table-column label="已有日目标" width="150" align="right">
+            <template #default="{ row }">{{ row.daily_target_count || 0 }} 天</template>
+          </el-table-column>
+        </el-table>
+      </el-collapse-item>
+    </el-collapse>
 
     <el-drawer v-model="dailyDrawerVisible" title="店铺日目标" size="760px">
       <template v-if="currentShop">
@@ -211,7 +213,6 @@
               <span>{{ item.weekday }}</span>
             </div>
             <div>{{ formatCompactAmount(item.amount) }}</div>
-            <div>{{ item.quantity }} 单</div>
           </div>
         </div>
 
@@ -224,7 +225,6 @@
           <el-table-column prop="amount" label="日销售目标" align="right">
             <template #default="{ row }">{{ formatAmount(row.amount) }}</template>
           </el-table-column>
-          <el-table-column prop="quantity" label="日订单目标" width="120" align="right" />
         </el-table>
       </template>
     </el-drawer>
@@ -254,6 +254,7 @@ const copying = ref(false)
 const shops = ref([])
 const dailyDrawerVisible = ref(false)
 const currentShop = ref(null)
+const reservedMetricPanels = ref([])
 
 const summary = reactive({
   target_id: null,
@@ -282,11 +283,9 @@ const daysInMonth = computed(() => {
 const totals = computed(() => calculateShopTargetTotals(shops.value))
 
 const amountDiff = computed(() => Number((totals.value.amount - Number(summary.company_target_amount || 0)).toFixed(2)))
-const quantityDiff = computed(() => totals.value.quantity - Number(summary.company_target_quantity || 0))
 const profitBasisDiff = computed(() => Number((totals.value.profitBasisAmount - Number(summary.company_target_profit_basis_amount || 0)).toFixed(2)))
 const ratioIsValid = computed(() => Math.abs(totals.value.ratioPercent - 100) < 0.01)
 const amountIsValid = computed(() => Math.abs(amountDiff.value) < 0.01)
-const quantityIsValid = computed(() => quantityDiff.value === 0)
 const profitBasisIsValid = computed(() => Math.abs(profitBasisDiff.value) < 0.01)
 const targetProfitBasisRate = computed(() => {
   const amount = Number(summary.company_target_amount || 0)
@@ -296,14 +295,13 @@ const weekdayRatioTotal = computed(() => {
   return weekdayOptions.reduce((sum, day) => sum + Number(weekdayRatioPercents[day.key] || 0), 0)
 })
 const weekdayRatioIsValid = computed(() => Math.abs(weekdayRatioTotal.value - 100) < 0.01)
-const canSave = computed(() => ratioIsValid.value && amountIsValid.value && quantityIsValid.value && profitBasisIsValid.value && weekdayRatioIsValid.value)
+const canSave = computed(() => ratioIsValid.value && amountIsValid.value && profitBasisIsValid.value && weekdayRatioIsValid.value)
 
 const dailyPreview = computed(() => {
   if (!currentShop.value) return []
   return buildMonthDailyPreview({
     yearMonth: yearMonth.value,
     amountTotal: Number(currentShop.value.target_amount || 0),
-    quantityTotal: Number(currentShop.value.target_quantity || 0),
     weekdayRatioPercents
   })
 })
@@ -345,7 +343,6 @@ function splitEqually() {
   shops.value = splitShopTargetsEqually(
     shops.value,
     Number(summary.company_target_amount || 0),
-    Number(summary.company_target_quantity || 0),
     Number(summary.company_target_profit_basis_amount || 0)
   )
 }
@@ -354,7 +351,6 @@ function splitByRatio() {
   shops.value = splitShopTargetsByPercent(
     shops.value,
     Number(summary.company_target_amount || 0),
-    Number(summary.company_target_quantity || 0),
     Number(summary.company_target_profit_basis_amount || 0)
   )
 }
@@ -385,7 +381,7 @@ function applyWorkdayRatios() {
 
 async function saveWorkbench() {
   if (!canSave.value) {
-    ElMessage.error('拆分比例、销售额、订单目标和周比例必须全部对齐后才能保存')
+    ElMessage.error('拆分比例、销售额、结算利润和周比例必须全部对齐后才能保存')
     return
   }
   saving.value = true
@@ -393,7 +389,6 @@ async function saveWorkbench() {
     await api.applyShopTargetWorkbench({
       year_month: yearMonth.value,
       company_target_amount: Number(summary.company_target_amount || 0),
-      company_target_quantity: Number(summary.company_target_quantity || 0),
       company_target_profit_basis_amount: Number(summary.company_target_profit_basis_amount || 0),
       weekday_ratios: buildWeekdayRatiosPayload(),
       shops: shops.value.map((shop) => ({
@@ -401,7 +396,6 @@ async function saveWorkbench() {
         shop_id: shop.shop_id,
         ratio: Number(shop.ratio_percent || 0) / 100,
         target_amount: Number(shop.target_amount || 0),
-        target_quantity: Number(shop.target_quantity || 0),
         target_profit_basis_amount: Number(shop.target_profit_basis_amount || 0)
       }))
     })
@@ -437,7 +431,6 @@ function buildTableSummary({ columns }) {
     if (index === 0) return '合计'
     if (column.label === '拆分比例') return `${totals.value.ratioPercent.toFixed(2)}%`
     if (column.label === '目标销售额') return formatAmount(totals.value.amount)
-    if (column.label === '订单目标') return totals.value.quantity
     if (column.label === '结算利润目标') return formatAmount(totals.value.profitBasisAmount)
     if (column.label === '日目标') return canSave.value ? '可保存' : '待对齐'
     return ''
@@ -489,6 +482,26 @@ onMounted(loadWorkbench)
   border: 1px solid var(--el-border-color);
   border-radius: 6px;
   background: var(--el-bg-color);
+}
+
+.reserved-metric-panel {
+  margin-top: 14px;
+  border-top: 1px solid var(--el-border-color);
+}
+
+.reserved-metric-panel :deep(.el-collapse-item__header) {
+  gap: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.reserved-metric-tag {
+  margin-left: 4px;
+}
+
+.reserved-metric-summary,
+.reserved-metric-table {
+  margin-bottom: 12px;
 }
 
 .validation-strip {

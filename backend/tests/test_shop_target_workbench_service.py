@@ -57,8 +57,11 @@ def test_shop_workbench_response_includes_standard_name_alias_and_shop_id():
     assert result.shops[0].standard_name == "Standard Shop"
     assert "standard-shop" in result.shops[0].aliases
     shop_query = db.execute.await_args_list[1].args[0]
-    assert "shop_accounts" in str(shop_query)
-    assert "enabled" in str(shop_query)
+    shop_query_text = str(shop_query.compile(compile_kwargs={"literal_binds": True}))
+    assert "shop_accounts" in shop_query_text
+    assert "enabled" in shop_query_text
+    assert "business_role" in shop_query_text
+    assert "operating_store" in shop_query_text
 
 
 def test_shop_workbench_prefers_dim_shop_id_when_account_shop_id_is_stale():
@@ -162,7 +165,7 @@ def test_shop_workbench_prefers_period_scoped_shop_rows_when_legacy_exists():
     assert round(result.shops[0].ratio, 6) == round(273520.0 / 400000.0, 6)
 
 
-def test_apply_shop_workbench_creates_shop_and_daily_breakdowns_then_syncs_projection():
+def test_apply_shop_workbench_creates_zero_order_targets_for_a_new_month():
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[_ScalarsResult([]), None])
     db.add = AsyncMock()
@@ -212,6 +215,12 @@ def test_apply_shop_workbench_creates_shop_and_daily_breakdowns_then_syncs_proje
     assert service.cleanup_projection.await_count == 1
     assert service.sync_projection.await_count == 1
     assert db.commit.await_count == 1
+    assert target.target_quantity == 0
+    assert all(
+        getattr(obj, "target_quantity", 0) == 0
+        for obj in added_objects
+        if getattr(obj, "breakdown_type", None) in {"time", "shop", "shop_time"}
+    )
 
 
 def test_apply_shop_workbench_persists_settlement_profit_targets():
@@ -259,6 +268,79 @@ def test_apply_shop_workbench_persists_settlement_profit_targets():
     assert shop_breakdown.target_profit_basis_amount == 180.0
 
 
+def test_apply_shop_workbench_preserves_existing_order_targets():
+    month_start = date(2026, 3, 1)
+    month_end = date(2026, 3, 31)
+    target = SimpleNamespace(
+        id=77,
+        target_amount=100.0,
+        target_quantity=300,
+        target_profit_amount=0.0,
+        target_profit_basis_amount=10.0,
+        weekday_ratios={"1": 1.0},
+        status="active",
+    )
+    existing_breakdowns = [
+        SimpleNamespace(
+            breakdown_type="time",
+            period_start=month_start,
+            period_end=month_start,
+            target_quantity=10,
+        ),
+        SimpleNamespace(
+            breakdown_type="shop",
+            platform_code="shopee",
+            shop_id="SHP-1",
+            period_start=month_start,
+            period_end=month_end,
+            target_quantity=300,
+        ),
+        SimpleNamespace(
+            breakdown_type="shop_time",
+            platform_code="shopee",
+            shop_id="SHP-1",
+            period_start=month_start,
+            period_end=month_start,
+            target_quantity=10,
+        ),
+    ]
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        _ScalarsResult([target]),
+        _ScalarsResult(existing_breakdowns),
+        None,
+    ])
+    db.add = AsyncMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    service = ShopTargetWorkbenchService(db)
+    service.cleanup_projection = AsyncMock(return_value={"deleted": 0, "errors": []})
+    service.sync_projection = AsyncMock(return_value={"synced": 1, "errors": []})
+    request = ShopTargetWorkbenchApplyRequest(
+        year_month="2026-03",
+        company_target_amount=200.0,
+        company_target_quantity=999,
+        company_target_profit_basis_amount=20.0,
+        weekday_ratios={"1": 1.0},
+        shops=[ShopTargetWorkbenchShopInput(
+            platform_code="shopee",
+            shop_id="SHP-1",
+            ratio=1.0,
+            target_amount=200.0,
+            target_quantity=999,
+            target_profit_basis_amount=20.0,
+        )],
+    )
+
+    asyncio.run(service.apply(request, username="admin"))
+
+    added = [call.args[0] for call in db.add.call_args_list]
+    assert target.target_quantity == 300
+    assert next(item for item in added if item.breakdown_type == "time").target_quantity == 10
+    assert next(item for item in added if item.breakdown_type == "shop").target_quantity == 300
+    assert next(item for item in added if item.breakdown_type == "shop_time").target_quantity == 10
+
+
 def test_find_month_target_uses_latest_updated_record_when_month_has_multiple_versions():
     older = SimpleNamespace(id=1, updated_at=datetime(2026, 3, 1, tzinfo=timezone.utc))
     latest = SimpleNamespace(id=2, updated_at=datetime(2026, 3, 15, tzinfo=timezone.utc))
@@ -285,3 +367,49 @@ def test_deactivate_older_month_targets_keeps_latest_month_version_only():
     assert current.status == "active"
     assert older.status == "inactive"
     service.cleanup_projection.assert_awaited_once_with(older.id)
+
+
+def test_shop_workbench_allows_order_target_totals_to_differ_from_company_target():
+    request = ShopTargetWorkbenchApplyRequest(
+        year_month="2026-03",
+        company_target_amount=100.0,
+        company_target_quantity=1000,
+        company_target_profit_basis_amount=10.0,
+        shops=[
+            ShopTargetWorkbenchShopInput(
+                platform_code="shopee",
+                shop_id="SHP-1",
+                ratio=1.0,
+                target_amount=100.0,
+                target_quantity=1,
+                target_profit_basis_amount=10.0,
+            )
+        ],
+    )
+
+    ShopTargetWorkbenchService(AsyncMock())._validate_request(request)
+
+
+def test_copy_previous_month_does_not_copy_order_targets():
+    service = ShopTargetWorkbenchService(AsyncMock())
+    service.get_workbench = AsyncMock(return_value=SimpleNamespace(
+        company_target_amount=100.0,
+        company_target_quantity=1000,
+        company_target_profit_basis_amount=10.0,
+        weekday_ratios={"1": 1.0},
+        shops=[SimpleNamespace(
+            platform_code="shopee",
+            shop_id="SHP-1",
+            ratio=1.0,
+            target_amount=100.0,
+            target_quantity=1000,
+            target_profit_basis_amount=10.0,
+        )],
+    ))
+    service.apply = AsyncMock(return_value=SimpleNamespace(target_id=1))
+
+    asyncio.run(service.copy_prev_month("2026-04", username="admin"))
+
+    request = service.apply.await_args.args[0]
+    assert request.company_target_quantity == 0
+    assert request.shops[0].target_quantity == 0
