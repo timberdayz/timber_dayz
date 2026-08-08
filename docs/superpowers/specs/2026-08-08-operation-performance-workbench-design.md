@@ -28,7 +28,7 @@
 | --- | --- |
 | 月度工作台 | 保留 `/target-management/operation` 路由，将“新建运营目标”改为按月份获取和保存完整指标清单。 |
 | 指标范围 | 默认全店统一；各店存在特殊规则时，后续通过 `TargetBreakdown` 覆盖该指标的全局值。 |
-| 总满分 | 当月所有启用指标的 `max_score` 之和必须等于绩效配置 `operation_max_score`，当前为 20。 |
+| 总满分 | 当月所有启用指标的 `max_score` 之和必须等于按目标月份解析的绩效配置 `operation_max_score`，当前为 20。 |
 | 复制上月 | 复制启用状态、目标值、满分、罚分规则和全店范围；清空 `achieved_value` 与 `manual_score_value`。 |
 | 保存语义 | 当前月份已存在的指标不被复制覆盖；接口返回新增数、跳过数和缺失来源提示。 |
 | 个人绩效 | 店铺运营分仍经由正式店铺绩效继承到个人绩效；个人输入项继续是独立的直接来源。 |
@@ -84,7 +84,7 @@
 
 ### 指标目录
 
-新增后端受控的运营指标目录，作为前端唯一来源，不再由 Vue 页面硬编码。首批沿用现有业务指标：
+新增后端受控的运营指标目录，作为前端唯一来源，不再由 Vue 页面硬编码。目录由版本化 Python 模块 `operation_metric_catalog` 提供整数 `catalog_version`；每次变更递增版本，并声明新增、保留和退役代码。首批沿用现有业务指标：
 
 - `customer_satisfaction`：客户满意度，越高越好。
 - `complaint_count`：客诉，越低越好。
@@ -93,7 +93,7 @@
 - `exam_score`：考试，越高越好。
 - `manual_other`：其他人工项，人工评分。
 
-目录定义每项的显示名、方向、是否支持罚分、是否使用人工评分和默认分值。每月启用项与分值仍由业务用户配置；目录本身不可在本期页面自由增删。
+目录定义每项的显示名、方向、是否支持罚分、是否使用人工评分和默认分值。每月启用项与分值仍由业务用户配置；目录本身不可在本期页面自由增删。复制时，只复制当前目录仍允许的指标；已退役代码跳过并返回逐项原因。历史实例永远按保存的目录版本和字段快照展示及计算，不按新目录重解释。
 
 ### 数据模型
 
@@ -105,17 +105,24 @@
 - `achieved_value` 与 `manual_score_value` 在尚未录入结果时保持 `NULL`，不能以 `0` 代替缺失。
 - 新增 `is_enabled` 布尔字段。`status` 继续只表达记录生命周期（`active`、`completed`、`cancelled`），不能复用为指标是否参加当月评分。禁用项保留其配置和审计记录，但不复制计算、不参与满分校验和汇总；再次启用复用同一指标行。
 - 新增 `metric_catalog_version`。每个工作台实例继续快照保存 `metric_code`、`metric_name`、`metric_direction` 和具体规则，后续目录改名、调整方向或默认规则不得重解释历史月份。
+- 新增 `performance_config_id` 和 `performance_config_updated_at`。它们记录该月工作台首次保存时，按该目标月份解析出的有效绩效配置版本；不允许用系统“当前配置”代替按月解析。
 
 工作台运营记录必须使用自然月首日和末日作为 `period_start`、`period_end`，禁止跨月。迁移以该约束和 PostgreSQL partial unique index 防止同一月份、同一指标重复创建全店基线记录：`(period_start, metric_code)`，条件为 `target_type='operation' AND scope_type='shop'`。该索引覆盖启用和禁用行，保证“未配置”“已禁用”和“已取消”不会产生重复基线。
 
+迁移会先把历史 `target_type=operation AND scope_type IS NULL` 规范化为 `scope_type='shop'`，旧 CRUD 对运营目标也强制写入并校验该值。数据库增加运营行约束：运营目标必须有 `metric_code`、合法 `metric_direction` 和自然月周期；从而不能用空 scope 或跨月记录绕过唯一索引。
+
 迁移前必须审计历史重复记录。选定规范记录后，先将关联 `TargetBreakdown` 重新归属到规范记录，再将重复记录归档为 `cancelled`；不得只按最新更新时间删除或丢失店铺覆盖数据。
+
+运营指标的店铺覆盖仅允许 `breakdown_type='shop'`，不支持 `shop_time` 日级覆盖。增加唯一约束 `(target_id, breakdown_type, platform_code, shop_id, period_start, period_end)`；同一指标同一店铺在同一自然月只能有一条覆盖。覆盖行的 `target_value`、`achieved_value`、`manual_score_value` 为 `NULL` 时表示继承全店基线，至少一个字段必须显式覆盖才允许保存。迁移重挂 `TargetBreakdown` 前先合并或人工处置冲突行，禁止依赖无排序字典覆盖。
 
 为区分个人绩效“真实零分”与“未计算”，扩展 `c_class.employee_performance`：
 
-- `calculation_status`：`complete`、`pending_store_performance`、`pending_personal_input`。
-- `performance_source_type`：`personal_inputs`、`shop_inherited`、`pending`。
+- `calculation_status`：`complete`、`pending_store_performance`、`pending_personal_input`、`historical_unknown`。
+- `performance_source_type`：`personal_inputs`、`shop_inherited`、`pending`、`historical`。
 
-非 `complete` 行的 `performance_score` 改为可空并写入 `NULL`，不能以 0 作为占位。历史行通过迁移标识为 `historical_unknown` 或按可验证来源回填；不修改已经结算的分数值。
+对未锁定月份，非 `complete` 行的 `performance_score` 改为可空并写入 `NULL`，不能以 0 作为占位。已结算月份的历史行标识为 `historical_unknown` 与 `historical`，保留原有非空分数以保证审计可追溯，但不重新排名、不参与工资或新的月结计算；历史薪资与快照仍是唯一结算依据。
+
+`a_class.employee_performance_inputs` 同步迁移：非人工输入的 `achieved_value` 改为可空，人工输入的 `manual_score_value` 改为可空；相应 Pydantic 创建/更新契约不再将缺失值默认写为 0。个人输入的可计算性规则为：人工项必须有人工分；`higher_better` 必须有 `target_value > 0` 与实际值；`lower_better` 允许 `target_value = 0`，实际值为 0 得满分、实际值大于 0 的基础分为 0。罚分和运营单项得分的下限均为 0，运营汇总分下限也为 0，不能产生负运营分或违反店铺总分非负约束。
 
 ### API
 
@@ -127,6 +134,8 @@
 | `PUT /api/targets/operation-workbench` | 原子保存当月全部指标配置与录入结果。 |
 | `POST /api/targets/operation-workbench/copy-prev-month?year_month=YYYY-MM` | 从上月创建当前月缺失指标，保留当月已有编辑。 |
 | `GET /api/targets/operation-metric-catalog` | 返回受控指标目录；工作台接口也可内嵌该目录。 |
+
+工作台读取和保存必须复用绩效重算的“按 `year_month` 解析有效绩效配置”服务。读取响应返回 `performance_config_id`、`performance_config_updated_at` 和 `operation_max_score`；保存请求必须回传这两个版本值。服务端重新按月份解析，配置 ID 或更新时间不一致时返回 409，要求用户刷新并按新分值重新分配。工作台实例保存对应配置快照，绩效重算同时校验该快照与当月有效配置一致，避免跨配置生效月把 20 分写入错误月份。
 
 复制规则：
 
@@ -142,12 +151,16 @@
 2. `PUT` 必须带回完整受控目录；缺少的 `metric_code` 直接返回 400，不能隐式删除或禁用已有行。显式 `is_enabled=false` 才是禁用操作。
 3. 每个已有指标携带 `updated_at` 作为乐观并发版本；版本不匹配或复制与保存产生冲突时返回 409，前端重新加载后再提交。
 4. 复制和保存都在一个事务内执行；数据库唯一索引负责并发复制时的去重。
-5. 启用指标的满分必须大于 0；所有启用项满分之和必须等于当前绩效配置运营满分。
+5. 启用指标的满分必须大于 0；所有启用项满分之和必须等于请求中、且由服务端按目标月份重新确认的绩效配置运营满分。
 6. 非人工项可在月初只保存目标值，实际值为空时状态为 `pending_actual`；绩效重算不会把它当作 0 分。
 7. 人工项未录入人工分时状态为 `pending_manual_score`。
 8. 已锁定月份禁止保存与复制。
 
 锁月保护必须覆盖新工作台 API 和保留的 `/api/targets` 运营目标 CRUD。任何 `target_type=operation` 的创建、更新、删除、取消、重新启用和复制在工资期锁定后统一返回 409；非运营历史 CRUD 不在本功能中改变。
+
+新增 `PerformanceReadinessService.assert_month_performance_ready(year_month)`，它是收入、薪资和月结的唯一预检入口。其结算人口定义为同月的并集：有效员工店铺分配、有效个人绩效输入、以及薪资生成当前会纳入的薪资结构和既有工资记录员工。其店铺集合定义为该人口挂靠、且在当月店铺绩效源数据中的有效经营店铺。该服务验证每个结算人口均有 `calculation_status=complete`，并验证集合内每个店铺绩效为正式结果；失败时在任何写入前返回 409，附带 pending 员工、待就绪店铺与原因。
+
+`HRIncomeCalculationService`、单人或全月 `PayrollGenerationService`、月结快照构建和月结审批都必须调用同一预检，不能各自推导员工或店铺集合。
 
 ### 店铺绩效计算
 
@@ -163,7 +176,7 @@
 
 店铺正式绩效仍需同时满足：运营维度已计算、店铺利润目标大于 0、当月利润基准已锁定。运营工作台不绕过这些结算控制。
 
-本期采用现有的全月结算门槛：参与该月店铺绩效计算的所有有效店铺都必须正式就绪，才执行员工收入、薪资生成和月结快照。只要有一个店铺的运营覆盖或其他前提待录入，整月员工绩效均为 pending，不能采取“仅对部分正式店铺的员工发薪”的局部结算策略。
+本期采用现有的全月结算门槛：参与该月店铺绩效计算的所有有效店铺都必须正式就绪，才允许执行员工收入、薪资生成和月结快照。只要有一个店铺的运营覆盖或其他前提待录入，整月结算被阻断，不能采取“仅对部分正式店铺的员工发薪”的局部结算策略。
 
 ### 个人绩效与排名
 
@@ -173,11 +186,11 @@
 个人绩效输入项 > 正式店铺绩效聚合 > pending
 ```
 
-若无个人输入且挂店没有正式店铺绩效，写入 `calculation_status=pending_store_performance`，不再伪装为有效的 `0.0`。若存在个人输入但任一启用输入缺少可计算值，写入 `pending_personal_input`；个人输入 API 同样需要以 `NULL` 表达未录入实际值，不能使用默认 0 混淆状态。
+个人输入优先级定义为个人分的来源优先级，不受店铺就绪状态覆盖：个人输入完整时，该员工可写入 `calculation_status=complete` 和 `performance_source_type=personal_inputs`；即使其他店铺待录入，也可以在个人绩效页看到该结果。若无个人输入且挂店没有正式店铺绩效，写入 `pending_store_performance`，不再伪装为有效的 `0.0`。若存在个人输入但任一启用输入缺少可计算值，写入 `pending_personal_input`；个人输入 API 同样需要以 `NULL` 表达未录入实际值，不能使用默认 0 混淆状态。
 
 个人绩效接口应返回状态、来源和阻断原因；前端显示“未计算”，排名显示 `—`。排名 SQL、总数、分页和排序只以 `calculation_status=complete` 的人员为排名池；pending 人员可在结果列表的非排名区展示，但不能挤占 complete 人员的分页或名次。只有 `complete` 行进入工资系数、薪资生成和月结绩效快照。真实计算得到的 0 分仍显示 `0.0` 并参与排名。
 
-薪资生成与月结服务必须在任何 active 员工绩效为非 `complete` 时返回未就绪错误，不得将空分数转换为 0。月结快照同样拒绝生成，直到整月门槛满足；这与绩效重算端的全月门槛保持一致。
+薪资生成与月结服务必须通过 `PerformanceReadinessService` 在结算人口中发现任意非 `complete` 行时返回未就绪错误，不得将空分数转换为 0。也就是说，个人输入完整的员工可以在页面显示 `complete`，但只要同月仍有其他结算人口 pending，整月工资和月结快照依然拒绝生成，直到全月门槛满足；这与绩效重算端的全月门槛保持一致。
 
 ## 前端交互
 
@@ -204,7 +217,7 @@
 1. 保留现有 `/api/targets` CRUD，供历史页面与兼容调用使用；新页面只使用工作台 API。运营类型的旧 CRUD 必须复用工作台的锁月校验并在锁定月返回 409。
 2. 启动迁移前审计历史重复的 `(month, metric_code)` 运营记录；明确采用最新记录或人工处理规则。
 3. `operation_score` 的旧 `score_details` 保持可读；新结果增加 `items` 字段，不破坏旧详情渲染。
-4. 旧个人绩效行没有来源状态时，在展示层降级为“历史结果”，不自动断言为正式可排名结果；已结算快照保持原样。
+4. 迁移先识别已结算月份与其快照，再将对应个人绩效行标记为 `historical_unknown/historical` 并保留原分数；这些行显示“历史冻结”，不重新排名、不参与新的工资或月结。之后才处理未锁定月份：能按输入或正式店铺验证来源的行回填为 `complete`，其余标为 pending 并将占位 0 改为 `NULL`。已结算快照保持原样。
 
 ## 验收标准
 
@@ -218,6 +231,12 @@
 8. 待计算员工不能生成工资或月结绩效快照；调用方得到明确的未就绪错误。
 9. 同页同时存在 complete 和 pending 员工时，complete 人员的分页、总数和名次不受 pending 人员污染。
 10. 并发复制或保存时没有重复指标或静默覆盖；冲突请求返回 409。
+11. 绩效配置在相邻月份变更运营满分时，工作台按所选月份返回正确配置；旧配置版本提交返回 409，不能以错误满分保存。
+12. 某员工个人输入完整、其他员工或店铺仍待录入时：该员工个人页为 complete；整月工资和月结仍被阻断；无员工以伪 0 分进入下游。
+13. 已结算历史月份保留历史分数并显示“历史冻结”，不因迁移变为 `NULL`，也不重排历史名次。
+14. 个人输入的人工项缺人工分、非人工项缺实际值、`higher_better` 目标非正值时均为 pending；`lower_better` 的零目标在实际为 0 时得满分、实际大于 0 时基础分为 0。
+15. 运营店铺覆盖在同月同指标同店铺不可重复；`shop_time` 覆盖被拒绝；覆盖字段为空时继承全店基线。
+16. 仅有个人输入、无店铺分配的员工也进入统一预检；收入重算、单人/全月薪资生成、月结快照和审批在任何写入前得到相同的 409 未就绪结论。
 
 ## 验证策略
 
