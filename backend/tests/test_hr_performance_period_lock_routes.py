@@ -85,19 +85,40 @@ def test_performance_calculation_rejects_confirmed_payroll_month(monkeypatch):
         def __init__(self, _db):
             pass
 
+        async def get_month_lock_status(self, **_kwargs):
+            return {
+                "period": "2025-07",
+                "is_locked": True,
+                "can_recalculate": False,
+                "locked_record_count": 3,
+                "locked_statuses": ["paid"],
+                "reason": "payroll is paid",
+            }
+
         async def assert_month_mutable(self, **_kwargs):
             raise PayrollPeriodLockedError("2025-07 工资单已确认，请在下一工资月份补录。")
 
     monkeypatch.setattr(module, "PayrollPeriodLockService", _LockedMonthService)
 
+    db = SimpleNamespace(rollback=AsyncMock(), execute=AsyncMock())
+
     response = asyncio.run(
         module.calculate_performance_scores(
             period="2025-07",
             config_id=None,
-            db=SimpleNamespace(rollback=AsyncMock()),
+            db=db,
             _current_user=SimpleNamespace(),
         )
     )
 
     assert response.status_code == 409
-    assert json.loads(response.body.decode("utf-8"))["success"] is False
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is False
+    assert body["message"] == "payroll is paid"
+    assert body["data"] == {
+        "error_code": "PAYROLL_PERIOD_LOCKED",
+        "period": "2025-07",
+        "locked_record_count": 3,
+        "locked_statuses": ["paid"],
+    }
+    db.execute.assert_not_awaited()

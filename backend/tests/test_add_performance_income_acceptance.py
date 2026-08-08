@@ -33,6 +33,22 @@ def _stub_valid_shop_key_loader(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _allow_recalculation_for_acceptance_tests(monkeypatch):
+    class _UnlockedPayrollPeriodLockService:
+        def __init__(self, _db):
+            pass
+
+        async def assert_month_mutable(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        performance_management_module,
+        "PayrollPeriodLockService",
+        _UnlockedPayrollPeriodLockService,
+    )
+
+
 def _json_body(resp) -> dict:
     """从 JSONResponse 读取 JSON 内容。"""
     return json.loads(resp.body.decode("utf-8"))

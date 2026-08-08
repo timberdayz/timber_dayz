@@ -27,6 +27,9 @@ class _Result:
             return self._scalar_value
         return self._rows[0] if self._rows else None
 
+    def scalar_one(self):
+        return self._scalar_value
+
     def scalars(self):
         return self
 
@@ -102,12 +105,32 @@ async def test_performance_read_endpoints_require_login_and_read_permission():
         response = await client.get("/api/performance/config")
     assert response.status_code == 401
 
+    async with AsyncClient(
+        transport=ASGITransport(app=_app_with_overrides(_EmptyDb())),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/api/performance/period-status",
+            params={"period": "2025-01"},
+        )
+    assert response.status_code == 401
+
     no_read_user = _user("investor", permissions=["business-overview"])
     async with AsyncClient(
         transport=ASGITransport(app=_app_with_overrides(_EmptyDb(), no_read_user)),
         base_url="http://test",
     ) as client:
         response = await client.get("/api/performance/config")
+    assert response.status_code == 403
+
+    async with AsyncClient(
+        transport=ASGITransport(app=_app_with_overrides(_EmptyDb(), no_read_user)),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/api/performance/period-status",
+            params={"period": "2025-01"},
+        )
     assert response.status_code == 403
 
     read_user = _user("manager", permissions=["performance:read"])
@@ -117,8 +140,69 @@ async def test_performance_read_endpoints_require_login_and_read_permission():
     ) as client:
         response = await client.get("/api/performance/config")
         assert response.status_code == 200
+        response = await client.get(
+            "/api/performance/period-status",
+            params={"period": "2025-01"},
+        )
+        assert response.status_code == 200
         response = await client.get("/api/performance/scores", params={"period": "2025-01"})
         assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_performance_period_status_returns_locked_summary(monkeypatch):
+    class _StatusService:
+        def __init__(self, _db):
+            pass
+
+        async def get_month_lock_status(self, *, year_month):
+            assert year_month == "2026-07"
+            return {
+                "period": year_month,
+                "is_locked": True,
+                "can_recalculate": False,
+                "locked_record_count": 3,
+                "locked_statuses": ["paid"],
+                "reason": "payroll is paid",
+            }
+
+    monkeypatch.setattr(performance_module, "PayrollPeriodLockService", _StatusService)
+    user = _user("manager", permissions=["performance:read"])
+
+    async with AsyncClient(
+        transport=ASGITransport(app=_app_with_overrides(_EmptyDb(), user)),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/api/performance/period-status",
+            params={"period": "2026-07"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "period": "2026-07",
+        "is_locked": True,
+        "can_recalculate": False,
+        "locked_record_count": 3,
+        "locked_statuses": ["paid"],
+        "reason": "payroll is paid",
+    }
+
+
+@pytest.mark.asyncio
+async def test_performance_period_status_rejects_invalid_month_format():
+    user = _user("manager", permissions=["performance:read"])
+
+    async with AsyncClient(
+        transport=ASGITransport(app=_app_with_overrides(_EmptyDb(), user)),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/api/performance/period-status",
+            params={"period": "July-2026"},
+        )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -164,7 +248,7 @@ def test_active_config_query_has_stable_tiebreakers():
             self.first_stmt = None
 
         async def execute(self, stmt, *_args, **_kwargs):
-            if self.first_stmt is None:
+            if self.first_stmt is None and "EXISTS" not in str(stmt):
                 self.first_stmt = stmt
             return _Result(rows=[], scalar_value=None)
 
@@ -182,6 +266,7 @@ def test_active_config_query_has_stable_tiebreakers():
     assert any("effective_from" in clause for clause in order_by)
     assert any("updated_at" in clause for clause in order_by)
     assert any("id" in clause for clause in order_by)
+    assert db.first_stmt._limit_clause is not None
 
 
 def _json_body(resp) -> dict:
@@ -197,9 +282,11 @@ class _CalcDb:
         self.commit = AsyncMock()
         self.rollback = AsyncMock()
 
-    async def execute(self, *_args, **_kwargs):
+    async def execute(self, statement, *_args, **_kwargs):
         self.execute_calls += 1
-        if self.execute_calls == 1:
+        if "EXISTS" in str(statement):
+            return _Result(scalar_value=False)
+        if "performance_config" in str(statement):
             return _Result(scalar_value=self.config)
         return _Result(rows=[], scalar_value=None)
 

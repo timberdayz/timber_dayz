@@ -20,7 +20,8 @@
     "test:my-income-view-model": "node --test scripts/myIncomeViewModel.test.mjs",
     "test:target-route-split": "node --test scripts/targetRouteSplit.test.mjs",
     "test:operation-target-formula": "node --test scripts/operationTargetFormula.test.mjs",
-    "test:performance-route-split": "node --test scripts/performanceRouteSplit.test.mjs"
+    "test:performance-route-split": "node --test scripts/performanceRouteSplit.test.mjs",
+    "test:performance-payroll-lock": "node --test scripts/performancePayrollLock.test.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.1.0",

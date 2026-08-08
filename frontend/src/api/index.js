@@ -2127,6 +2127,10 @@ export default {
     return await this._get('/performance/scores', { params })
   },
 
+  async getPerformancePeriodStatus(period) {
+    return await this._get('/performance/period-status', { params: { period } })
+  },
+
   // 获取店铺绩效详情
   async getShopPerformanceDetail(platformCode, shopId, period) {
     return await this._get(`/performance/scores/${shopId}`, {

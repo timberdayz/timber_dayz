@@ -78,6 +78,7 @@ class ErrorCode(IntEnum):
     # 2310-2319: 绩效计算
     PERF_CALC_NOT_READY = 2310
     PERF_CONFIG_NOT_FOUND = 2311
+    PAYROLL_PERIOD_LOCKED = 2312
     
     # 2400-2499: 数据同步错误
     DATA_SYNC_FAILED = 2401
@@ -189,6 +190,7 @@ def get_error_message(code: int, default_message: str = "操作失败") -> str:
         ErrorCode.TARGET_NOT_FOUND: "目标不存在",
         ErrorCode.PERF_CALC_NOT_READY: "绩效计算能力未就绪",
         ErrorCode.PERF_CONFIG_NOT_FOUND: "考核周期内无可用绩效配置",
+        ErrorCode.PAYROLL_PERIOD_LOCKED: "工资月份已锁定",
         
         # 数据错误
         ErrorCode.DATA_VALIDATION_FAILED: "数据验证失败",
@@ -211,6 +213,5 @@ def get_error_message(code: int, default_message: str = "操作失败") -> str:
     }
     
     return error_messages.get(code, default_message)
-
 
 

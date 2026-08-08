@@ -54,6 +54,7 @@ from backend.schemas.performance import (
     PerformanceConfigCreateRequest,
     PerformanceConfigUpdateRequest,
     PerformanceConfigResponse,
+    PerformancePeriodStatusResponse,
     PerformanceScoreResponse,
 )
 from backend.dependencies.auth import get_current_user, require_admin
@@ -1519,6 +1520,23 @@ async def list_performance_scores(
         )
 
 
+@router.get("/period-status", response_model=PerformancePeriodStatusResponse)
+async def get_performance_period_status(
+    period: str = Query(
+        ...,
+        pattern=r"^\d{4}-\d{2}$",
+        description="考核周期,如'2025-01'",
+    ),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: Any = Depends(_require_performance_read),
+):
+    return success_response(
+        data=await PayrollPeriodLockService(db).get_month_lock_status(
+            year_month=period,
+        )
+    )
+
+
 @router.get("/scores/{shop_id}", response_model=Dict[str, Any])
 async def get_shop_performance(
     request: Request,
@@ -1625,13 +1643,15 @@ async def calculate_performance_scores(
     - 写入 c_class.performance_scores（按 platform_code+shop_id+period upsert）
     """
     try:
-        await PayrollPeriodLockService(db).assert_month_mutable(year_month=period)
-        # 按考核周期校验配置是否存在(契约: 无配置时返回 404 + PERF_CONFIG_NOT_FOUND)
+        # Validate format before querying the payroll lock for the requested period.
         period_start = datetime.strptime(period, "%Y-%m").date().replace(day=1)
         if period_start.month == 12:
             period_end = period_start.replace(year=period_start.year + 1, month=1, day=1) - timedelta(days=1)
         else:
             period_end = period_start.replace(month=period_start.month + 1, day=1) - timedelta(days=1)
+
+        await PayrollPeriodLockService(db).assert_month_mutable(year_month=period)
+        # 按考核周期校验配置是否存在(契约: 无配置时返回 404 + PERF_CONFIG_NOT_FOUND)
 
         if config_id:
             result = await db.execute(
@@ -1647,7 +1667,7 @@ async def calculate_performance_scores(
                         PerformanceConfig.effective_to.is_(None),
                         PerformanceConfig.effective_to >= period_start
                     )
-                ).order_by(*_performance_config_ordering())
+                ).order_by(*_performance_config_ordering()).limit(1)
             )
             config = result.scalar_one_or_none()
 
@@ -2013,11 +2033,20 @@ async def calculate_performance_scores(
         raise
     except PayrollPeriodLockedError as e:
         await db.rollback()
+        lock_status = await PayrollPeriodLockService(db).get_month_lock_status(
+            year_month=period,
+        )
         return error_response(
-            code=ErrorCode.PARAMETER_INVALID,
-            message=str(e),
-            error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
-            detail=str(e),
+            code=ErrorCode.PAYROLL_PERIOD_LOCKED,
+            message=lock_status["reason"],
+            error_type=get_error_type(ErrorCode.PAYROLL_PERIOD_LOCKED),
+            detail=lock_status["reason"],
+            data={
+                "error_code": "PAYROLL_PERIOD_LOCKED",
+                "period": period,
+                "locked_record_count": lock_status["locked_record_count"],
+                "locked_statuses": lock_status["locked_statuses"],
+            },
             status_code=409,
         )
     except ValueError as e:
