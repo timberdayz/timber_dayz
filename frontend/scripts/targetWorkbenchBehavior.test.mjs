@@ -13,25 +13,27 @@ import {
   splitShopTargetsByPercent
 } from '../src/domains/business/views/target/shopTargetUtils.js'
 
-test('shop ratio split uses entered percent values and exposes unresolved totals', () => {
+test('shop ratio split only recalculates sales and settlement profit targets', () => {
   const shops = [
-    { shop_id: 'A', ratio_percent: 30 },
-    { shop_id: 'B', ratio_percent: 30 }
+    { shop_id: 'A', ratio_percent: 30, target_quantity: 30 },
+    { shop_id: 'B', ratio_percent: 30, target_quantity: 70 }
   ]
 
-  const result = splitShopTargetsByPercent(shops, 1000, 100)
+  const result = splitShopTargetsByPercent(shops, 1000, 180)
   const totals = calculateShopTargetTotals(result)
 
   assert.equal(totals.ratioPercent, 60)
   assert.equal(totals.amount, 600)
-  assert.equal(totals.quantity, 60)
+  assert.equal(totals.profitBasisAmount, 108)
+  assert.equal('quantity' in totals, false)
+  assert.deepEqual(result.map((shop) => shop.target_quantity), [30, 70])
 })
 
-test('shop ratio split keeps exact monthly totals when ratio reaches 100 percent', () => {
+test('shop ratio split keeps exact sales and settlement profit totals when ratio reaches 100 percent', () => {
   const shops = [
-    { shop_id: 'A', ratio_percent: 33.33 },
-    { shop_id: 'B', ratio_percent: 33.33 },
-    { shop_id: 'C', ratio_percent: 33.34 }
+    { shop_id: 'A', ratio_percent: 33.33, target_quantity: 10 },
+    { shop_id: 'B', ratio_percent: 33.33, target_quantity: 20 },
+    { shop_id: 'C', ratio_percent: 33.34, target_quantity: 30 }
   ]
 
   const result = splitShopTargetsByPercent(shops, 1000, 101)
@@ -39,7 +41,8 @@ test('shop ratio split keeps exact monthly totals when ratio reaches 100 percent
 
   assert.equal(totals.ratioPercent, 100)
   assert.equal(totals.amount, 1000)
-  assert.equal(totals.quantity, 101)
+  assert.equal(totals.profitBasisAmount, 101)
+  assert.deepEqual(result.map((shop) => shop.target_quantity), [10, 20, 30])
 })
 
 test('shop ratio split keeps settlement profit targets aligned with the company target', () => {
@@ -50,7 +53,6 @@ test('shop ratio split keeps settlement profit targets aligned with the company 
       { shop_id: 'C', ratio_percent: 33.34 }
     ],
     1000,
-    101,
     180
   )
   const totals = calculateShopTargetTotals(result)
@@ -71,17 +73,33 @@ test('shop target workbench exposes settlement profit target inputs and target m
   assert.equal(source.includes('target_profit_basis_amount'), true)
 })
 
-test('daily preview renders one calendar item per natural day and reconciles totals', () => {
+test('shop target workbench presents order targets as a read-only reserved metric', () => {
+  const source = readFileSync(
+    new URL('../src/domains/business/views/target/TargetShopWorkbench.vue', import.meta.url),
+    'utf8'
+  )
+
+  assert.equal(source.includes('data-testid="reserved-order-targets"'), true)
+  assert.equal(source.includes('v-model="summary.company_target_quantity"'), false)
+  assert.equal(source.includes('v-model="row.target_quantity"'), false)
+  const saveFunction = source.slice(
+    source.indexOf('async function saveWorkbench()'),
+    source.indexOf('async function copyPrevMonth()')
+  )
+  assert.equal(saveFunction.includes('company_target_quantity'), false)
+  assert.equal(saveFunction.includes('target_quantity'), false)
+})
+
+test('daily preview renders one calendar item per natural day without order targets', () => {
   const rows = buildMonthDailyPreview({
     yearMonth: '2026-02',
     amountTotal: 2800,
-    quantityTotal: 28,
     weekdayRatioPercents: { 1: 16, 2: 16, 3: 16, 4: 16, 5: 16, 6: 10, 7: 10 }
   })
 
   assert.equal(rows.length, 28)
   assert.equal(rows.reduce((sum, row) => sum + row.amount, 0), 2800)
-  assert.equal(rows.reduce((sum, row) => sum + row.quantity, 0), 28)
+  assert.equal(rows.every((row) => !Object.hasOwn(row, 'quantity')), true)
   assert.equal(rows[0].date, '2026-02-01')
 })
 
