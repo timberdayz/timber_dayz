@@ -445,6 +445,7 @@ class HRIncomeCalculationService:
                 .where(
                     SalaryStructure.status == "active",
                     SalaryStructure.employee_code.in_(employee_codes),
+                    SalaryStructure.effective_date <= effective_cutoff,
                 )
                 .order_by(
                     SalaryStructure.employee_code,
@@ -455,22 +456,16 @@ class HRIncomeCalculationService:
         ).scalars().all()
 
         ratio_by_employee: Dict[str, float] = {}
-        fallback_by_employee: Dict[str, float] = {}
         for row in rows:
             employee_code = (getattr(row, "employee_code", None) or "").strip()
             if not employee_code:
                 continue
             ratio = self._to_float(getattr(row, "commission_ratio", None), 0.0)
-            if employee_code not in fallback_by_employee:
-                fallback_by_employee[employee_code] = ratio
             if employee_code in ratio_by_employee:
                 continue
             effective_date = self._coerce_date(getattr(row, "effective_date", None))
             if effective_date is not None and effective_date <= effective_cutoff:
                 ratio_by_employee[employee_code] = ratio
-
-        for employee_code, ratio in fallback_by_employee.items():
-            ratio_by_employee.setdefault(employee_code, ratio)
         return ratio_by_employee
 
     async def calculate_month(self, year_month: str, commit: bool = True) -> Dict[str, Any]:
@@ -502,7 +497,29 @@ class HRIncomeCalculationService:
                 .where(EmployeeShopAssignment.year_month == year_month)
             )
         ).scalars().all()
-        if not assignment_rows:
+        input_population_rows = (
+            await self.db.execute(
+                select(EmployeePerformanceInput).where(
+                    EmployeePerformanceInput.year_month == year_month,
+                    EmployeePerformanceInput.status == "active",
+                )
+            )
+        ).scalars().all()
+        salary_population_rows = (
+            await self.db.execute(
+                select(SalaryStructure).where(
+                    SalaryStructure.status == "active",
+                    SalaryStructure.effective_date
+                    <= self._year_month_last_day(year_month),
+                )
+            )
+        ).scalars().all()
+        population_codes = {
+            str(getattr(row, "employee_code", "") or "").strip()
+            for row in [*assignment_rows, *input_population_rows, *salary_population_rows]
+            if str(getattr(row, "employee_code", "") or "").strip()
+        }
+        if not population_codes:
             return {
                 "year_month": year_month,
                 "employee_count": 0,
@@ -520,6 +537,18 @@ class HRIncomeCalculationService:
                 year_month=getattr(row, "year_month", None),
             )
             for row in assignment_rows
+        ]
+        assigned_codes = {
+            str(row.employee_code or "").strip()
+            for row in assignments
+            if str(row.employee_code or "").strip()
+        }
+        employee_rows = [
+            *assignments,
+            *[
+                SimpleNamespace(employee_code=employee_code)
+                for employee_code in sorted(population_codes - assigned_codes)
+            ],
         ]
 
         cfg_rows = (
@@ -544,16 +573,16 @@ class HRIncomeCalculationService:
             year_month, assignments
         )
         attendance_adjustment_by_employee = await self._load_attendance_adjustment_by_employee(
-            year_month, assignments
+            year_month, employee_rows
         )
         manual_adjustment_by_employee = await self._load_manual_adjustment_by_employee(
-            year_month, assignments
+            year_month, employee_rows
         )
         input_score_by_employee, pending_input_employee_codes = await self._load_employee_performance_input_score_by_employee(
-            year_month, assignments
+            year_month, employee_rows
         )
         default_commission_ratio_by_employee = await self._load_default_commission_ratio_by_employee(
-            year_month, assignments
+            year_month, employee_rows
         )
 
         commission_agg: Dict[str, Dict[str, float]] = {}
@@ -624,6 +653,18 @@ class HRIncomeCalculationService:
             comm_rec["commission_amount"] += alloc_profit * ratio
             comm_rec["weighted_rate_num"] += achievement_rate * sales_share
             comm_rec["weighted_rate_den"] += sales_share
+
+        for employee_code in population_codes:
+            performance_agg.setdefault(
+                employee_code,
+                {
+                    "sales_amount": 0.0,
+                    "weighted_rate_num": 0.0,
+                    "weighted_rate_den": 0.0,
+                    "weighted_score_num": 0.0,
+                    "weighted_score_den": 0.0,
+                },
+            )
 
         commission_upserts = 0
         performance_upserts = 0
@@ -733,16 +774,20 @@ class HRIncomeCalculationService:
             if employee_code in input_score_by_employee:
                 performance_score = input_score_by_employee[employee_code]
                 performance_source_type = "personal_inputs"
-            elif employee_code in pending_input_employee_codes:
-                performance_score = None
-                calculation_status = "pending_personal_input"
             elif rec["weighted_score_den"] > 0:
                 performance_score = (
                     rec["weighted_score_num"] / rec["weighted_score_den"]
                 )
+            elif employee_code in pending_input_employee_codes:
+                performance_score = None
+                calculation_status = "pending_personal_input"
             else:
                 performance_score = None
-                calculation_status = "pending_store_performance"
+                calculation_status = (
+                    "pending_store_performance"
+                    if employee_code in assigned_codes
+                    else "pending_personal_input"
+                )
                 performance_source_type = "pending"
             if performance_score is not None:
                 performance_score += self._to_float(

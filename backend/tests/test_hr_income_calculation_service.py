@@ -61,6 +61,107 @@ def test_calculate_month_no_assignments():
     assert result["performance_upserts"] == 0
 
 
+def test_calculate_month_creates_personal_only_performance_without_commission():
+    db = AsyncMock()
+    added = []
+    input_row = SimpleNamespace(
+        employee_code="E_PERSONAL",
+        year_month="2026-03",
+        metric_code="quality",
+        metric_direction="up",
+        target_value=100.0,
+        achieved_value=80.0,
+        max_score=50.0,
+        manual_score_enabled=False,
+        manual_score_value=None,
+        status="active",
+    )
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformanceInput:
+                return _MockResult(rows=[input_row])
+            if entity in {AttendanceRecord, EmployeePerformanceAdjustment}:
+                return _MockResult(rows=[])
+            if entity is SalaryStructure:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+
+    result = asyncio.run(HRIncomeCalculationService(db=db).calculate_month("2026-03"))
+
+    assert result["employee_count"] == 1
+    assert result["commission_upserts"] == 0
+    performance = next(item for item in added if isinstance(item, EmployeePerformance))
+    assert performance.employee_code == "E_PERSONAL"
+    assert performance.actual_sales == 0.0
+    assert performance.achievement_rate == 0.0
+    assert performance.performance_score == pytest.approx(40.0)
+    assert performance.performance_source_type == "personal_inputs"
+
+
+def test_calculate_month_marks_salary_only_employee_pending_without_shop_assignment():
+    db = AsyncMock()
+    added = []
+    salary = SimpleNamespace(employee_code="E_SALARY", status="active")
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformanceInput:
+                return _MockResult(rows=[])
+            if entity is SalaryStructure:
+                return _MockResult(rows=[salary])
+            if entity in {AttendanceRecord, EmployeePerformanceAdjustment}:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=None)
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+    db.commit = AsyncMock()
+
+    result = asyncio.run(HRIncomeCalculationService(db=db).calculate_month("2026-03"))
+
+    assert result["employee_count"] == 1
+    assert result["commission_upserts"] == 0
+    performance = next(item for item in added if isinstance(item, EmployeePerformance))
+    assert performance.performance_score is None
+    assert performance.calculation_status == "pending_personal_input"
+    assert performance.performance_source_type == "pending"
+
+
+def test_default_commission_ratio_ignores_future_salary_structure():
+    db = AsyncMock()
+    future_salary = SimpleNamespace(
+        employee_code="E_FUTURE",
+        commission_ratio=0.5,
+        effective_date="2026-04-01",
+        id=1,
+        status="active",
+    )
+    db.execute = AsyncMock(return_value=_MockResult(rows=[future_salary]))
+
+    ratios = asyncio.run(
+        HRIncomeCalculationService(db=db)._load_default_commission_ratio_by_employee(
+            "2026-03", [SimpleNamespace(employee_code="E_FUTURE")]
+        )
+    )
+
+    assert ratios == {}
+
+
 def test_calculate_month_upsert_writes():
     db = AsyncMock()
     added = []

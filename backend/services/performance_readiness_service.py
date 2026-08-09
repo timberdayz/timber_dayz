@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from calendar import monthrange
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -62,6 +64,10 @@ class PerformanceReadinessService:
         }
 
     async def assert_month_performance_ready(self, year_month: str) -> None:
+        period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+        period_end = period_start.replace(
+            day=monthrange(period_start.year, period_start.month)[1]
+        )
         assignments = (await self.db.execute(select(EmployeeShopAssignment).where(
             EmployeeShopAssignment.year_month == year_month,
             EmployeeShopAssignment.status == "active",
@@ -72,6 +78,7 @@ class PerformanceReadinessService:
         ))).scalars().all()
         salaries = (await self.db.execute(select(SalaryStructure).where(
             SalaryStructure.status == "active",
+            SalaryStructure.effective_date <= period_end,
         ))).scalars().all()
         payrolls = (await self.db.execute(select(PayrollRecord).where(
             PayrollRecord.year_month == year_month,
