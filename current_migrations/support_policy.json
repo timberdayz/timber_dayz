@@ -1,0 +1,9 @@
+{
+  "approved_legacy_sources": [
+    {
+      "legacy_revision": "20260805_payroll_backfill_audit",
+      "schema_fingerprint": "5f27584d2911a7fff4ea659c954f5e8d152f984a9226f8d505acae46d8037578",
+      "baseline_revision": "current_schema_20260805"
+    }
+  ]
+}

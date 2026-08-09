@@ -14,7 +14,7 @@ It expects you to provide a ready-to-connect snapshot database via:
   PROD_SNAPSHOT_DATABASE_URL=postgresql+asyncpg://...  (or postgresql://...)
 
 It will then:
-1) Run Alembic upgrade heads against the snapshot DB
+1) Run the fail-closed current-schema migration entrypoint against the snapshot DB
 2) Run PostgreSQL Dashboard assets bootstrap once (idempotent, lock-safe)
 
 Exit code:
@@ -58,9 +58,9 @@ def main() -> int:
     env.setdefault("AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP", "false")
 
     try:
-        print("[INFO] Rehearsal: alembic upgrade heads on snapshot DB...")
+        print("[INFO] Rehearsal: current-schema migration on snapshot DB...")
         _run(
-            [sys.executable, "-m", "alembic", "upgrade", "heads"],
+            [sys.executable, str(ROOT_DIR / "scripts" / "run_current_schema_migrations.py")],
             env=env,
             cwd=ROOT_DIR,
         )
@@ -81,4 +81,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -16,6 +16,17 @@ from backend.services.cloud_b_class_sync_service import CloudBClassSyncService, 
 from backend.services.cloud_b_class_auto_sync_runtime import CloudBClassAutoSyncRuntime
 
 
+def test_cloud_sync_startup_revision_check_uses_isolated_current_chain():
+    source = Path("backend/services/cloud_b_class_auto_sync_factory.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Config(str(_project_root() / "alembic-current.ini"))' in source
+    assert '"current_migrations"' in source
+    assert "public.current_schema_alembic_version" in source
+    assert "table_name = 'alembic_version'" not in source
+
+
 def test_build_cloud_sync_service_from_env_supports_dry_run(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp")
     monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15433/xihong_erp")

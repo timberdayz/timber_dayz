@@ -117,10 +117,12 @@ services:
       dockerfile: Dockerfile.backend
     container_name: xihong_erp_migrate
     restart: "no"
-    command: alembic upgrade heads
+    command: python /app/scripts/run_current_schema_migrations.py
     environment:
       DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
-      RUN_MIGRATIONS: "1"
+      RUN_MIGRATIONS: "0"
+      CURRENT_SCHEMA_SOURCE_REVISION: ${CURRENT_SCHEMA_SOURCE_REVISION:-}
+      CURRENT_SCHEMA_SOURCE_FINGERPRINT: ${CURRENT_SCHEMA_SOURCE_FINGERPRINT:-}
       APP_ENV: development
     volumes:
       - ./backend:/app/backend

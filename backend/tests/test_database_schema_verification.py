@@ -1,6 +1,13 @@
 from backend.models import database as db_module
 
 
+def test_schema_verifier_uses_isolated_current_migration_chain():
+    source = __import__("pathlib").Path(db_module.__file__).read_text(encoding="utf-8")
+
+    assert 'Config("alembic-current.ini")' in source
+    assert "current_schema_alembic_version" in source
+
+
 def test_expand_existing_table_aliases_adds_unqualified_names_for_schema_tables():
     existing_tables = {
         "core.accounts",

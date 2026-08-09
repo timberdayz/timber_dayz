@@ -77,8 +77,8 @@ def _project_root() -> Path:
 
 
 def _get_code_alembic_heads() -> set[str]:
-    cfg = Config(str(_project_root() / "alembic.ini"))
-    cfg.set_main_option("script_location", str(_project_root() / "migrations"))
+    cfg = Config(str(_project_root() / "alembic-current.ini"))
+    cfg.set_main_option("script_location", str(_project_root() / "current_migrations"))
     script = ScriptDirectory.from_config(cfg)
     return set(script.get_heads())
 
@@ -86,20 +86,10 @@ def _get_code_alembic_heads() -> set[str]:
 def _get_database_alembic_revisions(engine) -> set[str]:
     revisions: set[str] = set()
     with engine.begin() as conn:
-        rows = conn.exec_driver_sql(
-            """
-            SELECT table_schema
-            FROM information_schema.tables
-            WHERE table_name = 'alembic_version'
-            ORDER BY table_schema
-            """
-        ).fetchall()
-        for row in rows:
-            schema = row[0]
-            result = conn.exec_driver_sql(
-                f'SELECT version_num FROM "{schema}".alembic_version'
-            )
-            revisions.update(str(item[0]) for item in result.fetchall())
+        result = conn.exec_driver_sql(
+            "SELECT version_num FROM public.current_schema_alembic_version"
+        )
+        revisions.update(str(item[0]) for item in result.fetchall())
     return revisions
 
 

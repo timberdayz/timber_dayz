@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-临时库迁移门禁脚本：在全新临时 Postgres 上执行 alembic upgrade heads，与 CI 的 Validate Database Migrations 等价。
+临时库迁移门禁脚本：在全新临时 Postgres 上执行 fail-closed current-schema migration。
 
 用途：发布前在本地复现「从零跑全量迁移」的门禁，不触碰开发库或现有 compose 的 Postgres 卷。
 用法：python scripts/validate_migrations_fresh_db.py [--port 5433]
@@ -140,7 +140,7 @@ def choose_temp_postgres_port(preferred_port: int) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="临时库迁移门禁：在全新临时 Postgres 上跑 alembic upgrade heads")
+    parser = argparse.ArgumentParser(description="临时库迁移门禁：在全新临时 Postgres 上跑 current-schema migration")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"临时 Postgres 端口（默认 {DEFAULT_PORT}）")
     args = parser.parse_args()
     port = choose_temp_postgres_port(args.port)
@@ -179,9 +179,12 @@ def main() -> int:
         safe_print("[OK] Postgres 就绪")
 
         database_url = f"postgresql://{PG_USER}:{PG_PASSWORD}@127.0.0.1:{port}/{PG_DB}"
-        safe_print("[INFO] 执行 alembic upgrade heads...")
+        safe_print("[INFO] 执行 fail-closed current-schema migration...")
         code, out = run(
-            [sys.executable, "-m", "alembic", "upgrade", "heads"],
+            [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "run_current_schema_migrations.py"),
+            ],
             cwd=PROJECT_ROOT,
             env={"DATABASE_URL": database_url},
             timeout=300,

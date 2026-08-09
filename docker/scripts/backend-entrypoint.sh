@@ -20,17 +20,13 @@ is_backend_service_command() {
 
 case "${should_run_migrations}" in
     1|true|TRUE|yes|YES)
-        echo "[INFO] Running database migrations..."
-        if ! alembic upgrade heads; then
-            echo "[ERROR] Migration failed (alembic upgrade heads). Start aborted."
-            echo "[INFO] Check DATABASE_URL and run: alembic upgrade heads"
+        echo "[INFO] Running fail-closed current-schema migration..."
+        if ! python3 /app/scripts/run_current_schema_migrations.py; then
+            echo "[ERROR] Current-schema migration failed. Start aborted."
+            echo "[INFO] Check DATABASE_URL and the current-schema source contract."
             exit 1
         fi
 
-        if [ "$#" -ge 3 ] && [ "$1" = "alembic" ] && [ "$2" = "upgrade" ] && [ "$3" = "heads" ]; then
-            echo "[INFO] Migration job completed successfully."
-            exit 0
-        fi
         ;;
     *)
         echo "[INFO] Skipping database migrations (RUN_MIGRATIONS=${should_run_migrations})."

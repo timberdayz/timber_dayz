@@ -10,22 +10,22 @@ def _deploy_script() -> str:
     return DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
 
-def test_remote_deploy_prefers_core_alembic_version_detection():
+def test_remote_deploy_uses_fail_closed_current_schema_wrapper():
     script = _deploy_script()
 
-    assert "table_schema = 'core' AND table_name = 'alembic_version'" in script
-    assert "CORE_ALEMBIC_VERSION_EXISTS" in script
-    assert "PUBLIC_ALEMBIC_VERSION_EXISTS" in script
-    assert "ALEMBIC_VERSION_EXISTS=$(" not in script
+    assert "run_current_schema_migrations.py" in script
+    assert "CURRENT_SCHEMA_SOURCE_REVISION" in script
+    assert "CURRENT_SCHEMA_SOURCE_FINGERPRINT" in script
+    assert "alembic upgrade heads" not in script
 
 
-def test_remote_deploy_fails_fast_when_business_tables_exist_without_alembic_version():
+def test_remote_deploy_passes_optional_current_schema_source_contract_to_wrapper():
     script = _deploy_script()
 
-    assert "BUSINESS_TABLE_COUNT" in script
-    assert "DATABASE_IS_EMPTY" in script
-    assert "[ERROR] No alembic_version table found, but database is not empty" in script
-    assert "return 1" in script
+    assert "-e CURRENT_SCHEMA_SOURCE_REVISION" in script
+    assert "-e CURRENT_SCHEMA_SOURCE_FINGERPRINT" in script
+    assert "CURRENT_SCHEMA_SOURCE_REVISION is required" not in script
+    assert "CURRENT_SCHEMA_SOURCE_FINGERPRINT is required" not in script
 
 
 def test_remote_deploy_schema_gate_runs_before_backend_health_wait():

@@ -129,8 +129,8 @@ def test_dev_compose_uses_dedicated_migrate_service_and_disables_runtime_migrati
     worker_env = services["celery-worker"]["environment"]
     beat_env = services["celery-beat"]["environment"]
 
-    assert migrate["command"] == "alembic upgrade heads"
-    assert migrate["environment"]["RUN_MIGRATIONS"] == "1"
+    assert migrate["command"] == "python /app/scripts/run_current_schema_migrations.py"
+    assert migrate["environment"]["RUN_MIGRATIONS"] == "0"
     assert backend_env["RUN_MIGRATIONS"] == "0"
     assert worker_env["RUN_MIGRATIONS"] == "0"
     assert beat_env["RUN_MIGRATIONS"] == "0"
@@ -188,8 +188,8 @@ def test_prod_compose_uses_dedicated_migrate_service_and_disables_runtime_migrat
     worker_env = services["celery-worker"]["environment"]
     beat_env = services["celery-beat"]["environment"]
 
-    assert migrate["command"] == "alembic upgrade heads"
-    assert migrate["environment"]["RUN_MIGRATIONS"] == "1"
+    assert migrate["command"] == "python /app/scripts/run_current_schema_migrations.py"
+    assert migrate["environment"]["RUN_MIGRATIONS"] == "0"
     assert backend_env["RUN_MIGRATIONS"] == "0"
     assert worker_env["RUN_MIGRATIONS"] == "0"
     assert beat_env["RUN_MIGRATIONS"] == "0"

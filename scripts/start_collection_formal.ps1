@@ -119,15 +119,15 @@ function Ensure-CloudSyncTunnel {
     throw "Cloud sync tunnel did not become reachable within 20 seconds: ${localHost}:${localPort}"
 }
 
-function Invoke-LocalAlembicUpgrade {
-    Write-Host "[Migration] Running local alembic upgrade heads before backend startup..."
+function Invoke-LocalCurrentSchemaMigration {
+    Write-Host "[Migration] Running fail-closed current-schema migration before backend startup..."
     Push-Location $repoRoot
     try {
-        & python -m alembic upgrade heads
+        & python "$repoRoot\scripts\run_current_schema_migrations.py"
         if ($LASTEXITCODE -ne 0) {
-            throw "local alembic upgrade heads failed with exit code $LASTEXITCODE"
+            throw "current-schema migration failed with exit code $LASTEXITCODE"
         }
-        Write-Host "[OK] Local database migration is at heads"
+        Write-Host "[OK] Local database migration passed current-schema preflight"
     } finally {
         Pop-Location
     }
@@ -158,7 +158,7 @@ if ($TunnelOnly) {
 }
 
 if (-not $SkipChecks) {
-    Invoke-LocalAlembicUpgrade
+    Invoke-LocalCurrentSchemaMigration
     & python "$repoRoot\scripts\check_local_run_env.py" --profile collection --require-cloud-tunnel
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[FAIL] Formal collection preflight failed. Confirm the SSH tunnel is running and CLOUD_SYNC_TUNNEL_HOST:CLOUD_SYNC_TUNNEL_PORT is reachable."

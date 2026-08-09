@@ -194,6 +194,22 @@ def _get_alembic_revisions_by_schema(connection, inspector=None) -> dict[str, st
     return revisions_by_schema
 
 
+def _get_current_schema_revision(connection, inspector=None) -> str | None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspector or inspect(connection)
+    if not inspector.has_table("current_schema_alembic_version", schema="public"):
+        return None
+    revisions = connection.execute(
+        text("SELECT version_num FROM public.current_schema_alembic_version")
+    ).scalars().all()
+    if len(revisions) != 1:
+        raise RuntimeError(
+            "public.current_schema_alembic_version must contain exactly one revision"
+        )
+    return str(revisions[0])
+
+
 def _find_missing_critical_columns(
     conn_inspector,
     existing_tables: set[str] | None = None,
@@ -531,12 +547,11 @@ def verify_schema_completeness():
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
-        alembic_cfg = Config("alembic.ini")
+        alembic_cfg = Config("alembic-current.ini")
         script = ScriptDirectory.from_config(alembic_cfg)
         head_rev = script.get_current_head()
         with engine.connect() as conn:
-            revisions_by_schema = _get_alembic_revisions_by_schema(conn, inspector=inspect(conn))
-        current_rev = _pick_effective_current_revision(revisions_by_schema, head_rev)
+            current_rev = _get_current_schema_revision(conn, inspector=inspect(conn))
 
         migration_status = "up_to_date" if current_rev == head_rev else "outdated"
         if current_rev is None:

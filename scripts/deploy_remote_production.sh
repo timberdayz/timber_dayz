@@ -601,62 +601,16 @@ done
 
 # [SCHEMA MIGRATION] Phase 2: smart database migration.
 smart_database_migrate() {
-  POSTGRES_USER_VAL="${POSTGRES_USER_VAL:-erp_user}"
-  POSTGRES_DB_VAL="${POSTGRES_DB_VAL:-xihong_erp}"
-
-  CORE_ALEMBIC_VERSION_EXISTS="$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
-      "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'core' AND table_name = 'alembic_version')" \
-      2>/dev/null | tr -d ' \n\r' || echo "f")"
-  PUBLIC_ALEMBIC_VERSION_EXISTS="$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
-      "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'alembic_version')" \
-      2>/dev/null | tr -d ' \n\r' || echo "f")"
-  BUSINESS_TABLE_COUNT=$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
-      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type = 'BASE TABLE' AND table_name <> 'alembic_version'" \
-      2>/dev/null | tr -d ' \n\r' || echo "0")
-  CRITICAL_SCHEMA_COUNT=$("${compose_cmd_base[@]}" exec -T postgres psql -U "${POSTGRES_USER_VAL}" -d "${POSTGRES_DB_VAL}" -t -c \
-      "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name IN ('core','b_class','semantic','mart','api','ops')" \
-      2>/dev/null | tr -d ' \n\r' || echo "0")
-
-  DATABASE_IS_EMPTY="false"
-  if [ "${BUSINESS_TABLE_COUNT:-0}" = "0" ] && [ "${CRITICAL_SCHEMA_COUNT:-0}" = "0" ]; then
-    DATABASE_IS_EMPTY="true"
-  fi
-
-  echo "[INFO] Alembic state: core=${CORE_ALEMBIC_VERSION_EXISTS:-f}, public=${PUBLIC_ALEMBIC_VERSION_EXISTS:-f}, business_tables=${BUSINESS_TABLE_COUNT:-0}, critical_schemas=${CRITICAL_SCHEMA_COUNT:-0}"
-
-  if [ "${CORE_ALEMBIC_VERSION_EXISTS}" = "t" ]; then
-    echo "[INFO] Existing database detected via core.alembic_version; running incremental migrations"
-  elif [ "${PUBLIC_ALEMBIC_VERSION_EXISTS}" = "t" ]; then
-    echo "[WARN] Existing database detected via legacy public.alembic_version; running incremental migrations"
-  elif [ "${DATABASE_IS_EMPTY}" != "true" ]; then
-    echo "[ERROR] No alembic_version table found, but database is not empty"
-    echo "[INFO] BUSINESS_TABLE_COUNT=${BUSINESS_TABLE_COUNT:-0}, CRITICAL_SCHEMA_COUNT=${CRITICAL_SCHEMA_COUNT:-0}"
-    echo "[INFO] Refusing snapshot initialization to avoid corrupting an existing production database"
-    return 1
-  fi
-
   MIGRATE_LOG=$(mktemp)
-  if [ "${CORE_ALEMBIC_VERSION_EXISTS}" != "t" ] && [ "${PUBLIC_ALEMBIC_VERSION_EXISTS}" != "t" ]; then
-    echo "[INFO] Fresh empty database detected; running schema snapshot migration path"
-    REVISION_EXISTS=$("${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic history 2>&1 | grep -c "v5_0_0_schema_snapshot" || echo "0")
-    if [ "${REVISION_EXISTS}" -gt 0 ]; then
-      "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade v5_0_0_schema_snapshot 2> "${MIGRATE_LOG}" || {
-        echo "[ERROR] Schema snapshot migration failed"
-        cat "${MIGRATE_LOG}"
-        rm -f "${MIGRATE_LOG}"
-        return 1
-      }
-    else
-      echo "[WARN] Snapshot revision v5_0_0_schema_snapshot not found; falling back to alembic upgrade heads"
-    fi
-  fi
-
-  "${compose_cmd_base[@]}" run --rm --no-deps backend-api alembic upgrade heads 2> "${MIGRATE_LOG}" || {
-    echo "[ERROR] Alembic upgrade heads failed"
-    cat "${MIGRATE_LOG}"
-    rm -f "${MIGRATE_LOG}"
-    return 1
-  }
+  "${compose_cmd_base[@]}" run --rm --no-deps \
+    -e CURRENT_SCHEMA_SOURCE_REVISION \
+    -e CURRENT_SCHEMA_SOURCE_FINGERPRINT \
+    backend-api python3 /app/scripts/run_current_schema_migrations.py 2> "${MIGRATE_LOG}" || {
+      echo "[ERROR] Current-schema migration failed"
+      cat "${MIGRATE_LOG}"
+      rm -f "${MIGRATE_LOG}"
+      return 1
+    }
   rm -f "${MIGRATE_LOG}"
 }
 
