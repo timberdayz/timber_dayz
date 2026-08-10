@@ -126,6 +126,18 @@ def upgrade() -> None:
             CREATE OR REPLACE FUNCTION a_class.enforce_operation_target_contract()
             RETURNS trigger AS $$
             BEGIN
+                IF TG_OP = 'DELETE' THEN
+                    IF OLD.target_type = 'operation' AND OLD.metric_catalog_version IS NULL THEN
+                        RAISE EXCEPTION 'historical operation targets are read-only';
+                    END IF;
+                    RETURN OLD;
+                END IF;
+                IF (TG_OP = 'UPDATE'
+                    AND OLD.target_type = 'operation'
+                    AND OLD.metric_catalog_version IS NULL)
+                   OR (NEW.target_type = 'operation' AND NEW.metric_catalog_version IS NULL) THEN
+                    RAISE EXCEPTION 'historical operation targets are read-only';
+                END IF;
                 IF NEW.target_type = 'operation' AND NEW.metric_catalog_version IS NOT NULL THEN
                     IF NEW.scope_type IS DISTINCT FROM 'shop' THEN
                         RAISE EXCEPTION 'operation targets require scope_type=shop';
@@ -146,7 +158,7 @@ def upgrade() -> None:
             $$ LANGUAGE plpgsql;
 
             CREATE TRIGGER trg_enforce_operation_target_contract
-            BEFORE INSERT OR UPDATE ON a_class.sales_targets
+            BEFORE INSERT OR UPDATE OR DELETE ON a_class.sales_targets
             FOR EACH ROW EXECUTE FUNCTION a_class.enforce_operation_target_contract();
             """
         )
@@ -159,13 +171,18 @@ def upgrade() -> None:
             DECLARE
                 parent_target a_class.sales_targets%ROWTYPE;
             BEGIN
-                SELECT * INTO parent_target FROM a_class.sales_targets WHERE id = NEW.target_id;
+                IF TG_OP = 'DELETE' THEN
+                    SELECT * INTO parent_target FROM a_class.sales_targets WHERE id = OLD.target_id;
+                ELSE
+                    SELECT * INTO parent_target FROM a_class.sales_targets WHERE id = NEW.target_id;
+                END IF;
                 IF FOUND AND parent_target.target_type = 'operation' THEN
                     IF parent_target.metric_catalog_version IS NULL THEN
-                        IF NEW.operation_contract_version IS NOT NULL THEN
-                            RAISE EXCEPTION 'historical operation breakdowns require a null contract version';
-                        END IF;
+                        RAISE EXCEPTION 'historical operation breakdowns are read-only';
                     ELSE
+                        IF TG_OP = 'DELETE' THEN
+                            RETURN OLD;
+                        END IF;
                         IF NEW.operation_contract_version IS NULL THEN
                             NEW.operation_contract_version := parent_target.metric_catalog_version;
                         END IF;
@@ -186,12 +203,15 @@ def upgrade() -> None:
                         END IF;
                     END IF;
                 END IF;
+                IF TG_OP = 'DELETE' THEN
+                    RETURN OLD;
+                END IF;
                 RETURN NEW;
             END;
             $$ LANGUAGE plpgsql;
 
             CREATE TRIGGER trg_enforce_operation_breakdown_contract
-            BEFORE INSERT OR UPDATE ON a_class.target_breakdown
+            BEFORE INSERT OR UPDATE OR DELETE ON a_class.target_breakdown
             FOR EACH ROW EXECUTE FUNCTION a_class.enforce_operation_breakdown_contract();
             """
         )

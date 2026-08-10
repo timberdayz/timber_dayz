@@ -543,23 +543,16 @@ def test_current_operation_contract_rejects_invalid_targets_and_matching_duplica
                 )
             invalid_target_savepoint.rollback()
 
-            legacy_id = connection.execute(
-                text(
-                    "INSERT INTO a_class.sales_targets "
-                    "(target_name, target_type, period_start, period_end) "
-                    "VALUES ('Legacy remains permissive', 'operation', '2026-07-02', '2026-07-31') "
-                    "RETURNING id"
+            historical_insert_savepoint = connection.begin_nested()
+            with pytest.raises(Exception, match="historical operation targets are read-only"):
+                connection.execute(
+                    text(
+                        "INSERT INTO a_class.sales_targets "
+                        "(target_name, target_type, period_start, period_end) "
+                        "VALUES ('Legacy write rejected', 'operation', '2026-07-02', '2026-07-31')"
+                    )
                 )
-            ).scalar_one()
-            connection.execute(
-                text(
-                    "INSERT INTO a_class.target_breakdown "
-                    "(target_id, breakdown_type, target_amount, target_quantity, "
-                    "achieved_amount, achieved_quantity, achievement_rate) "
-                    "VALUES (:target_id, 'time', 0, 0, 0, 0, 0)"
-                ),
-                {"target_id": legacy_id},
-            )
+            historical_insert_savepoint.rollback()
             connection.execute(
                 text(
                     "INSERT INTO core.dim_platforms (platform_code, name, is_active) "
@@ -709,6 +702,25 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                 text("SELECT version_num FROM public.current_schema_alembic_version")
             ).scalar_one() == "current_schema_20260808_operation_performance_workbench"
 
+        with engine.begin() as connection:
+            historical_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, period_start, period_end) "
+                    "VALUES ('Historical versionless', 'operation', '2026-07-01', '2026-07-31') "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            historical_breakdown_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, target_amount, target_quantity, achieved_amount, "
+                    "achieved_quantity, achievement_rate) "
+                    "VALUES (:target_id, 'time', 0, 0, 0, 0, 0) RETURNING id"
+                ),
+                {"target_id": historical_id},
+            ).scalar_one()
+
         assert (
             migration_runner.run_current_schema_migrations(
                 database_url,
@@ -741,14 +753,6 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                     "metric_direction, metric_catalog_version) "
                     "VALUES ('Current versioned', 'operation', '2026-07-01', '2026-07-31', 'shop', "
                     "'metric', 'higher_better', 1) RETURNING id"
-                )
-            ).scalar_one()
-            historical_id = connection.execute(
-                text(
-                    "INSERT INTO a_class.sales_targets "
-                    "(target_name, target_type, period_start, period_end) "
-                    "VALUES ('Historical versionless', 'operation', '2026-07-01', '2026-07-31') "
-                    "RETURNING id"
                 )
             ).scalar_one()
             inherited_breakdown_id = connection.execute(
@@ -792,26 +796,41 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                     {"target_id": current_id},
                 )
             wrong_version_savepoint.rollback()
-            historical_savepoint = connection.begin_nested()
-            with pytest.raises(Exception, match="historical operation breakdowns require a null"):
+            historical_target_insert_savepoint = connection.begin_nested()
+            with pytest.raises(Exception, match="historical operation targets are read-only"):
                 connection.execute(
                     text(
-                        "INSERT INTO a_class.target_breakdown "
-                        "(target_id, breakdown_type, operation_contract_version) "
-                        "VALUES (:target_id, 'time', 1)"
-                    ),
-                    {"target_id": historical_id},
+                        "INSERT INTO a_class.sales_targets "
+                        "(target_name, target_type, period_start, period_end) "
+                        "VALUES ('New legacy target', 'operation', '2026-07-01', '2026-07-31')"
+                    )
                 )
-            historical_savepoint.rollback()
-            historical_breakdown_id = connection.execute(
+            historical_target_insert_savepoint.rollback()
+            for statement in (
+                text("UPDATE a_class.sales_targets SET target_name = 'Changed' WHERE id = :id"),
+                text("DELETE FROM a_class.sales_targets WHERE id = :id"),
+            ):
+                savepoint = connection.begin_nested()
+                with pytest.raises(Exception, match="historical operation targets are read-only"):
+                    connection.execute(statement, {"id": historical_id})
+                savepoint.rollback()
+            for statement in (
                 text(
                     "INSERT INTO a_class.target_breakdown "
                     "(target_id, breakdown_type, target_amount, target_quantity, achieved_amount, "
                     "achieved_quantity, achievement_rate) "
-                    "VALUES (:target_id, 'time', 0, 0, 0, 0, 0) RETURNING id"
+                    "VALUES (:target_id, 'time', 0, 0, 0, 0, 0)"
                 ),
-                {"target_id": historical_id},
-            ).scalar_one()
+                text("UPDATE a_class.target_breakdown SET target_amount = 1 WHERE id = :id"),
+                text("DELETE FROM a_class.target_breakdown WHERE id = :id"),
+            ):
+                savepoint = connection.begin_nested()
+                with pytest.raises(Exception, match="historical operation breakdowns are read-only"):
+                    connection.execute(
+                        statement,
+                        {"id": historical_breakdown_id, "target_id": historical_id},
+                    )
+                savepoint.rollback()
             assert connection.execute(
                 text(
                     "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
