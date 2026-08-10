@@ -166,6 +166,9 @@ def upgrade() -> None:
                             RAISE EXCEPTION 'historical operation breakdowns require a null contract version';
                         END IF;
                     ELSE
+                        IF NEW.operation_contract_version IS NULL THEN
+                            NEW.operation_contract_version := parent_target.metric_catalog_version;
+                        END IF;
                         IF NEW.operation_contract_version
                            IS DISTINCT FROM parent_target.metric_catalog_version THEN
                             RAISE EXCEPTION 'operation breakdown contract version must match its parent target';

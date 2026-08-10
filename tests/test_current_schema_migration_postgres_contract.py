@@ -751,18 +751,47 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                     "RETURNING id"
                 )
             ).scalar_one()
-            for contract_version in (None, 2):
-                savepoint = connection.begin_nested()
-                with pytest.raises(Exception, match="contract version must match"):
-                    connection.execute(
-                        text(
-                            "INSERT INTO a_class.target_breakdown "
-                            "(target_id, breakdown_type, operation_contract_version) "
-                            "VALUES (:target_id, 'time', :contract_version)"
-                        ),
-                        {"target_id": current_id, "contract_version": contract_version},
-                    )
-                savepoint.rollback()
+            inherited_breakdown_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, platform_code, shop_id, period_start, period_end, "
+                    "target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate) "
+                    "VALUES (:target_id, 'shop', 'platform', 'shop', '2026-07-01', '2026-07-31', "
+                    "0, 0, 0, 0, 0) RETURNING id"
+                ),
+                {"target_id": current_id},
+            ).scalar_one()
+            assert connection.execute(
+                text(
+                    "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
+                ),
+                {"id": inherited_breakdown_id},
+            ).scalar_one() == 1
+            connection.execute(
+                text(
+                    "UPDATE a_class.target_breakdown "
+                    "SET target_amount = 1, operation_contract_version = NULL WHERE id = :id"
+                ),
+                {"id": inherited_breakdown_id},
+            )
+            assert connection.execute(
+                text(
+                    "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
+                ),
+                {"id": inherited_breakdown_id},
+            ).scalar_one() == 1
+            wrong_version_savepoint = connection.begin_nested()
+            with pytest.raises(Exception, match="contract version must match"):
+                connection.execute(
+                    text(
+                        "INSERT INTO a_class.target_breakdown "
+                        "(target_id, breakdown_type, platform_code, shop_id, period_start, period_end, "
+                        "operation_contract_version) "
+                        "VALUES (:target_id, 'shop', 'platform', 'shop', '2026-07-01', '2026-07-31', 2)"
+                    ),
+                    {"target_id": current_id},
+                )
+            wrong_version_savepoint.rollback()
             historical_savepoint = connection.begin_nested()
             with pytest.raises(Exception, match="historical operation breakdowns require a null"):
                 connection.execute(
@@ -774,6 +803,21 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                     {"target_id": historical_id},
                 )
             historical_savepoint.rollback()
+            historical_breakdown_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, target_amount, target_quantity, achieved_amount, "
+                    "achieved_quantity, achievement_rate) "
+                    "VALUES (:target_id, 'time', 0, 0, 0, 0, 0) RETURNING id"
+                ),
+                {"target_id": historical_id},
+            ).scalar_one()
+            assert connection.execute(
+                text(
+                    "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
+                ),
+                {"id": historical_breakdown_id},
+            ).scalar_one() is None
             connection.execute(
                 text(
                     "ALTER TABLE a_class.target_breakdown "
@@ -953,5 +997,115 @@ def test_old_20260808_current_operation_overrides_are_backfilled_without_touchin
                 ),
                 {"id": historical_breakdown_id},
             ).scalar_one() is None
+    finally:
+        subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
+
+
+def test_20260808_preflight_rejects_invalid_current_override_when_contract_column_is_absent():
+    if not _docker_available():
+        pytest.skip("requires a reachable Docker daemon and PostgreSQL 15 image")
+
+    port = _free_port()
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "-e",
+            "POSTGRES_USER=current_test",
+            "-e",
+            "POSTGRES_PASSWORD=current_test",
+            "-e",
+            "POSTGRES_DB=current_test",
+            "-p",
+            f"127.0.0.1:{port}:5432",
+            "postgres:15",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    container_id = started.stdout.strip()
+    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    try:
+        _wait_for_postgres(container_id)
+        old_upgrade = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "alembic-current.ini",
+                "upgrade",
+                "current_schema_20260808_operation_performance_workbench",
+            ],
+            cwd=ROOT,
+            env={**os.environ, "DATABASE_URL": database_url},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert old_upgrade.returncode == 0, old_upgrade.stderr
+
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            current_target_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, scope_type, period_start, period_end, metric_code, "
+                    "metric_direction, metric_catalog_version) "
+                    "VALUES ('Current target', 'operation', 'shop', '2026-08-01', '2026-08-31', "
+                    "'reply', 'higher_better', 7) RETURNING id"
+                )
+            ).scalar_one()
+            # The old trigger only validates matching explicit versions, so a
+            # versionless invalid time breakdown can exist in a 20260808 DB.
+            connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, period_start, period_end, target_amount, target_quantity, "
+                    "achieved_amount, achieved_quantity, achievement_rate) "
+                    "VALUES (:target_id, 'time', '2026-08-02', '2026-08-02', 0, 0, 0, 0, 0)"
+                ),
+                {"target_id": current_target_id},
+            )
+            connection.execute(text("DROP INDEX a_class.uq_operation_shop_override"))
+            connection.execute(
+                text(
+                    "ALTER TABLE a_class.target_breakdown "
+                    "DROP COLUMN operation_contract_version"
+                )
+            )
+
+        preflight = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_current_schema_migrations.py",
+                "--database-url",
+                database_url,
+                "--preflight-only",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert preflight.returncode == 2
+        assert "invalid current operation contract data" in preflight.stderr
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT version_num FROM public.current_schema_alembic_version")
+            ).scalar_one() == "current_schema_20260808_operation_performance_workbench"
+            assert "operation_contract_version" not in {
+                row[0]
+                for row in connection.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'a_class' AND table_name = 'target_breakdown'"
+                    )
+                )
+            }
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)

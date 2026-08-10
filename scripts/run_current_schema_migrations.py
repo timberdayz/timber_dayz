@@ -410,6 +410,37 @@ def assert_legacy_adoption_data_is_safe(database_url: str) -> dict[str, Any]:
                             """
                         )
                     ).first()
+                elif inspect(connection).has_table("target_breakdown", schema="a_class"):
+                    current_override = connection.execute(
+                        text(
+                            """
+                            SELECT tb.id FROM a_class.target_breakdown AS tb
+                            JOIN a_class.sales_targets AS st ON st.id = tb.target_id
+                            WHERE st.target_type = 'operation'
+                              AND st.metric_catalog_version IS NOT NULL
+                              AND (tb.breakdown_type IS DISTINCT FROM 'shop'
+                                   OR NULLIF(btrim(tb.platform_code), '') IS NULL
+                                   OR NULLIF(btrim(tb.shop_id), '') IS NULL
+                                   OR tb.period_start IS DISTINCT FROM st.period_start
+                                   OR tb.period_end IS DISTINCT FROM st.period_end)
+                            LIMIT 1
+                            """
+                        )
+                    ).first()
+                    duplicate_override = connection.execute(
+                        text(
+                            """
+                            SELECT tb.target_id FROM a_class.target_breakdown AS tb
+                            JOIN a_class.sales_targets AS st ON st.id = tb.target_id
+                            WHERE st.target_type = 'operation'
+                              AND st.metric_catalog_version IS NOT NULL
+                              AND tb.breakdown_type = 'shop'
+                            GROUP BY tb.target_id, tb.platform_code, tb.shop_id
+                            HAVING count(*) > 1
+                            LIMIT 1
+                            """
+                        )
+                    ).first()
     finally:
         engine.dispose()
     if (
