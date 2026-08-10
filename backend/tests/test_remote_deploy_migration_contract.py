@@ -248,6 +248,13 @@ def test_remote_deploy_isolates_new_compose_project_from_rollback_container_ids(
     )
 
 
+def test_isolated_release_starts_application_services_without_compose_dependencies():
+    script = _deploy_script()
+
+    for service in ("backend-api celery-worker celery-beat", "frontend", "nginx"):
+        assert f"up -d --no-build --no-deps {service}" in script
+
+
 def test_remote_deploy_requires_frontend_and_gateway_health_before_declaring_cutover():
     script = _deploy_script()
 

@@ -25,9 +25,9 @@ REQUIRED_LITERALS = [
     'run --rm --no-deps backend-api python3 /app/scripts/bootstrap_production.py',
     'run --rm --no-deps backend-api python3 /app/scripts/verify_system_role_integrity.py --repair',
     'run --rm --no-deps backend-api python3 /app/scripts/bootstrap_postgresql_dashboard.py',
-    'up -d --no-build backend-api celery-worker celery-beat',
-    'up -d --no-build frontend',
-    'up -d --no-build nginx',
+    'up -d --no-build --no-deps backend-api celery-worker celery-beat',
+    'up -d --no-build --no-deps frontend',
+    'up -d --no-build --no-deps nginx',
 ]
 
 REQUIRED_BACKEND_IMAGE_FILES = [

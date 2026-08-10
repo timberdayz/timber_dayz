@@ -709,23 +709,14 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                 text("SELECT version_num FROM public.current_schema_alembic_version")
             ).scalar_one() == "current_schema_20260808_operation_performance_workbench"
 
-        upgraded = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "alembic",
-                "-c",
-                "alembic-current.ini",
-                "upgrade",
-                "head",
-            ],
-            cwd=ROOT,
-            env={**os.environ, "DATABASE_URL": database_url},
-            capture_output=True,
-            text=True,
-            check=False,
+        assert (
+            migration_runner.run_current_schema_migrations(
+                database_url,
+                expected_source_revision=None,
+                expected_source_fingerprint=None,
+            )
+            == "upgrade"
         )
-        assert upgraded.returncode == 0, upgraded.stderr
 
         with engine.begin() as connection:
             assert connection.execute(
@@ -810,5 +801,157 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
             match="invalid current operation contract data",
         ):
             migration_runner.assert_legacy_adoption_data_is_safe(database_url)
+    finally:
+        subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
+
+
+def test_old_20260808_current_operation_overrides_are_backfilled_without_touching_history():
+    if not _docker_available():
+        pytest.skip("requires a reachable Docker daemon and PostgreSQL 15 image")
+
+    port = _free_port()
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "-e",
+            "POSTGRES_USER=current_test",
+            "-e",
+            "POSTGRES_PASSWORD=current_test",
+            "-e",
+            "POSTGRES_DB=current_test",
+            "-p",
+            f"127.0.0.1:{port}:5432",
+            "postgres:15",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    container_id = started.stdout.strip()
+    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    try:
+        _wait_for_postgres(container_id)
+        old_upgrade = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "alembic-current.ini",
+                "upgrade",
+                "current_schema_20260808_operation_performance_workbench",
+            ],
+            cwd=ROOT,
+            env={**os.environ, "DATABASE_URL": database_url},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert old_upgrade.returncode == 0, old_upgrade.stderr
+
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO core.dim_platforms (platform_code, name, is_active) "
+                    "VALUES ('platform', 'Platform', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO core.dim_shops (platform_code, shop_id, shop_name) VALUES "
+                    "('platform', 'current-shop', 'Current shop'), "
+                    "('platform', 'legacy-shop', 'Legacy shop')"
+                )
+            )
+            current_target_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, scope_type, period_start, period_end, metric_code, "
+                    "metric_direction, metric_catalog_version) "
+                    "VALUES ('Current target', 'operation', 'shop', '2026-08-01', '2026-08-31', "
+                    "'reply', 'higher_better', 7) RETURNING id"
+                )
+            ).scalar_one()
+            historical_target_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, period_start, period_end) "
+                    "VALUES ('Historical target', 'operation', '2026-08-02', '2026-08-20') RETURNING id"
+                )
+            ).scalar_one()
+            current_breakdown_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, platform_code, shop_id, period_start, period_end, "
+                    "target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate, "
+                    "operation_contract_version) "
+                    "VALUES (:target_id, 'shop', 'platform', 'current-shop', '2026-08-01', '2026-08-31', "
+                    "123, 4, 45, 2, 36.5, 7) RETURNING id"
+                ),
+                {"target_id": current_target_id},
+            ).scalar_one()
+            historical_breakdown_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, platform_code, shop_id, period_start, period_end, "
+                    "target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate) "
+                    "VALUES (:target_id, 'time', 'platform', 'legacy-shop', '2026-08-03', '2026-08-03', "
+                    "99, 3, 11, 1, 11.1) RETURNING id"
+                ),
+                {"target_id": historical_target_id},
+            ).scalar_one()
+            history_before = connection.execute(
+                text(
+                    "SELECT target_id, breakdown_type, platform_code, shop_id, period_start, period_end, "
+                    "target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate "
+                    "FROM a_class.target_breakdown WHERE id = :id"
+                ),
+                {"id": historical_breakdown_id},
+            ).one()
+            connection.execute(text("DROP INDEX a_class.uq_operation_shop_override"))
+            connection.execute(
+                text(
+                    "ALTER TABLE a_class.target_breakdown "
+                    "DROP COLUMN operation_contract_version"
+                )
+            )
+
+        assert (
+            migration_runner.run_current_schema_migrations(
+                database_url,
+                expected_source_revision=None,
+                expected_source_fingerprint=None,
+            )
+            == "upgrade"
+        )
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT operation_contract_version FROM a_class.target_breakdown "
+                    "WHERE id = :id"
+                ),
+                {"id": current_breakdown_id},
+            ).scalar_one() == 7
+            history_after = connection.execute(
+                text(
+                    "SELECT target_id, breakdown_type, platform_code, shop_id, period_start, period_end, "
+                    "target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate "
+                    "FROM a_class.target_breakdown WHERE id = :id"
+                ),
+                {"id": historical_breakdown_id},
+            ).one()
+            assert history_after == history_before
+            assert connection.execute(
+                text(
+                    "SELECT operation_contract_version FROM a_class.target_breakdown "
+                    "WHERE id = :id"
+                ),
+                {"id": historical_breakdown_id},
+            ).scalar_one() is None
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)

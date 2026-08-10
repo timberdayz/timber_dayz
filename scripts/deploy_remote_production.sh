@@ -846,7 +846,7 @@ fi
 echo "[OK] PostgreSQL Dashboard assets are ready"
 
 echo "[INFO] Phase 3: starting application layer (backend-api, celery)..."
-"${compose_cmd_base[@]}" up -d --no-build backend-api celery-worker celery-beat
+"${compose_cmd_base[@]}" up -d --no-build --no-deps backend-api celery-worker celery-beat
 
 echo "[INFO] Waiting for backend health..."
 for i in $(seq 1 60); do
@@ -889,7 +889,7 @@ else
 fi
 
 echo "[INFO] Phase 3b: starting frontend..."
-"${compose_cmd_base[@]}" up -d --no-build frontend
+"${compose_cmd_base[@]}" up -d --no-build --no-deps frontend
 
 echo "[INFO] Waiting for frontend health..."
 frontend_healthy=0
@@ -907,7 +907,7 @@ if [ "${frontend_healthy}" -ne 1 ]; then
 fi
 
 echo "[INFO] Phase 4: starting gateway (Nginx, last)..."
-"${compose_cmd_base[@]}" up -d --no-build nginx
+"${compose_cmd_base[@]}" up -d --no-build --no-deps nginx
 
 echo "[INFO] Waiting for Nginx health..."
 nginx_healthy=0

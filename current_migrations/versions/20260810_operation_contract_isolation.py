@@ -25,6 +25,64 @@ def upgrade() -> None:
             schema="a_class",
         )
 
+    # Older 20260808 deployments can contain real workbench targets and shop
+    # overrides without a persisted contract version. Backfill only rows whose
+    # parent unambiguously belongs to the current workbench; invalid or
+    # conflicting data must be resolved manually instead of being guessed.
+    connection.execute(
+        sa.text(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM a_class.target_breakdown AS tb
+                    JOIN a_class.sales_targets AS st ON st.id = tb.target_id
+                    WHERE st.target_type = 'operation'
+                      AND st.metric_catalog_version IS NOT NULL
+                      AND (
+                          tb.breakdown_type IS DISTINCT FROM 'shop'
+                          OR NULLIF(btrim(tb.platform_code), '') IS NULL
+                          OR NULLIF(btrim(tb.shop_id), '') IS NULL
+                          OR tb.period_start IS DISTINCT FROM st.period_start
+                          OR tb.period_end IS DISTINCT FROM st.period_end
+                          OR (
+                              tb.operation_contract_version IS NOT NULL
+                              AND tb.operation_contract_version IS DISTINCT FROM st.metric_catalog_version
+                          )
+                      )
+                ) THEN
+                    RAISE EXCEPTION
+                        'current operation overrides cannot be safely backfilled; manual resolution is required';
+                END IF;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM a_class.target_breakdown AS tb
+                    JOIN a_class.sales_targets AS st ON st.id = tb.target_id
+                    WHERE st.target_type = 'operation'
+                      AND st.metric_catalog_version IS NOT NULL
+                      AND tb.breakdown_type = 'shop'
+                    GROUP BY tb.target_id, tb.platform_code, tb.shop_id
+                    HAVING count(*) > 1
+                ) THEN
+                    RAISE EXCEPTION
+                        'duplicate current operation overrides cannot be safely backfilled';
+                END IF;
+
+                UPDATE a_class.target_breakdown AS tb
+                SET operation_contract_version = st.metric_catalog_version
+                FROM a_class.sales_targets AS st
+                WHERE st.id = tb.target_id
+                  AND st.target_type = 'operation'
+                  AND st.metric_catalog_version IS NOT NULL
+                  AND tb.operation_contract_version IS NULL;
+            END;
+            $$;
+            """
+        )
+    )
+
     connection.execute(
         sa.text(
             "DROP TRIGGER IF EXISTS trg_enforce_operation_breakdown_contract "
