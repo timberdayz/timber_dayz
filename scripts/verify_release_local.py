@@ -78,6 +78,7 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
             "--profile",
             "production",
             "config",
+            "--quiet",
         ],
         env=compose_env,
     )

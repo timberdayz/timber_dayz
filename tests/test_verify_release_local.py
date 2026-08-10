@@ -51,3 +51,17 @@ def test_release_verification_does_not_check_the_default_local_database(monkeypa
     run_release_verification(skip_build=True, table="fact_shopee_orders_monthly")
 
     assert all("scripts/verify_schema_consistency.py" not in command for command in commands)
+
+
+def test_release_verification_validates_compose_without_rendering_secrets(monkeypatch):
+    commands = []
+
+    def fake_run(command, *, env=None):
+        commands.append(command)
+
+    monkeypatch.setattr("scripts.verify_release_local._run_command", fake_run)
+
+    run_release_verification(skip_build=True, table="fact_shopee_orders_monthly")
+
+    compose_config_command = next(command for command in commands if command[-1] == "--quiet")
+    assert compose_config_command[-2] == "config"
