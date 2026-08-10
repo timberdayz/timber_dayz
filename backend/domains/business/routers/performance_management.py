@@ -208,7 +208,7 @@ async def _load_valid_performance_shop_keys(
                     and_(
                         func.lower(ShopAccount.platform)
                         == func.lower(DimShop.platform_code),
-                        ShopAccount.enabled == True,
+                        ShopAccount.enabled.is_(True),
                         ShopAccount.business_role == "operating_store",
                         or_(
                             ShopAccount.platform_shop_id == DimShop.shop_id,
@@ -879,7 +879,7 @@ async def _sync_performance_alerts(
                         select(ShopAlert).where(
                             ShopAlert.platform_code == platform_code,
                             ShopAlert.shop_id == shop_id,
-                            ShopAlert.is_resolved == False,
+                            ShopAlert.is_resolved.is_(False),
                             ShopAlert.alert_type.in_(performance_alert_types),
                         )
                     )
@@ -1686,7 +1686,7 @@ async def list_performance_scores(
         shop_query = (
             select(ShopAccount)
             .where(
-                ShopAccount.enabled == True,
+                ShopAccount.enabled.is_(True),
                 ShopAccount.business_role == "operating_store",
             )
             .order_by(ShopAccount.platform, ShopAccount.store_name)
@@ -1986,7 +1986,7 @@ async def calculate_performance_scores(
             result = await db.execute(
                 select(PerformanceConfig)
                 .where(
-                    PerformanceConfig.is_active == True,
+                    PerformanceConfig.is_active.is_(True),
                     PerformanceConfig.effective_from <= period_end,
                     or_(
                         PerformanceConfig.effective_to.is_(None),
@@ -2149,10 +2149,6 @@ async def calculate_performance_scores(
                 if target_profit > 0
                 else 0.0
             )
-            key_product_target = 0.0
-            key_product_achieved = 0.0
-            key_product_rate_fraction = None
-            key_product_rate = None
             key_product_score = 0.0
             operation_score, operation_details = (
                 _calculate_operation_metrics_for_shop(
@@ -2445,7 +2441,7 @@ async def calculate_performance_scores(
         )
     except HTTPException:
         raise
-    except PayrollPeriodLockedError as e:
+    except PayrollPeriodLockedError:
         await db.rollback()
         lock_status = await PayrollPeriodLockService(db).get_month_lock_status(
             year_month=period,

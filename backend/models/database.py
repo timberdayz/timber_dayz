@@ -21,7 +21,7 @@
 更新: 2026-01-01 - 添加异步SQLAlchemy支持
 """
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from typing import Generator, AsyncGenerator
@@ -178,7 +178,7 @@ def _pick_effective_current_revision(
 
 
 def _get_alembic_revisions_by_schema(connection, inspector=None) -> dict[str, str]:
-    from sqlalchemy import inspect, text
+    from sqlalchemy import inspect
 
     if inspector is None:
         inspector = inspect(connection)
@@ -208,7 +208,7 @@ def _get_alembic_revisions_by_schema(connection, inspector=None) -> dict[str, st
 
 
 def _get_current_schema_revision(connection, inspector=None) -> str | None:
-    from sqlalchemy import inspect, text
+    from sqlalchemy import inspect
 
     inspector = inspector or inspect(connection)
     if not inspector.has_table("current_schema_alembic_version", schema="public"):
@@ -357,7 +357,7 @@ else:
 
 # [*] v4.18.2修复:asyncpg 需要通过事件监听器设置 search_path
 # asyncpg 不支持通过 connect_args 传递 options
-from sqlalchemy import event, text
+from sqlalchemy import event
 
 
 @event.listens_for(async_engine.sync_engine, "connect")
@@ -669,8 +669,6 @@ def warm_up_pool(pool_size: int = 10):
     Raises:
         Exception: 连接池预热失败时抛出异常
     """
-    from sqlalchemy import text
-
     connections = []
     try:
         logger.info(f"[sync] 开始预热连接池(目标: {pool_size}个连接)")
@@ -717,7 +715,6 @@ async def warm_up_async_pool(pool_size: int = 10):
         必须并发创建多个连接,才能真正预热连接池。
         单个 session 循环执行只会复用同一连接。
     """
-    from sqlalchemy import text
 
     async def test_single_connection(i: int):
         """测试单个连接"""

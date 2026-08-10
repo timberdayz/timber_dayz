@@ -224,12 +224,6 @@ def test_current_migration_files_are_isolated_from_historical_versions_and_stati
 
 
 def test_operation_contract_isolated_from_legacy_rows_in_the_migration_and_ssot():
-    increment_source = (
-        ROOT
-        / "current_migrations"
-        / "versions"
-        / "20260808_operation_performance_workbench.py"
-    ).read_text(encoding="utf-8")
     business_schema_source = (
         ROOT / "modules" / "core" / "db" / "schema_parts" / "business.py"
     ).read_text(encoding="utf-8")

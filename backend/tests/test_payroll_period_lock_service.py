@@ -71,21 +71,6 @@ def test_employee_month_lock_allows_draft_or_missing_payroll():
     )
 
 
-def test_shop_month_lock_rejects_config_changes_when_an_assignee_is_confirmed():
-    from backend.services.payroll_period_lock_service import (
-        PayrollPeriodLockedError,
-        PayrollPeriodLockService,
-    )
-
-    db = SimpleNamespace(
-        execute=AsyncMock(
-            return_value=_Result(
-                SimpleNamespace(employee_code="EMP001", status="confirmed")
-            )
-        )
-    )
-
-
 def test_month_lock_rejects_recalculation_after_any_payroll_confirmation():
     from backend.services.payroll_period_lock_service import (
         PayrollPeriodLockedError,

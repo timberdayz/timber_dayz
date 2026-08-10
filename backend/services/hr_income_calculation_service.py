@@ -533,7 +533,7 @@ class HRIncomeCalculationService:
                         and_(
                             func.lower(ShopAccount.platform)
                             == func.lower(EmployeeShopAssignment.platform_code),
-                            ShopAccount.enabled == True,
+                            ShopAccount.enabled.is_(True),
                             ShopAccount.business_role == "operating_store",
                             or_(
                                 ShopAccount.platform_shop_id

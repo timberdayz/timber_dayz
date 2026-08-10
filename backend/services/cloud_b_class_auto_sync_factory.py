@@ -56,7 +56,10 @@ def _build_checkpoint_scope_key(cloud_database_url: str | None, dry_run: bool) -
         f"{parsed.host or ''}:{parsed.port or ''}/"
         f"{parsed.database or ''}"
     )
-    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
+    # This is a stable namespace key, not a security token or password hash.
+    digest = hashlib.sha1(identity.encode("utf-8"), usedforsecurity=False).hexdigest()[
+        :16
+    ]
     return f"cloud_sync:{digest}"
 
 

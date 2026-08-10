@@ -412,7 +412,7 @@ async def list_target_shops(
         query = (
             select(ShopAccount)
             .where(
-                ShopAccount.enabled == True,
+                ShopAccount.enabled.is_(True),
                 ShopAccount.business_role == "operating_store",
             )
             .order_by(ShopAccount.platform, ShopAccount.store_name)
@@ -1306,7 +1306,7 @@ async def create_breakdown(
                         select(ShopAccount).where(
                             func.lower(ShopAccount.platform)
                             == normalized_platform_code,
-                            ShopAccount.enabled == True,
+                            ShopAccount.enabled.is_(True),
                             ShopAccount.business_role == "operating_store",
                             or_(
                                 ShopAccount.platform_shop_id == request.shop_id,

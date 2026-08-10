@@ -3,9 +3,10 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
+from types import SimpleNamespace
 from typing import Any, Dict
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
