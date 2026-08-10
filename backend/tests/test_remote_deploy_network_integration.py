@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import uuid
@@ -10,10 +11,26 @@ from pathlib import Path
 import pytest
 
 
+def test_docker_integration_requires_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("RUN_DEPLOY_DOCKER_INTEGRATION", raising=False)
+    monkeypatch.setattr(
+        __import__(__name__),
+        "_docker_compose_command",
+        lambda: (_ for _ in ()).throw(AssertionError("Docker must not be probed")),
+    )
+
+    with pytest.raises(pytest.skip.Exception, match="RUN_DEPLOY_DOCKER_INTEGRATION=1"):
+        _require_docker_compose()
+
+
 def _docker_compose_command() -> list[str] | None:
-    if shutil.which("docker") and subprocess.run(
-        ["docker", "compose", "version"], capture_output=True, text=True
-    ).returncode == 0:
+    if (
+        shutil.which("docker")
+        and subprocess.run(
+            ["docker", "compose", "version"], capture_output=True, text=True
+        ).returncode
+        == 0
+    ):
         return ["docker", "compose"]
     if shutil.which("docker-compose"):
         return ["docker-compose"]
@@ -21,14 +38,19 @@ def _docker_compose_command() -> list[str] | None:
 
 
 def _require_docker_compose() -> list[str]:
+    if os.getenv("RUN_DEPLOY_DOCKER_INTEGRATION") != "1":
+        pytest.skip(
+            "set RUN_DEPLOY_DOCKER_INTEGRATION=1 to run Docker deployment integration"
+        )
     command = _docker_compose_command()
     if command is None:
         pytest.skip("Docker Compose is not installed")
     if not shutil.which("docker"):
         pytest.skip("Docker CLI is not installed")
-    if subprocess.run(
-        ["docker", "info"], capture_output=True, text=True
-    ).returncode != 0:
+    if (
+        subprocess.run(["docker", "info"], capture_output=True, text=True).returncode
+        != 0
+    ):
         pytest.skip("Docker daemon is not available")
     return command
 
@@ -118,6 +140,51 @@ networks:
             cwd=tmp_path,
         )
         assert probe.returncode == 0, probe.stderr
+
+        release_down = _run(
+            [
+                *compose,
+                "-p",
+                release_project,
+                "-f",
+                str(base_compose),
+                "-f",
+                str(release_compose),
+                "down",
+                "--remove-orphans",
+            ],
+            cwd=tmp_path,
+        )
+        assert release_down.returncode == 0, release_down.stderr
+
+        base_container = _run(
+            [
+                *compose,
+                "-p",
+                base_project,
+                "-f",
+                str(base_compose),
+                "ps",
+                "-q",
+                "infrastructure",
+            ],
+            cwd=tmp_path,
+        )
+        assert base_container.returncode == 0, base_container.stderr
+        container_id = base_container.stdout.strip()
+        assert container_id
+
+        running = _run(
+            ["docker", "inspect", "--format", "{{.State.Running}}", container_id],
+            cwd=tmp_path,
+        )
+        assert running.returncode == 0, running.stderr
+        assert running.stdout.strip() == "true"
+
+        shared_network = _run(
+            ["docker", "network", "inspect", network_name], cwd=tmp_path
+        )
+        assert shared_network.returncode == 0, shared_network.stderr
     finally:
         _run(
             [
