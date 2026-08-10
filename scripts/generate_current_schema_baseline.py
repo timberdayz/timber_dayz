@@ -9,7 +9,9 @@ import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "current_migrations" / "versions" / "20260805_current_schema_baseline.py"
+OUTPUT = (
+    ROOT / "current_migrations" / "versions" / "20260805_current_schema_baseline.py"
+)
 REVISION = "current_schema_20260805"
 
 
@@ -77,7 +79,9 @@ def _clean_dump(source: str) -> str:
             continue
         if stripped.startswith("--"):
             continue
-        if re.match(r"^(SET\b|SELECT pg_catalog\.set_config\b)", stripped, re.IGNORECASE):
+        if re.match(
+            r"^(SET\b|SELECT pg_catalog\.set_config\b)", stripped, re.IGNORECASE
+        ):
             continue
         lines.append(line)
     cleaned = "\n".join(lines).strip() + "\n"
@@ -95,6 +99,7 @@ def _clean_dump(source: str) -> str:
         return match.group(1) + table_body + match.group(3)
 
     cleaned = quarantine_table.sub(remove_retired_columns, cleaned)
+
     # Historical Alembic state is an archive concern. Fresh databases must only
     # receive the isolated current-chain version table that Alembic creates.
     def is_archived_or_test_object(statement: str) -> bool:
@@ -166,7 +171,11 @@ def main() -> int:
     parser.add_argument("--source-dump", required=True, type=Path)
     args = parser.parse_args()
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(generate_baseline_source(args.source_dump.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
+    OUTPUT.write_text(
+        generate_baseline_source(args.source_dump.read_text(encoding="utf-8")),
+        encoding="utf-8",
+        newline="\n",
+    )
     print(f"[OK] Wrote static production baseline: {OUTPUT}")
     return 0
 

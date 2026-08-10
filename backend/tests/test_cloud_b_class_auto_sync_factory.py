@@ -12,7 +12,11 @@ from backend.services.cloud_b_class_auto_sync_factory import (
     run_cloud_sync_startup_checks_from_env,
 )
 from backend.services.cloud_b_class_mirror_manager import CloudBClassMirrorManager
-from backend.services.cloud_b_class_sync_service import CloudBClassSyncService, SQLAlchemyCloudWriter, build_sync_payload
+from backend.services.cloud_b_class_sync_service import (
+    CloudBClassSyncService,
+    SQLAlchemyCloudWriter,
+    build_sync_payload,
+)
 from backend.services.cloud_b_class_auto_sync_runtime import CloudBClassAutoSyncRuntime
 
 
@@ -28,8 +32,13 @@ def test_cloud_sync_startup_revision_check_uses_isolated_current_chain():
 
 
 def test_build_cloud_sync_service_from_env_supports_dry_run(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp")
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15433/xihong_erp")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
+    )
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL",
+        "postgresql://erp_user:erp_pass_2025@localhost:15433/xihong_erp",
+    )
 
     service = build_cloud_sync_service_from_env(dry_run=True)
 
@@ -113,7 +122,9 @@ def test_cloud_sync_mirror_manager_defaults_to_b_class_schema():
     assert manager.schema_name == "b_class"
 
 
-def test_cloud_sync_mirror_manager_rejects_existing_table_missing_canonical_columns(monkeypatch):
+def test_cloud_sync_mirror_manager_rejects_existing_table_missing_canonical_columns(
+    monkeypatch,
+):
     class FakeConnection:
         def __enter__(self):
             return self
@@ -147,8 +158,13 @@ def test_cloud_sync_mirror_manager_rejects_existing_table_missing_canonical_colu
 
 
 def test_build_cloud_sync_worker_factory_returns_worker(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp")
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15433/xihong_erp")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
+    )
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL",
+        "postgresql://erp_user:erp_pass_2025@localhost:15433/xihong_erp",
+    )
 
     worker_factory = build_cloud_sync_worker_factory_from_env(dry_run=True)
     worker = worker_factory()
@@ -195,7 +211,9 @@ def test_checkpoint_scope_key_changes_with_cloud_target():
     assert scope_a != scope_b
 
 
-def test_build_cloud_sync_runtime_from_env_returns_none_when_worker_disabled(monkeypatch):
+def test_build_cloud_sync_runtime_from_env_returns_none_when_worker_disabled(
+    monkeypatch,
+):
     monkeypatch.setenv("ENABLE_COLLECTION", "true")
     monkeypatch.setenv("DEPLOYMENT_ROLE", "local")
     monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "false")
@@ -220,7 +238,10 @@ def test_build_cloud_sync_runtime_from_env_returns_runtime_when_enabled(monkeypa
     monkeypatch.setenv("ENABLE_COLLECTION", "true")
     monkeypatch.setenv("DEPLOYMENT_ROLE", "local")
     monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "true")
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15433/xihong_erp")
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL",
+        "postgresql://erp_user:erp_pass_2025@localhost:15433/xihong_erp",
+    )
     monkeypatch.setenv("CLOUD_SYNC_POLL_INTERVAL_SECONDS", "9")
     monkeypatch.setenv("CLOUD_SYNC_WORKER_ID", "cloud-sync-worker-test")
 
@@ -231,7 +252,9 @@ def test_build_cloud_sync_runtime_from_env_returns_runtime_when_enabled(monkeypa
     assert runtime.worker_id == "cloud-sync-worker-test"
 
 
-def test_run_cloud_sync_startup_checks_reports_degraded_when_cloud_db_missing(monkeypatch):
+def test_run_cloud_sync_startup_checks_reports_degraded_when_cloud_db_missing(
+    monkeypatch,
+):
     class FakeConnection:
         def __enter__(self):
             return self
@@ -258,10 +281,22 @@ def test_run_cloud_sync_startup_checks_reports_degraded_when_cloud_db_missing(mo
             ]
 
     monkeypatch.delenv("CLOUD_DATABASE_URL", raising=False)
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", lambda *args, **kwargs: FakeEngine())
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.sa_inspect", lambda *args, **kwargs: FakeInspector())
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions", lambda engine: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.create_engine",
+        lambda *args, **kwargs: FakeEngine(),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
+        lambda *args, **kwargs: FakeInspector(),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads",
+        lambda: {"head-revision"},
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
+        lambda engine: {"head-revision"},
+    )
 
     payload = run_cloud_sync_startup_checks_from_env()
 
@@ -271,7 +306,9 @@ def test_run_cloud_sync_startup_checks_reports_degraded_when_cloud_db_missing(mo
     assert payload["checks"]["cloud_database_url"]["ok"] is False
 
 
-def test_run_cloud_sync_startup_checks_reports_ok_when_tunnel_and_cloud_db_are_reachable(monkeypatch):
+def test_run_cloud_sync_startup_checks_reports_ok_when_tunnel_and_cloud_db_are_reachable(
+    monkeypatch,
+):
     class FakeConnection:
         def __enter__(self):
             return self
@@ -301,15 +338,33 @@ def test_run_cloud_sync_startup_checks_reports_ok_when_tunnel_and_cloud_db_are_r
                 "cloud_b_class_sync_tasks",
             ]
 
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:pass@host.docker.internal:15433/xihong_erp")
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL",
+        "postgresql://erp_user:pass@host.docker.internal:15433/xihong_erp",
+    )
     monkeypatch.setenv("CLOUD_SYNC_TUNNEL_ENABLED", "true")
     monkeypatch.setenv("CLOUD_SYNC_TUNNEL_HOST", "host.docker.internal")
     monkeypatch.setenv("CLOUD_SYNC_TUNNEL_PORT", "15433")
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", lambda *args, **kwargs: FakeEngine())
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.sa_inspect", lambda *args, **kwargs: FakeInspector())
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions", lambda engine: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.create_engine",
+        lambda *args, **kwargs: FakeEngine(),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
+        lambda *args, **kwargs: FakeInspector(),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._tcp_probe",
+        lambda *args, **kwargs: (True, None),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads",
+        lambda: {"head-revision"},
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
+        lambda engine: {"head-revision"},
+    )
 
     payload = run_cloud_sync_startup_checks_from_env()
 
@@ -318,7 +373,9 @@ def test_run_cloud_sync_startup_checks_reports_ok_when_tunnel_and_cloud_db_are_r
     assert payload["checks"]["cloud_sync_tunnel"]["ok"] is True
 
 
-def test_run_cloud_sync_startup_checks_does_not_migrate_cloud_receiver_when_enabled(monkeypatch):
+def test_run_cloud_sync_startup_checks_does_not_migrate_cloud_receiver_when_enabled(
+    monkeypatch,
+):
     class FakeConnection:
         def __init__(self, revision):
             self.revision = revision
@@ -365,12 +422,25 @@ def test_run_cloud_sync_startup_checks_does_not_migrate_cloud_receiver_when_enab
     def fake_inspect(engine):
         return FakeInspector(cloud=getattr(engine, "revision", "") == "old-revision")
 
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp")
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp"
+    )
     monkeypatch.setenv("ENABLE_CLOUD_SYNC_AUTO_MIGRATION", "true")
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", fake_create_engine)
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.sa_inspect", fake_inspect)
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.create_engine",
+        fake_create_engine,
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.sa_inspect", fake_inspect
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._tcp_probe",
+        lambda *args, **kwargs: (True, None),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads",
+        lambda: {"head-revision"},
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
         lambda engine: {getattr(engine, "revision", "head-revision")},
@@ -420,14 +490,27 @@ def test_run_cloud_sync_startup_checks_errors_when_receiver_log_missing(monkeypa
             return FakeEngine("old-revision")
         return FakeEngine("head-revision")
 
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp")
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", fake_create_engine)
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp"
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.create_engine",
+        fake_create_engine,
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
-        lambda engine: FakeInspector(cloud=getattr(engine, "revision", "") == "old-revision"),
+        lambda engine: FakeInspector(
+            cloud=getattr(engine, "revision", "") == "old-revision"
+        ),
     )
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._tcp_probe",
+        lambda *args, **kwargs: (True, None),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads",
+        lambda: {"head-revision"},
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
         lambda engine: {getattr(engine, "revision", "head-revision")},
@@ -437,7 +520,10 @@ def test_run_cloud_sync_startup_checks_errors_when_receiver_log_missing(monkeypa
 
     assert payload["status"] == "error"
     assert payload["checks"]["cloud_receiver_tables"]["ok"] is False
-    assert "ops.cloud_sync_receive_log" in payload["checks"]["cloud_receiver_tables"]["detail"]
+    assert (
+        "ops.cloud_sync_receive_log"
+        in payload["checks"]["cloud_receiver_tables"]["detail"]
+    )
 
 
 def test_run_cloud_sync_startup_checks_errors_when_receiver_queue_missing(monkeypatch):
@@ -479,15 +565,28 @@ def test_run_cloud_sync_startup_checks_errors_when_receiver_queue_missing(monkey
             return FakeEngine("old-revision")
         return FakeEngine("head-revision")
 
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp")
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp"
+    )
     monkeypatch.delenv("ENABLE_CLOUD_SYNC_AUTO_MIGRATION", raising=False)
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.create_engine",
+        fake_create_engine,
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
-        lambda engine: FakeInspector(cloud=getattr(engine, "revision", "") == "old-revision"),
+        lambda engine: FakeInspector(
+            cloud=getattr(engine, "revision", "") == "old-revision"
+        ),
     )
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._tcp_probe",
+        lambda *args, **kwargs: (True, None),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads",
+        lambda: {"head-revision"},
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
         lambda engine: {getattr(engine, "revision", "head-revision")},
@@ -497,10 +596,15 @@ def test_run_cloud_sync_startup_checks_errors_when_receiver_queue_missing(monkey
 
     assert payload["status"] == "error"
     assert payload["checks"]["cloud_receiver_tables"]["ok"] is False
-    assert "core.refresh_queue_tasks" in payload["checks"]["cloud_receiver_tables"]["detail"]
+    assert (
+        "core.refresh_queue_tasks"
+        in payload["checks"]["cloud_receiver_tables"]["detail"]
+    )
 
 
-def test_run_cloud_sync_startup_checks_accepts_receiver_target_without_erp_alembic_history(monkeypatch):
+def test_run_cloud_sync_startup_checks_accepts_receiver_target_without_erp_alembic_history(
+    monkeypatch,
+):
     class FakeConnection:
         def __enter__(self):
             return self
@@ -539,15 +643,26 @@ def test_run_cloud_sync_startup_checks_accepts_receiver_target_without_erp_alemb
     def fake_create_engine(url, *args, **kwargs):
         return FakeEngine(cloud=str(url).startswith("postgresql://cloud"))
 
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp")
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp"
+    )
     monkeypatch.setenv("ENABLE_CLOUD_SYNC_AUTO_MIGRATION", "true")
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory.create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory.create_engine",
+        fake_create_engine,
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
         lambda engine: FakeInspector(cloud=engine.cloud),
     )
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._tcp_probe",
+        lambda *args, **kwargs: (True, None),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads",
+        lambda: {"head-revision"},
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
         lambda engine: {"head-revision"} if not engine.cloud else set(),
@@ -558,7 +673,9 @@ def test_run_cloud_sync_startup_checks_accepts_receiver_target_without_erp_alemb
     assert payload["checks"]["cloud_receiver_tables"]["ok"] is True
 
 
-def test_run_cloud_sync_startup_checks_rejects_receiver_target_missing_refresh_queue(monkeypatch):
+def test_run_cloud_sync_startup_checks_rejects_receiver_target_missing_refresh_queue(
+    monkeypatch,
+):
     class FakeConnection:
         def __enter__(self):
             return self
@@ -594,17 +711,27 @@ def test_run_cloud_sync_startup_checks_rejects_receiver_target_missing_refresh_q
                 "cloud_b_class_sync_tasks",
             ]
 
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp")
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL", "postgresql://cloud:pass@127.0.0.1:15433/xihong_erp"
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory.create_engine",
-        lambda url, *args, **kwargs: FakeEngine(cloud=str(url).startswith("postgresql://cloud")),
+        lambda url, *args, **kwargs: FakeEngine(
+            cloud=str(url).startswith("postgresql://cloud")
+        ),
     )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory.sa_inspect",
         lambda engine: FakeInspector(cloud=engine.cloud),
     )
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._tcp_probe", lambda *args, **kwargs: (True, None))
-    monkeypatch.setattr("backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads", lambda: {"head-revision"})
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._tcp_probe",
+        lambda *args, **kwargs: (True, None),
+    )
+    monkeypatch.setattr(
+        "backend.services.cloud_b_class_auto_sync_factory._get_code_alembic_heads",
+        lambda: {"head-revision"},
+    )
     monkeypatch.setattr(
         "backend.services.cloud_b_class_auto_sync_factory._get_database_alembic_revisions",
         lambda engine: {"head-revision"},
@@ -614,7 +741,10 @@ def test_run_cloud_sync_startup_checks_rejects_receiver_target_missing_refresh_q
 
     assert payload["status"] == "error"
     assert payload["checks"]["cloud_receiver_tables"]["ok"] is False
-    assert payload["checks"]["cloud_receiver_tables"]["detail"] == "missing core.refresh_queue_tasks"
+    assert (
+        payload["checks"]["cloud_receiver_tables"]["detail"]
+        == "missing core.refresh_queue_tasks"
+    )
 
 
 def test_worker_factory_recover_stale_running_tasks_recovers_legacy_scope(
@@ -622,7 +752,9 @@ def test_worker_factory_recover_stale_running_tasks_recovers_legacy_scope(
     tmp_path,
 ):
     monkeypatch.setenv("DATABASE_URL", "sqlite://")
-    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:pass@127.0.0.1:15433/xihong_erp")
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL", "postgresql://erp_user:pass@127.0.0.1:15433/xihong_erp"
+    )
 
     recovered = []
 
@@ -678,7 +810,9 @@ def test_worker_factory_recover_stale_running_tasks_recovers_legacy_scope(
 
     factory = CloudSyncWorkerFactory(
         local_engine=object(),
-        cloud_engine=argparse.Namespace(url="postgresql://erp_user:pass@127.0.0.1:15433/xihong_erp"),
+        cloud_engine=argparse.Namespace(
+            url="postgresql://erp_user:pass@127.0.0.1:15433/xihong_erp"
+        ),
         session_factory=lambda: FakeSession(),
         dry_run=False,
     )

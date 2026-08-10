@@ -60,9 +60,20 @@ from modules.core.db import (
     MaterializedViewRefreshLog,  # v4.11.4新增:物化视图刷新日志表
 )
 
-from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncRun, CloudBClassSyncTask, RefreshQueueTask
+from modules.core.db import (
+    CloudBClassSyncCheckpoint,
+    CloudBClassSyncRun,
+    CloudBClassSyncTask,
+    RefreshQueueTask,
+)
 from modules.core.db import TaskCenterTask, TaskCenterLog, TaskCenterLink
-from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability, PlatformShopDiscovery
+from modules.core.db import (
+    MainAccount,
+    ShopAccount,
+    ShopAccountAlias,
+    ShopAccountCapability,
+    PlatformShopDiscovery,
+)
 from modules.core.db import (
     InventoryAdjustmentHeader,
     InventoryAdjustmentLine,
@@ -177,7 +188,9 @@ def _get_alembic_revisions_by_schema(connection, inspector=None) -> dict[str, st
     primary_table_names = inspector.get_table_names(schema=PRIMARY_ALEMBIC_SCHEMA)
     if "alembic_version" in primary_table_names:
         result = connection.execute(
-            text(f'SELECT version_num FROM "{PRIMARY_ALEMBIC_SCHEMA}"."alembic_version"')
+            text(
+                f'SELECT version_num FROM "{PRIMARY_ALEMBIC_SCHEMA}"."alembic_version"'
+            )
         ).fetchall()
         if result:
             return {PRIMARY_ALEMBIC_SCHEMA: result[-1][0]}
@@ -200,9 +213,13 @@ def _get_current_schema_revision(connection, inspector=None) -> str | None:
     inspector = inspector or inspect(connection)
     if not inspector.has_table("current_schema_alembic_version", schema="public"):
         return None
-    revisions = connection.execute(
-        text("SELECT version_num FROM public.current_schema_alembic_version")
-    ).scalars().all()
+    revisions = (
+        connection.execute(
+            text("SELECT version_num FROM public.current_schema_alembic_version")
+        )
+        .scalars()
+        .all()
+    )
     if len(revisions) != 1:
         raise RuntimeError(
             "public.current_schema_alembic_version must contain exactly one revision"
@@ -223,7 +240,11 @@ def _find_missing_critical_columns(
         else:
             schema_name, table_name = None, qualified_table
 
-        if existing_tables and qualified_table not in existing_aliases and table_name not in existing_aliases:
+        if (
+            existing_tables
+            and qualified_table not in existing_aliases
+            and table_name not in existing_aliases
+        ):
             continue
 
         try:
@@ -239,28 +260,30 @@ def _find_missing_critical_columns(
 
     return sorted(missing_columns)
 
+
 # ==================== 数据库URL转换函数 ====================
+
 
 def get_async_database_url(database_url: str) -> str:
     """
     将同步数据库URL转换为异步URL
-    
+
     支持的数据库类型:
     - PostgreSQL: postgresql:// -> postgresql+asyncpg://
     - SQLite: sqlite:// -> sqlite+aiosqlite://
-    
+
     Args:
         database_url: 同步数据库URL
-        
+
     Returns:
         异步数据库URL
-        
+
     Raises:
         ValueError: 不支持的数据库类型
     """
     parsed = urlparse(database_url)
-    scheme = parsed.scheme.split('+')[0]  # 移除现有驱动(如 +psycopg2)
-    
+    scheme = parsed.scheme.split("+")[0]  # 移除现有驱动(如 +psycopg2)
+
     # 根据数据库类型选择异步驱动
     if scheme == "postgresql":
         new_scheme = "postgresql+asyncpg"
@@ -268,9 +291,10 @@ def get_async_database_url(database_url: str) -> str:
         new_scheme = "sqlite+aiosqlite"
     else:
         raise ValueError(f"不支持的数据库类型: {scheme}")
-    
+
     new_parsed = parsed._replace(scheme=new_scheme)
     return urlunparse(new_parsed)
+
 
 # ==================== 数据库引擎配置 ====================
 
@@ -297,20 +321,15 @@ else:
 
 # 创建数据库引擎
 engine = create_engine(
-    DATABASE_URL,
-    echo=settings.DATABASE_ECHO,
-    connect_args=connect_args,
-    **pool_config
+    DATABASE_URL, echo=settings.DATABASE_ECHO, connect_args=connect_args, **pool_config
 )
 
 # 创建Session工厂
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-logger.info(f"[sync] 数据库连接已配置: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'SQLite'}")
+logger.info(
+    f"[sync] 数据库连接已配置: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'SQLite'}"
+)
 
 # ==================== 异步数据库引擎配置(v4.18.2新增) ====================
 
@@ -340,24 +359,27 @@ else:
 # asyncpg 不支持通过 connect_args 传递 options
 from sqlalchemy import event, text
 
+
 @event.listens_for(async_engine.sync_engine, "connect")
 def set_search_path_on_connect(dbapi_connection, connection_record):
     """每次连接建立时设置 search_path 和事务超时保护"""
     cursor = dbapi_connection.cursor()
-    cursor.execute("SET search_path TO public, b_class, a_class, c_class, core, finance")
+    cursor.execute(
+        "SET search_path TO public, b_class, a_class, c_class, core, finance"
+    )
     cursor.execute("SET statement_timeout TO 120000")
     cursor.execute("SET idle_in_transaction_session_timeout TO 120000")
     cursor.close()
 
+
 logger.info("[async] 已配置 asyncpg search_path 事件监听器")
 
 # 创建异步Session工厂
-AsyncSessionLocal = async_sessionmaker(
-    bind=async_engine,
-    expire_on_commit=False
-)
+AsyncSessionLocal = async_sessionmaker(bind=async_engine, expire_on_commit=False)
 
-logger.info(f"[async] 异步数据库连接已配置: {ASYNC_DATABASE_URL.split('@')[-1] if '@' in ASYNC_DATABASE_URL else 'SQLite'}")
+logger.info(
+    f"[async] 异步数据库连接已配置: {ASYNC_DATABASE_URL.split('@')[-1] if '@' in ASYNC_DATABASE_URL else 'SQLite'}"
+)
 
 
 def reset_async_engine_pool_for_new_loop() -> None:
@@ -371,21 +393,23 @@ def reset_async_engine_pool_for_new_loop() -> None:
     async_engine.sync_engine.dispose(close=False)
     logger.info("[async] dropped async engine pool before creating a new event loop")
 
+
 # ==================== FastAPI依赖注入 ====================
+
 
 def get_db() -> Generator[Session, None, None]:
     """
     FastAPI数据库Session依赖注入(同步版本)
-    
+
     Usage:
         @router.get("/items")
         async def get_items(db: Session = Depends(get_db)):
             items = db.query(CatalogFile).all()
             return items
-    
+
     Yields:
         Session: SQLAlchemy数据库会话
-        
+
     Note:
         v4.18.2: 此函数保留用于过渡期,新代码请使用 get_async_db()
     """
@@ -399,17 +423,17 @@ def get_db() -> Generator[Session, None, None]:
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI数据库Session依赖注入(异步版本,v4.18.2新增)
-    
+
     Usage:
         @router.get("/items")
         async def get_items(db: AsyncSession = Depends(get_async_db)):
             result = await db.execute(select(CatalogFile))
             items = result.scalars().all()
             return items
-    
+
     Yields:
         AsyncSession: SQLAlchemy异步数据库会话
-        
+
     Note:
         事务策略说明:
         - 成功时自动 commit(请求结束后)
@@ -430,16 +454,16 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
 def init_db():
     """
     初始化数据库(创建所有表)
-    
+
     注意:
     - 生产环境:禁止使用此函数,必须使用 Alembic 迁移(alembic upgrade head)
     - 开发环境:可以使用此函数快速创建表(但不推荐)
     - 此函数仅作为辅助,不保证表结构完整性和迁移历史
-    
+
     推荐方式:使用 Alembic 迁移
     """
     import os
-    
+
     # 生产环境禁止使用
     environment = os.getenv("ENVIRONMENT", "").lower()
     if environment == "production":
@@ -447,13 +471,13 @@ def init_db():
             "[WARN] 生产环境禁止使用 init_db(),请使用 Alembic 迁移: alembic upgrade head"
         )
         return
-    
+
     # 开发环境:仅作为快速原型,记录警告
     logger.warning(
         "[WARN] 使用 init_db() 创建表,这不是推荐方式。"
         "请使用 Alembic 迁移: alembic upgrade head"
     )
-    
+
     missing_tables = []
     created_tables = []
     skip_schemas = {"pg_catalog", "information_schema", "pg_toast"}
@@ -474,6 +498,7 @@ def init_db():
     try:
         # 执行前检查（多 schema：与 verify_schema_completeness 一致）
         from sqlalchemy import inspect
+
         inspector = inspect(engine)
         existing_before = _collect_existing_tables(inspector)
 
@@ -487,12 +512,12 @@ def init_db():
         expected_tables = set(Base.metadata.tables.keys())
 
         created_tables = existing_after - existing_before
-        missing_tables = expected_tables - _expand_existing_table_aliases(existing_after)
+        missing_tables = expected_tables - _expand_existing_table_aliases(
+            existing_after
+        )
 
         if missing_tables:
-            logger.error(
-                f"[ERROR] 以下表创建失败: {', '.join(sorted(missing_tables))}"
-            )
+            logger.error(f"[ERROR] 以下表创建失败: {', '.join(sorted(missing_tables))}")
             raise RuntimeError(f"Missing tables: {', '.join(sorted(missing_tables))}")
 
         logger.info(
@@ -515,11 +540,11 @@ def init_db():
 def verify_schema_completeness():
     """
     验证数据库表结构完整性(生产环境必须)
-    
+
     检查:
     1. schema.py 中定义的所有表是否都存在（含 public / a_class / c_class 等多 schema）
     2.  Alembic 迁移状态是否与代码一致
-    
+
     Returns:
         dict: {
             "all_tables_exist": bool,
@@ -541,7 +566,9 @@ def verify_schema_completeness():
 
     expected_tables = set(Base.metadata.tables.keys())
     missing_tables = expected_tables - _expand_existing_table_aliases(existing_tables)
-    missing_columns = _find_missing_critical_columns(inspector, existing_tables=existing_tables)
+    missing_columns = _find_missing_critical_columns(
+        inspector, existing_tables=existing_tables
+    )
 
     try:
         from alembic.config import Config
@@ -570,9 +597,9 @@ def verify_schema_completeness():
         "current_revision": current_rev,
         "head_revision": head_rev,
         "expected_table_count": len(expected_tables),
-        "actual_table_count": len(existing_tables)
+        "actual_table_count": len(existing_tables),
     }
-    
+
     inspector = inspect(engine)
     # 多 schema 支持：Base.metadata.tables 的 key 为 "schema.tablename" 或 "tablename"(public)
     # get_table_names() 无 schema 时只返回 default schema(通常 public)，需按 schema 汇总
@@ -590,24 +617,24 @@ def verify_schema_completeness():
     except Exception:
         # 降级：仅 default schema（兼容旧行为）
         existing_tables = set(inspector.get_table_names())
-    
+
     # 获取 schema.py 中定义的所有表
     expected_tables = set(Base.metadata.tables.keys())
-    
+
     missing_tables = expected_tables - existing_tables
-    
+
     # 检查 Alembic 版本
     try:
         from alembic.config import Config
         from alembic.script import ScriptDirectory
         from alembic.runtime.migration import MigrationContext
-        
+
         alembic_cfg = Config("alembic.ini")
         script = ScriptDirectory.from_config(alembic_cfg)
         context = MigrationContext.configure(engine.connect())
         current_rev = context.get_current_revision()
         head_rev = script.get_current_head()
-        
+
         migration_status = "up_to_date" if current_rev == head_rev else "outdated"
         if current_rev is None:
             migration_status = "not_initialized"
@@ -615,7 +642,7 @@ def verify_schema_completeness():
         migration_status = f"error: {str(e)}"
         current_rev = None
         head_rev = None
-    
+
     return {
         "all_tables_exist": len(missing_tables) == 0,
         "missing_tables": sorted(list(missing_tables)),
@@ -623,43 +650,43 @@ def verify_schema_completeness():
         "current_revision": current_rev,
         "head_revision": head_rev,
         "expected_table_count": len(expected_tables),
-        "actual_table_count": len(existing_tables)
+        "actual_table_count": len(existing_tables),
     }
 
 
 def warm_up_pool(pool_size: int = 10):
     """
     预热数据库连接池(同步版本,v4.1.0新增)
-    
+
     通过预先创建和测试连接,避免首次请求时的冷启动延迟。
-    
+
     Args:
         pool_size: 预热连接数量,默认10个
-    
+
     Returns:
         None
-    
+
     Raises:
         Exception: 连接池预热失败时抛出异常
     """
     from sqlalchemy import text
-    
+
     connections = []
     try:
         logger.info(f"[sync] 开始预热连接池(目标: {pool_size}个连接)")
-        
+
         # 创建连接并执行测试查询
         for i in range(pool_size):
             conn = engine.connect()
             conn.execute(text("SELECT 1"))
             connections.append(conn)
-        
+
         # 关闭所有连接(返回连接池)
         for conn in connections:
             conn.close()
-        
+
         logger.info(f"[sync] 连接池预热完成: {pool_size}个连接已测试")
-        
+
     except Exception as e:
         logger.error(f"[sync] 连接池预热失败: {e}")
         # 清理已创建的连接
@@ -674,24 +701,24 @@ def warm_up_pool(pool_size: int = 10):
 async def warm_up_async_pool(pool_size: int = 10):
     """
     预热异步数据库连接池(v4.18.2新增)
-    
+
     通过并发创建和测试连接,避免首次请求时的冷启动延迟。
-    
+
     Args:
         pool_size: 预热连接数量,默认10个
-    
+
     Returns:
         None
-    
+
     Raises:
         Exception: 连接池预热失败时抛出异常
-        
+
     Note:
         必须并发创建多个连接,才能真正预热连接池。
         单个 session 循环执行只会复用同一连接。
     """
     from sqlalchemy import text
-    
+
     async def test_single_connection(i: int):
         """测试单个连接"""
         session = AsyncSessionLocal()
@@ -707,14 +734,14 @@ async def warm_up_async_pool(pool_size: int = 10):
                 await session.close()
             except Exception:
                 pass  # 忽略关闭时的错误
-    
+
     try:
         logger.info(f"[async] 开始预热异步连接池(目标: {pool_size}个连接)")
-        
+
         # 并发创建多个连接,真正预热连接池
         tasks = [test_single_connection(i) for i in range(pool_size)]
         await asyncio.gather(*tasks)
-        
+
         logger.info(f"[async] 异步连接池预热完成: {pool_size}个连接已创建")
     except Exception as e:
         logger.error(f"[async] 异步连接池预热失败: {e}")

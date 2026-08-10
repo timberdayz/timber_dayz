@@ -65,9 +65,13 @@ async def test_generic_target_routes_reject_all_operation_write_bypasses(monkeyp
 
     class _UnexpectedService:
         def __init__(self, *_args, **_kwargs):
-            raise AssertionError("operation calculation must be rejected before service execution")
+            raise AssertionError(
+                "operation calculation must be rejected before service execution"
+            )
 
-    monkeypatch.setattr(target_management, "TargetManagementService", _UnexpectedService, raising=False)
+    monkeypatch.setattr(
+        target_management, "TargetManagementService", _UnexpectedService, raising=False
+    )
     calculate_db = _Db(_target("operation"))
     with pytest.raises(HTTPException) as calculate_error:
         await target_management.calculate_target_achievement(7, db=calculate_db)

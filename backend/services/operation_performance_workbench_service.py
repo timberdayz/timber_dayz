@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas.target import OperationWorkbenchApplyRequest
 from backend.services.payroll_period_lock_service import PayrollPeriodLockService
-from modules.core.db import OperationMetricCatalog, PerformanceConfig, SalesTarget, TargetBreakdown
+from modules.core.db import (
+    OperationMetricCatalog,
+    PerformanceConfig,
+    SalesTarget,
+    TargetBreakdown,
+)
 
 
 class OperationMetricCalculator:
@@ -48,7 +53,11 @@ class OperationMetricCalculator:
         achieved_number = float(achieved)
         if direction == "higher_better":
             if target_number <= 0:
-                return None, {**detail, "status": "pending", "message": "正向指标目标必须大于零"}
+                return None, {
+                    **detail,
+                    "status": "pending",
+                    "message": "正向指标目标必须大于零",
+                }
             ratio = min(max(achieved_number / target_number, 0.0), 1.0)
         elif target_number == 0:
             ratio = 1.0 if achieved_number == 0 else 0.0
@@ -64,7 +73,9 @@ class OperationMetricCalculator:
             per_unit = float(getattr(metric, "penalty_per_unit", 0.0) or 0.0)
             penalty_max = float(getattr(metric, "penalty_max", 0.0) or 0.0)
             if threshold is not None and achieved_number > float(threshold):
-                penalty = min((achieved_number - float(threshold)) * per_unit, penalty_max)
+                penalty = min(
+                    (achieved_number - float(threshold)) * per_unit, penalty_max
+                )
         score = max(0.0, base_score - penalty)
         return round(score, 4), {
             **detail,
@@ -88,8 +99,12 @@ class OperationPerformanceWorkbenchService:
         *,
         expected_max_score: float,
     ) -> tuple[float | None, dict[str, Any]]:
-        enabled = [metric for metric in metrics if bool(getattr(metric, "is_enabled", True))]
-        total_max_score = sum(float(getattr(metric, "max_score", 0.0) or 0.0) for metric in enabled)
+        enabled = [
+            metric for metric in metrics if bool(getattr(metric, "is_enabled", True))
+        ]
+        total_max_score = sum(
+            float(getattr(metric, "max_score", 0.0) or 0.0) for metric in enabled
+        )
         if round(total_max_score, 4) != round(float(expected_max_score), 4):
             raise ValueError("运营指标满分之和必须等于绩效配置的运营满分")
 
@@ -126,10 +141,14 @@ class OperationPerformanceWorkbenchService:
         start = datetime.strptime(year_month, "%Y-%m").date().replace(day=1)
         return start, start.replace(day=monthrange(start.year, start.month)[1])
 
-    async def _catalog(self, catalog_version: int | None = None, *, active_only: bool = True):
+    async def _catalog(
+        self, catalog_version: int | None = None, *, active_only: bool = True
+    ):
         query = select(OperationMetricCatalog)
         if catalog_version is not None:
-            query = query.where(OperationMetricCatalog.catalog_version == catalog_version)
+            query = query.where(
+                OperationMetricCatalog.catalog_version == catalog_version
+            )
         else:
             latest = await self.db.execute(
                 select(OperationMetricCatalog.catalog_version)
@@ -139,10 +158,16 @@ class OperationPerformanceWorkbenchService:
             catalog_version = latest.scalar_one_or_none()
             if catalog_version is None:
                 return []
-            query = query.where(OperationMetricCatalog.catalog_version == catalog_version)
+            query = query.where(
+                OperationMetricCatalog.catalog_version == catalog_version
+            )
         if active_only:
             query = query.where(OperationMetricCatalog.is_active.is_(True))
-        return (await self.db.execute(query.order_by(OperationMetricCatalog.id))).scalars().all()
+        return (
+            (await self.db.execute(query.order_by(OperationMetricCatalog.id)))
+            .scalars()
+            .all()
+        )
 
     async def _config(self, year_month: str, config_id: int | None = None):
         month_start, month_end = self.month_range(year_month)
@@ -153,24 +178,35 @@ class OperationPerformanceWorkbenchService:
             query = query.where(
                 PerformanceConfig.is_active.is_(True),
                 PerformanceConfig.effective_from <= month_end,
-                (PerformanceConfig.effective_to.is_(None) | (PerformanceConfig.effective_to >= month_start)),
-            ).order_by(PerformanceConfig.effective_from.desc(), PerformanceConfig.id.desc())
+                (
+                    PerformanceConfig.effective_to.is_(None)
+                    | (PerformanceConfig.effective_to >= month_start)
+                ),
+            ).order_by(
+                PerformanceConfig.effective_from.desc(), PerformanceConfig.id.desc()
+            )
         return (await self.db.execute(query.limit(1))).scalar_one_or_none()
 
     async def _targets(self, year_month: str):
         month_start, month_end = self.month_range(year_month)
-        return (await self.db.execute(
-            select(SalesTarget)
-            .where(
-                SalesTarget.target_type == "operation",
-                SalesTarget.period_start == month_start,
-                SalesTarget.period_end == month_end,
-                SalesTarget.metric_catalog_version.is_not(None),
-                SalesTarget.scope_type.in_(("shop", None)),
-                SalesTarget.status != "cancelled",
+        return (
+            (
+                await self.db.execute(
+                    select(SalesTarget)
+                    .where(
+                        SalesTarget.target_type == "operation",
+                        SalesTarget.period_start == month_start,
+                        SalesTarget.period_end == month_end,
+                        SalesTarget.metric_catalog_version.is_not(None),
+                        SalesTarget.scope_type.in_(("shop", None)),
+                        SalesTarget.status != "cancelled",
+                    )
+                    .order_by(SalesTarget.metric_code, SalesTarget.id)
+                )
             )
-            .order_by(SalesTarget.metric_code, SalesTarget.id)
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
 
     async def get_workbench(self, year_month: str) -> dict[str, Any]:
         month_start, month_end = self.month_range(year_month)
@@ -178,41 +214,95 @@ class OperationPerformanceWorkbenchService:
         catalog = await self._catalog()
         targets = await self._targets(year_month)
         by_code = {str(row.metric_code): row for row in targets if row.metric_code}
-        code_by_id = {row.id: str(row.metric_code) for row in targets if row.metric_code}
+        code_by_id = {
+            row.id: str(row.metric_code) for row in targets if row.metric_code
+        }
         target_ids = [row.id for row in targets]
         overrides = []
         if target_ids:
-            overrides = (await self.db.execute(
-                select(TargetBreakdown)
-                .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
-                .where(
-                    TargetBreakdown.target_id.in_(target_ids),
-                    TargetBreakdown.breakdown_type == "shop",
-                    SalesTarget.metric_catalog_version.is_not(None),
-                    TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version,
+            overrides = (
+                (
+                    await self.db.execute(
+                        select(TargetBreakdown)
+                        .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
+                        .where(
+                            TargetBreakdown.target_id.in_(target_ids),
+                            TargetBreakdown.breakdown_type == "shop",
+                            SalesTarget.metric_catalog_version.is_not(None),
+                            TargetBreakdown.operation_contract_version
+                            == SalesTarget.metric_catalog_version,
+                        )
+                        .order_by(
+                            TargetBreakdown.target_id,
+                            TargetBreakdown.platform_code,
+                            TargetBreakdown.shop_id,
+                        )
+                    )
                 )
-                .order_by(TargetBreakdown.target_id, TargetBreakdown.platform_code, TargetBreakdown.shop_id)
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
         rows = []
         for item in catalog:
             target = by_code.get(item.metric_code)
-            rows.append({
-                "metric_code": item.metric_code,
-                "metric_name": item.metric_name,
-                "metric_direction": item.metric_direction,
-                "catalog_version": item.catalog_version,
-                "is_enabled": bool(getattr(target, "is_enabled", True)) if target else False,
-                "target_id": getattr(target, "id", None),
-                "target_value": getattr(target, "target_value", None) if target else item.default_target_value,
-                "achieved_value": getattr(target, "achieved_value", None) if target else None,
-                "max_score": float(getattr(target, "max_score", item.default_max_score) or 0.0) if target else float(item.default_max_score or 0.0),
-                "penalty_enabled": bool(getattr(target, "penalty_enabled", item.default_penalty_enabled)) if target else bool(item.default_penalty_enabled),
-                "penalty_threshold": getattr(target, "penalty_threshold", None) if target else item.default_penalty_threshold,
-                "penalty_per_unit": getattr(target, "penalty_per_unit", None) if target else item.default_penalty_per_unit,
-                "penalty_max": getattr(target, "penalty_max", None) if target else item.default_penalty_max,
-                "manual_score_enabled": bool(item.manual_score_enabled or item.metric_direction == "manual_score"),
-                "manual_score_value": getattr(target, "manual_score_value", None) if target else None,
-            })
+            rows.append(
+                {
+                    "metric_code": item.metric_code,
+                    "metric_name": item.metric_name,
+                    "metric_direction": item.metric_direction,
+                    "catalog_version": item.catalog_version,
+                    "is_enabled": (
+                        bool(getattr(target, "is_enabled", True)) if target else False
+                    ),
+                    "target_id": getattr(target, "id", None),
+                    "target_value": (
+                        getattr(target, "target_value", None)
+                        if target
+                        else item.default_target_value
+                    ),
+                    "achieved_value": (
+                        getattr(target, "achieved_value", None) if target else None
+                    ),
+                    "max_score": (
+                        float(
+                            getattr(target, "max_score", item.default_max_score) or 0.0
+                        )
+                        if target
+                        else float(item.default_max_score or 0.0)
+                    ),
+                    "penalty_enabled": (
+                        bool(
+                            getattr(
+                                target, "penalty_enabled", item.default_penalty_enabled
+                            )
+                        )
+                        if target
+                        else bool(item.default_penalty_enabled)
+                    ),
+                    "penalty_threshold": (
+                        getattr(target, "penalty_threshold", None)
+                        if target
+                        else item.default_penalty_threshold
+                    ),
+                    "penalty_per_unit": (
+                        getattr(target, "penalty_per_unit", None)
+                        if target
+                        else item.default_penalty_per_unit
+                    ),
+                    "penalty_max": (
+                        getattr(target, "penalty_max", None)
+                        if target
+                        else item.default_penalty_max
+                    ),
+                    "manual_score_enabled": bool(
+                        item.manual_score_enabled
+                        or item.metric_direction == "manual_score"
+                    ),
+                    "manual_score_value": (
+                        getattr(target, "manual_score_value", None) if target else None
+                    ),
+                }
+            )
         return {
             "year_month": year_month,
             "period_start": month_start,
@@ -220,8 +310,12 @@ class OperationPerformanceWorkbenchService:
             "catalog_version": catalog[0].catalog_version if catalog else None,
             "performance_config_id": getattr(config, "id", None),
             "performance_config_updated_at": getattr(config, "updated_at", None),
-            "operation_max_score": float(getattr(config, "operation_max_score", 20) if config else 20),
-            "updated_at": max((getattr(row, "updated_at", None) for row in targets), default=None),
+            "operation_max_score": float(
+                getattr(config, "operation_max_score", 20) if config else 20
+            ),
+            "updated_at": max(
+                (getattr(row, "updated_at", None) for row in targets), default=None
+            ),
             "metrics": rows,
             "shop_overrides": [
                 {
@@ -237,30 +331,50 @@ class OperationPerformanceWorkbenchService:
             ],
         }
 
-    async def apply(self, request: OperationWorkbenchApplyRequest, username: str | None = None) -> dict[str, Any]:
+    async def apply(
+        self, request: OperationWorkbenchApplyRequest, username: str | None = None
+    ) -> dict[str, Any]:
         month_start, month_end = self.month_range(request.year_month)
-        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=request.year_month)
+        await PayrollPeriodLockService(self.db).assert_month_mutable(
+            year_month=request.year_month
+        )
         catalog = await self._catalog(request.catalog_version)
         catalog_by_code = {item.metric_code: item for item in catalog}
         config = await self._config(request.year_month)
         if config is None:
             raise ValueError("考核周期内无可用绩效配置")
-        if request.performance_config_id is not None and request.performance_config_id != config.id:
-            raise OperationPerformanceWorkbenchConflictError("绩效配置已变更，请刷新后重试")
+        if (
+            request.performance_config_id is not None
+            and request.performance_config_id != config.id
+        ):
+            raise OperationPerformanceWorkbenchConflictError(
+                "绩效配置已变更，请刷新后重试"
+            )
         expected_config_updated_at = request.expected_performance_config_updated_at
         current_config_updated_at = getattr(config, "updated_at", None)
         if (
             expected_config_updated_at is not None
             and current_config_updated_at is not None
-            and abs((current_config_updated_at - expected_config_updated_at).total_seconds()) > 0.001
+            and abs(
+                (current_config_updated_at - expected_config_updated_at).total_seconds()
+            )
+            > 0.001
         ):
-            raise OperationPerformanceWorkbenchConflictError("绩效配置已变更，请刷新后重试")
-        unknown_codes = [item.metric_code for item in request.metrics if item.metric_code not in catalog_by_code]
+            raise OperationPerformanceWorkbenchConflictError(
+                "绩效配置已变更，请刷新后重试"
+            )
+        unknown_codes = [
+            item.metric_code
+            for item in request.metrics
+            if item.metric_code not in catalog_by_code
+        ]
         if unknown_codes:
             raise ValueError(f"运营指标不在目录中: {', '.join(unknown_codes)}")
         invalid_overrides = [
-            item.metric_code for item in request.shop_overrides
-            if item.metric_code not in {metric.metric_code for metric in request.metrics}
+            item.metric_code
+            for item in request.shop_overrides
+            if item.metric_code
+            not in {metric.metric_code for metric in request.metrics}
             or not item.platform_code.strip()
             or not item.shop_id.strip()
         ]
@@ -274,9 +388,16 @@ class OperationPerformanceWorkbenchService:
         existing = await self._targets(request.year_month)
         existing_by_code = {row.metric_code: row for row in existing if row.metric_code}
         if request.expected_updated_at is not None:
-            current = max((getattr(row, "updated_at", None) for row in existing), default=None)
-            if current is not None and abs((current - request.expected_updated_at).total_seconds()) > 0.001:
-                raise OperationPerformanceWorkbenchConflictError("运营绩效配置已被其他用户更新，请刷新后重试")
+            current = max(
+                (getattr(row, "updated_at", None) for row in existing), default=None
+            )
+            if (
+                current is not None
+                and abs((current - request.expected_updated_at).total_seconds()) > 0.001
+            ):
+                raise OperationPerformanceWorkbenchConflictError(
+                    "运营绩效配置已被其他用户更新，请刷新后重试"
+                )
 
         rows_by_code: dict[str, SalesTarget] = {}
         for item in request.metrics:
@@ -308,7 +429,10 @@ class OperationPerformanceWorkbenchService:
             row.penalty_threshold = item.penalty_threshold
             row.penalty_per_unit = item.penalty_per_unit
             row.penalty_max = item.penalty_max
-            row.manual_score_enabled = bool(catalog_item.manual_score_enabled or catalog_item.metric_direction == "manual_score")
+            row.manual_score_enabled = bool(
+                catalog_item.manual_score_enabled
+                or catalog_item.metric_direction == "manual_score"
+            )
             row.manual_score_value = item.manual_score_value
             row.is_enabled = item.is_enabled
             row.metric_catalog_version = request.catalog_version
@@ -332,7 +456,8 @@ class OperationPerformanceWorkbenchService:
                     TargetBreakdown.target_id.in_(target_ids),
                     TargetBreakdown.breakdown_type == "shop",
                     SalesTarget.metric_catalog_version.is_not(None),
-                    TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version,
+                    TargetBreakdown.operation_contract_version
+                    == SalesTarget.metric_catalog_version,
                 )
             )
             await self.db.execute(
@@ -344,25 +469,35 @@ class OperationPerformanceWorkbenchService:
             target = rows_by_code.get(override.metric_code)
             if target is None:
                 raise ValueError(f"店铺覆盖指标不存在: {override.metric_code}")
-            self.db.add(TargetBreakdown(
-                target_id=target.id,
-                breakdown_type="shop",
-                platform_code=override.platform_code.lower(),
-                shop_id=override.shop_id,
-                period_start=month_start,
-                period_end=month_end,
-                target_value=override.target_value,
-                achieved_value=override.achieved_value,
-                manual_score_value=override.manual_score_value,
-                operation_contract_version=target.metric_catalog_version,
-            ))
+            self.db.add(
+                TargetBreakdown(
+                    target_id=target.id,
+                    breakdown_type="shop",
+                    platform_code=override.platform_code.lower(),
+                    shop_id=override.shop_id,
+                    period_start=month_start,
+                    period_end=month_end,
+                    target_value=override.target_value,
+                    achieved_value=override.achieved_value,
+                    manual_score_value=override.manual_score_value,
+                    operation_contract_version=target.metric_catalog_version,
+                )
+            )
         await self.db.commit()
         return await self.get_workbench(request.year_month)
 
-    async def copy_prev_month(self, year_month: str, username: str | None = None) -> dict[str, Any]:
-        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=year_month)
+    async def copy_prev_month(
+        self, year_month: str, username: str | None = None
+    ) -> dict[str, Any]:
+        await PayrollPeriodLockService(self.db).assert_month_mutable(
+            year_month=year_month
+        )
         month_start, _ = self.month_range(year_month)
-        previous_month = f"{month_start.year - 1:04d}-12" if month_start.month == 1 else f"{month_start.year:04d}-{month_start.month - 1:02d}"
+        previous_month = (
+            f"{month_start.year - 1:04d}-12"
+            if month_start.month == 1
+            else f"{month_start.year:04d}-{month_start.month - 1:02d}"
+        )
         current = await self._targets(year_month)
         if current:
             raise ValueError("目标月份已有运营配置，请清空后再复制")
@@ -378,31 +513,40 @@ class OperationPerformanceWorkbenchService:
             if row.metric_code not in active_catalog:
                 skipped.append({"metric_code": row.metric_code, "reason": "指标已退役"})
                 continue
-            metrics.append({
-                "metric_code": row.metric_code,
-                "is_enabled": bool(row.is_enabled),
-                "target_value": row.target_value,
-                "achieved_value": None,
-                "max_score": row.max_score,
-                "penalty_enabled": row.penalty_enabled,
-                "penalty_threshold": row.penalty_threshold,
-                "penalty_per_unit": row.penalty_per_unit,
-                "penalty_max": row.penalty_max,
-                "manual_score_value": None,
-            })
+            metrics.append(
+                {
+                    "metric_code": row.metric_code,
+                    "is_enabled": bool(row.is_enabled),
+                    "target_value": row.target_value,
+                    "achieved_value": None,
+                    "max_score": row.max_score,
+                    "penalty_enabled": row.penalty_enabled,
+                    "penalty_threshold": row.penalty_threshold,
+                    "penalty_per_unit": row.penalty_per_unit,
+                    "penalty_max": row.penalty_max,
+                    "manual_score_value": None,
+                }
+            )
         previous_ids = [row.id for row in previous]
         overrides = []
         if previous_ids:
-            rows = (await self.db.execute(
-                select(TargetBreakdown)
-                .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
-                .where(
-                    TargetBreakdown.target_id.in_(previous_ids),
-                    TargetBreakdown.breakdown_type == "shop",
-                    SalesTarget.metric_catalog_version.is_not(None),
-                    TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version,
+            rows = (
+                (
+                    await self.db.execute(
+                        select(TargetBreakdown)
+                        .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
+                        .where(
+                            TargetBreakdown.target_id.in_(previous_ids),
+                            TargetBreakdown.breakdown_type == "shop",
+                            SalesTarget.metric_catalog_version.is_not(None),
+                            TargetBreakdown.operation_contract_version
+                            == SalesTarget.metric_catalog_version,
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             code_by_id = {row.id: row.metric_code for row in previous}
             overrides = [
                 {
@@ -413,13 +557,19 @@ class OperationPerformanceWorkbenchService:
                     "achieved_value": None,
                     "manual_score_value": None,
                 }
-                for row in rows if code_by_id[row.target_id] in active_catalog
+                for row in rows
+                if code_by_id[row.target_id] in active_catalog
             ]
-        result = await self.apply(OperationWorkbenchApplyRequest(
-            year_month=year_month,
-            catalog_version=max(active_catalog.values(), key=lambda item: item.catalog_version).catalog_version,
-            metrics=metrics,
-            shop_overrides=overrides,
-        ), username=username)
+        result = await self.apply(
+            OperationWorkbenchApplyRequest(
+                year_month=year_month,
+                catalog_version=max(
+                    active_catalog.values(), key=lambda item: item.catalog_version
+                ).catalog_version,
+                metrics=metrics,
+                shop_overrides=overrides,
+            ),
+            username=username,
+        )
         result["skipped"] = skipped
         return result

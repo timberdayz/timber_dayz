@@ -134,9 +134,7 @@ class DepartmentResponse(BaseModel):
 
 
 class PositionCreate(BaseModel):
-    position_code: str = Field(
-        ..., description="职位编码", min_length=1, max_length=64
-    )
+    position_code: str = Field(..., description="职位编码", min_length=1, max_length=64)
     position_name: str = Field(
         ..., description="职位名称", min_length=1, max_length=128
     )
@@ -212,9 +210,7 @@ class EmployeeCreate(BaseModel):
     bank_account: Optional[str] = Field(None, description="银行账号")
     status: str = Field("active", description="状态")
     employee_identity_type: str = Field("employee", description="员工身份类型")
-    user_id: Optional[int] = Field(
-        None, description="关联登录账号 dim_users.user_id"
-    )
+    user_id: Optional[int] = Field(None, description="关联登录账号 dim_users.user_id")
 
     @field_validator(
         "birth_date",
@@ -295,9 +291,7 @@ class EmployeeUpdate(BaseModel):
     bank_account: Optional[str] = None
     status: Optional[str] = None
     employee_identity_type: Optional[str] = None
-    user_id: Optional[int] = Field(
-        None, description="关联登录账号 dim_users.user_id"
-    )
+    user_id: Optional[int] = Field(None, description="关联登录账号 dim_users.user_id")
 
 
 class EmployeeResponse(BaseModel):
@@ -349,9 +343,7 @@ class WorkShiftCreate(BaseModel):
     start_time: str = Field(
         ..., description="上班时间(HH:MM)", pattern=r"^\d{2}:\d{2}$"
     )
-    end_time: str = Field(
-        ..., description="下班时间(HH:MM)", pattern=r"^\d{2}:\d{2}$"
-    )
+    end_time: str = Field(..., description="下班时间(HH:MM)", pattern=r"^\d{2}:\d{2}$")
     work_hours: float = Field(8.0, ge=0, le=24, description="标准工作时长")
     break_hours: float = Field(1.0, ge=0, le=8, description="休息时长")
     late_tolerance: int = Field(15, ge=0, description="迟到容忍时间(分钟)")
@@ -597,7 +589,9 @@ class SalaryStructureUpdate(BaseModel):
     meal_allowance: Optional[Decimal] = Field(None, ge=0, description="????")
     communication_allowance: Optional[Decimal] = Field(None, ge=0, description="????")
     other_allowance: Optional[Decimal] = Field(None, ge=0, description="????")
-    performance_package_amount: Optional[Decimal] = Field(None, ge=0, description="???????")
+    performance_package_amount: Optional[Decimal] = Field(
+        None, ge=0, description="???????"
+    )
     performance_ratio: Optional[float] = Field(None, ge=0, le=1, description="??????")
     commission_ratio: Optional[float] = Field(None, ge=0, le=1, description="????")
     social_insurance_base: Optional[Decimal] = Field(None, ge=0, description="????")
@@ -885,11 +879,16 @@ class ShopCommissionConfigUpdate(BaseModel):
         ..., ge=0, le=1, description="可分配净利润率 0-1，如 0.8 表示 80%"
     )
 
+
 class EmployeePerformanceAdjustmentCreate(BaseModel):
-    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM")
+    year_month: str = Field(
+        ..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM"
+    )
     employee_code: str = Field(..., min_length=1, max_length=64)
     adjustment_type: str = Field(..., min_length=1, max_length=32)
-    score_delta: float = Field(..., ge=-100, le=100, description="绩效分增减值，可正可负")
+    score_delta: float = Field(
+        ..., ge=-100, le=100, description="绩效分增减值，可正可负"
+    )
     source: Optional[str] = Field(None, max_length=64)
     reason: Optional[str] = Field(None, max_length=512)
 
@@ -921,11 +920,15 @@ class EmployeePerformanceAdjustmentResponse(BaseModel):
 
 
 class EmployeePerformanceInputCreate(BaseModel):
-    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM")
+    year_month: str = Field(
+        ..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM"
+    )
     employee_code: str = Field(..., min_length=1, max_length=64)
     metric_code: str = Field(..., min_length=1, max_length=64)
     metric_name: Optional[str] = Field(None, max_length=128)
-    metric_direction: str = Field(..., pattern="^(up|down|higher_better|lower_better|manual_score)$")
+    metric_direction: str = Field(
+        ..., pattern="^(up|down|higher_better|lower_better|manual_score)$"
+    )
     target_value: float = Field(0, ge=0)
     achieved_value: Optional[float] = Field(None, ge=0)
     max_score: float = Field(..., ge=0, le=100)
@@ -937,7 +940,9 @@ class EmployeePerformanceInputCreate(BaseModel):
 
 class EmployeePerformanceInputUpdate(BaseModel):
     metric_name: Optional[str] = Field(None, max_length=128)
-    metric_direction: Optional[str] = Field(None, pattern="^(up|down|higher_better|lower_better|manual_score)$")
+    metric_direction: Optional[str] = Field(
+        None, pattern="^(up|down|higher_better|lower_better|manual_score)$"
+    )
     target_value: Optional[float] = Field(None, ge=0)
     achieved_value: Optional[float] = Field(None, ge=0)
     max_score: Optional[float] = Field(None, ge=0, le=100)

@@ -79,12 +79,16 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
         check=True,
     )
     container_id = started.stdout.strip()
-    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
     try:
         _wait_for_postgres(container_id)
         engine = create_engine(database_url)
         with engine.begin() as connection:
-            connection.execute(text("CREATE TABLE public.legacy_probe (id integer primary key)"))
+            connection.execute(
+                text("CREATE TABLE public.legacy_probe (id integer primary key)")
+            )
 
         rejected = subprocess.run(
             [sys.executable, "scripts/run_current_schema_migrations.py"],
@@ -97,7 +101,9 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
         assert rejected.returncode == 2
         assert "not an approved legacy source" in rejected.stderr
         assert inspect(engine).has_table("legacy_probe", schema="public")
-        assert not inspect(engine).has_table("current_schema_alembic_version", schema="public")
+        assert not inspect(engine).has_table(
+            "current_schema_alembic_version", schema="public"
+        )
 
         with engine.begin() as connection:
             connection.execute(text("CREATE SCHEMA core"))
@@ -108,7 +114,9 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
                 )
             )
             connection.execute(
-                text("INSERT INTO core.alembic_version (version_num) VALUES ('unknown')")
+                text(
+                    "INSERT INTO core.alembic_version (version_num) VALUES ('unknown')"
+                )
             )
 
         unknown_revision = subprocess.run(
@@ -122,7 +130,9 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
         assert unknown_revision.returncode == 2
         assert "not an approved legacy source" in unknown_revision.stderr
         assert inspect(engine).has_table("legacy_probe", schema="public")
-        assert not inspect(engine).has_table("current_schema_alembic_version", schema="public")
+        assert not inspect(engine).has_table(
+            "current_schema_alembic_version", schema="public"
+        )
 
         with engine.begin() as connection:
             connection.execute(text("DELETE FROM core.alembic_version"))
@@ -144,7 +154,9 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
         assert mismatched_fingerprint.returncode == 2
         assert "fingerprint is not approved" in mismatched_fingerprint.stderr
         assert inspect(engine).has_table("legacy_probe", schema="public")
-        assert not inspect(engine).has_table("current_schema_alembic_version", schema="public")
+        assert not inspect(engine).has_table(
+            "current_schema_alembic_version", schema="public"
+        )
 
         with engine.begin() as connection:
             connection.execute(text("DROP TABLE core.alembic_version"))
@@ -160,7 +172,9 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
             check=False,
         )
         assert bootstrapped.returncode == 0, bootstrapped.stderr
-        assert inspect(engine).has_table("current_schema_alembic_version", schema="public")
+        assert inspect(engine).has_table(
+            "current_schema_alembic_version", schema="public"
+        )
         assert len(inspect(engine).get_table_names(schema="a_class")) > 0
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
@@ -195,7 +209,9 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
         check=True,
     )
     container_id = started.stdout.strip()
-    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
     try:
         _wait_for_postgres(container_id)
         baseline = subprocess.run(
@@ -224,9 +240,7 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
                     "VALUES ('MIGRATION-KEEP', 'Migration Keep')"
                 )
             )
-            connection.execute(
-                text("DROP TABLE public.current_schema_alembic_version")
-            )
+            connection.execute(text("DROP TABLE public.current_schema_alembic_version"))
             connection.execute(
                 text(
                     "CREATE TABLE IF NOT EXISTS core.alembic_version "
@@ -235,7 +249,9 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
             )
             connection.execute(text("DELETE FROM core.alembic_version"))
             connection.execute(
-                text("INSERT INTO core.alembic_version (version_num) VALUES (:revision)"),
+                text(
+                    "INSERT INTO core.alembic_version (version_num) VALUES (:revision)"
+                ),
                 {"revision": LEGACY_REVISION},
             )
 
@@ -266,18 +282,29 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
         inspector = inspect(engine)
         assert inspector.has_table("operation_metric_catalog", schema="a_class")
         with engine.connect() as connection:
-            assert connection.execute(
-                text(
-                    "SELECT name FROM a_class.employees "
-                    "WHERE employee_code = 'MIGRATION-KEEP'"
-                )
-            ).scalar_one() == "Migration Keep"
-            assert connection.execute(
-                text("SELECT version_num FROM public.current_schema_alembic_version")
-            ).scalar_one() == CURRENT_HEAD_REVISION
-            assert connection.execute(
-                text("SELECT version_num FROM core.alembic_version")
-            ).scalar_one() == LEGACY_REVISION
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT name FROM a_class.employees "
+                        "WHERE employee_code = 'MIGRATION-KEEP'"
+                    )
+                ).scalar_one()
+                == "Migration Keep"
+            )
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
+                ).scalar_one()
+                == CURRENT_HEAD_REVISION
+            )
+            assert (
+                connection.execute(
+                    text("SELECT version_num FROM core.alembic_version")
+                ).scalar_one()
+                == LEGACY_REVISION
+            )
 
         assert (
             migration_runner.run_current_schema_migrations(
@@ -288,12 +315,15 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
             == "upgrade"
         )
         with engine.connect() as connection:
-            assert connection.execute(
-                text(
-                    "SELECT name FROM a_class.employees "
-                    "WHERE employee_code = 'MIGRATION-KEEP'"
-                )
-            ).scalar_one() == "Migration Keep"
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT name FROM a_class.employees "
+                        "WHERE employee_code = 'MIGRATION-KEEP'"
+                    )
+                ).scalar_one()
+                == "Migration Keep"
+            )
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
 
@@ -326,7 +356,9 @@ def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits
         check=True,
     )
     container_id = started.stdout.strip()
-    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
     try:
         _wait_for_postgres(container_id)
         baseline = subprocess.run(
@@ -408,7 +440,9 @@ def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits
             )
             connection.execute(text("DELETE FROM core.alembic_version"))
             connection.execute(
-                text("INSERT INTO core.alembic_version (version_num) VALUES (:revision)"),
+                text(
+                    "INSERT INTO core.alembic_version (version_num) VALUES (:revision)"
+                ),
                 {"revision": LEGACY_REVISION},
             )
 
@@ -439,21 +473,27 @@ def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits
         inspector = inspect(engine)
         assert inspector.has_table("current_schema_alembic_version", schema="public")
         with engine.connect() as connection:
-            assert connection.execute(
-                text(
-                    "SELECT count(*) FROM a_class.target_breakdown "
-                    "WHERE target_id = :target_id"
-                ),
-                {"target_id": target_id},
-            ).scalar_one() == 2
-            assert connection.execute(
-                text(
-                    "SELECT count(*) FROM a_class.target_breakdown "
-                    "WHERE target_id = :target_id "
-                    "AND operation_contract_version IS NULL"
-                ),
-                {"target_id": target_id},
-            ).scalar_one() == 2
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM a_class.target_breakdown "
+                        "WHERE target_id = :target_id"
+                    ),
+                    {"target_id": target_id},
+                ).scalar_one()
+                == 2
+            )
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM a_class.target_breakdown "
+                        "WHERE target_id = :target_id "
+                        "AND operation_contract_version IS NULL"
+                    ),
+                    {"target_id": target_id},
+                ).scalar_one()
+                == 2
+            )
 
         audit = migration_runner.audit_legacy_operation_data(database_url)
         assert audit["legacy_count"] == 2
@@ -509,7 +549,9 @@ def test_current_operation_contract_rejects_invalid_targets_and_matching_duplica
         check=True,
     )
     container_id = started.stdout.strip()
-    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
     try:
         _wait_for_postgres(container_id)
         migrated = subprocess.run(
@@ -544,7 +586,9 @@ def test_current_operation_contract_rejects_invalid_targets_and_matching_duplica
             invalid_target_savepoint.rollback()
 
             historical_insert_savepoint = connection.begin_nested()
-            with pytest.raises(Exception, match="historical operation targets are read-only"):
+            with pytest.raises(
+                Exception, match="historical operation targets are read-only"
+            ):
                 connection.execute(
                     text(
                         "INSERT INTO a_class.sales_targets "
@@ -675,7 +719,9 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
         check=True,
     )
     container_id = started.stdout.strip()
-    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
     try:
         _wait_for_postgres(container_id)
         old_upgrade = subprocess.run(
@@ -698,9 +744,14 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
 
         engine = create_engine(database_url)
         with engine.connect() as connection:
-            assert connection.execute(
-                text("SELECT version_num FROM public.current_schema_alembic_version")
-            ).scalar_one() == "current_schema_20260808_operation_performance_workbench"
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
+                ).scalar_one()
+                == "current_schema_20260808_operation_performance_workbench"
+            )
 
         with engine.begin() as connection:
             historical_id = connection.execute(
@@ -731,9 +782,14 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
         )
 
         with engine.begin() as connection:
-            assert connection.execute(
-                text("SELECT version_num FROM public.current_schema_alembic_version")
-            ).scalar_one() == CURRENT_HEAD_REVISION
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
+                ).scalar_one()
+                == CURRENT_HEAD_REVISION
+            )
             connection.execute(
                 text(
                     "INSERT INTO core.dim_platforms (platform_code, name, is_active) "
@@ -765,12 +821,15 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                 ),
                 {"target_id": current_id},
             ).scalar_one()
-            assert connection.execute(
-                text(
-                    "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
-                ),
-                {"id": inherited_breakdown_id},
-            ).scalar_one() == 1
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
+                    ),
+                    {"id": inherited_breakdown_id},
+                ).scalar_one()
+                == 1
+            )
             connection.execute(
                 text(
                     "UPDATE a_class.target_breakdown "
@@ -778,12 +837,15 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                 ),
                 {"id": inherited_breakdown_id},
             )
-            assert connection.execute(
-                text(
-                    "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
-                ),
-                {"id": inherited_breakdown_id},
-            ).scalar_one() == 1
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
+                    ),
+                    {"id": inherited_breakdown_id},
+                ).scalar_one()
+                == 1
+            )
             wrong_version_savepoint = connection.begin_nested()
             with pytest.raises(Exception, match="contract version must match"):
                 connection.execute(
@@ -797,7 +859,9 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                 )
             wrong_version_savepoint.rollback()
             historical_target_insert_savepoint = connection.begin_nested()
-            with pytest.raises(Exception, match="historical operation targets are read-only"):
+            with pytest.raises(
+                Exception, match="historical operation targets are read-only"
+            ):
                 connection.execute(
                     text(
                         "INSERT INTO a_class.sales_targets "
@@ -807,11 +871,15 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                 )
             historical_target_insert_savepoint.rollback()
             for statement in (
-                text("UPDATE a_class.sales_targets SET target_name = 'Changed' WHERE id = :id"),
+                text(
+                    "UPDATE a_class.sales_targets SET target_name = 'Changed' WHERE id = :id"
+                ),
                 text("DELETE FROM a_class.sales_targets WHERE id = :id"),
             ):
                 savepoint = connection.begin_nested()
-                with pytest.raises(Exception, match="historical operation targets are read-only"):
+                with pytest.raises(
+                    Exception, match="historical operation targets are read-only"
+                ):
                     connection.execute(statement, {"id": historical_id})
                 savepoint.rollback()
             for statement in (
@@ -821,22 +889,29 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                     "achieved_quantity, achievement_rate) "
                     "VALUES (:target_id, 'time', 0, 0, 0, 0, 0)"
                 ),
-                text("UPDATE a_class.target_breakdown SET target_amount = 1 WHERE id = :id"),
+                text(
+                    "UPDATE a_class.target_breakdown SET target_amount = 1 WHERE id = :id"
+                ),
                 text("DELETE FROM a_class.target_breakdown WHERE id = :id"),
             ):
                 savepoint = connection.begin_nested()
-                with pytest.raises(Exception, match="historical operation breakdowns are read-only"):
+                with pytest.raises(
+                    Exception, match="historical operation breakdowns are read-only"
+                ):
                     connection.execute(
                         statement,
                         {"id": historical_breakdown_id, "target_id": historical_id},
                     )
                 savepoint.rollback()
-            assert connection.execute(
-                text(
-                    "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
-                ),
-                {"id": historical_breakdown_id},
-            ).scalar_one() is None
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT operation_contract_version FROM a_class.target_breakdown WHERE id = :id"
+                    ),
+                    {"id": historical_breakdown_id},
+                ).scalar_one()
+                is None
+            )
             connection.execute(
                 text(
                     "ALTER TABLE a_class.target_breakdown "
@@ -894,7 +969,9 @@ def test_old_20260808_current_operation_overrides_are_backfilled_without_touchin
         check=True,
     )
     container_id = started.stdout.strip()
-    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
     try:
         _wait_for_postgres(container_id)
         old_upgrade = subprocess.run(
@@ -993,13 +1070,16 @@ def test_old_20260808_current_operation_overrides_are_backfilled_without_touchin
         )
 
         with engine.connect() as connection:
-            assert connection.execute(
-                text(
-                    "SELECT operation_contract_version FROM a_class.target_breakdown "
-                    "WHERE id = :id"
-                ),
-                {"id": current_breakdown_id},
-            ).scalar_one() == 7
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT operation_contract_version FROM a_class.target_breakdown "
+                        "WHERE id = :id"
+                    ),
+                    {"id": current_breakdown_id},
+                ).scalar_one()
+                == 7
+            )
             history_after = connection.execute(
                 text(
                     "SELECT target_id, breakdown_type, platform_code, shop_id, period_start, period_end, "
@@ -1009,13 +1089,16 @@ def test_old_20260808_current_operation_overrides_are_backfilled_without_touchin
                 {"id": historical_breakdown_id},
             ).one()
             assert history_after == history_before
-            assert connection.execute(
-                text(
-                    "SELECT operation_contract_version FROM a_class.target_breakdown "
-                    "WHERE id = :id"
-                ),
-                {"id": historical_breakdown_id},
-            ).scalar_one() is None
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT operation_contract_version FROM a_class.target_breakdown "
+                        "WHERE id = :id"
+                    ),
+                    {"id": historical_breakdown_id},
+                ).scalar_one()
+                is None
+            )
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
 
@@ -1046,7 +1129,9 @@ def test_20260808_preflight_rejects_invalid_current_override_when_contract_colum
         check=True,
     )
     container_id = started.stdout.strip()
-    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
     try:
         _wait_for_postgres(container_id)
         old_upgrade = subprocess.run(
@@ -1114,9 +1199,14 @@ def test_20260808_preflight_rejects_invalid_current_override_when_contract_colum
         assert "invalid current operation contract data" in preflight.stderr
 
         with engine.connect() as connection:
-            assert connection.execute(
-                text("SELECT version_num FROM public.current_schema_alembic_version")
-            ).scalar_one() == "current_schema_20260808_operation_performance_workbench"
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
+                ).scalar_one()
+                == "current_schema_20260808_operation_performance_workbench"
+            )
             assert "operation_contract_version" not in {
                 row[0]
                 for row in connection.execute(

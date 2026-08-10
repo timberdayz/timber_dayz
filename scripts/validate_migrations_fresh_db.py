@@ -42,7 +42,9 @@ def safe_print(msg: str) -> None:
             print(msg.encode("ascii", errors="ignore").decode("ascii"), flush=True)
 
 
-def run(cmd: list, cwd: Path = None, env: dict = None, timeout: int = 120) -> tuple[int, str]:
+def run(
+    cmd: list, cwd: Path = None, env: dict = None, timeout: int = 120
+) -> tuple[int, str]:
     """Run command, return (returncode, combined_output)."""
     cwd = cwd or PROJECT_ROOT
     env = env or os.environ
@@ -105,11 +107,18 @@ def verify_orm_schema_consistency(
 
 def build_temp_postgres_run_command(port: int) -> list[str]:
     return [
-        "docker", "run", "--rm", "-d",
-        "-e", f"POSTGRES_USER={PG_USER}",
-        "-e", f"POSTGRES_PASSWORD={PG_PASSWORD}",
-        "-e", f"POSTGRES_DB={PG_DB}",
-        "-p", f"{port}:5432",
+        "docker",
+        "run",
+        "--rm",
+        "-d",
+        "-e",
+        f"POSTGRES_USER={PG_USER}",
+        "-e",
+        f"POSTGRES_PASSWORD={PG_PASSWORD}",
+        "-e",
+        f"POSTGRES_DB={PG_DB}",
+        "-p",
+        f"{port}:5432",
         IMAGE,
     ]
 
@@ -125,7 +134,9 @@ def start_temp_postgres_container(
         timeout=docker_run_timeout,
     )
     if code != 0:
-        raise RuntimeError(out.strip() or "failed to start temporary postgres container")
+        raise RuntimeError(
+            out.strip() or "failed to start temporary postgres container"
+        )
     container_id = (out.strip().split("\n")[0] or "").strip()
     if not container_id:
         raise RuntimeError("failed to resolve temporary postgres container id")
@@ -134,7 +145,9 @@ def start_temp_postgres_container(
 
 def is_docker_bind_error(message: str) -> bool:
     normalized = str(message or "").lower()
-    return "bind for 0.0.0.0" in normalized and "port is already allocated" in normalized
+    return (
+        "bind for 0.0.0.0" in normalized and "port is already allocated" in normalized
+    )
 
 
 def choose_temp_postgres_port(preferred_port: int) -> int:
@@ -153,8 +166,15 @@ def choose_temp_postgres_port(preferred_port: int) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="临时库迁移门禁：在全新临时 Postgres 上跑 current-schema migration")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"临时 Postgres 端口（默认 {DEFAULT_PORT}）")
+    parser = argparse.ArgumentParser(
+        description="临时库迁移门禁：在全新临时 Postgres 上跑 current-schema migration"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"临时 Postgres 端口（默认 {DEFAULT_PORT}）",
+    )
     args = parser.parse_args()
     port = choose_temp_postgres_port(args.port)
     if port != args.port:
@@ -166,7 +186,9 @@ def main() -> int:
     except RuntimeError as exc:
         if is_docker_bind_error(str(exc)):
             fallback_port = choose_temp_postgres_port(0)
-            safe_print(f"[WARN] 端口 {port} Docker 绑定失败，改用临时端口 {fallback_port}")
+            safe_print(
+                f"[WARN] 端口 {port} Docker 绑定失败，改用临时端口 {fallback_port}"
+            )
             port = fallback_port
             try:
                 container_id = start_temp_postgres_container(port)
@@ -182,7 +204,19 @@ def main() -> int:
     try:
         safe_print("[INFO] 等待 Postgres 就绪...")
         for i in range(60):
-            code, _ = run(["docker", "exec", container_id, "pg_isready", "-U", PG_USER, "-d", PG_DB], timeout=5)
+            code, _ = run(
+                [
+                    "docker",
+                    "exec",
+                    container_id,
+                    "pg_isready",
+                    "-U",
+                    PG_USER,
+                    "-d",
+                    PG_DB,
+                ],
+                timeout=5,
+            )
             if code == 0:
                 break
             time.sleep(1)

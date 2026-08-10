@@ -11,10 +11,15 @@ depends_on = None
 
 
 def _columns(connection, table: str, schema: str) -> set[str]:
-    return {item["name"] for item in sa.inspect(connection).get_columns(table, schema=schema)}
+    return {
+        item["name"]
+        for item in sa.inspect(connection).get_columns(table, schema=schema)
+    }
 
 
-def _add_column_if_missing(connection, table: str, schema: str, column: sa.Column) -> None:
+def _add_column_if_missing(
+    connection, table: str, schema: str, column: sa.Column
+) -> None:
     if column.name not in _columns(connection, table, schema):
         op.add_column(table, column, schema=schema)
 
@@ -22,30 +27,60 @@ def _add_column_if_missing(connection, table: str, schema: str, column: sa.Colum
 def upgrade() -> None:
     connection = op.get_bind()
 
-    if not sa.inspect(connection).has_table("operation_metric_catalog", schema="a_class"):
+    if not sa.inspect(connection).has_table(
+        "operation_metric_catalog", schema="a_class"
+    ):
         op.create_table(
             "operation_metric_catalog",
             sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-            sa.Column("catalog_version", sa.Integer(), nullable=False, server_default="1"),
+            sa.Column(
+                "catalog_version", sa.Integer(), nullable=False, server_default="1"
+            ),
             sa.Column("metric_code", sa.String(64), nullable=False),
             sa.Column("metric_name", sa.String(128), nullable=False),
             sa.Column("metric_direction", sa.String(32), nullable=False),
             sa.Column("default_target_value", sa.Float(), nullable=True),
-            sa.Column("default_max_score", sa.Float(), nullable=False, server_default="0"),
-            sa.Column("default_penalty_enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
+            sa.Column(
+                "default_max_score", sa.Float(), nullable=False, server_default="0"
+            ),
+            sa.Column(
+                "default_penalty_enabled",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.false(),
+            ),
             sa.Column("default_penalty_threshold", sa.Float(), nullable=True),
             sa.Column("default_penalty_per_unit", sa.Float(), nullable=True),
             sa.Column("default_penalty_max", sa.Float(), nullable=True),
-            sa.Column("manual_score_enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column(
+                "manual_score_enabled",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.false(),
+            ),
+            sa.Column(
+                "is_active", sa.Boolean(), nullable=False, server_default=sa.true()
+            ),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.func.now(),
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.func.now(),
+            ),
             sa.CheckConstraint(
                 "metric_direction IN ('higher_better', 'lower_better', 'manual_score')",
                 name="chk_operation_metric_catalog_direction",
             ),
             sa.UniqueConstraint(
-                "catalog_version", "metric_code", name="uq_operation_metric_catalog_version_code"
+                "catalog_version",
+                "metric_code",
+                name="uq_operation_metric_catalog_version_code",
             ),
             schema="a_class",
         )
@@ -56,29 +91,88 @@ def upgrade() -> None:
             schema="a_class",
         )
 
-    _add_column_if_missing(connection, "sales_targets", "a_class", sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.true()))
-    _add_column_if_missing(connection, "sales_targets", "a_class", sa.Column("metric_catalog_version", sa.Integer(), nullable=True))
-    _add_column_if_missing(connection, "sales_targets", "a_class", sa.Column("performance_config_id", sa.BigInteger(), nullable=True))
-    _add_column_if_missing(connection, "sales_targets", "a_class", sa.Column("performance_config_updated_at", sa.DateTime(timezone=True), nullable=True))
-    _add_column_if_missing(connection, "employee_performance_inputs", "a_class", sa.Column("achieved_value", sa.Float(), nullable=True))
-    _add_column_if_missing(connection, "employee_performance", "c_class", sa.Column("calculation_status", sa.String(32), nullable=False, server_default="historical_unknown"))
-    _add_column_if_missing(connection, "employee_performance", "c_class", sa.Column("performance_source_type", sa.String(32), nullable=False, server_default="historical"))
+    _add_column_if_missing(
+        connection,
+        "sales_targets",
+        "a_class",
+        sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
+    )
+    _add_column_if_missing(
+        connection,
+        "sales_targets",
+        "a_class",
+        sa.Column("metric_catalog_version", sa.Integer(), nullable=True),
+    )
+    _add_column_if_missing(
+        connection,
+        "sales_targets",
+        "a_class",
+        sa.Column("performance_config_id", sa.BigInteger(), nullable=True),
+    )
+    _add_column_if_missing(
+        connection,
+        "sales_targets",
+        "a_class",
+        sa.Column(
+            "performance_config_updated_at", sa.DateTime(timezone=True), nullable=True
+        ),
+    )
+    _add_column_if_missing(
+        connection,
+        "employee_performance_inputs",
+        "a_class",
+        sa.Column("achieved_value", sa.Float(), nullable=True),
+    )
+    _add_column_if_missing(
+        connection,
+        "employee_performance",
+        "c_class",
+        sa.Column(
+            "calculation_status",
+            sa.String(32),
+            nullable=False,
+            server_default="historical_unknown",
+        ),
+    )
+    _add_column_if_missing(
+        connection,
+        "employee_performance",
+        "c_class",
+        sa.Column(
+            "performance_source_type",
+            sa.String(32),
+            nullable=False,
+            server_default="historical",
+        ),
+    )
 
-    if "achieved_value" in _columns(connection, "employee_performance_inputs", "a_class"):
-        op.alter_column("employee_performance_inputs", "achieved_value", nullable=True, schema="a_class")
+    if "achieved_value" in _columns(
+        connection, "employee_performance_inputs", "a_class"
+    ):
+        op.alter_column(
+            "employee_performance_inputs",
+            "achieved_value",
+            nullable=True,
+            schema="a_class",
+        )
     if "performance_score" in _columns(connection, "employee_performance", "c_class"):
-        op.alter_column("employee_performance", "performance_score", nullable=True, schema="c_class")
+        op.alter_column(
+            "employee_performance", "performance_score", nullable=True, schema="c_class"
+        )
 
     # Normalize legacy operation records and shop overrides before identity indexes.
-    connection.execute(sa.text(
-        """
+    connection.execute(
+        sa.text(
+            """
         UPDATE a_class.sales_targets
         SET scope_type = 'shop'
         WHERE target_type = 'operation' AND scope_type IS NULL
         """
-    ))
-    connection.execute(sa.text(
-        """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
         UPDATE a_class.target_breakdown AS tb
         SET breakdown_type = 'shop',
             period_start = st.period_start,
@@ -88,9 +182,11 @@ def upgrade() -> None:
           AND st.target_type = 'operation'
           AND tb.breakdown_type IN ('shop', 'shop_time')
         """
-    ))
-    connection.execute(sa.text(
-        """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
         DELETE FROM a_class.target_breakdown AS duplicate
         USING a_class.target_breakdown AS keeper
         WHERE duplicate.id > keeper.id
@@ -100,16 +196,20 @@ def upgrade() -> None:
           AND duplicate.platform_code IS NOT DISTINCT FROM keeper.platform_code
           AND duplicate.shop_id IS NOT DISTINCT FROM keeper.shop_id
         """
-    ))
-    connection.execute(sa.text(
-        """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_operation_target_month_metric
         ON a_class.sales_targets (period_start, period_end, metric_code)
         WHERE target_type = 'operation' AND scope_type = 'shop' AND metric_code IS NOT NULL
         """
-    ))
-    connection.execute(sa.text(
-        """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
         CREATE OR REPLACE FUNCTION a_class.enforce_operation_target_contract()
         RETURNS trigger AS $$
         BEGIN
@@ -137,9 +237,11 @@ def upgrade() -> None:
         BEFORE INSERT OR UPDATE ON a_class.sales_targets
         FOR EACH ROW EXECUTE FUNCTION a_class.enforce_operation_target_contract();
         """
-    ))
-    connection.execute(sa.text(
-        """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
         CREATE OR REPLACE FUNCTION a_class.enforce_operation_breakdown_contract()
         RETURNS trigger AS $$
         DECLARE
@@ -168,14 +270,17 @@ def upgrade() -> None:
         BEFORE INSERT OR UPDATE ON a_class.target_breakdown
         FOR EACH ROW EXECUTE FUNCTION a_class.enforce_operation_breakdown_contract();
         """
-    ))
-    connection.execute(sa.text(
-        """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_operation_shop_override
         ON a_class.target_breakdown (target_id, breakdown_type, platform_code, shop_id)
         WHERE breakdown_type = 'shop'
         """
-    ))
+        )
+    )
 
     seed_rows = [
         ("customer_satisfaction", "客户满意度", "higher_better"),
@@ -186,24 +291,50 @@ def upgrade() -> None:
         ("manual_other", "其他人工指标", "manual_score"),
     ]
     for code, name, direction in seed_rows:
-        connection.execute(sa.text(
-            """
+        connection.execute(
+            sa.text(
+                """
             INSERT INTO a_class.operation_metric_catalog
                 (catalog_version, metric_code, metric_name, metric_direction, default_max_score,
                  manual_score_enabled, is_active)
             VALUES (1, :code, :name, :direction, 0, :manual, true)
             ON CONFLICT (catalog_version, metric_code) DO NOTHING
             """
-        ), {"code": code, "name": name, "direction": direction, "manual": direction == "manual_score"})
+            ),
+            {
+                "code": code,
+                "name": name,
+                "direction": direction,
+                "manual": direction == "manual_score",
+            },
+        )
 
 
 def downgrade() -> None:
     connection = op.get_bind()
-    connection.execute(sa.text("DROP TRIGGER IF EXISTS trg_enforce_operation_breakdown_contract ON a_class.target_breakdown"))
-    connection.execute(sa.text("DROP FUNCTION IF EXISTS a_class.enforce_operation_breakdown_contract()"))
-    connection.execute(sa.text("DROP TRIGGER IF EXISTS trg_enforce_operation_target_contract ON a_class.sales_targets"))
-    connection.execute(sa.text("DROP FUNCTION IF EXISTS a_class.enforce_operation_target_contract()"))
-    connection.execute(sa.text("DROP INDEX IF EXISTS a_class.uq_operation_shop_override"))
-    connection.execute(sa.text("DROP INDEX IF EXISTS a_class.uq_operation_target_month_metric"))
+    connection.execute(
+        sa.text(
+            "DROP TRIGGER IF EXISTS trg_enforce_operation_breakdown_contract ON a_class.target_breakdown"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "DROP FUNCTION IF EXISTS a_class.enforce_operation_breakdown_contract()"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "DROP TRIGGER IF EXISTS trg_enforce_operation_target_contract ON a_class.sales_targets"
+        )
+    )
+    connection.execute(
+        sa.text("DROP FUNCTION IF EXISTS a_class.enforce_operation_target_contract()")
+    )
+    connection.execute(
+        sa.text("DROP INDEX IF EXISTS a_class.uq_operation_shop_override")
+    )
+    connection.execute(
+        sa.text("DROP INDEX IF EXISTS a_class.uq_operation_target_month_metric")
+    )
     if sa.inspect(connection).has_table("operation_metric_catalog", schema="a_class"):
         op.drop_table("operation_metric_catalog", schema="a_class")

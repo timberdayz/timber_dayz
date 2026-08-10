@@ -74,7 +74,9 @@ class MonthlyProfitSettlementService:
         approved_by: str | None = None,
         remark: str | None = None,
     ) -> dict[str, Any]:
-        total_ratio = personnel_target_ratio + follow_target_ratio + company_target_ratio
+        total_ratio = (
+            personnel_target_ratio + follow_target_ratio + company_target_ratio
+        )
         if abs(total_ratio - 1.0) > 1e-9:
             raise MonthlyProfitSettlementValidationError("target ratios must sum to 1")
 
@@ -83,14 +85,25 @@ class MonthlyProfitSettlementService:
         company_target_amount = net_profit_amount * company_target_ratio
 
         company_actual_amount = (
-            net_profit_amount - personnel_actual_amount - follow_actual_amount - adjustment_amount
+            net_profit_amount
+            - personnel_actual_amount
+            - follow_actual_amount
+            - adjustment_amount
         )
 
-        personnel_actual_ratio = (personnel_actual_amount / net_profit_amount) if net_profit_amount else 0.0
-        follow_actual_ratio = (follow_actual_amount / net_profit_amount) if net_profit_amount else 0.0
-        company_actual_ratio = (company_actual_amount / net_profit_amount) if net_profit_amount else 0.0
+        personnel_actual_ratio = (
+            (personnel_actual_amount / net_profit_amount) if net_profit_amount else 0.0
+        )
+        follow_actual_ratio = (
+            (follow_actual_amount / net_profit_amount) if net_profit_amount else 0.0
+        )
+        company_actual_ratio = (
+            (company_actual_amount / net_profit_amount) if net_profit_amount else 0.0
+        )
         difference_amount = company_target_amount - company_actual_amount
-        difference_ratio = (difference_amount / net_profit_amount) if net_profit_amount else 0.0
+        difference_ratio = (
+            (difference_amount / net_profit_amount) if net_profit_amount else 0.0
+        )
 
         return {
             "id": settlement_id,
@@ -118,10 +131,16 @@ class MonthlyProfitSettlementService:
 
     async def _load_net_profit_amount(self, period_month: str) -> float:
         rows = (
-            await self.db.execute(
-                select(ShopProfitBasis).where(ShopProfitBasis.period_month == period_month)
+            (
+                await self.db.execute(
+                    select(ShopProfitBasis).where(
+                        ShopProfitBasis.period_month == period_month
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         basis_by_shop: dict[tuple[str, str], Any] = {}
         for row in rows:
             key = (
@@ -153,21 +172,27 @@ class MonthlyProfitSettlementService:
 
     async def _load_personnel_payload(self, period_month: str) -> dict[str, Any]:
         allocation_rows = (
-            await self.db.execute(
-                select(EmployeeLaborCostAllocation).where(
-                    EmployeeLaborCostAllocation.period_month == period_month,
-                    EmployeeLaborCostAllocation.source_payroll_status.in_(("confirmed", "paid")),
+            (
+                await self.db.execute(
+                    select(EmployeeLaborCostAllocation).where(
+                        EmployeeLaborCostAllocation.period_month == period_month,
+                        EmployeeLaborCostAllocation.source_payroll_status.in_(
+                            ("confirmed", "paid")
+                        ),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         details: list[dict[str, Any]] = []
         total = 0.0
 
         for row in allocation_rows:
-            amount = self._to_float(getattr(row, "performance_amount", 0)) + self._to_float(
-                getattr(row, "commission_amount", 0)
-            )
+            amount = self._to_float(
+                getattr(row, "performance_amount", 0)
+            ) + self._to_float(getattr(row, "commission_amount", 0))
             total += amount
             details.append(
                 {
@@ -186,30 +211,38 @@ class MonthlyProfitSettlementService:
 
     async def _load_follow_payload(self, period_month: str) -> dict[str, Any]:
         rows = (
-            await self.db.execute(
-                select(FollowInvestmentDetail)
-                .join(
-                    FollowInvestmentSettlement,
-                    FollowInvestmentDetail.settlement_id == FollowInvestmentSettlement.id,
-                )
-                .where(
-                    FollowInvestmentSettlement.period_month == period_month,
-                    FollowInvestmentSettlement.status == "approved",
+            (
+                await self.db.execute(
+                    select(FollowInvestmentDetail)
+                    .join(
+                        FollowInvestmentSettlement,
+                        FollowInvestmentDetail.settlement_id
+                        == FollowInvestmentSettlement.id,
+                    )
+                    .where(
+                        FollowInvestmentSettlement.period_month == period_month,
+                        FollowInvestmentSettlement.status == "approved",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         details: list[dict[str, Any]] = []
         total = 0.0
         for row in rows:
             approved_income = getattr(row, "approved_income", None)
             estimated_income = getattr(row, "estimated_income", 0)
-            amount = self._to_float(approved_income if approved_income is not None else estimated_income)
+            amount = self._to_float(
+                approved_income if approved_income is not None else estimated_income
+            )
             total += amount
             details.append(
                 {
                     "investor_user_id": getattr(row, "investor_user_id", None),
-                    "source_settlement_id": getattr(row, "settlement_id", None) or getattr(row, "source_settlement_id", None),
+                    "source_settlement_id": getattr(row, "settlement_id", None)
+                    or getattr(row, "source_settlement_id", None),
                     "amount": amount,
                     "status": "approved",
                     "remark": None,
@@ -217,19 +250,29 @@ class MonthlyProfitSettlementService:
             )
         return {"actual_amount": total, "details": details}
 
-    async def _load_settlement_record(self, period_month: str) -> MonthlyProfitSettlement | None:
+    async def _load_settlement_record(
+        self, period_month: str
+    ) -> MonthlyProfitSettlement | None:
         return (
             await self.db.execute(
-                select(MonthlyProfitSettlement).where(MonthlyProfitSettlement.period_month == period_month)
+                select(MonthlyProfitSettlement).where(
+                    MonthlyProfitSettlement.period_month == period_month
+                )
             )
         ).scalar_one_or_none()
 
     async def _load_personnel_details(self, settlement_id: int) -> list[dict[str, Any]]:
         rows = (
-            await self.db.execute(
-                select(MonthlyProfitPersonnelDetail).where(MonthlyProfitPersonnelDetail.settlement_id == settlement_id)
+            (
+                await self.db.execute(
+                    select(MonthlyProfitPersonnelDetail).where(
+                        MonthlyProfitPersonnelDetail.settlement_id == settlement_id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             {
                 "detail_type": row.detail_type,
@@ -246,10 +289,16 @@ class MonthlyProfitSettlementService:
 
     async def _load_follow_details(self, settlement_id: int) -> list[dict[str, Any]]:
         rows = (
-            await self.db.execute(
-                select(MonthlyProfitFollowDetail).where(MonthlyProfitFollowDetail.settlement_id == settlement_id)
+            (
+                await self.db.execute(
+                    select(MonthlyProfitFollowDetail).where(
+                        MonthlyProfitFollowDetail.settlement_id == settlement_id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             {
                 "investor_user_id": row.investor_user_id,
@@ -263,10 +312,16 @@ class MonthlyProfitSettlementService:
 
     async def _load_adjustments(self, settlement_id: int) -> list[dict[str, Any]]:
         rows = (
-            await self.db.execute(
-                select(MonthlyProfitAdjustment).where(MonthlyProfitAdjustment.settlement_id == settlement_id)
+            (
+                await self.db.execute(
+                    select(MonthlyProfitAdjustment).where(
+                        MonthlyProfitAdjustment.settlement_id == settlement_id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             {
                 "adjustment_type": row.adjustment_type,
@@ -298,14 +353,19 @@ class MonthlyProfitSettlementService:
         snapshot_version: int,
     ) -> list[dict[str, Any]]:
         rows = (
-            await self.db.execute(
-                select(MonthlyProfitPayrollSnapshot).where(
-                    MonthlyProfitPayrollSnapshot.settlement_id == settlement_id,
-                    MonthlyProfitPayrollSnapshot.snapshot_version == snapshot_version,
-                    MonthlyProfitPayrollSnapshot.snapshot_status == "active",
+            (
+                await self.db.execute(
+                    select(MonthlyProfitPayrollSnapshot).where(
+                        MonthlyProfitPayrollSnapshot.settlement_id == settlement_id,
+                        MonthlyProfitPayrollSnapshot.snapshot_version
+                        == snapshot_version,
+                        MonthlyProfitPayrollSnapshot.snapshot_status == "active",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             {
                 "detail_type": "payroll_total_cost",
@@ -330,17 +390,35 @@ class MonthlyProfitSettlementService:
         )
         follow_details = await self._load_follow_details(settlement_id)
         adjustments = await self._load_adjustments(settlement_id)
-        personnel_actual_amount = sum(self._to_float(detail.get("amount")) for detail in personnel_details)
-        follow_actual_amount = sum(self._to_float(detail.get("amount")) for detail in follow_details)
-        adjustment_amount = sum(self._to_float(detail.get("amount")) for detail in adjustments)
-        personnel_target_ratio = self._to_float(self._get_value(record, "personnel_target_ratio"))
-        follow_target_ratio = self._to_float(self._get_value(record, "follow_target_ratio"))
-        company_target_ratio = self._to_float(self._get_value(record, "company_target_ratio"))
-        if personnel_target_ratio == 0 and follow_target_ratio == 0 and company_target_ratio == 0:
+        personnel_actual_amount = sum(
+            self._to_float(detail.get("amount")) for detail in personnel_details
+        )
+        follow_actual_amount = sum(
+            self._to_float(detail.get("amount")) for detail in follow_details
+        )
+        adjustment_amount = sum(
+            self._to_float(detail.get("amount")) for detail in adjustments
+        )
+        personnel_target_ratio = self._to_float(
+            self._get_value(record, "personnel_target_ratio")
+        )
+        follow_target_ratio = self._to_float(
+            self._get_value(record, "follow_target_ratio")
+        )
+        company_target_ratio = self._to_float(
+            self._get_value(record, "company_target_ratio")
+        )
+        if (
+            personnel_target_ratio == 0
+            and follow_target_ratio == 0
+            and company_target_ratio == 0
+        ):
             company_target_ratio = 1.0
         summary = self.build_summary(
             period_month=self._get_value(record, "period_month"),
-            net_profit_amount=self._to_float(self._get_value(record, "net_profit_amount")),
+            net_profit_amount=self._to_float(
+                self._get_value(record, "net_profit_amount")
+            ),
             personnel_actual_amount=personnel_actual_amount,
             follow_actual_amount=follow_actual_amount,
             adjustment_amount=adjustment_amount,
@@ -384,13 +462,17 @@ class MonthlyProfitSettlementService:
         )
         for model in snapshot_models:
             rows = (
-                await self.db.execute(
-                    select(model).where(
-                        model.settlement_id == settlement_id,
-                        model.snapshot_status == "active",
+                (
+                    await self.db.execute(
+                        select(model).where(
+                            model.settlement_id == settlement_id,
+                            model.snapshot_status == "active",
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for row in rows:
                 row.snapshot_status = "superseded"
 
@@ -403,10 +485,16 @@ class MonthlyProfitSettlementService:
         created_by: str,
     ) -> None:
         shop_basis_rows = (
-            await self.db.execute(
-                select(ShopProfitBasis).where(ShopProfitBasis.period_month == period_month)
+            (
+                await self.db.execute(
+                    select(ShopProfitBasis).where(
+                        ShopProfitBasis.period_month == period_month
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for row in shop_basis_rows:
             self.db.add(
                 MonthlyProfitShopBasisSnapshot(
@@ -418,18 +506,30 @@ class MonthlyProfitSettlementService:
                     shop_id=getattr(row, "shop_id", None),
                     shop_name=None,
                     basis_version=getattr(row, "basis_version", None),
-                    orders_profit_amount=self._to_float(getattr(row, "orders_profit_amount", 0.0)),
-                    a_class_cost_amount=self._to_float(getattr(row, "a_class_cost_amount", 0.0)),
-                    profit_basis_amount=self._to_float(getattr(row, "profit_basis_amount", 0.0)),
+                    orders_profit_amount=self._to_float(
+                        getattr(row, "orders_profit_amount", 0.0)
+                    ),
+                    a_class_cost_amount=self._to_float(
+                        getattr(row, "a_class_cost_amount", 0.0)
+                    ),
+                    profit_basis_amount=self._to_float(
+                        getattr(row, "profit_basis_amount", 0.0)
+                    ),
                     created_by=created_by,
                 )
             )
 
         commission_rows = (
-            await self.db.execute(
-                select(EmployeeCommission).where(EmployeeCommission.year_month == period_month)
+            (
+                await self.db.execute(
+                    select(EmployeeCommission).where(
+                        EmployeeCommission.year_month == period_month
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for row in commission_rows:
             self.db.add(
                 MonthlyProfitEmployeeCommissionSnapshot(
@@ -443,17 +543,27 @@ class MonthlyProfitSettlementService:
                     shop_id="",
                     shop_name=None,
                     sales_amount=self._to_float(getattr(row, "sales_amount", 0.0)),
-                    commission_rate=self._to_float(getattr(row, "commission_rate", 0.0)),
-                    commission_amount=self._to_float(getattr(row, "commission_amount", 0.0)),
+                    commission_rate=self._to_float(
+                        getattr(row, "commission_rate", 0.0)
+                    ),
+                    commission_amount=self._to_float(
+                        getattr(row, "commission_amount", 0.0)
+                    ),
                     created_by=created_by,
                 )
             )
 
         performance_rows = (
-            await self.db.execute(
-                select(EmployeePerformance).where(EmployeePerformance.year_month == period_month)
+            (
+                await self.db.execute(
+                    select(EmployeePerformance).where(
+                        EmployeePerformance.year_month == period_month
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for row in performance_rows:
             self.db.add(
                 MonthlyProfitEmployeePerformanceSnapshot(
@@ -464,8 +574,12 @@ class MonthlyProfitSettlementService:
                     employee_code=getattr(row, "employee_code", None),
                     employee_name=None,
                     actual_sales=self._to_float(getattr(row, "actual_sales", 0.0)),
-                    achievement_rate=self._to_float(getattr(row, "achievement_rate", 0.0)),
-                    performance_score=self._to_float(getattr(row, "performance_score", 0.0)),
+                    achievement_rate=self._to_float(
+                        getattr(row, "achievement_rate", 0.0)
+                    ),
+                    performance_score=self._to_float(
+                        getattr(row, "performance_score", 0.0)
+                    ),
                     attendance_adjustment_score=0.0,
                     manual_adjustment_score=0.0,
                     created_by=created_by,
@@ -473,10 +587,16 @@ class MonthlyProfitSettlementService:
             )
 
         payroll_rows = (
-            await self.db.execute(
-                select(PayrollRecord).where(PayrollRecord.year_month == period_month)
+            (
+                await self.db.execute(
+                    select(PayrollRecord).where(
+                        PayrollRecord.year_month == period_month
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for row in payroll_rows:
             self.db.add(
                 MonthlyProfitPayrollSnapshot(
@@ -495,13 +615,17 @@ class MonthlyProfitSettlementService:
                     allowances=getattr(row, "allowances", 0.0),
                     bonus=getattr(row, "bonus", 0.0),
                     gross_salary=getattr(row, "gross_salary", 0.0),
-                    social_insurance_personal=getattr(row, "social_insurance_personal", 0.0),
+                    social_insurance_personal=getattr(
+                        row, "social_insurance_personal", 0.0
+                    ),
                     housing_fund_personal=getattr(row, "housing_fund_personal", 0.0),
                     income_tax=getattr(row, "income_tax", 0.0),
                     other_deductions=getattr(row, "other_deductions", 0.0),
                     total_deductions=getattr(row, "total_deductions", 0.0),
                     net_salary=getattr(row, "net_salary", 0.0),
-                    social_insurance_company=getattr(row, "social_insurance_company", 0.0),
+                    social_insurance_company=getattr(
+                        row, "social_insurance_company", 0.0
+                    ),
                     housing_fund_company=getattr(row, "housing_fund_company", 0.0),
                     total_cost=getattr(row, "total_cost", 0.0),
                     payroll_status=getattr(row, "status", None),
@@ -511,7 +635,9 @@ class MonthlyProfitSettlementService:
                 )
             )
 
-    async def _upsert_settlement(self, period_month: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _upsert_settlement(
+        self, period_month: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         record = await self._load_settlement_record(period_month)
         if record is None:
             record = MonthlyProfitSettlement(period_month=period_month)
@@ -519,7 +645,9 @@ class MonthlyProfitSettlementService:
             await self.db.flush()
 
         if getattr(record, "status", "draft") == "approved":
-            raise MonthlyProfitSettlementConflictError("settlement already approved; reopen before rebuild")
+            raise MonthlyProfitSettlementConflictError(
+                "settlement already approved; reopen before rebuild"
+            )
 
         for field in [
             "net_profit_amount",
@@ -540,7 +668,9 @@ class MonthlyProfitSettlementService:
         ]:
             setattr(record, field, payload[field])
 
-        record.locked_at = datetime.now(timezone.utc) if payload["status"] == "approved" else None
+        record.locked_at = (
+            datetime.now(timezone.utc) if payload["status"] == "approved" else None
+        )
         record.updated_at = datetime.now(timezone.utc)
         await self.db.flush()
         payload["id"] = record.id
@@ -556,7 +686,9 @@ class MonthlyProfitSettlementService:
         adjustment_amount: float = 0.0,
         adjustment_reason: str | None = None,
     ) -> dict[str, Any]:
-        await PerformanceReadinessService(self.db).assert_month_performance_ready(period_month)
+        await PerformanceReadinessService(self.db).assert_month_performance_ready(
+            period_month
+        )
         net_profit_amount = await self._load_net_profit_amount(period_month)
         personnel_payload = await self._load_personnel_payload(period_month)
         follow_payload = await self._load_follow_payload(period_month)
@@ -564,7 +696,9 @@ class MonthlyProfitSettlementService:
         summary = self.build_summary(
             period_month=period_month,
             net_profit_amount=net_profit_amount,
-            personnel_actual_amount=self._to_float(personnel_payload.get("actual_amount")),
+            personnel_actual_amount=self._to_float(
+                personnel_payload.get("actual_amount")
+            ),
             follow_actual_amount=self._to_float(follow_payload.get("actual_amount")),
             adjustment_amount=adjustment_amount,
             personnel_target_ratio=personnel_target_ratio,
@@ -575,13 +709,19 @@ class MonthlyProfitSettlementService:
         settlement_id = int(summary["id"])
 
         await self.db.execute(
-            delete(MonthlyProfitPersonnelDetail).where(MonthlyProfitPersonnelDetail.settlement_id == settlement_id)
+            delete(MonthlyProfitPersonnelDetail).where(
+                MonthlyProfitPersonnelDetail.settlement_id == settlement_id
+            )
         )
         await self.db.execute(
-            delete(MonthlyProfitFollowDetail).where(MonthlyProfitFollowDetail.settlement_id == settlement_id)
+            delete(MonthlyProfitFollowDetail).where(
+                MonthlyProfitFollowDetail.settlement_id == settlement_id
+            )
         )
         await self.db.execute(
-            delete(MonthlyProfitAdjustment).where(MonthlyProfitAdjustment.settlement_id == settlement_id)
+            delete(MonthlyProfitAdjustment).where(
+                MonthlyProfitAdjustment.settlement_id == settlement_id
+            )
         )
         await self.db.flush()
 
@@ -665,17 +805,35 @@ class MonthlyProfitSettlementService:
             return await self.load_snapshot_settlement_view(record)
 
         settlement_id = int(self._get_value(record, "id"))
-        personnel_target_ratio = self._to_float(self._get_value(record, "personnel_target_ratio"))
-        follow_target_ratio = self._to_float(self._get_value(record, "follow_target_ratio"))
-        company_target_ratio = self._to_float(self._get_value(record, "company_target_ratio"))
-        if personnel_target_ratio == 0 and follow_target_ratio == 0 and company_target_ratio == 0:
+        personnel_target_ratio = self._to_float(
+            self._get_value(record, "personnel_target_ratio")
+        )
+        follow_target_ratio = self._to_float(
+            self._get_value(record, "follow_target_ratio")
+        )
+        company_target_ratio = self._to_float(
+            self._get_value(record, "company_target_ratio")
+        )
+        if (
+            personnel_target_ratio == 0
+            and follow_target_ratio == 0
+            and company_target_ratio == 0
+        ):
             company_target_ratio = 1.0
         summary = self.build_summary(
             period_month=self._get_value(record, "period_month"),
-            net_profit_amount=self._to_float(self._get_value(record, "net_profit_amount")),
-            personnel_actual_amount=self._to_float(self._get_value(record, "personnel_actual_amount")),
-            follow_actual_amount=self._to_float(self._get_value(record, "follow_actual_amount")),
-            adjustment_amount=self._to_float(self._get_value(record, "adjustment_amount")),
+            net_profit_amount=self._to_float(
+                self._get_value(record, "net_profit_amount")
+            ),
+            personnel_actual_amount=self._to_float(
+                self._get_value(record, "personnel_actual_amount")
+            ),
+            follow_actual_amount=self._to_float(
+                self._get_value(record, "follow_actual_amount")
+            ),
+            adjustment_amount=self._to_float(
+                self._get_value(record, "adjustment_amount")
+            ),
             personnel_target_ratio=personnel_target_ratio,
             follow_target_ratio=follow_target_ratio,
             company_target_ratio=company_target_ratio,
@@ -691,16 +849,22 @@ class MonthlyProfitSettlementService:
             "adjustments": await self._load_adjustments(settlement_id),
         }
 
-    async def update_targets(self, settlement_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    async def update_targets(
+        self, settlement_id: int, body: dict[str, Any]
+    ) -> dict[str, Any]:
         record = (
             await self.db.execute(
-                select(MonthlyProfitSettlement).where(MonthlyProfitSettlement.id == settlement_id)
+                select(MonthlyProfitSettlement).where(
+                    MonthlyProfitSettlement.id == settlement_id
+                )
             )
         ).scalar_one_or_none()
         if record is None:
             raise MonthlyProfitSettlementNotFoundError("settlement not found")
         if record.status == "approved":
-            raise MonthlyProfitSettlementConflictError("approved settlement cannot be edited; reopen first")
+            raise MonthlyProfitSettlementConflictError(
+                "approved settlement cannot be edited; reopen first"
+            )
 
         summary = self.build_summary(
             period_month=record.period_month,
@@ -718,7 +882,9 @@ class MonthlyProfitSettlementService:
         )
 
         await self.db.execute(
-            delete(MonthlyProfitAdjustment).where(MonthlyProfitAdjustment.settlement_id == settlement_id)
+            delete(MonthlyProfitAdjustment).where(
+                MonthlyProfitAdjustment.settlement_id == settlement_id
+            )
         )
         if summary["adjustment_amount"]:
             self.db.add(
@@ -726,7 +892,8 @@ class MonthlyProfitSettlementService:
                     settlement_id=settlement_id,
                     adjustment_type="manual_adjustment",
                     amount=summary["adjustment_amount"],
-                    reason=body.get("adjustment_reason") or "monthly settlement adjustment",
+                    reason=body.get("adjustment_reason")
+                    or "monthly settlement adjustment",
                     created_by="system",
                 )
             )
@@ -746,7 +913,9 @@ class MonthlyProfitSettlementService:
     async def approve(self, settlement_id: int, approver: str) -> dict[str, Any]:
         record = (
             await self.db.execute(
-                select(MonthlyProfitSettlement).where(MonthlyProfitSettlement.id == settlement_id)
+                select(MonthlyProfitSettlement).where(
+                    MonthlyProfitSettlement.id == settlement_id
+                )
             )
         ).scalar_one_or_none()
         if record is None:
@@ -757,8 +926,10 @@ class MonthlyProfitSettlementService:
             str(getattr(record, "period_month", ""))
         )
         if (
-            abs(self._to_float(getattr(record, "difference_amount", 0.0))) > self.APPROVAL_DIFFERENCE_AMOUNT_THRESHOLD
-            or abs(self._to_float(getattr(record, "difference_ratio", 0.0))) > self.APPROVAL_DIFFERENCE_RATIO_THRESHOLD
+            abs(self._to_float(getattr(record, "difference_amount", 0.0)))
+            > self.APPROVAL_DIFFERENCE_AMOUNT_THRESHOLD
+            or abs(self._to_float(getattr(record, "difference_ratio", 0.0)))
+            > self.APPROVAL_DIFFERENCE_RATIO_THRESHOLD
         ):
             raise MonthlyProfitSettlementConflictError("difference threshold exceeded")
         snapshot_version = await self.get_next_snapshot_version(settlement_id)
@@ -797,13 +968,17 @@ class MonthlyProfitSettlementService:
     async def reopen(self, settlement_id: int) -> dict[str, Any]:
         record = (
             await self.db.execute(
-                select(MonthlyProfitSettlement).where(MonthlyProfitSettlement.id == settlement_id)
+                select(MonthlyProfitSettlement).where(
+                    MonthlyProfitSettlement.id == settlement_id
+                )
             )
         ).scalar_one_or_none()
         if record is None:
             raise MonthlyProfitSettlementNotFoundError("settlement not found")
         if record.status != "approved":
-            raise MonthlyProfitSettlementConflictError("only approved settlement can be reopened")
+            raise MonthlyProfitSettlementConflictError(
+                "only approved settlement can be reopened"
+            )
         paid_payroll = (
             await self.db.execute(
                 select(PayrollRecord).where(
@@ -828,18 +1003,30 @@ class MonthlyProfitSettlementService:
     async def invalidate_settlement_performance(self, period_month: str) -> None:
         """Reopen the inputs that made a period's formal performance result official."""
         basis_rows = (
-            await self.db.execute(
-                select(ShopProfitBasis).where(ShopProfitBasis.period_month == period_month)
+            (
+                await self.db.execute(
+                    select(ShopProfitBasis).where(
+                        ShopProfitBasis.period_month == period_month
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for basis in basis_rows:
             basis.is_locked = False
 
         score_rows = (
-            await self.db.execute(
-                select(PerformanceScore).where(PerformanceScore.period == period_month)
+            (
+                await self.db.execute(
+                    select(PerformanceScore).where(
+                        PerformanceScore.period == period_month
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for score in score_rows:
             details = dict(getattr(score, "score_details", None) or {})
             summary = dict(details.get("summary") or {})

@@ -23,8 +23,7 @@ def test_dev_backend_mounts_tools_directory():
     volumes = compose["services"]["backend-api"]["volumes"]
 
     assert any(
-        str(volume).startswith("./tools:/app/tools")
-        for volume in volumes
+        str(volume).startswith("./tools:/app/tools") for volume in volumes
     ), "backend dev container must mount tools into /app/tools for runtime subprocesses"
 
 
@@ -33,8 +32,7 @@ def test_dev_backend_mounts_profiles_directory_for_session_reuse():
     volumes = compose["services"]["backend-api"]["volumes"]
 
     assert any(
-        str(volume).startswith("./profiles:/app/profiles")
-        for volume in volumes
+        str(volume).startswith("./profiles:/app/profiles") for volume in volumes
     ), "backend dev container must mount profiles into /app/profiles for session reuse"
 
 
@@ -43,12 +41,14 @@ def test_backend_image_copies_runtime_tool_scripts():
 
     assert (
         "COPY tools /app/tools" in dockerfile
-        or "COPY tools/launch_inspector_recorder.py /app/tools/launch_inspector_recorder.py" in dockerfile
+        or "COPY tools/launch_inspector_recorder.py /app/tools/launch_inspector_recorder.py"
+        in dockerfile
     ), "backend image must package runtime tools into /app/tools"
 
     assert (
         "COPY tools /app/tools" in dockerfile
-        or "COPY tools/run_component_test.py /app/tools/run_component_test.py" in dockerfile
+        or "COPY tools/run_component_test.py /app/tools/run_component_test.py"
+        in dockerfile
     ), "backend image must package component test runner into /app/tools"
 
 
@@ -69,7 +69,9 @@ def test_prod_postgres_exposes_only_loopback_debug_port():
 
 
 def test_prod_compose_does_not_keep_legacy_secret_fallbacks():
-    compose_text = (PROJECT_ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+    compose_text = (PROJECT_ROOT / "docker-compose.prod.yml").read_text(
+        encoding="utf-8"
+    )
 
     assert "erp_pass_2025" not in compose_text
     assert "redis_pass_2025" not in compose_text
@@ -158,11 +160,15 @@ def test_dev_runtime_services_mount_sql_directory_for_refresh_pipeline():
     compose = _read_yaml("docker-compose.dev.yml")
     services = compose["services"]
 
-    for service_name in ("backend-api", "backend-collector", "celery-worker", "celery-beat"):
+    for service_name in (
+        "backend-api",
+        "backend-collector",
+        "celery-worker",
+        "celery-beat",
+    ):
         volumes = services[service_name]["volumes"]
         assert any(
-            str(volume).startswith("./sql:/app/sql")
-            for volume in volumes
+            str(volume).startswith("./sql:/app/sql") for volume in volumes
         ), f"{service_name} must mount sql assets into /app/sql for refresh execution"
 
 
@@ -211,9 +217,11 @@ def test_prod_backend_healthcheck_uses_readiness_endpoint():
 
 
 def test_prod_nginx_health_proxy_uses_backend_readiness_endpoint():
-    nginx_conf = (PROJECT_ROOT / "nginx" / "nginx.prod.conf").read_text(encoding="utf-8")
+    nginx_conf = (PROJECT_ROOT / "nginx" / "nginx.prod.conf").read_text(
+        encoding="utf-8"
+    )
 
-    assert 'proxy_pass http://$backend_upstream/healthz/ready;' in nginx_conf
+    assert "proxy_pass http://$backend_upstream/healthz/ready;" in nginx_conf
 
 
 def test_prod_compose_injects_release_tag_into_runtime_services():
@@ -234,7 +242,9 @@ def test_dev_compose_declares_explicit_backend_api_and_collector_services():
     assert "backend-collector" in services
     assert "backend" not in services
     assert services["backend-api"]["environment"]["DEPLOYMENT_ROLE"] == "api"
-    assert services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
+    assert (
+        services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
+    )
 
 
 def test_dev_collector_inherits_account_encryption_key():
@@ -263,7 +273,9 @@ def test_prod_compose_declares_explicit_backend_api_and_collector_services():
     assert "backend-api" in services
     assert "backend-collector" in services
     assert "backend" not in services
-    assert services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
+    assert (
+        services["backend-collector"]["environment"]["DEPLOYMENT_ROLE"] == "collector"
+    )
 
 
 def test_prod_collector_inherits_account_encryption_key():
@@ -340,7 +352,9 @@ def test_cloud_4c8g_overlay_sets_balanced_backend_and_worker_memory_limits():
     compose = _read_yaml("docker-compose.cloud-4c8g.yml")
 
     backend_limits = compose["services"]["backend-api"]["deploy"]["resources"]["limits"]
-    worker_limits = compose["services"]["celery-worker"]["deploy"]["resources"]["limits"]
+    worker_limits = compose["services"]["celery-worker"]["deploy"]["resources"][
+        "limits"
+    ]
 
     assert backend_limits["memory"] == "1.5G"
     assert worker_limits["memory"] == "768M"
@@ -351,8 +365,10 @@ def test_remote_production_deploy_does_not_start_celery_exporter_by_default():
         PROJECT_ROOT / "scripts" / "deploy_remote_production.sh"
     ).read_text(encoding="utf-8")
 
-    assert 'up -d backend celery-worker celery-beat celery-exporter' not in deploy_script
-    assert 'up -d --no-build backend-api celery-worker celery-beat' in deploy_script
+    assert (
+        "up -d backend celery-worker celery-beat celery-exporter" not in deploy_script
+    )
+    assert "up -d --no-build backend-api celery-worker celery-beat" in deploy_script
 
 
 def test_remote_production_deploy_removes_legacy_celery_exporter_container():

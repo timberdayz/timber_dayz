@@ -7,7 +7,15 @@ from logging.config import fileConfig
 
 from alembic import context
 from alembic.ddl.impl import DefaultImpl
-from sqlalchemy import Column, MetaData, PrimaryKeyConstraint, String, Table, engine_from_config, pool
+from sqlalchemy import (
+    Column,
+    MetaData,
+    PrimaryKeyConstraint,
+    String,
+    Table,
+    engine_from_config,
+    pool,
+)
 
 
 config = context.config

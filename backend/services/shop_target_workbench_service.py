@@ -15,7 +15,13 @@ from backend.schemas.target import (
 )
 from backend.services.target_sync_service import TargetSyncService
 from backend.services.target_breakdown_selection import select_effective_shop_breakdowns
-from modules.core.db import DimShop, SalesTarget, ShopAccount, ShopAccountAlias, TargetBreakdown
+from modules.core.db import (
+    DimShop,
+    SalesTarget,
+    ShopAccount,
+    ShopAccountAlias,
+    TargetBreakdown,
+)
 
 
 class ShopTargetWorkbenchService:
@@ -29,14 +35,19 @@ class ShopTargetWorkbenchService:
         breakdowns = await self._list_breakdowns(target.id) if target else []
 
         shop_rows = [item for item in breakdowns if item.breakdown_type == "shop"]
-        effective_shop_rows = select_effective_shop_breakdowns(shop_rows, month_start, month_end)
+        effective_shop_rows = select_effective_shop_breakdowns(
+            shop_rows, month_start, month_end
+        )
         shop_breakdowns = {
-            (item.platform_code, item.shop_id): item
-            for item in effective_shop_rows
+            (item.platform_code, item.shop_id): item for item in effective_shop_rows
         }
         daily_dates: dict[tuple[str, str], set[date]] = {}
         for item in breakdowns:
-            if item.breakdown_type == "shop_time" and item.platform_code and item.shop_id:
+            if (
+                item.breakdown_type == "shop_time"
+                and item.platform_code
+                and item.shop_id
+            ):
                 key = (item.platform_code, item.shop_id)
                 day = item.period_start
                 if day and item.period_end == day and month_start <= day <= month_end:
@@ -44,7 +55,11 @@ class ShopTargetWorkbenchService:
         daily_counts = {key: len(days) for key, days in daily_dates.items()}
 
         total_amount = float(target.target_amount or 0.0) if target else 0.0
-        total_profit_basis_amount = float(getattr(target, "target_profit_basis_amount", 0.0) or 0.0) if target else 0.0
+        total_profit_basis_amount = (
+            float(getattr(target, "target_profit_basis_amount", 0.0) or 0.0)
+            if target
+            else 0.0
+        )
         response_shops = []
         for shop in shops:
             key = (shop.platform_code, shop.shop_id)
@@ -59,7 +74,9 @@ class ShopTargetWorkbenchService:
                     ratio=(amount / total_amount) if total_amount else 0.0,
                     target_amount=amount,
                     target_quantity=int(getattr(breakdown, "target_quantity", 0) or 0),
-                    target_profit_basis_amount=float(getattr(breakdown, "target_profit_basis_amount", 0.0) or 0.0),
+                    target_profit_basis_amount=float(
+                        getattr(breakdown, "target_profit_basis_amount", 0.0) or 0.0
+                    ),
                     daily_target_count=daily_counts.get(key, 0),
                 )
             )
@@ -68,9 +85,12 @@ class ShopTargetWorkbenchService:
             year_month=year_month,
             target_id=getattr(target, "id", None),
             company_target_amount=total_amount,
-            company_target_quantity=int(getattr(target, "target_quantity", 0) or 0) if target else 0,
+            company_target_quantity=(
+                int(getattr(target, "target_quantity", 0) or 0) if target else 0
+            ),
             company_target_profit_basis_amount=total_profit_basis_amount,
-            weekday_ratios=getattr(target, "weekday_ratios", None) or self._default_weekday_ratios(),
+            weekday_ratios=getattr(target, "weekday_ratios", None)
+            or self._default_weekday_ratios(),
             shops=response_shops,
         )
 
@@ -105,7 +125,9 @@ class ShopTargetWorkbenchService:
         target.status = "active"
         target.target_amount = request.company_target_amount
         target.target_quantity = preserved_quantities["company"]
-        target.target_profit_amount = getattr(target, "target_profit_amount", 0.0) or 0.0
+        target.target_profit_amount = (
+            getattr(target, "target_profit_amount", 0.0) or 0.0
+        )
         target.target_profit_basis_amount = request.company_target_profit_basis_amount
         target.weekday_ratios = self._normalize_weekday_ratios(request.weekday_ratios)
         target.description = "店铺目标工作台维护"
@@ -167,10 +189,14 @@ class ShopTargetWorkbenchService:
         return await self.apply(request, username=username)
 
     async def sync_projection(self, target_id: int):
-        return await TargetSyncService(self.db).sync_target_to_a_class(target_id, commit=False)
+        return await TargetSyncService(self.db).sync_target_to_a_class(
+            target_id, commit=False
+        )
 
     async def cleanup_projection(self, target_id: int):
-        return await TargetSyncService(self.db).delete_target_from_a_class(target_id, commit=False)
+        return await TargetSyncService(self.db).delete_target_from_a_class(
+            target_id, commit=False
+        )
 
     async def _find_month_target(self, month_start: date, month_end: date):
         targets = await self._list_month_targets(month_start, month_end)
@@ -183,11 +209,17 @@ class ShopTargetWorkbenchService:
             .where(SalesTarget.status == "active")
             .where(SalesTarget.period_start <= month_end)
             .where(SalesTarget.period_end >= month_start)
-            .order_by(SalesTarget.updated_at.desc(), SalesTarget.created_at.desc(), SalesTarget.id.desc())
+            .order_by(
+                SalesTarget.updated_at.desc(),
+                SalesTarget.created_at.desc(),
+                SalesTarget.id.desc(),
+            )
         )
         return result.scalars().all()
 
-    async def _deactivate_older_month_targets(self, month_targets, current_target_id: int) -> None:
+    async def _deactivate_older_month_targets(
+        self, month_targets, current_target_id: int
+    ) -> None:
         for target in month_targets:
             if getattr(target, "id", None) == current_target_id:
                 continue
@@ -201,7 +233,11 @@ class ShopTargetWorkbenchService:
             select(ShopAccount)
             .where(ShopAccount.enabled.is_(True))
             .where(ShopAccount.business_role == "operating_store")
-            .order_by(ShopAccount.platform.asc(), ShopAccount.store_name.asc(), ShopAccount.shop_account_id.asc())
+            .order_by(
+                ShopAccount.platform.asc(),
+                ShopAccount.store_name.asc(),
+                ShopAccount.shop_account_id.asc(),
+            )
         )
         records = result.scalars().all()
         shops = []
@@ -213,13 +249,20 @@ class ShopTargetWorkbenchService:
                 )
             )
             alias_records = alias_result.scalars().all()
-            aliases = [alias.alias_value for alias in alias_records if getattr(alias, "alias_value", None)]
+            aliases = [
+                alias.alias_value
+                for alias in alias_records
+                if getattr(alias, "alias_value", None)
+            ]
             shop_id = await self._resolve_shop_target_id(record)
             shops.append(
                 SimpleNamespace(
-                    platform_code=str(getattr(record, "platform", "") or "").strip().lower(),
+                    platform_code=str(getattr(record, "platform", "") or "")
+                    .strip()
+                    .lower(),
                     shop_id=shop_id,
-                    standard_name=str(getattr(record, "store_name", "") or "").strip() or shop_id,
+                    standard_name=str(getattr(record, "store_name", "") or "").strip()
+                    or shop_id,
                     aliases=aliases,
                 )
             )
@@ -259,7 +302,9 @@ class ShopTargetWorkbenchService:
         return candidates[0] if candidates else store_name
 
     async def _list_breakdowns(self, target_id: int):
-        result = await self.db.execute(select(TargetBreakdown).where(TargetBreakdown.target_id == target_id))
+        result = await self.db.execute(
+            select(TargetBreakdown).where(TargetBreakdown.target_id == target_id)
+        )
         return result.scalars().all()
 
     async def _replace_breakdowns(
@@ -270,15 +315,18 @@ class ShopTargetWorkbenchService:
         month_end: date,
         preserved_quantities: dict,
     ) -> None:
-        await self.db.execute(delete(TargetBreakdown).where(TargetBreakdown.target_id == target_id))
+        await self.db.execute(
+            delete(TargetBreakdown).where(TargetBreakdown.target_id == target_id)
+        )
         days = monthrange(month_start.year, month_start.month)[1]
         day_weights = self._month_day_weights(month_start, days, request.weekday_ratios)
         total_weight = sum(weight for _, weight in day_weights) or 1.0
 
-        company_daily_amounts = self._split_amount_by_weights(request.company_target_amount, day_weights, total_weight)
+        company_daily_amounts = self._split_amount_by_weights(
+            request.company_target_amount, day_weights, total_weight
+        )
         company_daily_quantities = [
-            preserved_quantities["time"].get(current, 0)
-            for current, _ in day_weights
+            preserved_quantities["time"].get(current, 0) for current, _ in day_weights
         ]
         company_daily_profit_basis_amounts = self._split_amount_by_weights(
             request.company_target_profit_basis_amount,
@@ -318,9 +366,13 @@ class ShopTargetWorkbenchService:
                     target_profit_basis_amount=shop.target_profit_basis_amount,
                 )
             )
-            shop_daily_amounts = self._split_amount_by_weights(shop.target_amount, day_weights, total_weight)
+            shop_daily_amounts = self._split_amount_by_weights(
+                shop.target_amount, day_weights, total_weight
+            )
             shop_daily_quantities = [
-                preserved_quantities["shop_time"].get((shop.platform_code, shop.shop_id, current), 0)
+                preserved_quantities["shop_time"].get(
+                    (shop.platform_code, shop.shop_id, current), 0
+                )
                 for current, _ in day_weights
             ]
             shop_daily_profit_basis_amounts = self._split_amount_by_weights(
@@ -339,8 +391,8 @@ class ShopTargetWorkbenchService:
                         period_end=current,
                         period_label=current.isoformat(),
                         target_amount=shop_daily_amounts[idx],
-                    target_quantity=shop_daily_quantities[idx],
-                    target_profit_basis_amount=shop_daily_profit_basis_amounts[idx],
+                        target_quantity=shop_daily_quantities[idx],
+                        target_profit_basis_amount=shop_daily_profit_basis_amounts[idx],
                     )
                 )
 
@@ -360,7 +412,9 @@ class ShopTargetWorkbenchService:
                     period_end=month_end,
                     period_label=request.year_month,
                     target_amount=0.0,
-                    target_quantity=preserved_quantities["shop"].get((platform_code, shop_id), 0),
+                    target_quantity=preserved_quantities["shop"].get(
+                        (platform_code, shop_id), 0
+                    ),
                     target_profit_basis_amount=0.0,
                 )
             )
@@ -375,7 +429,9 @@ class ShopTargetWorkbenchService:
                         period_end=current,
                         period_label=current.isoformat(),
                         target_amount=0.0,
-                        target_quantity=preserved_quantities["shop_time"].get((platform_code, shop_id, current), 0),
+                        target_quantity=preserved_quantities["shop_time"].get(
+                            (platform_code, shop_id, current), 0
+                        ),
                         target_profit_basis_amount=0.0,
                     )
                 )
@@ -409,14 +465,18 @@ class ShopTargetWorkbenchService:
                 and breakdown.period_start == breakdown.period_end
                 and month_start <= breakdown.period_start <= month_end
             ):
-                quantities["shop_time"][(
-                    breakdown.platform_code,
-                    breakdown.shop_id,
-                    breakdown.period_start,
-                )] = quantity
+                quantities["shop_time"][
+                    (
+                        breakdown.platform_code,
+                        breakdown.shop_id,
+                        breakdown.period_start,
+                    )
+                ] = quantity
 
         shop_rows = [item for item in breakdowns if item.breakdown_type == "shop"]
-        for breakdown in select_effective_shop_breakdowns(shop_rows, month_start, month_end):
+        for breakdown in select_effective_shop_breakdowns(
+            shop_rows, month_start, month_end
+        ):
             if breakdown.platform_code and breakdown.shop_id:
                 quantities["shop"][(breakdown.platform_code, breakdown.shop_id)] = int(
                     getattr(breakdown, "target_quantity", 0) or 0
@@ -434,21 +494,42 @@ class ShopTargetWorkbenchService:
 
     def _validate_request(self, request: ShopTargetWorkbenchApplyRequest) -> None:
         ratio_total = sum(float(shop.ratio or 0.0) for shop in request.shops)
-        amount_total = round(sum(float(shop.target_amount or 0.0) for shop in request.shops), 2)
-        profit_basis_total = round(sum(float(shop.target_profit_basis_amount or 0.0) for shop in request.shops), 2)
+        amount_total = round(
+            sum(float(shop.target_amount or 0.0) for shop in request.shops), 2
+        )
+        profit_basis_total = round(
+            sum(
+                float(shop.target_profit_basis_amount or 0.0) for shop in request.shops
+            ),
+            2,
+        )
         if abs(ratio_total - 1.0) > 0.0001:
             raise ValueError("店铺拆分比例合计必须等于100%")
-        if abs(amount_total - round(float(request.company_target_amount or 0.0), 2)) > 0.01:
+        if (
+            abs(amount_total - round(float(request.company_target_amount or 0.0), 2))
+            > 0.01
+        ):
             raise ValueError("店铺目标销售额合计必须等于公司总销售额")
-        if abs(profit_basis_total - round(float(request.company_target_profit_basis_amount or 0.0), 2)) > 0.01:
+        if (
+            abs(
+                profit_basis_total
+                - round(float(request.company_target_profit_basis_amount or 0.0), 2)
+            )
+            > 0.01
+        ):
             raise ValueError("店铺结算利润目标合计必须等于公司结算利润目标")
 
     def _default_weekday_ratios(self) -> dict[str, float]:
         return {str(day): 1 / 7 for day in range(1, 8)}
 
-    def _normalize_weekday_ratios(self, ratios: dict[str, float] | None) -> dict[str, float]:
+    def _normalize_weekday_ratios(
+        self, ratios: dict[str, float] | None
+    ) -> dict[str, float]:
         source = ratios or self._default_weekday_ratios()
-        normalized = {str(day): max(float(source.get(str(day), 0.0) or 0.0), 0.0) for day in range(1, 8)}
+        normalized = {
+            str(day): max(float(source.get(str(day), 0.0) or 0.0), 0.0)
+            for day in range(1, 8)
+        }
         total = sum(normalized.values())
         if total <= 0:
             return self._default_weekday_ratios()
@@ -474,9 +555,14 @@ class ShopTargetWorkbenchService:
         day_weights: list[tuple[date, float]],
         total_weight: float,
     ) -> list[float]:
-        values = [round(float(total_amount or 0.0) * weight / total_weight, 2) for _, weight in day_weights]
+        values = [
+            round(float(total_amount or 0.0) * weight / total_weight, 2)
+            for _, weight in day_weights
+        ]
         if values:
-            values[-1] = round(values[-1] + round(float(total_amount or 0.0) - sum(values), 2), 2)
+            values[-1] = round(
+                values[-1] + round(float(total_amount or 0.0) - sum(values), 2), 2
+            )
         return values
 
     def _split_quantity_by_weights(
@@ -485,10 +571,17 @@ class ShopTargetWorkbenchService:
         day_weights: list[tuple[date, float]],
         total_weight: float,
     ) -> list[int]:
-        raw_values = [float(total_quantity or 0) * weight / total_weight for _, weight in day_weights]
+        raw_values = [
+            float(total_quantity or 0) * weight / total_weight
+            for _, weight in day_weights
+        ]
         values = [int(value) for value in raw_values]
         remainder = int(total_quantity or 0) - sum(values)
-        ranked = sorted(range(len(raw_values)), key=lambda idx: raw_values[idx] - values[idx], reverse=True)
+        ranked = sorted(
+            range(len(raw_values)),
+            key=lambda idx: raw_values[idx] - values[idx],
+            reverse=True,
+        )
         for idx in ranked[:remainder]:
             values[idx] += 1
         return values

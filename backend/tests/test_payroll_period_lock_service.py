@@ -60,12 +60,15 @@ def test_employee_month_lock_allows_draft_or_missing_payroll():
 
     db = SimpleNamespace(execute=AsyncMock(return_value=_Result(None)))
 
-    assert asyncio.run(
-        PayrollPeriodLockService(db).assert_employee_month_mutable(
-            employee_code="EMP001",
-            year_month="2025-07",
+    assert (
+        asyncio.run(
+            PayrollPeriodLockService(db).assert_employee_month_mutable(
+                employee_code="EMP001",
+                year_month="2025-07",
+            )
         )
-    ) is None
+        is None
+    )
 
 
 def test_shop_month_lock_rejects_config_changes_when_an_assignee_is_confirmed():
@@ -125,9 +128,7 @@ def test_month_lock_status_summarizes_confirmed_and_paid_payrolls():
     from backend.services.payroll_period_lock_service import PayrollPeriodLockService
 
     db = SimpleNamespace(
-        execute=AsyncMock(
-            return_value=_RowsResult([("confirmed", 1), ("paid", 3)])
-        )
+        execute=AsyncMock(return_value=_RowsResult([("confirmed", 1), ("paid", 3)]))
     )
 
     status = asyncio.run(
@@ -155,7 +156,9 @@ def test_salary_effective_date_lock_rejects_backdated_change_over_confirmed_mont
     db = SimpleNamespace(
         execute=AsyncMock(
             return_value=_Result(
-                SimpleNamespace(employee_code="EMP001", year_month="2025-07", status="confirmed")
+                SimpleNamespace(
+                    employee_code="EMP001", year_month="2025-07", status="confirmed"
+                )
             )
         )
     )

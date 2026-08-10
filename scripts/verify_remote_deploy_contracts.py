@@ -13,21 +13,21 @@ DOCKERFILE_BACKEND_PATH = Path("Dockerfile.backend")
 
 
 REQUIRED_LITERALS = [
-    'migrate:',
-    'celery-worker:',
-    'celery-beat:',
-    'backend-api:',
-    'backend-api python3 /app/scripts/run_current_schema_migrations.py',
-    'run_current_schema_migrations.py --preflight-only',
-    'capture_running_application_containers',
-    'trap handle_deploy_exit EXIT',
-    'DEPLOYMENT_CUTOVER_COMPLETE=1',
-    'run --rm --no-deps backend-api python3 /app/scripts/bootstrap_production.py',
-    'run --rm --no-deps backend-api python3 /app/scripts/verify_system_role_integrity.py --repair',
-    'run --rm --no-deps backend-api python3 /app/scripts/bootstrap_postgresql_dashboard.py',
-    'up -d --no-build --no-deps backend-api celery-worker celery-beat',
-    'up -d --no-build --no-deps frontend',
-    'up -d --no-build --no-deps nginx',
+    "migrate:",
+    "celery-worker:",
+    "celery-beat:",
+    "backend-api:",
+    "backend-api python3 /app/scripts/run_current_schema_migrations.py",
+    "run_current_schema_migrations.py --preflight-only",
+    "capture_running_application_containers",
+    "trap handle_deploy_exit EXIT",
+    "DEPLOYMENT_CUTOVER_COMPLETE=1",
+    "run --rm --no-deps backend-api python3 /app/scripts/bootstrap_production.py",
+    "run --rm --no-deps backend-api python3 /app/scripts/verify_system_role_integrity.py --repair",
+    "run --rm --no-deps backend-api python3 /app/scripts/bootstrap_postgresql_dashboard.py",
+    "up -d --no-build --no-deps backend-api celery-worker celery-beat",
+    "up -d --no-build --no-deps frontend",
+    "up -d --no-build --no-deps nginx",
 ]
 
 REQUIRED_BACKEND_IMAGE_FILES = [
@@ -43,7 +43,10 @@ def _dockerfile_copies_file(dockerfile_source: str, repo_rel_path: str) -> bool:
     needle_explicit = f"COPY {repo_rel_path} "
     if needle_explicit in dockerfile_source:
         return True
-    if "COPY scripts/ /app/scripts" in dockerfile_source or "COPY scripts/ /app/scripts/" in dockerfile_source:
+    if (
+        "COPY scripts/ /app/scripts" in dockerfile_source
+        or "COPY scripts/ /app/scripts/" in dockerfile_source
+    ):
         return True
     return False
 

@@ -60,14 +60,22 @@ def main() -> int:
     try:
         print("[INFO] Rehearsal: current-schema migration on snapshot DB...")
         _run(
-            [sys.executable, str(ROOT_DIR / "scripts" / "run_current_schema_migrations.py")],
+            [
+                sys.executable,
+                str(ROOT_DIR / "scripts" / "run_current_schema_migrations.py"),
+            ],
             env=env,
             cwd=ROOT_DIR,
         )
 
-        print("[INFO] Rehearsal: bootstrap PostgreSQL Dashboard assets on snapshot DB...")
+        print(
+            "[INFO] Rehearsal: bootstrap PostgreSQL Dashboard assets on snapshot DB..."
+        )
         _run(
-            [sys.executable, str(ROOT_DIR / "scripts" / "bootstrap_postgresql_dashboard.py")],
+            [
+                sys.executable,
+                str(ROOT_DIR / "scripts" / "bootstrap_postgresql_dashboard.py"),
+            ],
             env=env,
             cwd=ROOT_DIR,
         )

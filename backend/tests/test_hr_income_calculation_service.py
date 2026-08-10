@@ -443,10 +443,20 @@ def test_calculate_month_prefers_english_orm_writes_when_available():
     assert result["performance_upserts"] == 1
     assert any(isinstance(x, EmployeeCommission) for x in added)
     assert any(isinstance(x, EmployeePerformance) for x in added)
-    assert all("update c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
-    assert all("insert into c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
-    assert all("update c_class.employee_performance" not in sql.lower() for sql in executed_sql)
-    assert all("insert into c_class.employee_performance" not in sql.lower() for sql in executed_sql)
+    assert all(
+        "update c_class.employee_commissions" not in sql.lower() for sql in executed_sql
+    )
+    assert all(
+        "insert into c_class.employee_commissions" not in sql.lower()
+        for sql in executed_sql
+    )
+    assert all(
+        "update c_class.employee_performance" not in sql.lower() for sql in executed_sql
+    )
+    assert all(
+        "insert into c_class.employee_performance" not in sql.lower()
+        for sql in executed_sql
+    )
     assert db.rollback.await_count == 0
 
 
@@ -532,10 +542,20 @@ def test_calculate_month_updates_existing_records_with_english_orm_path():
     assert existing_performance.performance_score is None
     assert existing_performance.calculation_status == "pending_store_performance"
     assert db.rollback.await_count == 0
-    assert all("update c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
-    assert all("insert into c_class.employee_commissions" not in sql.lower() for sql in executed_sql)
-    assert all("update c_class.employee_performance" not in sql.lower() for sql in executed_sql)
-    assert all("insert into c_class.employee_performance" not in sql.lower() for sql in executed_sql)
+    assert all(
+        "update c_class.employee_commissions" not in sql.lower() for sql in executed_sql
+    )
+    assert all(
+        "insert into c_class.employee_commissions" not in sql.lower()
+        for sql in executed_sql
+    )
+    assert all(
+        "update c_class.employee_performance" not in sql.lower() for sql in executed_sql
+    )
+    assert all(
+        "insert into c_class.employee_performance" not in sql.lower()
+        for sql in executed_sql
+    )
 
 
 def test_calculate_month_falls_back_to_salary_structure_commission_ratio_when_assignment_ratio_missing():
@@ -607,7 +627,9 @@ def test_calculate_month_falls_back_to_salary_structure_commission_ratio_when_as
     assert commission.commission_rate == pytest.approx(0.5)
 
 
-def test_load_profit_basis_by_shop_prefers_locked_shop_profit_basis_snapshot(monkeypatch):
+def test_load_profit_basis_by_shop_prefers_locked_shop_profit_basis_snapshot(
+    monkeypatch,
+):
     db = AsyncMock()
 
     snapshot_row = SimpleNamespace(
@@ -649,7 +671,9 @@ def test_load_profit_basis_by_shop_prefers_locked_shop_profit_basis_snapshot(mon
     assert result == {"shopee|s1": {"profit_basis_amount": 1800.0}}
 
 
-def test_load_profit_basis_by_shop_excludes_unlocked_shop_profit_basis_snapshot(monkeypatch):
+def test_load_profit_basis_by_shop_excludes_unlocked_shop_profit_basis_snapshot(
+    monkeypatch,
+):
     db = AsyncMock()
 
     snapshot_row = SimpleNamespace(
@@ -736,7 +760,11 @@ def test_calculate_month_employee_performance_uses_store_total_score():
             performance_coefficient=1.2,
             score_details={
                 "sales": {"target": 900.0},
-                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
+                "summary": {
+                    "calculation_status": "complete",
+                    "ranking_pool": "official",
+                    "formal_ready": True,
+                },
             },
         ),
         SimpleNamespace(
@@ -747,7 +775,11 @@ def test_calculate_month_employee_performance_uses_store_total_score():
             performance_coefficient=0.9,
             score_details={
                 "sales": {"target": 100.0},
-                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
+                "summary": {
+                    "calculation_status": "complete",
+                    "ranking_pool": "official",
+                    "formal_ready": True,
+                },
             },
         ),
     ]
@@ -803,7 +835,9 @@ def test_calculate_month_employee_performance_uses_store_total_score():
     assert commission.commission_amount == pytest.approx(172.5)
     assert commission.commission_rate == pytest.approx(1.4375)
     assert perf.actual_sales == pytest.approx(1200.0)
-    assert perf.achievement_rate == pytest.approx((60.0 * 1000.0 + 50.0 * 200.0) / 1200.0 / 100.0)
+    assert perf.achievement_rate == pytest.approx(
+        (60.0 * 1000.0 + 50.0 * 200.0) / 1200.0 / 100.0
+    )
     assert perf.performance_score == pytest.approx(90.8)
 
 
@@ -950,14 +984,24 @@ def test_calculate_month_employee_performance_applies_attendance_penalties():
             total_score=92.0,
             score_details={
                 "sales": {"target": 1000.0},
-                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
+                "summary": {
+                    "calculation_status": "complete",
+                    "ranking_pool": "official",
+                    "formal_ready": True,
+                },
             },
         ),
     ]
     attendance_rows = [
-        SimpleNamespace(employee_code="E101", attendance_date="2026-03-01", status="late"),
-        SimpleNamespace(employee_code="E101", attendance_date="2026-03-02", status="absent"),
-        SimpleNamespace(employee_code="E101", attendance_date="2026-03-03", status="normal"),
+        SimpleNamespace(
+            employee_code="E101", attendance_date="2026-03-01", status="late"
+        ),
+        SimpleNamespace(
+            employee_code="E101", attendance_date="2026-03-02", status="absent"
+        ),
+        SimpleNamespace(
+            employee_code="E101", attendance_date="2026-03-03", status="normal"
+        ),
     ]
 
     async def _execute(stmt, params=None):
@@ -1034,7 +1078,11 @@ def test_calculate_month_employee_performance_falls_back_to_chinese_attendance_c
             total_score=92.0,
             score_details={
                 "sales": {"target": 1000.0},
-                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
+                "summary": {
+                    "calculation_status": "complete",
+                    "ranking_pool": "official",
+                    "formal_ready": True,
+                },
             },
         ),
     ]
@@ -1068,7 +1116,9 @@ def test_calculate_month_employee_performance_falls_back_to_chinese_attendance_c
             if entity is PerformanceScore:
                 return _MockResult(rows=perf_rows)
             if entity is AttendanceRecord:
-                raise Exception("column attendance_records.employee_code does not exist")
+                raise Exception(
+                    "column attendance_records.employee_code does not exist"
+                )
             if entity is EmployeePerformanceAdjustment:
                 return _MockResult(rows=[])
             if entity is EmployeeCommission:
@@ -1076,7 +1126,7 @@ def test_calculate_month_employee_performance_falls_back_to_chinese_attendance_c
             if entity is EmployeePerformance:
                 return _MockResult(scalar_value=None)
         sql = str(stmt)
-        if 'from a_class.attendance_records' in sql.lower():
+        if "from a_class.attendance_records" in sql.lower():
             return _RawAttendanceResult(
                 [
                     {"employee_code": "E201", "status": "late"},
@@ -1143,13 +1193,24 @@ def test_calculate_month_employee_performance_applies_manual_adjustments():
             total_score=92.0,
             score_details={
                 "sales": {"target": 1000.0},
-                    "summary": {"calculation_status": "complete", "ranking_pool": "official", "formal_ready": True},
+                "summary": {
+                    "calculation_status": "complete",
+                    "ranking_pool": "official",
+                    "formal_ready": True,
+                },
             },
         ),
     ]
     adjustment_rows = [
-        SimpleNamespace(employee_code="E102", year_month="2026-03", score_delta=3.0, status="active"),
-        SimpleNamespace(employee_code="E102", year_month="2026-03", score_delta=-1.5, status="active"),
+        SimpleNamespace(
+            employee_code="E102", year_month="2026-03", score_delta=3.0, status="active"
+        ),
+        SimpleNamespace(
+            employee_code="E102",
+            year_month="2026-03",
+            score_delta=-1.5,
+            status="active",
+        ),
     ]
 
     async def _execute(stmt, params=None):
@@ -1343,10 +1404,14 @@ def test_calculate_month_employee_performance_applies_inputs_then_adjustments():
         ),
     ]
     attendance_rows = [
-        SimpleNamespace(employee_code="E302", attendance_date="2026-03-01", status="late"),
+        SimpleNamespace(
+            employee_code="E302", attendance_date="2026-03-01", status="late"
+        ),
     ]
     adjustment_rows = [
-        SimpleNamespace(employee_code="E302", year_month="2026-03", score_delta=5.0, status="active"),
+        SimpleNamespace(
+            employee_code="E302", year_month="2026-03", score_delta=5.0, status="active"
+        ),
     ]
 
     async def _execute(stmt, params=None):

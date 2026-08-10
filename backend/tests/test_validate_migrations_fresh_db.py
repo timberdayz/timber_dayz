@@ -52,7 +52,10 @@ def test_choose_temp_postgres_port_resolves_an_ephemeral_port():
 
 
 def test_is_docker_bind_error_detects_port_allocation_failure():
-    assert is_docker_bind_error("Bind for 0.0.0.0:5433 failed: port is already allocated") is True
+    assert (
+        is_docker_bind_error("Bind for 0.0.0.0:5433 failed: port is already allocated")
+        is True
+    )
     assert is_docker_bind_error("some other docker error") is False
 
 

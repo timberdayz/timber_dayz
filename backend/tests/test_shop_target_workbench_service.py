@@ -3,7 +3,10 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from backend.schemas.target import ShopTargetWorkbenchApplyRequest, ShopTargetWorkbenchShopInput
+from backend.schemas.target import (
+    ShopTargetWorkbenchApplyRequest,
+    ShopTargetWorkbenchShopInput,
+)
 from backend.services.shop_target_workbench_service import ShopTargetWorkbenchService
 
 
@@ -43,7 +46,9 @@ def test_shop_workbench_response_includes_standard_name_alias_and_shop_id():
                     )
                 ]
             ),
-            _ScalarsResult([SimpleNamespace(alias_value="standard-shop", is_primary=True)]),
+            _ScalarsResult(
+                [SimpleNamespace(alias_value="standard-shop", is_primary=True)]
+            ),
             _ScalarOneResult("SHP-1"),
         ]
     )
@@ -152,7 +157,9 @@ def test_shop_workbench_prefers_period_scoped_shop_rows_when_legacy_exists():
             _ScalarsResult([account]),
             _ScalarsResult([]),
             _ScalarOneResult("shop-1"),
-            _ScalarsResult([scoped_shop, legacy_shop, first_shop_time, duplicate_shop_time]),
+            _ScalarsResult(
+                [scoped_shop, legacy_shop, first_shop_time, duplicate_shop_time]
+            ),
         ]
     )
 
@@ -189,7 +196,15 @@ def test_apply_shop_workbench_creates_zero_order_targets_for_a_new_month():
         year_month="2026-03",
         company_target_amount=243148.08,
         company_target_quantity=2655,
-        weekday_ratios={"1": 0.2, "2": 0.2, "3": 0.2, "4": 0.2, "5": 0.1, "6": 0.05, "7": 0.05},
+        weekday_ratios={
+            "1": 0.2,
+            "2": 0.2,
+            "3": 0.2,
+            "4": 0.2,
+            "5": 0.1,
+            "6": 0.05,
+            "7": 0.05,
+        },
         shops=[
             ShopTargetWorkbenchShopInput(
                 platform_code="shopee",
@@ -207,7 +222,11 @@ def test_apply_shop_workbench_creates_zero_order_targets_for_a_new_month():
     breakdown_types = [getattr(obj, "breakdown_type", None) for obj in added_objects]
 
     assert result.target_id == 77
-    target = next(obj for obj in [call.args[0] for call in db.add.call_args_list] if hasattr(obj, "target_name"))
+    target = next(
+        obj
+        for obj in [call.args[0] for call in db.add.call_args_list]
+        if hasattr(obj, "target_name")
+    )
     assert round(sum(target.weekday_ratios.values()), 6) == 1
     assert "shop" in breakdown_types
     assert "time" in breakdown_types
@@ -246,7 +265,15 @@ def test_apply_shop_workbench_persists_settlement_profit_targets():
         company_target_amount=1000.0,
         company_target_quantity=100,
         company_target_profit_basis_amount=180.0,
-        weekday_ratios={"1": 0.2, "2": 0.2, "3": 0.2, "4": 0.2, "5": 0.1, "6": 0.05, "7": 0.05},
+        weekday_ratios={
+            "1": 0.2,
+            "2": 0.2,
+            "3": 0.2,
+            "4": 0.2,
+            "5": 0.1,
+            "6": 0.05,
+            "7": 0.05,
+        },
         shops=[
             ShopTargetWorkbenchShopInput(
                 platform_code="shopee",
@@ -263,7 +290,9 @@ def test_apply_shop_workbench_persists_settlement_profit_targets():
 
     added_objects = [call.args[0] for call in db.add.call_args_list]
     target = next(obj for obj in added_objects if hasattr(obj, "target_name"))
-    shop_breakdown = next(obj for obj in added_objects if getattr(obj, "breakdown_type", None) == "shop")
+    shop_breakdown = next(
+        obj for obj in added_objects if getattr(obj, "breakdown_type", None) == "shop"
+    )
     assert target.target_profit_basis_amount == 180.0
     assert shop_breakdown.target_profit_basis_amount == 180.0
 
@@ -305,11 +334,13 @@ def test_apply_shop_workbench_preserves_existing_order_targets():
         ),
     ]
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[
-        _ScalarsResult([target]),
-        _ScalarsResult(existing_breakdowns),
-        None,
-    ])
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarsResult([target]),
+            _ScalarsResult(existing_breakdowns),
+            None,
+        ]
+    )
     db.add = AsyncMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
@@ -322,33 +353,50 @@ def test_apply_shop_workbench_preserves_existing_order_targets():
         company_target_quantity=999,
         company_target_profit_basis_amount=20.0,
         weekday_ratios={"1": 1.0},
-        shops=[ShopTargetWorkbenchShopInput(
-            platform_code="shopee",
-            shop_id="SHP-1",
-            ratio=1.0,
-            target_amount=200.0,
-            target_quantity=999,
-            target_profit_basis_amount=20.0,
-        )],
+        shops=[
+            ShopTargetWorkbenchShopInput(
+                platform_code="shopee",
+                shop_id="SHP-1",
+                ratio=1.0,
+                target_amount=200.0,
+                target_quantity=999,
+                target_profit_basis_amount=20.0,
+            )
+        ],
     )
 
     asyncio.run(service.apply(request, username="admin"))
 
     added = [call.args[0] for call in db.add.call_args_list]
     assert target.target_quantity == 300
-    assert next(item for item in added if item.breakdown_type == "time").target_quantity == 10
-    assert next(item for item in added if item.breakdown_type == "shop").target_quantity == 300
-    assert next(item for item in added if item.breakdown_type == "shop_time").target_quantity == 10
+    assert (
+        next(item for item in added if item.breakdown_type == "time").target_quantity
+        == 10
+    )
+    assert (
+        next(item for item in added if item.breakdown_type == "shop").target_quantity
+        == 300
+    )
+    assert (
+        next(
+            item for item in added if item.breakdown_type == "shop_time"
+        ).target_quantity
+        == 10
+    )
 
 
 def test_find_month_target_uses_latest_updated_record_when_month_has_multiple_versions():
     older = SimpleNamespace(id=1, updated_at=datetime(2026, 3, 1, tzinfo=timezone.utc))
-    latest = SimpleNamespace(id=2, updated_at=datetime(2026, 3, 15, tzinfo=timezone.utc))
+    latest = SimpleNamespace(
+        id=2, updated_at=datetime(2026, 3, 15, tzinfo=timezone.utc)
+    )
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_ScalarsResult([latest, older]))
 
     service = ShopTargetWorkbenchService(db)
-    result = asyncio.run(service._find_month_target(date(2026, 3, 1), date(2026, 3, 31)))
+    result = asyncio.run(
+        service._find_month_target(date(2026, 3, 1), date(2026, 3, 31))
+    )
 
     assert result.id == 2
     query_text = str(db.execute.await_args.args[0])
@@ -392,20 +440,24 @@ def test_shop_workbench_allows_order_target_totals_to_differ_from_company_target
 
 def test_copy_previous_month_does_not_copy_order_targets():
     service = ShopTargetWorkbenchService(AsyncMock())
-    service.get_workbench = AsyncMock(return_value=SimpleNamespace(
-        company_target_amount=100.0,
-        company_target_quantity=1000,
-        company_target_profit_basis_amount=10.0,
-        weekday_ratios={"1": 1.0},
-        shops=[SimpleNamespace(
-            platform_code="shopee",
-            shop_id="SHP-1",
-            ratio=1.0,
-            target_amount=100.0,
-            target_quantity=1000,
-            target_profit_basis_amount=10.0,
-        )],
-    ))
+    service.get_workbench = AsyncMock(
+        return_value=SimpleNamespace(
+            company_target_amount=100.0,
+            company_target_quantity=1000,
+            company_target_profit_basis_amount=10.0,
+            weekday_ratios={"1": 1.0},
+            shops=[
+                SimpleNamespace(
+                    platform_code="shopee",
+                    shop_id="SHP-1",
+                    ratio=1.0,
+                    target_amount=100.0,
+                    target_quantity=1000,
+                    target_profit_basis_amount=10.0,
+                )
+            ],
+        )
+    )
     service.apply = AsyncMock(return_value=SimpleNamespace(target_id=1))
 
     asyncio.run(service.copy_prev_month("2026-04", username="admin"))

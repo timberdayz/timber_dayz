@@ -68,10 +68,14 @@ class PayrollGenerationService:
     @classmethod
     def _salary_effective_cutoff(cls, year_month: str) -> date:
         period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
-        return period_start.replace(day=monthrange(period_start.year, period_start.month)[1])
+        return period_start.replace(
+            day=monthrange(period_start.year, period_start.month)[1]
+        )
 
     @classmethod
-    def _pick_salary_structure_for_month(cls, salary_rows: list[Any], year_month: str) -> Any | None:
+    def _pick_salary_structure_for_month(
+        cls, salary_rows: list[Any], year_month: str
+    ) -> Any | None:
         if not salary_rows:
             return None
         effective_cutoff = cls._salary_effective_cutoff(year_month)
@@ -79,7 +83,8 @@ class PayrollGenerationService:
             row
             for row in salary_rows
             if cls._coerce_date(getattr(row, "effective_date", None)) is not None
-            and cls._coerce_date(getattr(row, "effective_date", None)) <= effective_cutoff
+            and cls._coerce_date(getattr(row, "effective_date", None))
+            <= effective_cutoff
         ]
         if eligible_rows:
             return eligible_rows[0]
@@ -98,9 +103,10 @@ class PayrollGenerationService:
         except Exception:
             await self.db.rollback()
             row = (
-                await self.db.execute(
-                    text(
-                        """
+                (
+                    await self.db.execute(
+                        text(
+                            """
                         select
                           "提成金额" as commission_amount,
                           "销售额" as sales_amount,
@@ -110,10 +116,13 @@ class PayrollGenerationService:
                           and "年月" = :year_month
                         limit 1
                         """
-                    ),
-                    {"employee_code": employee_code, "year_month": year_month},
+                        ),
+                        {"employee_code": employee_code, "year_month": year_month},
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             return SimpleNamespace(**dict(row)) if row else None
 
     async def _load_employee_performance(self, employee_code: str, year_month: str):
@@ -129,9 +138,10 @@ class PayrollGenerationService:
         except Exception:
             await self.db.rollback()
             row = (
-                await self.db.execute(
-                    text(
-                        """
+                (
+                    await self.db.execute(
+                        text(
+                            """
                         select
                           "绩效得分" as performance_score,
                           "实际销售额" as actual_sales,
@@ -141,27 +151,35 @@ class PayrollGenerationService:
                           and "年月" = :year_month
                         limit 1
                         """
-                    ),
-                    {"employee_code": employee_code, "year_month": year_month},
+                        ),
+                        {"employee_code": employee_code, "year_month": year_month},
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             return SimpleNamespace(**dict(row)) if row else None
 
     async def _load_employee_commission_rows(self, year_month: str):
         try:
             return (
-                await self.db.execute(
-                    select(EmployeeCommission).where(
-                        EmployeeCommission.year_month == year_month
+                (
+                    await self.db.execute(
+                        select(EmployeeCommission).where(
+                            EmployeeCommission.year_month == year_month
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         except Exception:
             await self.db.rollback()
             rows = (
-                await self.db.execute(
-                    text(
-                        """
+                (
+                    await self.db.execute(
+                        text(
+                            """
                         select
                           "员工编号" as employee_code,
                           "提成金额" as commission_amount,
@@ -170,27 +188,35 @@ class PayrollGenerationService:
                         from c_class.employee_commissions
                         where "年月" = :year_month
                         """
-                    ),
-                    {"year_month": year_month},
+                        ),
+                        {"year_month": year_month},
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
             return [SimpleNamespace(**dict(row)) for row in rows]
 
     async def _load_employee_performance_rows(self, year_month: str):
         try:
             return (
-                await self.db.execute(
-                    select(EmployeePerformance).where(
-                        EmployeePerformance.year_month == year_month
+                (
+                    await self.db.execute(
+                        select(EmployeePerformance).where(
+                            EmployeePerformance.year_month == year_month
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         except Exception:
             await self.db.rollback()
             rows = (
-                await self.db.execute(
-                    text(
-                        """
+                (
+                    await self.db.execute(
+                        text(
+                            """
                         select
                           "员工编号" as employee_code,
                           "绩效得分" as performance_score,
@@ -199,10 +225,13 @@ class PayrollGenerationService:
                         from c_class.employee_performance
                         where "年月" = :year_month
                         """
-                    ),
-                    {"year_month": year_month},
+                        ),
+                        {"year_month": year_month},
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
             return [SimpleNamespace(**dict(row)) for row in rows]
 
     # Cleanup-phase override: prefer English ORM columns only.
@@ -228,21 +257,29 @@ class PayrollGenerationService:
 
     async def _load_employee_commission_rows(self, year_month: str):
         return (
-            await self.db.execute(
-                select(EmployeeCommission).where(
-                    EmployeeCommission.year_month == year_month
+            (
+                await self.db.execute(
+                    select(EmployeeCommission).where(
+                        EmployeeCommission.year_month == year_month
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     async def _load_employee_performance_rows(self, year_month: str):
         return (
-            await self.db.execute(
-                select(EmployeePerformance).where(
-                    EmployeePerformance.year_month == year_month
+            (
+                await self.db.execute(
+                    select(EmployeePerformance).where(
+                        EmployeePerformance.year_month == year_month
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     async def _is_salary_eligible_employee(self, employee_code: str) -> bool:
         employee = (
@@ -341,9 +378,7 @@ class PayrollGenerationService:
             getattr(salary, "communication_allowance", 0),
             getattr(salary, "other_allowance", 0),
         )
-        commission_amount = cls._to_money(
-            getattr(commission, "commission_amount", 0)
-        )
+        commission_amount = cls._to_money(getattr(commission, "commission_amount", 0))
         performance_package_amount = cls._to_money(
             getattr(salary, "performance_package_amount", 0)
         )
@@ -405,7 +440,9 @@ class PayrollGenerationService:
         return False
 
     @classmethod
-    def _locked_conflict_detail(cls, existing: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _locked_conflict_detail(
+        cls, existing: Any, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
         changed_fields = []
         for field in cls.AUTO_MONEY_FIELDS:
             existing_value = cls._to_money(getattr(existing, field, 0))
@@ -413,16 +450,28 @@ class PayrollGenerationService:
             if existing_value != next_value:
                 changed_fields.append(field)
         return {
-            "employee_code": getattr(existing, "employee_code", payload.get("employee_code", "")),
-            "year_month": getattr(existing, "year_month", payload.get("year_month", "")),
+            "employee_code": getattr(
+                existing, "employee_code", payload.get("employee_code", "")
+            ),
+            "year_month": getattr(
+                existing, "year_month", payload.get("year_month", "")
+            ),
             "payroll_status": getattr(existing, "status", None),
             "changed_fields": changed_fields,
-            "current_net_salary": float(cls._to_money(getattr(existing, "net_salary", 0))),
-            "recalculated_net_salary": float(cls._to_money(payload.get("net_salary", 0))),
+            "current_net_salary": float(
+                cls._to_money(getattr(existing, "net_salary", 0))
+            ),
+            "recalculated_net_salary": float(
+                cls._to_money(payload.get("net_salary", 0))
+            ),
         }
 
-    async def generate_employee_month(self, employee_code: str, year_month: str) -> Dict[str, Any]:
-        await PerformanceReadinessService(self.db).assert_month_performance_ready(year_month)
+    async def generate_employee_month(
+        self, employee_code: str, year_month: str
+    ) -> Dict[str, Any]:
+        await PerformanceReadinessService(self.db).assert_month_performance_ready(
+            year_month
+        )
         if not await self._is_salary_eligible_employee(employee_code):
             return {
                 "employee_code": employee_code,
@@ -433,15 +482,21 @@ class PayrollGenerationService:
                 "payroll_record": None,
             }
         salary_rows = (
-            await self.db.execute(
-                select(SalaryStructure)
-                .where(
-                    SalaryStructure.employee_code == employee_code,
-                    SalaryStructure.status == "active",
+            (
+                await self.db.execute(
+                    select(SalaryStructure)
+                    .where(
+                        SalaryStructure.employee_code == employee_code,
+                        SalaryStructure.status == "active",
+                    )
+                    .order_by(
+                        desc(SalaryStructure.effective_date), desc(SalaryStructure.id)
+                    )
                 )
-                .order_by(desc(SalaryStructure.effective_date), desc(SalaryStructure.id))
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         salary = self._pick_salary_structure_for_month(salary_rows, year_month)
         commission = await self._load_employee_commission(employee_code, year_month)
         performance = await self._load_employee_performance(employee_code, year_month)
@@ -454,7 +509,12 @@ class PayrollGenerationService:
             )
         ).scalar_one_or_none()
 
-        if salary is None and commission is None and performance is None and existing is None:
+        if (
+            salary is None
+            and commission is None
+            and performance is None
+            and existing is None
+        ):
             return {
                 "employee_code": employee_code,
                 "year_month": year_month,
@@ -515,19 +575,29 @@ class PayrollGenerationService:
         }
 
     async def generate_month(self, year_month: str) -> Dict[str, Any]:
-        await PerformanceReadinessService(self.db).assert_month_performance_ready(year_month)
+        await PerformanceReadinessService(self.db).assert_month_performance_ready(
+            year_month
+        )
         salary_rows = (
-            await self.db.execute(
-                select(SalaryStructure).where(SalaryStructure.status == "active")
+            (
+                await self.db.execute(
+                    select(SalaryStructure).where(SalaryStructure.status == "active")
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         commission_rows = await self._load_employee_commission_rows(year_month)
         performance_rows = await self._load_employee_performance_rows(year_month)
         existing_rows = (
-            await self.db.execute(
-                select(PayrollRecord).where(PayrollRecord.year_month == year_month)
+            (
+                await self.db.execute(
+                    select(PayrollRecord).where(PayrollRecord.year_month == year_month)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         salary_rows_by_employee: Dict[str, list[Any]] = {}
         for row in salary_rows:
@@ -546,7 +616,9 @@ class PayrollGenerationService:
             if getattr(row, "employee_code", None)
         }
         payroll_by_employee = {
-            row.employee_code: row for row in existing_rows if getattr(row, "employee_code", None)
+            row.employee_code: row
+            for row in existing_rows
+            if getattr(row, "employee_code", None)
         }
 
         candidate_employee_codes = (

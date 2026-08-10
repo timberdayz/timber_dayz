@@ -76,7 +76,9 @@ class HRIncomeCalculationService:
     @staticmethod
     def _year_month_last_day(year_month: str):
         period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
-        return period_start.replace(day=monthrange(period_start.year, period_start.month)[1])
+        return period_start.replace(
+            day=monthrange(period_start.year, period_start.month)[1]
+        )
 
     @staticmethod
     def _coerce_date(value: Any):
@@ -182,13 +184,17 @@ class HRIncomeCalculationService:
         basis_by_shop: Dict[str, Dict[str, float]] = {}
 
         snapshot_rows = (
-            await self.db.execute(
-                select(ShopProfitBasis).where(
-                    ShopProfitBasis.period_month == year_month,
-                    ShopProfitBasis.basis_version == "A_ONLY_V1",
+            (
+                await self.db.execute(
+                    select(ShopProfitBasis).where(
+                        ShopProfitBasis.period_month == year_month,
+                        ShopProfitBasis.basis_version == "A_ONLY_V1",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for row in snapshot_rows:
             key = self._shop_key(
                 getattr(row, "platform_code", None),
@@ -222,17 +228,23 @@ class HRIncomeCalculationService:
         if not shop_keys:
             return {}
 
-        platform_codes = sorted({platform_code for platform_code, _ in shop_keys.values()})
+        platform_codes = sorted(
+            {platform_code for platform_code, _ in shop_keys.values()}
+        )
         shop_ids = sorted({shop_id for _, shop_id in shop_keys.values()})
         rows = (
-            await self.db.execute(
-                select(PerformanceScore).where(
-                    PerformanceScore.period == year_month,
-                    PerformanceScore.platform_code.in_(platform_codes),
-                    PerformanceScore.shop_id.in_(shop_ids),
+            (
+                await self.db.execute(
+                    select(PerformanceScore).where(
+                        PerformanceScore.period == year_month,
+                        PerformanceScore.platform_code.in_(platform_codes),
+                        PerformanceScore.shop_id.in_(shop_ids),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         performance_by_shop: Dict[str, Dict[str, float]] = {}
         for row in rows:
@@ -273,7 +285,9 @@ class HRIncomeCalculationService:
 
         period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
         if period_start.month == 12:
-            next_month = period_start.replace(year=period_start.year + 1, month=1, day=1)
+            next_month = period_start.replace(
+                year=period_start.year + 1, month=1, day=1
+            )
         else:
             next_month = period_start.replace(month=period_start.month + 1, day=1)
 
@@ -287,17 +301,7 @@ class HRIncomeCalculationService:
                 # transaction semantics.
                 nested_transaction.close()
                 rows = (
-                    await self.db.execute(
-                        select(AttendanceRecord).where(
-                            AttendanceRecord.employee_code.in_(employee_codes),
-                            AttendanceRecord.attendance_date >= period_start,
-                            AttendanceRecord.attendance_date < next_month,
-                        )
-                    )
-                ).scalars().all()
-            else:
-                async with nested_transaction:
-                    rows = (
+                    (
                         await self.db.execute(
                             select(AttendanceRecord).where(
                                 AttendanceRecord.employee_code.in_(employee_codes),
@@ -305,12 +309,31 @@ class HRIncomeCalculationService:
                                 AttendanceRecord.attendance_date < next_month,
                             )
                         )
-                    ).scalars().all()
+                    )
+                    .scalars()
+                    .all()
+                )
+            else:
+                async with nested_transaction:
+                    rows = (
+                        (
+                            await self.db.execute(
+                                select(AttendanceRecord).where(
+                                    AttendanceRecord.employee_code.in_(employee_codes),
+                                    AttendanceRecord.attendance_date >= period_start,
+                                    AttendanceRecord.attendance_date < next_month,
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
         except Exception:
             rows = (
-                await self.db.execute(
-                    text(
-                        """
+                (
+                    await self.db.execute(
+                        text(
+                            """
                         select
                           "员工编号" as employee_code,
                           "状态" as status
@@ -319,14 +342,17 @@ class HRIncomeCalculationService:
                           and "考勤日期" >= :period_start
                           and "考勤日期" < :next_month
                         """
-                    ),
-                    {
-                        "employee_codes": employee_codes,
-                        "period_start": period_start,
-                        "next_month": next_month,
-                    },
+                        ),
+                        {
+                            "employee_codes": employee_codes,
+                            "period_start": period_start,
+                            "next_month": next_month,
+                        },
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         adjustment_by_employee: Dict[str, float] = {}
         for row in rows:
@@ -344,7 +370,9 @@ class HRIncomeCalculationService:
             )
             status = str(raw_status).strip().lower()
             delta = self.ATTENDANCE_PENALTY_BY_STATUS.get(status, 0.0)
-            adjustment_by_employee[employee_code] = adjustment_by_employee.get(employee_code, 0.0) + delta
+            adjustment_by_employee[employee_code] = (
+                adjustment_by_employee.get(employee_code, 0.0) + delta
+            )
         return adjustment_by_employee
 
     async def _load_manual_adjustment_by_employee(
@@ -363,14 +391,18 @@ class HRIncomeCalculationService:
             return {}
 
         rows = (
-            await self.db.execute(
-                select(EmployeePerformanceAdjustment).where(
-                    EmployeePerformanceAdjustment.year_month == year_month,
-                    EmployeePerformanceAdjustment.status == "active",
-                    EmployeePerformanceAdjustment.employee_code.in_(employee_codes),
+            (
+                await self.db.execute(
+                    select(EmployeePerformanceAdjustment).where(
+                        EmployeePerformanceAdjustment.year_month == year_month,
+                        EmployeePerformanceAdjustment.status == "active",
+                        EmployeePerformanceAdjustment.employee_code.in_(employee_codes),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         adjustment_by_employee: Dict[str, float] = {}
         for row in rows:
@@ -378,7 +410,9 @@ class HRIncomeCalculationService:
             if not employee_code:
                 continue
             delta = self._to_float(getattr(row, "score_delta", None), 0.0)
-            adjustment_by_employee[employee_code] = adjustment_by_employee.get(employee_code, 0.0) + delta
+            adjustment_by_employee[employee_code] = (
+                adjustment_by_employee.get(employee_code, 0.0) + delta
+            )
         return adjustment_by_employee
 
     async def _load_employee_performance_input_score_by_employee(
@@ -397,14 +431,18 @@ class HRIncomeCalculationService:
             return {}
 
         rows = (
-            await self.db.execute(
-                select(EmployeePerformanceInput).where(
-                    EmployeePerformanceInput.year_month == year_month,
-                    EmployeePerformanceInput.status == "active",
-                    EmployeePerformanceInput.employee_code.in_(employee_codes),
+            (
+                await self.db.execute(
+                    select(EmployeePerformanceInput).where(
+                        EmployeePerformanceInput.year_month == year_month,
+                        EmployeePerformanceInput.status == "active",
+                        EmployeePerformanceInput.employee_code.in_(employee_codes),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         score_by_employee: Dict[str, float] = {}
         pending_employee_codes: set[str] = set()
@@ -416,7 +454,9 @@ class HRIncomeCalculationService:
             if metric_score is None:
                 pending_employee_codes.add(employee_code)
                 continue
-            score_by_employee[employee_code] = score_by_employee.get(employee_code, 0.0) + metric_score
+            score_by_employee[employee_code] = (
+                score_by_employee.get(employee_code, 0.0) + metric_score
+            )
         return {
             employee_code: min(max(score, 0.0), 100.0)
             for employee_code, score in score_by_employee.items()
@@ -440,20 +480,24 @@ class HRIncomeCalculationService:
 
         effective_cutoff = self._year_month_last_day(year_month)
         rows = (
-            await self.db.execute(
-                select(SalaryStructure)
-                .where(
-                    SalaryStructure.status == "active",
-                    SalaryStructure.employee_code.in_(employee_codes),
-                    SalaryStructure.effective_date <= effective_cutoff,
-                )
-                .order_by(
-                    SalaryStructure.employee_code,
-                    SalaryStructure.effective_date.desc(),
-                    SalaryStructure.id.desc(),
+            (
+                await self.db.execute(
+                    select(SalaryStructure)
+                    .where(
+                        SalaryStructure.status == "active",
+                        SalaryStructure.employee_code.in_(employee_codes),
+                        SalaryStructure.effective_date <= effective_cutoff,
+                    )
+                    .order_by(
+                        SalaryStructure.employee_code,
+                        SalaryStructure.effective_date.desc(),
+                        SalaryStructure.id.desc(),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         ratio_by_employee: Dict[str, float] = {}
         for row in rows:
@@ -468,7 +512,9 @@ class HRIncomeCalculationService:
                 ratio_by_employee[employee_code] = ratio
         return ratio_by_employee
 
-    async def calculate_month(self, year_month: str, commit: bool = True) -> Dict[str, Any]:
+    async def calculate_month(
+        self, year_month: str, commit: bool = True
+    ) -> Dict[str, Any]:
         try:
             datetime.strptime(year_month, "%Y-%m")
         except ValueError as exc:
@@ -479,44 +525,63 @@ class HRIncomeCalculationService:
         )
 
         assignment_rows = (
-            await self.db.execute(
-                select(EmployeeShopAssignment)
-                .join(
-                    ShopAccount,
-                    and_(
-                        func.lower(ShopAccount.platform) == func.lower(EmployeeShopAssignment.platform_code),
-                        ShopAccount.enabled == True,
-                        ShopAccount.business_role == "operating_store",
-                        or_(
-                            ShopAccount.platform_shop_id == EmployeeShopAssignment.shop_id,
-                            ShopAccount.shop_account_id == EmployeeShopAssignment.shop_id,
+            (
+                await self.db.execute(
+                    select(EmployeeShopAssignment)
+                    .join(
+                        ShopAccount,
+                        and_(
+                            func.lower(ShopAccount.platform)
+                            == func.lower(EmployeeShopAssignment.platform_code),
+                            ShopAccount.enabled == True,
+                            ShopAccount.business_role == "operating_store",
+                            or_(
+                                ShopAccount.platform_shop_id
+                                == EmployeeShopAssignment.shop_id,
+                                ShopAccount.shop_account_id
+                                == EmployeeShopAssignment.shop_id,
+                            ),
                         ),
-                    ),
+                    )
+                    .where(EmployeeShopAssignment.status == "active")
+                    .where(EmployeeShopAssignment.year_month == year_month)
                 )
-                .where(EmployeeShopAssignment.status == "active")
-                .where(EmployeeShopAssignment.year_month == year_month)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         input_population_rows = (
-            await self.db.execute(
-                select(EmployeePerformanceInput).where(
-                    EmployeePerformanceInput.year_month == year_month,
-                    EmployeePerformanceInput.status == "active",
+            (
+                await self.db.execute(
+                    select(EmployeePerformanceInput).where(
+                        EmployeePerformanceInput.year_month == year_month,
+                        EmployeePerformanceInput.status == "active",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         salary_population_rows = (
-            await self.db.execute(
-                select(SalaryStructure).where(
-                    SalaryStructure.status == "active",
-                    SalaryStructure.effective_date
-                    <= self._year_month_last_day(year_month),
+            (
+                await self.db.execute(
+                    select(SalaryStructure).where(
+                        SalaryStructure.status == "active",
+                        SalaryStructure.effective_date
+                        <= self._year_month_last_day(year_month),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         population_codes = {
             str(getattr(row, "employee_code", "") or "").strip()
-            for row in [*assignment_rows, *input_population_rows, *salary_population_rows]
+            for row in [
+                *assignment_rows,
+                *input_population_rows,
+                *salary_population_rows,
+            ]
             if str(getattr(row, "employee_code", "") or "").strip()
         }
         if not population_codes:
@@ -552,12 +617,16 @@ class HRIncomeCalculationService:
         ]
 
         cfg_rows = (
-            await self.db.execute(
-                select(ShopCommissionConfig).where(
-                    ShopCommissionConfig.year_month == year_month
+            (
+                await self.db.execute(
+                    select(ShopCommissionConfig).where(
+                        ShopCommissionConfig.year_month == year_month
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         allocatable_by_shop = {
             self._shop_key(row.platform_code, row.shop_id): self._to_float(
                 row.allocatable_profit_rate, 1.0
@@ -572,17 +641,23 @@ class HRIncomeCalculationService:
         performance_by_shop = await self._load_store_performance_by_shop(
             year_month, assignments
         )
-        attendance_adjustment_by_employee = await self._load_attendance_adjustment_by_employee(
-            year_month, employee_rows
+        attendance_adjustment_by_employee = (
+            await self._load_attendance_adjustment_by_employee(
+                year_month, employee_rows
+            )
         )
         manual_adjustment_by_employee = await self._load_manual_adjustment_by_employee(
             year_month, employee_rows
         )
-        input_score_by_employee, pending_input_employee_codes = await self._load_employee_performance_input_score_by_employee(
-            year_month, employee_rows
+        input_score_by_employee, pending_input_employee_codes = (
+            await self._load_employee_performance_input_score_by_employee(
+                year_month, employee_rows
+            )
         )
-        default_commission_ratio_by_employee = await self._load_default_commission_ratio_by_employee(
-            year_month, employee_rows
+        default_commission_ratio_by_employee = (
+            await self._load_default_commission_ratio_by_employee(
+                year_month, employee_rows
+            )
         )
 
         commission_agg: Dict[str, Dict[str, float]] = {}
@@ -601,9 +676,7 @@ class HRIncomeCalculationService:
             achievement_rate = self._normalize_achievement_rate(
                 metric.get("achievement_rate")
             )
-            profit_basis_amount = self._to_float(
-                basis.get("profit_basis_amount"), 0.0
-            )
+            profit_basis_amount = self._to_float(basis.get("profit_basis_amount"), 0.0)
             alloc_rate = self._to_float(allocatable_by_shop.get(shop_key, 1.0), 1.0)
             alloc_profit = max(profit_basis_amount, 0.0) * alloc_rate
 
@@ -695,12 +768,16 @@ class HRIncomeCalculationService:
                 monthly_sales = self._to_float(metric.get("monthly_sales"), 0.0)
                 sales_share = monthly_sales * ratio
                 coefficient = self._to_float(
-                    performance_by_shop.get(shop_key, {}).get("performance_coefficient"),
+                    performance_by_shop.get(shop_key, {}).get(
+                        "performance_coefficient"
+                    ),
                     1.0,
                 )
                 coefficient_num += coefficient * sales_share
                 coefficient_den += sales_share
-            inherited_coefficient = coefficient_num / coefficient_den if coefficient_den > 0 else 1.0
+            inherited_coefficient = (
+                coefficient_num / coefficient_den if coefficient_den > 0 else 1.0
+            )
             commission_amount = raw_commission_amount * inherited_coefficient
             if sales_amount > 0:
                 commission_rate = commission_amount / sales_amount

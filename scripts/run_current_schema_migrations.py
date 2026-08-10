@@ -51,9 +51,13 @@ def _single_revision(connection, schema: str, table: str) -> str | None:
     inspector = inspect(connection)
     if not inspector.has_table(table, schema=schema):
         return None
-    rows = connection.execute(
-        text(f'SELECT version_num FROM "{schema}"."{table}" ORDER BY version_num')
-    ).scalars().all()
+    rows = (
+        connection.execute(
+            text(f'SELECT version_num FROM "{schema}"."{table}" ORDER BY version_num')
+        )
+        .scalars()
+        .all()
+    )
     if len(rows) != 1:
         raise MigrationSafetyError(
             f"{schema}.{table} must contain exactly one revision, found {len(rows)}"
@@ -84,7 +88,9 @@ def schema_fingerprint(connection, inspector=None) -> str:
             ]
             foreign_keys = [
                 {
-                    "constrained_columns": _stable_values(fk.get("constrained_columns")),
+                    "constrained_columns": _stable_values(
+                        fk.get("constrained_columns")
+                    ),
                     "referred_columns": _stable_values(fk.get("referred_columns")),
                     "referred_schema": fk.get("referred_schema") or "public",
                     "referred_table": fk.get("referred_table"),
@@ -107,7 +113,9 @@ def schema_fingerprint(connection, inspector=None) -> str:
                         foreign_keys,
                         key=lambda item: json.dumps(item, sort_keys=True),
                     ),
-                    "indexes": sorted(indexes, key=lambda item: json.dumps(item, sort_keys=True)),
+                    "indexes": sorted(
+                        indexes, key=lambda item: json.dumps(item, sort_keys=True)
+                    ),
                     "primary_key": _stable_values(
                         inspector.get_pk_constraint(table, schema=schema).get(
                             "constrained_columns"
@@ -117,7 +125,9 @@ def schema_fingerprint(connection, inspector=None) -> str:
                     "table": table,
                     "unique_constraints": sorted(
                         _stable_values(constraint.get("column_names"))
-                        for constraint in inspector.get_unique_constraints(table, schema=schema)
+                        for constraint in inspector.get_unique_constraints(
+                            table, schema=schema
+                        )
                     ),
                 }
             )
@@ -195,7 +205,9 @@ def choose_migration_action(
 ) -> str:
     """Return the only permitted write action after fail-closed preflight."""
     if state.current_revision is not None:
-        reachable_revisions = supported_current_revisions or get_supported_current_revisions()
+        reachable_revisions = (
+            supported_current_revisions or get_supported_current_revisions()
+        )
         if state.current_revision not in reachable_revisions:
             raise MigrationSafetyError(
                 f"{state.current_revision!r} is not a supported current revision"
@@ -207,14 +219,15 @@ def choose_migration_action(
 
     approved_source = _approved_legacy_source(state.legacy_revision)
     if approved_source is None:
-        raise MigrationSafetyError(
-            "database revision is not an approved legacy source"
-        )
+        raise MigrationSafetyError("database revision is not an approved legacy source")
     if state.schema_fingerprint != approved_source["schema_fingerprint"]:
         raise MigrationSafetyError(
             "database schema fingerprint is not approved for its legacy revision"
         )
-    if expected_source_revision and expected_source_revision != approved_source["legacy_revision"]:
+    if (
+        expected_source_revision
+        and expected_source_revision != approved_source["legacy_revision"]
+    ):
         raise MigrationSafetyError(
             "configured source revision does not match the approved legacy source"
         )
@@ -226,14 +239,18 @@ def choose_migration_action(
             "configured source schema fingerprint does not match the approved legacy source"
         )
     if approved_source["baseline_revision"] != get_current_schema_baseline_revision():
-        raise MigrationSafetyError("approved legacy source does not match the current baseline")
+        raise MigrationSafetyError(
+            "approved legacy source does not match the current baseline"
+        )
     return "stamp"
 
 
 def _has_column(connection, table: str, column: str, schema: str = "a_class") -> bool:
     if not inspect(connection).has_table(table, schema=schema):
         return False
-    return column in {item["name"] for item in inspect(connection).get_columns(table, schema=schema)}
+    return column in {
+        item["name"] for item in inspect(connection).get_columns(table, schema=schema)
+    }
 
 
 def _operation_audit_category(connection, query: str) -> dict[str, Any]:
@@ -258,7 +275,9 @@ def audit_legacy_operation_data(database_url: str) -> dict[str, Any]:
                 else "st.target_type = 'operation'"
             )
             legacy_count = connection.execute(
-                text(f"SELECT count(*) FROM a_class.sales_targets AS st WHERE {legacy_where}")
+                text(
+                    f"SELECT count(*) FROM a_class.sales_targets AS st WHERE {legacy_where}"
+                )
             ).scalar_one()
             categories = {
                 "missing_metric_code": _operation_audit_category(
@@ -365,7 +384,9 @@ def assert_legacy_adoption_data_is_safe(database_url: str) -> dict[str, Any]:
                         """
                     )
                 ).first()
-                if _has_column(connection, "target_breakdown", "operation_contract_version"):
+                if _has_column(
+                    connection, "target_breakdown", "operation_contract_version"
+                ):
                     version_mismatch = connection.execute(
                         text(
                             """
@@ -410,7 +431,9 @@ def assert_legacy_adoption_data_is_safe(database_url: str) -> dict[str, Any]:
                             """
                         )
                     ).first()
-                elif inspect(connection).has_table("target_breakdown", schema="a_class"):
+                elif inspect(connection).has_table(
+                    "target_breakdown", schema="a_class"
+                ):
                     current_override = connection.execute(
                         text(
                             """
@@ -449,7 +472,9 @@ def assert_legacy_adoption_data_is_safe(database_url: str) -> dict[str, Any]:
         or current_override is not None
         or duplicate_override is not None
     ):
-        raise MigrationSafetyError("invalid current operation contract data requires manual resolution before adoption")
+        raise MigrationSafetyError(
+            "invalid current operation contract data requires manual resolution before adoption"
+        )
     return audit_legacy_operation_data(database_url)
 
 
@@ -477,7 +502,9 @@ def preflight_current_schema_migrations(
             if isinstance(legacy_audit, dict)
             else {}
         )
-        print(f"[INFO] legacy operation data summary: {json.dumps(legacy_summary, sort_keys=True)}")
+        print(
+            f"[INFO] legacy operation data summary: {json.dumps(legacy_summary, sort_keys=True)}"
+        )
     return action
 
 
@@ -549,7 +576,8 @@ def main() -> int:
     try:
         migration_options = {
             "expected_source_revision": (args.source_revision or "").strip() or None,
-            "expected_source_fingerprint": (args.source_fingerprint or "").strip() or None,
+            "expected_source_fingerprint": (args.source_fingerprint or "").strip()
+            or None,
         }
         action = (
             preflight_current_schema_migrations(database_url, **migration_options)
@@ -557,7 +585,10 @@ def main() -> int:
             else run_current_schema_migrations(database_url, **migration_options)
         )
     except MigrationSafetyError as exc:
-        print(f"[FAIL] Current-schema migration preflight rejected write: {exc}", file=sys.stderr)
+        print(
+            f"[FAIL] Current-schema migration preflight rejected write: {exc}",
+            file=sys.stderr,
+        )
         return 2
     except RuntimeError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)

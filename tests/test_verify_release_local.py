@@ -22,7 +22,9 @@ def test_main_returns_zero_when_runner_succeeds():
         calls.append((skip_build, table))
         return True
 
-    code = main(["--skip-build", "--table", "fact_tiktok_orders_monthly"], runner=fake_runner)
+    code = main(
+        ["--skip-build", "--table", "fact_tiktok_orders_monthly"], runner=fake_runner
+    )
 
     assert code == 0
     assert calls == [(True, "fact_tiktok_orders_monthly")]
@@ -50,7 +52,9 @@ def test_release_verification_does_not_check_the_default_local_database(monkeypa
 
     run_release_verification(skip_build=True, table="fact_shopee_orders_monthly")
 
-    assert all("scripts/verify_schema_consistency.py" not in command for command in commands)
+    assert all(
+        "scripts/verify_schema_consistency.py" not in command for command in commands
+    )
 
 
 def test_release_verification_validates_compose_without_rendering_secrets(monkeypatch):
@@ -63,5 +67,7 @@ def test_release_verification_validates_compose_without_rendering_secrets(monkey
 
     run_release_verification(skip_build=True, table="fact_shopee_orders_monthly")
 
-    compose_config_command = next(command for command in commands if command[-1] == "--quiet")
+    compose_config_command = next(
+        command for command in commands if command[-1] == "--quiet"
+    )
     assert compose_config_command[-2] == "config"

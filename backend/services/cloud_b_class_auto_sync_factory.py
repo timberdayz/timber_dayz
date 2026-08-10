@@ -64,7 +64,9 @@ def get_current_checkpoint_scope_from_env(*, dry_run: bool = False) -> str:
     return _build_checkpoint_scope_key(os.getenv("CLOUD_DATABASE_URL"), dry_run=dry_run)
 
 
-def _tcp_probe(host: str, port: int, timeout_seconds: float = 1.0) -> tuple[bool, str | None]:
+def _tcp_probe(
+    host: str, port: int, timeout_seconds: float = 1.0
+) -> tuple[bool, str | None]:
     try:
         with socket.create_connection((host, port), timeout=timeout_seconds):
             return True, None
@@ -103,7 +105,11 @@ def _check_alembic_revision(
     if current_revisions == expected_heads:
         return {
             "ok": True,
-            "detail": ",".join(sorted(current_revisions)) if current_revisions else "no revisions",
+            "detail": (
+                ",".join(sorted(current_revisions))
+                if current_revisions
+                else "no revisions"
+            ),
         }
 
     detail = (
@@ -124,7 +130,9 @@ def _check_cloud_receiver_tables(cloud_inspector) -> dict[str, str | bool | None
     missing = []
     for schema, tables in required_tables.items():
         existing_tables = set(cloud_inspector.get_table_names(schema=schema))
-        missing.extend(f"{schema}.{table}" for table in sorted(tables - existing_tables))
+        missing.extend(
+            f"{schema}.{table}" for table in sorted(tables - existing_tables)
+        )
     return {
         "ok": not missing,
         "detail": None if not missing else f"missing {', '.join(missing)}",
@@ -154,7 +162,9 @@ def run_cloud_sync_startup_checks_from_env() -> dict:
         }
         checks["cloud_sync_state_tables"] = {
             "ok": not missing_tables,
-            "detail": None if not missing_tables else f"missing: {', '.join(missing_tables)}",
+            "detail": (
+                None if not missing_tables else f"missing: {', '.join(missing_tables)}"
+            ),
         }
         if missing_tables:
             status = "degraded"
@@ -249,7 +259,12 @@ def run_cloud_sync_startup_checks_from_env() -> dict:
         }
         status = "degraded" if status == "ok" else status
 
-    tunnel_enabled = str(os.getenv("CLOUD_SYNC_TUNNEL_ENABLED", "")).lower() in {"1", "true", "yes", "on"}
+    tunnel_enabled = str(os.getenv("CLOUD_SYNC_TUNNEL_ENABLED", "")).lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     tunnel_host = os.getenv("CLOUD_SYNC_TUNNEL_HOST")
     tunnel_port = os.getenv("CLOUD_SYNC_TUNNEL_PORT")
     if tunnel_enabled:
@@ -285,7 +300,11 @@ def _build_cloud_sync_service(
     checkpoint_scope: str,
 ) -> CloudBClassSyncService:
     checkpoint_service = CloudBClassSyncCheckpointService(session_factory())
-    mirror_manager = NoOpCloudBClassMirrorManager() if dry_run else CloudBClassMirrorManager(cloud_engine)
+    mirror_manager = (
+        NoOpCloudBClassMirrorManager()
+        if dry_run
+        else CloudBClassMirrorManager(cloud_engine)
+    )
     source_reader = SQLAlchemyBClassSourceReader(local_engine)
     cloud_writer = SQLAlchemyCloudWriter(cloud_engine, dry_run=dry_run)
 
@@ -312,7 +331,9 @@ def build_cloud_sync_service_from_env(dry_run: bool = False) -> CloudBClassSyncS
         raise RuntimeError("CLOUD_DATABASE_URL is required unless dry_run is enabled")
 
     local_engine = create_engine(DATABASE_URL)
-    cloud_engine = create_engine(cloud_database_url) if cloud_database_url else local_engine
+    cloud_engine = (
+        create_engine(cloud_database_url) if cloud_database_url else local_engine
+    )
     checkpoint_scope = _build_checkpoint_scope_key(cloud_database_url, dry_run)
 
     service = _build_cloud_sync_service(
@@ -439,7 +460,9 @@ def build_cloud_sync_worker_factory_from_env(dry_run: bool = False):
         raise RuntimeError("CLOUD_DATABASE_URL is required unless dry_run is enabled")
 
     local_engine = create_engine(DATABASE_URL)
-    cloud_engine = create_engine(cloud_database_url) if cloud_database_url else local_engine
+    cloud_engine = (
+        create_engine(cloud_database_url) if cloud_database_url else local_engine
+    )
     batch_size = int(os.getenv("CLOUD_SYNC_BATCH_SIZE", "1000"))
 
     return CloudSyncWorkerFactory(
@@ -453,10 +476,17 @@ def build_cloud_sync_worker_factory_from_env(dry_run: bool = False):
 
 def build_cloud_sync_runtime_from_env(dry_run: bool = False):
     enabled_flag = os.getenv("CLOUD_SYNC_WORKER_ENABLED")
-    enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in {"true", "1", "yes", "on"}
+    enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in {
+        "true",
+        "1",
+        "yes",
+        "on",
+    }
     deployment_role = os.getenv("DEPLOYMENT_ROLE", "")
 
-    if not should_enable_cloud_sync_worker(enabled_flag, enable_collection, deployment_role):
+    if not should_enable_cloud_sync_worker(
+        enabled_flag, enable_collection, deployment_role
+    ):
         return None
 
     worker_factory = build_cloud_sync_worker_factory_from_env(dry_run=dry_run)

@@ -19,7 +19,10 @@ from starlette.requests import Request
 from backend.domains.business.routers.hr_employee import get_my_income
 from backend.schemas.hr import MyIncomeBreakdown, PayrollIncomeBreakdown
 import backend.domains.business.routers.performance_management as performance_management_module
-from backend.domains.business.routers.performance_management import calculate_performance_scores, list_performance_scores
+from backend.domains.business.routers.performance_management import (
+    calculate_performance_scores,
+    list_performance_scores,
+)
 from modules.core.db import PerformanceScore
 
 
@@ -397,7 +400,9 @@ def test_calculate_rolls_back_when_payroll_generation_fails(monkeypatch):
     body = _json_body(resp)
     assert body["success"] is False
     assert body["message"] == "绩效计算失败"
-    assert "employee_commissions schema mismatch" in (((body.get("error") or {}).get("detail")) or "")
+    assert "employee_commissions schema mismatch" in (
+        ((body.get("error") or {}).get("detail")) or ""
+    )
     assert db.rollback.await_count >= 1
 
 
@@ -911,13 +916,18 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
             "_FakeIncomeService",
             (),
             {
-                "__init__": lambda self, db, metabase_service=None: setattr(self, "db", db),
-                "calculate_month": lambda self, year_month, **kwargs: asyncio.sleep(0, result={
-                    "year_month": year_month,
-                    "employee_count": 0,
-                    "commission_upserts": 0,
-                    "performance_upserts": 0,
-                }),
+                "__init__": lambda self, db, metabase_service=None: setattr(
+                    self, "db", db
+                ),
+                "calculate_month": lambda self, year_month, **kwargs: asyncio.sleep(
+                    0,
+                    result={
+                        "year_month": year_month,
+                        "employee_count": 0,
+                        "commission_upserts": 0,
+                        "performance_upserts": 0,
+                    },
+                ),
             },
         ),
         raising=False,
@@ -930,12 +940,15 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
             (),
             {
                 "__init__": lambda self, db: setattr(self, "db", db),
-                "generate_month": lambda self, year_month: asyncio.sleep(0, result={
-                    "year_month": year_month,
-                    "payroll_upserts": 0,
-                    "locked_conflicts": 0,
-                    "locked_conflict_details": [],
-                }),
+                "generate_month": lambda self, year_month: asyncio.sleep(
+                    0,
+                    result={
+                        "year_month": year_month,
+                        "payroll_upserts": 0,
+                        "locked_conflicts": 0,
+                        "locked_conflict_details": [],
+                    },
+                ),
             },
         ),
         raising=False,
@@ -1006,7 +1019,12 @@ def test_list_scores_shop_hides_pending_dimensions_from_partial_results():
         rank=1,
         performance_coefficient=1.0,
         score_details={
-            "sales": {"status": "calculated", "target": 1000.0, "achieved": 800.0, "rate": 80.0},
+            "sales": {
+                "status": "calculated",
+                "target": 1000.0,
+                "achieved": 800.0,
+                "rate": 80.0,
+            },
             "profit": {"status": "pending_design", "achieved": 200.0},
             "key_product": {"status": "pending_design"},
             "operation": {"status": "pending_design"},
@@ -1060,7 +1078,9 @@ def test_list_scores_shop_hides_pending_dimensions_from_partial_results():
     assert row["performance_coefficient"] is None
 
 
-def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_zero(monkeypatch):
+def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_zero(
+    monkeypatch,
+):
     class _ScalarOneResult:
         def __init__(self, value):
             self._value = value
@@ -1156,7 +1176,9 @@ def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_ze
                 "locked_conflicts": 0,
             }
 
-    monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
+    monkeypatch.setattr(
+        performance_management_module, "load_shop_monthly_metrics", _fake_metrics
+    )
     monkeypatch.setattr(
         performance_management_module,
         "_load_effective_target_for_month",
@@ -1169,11 +1191,36 @@ def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_ze
         AsyncMock(return_value={"shopee|shop-1"}),
         raising=False,
     )
-    monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
-    monkeypatch.setattr(performance_management_module, "_load_shop_monthly_operating_days", AsyncMock(return_value={}), raising=False)
-    monkeypatch.setattr(performance_management_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={}), raising=False)
-    monkeypatch.setattr(performance_management_module, "_sync_performance_alerts", AsyncMock(return_value=None), raising=False)
-    monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
+    monkeypatch.setattr(
+        performance_management_module,
+        "HRIncomeCalculationService",
+        _FakeIncomeService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_shop_monthly_operating_days",
+        AsyncMock(return_value={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_prior_red_streak_by_shop",
+        AsyncMock(return_value={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "PayrollGenerationService",
+        _FakePayrollService,
+        raising=False,
+    )
     monkeypatch.setattr(
         performance_management_module,
         "sync_performance_confirmation_task",
@@ -1205,7 +1252,9 @@ def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_ze
     assert created.score_details["profit"]["rate"] == 40.0
 
 
-def test_calculate_profit_score_allocates_parent_profit_target_when_breakdown_profit_is_zero(monkeypatch):
+def test_calculate_profit_score_allocates_parent_profit_target_when_breakdown_profit_is_zero(
+    monkeypatch,
+):
     class _ScalarOneResult:
         def __init__(self, value):
             self._value = value
@@ -1392,6 +1441,7 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
 
         def all(self):
             return self._rows
+
         def scalar_one_or_none(self):
             return self._rows[0] if self._rows else None
 
@@ -1491,18 +1541,45 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
                 "locked_conflicts": 0,
             }
 
-    monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
+    monkeypatch.setattr(
+        performance_management_module, "load_shop_monthly_metrics", _fake_metrics
+    )
     monkeypatch.setattr(
         performance_management_module,
         "_load_effective_target_for_month",
         AsyncMock(side_effect=[SimpleNamespace(id=4), operation_target]),
         raising=False,
     )
-    monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
-    monkeypatch.setattr(performance_management_module, "_load_shop_monthly_operating_days", AsyncMock(return_value={}), raising=False)
-    monkeypatch.setattr(performance_management_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={}), raising=False)
-    monkeypatch.setattr(performance_management_module, "_sync_performance_alerts", AsyncMock(return_value=None), raising=False)
-    monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
+    monkeypatch.setattr(
+        performance_management_module,
+        "HRIncomeCalculationService",
+        _FakeIncomeService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_shop_monthly_operating_days",
+        AsyncMock(return_value={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_prior_red_streak_by_shop",
+        AsyncMock(return_value={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "PayrollGenerationService",
+        _FakePayrollService,
+        raising=False,
+    )
 
     resp = asyncio.run(
         performance_management_module.calculate_performance_scores(
@@ -1629,7 +1706,9 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
                 "locked_conflicts": 0,
             }
 
-    monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
+    monkeypatch.setattr(
+        performance_management_module, "load_shop_monthly_metrics", _fake_metrics
+    )
     monkeypatch.setattr(
         performance_management_module,
         "_load_effective_target_for_month",
@@ -1642,12 +1721,41 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
         AsyncMock(return_value={"shopee|shop-1"}),
         raising=False,
     )
-    monkeypatch.setattr(performance_management_module, "_load_shop_monthly_product_metrics", _fake_product_metrics)
-    monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
-    monkeypatch.setattr(performance_management_module, "_load_shop_monthly_operating_days", AsyncMock(return_value={}), raising=False)
-    monkeypatch.setattr(performance_management_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={}), raising=False)
-    monkeypatch.setattr(performance_management_module, "_sync_performance_alerts", AsyncMock(return_value=None), raising=False)
-    monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_shop_monthly_product_metrics",
+        _fake_product_metrics,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "HRIncomeCalculationService",
+        _FakeIncomeService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_shop_monthly_operating_days",
+        AsyncMock(return_value={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_prior_red_streak_by_shop",
+        AsyncMock(return_value={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "PayrollGenerationService",
+        _FakePayrollService,
+        raising=False,
+    )
     monkeypatch.setattr(
         performance_management_module,
         "sync_performance_confirmation_task",
@@ -1689,7 +1797,9 @@ def test_my_income_unlinked_returns_linked_false_and_audit_called(monkeypatch):
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr(
+        "backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log
+    )
 
     request = Request(
         {
@@ -1728,7 +1838,9 @@ def test_my_income_non_employee_identity_returns_linked_false(monkeypatch):
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr(
+        "backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log
+    )
 
     request = Request(
         {
@@ -1749,7 +1861,9 @@ def test_my_income_non_employee_identity_returns_linked_false(monkeypatch):
     assert called["count"] == 1
 
 
-def _deprecated_my_income_linked_fallback_to_cn_columns_when_orm_columns_missing(monkeypatch):
+def _deprecated_my_income_linked_fallback_to_cn_columns_when_orm_columns_missing(
+    monkeypatch,
+):
     class _ResultOne:
         def __init__(self, value):
             self._value = value
@@ -1805,7 +1919,9 @@ def _deprecated_my_income_linked_fallback_to_cn_columns_when_orm_columns_missing
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr(
+        "backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log
+    )
 
     request = Request(
         {
@@ -1882,7 +1998,9 @@ def test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback(monkey
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr(
+        "backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log
+    )
 
     request = Request(
         {
@@ -1921,16 +2039,16 @@ def test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback(monkey
             "net_salary": 1888.0,
             "social_insurance_company": 120.0,
             "housing_fund_company": 80.0,
-                "total_cost": 2100.0,
-                "status": "draft",
-                "pay_date": None,
-                "remark": None,
-                "data_source": "payroll_record",
-                "is_locked": False,
-                "is_stale_against_latest_calc": False,
-                "latest_calculated_at": None,
-            }
+            "total_cost": 2100.0,
+            "status": "draft",
+            "pay_date": None,
+            "remark": None,
+            "data_source": "payroll_record",
+            "is_locked": False,
+            "is_stale_against_latest_calc": False,
+            "latest_calculated_at": None,
         }
+    }
     assert called["count"] == 1
 
 
@@ -1964,7 +2082,9 @@ def test_my_income_linked_without_payroll_returns_empty_income_state(monkeypatch
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr(
+        "backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log
+    )
 
     request = Request(
         {
@@ -2006,7 +2126,9 @@ def test_my_income_prefers_payroll_snapshot_for_approved_month(monkeypatch):
             return self._rows
 
     db = AsyncMock()
-    employee = SimpleNamespace(employee_code="EMP011", employee_identity_type="employee")
+    employee = SimpleNamespace(
+        employee_code="EMP011", employee_identity_type="employee"
+    )
     settlement = SimpleNamespace(id=21, status="approved", period_month="2025-01")
     payroll_snapshot = SimpleNamespace(
         employee_code="EMP011",
@@ -2051,7 +2173,9 @@ def test_my_income_prefers_payroll_snapshot_for_approved_month(monkeypatch):
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr(
+        "backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log
+    )
 
     request = Request(
         {

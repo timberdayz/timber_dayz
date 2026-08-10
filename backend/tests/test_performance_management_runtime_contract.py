@@ -88,6 +88,7 @@ def _app_with_overrides(db, user=None):
     app.dependency_overrides[performance_module.get_async_db] = _override_db
 
     if user is not None:
+
         async def _override_user():
             return user
 
@@ -145,7 +146,9 @@ async def test_performance_read_endpoints_require_login_and_read_permission():
             params={"period": "2025-01"},
         )
         assert response.status_code == 200
-        response = await client.get("/api/performance/scores", params={"period": "2025-01"})
+        response = await client.get(
+            "/api/performance/scores", params={"period": "2025-01"}
+        )
         assert response.status_code == 200
 
 
@@ -363,8 +366,12 @@ def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
         "_load_operation_target_breakdowns_by_shop",
         AsyncMock(return_value={}),
     )
-    monkeypatch.setattr(performance_module, "load_shop_monthly_target_achievement", _fake_source_rows)
-    monkeypatch.setattr(performance_module, "load_shop_monthly_metrics", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        performance_module, "load_shop_monthly_target_achievement", _fake_source_rows
+    )
+    monkeypatch.setattr(
+        performance_module, "load_shop_monthly_metrics", AsyncMock(return_value={})
+    )
     monkeypatch.setattr(
         performance_module,
         "_load_profit_basis_for_performance",
@@ -379,23 +386,43 @@ def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
             }
         ),
     )
-    monkeypatch.setattr(performance_module, "_load_valid_performance_shop_keys", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        performance_module,
+        "_load_valid_performance_shop_keys",
+        AsyncMock(return_value=None),
+    )
     monkeypatch.setattr(
         performance_module,
         "_load_shop_monthly_operating_days",
         AsyncMock(return_value={"shopee|shop-1": 31}),
     )
-    monkeypatch.setattr(performance_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={}))
-    monkeypatch.setattr(performance_module, "_sync_performance_alerts", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        performance_module, "_load_prior_red_streak_by_shop", AsyncMock(return_value={})
+    )
+    monkeypatch.setattr(
+        performance_module, "_sync_performance_alerts", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(
         performance_module,
         "_verify_persisted_shop_performance_keys",
         AsyncMock(return_value=None),
     )
-    monkeypatch.setattr(performance_module, "HRIncomeCalculationService", _FakeIncomeService)
-    monkeypatch.setattr(performance_module, "PayrollGenerationService", _FakePayrollService)
-    monkeypatch.setattr(performance_module, "sync_performance_confirmation_task", AsyncMock(return_value=None))
-    monkeypatch.setattr(performance_module, "invalidate_performance_related_caches", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        performance_module, "HRIncomeCalculationService", _FakeIncomeService
+    )
+    monkeypatch.setattr(
+        performance_module, "PayrollGenerationService", _FakePayrollService
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "sync_performance_confirmation_task",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "invalidate_performance_related_caches",
+        AsyncMock(return_value=None),
+    )
 
 
 def _config():
@@ -464,7 +491,10 @@ def test_recalculation_uses_shop_operation_breakdown(monkeypatch):
     assert _json_body(resp)["success"] is True
     created = next(item for item in db.added if isinstance(item, PerformanceScore))
     assert created.operation_score == 7.25
-    assert created.score_details["operation"]["source"] == "target_management_shop_breakdown"
+    assert (
+        created.score_details["operation"]["source"]
+        == "target_management_shop_breakdown"
+    )
 
 
 def test_recalculation_ignores_legacy_operation_target_and_skips_payroll(monkeypatch):
@@ -494,7 +524,9 @@ def test_recalculation_ignores_legacy_operation_target_and_skips_payroll(monkeyp
             pass
 
         async def generate_month(self, *_args, **_kwargs):
-            raise AssertionError("pending operation performance must not create payroll")
+            raise AssertionError(
+                "pending operation performance must not create payroll"
+            )
 
     monkeypatch.setattr(
         performance_module,
@@ -506,8 +538,12 @@ def test_recalculation_ignores_legacy_operation_target_and_skips_payroll(monkeyp
         "_load_effective_target_for_month",
         _effective_target,
     )
-    monkeypatch.setattr(performance_module, "HRIncomeCalculationService", _UnexpectedIncome)
-    monkeypatch.setattr(performance_module, "PayrollGenerationService", _UnexpectedPayroll)
+    monkeypatch.setattr(
+        performance_module, "HRIncomeCalculationService", _UnexpectedIncome
+    )
+    monkeypatch.setattr(
+        performance_module, "PayrollGenerationService", _UnexpectedPayroll
+    )
     db = _CalcDb(_config())
 
     response = asyncio.run(
@@ -686,8 +722,12 @@ def test_partial_recalculation_does_not_write_income_or_payroll(monkeypatch):
             downstream_calls.append("payroll")
             return {}
 
-    monkeypatch.setattr(performance_module, "load_shop_monthly_target_achievement", _partial_source_rows)
-    monkeypatch.setattr(performance_module, "HRIncomeCalculationService", _IncomeService)
+    monkeypatch.setattr(
+        performance_module, "load_shop_monthly_target_achievement", _partial_source_rows
+    )
+    monkeypatch.setattr(
+        performance_module, "HRIncomeCalculationService", _IncomeService
+    )
     monkeypatch.setattr(performance_module, "PayrollGenerationService", _PayrollService)
     db = _CalcDb(_config())
 
@@ -763,7 +803,11 @@ def test_monthly_score_uses_shop_target_and_locked_profit_basis(monkeypatch):
     monkeypatch.setattr(
         performance_module,
         "load_shop_monthly_metrics",
-        AsyncMock(return_value={"shopee|shop-1": {"monthly_sales": 1000.0, "monthly_profit": 500.0}}),
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {"monthly_sales": 1000.0, "monthly_profit": 500.0}
+            }
+        ),
     )
     monkeypatch.setattr(
         performance_module,

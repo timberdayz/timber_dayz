@@ -79,7 +79,9 @@ def test_performance_writes_reject_confirmed_payroll_month(
 
 
 def test_performance_calculation_rejects_confirmed_payroll_month(monkeypatch):
-    module = importlib.import_module("backend.domains.business.routers.performance_management")
+    module = importlib.import_module(
+        "backend.domains.business.routers.performance_management"
+    )
 
     class _LockedMonthService:
         def __init__(self, _db):
@@ -96,7 +98,9 @@ def test_performance_calculation_rejects_confirmed_payroll_month(monkeypatch):
             }
 
         async def assert_month_mutable(self, **_kwargs):
-            raise PayrollPeriodLockedError("2025-07 工资单已确认，请在下一工资月份补录。")
+            raise PayrollPeriodLockedError(
+                "2025-07 工资单已确认，请在下一工资月份补录。"
+            )
 
     monkeypatch.setattr(module, "PayrollPeriodLockService", _LockedMonthService)
 

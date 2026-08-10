@@ -17,7 +17,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run local pre-release verification")
-    parser.add_argument("--skip-build", action="store_true", help="Skip production image build step")
+    parser.add_argument(
+        "--skip-build", action="store_true", help="Skip production image build step"
+    )
     parser.add_argument(
         "--table",
         default="fact_shopee_orders_monthly",
@@ -29,7 +31,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _run_command(command: list[str], *, env: dict[str, str] | None = None) -> None:
     completed = subprocess.run(command, cwd=PROJECT_ROOT, env=env, check=False)
     if completed.returncode != 0:
-        raise RuntimeError(f"Command failed ({completed.returncode}): {' '.join(command)}")
+        raise RuntimeError(
+            f"Command failed ({completed.returncode}): {' '.join(command)}"
+        )
 
 
 def _build_verify_database_url_from_env(env_file: Path) -> str | None:
@@ -56,7 +60,9 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
 
     _run_command([sys.executable, "scripts/verify_release_tag_generation.py"])
     _run_command([sys.executable, "scripts/verify_remote_deploy_contracts.py"])
-    _run_command([sys.executable, "scripts/verify_system_role_integrity.py", "--repair"])
+    _run_command(
+        [sys.executable, "scripts/verify_system_role_integrity.py", "--repair"]
+    )
     _run_command([sys.executable, "scripts/validate_production_env.py"])
     _run_command([sys.executable, "scripts/pre_deployment_check.py"])
     _run_command([sys.executable, "scripts/validate_migrations_fresh_db.py"])

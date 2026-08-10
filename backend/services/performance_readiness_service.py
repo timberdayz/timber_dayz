@@ -26,7 +26,9 @@ class PerformanceReadinessService:
         self.db = db
 
     @staticmethod
-    def assert_employee_rows_ready(employee_codes: set[str], rows_by_employee: dict[str, Any]) -> None:
+    def assert_employee_rows_ready(
+        employee_codes: set[str], rows_by_employee: dict[str, Any]
+    ) -> None:
         pending = []
         for employee_code in sorted(employee_codes):
             row = rows_by_employee.get(employee_code)
@@ -42,7 +44,9 @@ class PerformanceReadinessService:
             if status != "complete" or score is None:
                 pending.append(f"{employee_code}:{status or '待计算'}")
         if pending:
-            raise PerformanceReadinessError("绩效尚未完成，无法结算：" + "；".join(pending))
+            raise PerformanceReadinessError(
+                "绩效尚未完成，无法结算：" + "；".join(pending)
+            )
 
     @staticmethod
     def _is_formal_shop_score(score: Any) -> bool:
@@ -68,21 +72,53 @@ class PerformanceReadinessService:
         period_end = period_start.replace(
             day=monthrange(period_start.year, period_start.month)[1]
         )
-        assignments = (await self.db.execute(select(EmployeeShopAssignment).where(
-            EmployeeShopAssignment.year_month == year_month,
-            EmployeeShopAssignment.status == "active",
-        ))).scalars().all()
-        inputs = (await self.db.execute(select(EmployeePerformanceInput).where(
-            EmployeePerformanceInput.year_month == year_month,
-            EmployeePerformanceInput.status == "active",
-        ))).scalars().all()
-        salaries = (await self.db.execute(select(SalaryStructure).where(
-            SalaryStructure.status == "active",
-            SalaryStructure.effective_date <= period_end,
-        ))).scalars().all()
-        payrolls = (await self.db.execute(select(PayrollRecord).where(
-            PayrollRecord.year_month == year_month,
-        ))).scalars().all()
+        assignments = (
+            (
+                await self.db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.year_month == year_month,
+                        EmployeeShopAssignment.status == "active",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        inputs = (
+            (
+                await self.db.execute(
+                    select(EmployeePerformanceInput).where(
+                        EmployeePerformanceInput.year_month == year_month,
+                        EmployeePerformanceInput.status == "active",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        salaries = (
+            (
+                await self.db.execute(
+                    select(SalaryStructure).where(
+                        SalaryStructure.status == "active",
+                        SalaryStructure.effective_date <= period_end,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        payrolls = (
+            (
+                await self.db.execute(
+                    select(PayrollRecord).where(
+                        PayrollRecord.year_month == year_month,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
         employee_codes = {
             str(getattr(row, "employee_code", "") or "").strip()
@@ -91,10 +127,12 @@ class PerformanceReadinessService:
         }
         if not employee_codes:
             return
-        performance_result = await self.db.execute(select(EmployeePerformance).where(
-            EmployeePerformance.year_month == year_month,
-            EmployeePerformance.employee_code.in_(employee_codes),
-        ))
+        performance_result = await self.db.execute(
+            select(EmployeePerformance).where(
+                EmployeePerformance.year_month == year_month,
+                EmployeePerformance.employee_code.in_(employee_codes),
+            )
+        )
         performance_rows = performance_result.scalars().all()
         if not performance_rows:
             scalar_one_or_none = getattr(performance_result, "scalar_one_or_none", None)
@@ -110,15 +148,27 @@ class PerformanceReadinessService:
         shop_dependent_codes = self.shop_dependent_employee_codes(rows_by_employee)
 
         shop_keys = {
-            (str(getattr(row, "platform_code", "") or "").lower(), str(getattr(row, "shop_id", "") or ""))
+            (
+                str(getattr(row, "platform_code", "") or "").lower(),
+                str(getattr(row, "shop_id", "") or ""),
+            )
             for row in assignments
-            if str(getattr(row, "employee_code", "") or "").strip() in shop_dependent_codes
+            if str(getattr(row, "employee_code", "") or "").strip()
+            in shop_dependent_codes
         }
         if not shop_keys:
             return
-        score_rows = (await self.db.execute(select(PerformanceScore).where(
-            PerformanceScore.period == year_month,
-        ))).scalars().all()
+        score_rows = (
+            (
+                await self.db.execute(
+                    select(PerformanceScore).where(
+                        PerformanceScore.period == year_month,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
         scores_by_shop = {
             (str(row.platform_code or "").lower(), str(row.shop_id or "")): row
             for row in score_rows
@@ -126,7 +176,9 @@ class PerformanceReadinessService:
         pending_shops = [
             f"{platform_code}|{shop_id}"
             for platform_code, shop_id in sorted(shop_keys)
-            if not self._is_formal_shop_score(scores_by_shop.get((platform_code, shop_id)))
+            if not self._is_formal_shop_score(
+                scores_by_shop.get((platform_code, shop_id))
+            )
         ]
         if pending_shops:
             raise PerformanceReadinessError(

@@ -9,7 +9,12 @@ from backend.services.operation_performance_workbench_service import (
     OperationMetricCalculator,
     OperationPerformanceWorkbenchService,
 )
-from modules.core.db import EmployeePerformance, EmployeePerformanceInput, OperationMetricCatalog, SalesTarget
+from modules.core.db import (
+    EmployeePerformance,
+    EmployeePerformanceInput,
+    OperationMetricCatalog,
+    SalesTarget,
+)
 
 
 def test_target_router_exposes_operation_workbench_endpoints():
@@ -34,14 +39,26 @@ def test_runtime_operation_paths_are_isolated_from_legacy_targets():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
-    workbench_source = (root / "backend/services/operation_performance_workbench_service.py").read_text(encoding="utf-8")
-    performance_source = (root / "backend/domains/business/routers/performance_management.py").read_text(encoding="utf-8")
-    target_source = (root / "backend/domains/business/routers/target_management.py").read_text(encoding="utf-8")
+    workbench_source = (
+        root / "backend/services/operation_performance_workbench_service.py"
+    ).read_text(encoding="utf-8")
+    performance_source = (
+        root / "backend/domains/business/routers/performance_management.py"
+    ).read_text(encoding="utf-8")
+    target_source = (
+        root / "backend/domains/business/routers/target_management.py"
+    ).read_text(encoding="utf-8")
 
+    normalized_performance_source = " ".join(performance_source.split())
     assert "SalesTarget.metric_catalog_version.is_not(None)" in workbench_source
-    assert "operation_contract_version=target.metric_catalog_version" in workbench_source
+    assert (
+        "operation_contract_version=target.metric_catalog_version" in workbench_source
+    )
     assert "SalesTarget.metric_catalog_version.is_not(None)" in performance_source
-    assert "TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version" in performance_source
+    assert (
+        "TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version"
+        in normalized_performance_source
+    )
     assert "legacy_operation_breakdowns_by_shop = {}" not in performance_source
     assert "请使用运营绩效工作台" in target_source
 
@@ -112,8 +129,12 @@ async def test_workbench_override_queries_require_parent_contract_version():
 
 
 @pytest.mark.asyncio
-async def test_copy_previous_month_reads_only_version_matched_shop_overrides(monkeypatch):
-    from backend.services import operation_performance_workbench_service as workbench_module
+async def test_copy_previous_month_reads_only_version_matched_shop_overrides(
+    monkeypatch,
+):
+    from backend.services import (
+        operation_performance_workbench_service as workbench_module,
+    )
 
     class _Result:
         def scalars(self):
@@ -169,7 +190,9 @@ async def test_copy_previous_month_reads_only_version_matched_shop_overrides(mon
 @pytest.mark.asyncio
 async def test_workbench_save_deletes_only_version_matched_shop_overrides(monkeypatch):
     from backend.schemas.target import OperationWorkbenchApplyRequest
-    from backend.services import operation_performance_workbench_service as workbench_module
+    from backend.services import (
+        operation_performance_workbench_service as workbench_module,
+    )
 
     class _Result:
         def scalars(self):
@@ -366,7 +389,9 @@ def test_aggregate_rejects_score_budget_mismatch():
 
 
 def test_performance_calculation_uses_all_operation_metrics_for_a_shop():
-    from backend.domains.business.routers.performance_management import _calculate_operation_metrics_for_shop
+    from backend.domains.business.routers.performance_management import (
+        _calculate_operation_metrics_for_shop,
+    )
 
     score, detail = _calculate_operation_metrics_for_shop(
         [
@@ -429,7 +454,9 @@ def test_readiness_rejects_pending_employee_before_payroll_write():
 
 
 def test_readiness_only_requires_shop_scores_for_shop_inherited_employees():
-    from backend.services.performance_readiness_service import PerformanceReadinessService
+    from backend.services.performance_readiness_service import (
+        PerformanceReadinessService,
+    )
 
     assert PerformanceReadinessService.shop_dependent_employee_codes(
         {
@@ -480,7 +507,15 @@ def test_operation_workbench_rejects_duplicate_shop_overrides_before_write():
             catalog_version=1,
             metrics=[{"metric_code": "reply_timeliness", "max_score": 20}],
             shop_overrides=[
-                {"metric_code": "reply_timeliness", "platform_code": "shopee", "shop_id": "S001"},
-                {"metric_code": "reply_timeliness", "platform_code": "SHOPEE", "shop_id": "S001"},
+                {
+                    "metric_code": "reply_timeliness",
+                    "platform_code": "shopee",
+                    "shop_id": "S001",
+                },
+                {
+                    "metric_code": "reply_timeliness",
+                    "platform_code": "SHOPEE",
+                    "shop_id": "S001",
+                },
             ],
         )

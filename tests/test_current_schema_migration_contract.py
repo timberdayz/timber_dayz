@@ -19,7 +19,10 @@ from scripts.run_current_schema_migrations import (
 
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_OPERATION_CONTRACT_FIX = (
-    ROOT / "current_migrations" / "versions" / "20260810_operation_contract_isolation.py"
+    ROOT
+    / "current_migrations"
+    / "versions"
+    / "20260810_operation_contract_isolation.py"
 )
 CURRENT_CONFIG = ROOT / "alembic-current.ini"
 CURRENT_BASELINE = (
@@ -27,7 +30,9 @@ CURRENT_BASELINE = (
 )
 CURRENT_ENTRYPOINT = ROOT / "scripts" / "run_current_schema_migrations.py"
 APPROVED_LEGACY_REVISION = "20260805_payroll_backfill_audit"
-APPROVED_LEGACY_FINGERPRINT = "5f27584d2911a7fff4ea659c954f5e8d152f984a9226f8d505acae46d8037578"
+APPROVED_LEGACY_FINGERPRINT = (
+    "5f27584d2911a7fff4ea659c954f5e8d152f984a9226f8d505acae46d8037578"
+)
 
 
 def test_empty_database_uses_only_the_current_upgrade_path():
@@ -174,7 +179,9 @@ def test_existing_database_rejects_a_mismatched_schema_fingerprint_before_stampi
         schema_fingerprint=APPROVED_LEGACY_FINGERPRINT,
     )
 
-    with pytest.raises(MigrationSafetyError, match="fingerprint does not match the approved"):
+    with pytest.raises(
+        MigrationSafetyError, match="fingerprint does not match the approved"
+    ):
         choose_migration_action(
             state,
             expected_source_revision=APPROVED_LEGACY_REVISION,
@@ -188,13 +195,16 @@ def test_current_migration_files_are_isolated_from_historical_versions_and_stati
 
     assert "script_location = current_migrations" in config_source
     assert "version_table = current_schema_alembic_version" in config_source
-    assert "revision = \"current_schema_20260805\"" in baseline_source
+    assert 'revision = "current_schema_20260805"' in baseline_source
     assert "down_revision = None" in baseline_source
     assert baseline_source.count("CREATE TABLE") >= 165
     assert "public.sales_targets" not in baseline_source
     assert "CREATE TABLE core.alembic_version (" not in baseline_source
     assert "CREATE TABLE public.alembic_version (" not in baseline_source
-    assert "CREATE TABLE core.data_quarantine (\\n    id integer NOT NULL,\\n    platform" not in baseline_source
+    assert (
+        "CREATE TABLE core.data_quarantine (\\n    id integer NOT NULL,\\n    platform"
+        not in baseline_source
+    )
     assert "Base.metadata" not in baseline_source
     assert "Base.metadata.create_all" not in baseline_source
 
@@ -204,7 +214,7 @@ def test_current_migration_files_are_isolated_from_historical_versions_and_stati
         / "versions"
         / "20260808_operation_performance_workbench.py"
     ).read_text(encoding="utf-8")
-    assert "down_revision = \"current_schema_20260805\"" in increment_source
+    assert 'down_revision = "current_schema_20260805"' in increment_source
     assert "operation_metric_catalog" in increment_source
     assert "DELETE FROM a_class.target_breakdown AS duplicate" not in increment_source
     assert "UPDATE a_class.sales_targets" not in increment_source
@@ -225,7 +235,11 @@ def test_operation_contract_isolated_from_legacy_rows_in_the_migration_and_ssot(
     ).read_text(encoding="utf-8")
     entrypoint_source = CURRENT_ENTRYPOINT.read_text(encoding="utf-8")
 
-    assert "operation_contract_version = Column(Integer, nullable=True" in business_schema_source
+    assert "operation_contract_version = Column(" in business_schema_source
+    assert (
+        'Integer, nullable=True, comment="运营工作台合同版本快照"'
+        in business_schema_source
+    )
     assert "--audit-legacy-operation-data" in entrypoint_source
     assert "audit_legacy_operation_data" in entrypoint_source
     assert "legacy operation data summary" in entrypoint_source
@@ -235,7 +249,10 @@ def test_current_operation_contract_fix_is_a_followup_migration_for_existing_202
     source = CURRENT_OPERATION_CONTRACT_FIX.read_text(encoding="utf-8")
 
     assert 'revision = "current_schema_20260810_operation_contract_isolation"' in source
-    assert 'down_revision = "current_schema_20260808_operation_performance_workbench"' in source
+    assert (
+        'down_revision = "current_schema_20260808_operation_performance_workbench"'
+        in source
+    )
     assert "operation_contract_version" in source
     assert "DROP TRIGGER IF EXISTS trg_enforce_operation_target_contract" in source
     assert "DROP TRIGGER IF EXISTS trg_enforce_operation_breakdown_contract" in source
@@ -258,7 +275,10 @@ def test_unified_entrypoint_probes_before_invoking_current_alembic_writer():
 def test_current_adoption_preflight_rejects_null_or_mismatched_breakdown_versions():
     source = CURRENT_ENTRYPOINT.read_text(encoding="utf-8")
 
-    assert "tb.operation_contract_version IS DISTINCT FROM st.metric_catalog_version" in source
+    assert (
+        "tb.operation_contract_version IS DISTINCT FROM st.metric_catalog_version"
+        in source
+    )
 
 
 def test_operational_migration_entrypoints_delegate_to_the_fail_closed_wrapper():
@@ -385,7 +405,9 @@ def test_schema_fingerprint_supports_postgresql_expression_indexes():
 
 
 def test_baseline_generator_omits_only_retired_quarantine_columns():
-    dump = "\ufeff" + """
+    dump = (
+        "\ufeff"
+        + """
         CREATE TABLE core.data_quarantine (
             id integer NOT NULL,
             settlement_id integer NOT NULL,
@@ -395,6 +417,7 @@ def test_baseline_generator_omits_only_retired_quarantine_columns():
         shop_id character varying(64)
     );
     """
+    )
 
     cleaned = _clean_dump(dump)
 

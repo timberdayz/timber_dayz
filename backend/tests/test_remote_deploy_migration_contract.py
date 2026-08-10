@@ -109,7 +109,9 @@ def test_current_schema_preflight_only_performs_read_only_adoption_checks(monkey
     assert safety_checks == ["postgresql://example"]
 
 
-def test_current_schema_preflight_checks_current_revision_contract_before_upgrade(monkeypatch):
+def test_current_schema_preflight_checks_current_revision_contract_before_upgrade(
+    monkeypatch,
+):
     state = migration_runner.MigrationState(
         database_empty=False,
         current_revision="current_schema_20260808_operation_performance_workbench",
@@ -134,11 +136,14 @@ def test_current_schema_preflight_checks_current_revision_contract_before_upgrad
         lambda database_url: safety_checks.append(database_url),
     )
 
-    assert migration_runner.preflight_current_schema_migrations(
-        "postgresql://current",
-        expected_source_revision=None,
-        expected_source_fingerprint=None,
-    ) == "upgrade"
+    assert (
+        migration_runner.preflight_current_schema_migrations(
+            "postgresql://current",
+            expected_source_revision=None,
+            expected_source_fingerprint=None,
+        )
+        == "upgrade"
+    )
     assert safety_checks == ["postgresql://current"]
 
 
@@ -192,7 +197,10 @@ def test_current_schema_preflight_does_not_log_legacy_operation_record_ids(
     monkeypatch.setattr(
         migration_runner,
         "assert_legacy_adoption_data_is_safe",
-        lambda _database_url: {"legacy_count": 1, "missing_metric_code": {"ids": [101]}},
+        lambda _database_url: {
+            "legacy_count": 1,
+            "missing_metric_code": {"ids": [101]},
+        },
     )
 
     migration_runner.preflight_current_schema_migrations(
@@ -207,9 +215,7 @@ def test_current_schema_preflight_does_not_log_legacy_operation_record_ids(
 def test_remote_deploy_preflights_before_stopping_or_removing_application_containers():
     script = _deploy_script()
 
-    preflight_index = script.index(
-        "run_current_schema_migrations.py --preflight-only"
-    )
+    preflight_index = script.index("run_current_schema_migrations.py --preflight-only")
     stage_index = script.index("stage_running_application_containers", preflight_index)
     assert preflight_index < stage_index
     assert "docker rm xihong_erp_frontend" not in script
@@ -241,28 +247,29 @@ def test_remote_deploy_isolates_new_compose_project_from_rollback_container_ids(
     assert "DEPLOYMENT_COMPOSE_PROJECT" in script
     assert '"-p" "${DEPLOYMENT_COMPOSE_PROJECT}"' in script
     assert "old containers retain their original Compose labels" in script
-    assert "docker inspect \"${previous_id}\"" in script
-    assert "docker rename \"${previous_id}\" \"${backup_name}\"" in script
-    assert script.index("run_current_schema_migrations.py --preflight-only") < script.index(
-        'compose_cmd_base=("${compose_cmd_base[@]}" "-p"'
-    )
+    assert 'docker inspect "${previous_id}"' in script
+    assert 'docker rename "${previous_id}" "${backup_name}"' in script
+    assert script.index(
+        "run_current_schema_migrations.py --preflight-only"
+    ) < script.index('compose_cmd_base=("${compose_cmd_base[@]}" "-p"')
 
 
 def test_remote_deploy_release_overlay_shares_but_never_owns_infrastructure_network():
     script = _deploy_script()
 
-    assert "networks:\n  erp_network:\n    external: true\n    name: xihong_erp_erp_network" in script
+    assert (
+        "networks:\n  erp_network:\n    external: true\n    name: xihong_erp_erp_network"
+        in script
+    )
     assert '"${infra_compose_cmd[@]}" up -d --no-build postgres redis' in script
     assert '"${compose_cmd_base[@]}" up -d --no-build postgres redis' not in script
-    assert 'docker network inspect xihong_erp_erp_network >/dev/null 2>&1' in script
+    assert "docker network inspect xihong_erp_erp_network >/dev/null 2>&1" in script
     preflight_phase_index = script.index(
         'echo "[INFO] Phase 1.5: Running read-only current-schema migration preflight..."'
     )
     assert script.index(
         'compose_cmd_base=("${compose_cmd_base[@]}" "-p"', preflight_phase_index
-    ) < script.index(
-        "if ! preflight_current_schema_migrations;", preflight_phase_index
-    )
+    ) < script.index("if ! preflight_current_schema_migrations;", preflight_phase_index)
 
 
 def test_isolated_release_starts_application_services_without_compose_dependencies():

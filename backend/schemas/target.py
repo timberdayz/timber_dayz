@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field, model_validator
 
 class TargetCreateRequest(BaseModel):
     target_name: str = Field(..., description="目标名称")
-    target_type: str = Field(..., description="目标类型: shop/product/campaign/operation")
+    target_type: str = Field(
+        ..., description="目标类型: shop/product/campaign/operation"
+    )
     scope_type: Optional[str] = Field(None, description="作用域类型: shop/employee")
     period_start: date = Field(..., description="开始日期")
     period_end: date = Field(..., description="结束日期")
@@ -95,7 +97,7 @@ class GenerateDailyBreakdownRequest(BaseModel):
     overwrite: bool = Field(False, description="是否覆盖已存在的日度分解")
     weekday_ratios: Optional[Dict[str, float]] = Field(
         None,
-        description='周一到周日拆分比例 1=周一...7=周日, 和为1; 不传则用目标已保存的',
+        description="周一到周日拆分比例 1=周一...7=周日, 和为1; 不传则用目标已保存的",
     )
 
 
@@ -243,7 +245,9 @@ class OperationWorkbenchApplyRequest(BaseModel):
     expected_performance_config_updated_at: Optional[datetime] = None
     expected_updated_at: Optional[datetime] = None
     metrics: List[OperationWorkbenchMetricInput] = Field(default_factory=list)
-    shop_overrides: List[OperationWorkbenchShopOverrideInput] = Field(default_factory=list)
+    shop_overrides: List[OperationWorkbenchShopOverrideInput] = Field(
+        default_factory=list
+    )
 
     @model_validator(mode="after")
     def validate_unique_operation_keys(self):

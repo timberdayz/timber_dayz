@@ -11,7 +11,10 @@ depends_on = None
 
 
 def _columns(connection, table: str, schema: str) -> set[str]:
-    return {item["name"] for item in sa.inspect(connection).get_columns(table, schema=schema)}
+    return {
+        item["name"]
+        for item in sa.inspect(connection).get_columns(table, schema=schema)
+    }
 
 
 def upgrade() -> None:
@@ -95,8 +98,12 @@ def upgrade() -> None:
             "ON a_class.sales_targets"
         )
     )
-    connection.execute(sa.text("DROP INDEX IF EXISTS a_class.uq_operation_target_month_metric"))
-    connection.execute(sa.text("DROP INDEX IF EXISTS a_class.uq_operation_shop_override"))
+    connection.execute(
+        sa.text("DROP INDEX IF EXISTS a_class.uq_operation_target_month_metric")
+    )
+    connection.execute(
+        sa.text("DROP INDEX IF EXISTS a_class.uq_operation_shop_override")
+    )
 
     connection.execute(
         sa.text(
