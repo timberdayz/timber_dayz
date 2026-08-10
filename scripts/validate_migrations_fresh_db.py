@@ -90,6 +90,19 @@ def verify_data_sync_critical_columns(database_url: str) -> list[str]:
         engine.dispose()
 
 
+def verify_orm_schema_consistency(
+    database_url: str,
+    *,
+    run_command=run,
+) -> str:
+    code, output = run_command(
+        ["python", "scripts/verify_schema_consistency.py", "--ignore-schema"],
+        env={"DATABASE_URL": database_url},
+        timeout=120,
+    )
+    return "" if code == 0 else output
+
+
 def build_temp_postgres_run_command(port: int) -> list[str]:
     return [
         "docker", "run", "--rm", "-d",
@@ -201,6 +214,16 @@ def main() -> int:
                 safe_print(f"  - {missing_column}")
             return 1
         safe_print("[OK] 数据同步关键列校验通过")
+        schema_consistency_error = verify_orm_schema_consistency(database_url)
+        if schema_consistency_error:
+            safe_print("[FAIL] 迁移后的 ORM Schema 一致性校验失败")
+            safe_print(
+                schema_consistency_error[-3000:]
+                if len(schema_consistency_error) > 3000
+                else schema_consistency_error
+            )
+            return 1
+        safe_print("[OK] 迁移后的 ORM Schema 一致性校验通过")
         return 0
     finally:
         safe_print("[INFO] 停止并删除临时容器...")

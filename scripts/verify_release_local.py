@@ -60,7 +60,6 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
     _run_command([sys.executable, "scripts/validate_production_env.py"])
     _run_command([sys.executable, "scripts/pre_deployment_check.py"])
     _run_command([sys.executable, "scripts/validate_migrations_fresh_db.py"])
-    _run_command([sys.executable, "scripts/verify_schema_consistency.py", "--ignore-schema"])
 
     compose_env = dict(os.environ)
     compose_env["COMPOSE_PROFILES"] = "production"

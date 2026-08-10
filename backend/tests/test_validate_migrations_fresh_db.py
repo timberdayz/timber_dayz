@@ -6,6 +6,7 @@ from scripts.validate_migrations_fresh_db import (
     choose_temp_postgres_port,
     is_docker_bind_error,
     start_temp_postgres_container,
+    verify_orm_schema_consistency,
 )
 
 
@@ -53,3 +54,28 @@ def test_choose_temp_postgres_port_resolves_an_ephemeral_port():
 def test_is_docker_bind_error_detects_port_allocation_failure():
     assert is_docker_bind_error("Bind for 0.0.0.0:5433 failed: port is already allocated") is True
     assert is_docker_bind_error("some other docker error") is False
+
+
+def test_verify_orm_schema_consistency_uses_the_migrated_database_url():
+    calls = []
+
+    def fake_run(command, cwd=None, env=None, timeout=0):
+        calls.append((command, env, timeout))
+        return 0, "schema is consistent"
+
+    assert (
+        verify_orm_schema_consistency(
+            "postgresql://migration_test_user:migration_test_pass@127.0.0.1:5433/migration_test_db",
+            run_command=fake_run,
+        )
+        == ""
+    )
+    assert calls == [
+        (
+            ["python", "scripts/verify_schema_consistency.py", "--ignore-schema"],
+            {
+                "DATABASE_URL": "postgresql://migration_test_user:migration_test_pass@127.0.0.1:5433/migration_test_db"
+            },
+            120,
+        )
+    ]

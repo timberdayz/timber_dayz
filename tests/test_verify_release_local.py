@@ -4,6 +4,7 @@ from scripts.verify_release_local import (
     _build_verify_database_url_from_env,
     main,
     parse_args,
+    run_release_verification,
 )
 
 
@@ -37,3 +38,16 @@ def test_build_verify_database_url_from_env_reads_database_url(tmp_path: Path):
     assert _build_verify_database_url_from_env(env_file) == (
         "postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/xihong_erp"
     )
+
+
+def test_release_verification_does_not_check_the_default_local_database(monkeypatch):
+    commands = []
+
+    def fake_run(command, *, env=None):
+        commands.append(command)
+
+    monkeypatch.setattr("scripts.verify_release_local._run_command", fake_run)
+
+    run_release_verification(skip_build=True, table="fact_shopee_orders_monthly")
+
+    assert all("scripts/verify_schema_consistency.py" not in command for command in commands)
