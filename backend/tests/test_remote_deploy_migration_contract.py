@@ -248,6 +248,23 @@ def test_remote_deploy_isolates_new_compose_project_from_rollback_container_ids(
     )
 
 
+def test_remote_deploy_release_overlay_shares_but_never_owns_infrastructure_network():
+    script = _deploy_script()
+
+    assert "networks:\n  erp_network:\n    external: true\n    name: xihong_erp_erp_network" in script
+    assert '"${infra_compose_cmd[@]}" up -d --no-build postgres redis' in script
+    assert '"${compose_cmd_base[@]}" up -d --no-build postgres redis' not in script
+    assert 'docker network inspect xihong_erp_erp_network >/dev/null 2>&1' in script
+    preflight_phase_index = script.index(
+        'echo "[INFO] Phase 1.5: Running read-only current-schema migration preflight..."'
+    )
+    assert script.index(
+        'compose_cmd_base=("${compose_cmd_base[@]}" "-p"', preflight_phase_index
+    ) < script.index(
+        "if ! preflight_current_schema_migrations;", preflight_phase_index
+    )
+
+
 def test_isolated_release_starts_application_services_without_compose_dependencies():
     script = _deploy_script()
 

@@ -565,6 +565,10 @@ services:
     ports: []
     networks:
       - erp_network
+networks:
+  erp_network:
+    external: true
+    name: xihong_erp_erp_network
 EOF
 
 # [DEBUG] 显示生成的 YAML 内容（用于诊断）
@@ -617,16 +621,18 @@ if ! validate_cleaned_env_quotes "${PRODUCTION_PATH}/.env.cleaned"; then
 fi
 
 echo "[INFO] Validating docker-compose config..."
-compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production)
+infra_compose_cmd=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production)
 if [ -f docker-compose.cloud.yml ]; then
-  compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production)
+  infra_compose_cmd=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml --profile production)
   if [ "${CLOUD_PROFILE:-}" = "4c8g" ] && [ -f docker-compose.cloud-4c8g.yml ]; then
-    compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.cloud-4c8g.yml -f docker-compose.deploy.yml --profile production)
+    infra_compose_cmd=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.cloud-4c8g.yml --profile production)
     echo "[INFO] CLOUD_PROFILE=4c8g: loading cloud-4c8g overlay"
   fi
 fi
-# [BOOTSTRAP] Add --env-file to all docker-compose commands (use cleaned .env file)
-compose_cmd_base=("${compose_cmd_base[@]}" "--env-file" "${PRODUCTION_PATH}/.env.cleaned")
+# Infrastructure remains owned by the original xihong_erp Compose project. The
+# release overlay only attaches release containers to that existing network.
+infra_compose_cmd=("${infra_compose_cmd[@]}" "--env-file" "${PRODUCTION_PATH}/.env.cleaned")
+compose_cmd_base=("${infra_compose_cmd[@]}" "-f" "docker-compose.deploy.yml")
 
 if ! "${compose_cmd_base[@]}" config >/dev/null 2>&1; then
   echo "[FAIL] docker-compose config validation failed"
@@ -639,7 +645,7 @@ fi
 echo "[OK] docker-compose config validated"
 
 echo "[INFO] Phase 1: starting infrastructure (PostgreSQL, Redis)..."
-"${compose_cmd_base[@]}" up -d --no-build postgres redis
+"${infra_compose_cmd[@]}" up -d --no-build postgres redis
 
 echo "[INFO] Waiting for infrastructure health..."
 for i in $(seq 1 60); do
@@ -680,6 +686,13 @@ for i in $(seq 1 60); do
   fi
   sleep 2
 done
+
+if ! docker network inspect xihong_erp_erp_network >/dev/null 2>&1; then
+  echo "[FAIL] Required infrastructure network xihong_erp_erp_network was not created"
+  echo "[INFO] Check that the xihong_erp Compose project can start postgres and redis before retrying"
+  exit 1
+fi
+echo "[OK] Shared infrastructure network is available"
 
 # [SCHEMA MIGRATION] Phase 2: smart database migration.
 preflight_current_schema_migrations() {
@@ -747,6 +760,9 @@ if (
   echo "[OK] Schema gate passed"
 }
 echo "[INFO] Phase 1.5: Running read-only current-schema migration preflight..."
+# Preflight is a release-project container and uses the external infrastructure
+# network, but it must run before existing application containers are staged.
+compose_cmd_base=("${compose_cmd_base[@]}" "-p" "${DEPLOYMENT_COMPOSE_PROJECT}")
 if ! preflight_current_schema_migrations; then
   echo "[FAIL] Migration preflight rejected deployment; existing application containers remain running"
   exit 1
@@ -759,7 +775,6 @@ echo "[OK] Read-only current-schema migration preflight passed"
 # select, recreate, or remove their IDs while cutover is in progress.
 DEPLOYMENT_ROLLBACK_ARMED=1
 trap handle_deploy_exit EXIT
-compose_cmd_base=("${compose_cmd_base[@]}" "-p" "${DEPLOYMENT_COMPOSE_PROJECT}")
 echo "[INFO] Staging existing application containers before migrations..."
 stage_running_application_containers
 echo "[OK] Existing application containers staged for rollback"
