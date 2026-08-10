@@ -1066,6 +1066,7 @@ async def _load_operation_targets_for_month(db: AsyncSession, year_month: str) -
             SalesTarget.scope_type == "shop",
             SalesTarget.status == "active",
             SalesTarget.is_enabled.is_(True),
+            SalesTarget.metric_catalog_version.is_not(None),
             SalesTarget.period_start == month_start,
             SalesTarget.period_end == month_end,
         ).order_by(SalesTarget.metric_code, SalesTarget.id)
@@ -1084,11 +1085,15 @@ async def _load_operation_target_breakdowns_by_shop(
     if not target_ids:
         return {}
     rows = (await db.execute(
-        select(TargetBreakdown).where(
+        select(TargetBreakdown).join(
+            SalesTarget,
+            TargetBreakdown.target_id == SalesTarget.id,
+        ).where(
             TargetBreakdown.target_id.in_(target_ids),
             TargetBreakdown.breakdown_type == "shop",
             TargetBreakdown.platform_code.is_not(None),
             TargetBreakdown.shop_id.is_not(None),
+            TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version,
         )
     )).scalars().all()
     grouped: dict[str, dict[int, Any]] = {}
@@ -1834,22 +1839,6 @@ async def calculate_performance_scores(
             db,
             operation_targets,
         )
-        legacy_operation_breakdowns_by_shop = {}
-        if not operation_targets:
-            legacy_target = await _load_effective_target_for_month(
-                db,
-                year_month=period,
-                target_type="operation",
-                scope_type="shop",
-            )
-            if legacy_target is not None and hasattr(legacy_target, "metric_direction") and hasattr(legacy_target, "max_score"):
-                # Historical single-target rows remain readable until their month
-                # is explicitly managed by the workbench.
-                operation_targets = [legacy_target]
-                legacy_operation_breakdowns_by_shop = await _load_operation_target_breakdown_by_shop(
-                    db,
-                    legacy_target,
-                )
         if operation_targets:
             configured_operation_score = sum(float(getattr(target, "max_score", 0.0) or 0.0) for target in operation_targets)
             if round(configured_operation_score, 4) != round(float(config.operation_max_score), 4):
@@ -1908,11 +1897,7 @@ async def calculate_performance_scores(
             key_product_score = 0.0
             operation_score, operation_details = _calculate_operation_metrics_for_shop(
                 operation_targets,
-                operation_breakdowns_by_shop.get(key, {}) or (
-                    {None: legacy_operation_breakdowns_by_shop[key]}
-                    if key in legacy_operation_breakdowns_by_shop
-                    else {}
-                ),
+                operation_breakdowns_by_shop.get(key, {}),
                 expected_max_score=float(config.operation_max_score),
             ) if operation_targets else (
                 0.0,

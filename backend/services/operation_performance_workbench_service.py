@@ -165,6 +165,7 @@ class OperationPerformanceWorkbenchService:
                 SalesTarget.target_type == "operation",
                 SalesTarget.period_start == month_start,
                 SalesTarget.period_end == month_end,
+                SalesTarget.metric_catalog_version.is_not(None),
                 SalesTarget.scope_type.in_(("shop", None)),
                 SalesTarget.status != "cancelled",
             )
@@ -183,7 +184,13 @@ class OperationPerformanceWorkbenchService:
         if target_ids:
             overrides = (await self.db.execute(
                 select(TargetBreakdown)
-                .where(TargetBreakdown.target_id.in_(target_ids), TargetBreakdown.breakdown_type == "shop")
+                .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
+                .where(
+                    TargetBreakdown.target_id.in_(target_ids),
+                    TargetBreakdown.breakdown_type == "shop",
+                    SalesTarget.metric_catalog_version.is_not(None),
+                    TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version,
+                )
                 .order_by(TargetBreakdown.target_id, TargetBreakdown.platform_code, TargetBreakdown.shop_id)
             )).scalars().all()
         rows = []
@@ -318,7 +325,21 @@ class OperationPerformanceWorkbenchService:
         await self.db.flush()
         target_ids = [row.id for row in rows_by_code.values()]
         if target_ids:
-            await self.db.execute(delete(TargetBreakdown).where(TargetBreakdown.target_id.in_(target_ids)))
+            current_contract_breakdown_ids = (
+                select(TargetBreakdown.id)
+                .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
+                .where(
+                    TargetBreakdown.target_id.in_(target_ids),
+                    TargetBreakdown.breakdown_type == "shop",
+                    SalesTarget.metric_catalog_version.is_not(None),
+                    TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version,
+                )
+            )
+            await self.db.execute(
+                delete(TargetBreakdown).where(
+                    TargetBreakdown.id.in_(current_contract_breakdown_ids)
+                )
+            )
         for override in request.shop_overrides:
             target = rows_by_code.get(override.metric_code)
             if target is None:
@@ -333,6 +354,7 @@ class OperationPerformanceWorkbenchService:
                 target_value=override.target_value,
                 achieved_value=override.achieved_value,
                 manual_score_value=override.manual_score_value,
+                operation_contract_version=target.metric_catalog_version,
             ))
         await self.db.commit()
         return await self.get_workbench(request.year_month)
@@ -371,9 +393,16 @@ class OperationPerformanceWorkbenchService:
         previous_ids = [row.id for row in previous]
         overrides = []
         if previous_ids:
-            rows = (await self.db.execute(select(TargetBreakdown).where(
-                TargetBreakdown.target_id.in_(previous_ids), TargetBreakdown.breakdown_type == "shop"
-            ))).scalars().all()
+            rows = (await self.db.execute(
+                select(TargetBreakdown)
+                .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
+                .where(
+                    TargetBreakdown.target_id.in_(previous_ids),
+                    TargetBreakdown.breakdown_type == "shop",
+                    SalesTarget.metric_catalog_version.is_not(None),
+                    TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version,
+                )
+            )).scalars().all()
             code_by_id = {row.id: row.metric_code for row in previous}
             overrides = [
                 {

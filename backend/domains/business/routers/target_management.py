@@ -751,6 +751,8 @@ async def create_target(
     """
     try:
         # 验证日期
+        if request.target_type == "operation":
+            raise HTTPException(status_code=409, detail="请使用运营绩效工作台")
         if request.period_end < request.period_start:
             return error_response(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
@@ -888,8 +890,12 @@ async def update_target(
             )
         
         # 更新字段
+        if target.target_type == "operation":
+            raise HTTPException(status_code=409, detail="请使用运营绩效工作台")
         await _assert_operation_month_mutable(db, target.target_type, target.period_start)
         update_data = request.model_dump(exclude_unset=True)
+        if update_data.get("target_type", target.target_type) == "operation":
+            raise HTTPException(status_code=409, detail="请使用运营绩效工作台")
         
         # 验证日期
         if "period_start" in update_data or "period_end" in update_data:
@@ -1027,6 +1033,8 @@ async def delete_target(
             )
         
         # 获取受影响的店铺和平台(删除前)
+        if target.target_type == "operation":
+            raise HTTPException(status_code=409, detail="请使用运营绩效工作台")
         await _assert_operation_month_mutable(db, target.target_type, target.period_start)
         breakdowns = (await db.execute(
             select(TargetBreakdown).where(TargetBreakdown.target_id == target_id)
@@ -1119,6 +1127,8 @@ async def create_breakdown(
             )
         
         # [OK] 统一 platform_code 为小写(与 dim_shops 标准格式一致)
+        if target.target_type == "operation":
+            raise HTTPException(status_code=409, detail="请使用运营绩效工作台")
         await _assert_operation_month_mutable(db, target.target_type, target.period_start)
         if target.target_type == "operation":
             if request.breakdown_type != "shop":
@@ -1604,6 +1614,8 @@ async def generate_daily_breakdown(
                 recovery_suggestion="请检查目标ID",
                 status_code=404,
             )
+        if target.target_type == "operation":
+            raise HTTPException(status_code=409, detail="请使用运营绩效工作台")
         start = target.period_start
         end = target.period_end
         if end < start:
@@ -1781,6 +1793,14 @@ async def calculate_target_achievement(
     """
     try:
         from backend.services.target_management_service import TargetManagementService
+
+        target = (await db.execute(
+            select(SalesTarget).where(SalesTarget.id == target_id)
+        )).scalar_one_or_none()
+        if target is None:
+            raise HTTPException(status_code=404, detail="目标不存在")
+        if target.target_type == "operation":
+            raise HTTPException(status_code=409, detail="请使用运营绩效工作台")
         
         service = TargetManagementService(db)
         result = service.calculate_target_achievement(target_id)

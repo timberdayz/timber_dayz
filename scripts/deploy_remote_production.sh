@@ -35,6 +35,109 @@ require_env "IMAGE_NAME_BACKEND"
 require_env "IMAGE_NAME_FRONTEND"
 require_env "IMAGE_TAG"
 
+# Keep the running application containers recoverable until the new cutover is healthy.
+APP_CONTAINER_NAMES=(
+  xihong_erp_frontend
+  xihong_erp_nginx
+  xihong_erp_backend_api
+  xihong_erp_backend
+  xihong_erp_backend_collector
+  xihong_erp_celery_worker
+  xihong_erp_celery_beat
+)
+declare -A PREVIOUS_APP_CONTAINER_IDS=()
+declare -A PREVIOUS_APP_CONTAINER_BACKUPS=()
+DEPLOYMENT_ROLLBACK_ARMED=0
+DEPLOYMENT_CUTOVER_COMPLETE=0
+DEPLOYMENT_ROLLBACK_SUFFIX="$$_$(date +%s)"
+DEPLOYMENT_COMPOSE_PROJECT="xihong_erp_release_${DEPLOYMENT_ROLLBACK_SUFFIX}"
+
+capture_running_application_containers() {
+  local container container_id is_running
+  for container in "${APP_CONTAINER_NAMES[@]}"; do
+    if ! docker inspect "${container}" >/dev/null 2>&1; then
+      continue
+    fi
+    is_running="$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)"
+    if [ "${is_running}" = "true" ]; then
+      container_id="$(docker inspect --format '{{.Id}}' "${container}")"
+      PREVIOUS_APP_CONTAINER_IDS["${container}"]="${container_id}"
+      PREVIOUS_APP_CONTAINER_BACKUPS["${container}"]="${container}__predeploy_${DEPLOYMENT_ROLLBACK_SUFFIX}"
+    fi
+  done
+}
+
+restore_previous_application_containers() {
+  local original_status="$1"
+  local container previous_id backup_name replacement_id
+
+  if [ "${DEPLOYMENT_ROLLBACK_ARMED}" != "1" ] || [ "${DEPLOYMENT_CUTOVER_COMPLETE}" = "1" ]; then
+    return 0
+  fi
+
+  set +e
+  echo "[WARN] Deployment failed before cutover; restoring previously running application containers..." >&2
+  for container in "${APP_CONTAINER_NAMES[@]}"; do
+    previous_id="${PREVIOUS_APP_CONTAINER_IDS[${container}]:-}"
+    backup_name="${PREVIOUS_APP_CONTAINER_BACKUPS[${container}]:-}"
+    if [ -z "${previous_id}" ] || [ -z "${backup_name}" ]; then
+      continue
+    fi
+
+    replacement_id="$(docker ps -aq --filter "name=^/${container}$" | head -n 1)"
+    if [ -n "${replacement_id}" ] && [ "${replacement_id}" != "${previous_id}" ]; then
+      docker stop "${replacement_id}" >/dev/null 2>&1 || true
+      docker rm "${replacement_id}" >/dev/null 2>&1 || true
+    fi
+    if docker inspect "${previous_id}" >/dev/null 2>&1; then
+      docker rename "${previous_id}" "${container}" >/dev/null 2>&1 || true
+      docker start "${previous_id}" >/dev/null 2>&1 || true
+    fi
+  done
+  echo "[WARN] Previous application container restoration attempted; deployment exits with status ${original_status}." >&2
+}
+
+handle_deploy_exit() {
+  local original_status=$?
+
+  if [ "${original_status}" -ne 0 ]; then
+    restore_previous_application_containers "${original_status}"
+  fi
+  return "${original_status}"
+}
+
+stage_running_application_containers() {
+  local container previous_id backup_name
+  capture_running_application_containers
+  for container in "${APP_CONTAINER_NAMES[@]}"; do
+    previous_id="${PREVIOUS_APP_CONTAINER_IDS[${container}]:-}"
+    backup_name="${PREVIOUS_APP_CONTAINER_BACKUPS[${container}]:-}"
+    if [ -z "${previous_id}" ] || [ -z "${backup_name}" ]; then
+      continue
+    fi
+    docker stop "${previous_id}"
+    docker rename "${previous_id}" "${backup_name}"
+  done
+
+  # A stopped container was not part of the rollback set. Remove only such
+  # stale name holders now, after preflight, so Compose can create the release.
+  for container in "${APP_CONTAINER_NAMES[@]}"; do
+    if docker inspect "${container}" >/dev/null 2>&1; then
+      docker rm "${container}" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
+discard_staged_application_containers() {
+  local container previous_id
+  for container in "${APP_CONTAINER_NAMES[@]}"; do
+    previous_id="${PREVIOUS_APP_CONTAINER_IDS[${container}]:-}"
+    if [ -n "${previous_id}" ]; then
+      docker rm "${previous_id}" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 # Prefer CNB when fully configured, and only fall back to GHCR if CNB pull fails.
 CNB_FULLY_CONFIGURED=0
 if [ -n "${CNB_REGISTRY:-}" ] && [ -n "${CNB_TOKEN:-}" ] && [ -n "${CNB_IMAGE_NAME_BACKEND:-}" ] && [ -n "${CNB_IMAGE_NAME_FRONTEND:-}" ]; then
@@ -399,27 +502,6 @@ fi
 
 echo "[OK] Resolved tags: Backend=${BACKEND_TAG}, Frontend=${FRONTEND_TAG}"
 
-echo "[INFO] Cleaning up old containers that might conflict with port 80..."
-docker stop xihong_erp_frontend 2>/dev/null || true
-docker rm xihong_erp_frontend 2>/dev/null || true
-
-# Stop application layer before migrations/bootstrap to avoid concurrent background jobs
-# touching ops tables and causing lock contention during deploy.
-echo "[INFO] Stopping existing application containers (backend/celery/nginx) to avoid DB lock contention..."
-docker stop xihong_erp_nginx 2>/dev/null || true
-docker stop xihong_erp_backend_api 2>/dev/null || true
-docker stop xihong_erp_backend 2>/dev/null || true
-docker stop xihong_erp_backend_collector 2>/dev/null || true
-docker stop xihong_erp_celery_worker 2>/dev/null || true
-docker stop xihong_erp_celery_beat 2>/dev/null || true
-echo "[OK] Application containers stopped (best-effort)"
-PORT_80_CONTAINER="$(docker ps --format "{{.Names}}" --filter "publish=80" 2>/dev/null | head -1 || echo "")"
-if [ -n "${PORT_80_CONTAINER}" ] && [ "${PORT_80_CONTAINER}" != "xihong_erp_nginx" ]; then
-  echo "[WARN] Found container ${PORT_80_CONTAINER} using port 80, stopping it..."
-  docker stop "${PORT_80_CONTAINER}" 2>/dev/null || true
-fi
-echo "[OK] Cleanup completed"
-
 export APP_ENV=production
 export COMPOSE_PROJECT_NAME=xihong_erp
 
@@ -600,6 +682,20 @@ for i in $(seq 1 60); do
 done
 
 # [SCHEMA MIGRATION] Phase 2: smart database migration.
+preflight_current_schema_migrations() {
+  PREFLIGHT_LOG=$(mktemp)
+  "${compose_cmd_base[@]}" run --rm --no-deps \
+    -e CURRENT_SCHEMA_SOURCE_REVISION \
+    -e CURRENT_SCHEMA_SOURCE_FINGERPRINT \
+    backend-api python3 /app/scripts/run_current_schema_migrations.py --preflight-only 2> "${PREFLIGHT_LOG}" || {
+      echo "[ERROR] Current-schema migration preflight failed"
+      cat "${PREFLIGHT_LOG}"
+      rm -f "${PREFLIGHT_LOG}"
+      return 1
+    }
+  rm -f "${PREFLIGHT_LOG}"
+}
+
 smart_database_migrate() {
   MIGRATE_LOG=$(mktemp)
   "${compose_cmd_base[@]}" run --rm --no-deps \
@@ -650,6 +746,30 @@ if (
   fi
   echo "[OK] Schema gate passed"
 }
+echo "[INFO] Phase 1.5: Running read-only current-schema migration preflight..."
+if ! preflight_current_schema_migrations; then
+  echo "[FAIL] Migration preflight rejected deployment; existing application containers remain running"
+  exit 1
+fi
+echo "[OK] Read-only current-schema migration preflight passed"
+
+# Stop and rename running containers only after the read-only preflight. Switch
+# the new release to a separate Compose project before it can create anything:
+# old containers retain their original Compose labels, so `compose up` cannot
+# select, recreate, or remove their IDs while cutover is in progress.
+DEPLOYMENT_ROLLBACK_ARMED=1
+trap handle_deploy_exit EXIT
+compose_cmd_base=("${compose_cmd_base[@]}" "-p" "${DEPLOYMENT_COMPOSE_PROJECT}")
+echo "[INFO] Staging existing application containers before migrations..."
+stage_running_application_containers
+echo "[OK] Existing application containers staged for rollback"
+
+PORT_80_CONTAINER="$(docker ps --format "{{.Names}}" --filter "publish=80" 2>/dev/null | head -1 || echo "")"
+if [ -n "${PORT_80_CONTAINER}" ] && [ "${PORT_80_CONTAINER}" != "xihong_erp_nginx" ]; then
+  echo "[WARN] Found container ${PORT_80_CONTAINER} using port 80, stopping it..."
+  docker stop "${PORT_80_CONTAINER}" 2>/dev/null || true
+fi
+
 echo "[INFO] Phase 2: Running smart database migration..."
 if ! smart_database_migrate; then
   echo "[FAIL] Smart database migration failed"
@@ -771,38 +891,37 @@ fi
 echo "[INFO] Phase 3b: starting frontend..."
 "${compose_cmd_base[@]}" up -d --no-build frontend
 
-echo "[INFO] Frontend health check (best-effort)..."
-if docker ps --format "{{.Names}}" | grep -q "^xihong_erp_frontend$"; then
-  # Avoid depending on curl inside the frontend container.
-  if docker exec xihong_erp_frontend sh -lc 'command -v curl >/dev/null 2>&1' >/dev/null 2>&1; then
-    for i in $(seq 1 30); do
-      if docker exec xihong_erp_frontend curl -fsS http://localhost:80 >/dev/null 2>&1; then
-        echo "[OK] Frontend responded on container port 80"
-        break
-      fi
-      sleep 2
-    done
-  else
-    echo "[INFO] Frontend container has no curl; skipping container HTTP health check"
+echo "[INFO] Waiting for frontend health..."
+frontend_healthy=0
+for i in $(seq 1 30); do
+  if docker exec xihong_erp_frontend wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1/ >/dev/null 2>&1; then
+    frontend_healthy=1
+    echo "[OK] Frontend responded on container port 80"
+    break
   fi
-else
-  echo "[INFO] Frontend container not found; skipping"
+  sleep 2
+done
+if [ "${frontend_healthy}" -ne 1 ]; then
+  echo "[FAIL] Frontend health check failed"
+  exit 1
 fi
 
 echo "[INFO] Phase 4: starting gateway (Nginx, last)..."
 "${compose_cmd_base[@]}" up -d --no-build nginx
 
-echo "[INFO] Nginx health check (host, best-effort)..."
-if command -v curl >/dev/null 2>&1; then
-  for i in $(seq 1 30); do
-    if curl -fsS http://localhost/health >/dev/null 2>&1; then
-      echo "[OK] Nginx /health passed"
-      break
-    fi
-    sleep 2
-  done
-else
-  echo "[INFO] Host has no curl; skipping Nginx /health check"
+echo "[INFO] Waiting for Nginx health..."
+nginx_healthy=0
+for i in $(seq 1 30); do
+  if docker exec xihong_erp_nginx wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1/health >/dev/null 2>&1; then
+    nginx_healthy=1
+    echo "[OK] Nginx /health passed"
+    break
+  fi
+  sleep 2
+done
+if [ "${nginx_healthy}" -ne 1 ]; then
+  echo "[FAIL] Nginx health check failed"
+  exit 1
 fi
 
 # [NGINX] 重载配置以使本次部署上传的 nginx.prod.conf 生效（容器未重启时需 reload）
@@ -810,9 +929,17 @@ if docker ps --format '{{.Names}}' | grep -q 'xihong_erp_nginx'; then
   if docker exec xihong_erp_nginx nginx -t 2>/dev/null; then
     docker exec xihong_erp_nginx nginx -s reload && echo "[OK] Nginx config reloaded"
   else
-    echo "[WARN] Nginx config test failed; skip reload"
+    echo "[FAIL] Nginx config test failed"
+    exit 1
   fi
 fi
+
+# The new backend, frontend, and gateway are up. Old containers are no longer
+# needed, so subsequent non-critical cleanup must not roll the application back.
+DEPLOYMENT_CUTOVER_COMPLETE=1
+discard_staged_application_containers
+trap - EXIT
+echo "[OK] Application cutover completed"
 
 # [LEGACY CLEANUP] PostgreSQL Dashboard production no longer depends on Metabase.
 if docker ps -a --format '{{.Names}}' | grep -q '^xihong_erp_metabase$'; then

@@ -1516,6 +1516,7 @@ class TargetBreakdown(Base):
     target_value = Column(Float, nullable=True, comment="运营指标目标值")
     achieved_value = Column(Float, nullable=True, comment="运营指标实际值")
     manual_score_value = Column(Float, nullable=True, comment="人工打分值")
+    operation_contract_version = Column(Integer, nullable=True, comment="运营工作台合同版本快照")
     
     # 审计字段
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import socket
 import subprocess
@@ -18,7 +19,7 @@ import scripts.run_current_schema_migrations as migration_runner
 
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_BASELINE_REVISION = "current_schema_20260805"
-CURRENT_HEAD_REVISION = "current_schema_20260808_operation_performance_workbench"
+CURRENT_HEAD_REVISION = "current_schema_20260810_operation_contract_isolation"
 LEGACY_REVISION = "20260805_payroll_backfill_audit"
 
 
@@ -46,6 +47,7 @@ def _wait_for_postgres(container_id: str) -> None:
             check=False,
         )
         if result.returncode == 0:
+            time.sleep(1)
             return
         time.sleep(1)
     raise RuntimeError("temporary PostgreSQL container did not become ready")
@@ -296,7 +298,7 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
 
 
-def test_legacy_adoption_rejects_duplicate_operation_shop_overrides_before_writing(
+def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits_them(
     tmp_path, monkeypatch
 ):
     if not _docker_available():
@@ -380,6 +382,23 @@ def test_legacy_adoption_rejects_duplicate_operation_shop_overrides_before_writi
                     ),
                     {"target_id": target_id, "achieved_value": achieved_value},
                 )
+            incomplete_target_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, period_start, period_end, scope_type) "
+                    "VALUES ('Incomplete legacy operation', 'operation', '2026-07-02', '2026-07-31', NULL) "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, target_amount, target_quantity, "
+                    "achieved_amount, achieved_quantity, achievement_rate) "
+                    "VALUES (:target_id, 'time', 0, 0, 0, 0, 0)"
+                ),
+                {"target_id": incomplete_target_id},
+            )
             connection.execute(text("DROP TABLE public.current_schema_alembic_version"))
             connection.execute(
                 text(
@@ -408,15 +427,17 @@ def test_legacy_adoption_rejects_duplicate_operation_shop_overrides_before_writi
         )
         monkeypatch.setattr(migration_runner, "SUPPORT_POLICY_PATH", policy_path)
 
-        with pytest.raises(migration_runner.MigrationSafetyError, match="duplicate operation"):
+        assert (
             migration_runner.run_current_schema_migrations(
                 database_url,
                 expected_source_revision=None,
                 expected_source_fingerprint=None,
             )
+            == "stamp"
+        )
 
         inspector = inspect(engine)
-        assert not inspector.has_table("current_schema_alembic_version", schema="public")
+        assert inspector.has_table("current_schema_alembic_version", schema="public")
         with engine.connect() as connection:
             assert connection.execute(
                 text(
@@ -425,5 +446,369 @@ def test_legacy_adoption_rejects_duplicate_operation_shop_overrides_before_writi
                 ),
                 {"target_id": target_id},
             ).scalar_one() == 2
+            assert connection.execute(
+                text(
+                    "SELECT count(*) FROM a_class.target_breakdown "
+                    "WHERE target_id = :target_id "
+                    "AND operation_contract_version IS NULL"
+                ),
+                {"target_id": target_id},
+            ).scalar_one() == 2
+
+        audit = migration_runner.audit_legacy_operation_data(database_url)
+        assert audit["legacy_count"] == 2
+        assert audit["missing_metric_code"]["count"] == 1
+        assert audit["missing_metric_direction"]["count"] == 1
+        assert audit["non_calendar_month"]["count"] == 1
+        assert audit["missing_shop_scope"]["count"] == 1
+        assert audit["incomplete_override"]["count"] == 1
+        assert audit["duplicate_override"]["count"] == 2
+        assert len(audit["duplicate_override"]["ids"]) == 2
+        cli_audit = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_current_schema_migrations.py",
+                "--database-url",
+                database_url,
+                "--audit-legacy-operation-data",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert cli_audit.returncode == 0, cli_audit.stderr
+        assert json.loads(cli_audit.stdout) == audit
+    finally:
+        subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
+
+
+def test_current_operation_contract_rejects_invalid_targets_and_matching_duplicate_overrides():
+    if not _docker_available():
+        pytest.skip("requires a reachable Docker daemon and PostgreSQL 15 image")
+
+    port = _free_port()
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "-e",
+            "POSTGRES_USER=current_test",
+            "-e",
+            "POSTGRES_PASSWORD=current_test",
+            "-e",
+            "POSTGRES_DB=current_test",
+            "-p",
+            f"127.0.0.1:{port}:5432",
+            "postgres:15",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    container_id = started.stdout.strip()
+    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    try:
+        _wait_for_postgres(container_id)
+        migrated = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "alembic-current.ini",
+                "upgrade",
+                "head",
+            ],
+            cwd=ROOT,
+            env={**os.environ, "DATABASE_URL": database_url},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert migrated.returncode == 0, migrated.stderr
+
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            invalid_target_savepoint = connection.begin_nested()
+            with pytest.raises(Exception, match="scope_type=shop"):
+                connection.execute(
+                    text(
+                        "INSERT INTO a_class.sales_targets "
+                        "(target_name, target_type, period_start, period_end, metric_catalog_version) "
+                        "VALUES ('Invalid current', 'operation', '2026-07-01', '2026-07-31', 1)"
+                    )
+                )
+            invalid_target_savepoint.rollback()
+
+            legacy_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, period_start, period_end) "
+                    "VALUES ('Legacy remains permissive', 'operation', '2026-07-02', '2026-07-31') "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, target_amount, target_quantity, "
+                    "achieved_amount, achieved_quantity, achievement_rate) "
+                    "VALUES (:target_id, 'time', 0, 0, 0, 0, 0)"
+                ),
+                {"target_id": legacy_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO core.dim_platforms (platform_code, name, is_active) "
+                    "VALUES ('platform', 'Platform', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO core.dim_shops (platform_code, shop_id, shop_name) "
+                    "VALUES ('platform', 'shop', 'Shop')"
+                )
+            )
+
+            current_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, period_start, period_end, scope_type, metric_code, "
+                    "metric_direction, metric_catalog_version) "
+                    "VALUES ('Current valid', 'operation', '2026-07-01', '2026-07-31', 'shop', "
+                    "'metric', 'higher_better', 1) RETURNING id"
+                )
+            ).scalar_one()
+            invalid_override_savepoint = connection.begin_nested()
+            with pytest.raises(Exception, match="only allow shop breakdowns"):
+                connection.execute(
+                    text(
+                        "INSERT INTO a_class.target_breakdown "
+                        "(target_id, breakdown_type, operation_contract_version) "
+                        "VALUES (:target_id, 'time', 1)"
+                    ),
+                    {"target_id": current_id},
+                )
+            invalid_override_savepoint.rollback()
+            override_sql = text(
+                "INSERT INTO a_class.target_breakdown "
+                "(target_id, breakdown_type, platform_code, shop_id, period_start, period_end, "
+                "target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate, "
+                "operation_contract_version) "
+                "VALUES (:target_id, 'shop', 'platform', 'shop', '2026-07-01', '2026-07-31', "
+                "0, 0, 0, 0, 0, 1)"
+            )
+            connection.execute(override_sql, {"target_id": current_id})
+            duplicate_override_savepoint = connection.begin_nested()
+            with pytest.raises(Exception, match="uq_operation_shop_override"):
+                connection.execute(override_sql, {"target_id": current_id})
+            duplicate_override_savepoint.rollback()
+
+            connection.execute(text("DROP INDEX a_class.uq_operation_shop_override"))
+            connection.execute(override_sql, {"target_id": current_id})
+
+        with pytest.raises(
+            migration_runner.MigrationSafetyError,
+            match="invalid current operation contract data",
+        ):
+            migration_runner.assert_legacy_adoption_data_is_safe(database_url)
+
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE a_class.sales_targets "
+                    "DISABLE TRIGGER trg_enforce_operation_target_contract"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, period_start, period_end, metric_catalog_version) "
+                    "VALUES ('Invalid current preflight', 'operation', '2026-07-01', '2026-07-31', 1)"
+                )
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE a_class.sales_targets "
+                    "ENABLE TRIGGER trg_enforce_operation_target_contract"
+                )
+            )
+
+        with pytest.raises(
+            migration_runner.MigrationSafetyError,
+            match="invalid current operation contract data",
+        ):
+            migration_runner.assert_legacy_adoption_data_is_safe(database_url)
+
+        with pytest.raises(
+            migration_runner.MigrationSafetyError,
+            match="invalid current operation contract data",
+        ):
+            migration_runner.run_current_schema_migrations(
+                database_url,
+                expected_source_revision=None,
+                expected_source_fingerprint=None,
+            )
+    finally:
+        subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
+
+
+def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions():
+    if not _docker_available():
+        pytest.skip("requires a reachable Docker daemon and PostgreSQL 15 image")
+
+    port = _free_port()
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "-e",
+            "POSTGRES_USER=current_test",
+            "-e",
+            "POSTGRES_PASSWORD=current_test",
+            "-e",
+            "POSTGRES_DB=current_test",
+            "-p",
+            f"127.0.0.1:{port}:5432",
+            "postgres:15",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    container_id = started.stdout.strip()
+    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    try:
+        _wait_for_postgres(container_id)
+        old_upgrade = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "alembic-current.ini",
+                "upgrade",
+                "current_schema_20260808_operation_performance_workbench",
+            ],
+            cwd=ROOT,
+            env={**os.environ, "DATABASE_URL": database_url},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert old_upgrade.returncode == 0, old_upgrade.stderr
+
+        engine = create_engine(database_url)
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT version_num FROM public.current_schema_alembic_version")
+            ).scalar_one() == "current_schema_20260808_operation_performance_workbench"
+
+        upgraded = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "alembic-current.ini",
+                "upgrade",
+                "head",
+            ],
+            cwd=ROOT,
+            env={**os.environ, "DATABASE_URL": database_url},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert upgraded.returncode == 0, upgraded.stderr
+
+        with engine.begin() as connection:
+            assert connection.execute(
+                text("SELECT version_num FROM public.current_schema_alembic_version")
+            ).scalar_one() == CURRENT_HEAD_REVISION
+            connection.execute(
+                text(
+                    "INSERT INTO core.dim_platforms (platform_code, name, is_active) "
+                    "VALUES ('platform', 'Platform', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO core.dim_shops (platform_code, shop_id, shop_name) "
+                    "VALUES ('platform', 'shop', 'Shop')"
+                )
+            )
+            current_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, period_start, period_end, scope_type, metric_code, "
+                    "metric_direction, metric_catalog_version) "
+                    "VALUES ('Current versioned', 'operation', '2026-07-01', '2026-07-31', 'shop', "
+                    "'metric', 'higher_better', 1) RETURNING id"
+                )
+            ).scalar_one()
+            historical_id = connection.execute(
+                text(
+                    "INSERT INTO a_class.sales_targets "
+                    "(target_name, target_type, period_start, period_end) "
+                    "VALUES ('Historical versionless', 'operation', '2026-07-01', '2026-07-31') "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            for contract_version in (None, 2):
+                savepoint = connection.begin_nested()
+                with pytest.raises(Exception, match="contract version must match"):
+                    connection.execute(
+                        text(
+                            "INSERT INTO a_class.target_breakdown "
+                            "(target_id, breakdown_type, operation_contract_version) "
+                            "VALUES (:target_id, 'time', :contract_version)"
+                        ),
+                        {"target_id": current_id, "contract_version": contract_version},
+                    )
+                savepoint.rollback()
+            historical_savepoint = connection.begin_nested()
+            with pytest.raises(Exception, match="historical operation breakdowns require a null"):
+                connection.execute(
+                    text(
+                        "INSERT INTO a_class.target_breakdown "
+                        "(target_id, breakdown_type, operation_contract_version) "
+                        "VALUES (:target_id, 'time', 1)"
+                    ),
+                    {"target_id": historical_id},
+                )
+            historical_savepoint.rollback()
+            connection.execute(
+                text(
+                    "ALTER TABLE a_class.target_breakdown "
+                    "DISABLE TRIGGER trg_enforce_operation_breakdown_contract"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO a_class.target_breakdown "
+                    "(target_id, breakdown_type, target_amount, target_quantity, achieved_amount, "
+                    "achieved_quantity, achievement_rate, operation_contract_version) "
+                    "VALUES (:target_id, 'time', 0, 0, 0, 0, 0, NULL)"
+                ),
+                {"target_id": current_id},
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE a_class.target_breakdown "
+                    "ENABLE TRIGGER trg_enforce_operation_breakdown_contract"
+                )
+            )
+
+        with pytest.raises(
+            migration_runner.MigrationSafetyError,
+            match="invalid current operation contract data",
+        ):
+            migration_runner.assert_legacy_adoption_data_is_safe(database_url)
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)

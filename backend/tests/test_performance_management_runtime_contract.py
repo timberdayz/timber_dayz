@@ -295,17 +295,23 @@ class _CalcDb:
 
 
 def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
-    async def _fake_target(_db, year_month, target_type, scope_type=None):
-        if target_type == "operation":
-            return SimpleNamespace(
-                metric_direction="manual_score",
-                target_value=None,
-                achieved_value=None,
-                max_score=20,
-                manual_score_enabled=True,
-                manual_score_value=20,
-            )
-        return None
+    operation_target = SimpleNamespace(
+        id=99,
+        metric_catalog_version=1,
+        metric_code="manual_quality",
+        metric_name="Manual quality",
+        metric_direction="manual_score",
+        target_value=None,
+        achieved_value=None,
+        max_score=20,
+        manual_score_enabled=True,
+        manual_score_value=20,
+        penalty_enabled=False,
+        penalty_threshold=None,
+        penalty_per_unit=None,
+        penalty_max=None,
+        is_enabled=True,
+    )
 
     async def _fake_source_rows(_db, _period):
         return {
@@ -347,7 +353,16 @@ def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
                 "locked_conflict_details": [],
             }
 
-    monkeypatch.setattr(performance_module, "_load_effective_target_for_month", _fake_target)
+    monkeypatch.setattr(
+        performance_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[operation_target]),
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(return_value={}),
+    )
     monkeypatch.setattr(performance_module, "load_shop_monthly_target_achievement", _fake_source_rows)
     monkeypatch.setattr(performance_module, "load_shop_monthly_metrics", AsyncMock(return_value={}))
     monkeypatch.setattr(
@@ -422,14 +437,16 @@ def test_recalculation_uses_shop_operation_breakdown(monkeypatch):
     _patch_successful_shop_recalc(monkeypatch)
     monkeypatch.setattr(
         performance_module,
-        "_load_operation_target_breakdown_by_shop",
+        "_load_operation_target_breakdowns_by_shop",
         AsyncMock(
             return_value={
-                "shopee|shop-1": SimpleNamespace(
-                    target_value=None,
-                    achieved_value=None,
-                    manual_score_value=7.25,
-                )
+                "shopee|shop-1": {
+                    99: SimpleNamespace(
+                        target_value=None,
+                        achieved_value=None,
+                        manual_score_value=7.25,
+                    )
+                }
             }
         ),
         raising=False,
@@ -448,6 +465,65 @@ def test_recalculation_uses_shop_operation_breakdown(monkeypatch):
     created = next(item for item in db.added if isinstance(item, PerformanceScore))
     assert created.operation_score == 7.25
     assert created.score_details["operation"]["source"] == "target_management_shop_breakdown"
+
+
+def test_recalculation_ignores_legacy_operation_target_and_skips_payroll(monkeypatch):
+    _patch_successful_shop_recalc(monkeypatch)
+    legacy_operation_target = SimpleNamespace(
+        metric_catalog_version=None,
+        metric_direction="manual_score",
+        manual_score_enabled=True,
+        manual_score_value=20.0,
+        max_score=20.0,
+    )
+
+    async def _effective_target(_db, *, target_type, **_kwargs):
+        if target_type == "operation":
+            raise AssertionError("legacy operation targets must not be loaded")
+        return None
+
+    class _UnexpectedIncome:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def calculate_month(self, *_args, **_kwargs):
+            raise AssertionError("pending operation performance must not create income")
+
+    class _UnexpectedPayroll:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def generate_month(self, *_args, **_kwargs):
+            raise AssertionError("pending operation performance must not create payroll")
+
+    monkeypatch.setattr(
+        performance_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "_load_effective_target_for_month",
+        _effective_target,
+    )
+    monkeypatch.setattr(performance_module, "HRIncomeCalculationService", _UnexpectedIncome)
+    monkeypatch.setattr(performance_module, "PayrollGenerationService", _UnexpectedPayroll)
+    db = _CalcDb(_config())
+
+    response = asyncio.run(
+        performance_module.calculate_performance_scores(
+            period="2025-01",
+            config_id=None,
+            db=db,
+        )
+    )
+
+    assert _json_body(response)["success"] is True
+    created = next(item for item in db.added if isinstance(item, PerformanceScore))
+    assert legacy_operation_target.metric_catalog_version is None
+    assert created.operation_score == 0.0
+    assert created.score_details["operation"]["status"] == "pending"
+    assert created.score_details["summary"]["calculation_status"] == "partial"
 
 
 def test_ranking_policy_writes_canonical_formal_state():

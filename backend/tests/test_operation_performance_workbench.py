@@ -1,4 +1,6 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from datetime import date
 
 import pytest
 from pydantic import ValidationError
@@ -26,6 +28,215 @@ def test_operation_workbench_model_contract_keeps_pending_values_nullable():
     assert EmployeePerformanceInput.__table__.c.achieved_value.nullable is True
     assert EmployeePerformance.__table__.c.performance_score.nullable is True
     assert hasattr(EmployeePerformance, "calculation_status")
+
+
+def test_runtime_operation_paths_are_isolated_from_legacy_targets():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    workbench_source = (root / "backend/services/operation_performance_workbench_service.py").read_text(encoding="utf-8")
+    performance_source = (root / "backend/domains/business/routers/performance_management.py").read_text(encoding="utf-8")
+    target_source = (root / "backend/domains/business/routers/target_management.py").read_text(encoding="utf-8")
+
+    assert "SalesTarget.metric_catalog_version.is_not(None)" in workbench_source
+    assert "operation_contract_version=target.metric_catalog_version" in workbench_source
+    assert "SalesTarget.metric_catalog_version.is_not(None)" in performance_source
+    assert "TargetBreakdown.operation_contract_version == SalesTarget.metric_catalog_version" in performance_source
+    assert "legacy_operation_breakdowns_by_shop = {}" not in performance_source
+    assert "请使用运营绩效工作台" in target_source
+
+
+@pytest.mark.asyncio
+async def test_workbench_override_queries_require_parent_contract_version():
+    class _Result:
+        def __init__(self, rows=None, scalar=None):
+            self.rows = rows or []
+            self.scalar_value = scalar
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.rows
+
+        def scalar_one_or_none(self):
+            return self.scalar_value
+
+    class _Db:
+        def __init__(self):
+            self.statements = []
+            self.target = SimpleNamespace(
+                id=10,
+                metric_code="reply",
+                metric_catalog_version=3,
+                metric_name="Reply",
+                metric_direction="higher_better",
+                is_enabled=True,
+                target_value=100,
+                achieved_value=None,
+                max_score=20,
+                penalty_enabled=False,
+                penalty_threshold=None,
+                penalty_per_unit=None,
+                penalty_max=None,
+                manual_score_enabled=False,
+                manual_score_value=None,
+                updated_at=None,
+            )
+
+        async def execute(self, statement, *_args, **_kwargs):
+            self.statements.append(statement)
+            statement_text = str(statement)
+            if "operation_metric_catalog" in statement_text:
+                return _Result(rows=[])
+            if "performance_configs" in statement_text:
+                return _Result(scalar=None)
+            if "target_breakdown" in statement_text:
+                return _Result(rows=[])
+            if "sales_targets" in statement_text:
+                return _Result(rows=[self.target])
+            return _Result(rows=[])
+
+    db = _Db()
+    await OperationPerformanceWorkbenchService(db).get_workbench("2026-08")
+
+    override_queries = [
+        statement for statement in db.statements if "target_breakdown" in str(statement)
+    ]
+    assert override_queries, "workbench must query shop overrides"
+    assert all(
+        "operation_contract_version" in str(statement)
+        and "metric_catalog_version" in str(statement)
+        for statement in override_queries
+    )
+
+
+@pytest.mark.asyncio
+async def test_copy_previous_month_reads_only_version_matched_shop_overrides(monkeypatch):
+    from backend.services import operation_performance_workbench_service as workbench_module
+
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class _Db:
+        def __init__(self):
+            self.statements = []
+
+        async def execute(self, statement, *_args, **_kwargs):
+            self.statements.append(statement)
+            return _Result()
+
+    previous = SimpleNamespace(
+        id=10,
+        metric_code="reply",
+        is_enabled=True,
+        target_value=100,
+        max_score=20,
+        penalty_enabled=False,
+        penalty_threshold=None,
+        penalty_per_unit=None,
+        penalty_max=None,
+    )
+    catalog_item = SimpleNamespace(metric_code="reply", catalog_version=3)
+
+    class _LockService:
+        def __init__(self, _db):
+            pass
+
+        async def assert_month_mutable(self, **_kwargs):
+            return None
+
+    db = _Db()
+    service = OperationPerformanceWorkbenchService(db)
+    service._targets = AsyncMock(side_effect=[[], [previous]])
+    service._catalog = AsyncMock(return_value=[catalog_item])
+    service.apply = AsyncMock(return_value={})
+    monkeypatch.setattr(workbench_module, "PayrollPeriodLockService", _LockService)
+
+    await service.copy_prev_month("2026-08")
+
+    override_query = next(
+        statement for statement in db.statements if "target_breakdown" in str(statement)
+    )
+    assert "operation_contract_version" in str(override_query)
+    assert "metric_catalog_version" in str(override_query)
+
+
+@pytest.mark.asyncio
+async def test_workbench_save_deletes_only_version_matched_shop_overrides(monkeypatch):
+    from backend.schemas.target import OperationWorkbenchApplyRequest
+    from backend.services import operation_performance_workbench_service as workbench_module
+
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class _Db:
+        def __init__(self):
+            self.statements = []
+            self.flush = AsyncMock()
+            self.commit = AsyncMock()
+
+        async def execute(self, statement, *_args, **_kwargs):
+            self.statements.append(statement)
+            return _Result()
+
+        def add(self, _row):
+            return None
+
+    class _LockService:
+        def __init__(self, _db):
+            pass
+
+        async def assert_month_mutable(self, **_kwargs):
+            return None
+
+    current = SimpleNamespace(
+        id=10,
+        metric_code="reply",
+        metric_catalog_version=3,
+        target_name="Reply",
+        target_type="operation",
+        scope_type="shop",
+        period_start=date(2026, 8, 1),
+        period_end=date(2026, 8, 31),
+        updated_at=None,
+    )
+    catalog_item = SimpleNamespace(
+        metric_code="reply",
+        metric_name="Reply",
+        metric_direction="higher_better",
+        manual_score_enabled=False,
+    )
+    config = SimpleNamespace(id=1, operation_max_score=20, updated_at=None)
+    db = _Db()
+    service = OperationPerformanceWorkbenchService(db)
+    service._catalog = AsyncMock(return_value=[catalog_item])
+    service._config = AsyncMock(return_value=config)
+    service._targets = AsyncMock(return_value=[current])
+    service.get_workbench = AsyncMock(return_value={})
+    monkeypatch.setattr(workbench_module, "PayrollPeriodLockService", _LockService)
+
+    await service.apply(
+        OperationWorkbenchApplyRequest(
+            year_month="2026-08",
+            catalog_version=3,
+            metrics=[{"metric_code": "reply", "max_score": 20}],
+        )
+    )
+
+    delete_statement = next(
+        statement for statement in db.statements if str(statement).startswith("DELETE")
+    )
+    assert "operation_contract_version" in str(delete_statement)
+    assert "metric_catalog_version" in str(delete_statement)
 
 
 def test_lower_better_zero_target_scores_zero_actual_at_full_score():

@@ -18,6 +18,9 @@ from scripts.run_current_schema_migrations import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CURRENT_OPERATION_CONTRACT_FIX = (
+    ROOT / "current_migrations" / "versions" / "20260810_operation_contract_isolation.py"
+)
 CURRENT_CONFIG = ROOT / "alembic-current.ini"
 CURRENT_BASELINE = (
     ROOT / "current_migrations" / "versions" / "20260805_current_schema_baseline.py"
@@ -204,7 +207,41 @@ def test_current_migration_files_are_isolated_from_historical_versions_and_stati
     assert "down_revision = \"current_schema_20260805\"" in increment_source
     assert "operation_metric_catalog" in increment_source
     assert "DELETE FROM a_class.target_breakdown AS duplicate" not in increment_source
-    assert "duplicate operation shop overrides require manual resolution" in increment_source
+    assert "UPDATE a_class.sales_targets" not in increment_source
+    assert "UPDATE a_class.target_breakdown" not in increment_source
+    assert "operation_contract_version" in increment_source
+    assert "metric_catalog_version IS NOT NULL" in increment_source
+
+
+def test_operation_contract_isolated_from_legacy_rows_in_the_migration_and_ssot():
+    increment_source = (
+        ROOT
+        / "current_migrations"
+        / "versions"
+        / "20260808_operation_performance_workbench.py"
+    ).read_text(encoding="utf-8")
+    business_schema_source = (
+        ROOT / "modules" / "core" / "db" / "schema_parts" / "business.py"
+    ).read_text(encoding="utf-8")
+    entrypoint_source = CURRENT_ENTRYPOINT.read_text(encoding="utf-8")
+
+    assert "operation_contract_version = Column(Integer, nullable=True" in business_schema_source
+    assert "--audit-legacy-operation-data" in entrypoint_source
+    assert "audit_legacy_operation_data" in entrypoint_source
+    assert "legacy operation data summary" in entrypoint_source
+
+
+def test_current_operation_contract_fix_is_a_followup_migration_for_existing_20260808_databases():
+    source = CURRENT_OPERATION_CONTRACT_FIX.read_text(encoding="utf-8")
+
+    assert 'revision = "current_schema_20260810_operation_contract_isolation"' in source
+    assert 'down_revision = "current_schema_20260808_operation_performance_workbench"' in source
+    assert "operation_contract_version" in source
+    assert "DROP TRIGGER IF EXISTS trg_enforce_operation_target_contract" in source
+    assert "DROP TRIGGER IF EXISTS trg_enforce_operation_breakdown_contract" in source
+    assert "DROP INDEX IF EXISTS a_class.uq_operation_target_month_metric" in source
+    assert "DROP INDEX IF EXISTS a_class.uq_operation_shop_override" in source
+    assert "IS DISTINCT FROM parent_target.metric_catalog_version" in source
 
 
 def test_unified_entrypoint_probes_before_invoking_current_alembic_writer():
@@ -216,6 +253,12 @@ def test_unified_entrypoint_probes_before_invoking_current_alembic_writer():
     assert '"-c"' in source
     assert '"alembic-current.ini"' in source
     assert "Base.metadata.create_all" not in source
+
+
+def test_current_adoption_preflight_rejects_null_or_mismatched_breakdown_versions():
+    source = CURRENT_ENTRYPOINT.read_text(encoding="utf-8")
+
+    assert "tb.operation_contract_version IS DISTINCT FROM st.metric_catalog_version" in source
 
 
 def test_operational_migration_entrypoints_delegate_to_the_fail_closed_wrapper():

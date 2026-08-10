@@ -60,6 +60,7 @@ def upgrade() -> None:
     _add_column_if_missing(connection, "sales_targets", "a_class", sa.Column("metric_catalog_version", sa.Integer(), nullable=True))
     _add_column_if_missing(connection, "sales_targets", "a_class", sa.Column("performance_config_id", sa.BigInteger(), nullable=True))
     _add_column_if_missing(connection, "sales_targets", "a_class", sa.Column("performance_config_updated_at", sa.DateTime(timezone=True), nullable=True))
+    _add_column_if_missing(connection, "target_breakdown", "a_class", sa.Column("operation_contract_version", sa.Integer(), nullable=True))
     _add_column_if_missing(connection, "employee_performance_inputs", "a_class", sa.Column("achieved_value", sa.Float(), nullable=True))
     _add_column_if_missing(connection, "employee_performance", "c_class", sa.Column("calculation_status", sa.String(32), nullable=False, server_default="historical_unknown"))
     _add_column_if_missing(connection, "employee_performance", "c_class", sa.Column("performance_source_type", sa.String(32), nullable=False, server_default="historical"))
@@ -69,72 +70,14 @@ def upgrade() -> None:
     if "performance_score" in _columns(connection, "employee_performance", "c_class"):
         op.alter_column("employee_performance", "performance_score", nullable=True, schema="c_class")
 
-    # Normalize legacy operation records and shop overrides before identity indexes.
-    connection.execute(sa.text(
-        """
-        UPDATE a_class.sales_targets
-        SET scope_type = 'shop'
-        WHERE target_type = 'operation' AND scope_type IS NULL
-        """
-    ))
-    connection.execute(sa.text(
-        """
-        UPDATE a_class.target_breakdown AS tb
-        SET breakdown_type = 'shop',
-            period_start = st.period_start,
-            period_end = st.period_end
-        FROM a_class.sales_targets AS st
-        WHERE tb.target_id = st.id
-          AND st.target_type = 'operation'
-          AND tb.breakdown_type IN ('shop', 'shop_time')
-        """
-    ))
-    invalid_operation_data = connection.execute(sa.text(
-        """
-        SELECT st.id
-        FROM a_class.sales_targets AS st
-        LEFT JOIN a_class.target_breakdown AS tb ON tb.target_id = st.id
-        WHERE st.target_type = 'operation'
-          AND (st.scope_type IS DISTINCT FROM 'shop'
-               OR st.period_start IS NULL
-               OR st.period_end IS NULL
-               OR st.period_start <> date_trunc('month', st.period_start)::date
-               OR st.period_end <> (date_trunc('month', st.period_start) + interval '1 month - 1 day')::date
-               OR NULLIF(btrim(st.metric_code), '') IS NULL
-               OR st.metric_direction NOT IN ('higher_better', 'lower_better', 'manual_score')
-               OR (tb.id IS NOT NULL AND (tb.breakdown_type IS DISTINCT FROM 'shop'
-                   OR NULLIF(btrim(tb.platform_code), '') IS NULL
-                   OR NULLIF(btrim(tb.shop_id), '') IS NULL
-                   OR tb.period_start IS DISTINCT FROM st.period_start
-                   OR tb.period_end IS DISTINCT FROM st.period_end)))
-        LIMIT 1
-        """
-    )).first()
-    if invalid_operation_data is not None:
-        raise RuntimeError(
-            "invalid operation target or shop override requires manual resolution before migration"
-        )
-    duplicate_override = connection.execute(sa.text(
-        """
-        SELECT st.id, tb.platform_code, tb.shop_id
-        FROM a_class.sales_targets AS st
-        JOIN a_class.target_breakdown AS tb ON tb.target_id = st.id
-        WHERE st.target_type = 'operation'
-          AND tb.breakdown_type = 'shop'
-        GROUP BY st.id, tb.platform_code, tb.shop_id
-        HAVING count(*) > 1
-        LIMIT 1
-        """
-    )).first()
-    if duplicate_override is not None:
-        raise RuntimeError(
-            "duplicate operation shop overrides require manual resolution before migration"
-        )
     connection.execute(sa.text(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_operation_target_month_metric
         ON a_class.sales_targets (period_start, period_end, metric_code)
-        WHERE target_type = 'operation' AND scope_type = 'shop' AND metric_code IS NOT NULL
+        WHERE target_type = 'operation'
+          AND metric_catalog_version IS NOT NULL
+          AND scope_type = 'shop'
+          AND metric_code IS NOT NULL
         """
     ))
     connection.execute(sa.text(
@@ -142,7 +85,7 @@ def upgrade() -> None:
         CREATE OR REPLACE FUNCTION a_class.enforce_operation_target_contract()
         RETURNS trigger AS $$
         BEGIN
-            IF NEW.target_type = 'operation' THEN
+            IF NEW.target_type = 'operation' AND NEW.metric_catalog_version IS NOT NULL THEN
                 IF NEW.scope_type IS DISTINCT FROM 'shop' THEN
                     RAISE EXCEPTION 'operation targets require scope_type=shop';
                 END IF;
@@ -175,7 +118,10 @@ def upgrade() -> None:
             parent_target a_class.sales_targets%ROWTYPE;
         BEGIN
             SELECT * INTO parent_target FROM a_class.sales_targets WHERE id = NEW.target_id;
-            IF FOUND AND parent_target.target_type = 'operation' THEN
+            IF FOUND
+               AND parent_target.target_type = 'operation'
+               AND parent_target.metric_catalog_version IS NOT NULL
+               AND NEW.operation_contract_version = parent_target.metric_catalog_version THEN
                 IF NEW.breakdown_type IS DISTINCT FROM 'shop' THEN
                     RAISE EXCEPTION 'operation targets only allow shop breakdowns';
                 END IF;
@@ -201,8 +147,9 @@ def upgrade() -> None:
     connection.execute(sa.text(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_operation_shop_override
-        ON a_class.target_breakdown (target_id, breakdown_type, platform_code, shop_id)
-        WHERE breakdown_type = 'shop'
+        ON a_class.target_breakdown
+            (target_id, operation_contract_version, breakdown_type, platform_code, shop_id)
+        WHERE breakdown_type = 'shop' AND operation_contract_version IS NOT NULL
         """
     ))
 

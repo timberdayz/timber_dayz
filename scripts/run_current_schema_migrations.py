@@ -230,68 +230,224 @@ def choose_migration_action(
     return "stamp"
 
 
-def assert_legacy_adoption_data_is_safe(database_url: str) -> None:
-    """Reject legacy operation data that cannot satisfy the current contract."""
+def _has_column(connection, table: str, column: str, schema: str = "a_class") -> bool:
+    if not inspect(connection).has_table(table, schema=schema):
+        return False
+    return column in {item["name"] for item in inspect(connection).get_columns(table, schema=schema)}
+
+
+def _operation_audit_category(connection, query: str) -> dict[str, Any]:
+    count = connection.execute(
+        text(f"SELECT count(*) FROM ({query}) AS operation_audit_rows")
+    ).scalar_one()
+    rows = connection.execute(text(f"{query} LIMIT 10")).scalars().all()
+    return {"count": int(count), "ids": [int(row) for row in rows]}
+
+
+def audit_legacy_operation_data(database_url: str) -> dict[str, Any]:
+    """Return a read-only summary of historical operation records outside the current contract."""
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            invalid_target = connection.execute(
-                text(
-                    """
-                    SELECT id
-                    FROM a_class.sales_targets
-                    WHERE target_type = 'operation'
-                      AND (scope_type IS DISTINCT FROM 'shop'
-                           OR period_start IS NULL
-                           OR period_end IS NULL
-                           OR period_start <> date_trunc('month', period_start)::date
-                           OR period_end <> (date_trunc('month', period_start) + interval '1 month - 1 day')::date
-                           OR NULLIF(btrim(metric_code), '') IS NULL
-                           OR metric_direction NOT IN ('higher_better', 'lower_better', 'manual_score'))
-                    LIMIT 1
-                    """
-                )
-            ).first()
-            invalid_override = connection.execute(
-                text(
-                    """
+            current_contract_available = _has_column(
+                connection, "sales_targets", "metric_catalog_version"
+            )
+            legacy_where = (
+                "st.target_type = 'operation' AND st.metric_catalog_version IS NULL"
+                if current_contract_available
+                else "st.target_type = 'operation'"
+            )
+            legacy_count = connection.execute(
+                text(f"SELECT count(*) FROM a_class.sales_targets AS st WHERE {legacy_where}")
+            ).scalar_one()
+            categories = {
+                "missing_metric_code": _operation_audit_category(
+                    connection,
+                    f"""
+                    SELECT st.id FROM a_class.sales_targets AS st
+                    WHERE {legacy_where} AND NULLIF(btrim(st.metric_code), '') IS NULL
+                    ORDER BY st.id
+                    """,
+                ),
+                "missing_metric_direction": _operation_audit_category(
+                    connection,
+                    f"""
+                    SELECT st.id FROM a_class.sales_targets AS st
+                    WHERE {legacy_where}
+                      AND (st.metric_direction IS NULL
+                           OR st.metric_direction NOT IN ('higher_better', 'lower_better', 'manual_score'))
+                    ORDER BY st.id
+                    """,
+                ),
+                "non_calendar_month": _operation_audit_category(
+                    connection,
+                    f"""
+                    SELECT st.id FROM a_class.sales_targets AS st
+                    WHERE {legacy_where}
+                      AND (st.period_start IS NULL OR st.period_end IS NULL
+                           OR st.period_start <> date_trunc('month', st.period_start)::date
+                           OR st.period_end <> (date_trunc('month', st.period_start) + interval '1 month - 1 day')::date)
+                    ORDER BY st.id
+                    """,
+                ),
+                "missing_shop_scope": _operation_audit_category(
+                    connection,
+                    f"""
+                    SELECT st.id FROM a_class.sales_targets AS st
+                    WHERE {legacy_where} AND st.scope_type IS DISTINCT FROM 'shop'
+                    ORDER BY st.id
+                    """,
+                ),
+                "incomplete_override": _operation_audit_category(
+                    connection,
+                    f"""
                     SELECT tb.id
                     FROM a_class.target_breakdown AS tb
                     JOIN a_class.sales_targets AS st ON st.id = tb.target_id
-                    WHERE st.target_type = 'operation'
+                    WHERE {legacy_where}
                       AND (tb.breakdown_type NOT IN ('shop', 'shop_time')
                            OR NULLIF(btrim(tb.platform_code), '') IS NULL
                            OR NULLIF(btrim(tb.shop_id), '') IS NULL
                            OR tb.period_start IS DISTINCT FROM st.period_start
                            OR tb.period_end IS DISTINCT FROM st.period_end)
-                    LIMIT 1
-                    """
-                )
-            ).first()
-            duplicate = connection.execute(
-                text(
-                    """
-                    SELECT st.id, tb.platform_code, tb.shop_id
-                    FROM a_class.sales_targets AS st
-                    JOIN a_class.target_breakdown AS tb ON tb.target_id = st.id
-                    WHERE st.target_type = 'operation'
-                      AND tb.breakdown_type IN ('shop', 'shop_time')
-                    GROUP BY st.id, tb.platform_code, tb.shop_id
-                    HAVING count(*) > 1
-                    LIMIT 1
-                    """
-                )
-            ).first()
+                    ORDER BY tb.id
+                    """,
+                ),
+                "duplicate_override": _operation_audit_category(
+                    connection,
+                    f"""
+                    SELECT duplicate_rows.id
+                    FROM (
+                        SELECT tb.id,
+                               count(*) OVER (
+                                   PARTITION BY st.id, tb.platform_code, tb.shop_id
+                               ) AS duplicate_count
+                        FROM a_class.target_breakdown AS tb
+                        JOIN a_class.sales_targets AS st ON st.id = tb.target_id
+                        WHERE {legacy_where}
+                          AND tb.breakdown_type IN ('shop', 'shop_time')
+                    ) AS duplicate_rows
+                    WHERE duplicate_rows.duplicate_count > 1
+                    ORDER BY duplicate_rows.id
+                    """,
+                ),
+            }
     finally:
         engine.dispose()
-    if invalid_target is not None or invalid_override is not None:
-        raise MigrationSafetyError(
-            "invalid operation target or shop override requires manual resolution before adoption"
+    return {"legacy_count": int(legacy_count), **categories}
+
+
+def assert_legacy_adoption_data_is_safe(database_url: str) -> dict[str, Any]:
+    """Fail closed only for invalid records explicitly marked as current contract data."""
+    current_target = None
+    version_mismatch = None
+    current_override = None
+    duplicate_override = None
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            inspector = inspect(connection)
+            if not inspector.has_table("sales_targets", schema="a_class"):
+                return {}
+            if _has_column(connection, "sales_targets", "metric_catalog_version"):
+                current_target = connection.execute(
+                    text(
+                        """
+                        SELECT id FROM a_class.sales_targets
+                        WHERE target_type = 'operation' AND metric_catalog_version IS NOT NULL
+                          AND (scope_type IS DISTINCT FROM 'shop'
+                               OR period_start IS NULL OR period_end IS NULL
+                               OR period_start <> date_trunc('month', period_start)::date
+                               OR period_end <> (date_trunc('month', period_start) + interval '1 month - 1 day')::date
+                               OR NULLIF(btrim(metric_code), '') IS NULL
+                               OR metric_direction NOT IN ('higher_better', 'lower_better', 'manual_score'))
+                        LIMIT 1
+                        """
+                    )
+                ).first()
+                if _has_column(connection, "target_breakdown", "operation_contract_version"):
+                    version_mismatch = connection.execute(
+                        text(
+                            """
+                            SELECT tb.id FROM a_class.target_breakdown AS tb
+                            JOIN a_class.sales_targets AS st ON st.id = tb.target_id
+                            WHERE st.target_type = 'operation'
+                              AND st.metric_catalog_version IS NOT NULL
+                              AND tb.operation_contract_version IS DISTINCT FROM st.metric_catalog_version
+                            LIMIT 1
+                            """
+                        )
+                    ).first()
+                    current_override = connection.execute(
+                        text(
+                            """
+                            SELECT tb.id FROM a_class.target_breakdown AS tb
+                            JOIN a_class.sales_targets AS st ON st.id = tb.target_id
+                            WHERE st.target_type = 'operation'
+                              AND st.metric_catalog_version IS NOT NULL
+                              AND tb.operation_contract_version = st.metric_catalog_version
+                              AND (tb.breakdown_type IS DISTINCT FROM 'shop'
+                                   OR NULLIF(btrim(tb.platform_code), '') IS NULL
+                                   OR NULLIF(btrim(tb.shop_id), '') IS NULL
+                                   OR tb.period_start IS DISTINCT FROM st.period_start
+                                   OR tb.period_end IS DISTINCT FROM st.period_end)
+                            LIMIT 1
+                            """
+                        )
+                    ).first()
+                    duplicate_override = connection.execute(
+                        text(
+                            """
+                            SELECT tb.target_id FROM a_class.target_breakdown AS tb
+                            JOIN a_class.sales_targets AS st ON st.id = tb.target_id
+                            WHERE st.target_type = 'operation'
+                              AND st.metric_catalog_version IS NOT NULL
+                              AND tb.operation_contract_version = st.metric_catalog_version
+                              AND tb.breakdown_type = 'shop'
+                            GROUP BY tb.target_id, tb.operation_contract_version, tb.platform_code, tb.shop_id
+                            HAVING count(*) > 1
+                            LIMIT 1
+                            """
+                        )
+                    ).first()
+    finally:
+        engine.dispose()
+    if (
+        current_target is not None
+        or version_mismatch is not None
+        or current_override is not None
+        or duplicate_override is not None
+    ):
+        raise MigrationSafetyError("invalid current operation contract data requires manual resolution before adoption")
+    return audit_legacy_operation_data(database_url)
+
+
+def preflight_current_schema_migrations(
+    database_url: str,
+    *,
+    expected_source_revision: str | None,
+    expected_source_fingerprint: str | None,
+) -> str:
+    """Resolve the allowed migration action without invoking any writer."""
+    state = probe_migration_state(database_url)
+    action = choose_migration_action(
+        state,
+        expected_source_revision=expected_source_revision,
+        expected_source_fingerprint=expected_source_fingerprint,
+        supported_current_revisions=get_supported_current_revisions(),
+    )
+    if action == "stamp" or not state.database_empty:
+        legacy_audit = assert_legacy_adoption_data_is_safe(database_url)
+        legacy_summary = (
+            {
+                key: value.get("count") if isinstance(value, dict) else value
+                for key, value in legacy_audit.items()
+            }
+            if isinstance(legacy_audit, dict)
+            else {}
         )
-    if duplicate is not None:
-        raise MigrationSafetyError(
-            "duplicate operation shop overrides require manual resolution before adoption"
-        )
+        print(f"[INFO] legacy operation data summary: {json.dumps(legacy_summary, sort_keys=True)}")
+    return action
 
 
 def run_current_schema_migrations(
@@ -300,20 +456,16 @@ def run_current_schema_migrations(
     expected_source_revision: str | None,
     expected_source_fingerprint: str | None,
 ) -> str:
-    state = probe_migration_state(database_url)
-    action = choose_migration_action(
-        state,
+    action = preflight_current_schema_migrations(
+        database_url,
         expected_source_revision=expected_source_revision,
         expected_source_fingerprint=expected_source_fingerprint,
-        supported_current_revisions=get_supported_current_revisions(),
     )
     commands = (
         [("stamp", get_current_schema_baseline_revision()), ("upgrade", "head")]
         if action == "stamp"
         else [("upgrade", "head")]
     )
-    if action == "stamp":
-        assert_legacy_adoption_data_is_safe(database_url)
     for command, revision in commands:
         result = subprocess.run(
             [
@@ -347,6 +499,8 @@ def main() -> int:
         default=os.getenv("CURRENT_SCHEMA_SOURCE_FINGERPRINT"),
     )
     parser.add_argument("--print-schema-fingerprint", action="store_true")
+    parser.add_argument("--audit-legacy-operation-data", action="store_true")
+    parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args()
 
     database_url = (args.database_url or "").strip()
@@ -357,12 +511,19 @@ def main() -> int:
         state = probe_migration_state(database_url)
         print(state.schema_fingerprint)
         return 0
+    if args.audit_legacy_operation_data:
+        print(json.dumps(audit_legacy_operation_data(database_url), sort_keys=True))
+        return 0
 
     try:
-        action = run_current_schema_migrations(
-            database_url,
-            expected_source_revision=(args.source_revision or "").strip() or None,
-            expected_source_fingerprint=(args.source_fingerprint or "").strip() or None,
+        migration_options = {
+            "expected_source_revision": (args.source_revision or "").strip() or None,
+            "expected_source_fingerprint": (args.source_fingerprint or "").strip() or None,
+        }
+        action = (
+            preflight_current_schema_migrations(database_url, **migration_options)
+            if args.preflight_only
+            else run_current_schema_migrations(database_url, **migration_options)
         )
     except MigrationSafetyError as exc:
         print(f"[FAIL] Current-schema migration preflight rejected write: {exc}", file=sys.stderr)
@@ -371,7 +532,8 @@ def main() -> int:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1
 
-    print(f"[OK] Current-schema migration action completed: {action}")
+    status = "preflight passed" if args.preflight_only else "migration action completed"
+    print(f"[OK] Current-schema {status}: {action}")
     return 0
 
 
