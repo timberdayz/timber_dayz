@@ -1,0 +1,66 @@
+<h2>运营绩效现状：录入链路与个人绩效的断点</h2>
+<p class="subtitle">基于当前页面、接口和 2026-07 实际数据。蓝色为已存在流程，橙色为导致个人绩效没有有效内容的断点。</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">当前月度流程</div>
+    <div class="mockup-body">
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:12px;align-items:stretch">
+        <div style="padding:14px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:6px">
+          <div class="label">01</div>
+          <strong>运营目标页面</strong>
+          <p style="margin:8px 0 0">每个指标单独点“新建”</p>
+        </div>
+        <div style="padding:14px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:6px">
+          <div class="label">02</div>
+          <strong>独立目标记录</strong>
+          <p style="margin:8px 0 0">月份、目标、实际、满分、规则都重复填写</p>
+        </div>
+        <div style="padding:14px;border:1px solid #fed7aa;background:#fff7ed;border-radius:6px">
+          <div class="label">03</div>
+          <strong>店铺运营得分</strong>
+          <p style="margin:8px 0 0">还需要运营已计算、利润目标和利润结算均就绪</p>
+        </div>
+        <div style="padding:14px;border:1px solid #fed7aa;background:#fff7ed;border-radius:6px">
+          <div class="label">04</div>
+          <strong>正式店铺绩效</strong>
+          <p style="margin:8px 0 0">非正式结果不能传给个人绩效</p>
+        </div>
+        <div style="padding:14px;border:1px solid #fee2e2;background:#fff1f2;border-radius:6px">
+          <div class="label">05</div>
+          <strong>个人绩效</strong>
+          <p style="margin:8px 0 0">无个人输入且无正式店铺分时，当前会写入 0.0 并排名</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">已确认的当前设计</div>
+    <div class="mockup-body">
+      <ul>
+        <li>运营目标当前仅支持“店铺范围”，不直接生成个人绩效。</li>
+        <li>固定可选指标为满意度、客诉、回复及时率、培训检核、考试、其他人工项。</li>
+        <li>每个指标是一条通用目标记录；页面按记录列出，不会自动补齐本月缺少的指标。</li>
+        <li>店铺目标工作台已有“复制上月目标”，运营目标页面没有等价能力。</li>
+      </ul>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">2026-07 的真实断点</div>
+    <div class="mockup-body">
+      <ul>
+        <li>个人绩效输入项：0 条。</li>
+        <li>运营目标：0 条；运营实绩：0 条。</li>
+        <li>店铺绩效结果：0 条；利润基准虽有 6 条，但均未锁定。</li>
+        <li>结果：4 位员工均显示 0.0，仍被编号为第 1 至第 4 名。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p><strong>结论：</strong>需要同时解决两个问题：把运营指标变为“每月完整的可维护清单”，并为个人绩效提供明确的可计算来源与未就绪状态。只增加“复制上月”不能独自修复个人绩效。</p>
+</div>
