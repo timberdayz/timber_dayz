@@ -161,6 +161,17 @@ def test_rebuild_cli_loads_collection_environment_before_resolving_database_url(
     assert os.getenv("DATABASE_URL") == captured["database_url"]
 
 
+def test_direct_rebuild_script_adds_project_root_before_loading_environment():
+    source = (Path("scripts") / "rebuild_local_current_schema.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'sys.path.insert(0, str(ROOT))' in source
+    assert source.index('sys.path.insert(0, str(ROOT))') < source.index(
+        "from backend.utils.project_env import load_project_env"
+    )
+
+
 def test_rebuild_rejects_an_active_local_collection_backend_before_backup(monkeypatch):
     monkeypatch.setattr(
         rebuild,

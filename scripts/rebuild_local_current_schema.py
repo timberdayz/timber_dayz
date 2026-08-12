@@ -16,6 +16,10 @@ import psutil
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 try:
     from backend.utils.project_env import load_project_env
 except ModuleNotFoundError:  # Direct `python scripts/...` execution on Windows.
@@ -49,7 +53,6 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution on Windows.
     )
 
 
-ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_DATABASE = "xihong_erp"
 EXPECTED_CONTAINER = DEFAULT_POSTGRES_CONTAINER
 EXPECTED_PORT = 15432
