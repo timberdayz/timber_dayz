@@ -112,7 +112,7 @@ def supervisor(tmp_path: Path, runtime: FakeRuntime) -> LocalProcessSupervisor:
     )
 
 
-def test_service_specs_use_only_the_two_approved_commands(tmp_path: Path):
+def test_local_collection_console_uses_the_development_startup_wrapper(tmp_path: Path):
     specs = build_service_specs(tmp_path, python_executable="python-test")
 
     assert set(specs) == {LOCAL_COLLECTION, INSPECTION_PANEL}
@@ -124,7 +124,8 @@ def test_service_specs_use_only_the_two_approved_commands(tmp_path: Path):
         "-Command",
     )
     assert "OutputEncoding" in specs[LOCAL_COLLECTION].command[5]
-    assert "start_collection_formal.ps1" in specs[LOCAL_COLLECTION].command[5]
+    assert "start_local_collection_mode.ps1" in specs[LOCAL_COLLECTION].command[5]
+    assert "start_collection_formal.ps1" not in specs[LOCAL_COLLECTION].command[5]
     assert specs[INSPECTION_PANEL].command == (
         "python-test",
         "-u",

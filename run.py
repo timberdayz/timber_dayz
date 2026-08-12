@@ -1834,6 +1834,18 @@ def main():
             if not ensure_local_schema_ready():
                 raise SystemExit(1)
 
+            if args.local:
+                local_admin_result = subprocess.run(
+                    [sys.executable, str(project_root / "scripts" / "ensure_local_dev_admin.py")],
+                    cwd=project_root,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                )
+                if local_admin_result.returncode != 0:
+                    safe_print("  [ERROR] 本地开发账号初始化失败")
+                    raise SystemExit(local_admin_result.returncode)
+
             if not ensure_postgresql_dashboard_assets(project_root):
                 safe_print("\n[ERROR] PostgreSQL Dashboard 资产检查失败")
                 raise SystemExit(1)

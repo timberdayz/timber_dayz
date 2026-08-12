@@ -49,12 +49,22 @@ def test_formal_collection_start_script_emits_machine_readable_failure_protocol(
     assert "throw \"current-schema migration failed" not in text
 
 
-def test_local_collection_start_script_keeps_development_preflight():
+def test_local_collection_start_script_uses_local_development_preflight():
     script = PROJECT_ROOT / "scripts" / "start_local_collection_mode.ps1"
     text = script.read_text(encoding="utf-8")
 
-    assert "--profile collection" in text
+    assert 'XIHONG_ENV_PROFILE = "development"' in text
+    assert "check_local_run_env.py" not in text
     assert "--require-cloud-tunnel" not in text
+
+
+def test_local_run_initializes_opt_in_admin_only_after_schema_is_ready():
+    text = (PROJECT_ROOT / "run.py").read_text(encoding="utf-8")
+
+    schema_check = text.index("if not ensure_local_schema_ready():")
+    admin_initializer = text.index("ensure_local_dev_admin.py")
+
+    assert schema_check < admin_initializer
 
 
 def test_collection_local_example_uses_remote_localhost_proxy_port():
