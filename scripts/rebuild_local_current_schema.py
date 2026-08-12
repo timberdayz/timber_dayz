@@ -16,6 +16,11 @@ import psutil
 from sqlalchemy.engine import make_url
 
 try:
+    from backend.utils.project_env import load_project_env
+except ModuleNotFoundError:  # Direct `python scripts/...` execution on Windows.
+    load_project_env = None  # type: ignore[assignment]
+
+try:
     from scripts.local_migration_backup import (
         DEFAULT_BACKUP_DIRECTORY,
         DEFAULT_POSTGRES_CONTAINER,
@@ -83,6 +88,22 @@ def _normalized_local_database_url(database_url: str) -> str:
     return str(url.set(drivername="postgresql"))
 
 
+def _docker_context_endpoint() -> str:
+    result = subprocess.run(
+        ["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _assert_local_docker_daemon() -> None:
+    endpoint = os.getenv("DOCKER_HOST", "").strip() or _docker_context_endpoint()
+    if not endpoint.casefold().startswith("npipe:////./pipe/"):
+        raise RebuildSafetyError("local rebuild requires the local Docker daemon")
+
+
 def _local_collection_backend_running(process_iterator: Callable[[], Iterable[Any]]) -> bool:
     for process in process_iterator():
         try:
@@ -134,6 +155,60 @@ def _assert_no_active_connections(
         raise RebuildSafetyError("local rebuild connection inspection returned invalid data") from exc
     if active_connections:
         raise RebuildSafetyError("local rebuild refused because the database has active connections")
+
+
+def _assert_target_container_port_mapping(docker_runner: Callable[..., Any]) -> None:
+    result = _docker_result(
+        [
+            "docker",
+            "inspect",
+            "--format",
+            "{{json .NetworkSettings.Ports}}",
+            EXPECTED_CONTAINER,
+        ],
+        docker_runner,
+        message="local rebuild could not inspect the target container",
+    )
+    try:
+        mappings = json.loads(result.stdout)
+        postgres_mappings = mappings["5432/tcp"]
+    except (TypeError, ValueError, KeyError) as exc:
+        raise RebuildSafetyError("local rebuild target container port mapping is invalid") from exc
+    if not isinstance(postgres_mappings, list) or not any(
+        isinstance(mapping, dict)
+        and mapping.get("HostPort") == str(EXPECTED_PORT)
+        for mapping in postgres_mappings
+    ):
+        raise RebuildSafetyError(
+            "local rebuild target container port mapping does not match the database URL"
+        )
+
+
+def _set_database_connection_policy(
+    database: str,
+    username: str,
+    allow_connections: bool,
+    docker_runner: Callable[..., Any],
+) -> None:
+    policy = "true" if allow_connections else "false"
+    _docker_result(
+        [
+            "docker",
+            "exec",
+            EXPECTED_CONTAINER,
+            "psql",
+            "-U",
+            username,
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f'ALTER DATABASE "{database}" WITH ALLOW_CONNECTIONS {policy}',
+        ],
+        docker_runner,
+        message="local rebuild could not update the database connection policy",
+    )
 
 
 def _run_checked_command(
@@ -201,8 +276,10 @@ def rebuild_local_current_schema(
         raise RebuildSafetyError("local rebuild requires the exact confirmation phrase")
     database, username = _validate_local_target(database_url)
     database_url = _normalized_local_database_url(database_url)
+    _assert_local_docker_daemon()
     if _local_collection_backend_running(process_iterator):
         raise RebuildSafetyError("local rebuild refused while the collection backend is running")
+    _assert_target_container_port_mapping(docker_runner)
     _assert_no_active_connections(database, username, docker_runner)
 
     state = migration_state_probe(database_url)
@@ -220,22 +297,33 @@ def rebuild_local_current_schema(
             )
     except BackupValidationError as exc:
         raise RebuildSafetyError("local rebuild backup validation failed") from exc
-    _assert_no_active_connections(database, username, docker_runner)
-
-    _docker_result(
-        [
-            "docker",
-            "exec",
-            EXPECTED_CONTAINER,
-            "dropdb",
-            "-U",
-            username,
-            "--maintenance-db=postgres",
-            database,
-        ],
-        docker_runner,
-        message="local rebuild could not drop xihong_erp",
-    )
+    connections_disabled = False
+    try:
+        _set_database_connection_policy(database, username, False, docker_runner)
+        connections_disabled = True
+        _assert_no_active_connections(database, username, docker_runner)
+        _docker_result(
+            [
+                "docker",
+                "exec",
+                EXPECTED_CONTAINER,
+                "dropdb",
+                "-U",
+                username,
+                "--maintenance-db=postgres",
+                database,
+            ],
+            docker_runner,
+            message="local rebuild could not drop xihong_erp",
+        )
+        connections_disabled = False
+    except Exception:
+        if connections_disabled:
+            try:
+                _set_database_connection_policy(database, username, True, docker_runner)
+            except RebuildSafetyError:
+                pass
+        raise
     _docker_result(
         [
             "docker",
@@ -305,12 +393,15 @@ def rebuild_local_current_schema(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
+    parser.add_argument("--database-url")
     parser.add_argument("--confirm", default="")
     args = parser.parse_args(argv)
+    if load_project_env is not None:
+        load_project_env(ROOT, profile="collection", override=True)
+    database_url = args.database_url or os.getenv("DATABASE_URL")
     try:
         result = rebuild_local_current_schema(
-            (args.database_url or "").strip(), confirmation=args.confirm
+            (database_url or "").strip(), confirmation=args.confirm
         )
     except (RebuildSafetyError, BackupValidationError) as exc:
         print(f"[FAIL] local rebuild refused: {exc}", file=sys.stderr)
