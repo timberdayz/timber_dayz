@@ -82,11 +82,28 @@ function renderService(service) {
   const startButton = card.querySelector('[data-action="start"]');
   const openButton = card.querySelector('[data-action="open"]');
   const stopButton = card.querySelector('[data-action="stop"]');
+  const diagnostic = card.querySelector('[data-role="diagnostic"]');
+  const failureCode = card.querySelector('[data-role="failure-code"]');
+  const failureSummary = card.querySelector('[data-role="failure-summary"]');
+  const recoveryHint = card.querySelector('[data-role="recovery-hint"]');
+  const launchStage = card.querySelector('[data-role="launch-stage"]');
+  const lastSuccess = card.querySelector('[data-role="last-success"]');
 
   stateBadge.textContent = STATE_LABELS[state] || state;
   stateBadge.className = `state-badge ${state}`;
-  message.textContent = service.last_error || DEFAULT_MESSAGES[state] || '';
+  message.textContent = service.last_failure_summary || service.last_error || DEFAULT_MESSAGES[state] || '';
   message.classList.toggle('error', state === 'failed');
+  const hasDiagnostic = Boolean(
+    service.failure_code || service.last_failure_summary || service.recovery_hint || service.launch_stage || service.last_success_at
+  );
+  diagnostic.hidden = !hasDiagnostic;
+  failureCode.textContent = service.failure_code ? `故障代码: ${service.failure_code}` : '';
+  failureSummary.textContent = service.last_failure_summary || '';
+  recoveryHint.textContent = service.recovery_hint ? `恢复建议: ${service.recovery_hint}` : '';
+  launchStage.textContent = service.launch_stage ? `启动阶段: ${service.launch_stage}` : '';
+  lastSuccess.textContent = service.last_success_at
+    ? `最近成功: ${new Date(service.last_success_at * 1000).toLocaleString('zh-CN', { hour12: false })}`
+    : '';
 
   startButton.disabled = !['stopped', 'failed'].includes(state);
   openButton.disabled = state !== 'running' || !service.launch_url;

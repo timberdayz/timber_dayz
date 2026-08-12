@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,12 +18,34 @@ from sqlalchemy import create_engine, inspect, text
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
+try:
+    from scripts.local_migration_backup import (
+        BackupValidationError,
+        create_and_verify_backup,
+        verify_backup_metadata,
+    )
+except ModuleNotFoundError:  # Direct `python scripts/...` execution on Windows.
+    from local_migration_backup import (  # type: ignore[no-redef]
+        BackupValidationError,
+        create_and_verify_backup,
+        verify_backup_metadata,
+    )
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_VERSION_TABLE = "current_schema_alembic_version"
 LEGACY_VERSION_TABLE = "alembic_version"
 SYSTEM_SCHEMAS = {"information_schema", "pg_catalog", "pg_toast"}
 SUPPORT_POLICY_PATH = ROOT / "current_migrations" / "support_policy.json"
+MIGRATION_FAILURE_CODES = {
+    "unapproved": "migration_unapproved_source",
+    "drift": "migration_schema_drift",
+    "backup": "migration_backup_failed",
+    "environment": "environment_invalid",
+    "lock": "migration_lock_unavailable",
+}
+MIGRATION_LOCK_KEY = 848_010_247
+LOCAL_BACKUP_GUARD_ENV = "XIHONG_REQUIRE_LOCAL_MIGRATION_BACKUP"
 
 
 class MigrationSafetyError(RuntimeError):
@@ -35,6 +58,36 @@ class MigrationState:
     current_revision: str | None
     legacy_revision: str | None
     schema_fingerprint: str | None
+
+
+@dataclass(frozen=True)
+class MigrationDiagnosis:
+    """Sanitized, read-only evidence for an operator-facing migration decision."""
+
+    database_empty: bool
+    current_revision: str | None
+    legacy_revision: str | None
+    action: str | None
+    failure_code: str | None
+    failure_summary: str | None
+    recommended_action: str
+    actual_fingerprint: str | None
+    approved_fingerprint: str | None
+    object_summary: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "database_empty": self.database_empty,
+            "current_revision": self.current_revision,
+            "legacy_revision": self.legacy_revision,
+            "action": self.action,
+            "failure_code": self.failure_code,
+            "failure_summary": self.failure_summary,
+            "recommended_action": self.recommended_action,
+            "actual_fingerprint": self.actual_fingerprint,
+            "approved_fingerprint": self.approved_fingerprint,
+            "object_summary": self.object_summary,
+        }
 
 
 def _normalize(value: Any) -> str | None:
@@ -69,13 +122,17 @@ def schema_fingerprint(connection, inspector=None) -> str:
     """Build a stable, read-only fingerprint from PostgreSQL schema metadata."""
     inspector = inspector or inspect(connection)
     tables: list[dict[str, Any]] = []
-    ignored_tables = {CURRENT_VERSION_TABLE, LEGACY_VERSION_TABLE}
+    ignored_version_tables = {
+        ("public", CURRENT_VERSION_TABLE),
+        ("public", LEGACY_VERSION_TABLE),
+        ("core", LEGACY_VERSION_TABLE),
+    }
 
     for schema in sorted(inspector.get_schema_names()):
         if schema in SYSTEM_SCHEMAS:
             continue
         for table in sorted(inspector.get_table_names(schema=schema)):
-            if table in ignored_tables:
+            if (schema, table) in ignored_version_tables:
                 continue
             columns = [
                 {
@@ -196,6 +253,217 @@ def _approved_legacy_source(legacy_revision: str | None) -> dict[str, str] | Non
     return None
 
 
+def _validate_approved_manifest(source: dict[str, Any]) -> None:
+    """Verify version-controlled approval evidence before allowing a legacy stamp."""
+    required_keys = {
+        "manifest_version",
+        "manifest_path",
+        "manifest_sha256",
+        "approval_note",
+    }
+    if not required_keys.issubset(source):
+        raise MigrationSafetyError("approved legacy source manifest metadata is incomplete")
+    manifest_path = Path(str(source["manifest_path"]))
+    if not manifest_path.is_absolute():
+        manifest_path = ROOT / manifest_path
+    try:
+        content = manifest_path.read_bytes()
+    except OSError as exc:
+        raise MigrationSafetyError("approved legacy source manifest is unavailable") from exc
+    actual_hash = hashlib.sha256(content).hexdigest()
+    if actual_hash != source["manifest_sha256"]:
+        raise MigrationSafetyError("approved legacy source manifest integrity check failed")
+    try:
+        manifest = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MigrationSafetyError("approved legacy source manifest is invalid") from exc
+    if (
+        manifest.get("manifest_version") != source["manifest_version"]
+        or manifest.get("legacy_revision") != source["legacy_revision"]
+        or manifest.get("schema_fingerprint") != source["schema_fingerprint"]
+        or manifest.get("baseline_revision") != source["baseline_revision"]
+    ):
+        raise MigrationSafetyError("approved legacy source manifest does not match policy")
+
+
+def failure_code_for(exc: BaseException) -> str:
+    """Map fail-closed failures to a small protocol shared with the launcher."""
+    message = str(exc).lower()
+    if "backup" in message:
+        return MIGRATION_FAILURE_CODES["backup"]
+    if "migration lock" in message:
+        return MIGRATION_FAILURE_CODES["lock"]
+    if "fingerprint" in message or "schema drift" in message:
+        return MIGRATION_FAILURE_CODES["drift"]
+    if "approved legacy source" in message or "approved legacy" in message:
+        return MIGRATION_FAILURE_CODES["unapproved"]
+    return MIGRATION_FAILURE_CODES["environment"]
+
+
+@contextmanager
+def migration_advisory_lock(database_url: str):
+    """Serialize write-side migration attempts without blocking read-only diagnosis."""
+    engine = create_engine(database_url)
+    connection = engine.connect()
+    acquired = False
+    try:
+        acquired = bool(
+            connection.execute(
+                text("SELECT pg_try_advisory_lock(:lock_key)"),
+                {"lock_key": MIGRATION_LOCK_KEY},
+            ).scalar_one()
+        )
+        if not acquired:
+            raise MigrationSafetyError("migration lock is already held by another process")
+        yield
+    finally:
+        try:
+            if acquired:
+                connection.execute(
+                    text("SELECT pg_advisory_unlock(:lock_key)"),
+                    {"lock_key": MIGRATION_LOCK_KEY},
+                )
+        finally:
+            connection.close()
+            engine.dispose()
+
+
+def schema_object_summary(database_url: str) -> dict[str, Any]:
+    """Return bounded structural evidence without business rows or credentials."""
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            inspector = inspect(connection)
+            summary: dict[str, list[dict[str, Any]]] = {
+                "tables": [],
+                "columns": [],
+                "primary_keys": [],
+                "unique_constraints": [],
+                "foreign_keys": [],
+                "check_constraints": [],
+                "indexes": [],
+                "views": [],
+                "materialized_views": [],
+                "functions": [],
+                "triggers": [],
+                "types": [],
+                "extensions": [],
+            }
+            for schema in sorted(inspector.get_schema_names()):
+                if schema in SYSTEM_SCHEMAS:
+                    continue
+                for table in sorted(inspector.get_table_names(schema=schema)):
+                    if (schema, table) in {
+                        ("public", CURRENT_VERSION_TABLE),
+                        ("public", LEGACY_VERSION_TABLE),
+                        ("core", LEGACY_VERSION_TABLE),
+                    }:
+                        continue
+                    summary["tables"].append({"schema": schema, "name": table})
+                    summary["columns"].append(
+                        {
+                            "schema": schema,
+                            "table": table,
+                            "columns": [
+                                {
+                                    "name": column["name"],
+                                    "type": _normalize(column.get("type")),
+                                    "nullable": bool(column.get("nullable")),
+                                    "default": _normalize(column.get("default")),
+                                }
+                                for column in inspector.get_columns(table, schema=schema)
+                            ],
+                        }
+                    )
+                    primary_key = inspector.get_pk_constraint(table, schema=schema)
+                    if primary_key.get("constrained_columns"):
+                        summary["primary_keys"].append(
+                            {"schema": schema, "table": table, "columns": primary_key["constrained_columns"]}
+                        )
+                    for constraint in inspector.get_unique_constraints(table, schema=schema):
+                        summary["unique_constraints"].append(
+                            {"schema": schema, "table": table, "columns": constraint.get("column_names") or []}
+                        )
+                    for foreign_key in inspector.get_foreign_keys(table, schema=schema):
+                        summary["foreign_keys"].append(
+                            {"schema": schema, "table": table, "columns": foreign_key.get("constrained_columns") or []}
+                        )
+                    for constraint in inspector.get_check_constraints(table, schema=schema):
+                        summary["check_constraints"].append(
+                            {"schema": schema, "table": table, "name": constraint.get("name")}
+                        )
+                    for index in inspector.get_indexes(table, schema=schema):
+                        summary["indexes"].append(
+                            {"schema": schema, "table": table, "name": index.get("name")}
+                        )
+                summary["views"].extend(
+                    {"schema": schema, "name": name}
+                    for name in inspector.get_view_names(schema=schema)
+                )
+            # SQLAlchemy does not expose these PostgreSQL catalogs uniformly.
+            catalog_queries = {
+                "materialized_views": "SELECT schemaname, matviewname FROM pg_matviews",
+                "functions": "SELECT n.nspname, p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')",
+                "triggers": "SELECT event_object_schema, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema')",
+                "types": "SELECT n.nspname, t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')",
+                "extensions": "SELECT extname, extversion FROM pg_extension",
+            }
+            for key, query in catalog_queries.items():
+                try:
+                    rows = connection.execute(text(query)).all()
+                except Exception:
+                    continue
+                summary[key].extend(
+                    {"schema": str(row[0]), "name": str(row[1])} for row in rows[:200]
+                )
+            return summary
+    finally:
+        engine.dispose()
+
+
+def diagnose_migration_state(database_url: str) -> MigrationDiagnosis:
+    """Diagnose migration eligibility without invoking backup, DDL, or DML."""
+    state = probe_migration_state(database_url)
+    approved = _approved_legacy_source(state.legacy_revision)
+    try:
+        action = choose_migration_action(
+            state,
+            expected_source_revision=None,
+            expected_source_fingerprint=None,
+            supported_current_revisions=get_supported_current_revisions(),
+        )
+    except MigrationSafetyError as exc:
+        failure_code = failure_code_for(exc)
+        return MigrationDiagnosis(
+            database_empty=state.database_empty,
+            current_revision=state.current_revision,
+            legacy_revision=state.legacy_revision,
+            action=None,
+            failure_code=failure_code,
+            failure_summary=str(exc),
+            recommended_action=(
+                "manual_schema_review"
+                if failure_code == MIGRATION_FAILURE_CODES["drift"]
+                else "manual_source_approval"
+            ),
+            actual_fingerprint=state.schema_fingerprint,
+            approved_fingerprint=(approved or {}).get("schema_fingerprint"),
+            object_summary=schema_object_summary(database_url),
+        )
+    return MigrationDiagnosis(
+        database_empty=state.database_empty,
+        current_revision=state.current_revision,
+        legacy_revision=state.legacy_revision,
+        action=action,
+        failure_code=None,
+        failure_summary=None,
+        recommended_action="proceed_with_guarded_migration",
+        actual_fingerprint=state.schema_fingerprint,
+        approved_fingerprint=(approved or {}).get("schema_fingerprint"),
+        object_summary=schema_object_summary(database_url),
+    )
+
+
 def choose_migration_action(
     state: MigrationState,
     *,
@@ -220,6 +488,7 @@ def choose_migration_action(
     approved_source = _approved_legacy_source(state.legacy_revision)
     if approved_source is None:
         raise MigrationSafetyError("database revision is not an approved legacy source")
+    _validate_approved_manifest(approved_source)
     if state.schema_fingerprint != approved_source["schema_fingerprint"]:
         raise MigrationSafetyError(
             "database schema fingerprint is not approved for its legacy revision"
@@ -514,35 +783,59 @@ def run_current_schema_migrations(
     expected_source_revision: str | None,
     expected_source_fingerprint: str | None,
 ) -> str:
+    """Back up non-empty databases, serialize writers, then run the approved action."""
     action = preflight_current_schema_migrations(
         database_url,
         expected_source_revision=expected_source_revision,
         expected_source_fingerprint=expected_source_fingerprint,
     )
-    commands = (
-        [("stamp", get_current_schema_baseline_revision()), ("upgrade", "head")]
-        if action == "stamp"
-        else [("upgrade", "head")]
-    )
-    for command, revision in commands:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "alembic",
-                "-c",
-                "alembic-current.ini",
-                command,
-                revision,
-            ],
-            cwd=ROOT,
-            env={**os.environ, "DATABASE_URL": database_url},
-            check=False,
+    state = probe_migration_state(database_url)
+    backup_metadata: dict[str, Any] | None = None
+    if not state.database_empty and os.getenv(LOCAL_BACKUP_GUARD_ENV) == "1":
+        try:
+            backup_metadata = create_and_verify_backup(database_url, state)
+        except BackupValidationError as exc:
+            raise MigrationSafetyError(f"migration backup validation failed: {exc}") from exc
+
+    with migration_advisory_lock(database_url):
+        # A waiting writer may observe a different state after acquiring the lock.
+        action = preflight_current_schema_migrations(
+            database_url,
+            expected_source_revision=expected_source_revision,
+            expected_source_fingerprint=expected_source_fingerprint,
         )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"current-schema alembic {command} {revision} failed ({result.returncode})"
+        state = probe_migration_state(database_url)
+        if backup_metadata is not None:
+            try:
+                verify_backup_metadata(Path(backup_metadata["metadata_path"]), state)
+            except BackupValidationError as exc:
+                raise MigrationSafetyError(
+                    f"migration backup validation failed: {exc}"
+                ) from exc
+        commands = (
+            [("stamp", get_current_schema_baseline_revision()), ("upgrade", "head")]
+            if action == "stamp"
+            else [("upgrade", "head")]
+        )
+        for command, revision in commands:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "alembic",
+                    "-c",
+                    "alembic-current.ini",
+                    command,
+                    revision,
+                ],
+                cwd=ROOT,
+                env={**os.environ, "DATABASE_URL": database_url},
+                check=False,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"current-schema alembic {command} {revision} failed ({result.returncode})"
+                )
     return action
 
 
@@ -559,12 +852,34 @@ def main() -> int:
     parser.add_argument("--print-schema-fingerprint", action="store_true")
     parser.add_argument("--audit-legacy-operation-data", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--diagnose", action="store_true")
+    parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     database_url = (args.database_url or "").strip()
     if not database_url:
         print("[FAIL] DATABASE_URL is required", file=sys.stderr)
         return 2
+    if args.json and not args.diagnose:
+        parser.error("--json is supported only with --diagnose")
+    if args.diagnose:
+        try:
+            diagnosis = diagnose_migration_state(database_url)
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "failure_code": failure_code_for(exc),
+                        "failure_summary": "migration diagnostic could not inspect the database",
+                    },
+                    sort_keys=True,
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        payload = diagnosis.to_dict()
+        print(json.dumps(payload, sort_keys=True) if args.json else payload)
+        return 0 if diagnosis.failure_code is None else 2
     if args.print_schema_fingerprint:
         state = probe_migration_state(database_url)
         print(state.schema_fingerprint)
@@ -585,10 +900,24 @@ def main() -> int:
             else run_current_schema_migrations(database_url, **migration_options)
         )
     except MigrationSafetyError as exc:
+        failure_code = failure_code_for(exc)
+        failure_summary = str(exc)
         print(
-            f"[FAIL] Current-schema migration preflight rejected write: {exc}",
+            f"[FAIL] Current-schema migration preflight rejected write: {failure_summary}",
             file=sys.stderr,
         )
+        print(f"XIHONG_FAILURE_CODE={failure_code}", file=sys.stderr)
+        print(f"XIHONG_FAILURE_SUMMARY={failure_summary}", file=sys.stderr)
+        print(
+            "XIHONG_RECOVERY_HINT="
+            + (
+                "manual_schema_review"
+                if failure_code == MIGRATION_FAILURE_CODES["drift"]
+                else "review_migration_diagnostic"
+            ),
+            file=sys.stderr,
+        )
+        print("XIHONG_SOURCE_EXIT_CODE=2", file=sys.stderr)
         return 2
     except RuntimeError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)

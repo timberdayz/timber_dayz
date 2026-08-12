@@ -3,7 +3,11 @@
     {
       "legacy_revision": "20260805_payroll_backfill_audit",
       "schema_fingerprint": "5f27584d2911a7fff4ea659c954f5e8d152f984a9226f8d505acae46d8037578",
-      "baseline_revision": "current_schema_20260805"
+      "baseline_revision": "current_schema_20260805",
+      "manifest_version": 1,
+      "manifest_path": "current_migrations/manifests/20260805_payroll_backfill_audit.json",
+      "manifest_sha256": "586a782a13e529c8222cb7b6d9398218cb3696061964d266e815e43c02f0ccb8",
+      "approval_note": "Reviewed production source baseline; immutable evidence for legacy adoption only."
     }
   ]
 }

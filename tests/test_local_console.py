@@ -51,13 +51,13 @@ class FakeSupervisor:
         self.calls.append(("stop-all", None))
         return [{"id": "local-collection", "state": "stopped"}]
 
-    def read_log(self, service_id: str):
+    def read_log(self, service_id: str, max_lines: int = 80):
         self.calls.append(("log", service_id))
         return [
             "token=abc123 password=hunter2",
             "postgresql://erp_user:db-secret@127.0.0.1:5432/xihong",
             "normal status line",
-        ]
+        ][-max_lines:]
 
 
 def _client(tmp_path: Path, supervisor: FakeSupervisor) -> TestClient:
@@ -129,12 +129,28 @@ def test_fixed_service_routes_delegate_without_accepting_commands(tmp_path: Path
     ).status_code == 404
 
 
-def test_log_api_is_removed_when_terminal_is_the_diagnostic_surface(tmp_path: Path):
+def test_log_api_is_token_protected_bounded_and_redacted(tmp_path: Path):
+    supervisor = FakeSupervisor()
+    client = _client(tmp_path, supervisor)
+
+    assert client.get("/api/services/local-collection/logs").status_code == 401
+    response = client.get(
+        "/api/services/local-collection/logs?lines=9999", headers=_headers()
+    )
+
+    assert response.status_code == 200
+    assert response.json()["service_id"] == "local-collection"
+    assert response.json()["lines"][-1] == "normal status line"
+    assert "abc123" not in response.text
+    assert "hunter2" not in response.text
+    assert "db-secret" not in response.text
+    assert supervisor.calls[-1] == ("log", "local-collection")
+
+
+def test_log_api_rejects_arbitrary_service_ids(tmp_path: Path):
     client = _client(tmp_path, FakeSupervisor())
 
-    assert client.get(
-        "/api/services/local-collection/log", headers=_headers()
-    ).status_code == 404
+    assert client.get("/api/services/arbitrary/logs", headers=_headers()).status_code == 404
 
 
 def test_ownership_error_is_sanitized_and_returned_as_conflict(tmp_path: Path):
@@ -295,6 +311,21 @@ def test_static_console_has_the_approved_content_and_token_handling():
     assert "请查看本地控制台窗口" in script
     assert "@media" in styles
     assert "border-radius: 8px" in styles
+
+
+def test_static_console_renders_structured_failure_context_without_unsafe_html():
+    static_dir = Path("scripts/local_console_static")
+    html = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+
+    assert "failure_code" in script
+    assert "last_failure_summary" in script
+    assert "recovery_hint" in script
+    assert "launch_stage" in script
+    assert "last_success_at" in script
+    assert "data-role=\"diagnostic\"" in html
+    assert ".textContent" in script
+    assert ".innerHTML" not in script
 
 
 def test_service_action_does_not_override_the_state_rendered_button_lock():

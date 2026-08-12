@@ -26,6 +26,29 @@ def test_formal_collection_start_script_uses_strict_tunnel_check():
     assert 'Get-EnvOrDefault "CLOUD_SYNC_REMOTE_DB_PORT" "15435"' in text
 
 
+def test_formal_collection_start_script_emits_machine_readable_failure_protocol():
+    script = PROJECT_ROOT / "scripts" / "start_collection_formal.ps1"
+    text = script.read_text(encoding="utf-8")
+
+    for marker in [
+        "XIHONG_STAGE=",
+        "XIHONG_FAILURE_CODE=",
+        "XIHONG_FAILURE_SUMMARY=",
+        "XIHONG_RECOVERY_HINT=",
+        "XIHONG_SOURCE_EXIT_CODE=",
+    ]:
+        assert marker in text
+    assert "--diagnose --json" in text
+    assert 'XIHONG_REQUIRE_LOCAL_MIGRATION_BACKUP = "1"' in text
+    assert 'Write-StageResult -Stage "backup" -Status "started"' in text
+    assert "$migrationOutput" in text
+    assert "XIHONG_FAILURE_CODE=" in text
+    assert "$diagnosis.actual_fingerprint" in text
+    assert "$diagnosis.approved_fingerprint" in text
+    assert "exit $migrationExitCode" in text
+    assert "throw \"current-schema migration failed" not in text
+
+
 def test_local_collection_start_script_keeps_development_preflight():
     script = PROJECT_ROOT / "scripts" / "start_local_collection_mode.ps1"
     text = script.read_text(encoding="utf-8")

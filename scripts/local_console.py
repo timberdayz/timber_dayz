@@ -27,6 +27,7 @@ from scripts.local_console_processes import (  # noqa: E402
     LOCAL_COLLECTION,
     LocalProcessSupervisor,
     ProcessOwnershipError,
+    redact_output_line,
 )
 
 TOKEN_HEADER = "X-Local-Console-Token"
@@ -157,6 +158,34 @@ def build_app(
     @app.post("/api/services/stop-all", dependencies=[Depends(require_token)])
     def stop_all() -> Any:
         return run_action(supervisor.stop_all)
+
+    @app.get(
+        "/api/services/local-collection/logs",
+        dependencies=[Depends(require_token)],
+    )
+    def local_collection_logs(lines: int = 80) -> dict[str, Any]:
+        bounded_lines = max(1, min(lines, 200))
+        return {
+            "service_id": LOCAL_COLLECTION,
+            "lines": [
+                redact_output_line(line)
+                for line in supervisor.read_log(LOCAL_COLLECTION, max_lines=bounded_lines)
+            ],
+        }
+
+    @app.get(
+        "/api/services/inspection-panel/logs",
+        dependencies=[Depends(require_token)],
+    )
+    def inspection_panel_logs(lines: int = 80) -> dict[str, Any]:
+        bounded_lines = max(1, min(lines, 200))
+        return {
+            "service_id": INSPECTION_PANEL,
+            "lines": [
+                redact_output_line(line)
+                for line in supervisor.read_log(INSPECTION_PANEL, max_lines=bounded_lines)
+            ],
+        }
 
     return app
 

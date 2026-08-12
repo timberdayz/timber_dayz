@@ -50,6 +50,9 @@ Playwright browser, and SSH tunnel.
   managed business processes.
 - Browser log dialogs are intentionally not provided. Controller and
   child-process logs are under `logs/local-console/`.
+- The console status page shows the latest startup stage, a stable failure code,
+  a redacted failure summary, and a recovery hint. Its fixed recent-log endpoint
+  is token-protected, bounded, and redacted; it cannot select arbitrary files.
 
 ## Files
 
@@ -108,8 +111,36 @@ The formal wrapper:
 1. sets `XIHONG_ENV_PROFILE=collection`
 2. stops Docker `backend-api` and Docker `backend-collector`
 3. starts the SSH tunnel if `CLOUD_SYNC_TUNNEL_HOST:CLOUD_SYNC_TUNNEL_PORT` is not reachable
-4. runs `python scripts/check_local_run_env.py --profile collection --require-cloud-tunnel`
-5. starts `python run.py --local`
+4. runs the read-only current-schema migration diagnosis and, for a non-empty
+   local database, requires a verified Docker `pg_dump -Fc` recovery package
+   before a permitted write migration
+5. runs `python scripts/check_local_run_env.py --profile collection --require-cloud-tunnel`
+6. starts `python run.py --local`
+
+## Startup Failure Handling
+
+Use this path when the Local Console reports a failed start:
+
+1. Read the displayed stage, failure code, redacted summary, and recovery hint.
+2. Let the console retry only low-risk checks such as Docker readiness and the
+   SSH tunnel. It will create and validate a local backup before an approved
+   non-empty migration writes to PostgreSQL.
+3. For `migration_schema_drift` or `migration_unapproved_source`, run the
+   read-only diagnostic below and submit its structural evidence for approval:
+
+```powershell
+python .\scripts\run_current_schema_migrations.py --diagnose --json
+```
+
+4. Only perform database restore, rebuild, Docker volume deletion, or approval
+   policy changes after an explicit human decision. These actions are not
+   exposed through Local Console.
+
+Never manually edit an Alembic version table, run Alembic `stamp` directly,
+delete archived migration metadata, add an unknown fingerprint to policy, or
+skip the preflight/backup guard. The structured local audit trail is written to
+`logs/local-console/startup-audit.jsonl` and contains only redacted protocol
+fields for failure trend analysis.
 
 For development, use the flexible wrapper:
 

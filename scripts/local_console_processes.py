@@ -40,6 +40,9 @@ ASSIGNMENT_SECRET_PATTERN = re.compile(
 QUERY_SECRET_PATTERN = re.compile(
     r"(?P<prefix>[?&](?:access_token|token)=)[^&\s]+", re.IGNORECASE
 )
+PROTOCOL_MARKER_PATTERN = re.compile(
+    r"^XIHONG_(?P<name>STAGE|FAILURE_CODE|FAILURE_SUMMARY|RECOVERY_HINT|SOURCE_EXIT_CODE)=(?P<value>.*)$"
+)
 
 
 def decode_output_line(value: bytes | str) -> str:
@@ -90,6 +93,13 @@ class ManagedRecord:
     state: str = "starting"
     launch_url: str | None = None
     last_error: str | None = None
+    failure_code: str | None = None
+    source_exit_code: int | None = None
+    wrapper_exit_code: int | None = None
+    last_failure_summary: str | None = None
+    recovery_hint: str | None = None
+    launch_stage: str | None = None
+    last_success_at: float | None = None
 
 
 def build_service_specs(
@@ -217,6 +227,13 @@ class LocalProcessSupervisor:
                     state=str(payload.get("state") or "starting"),
                     launch_url=payload.get("launch_url"),
                     last_error=payload.get("last_error"),
+                    failure_code=payload.get("failure_code"),
+                    source_exit_code=_optional_int(payload.get("source_exit_code")),
+                    wrapper_exit_code=_optional_int(payload.get("wrapper_exit_code")),
+                    last_failure_summary=payload.get("last_failure_summary"),
+                    recovery_hint=payload.get("recovery_hint"),
+                    launch_stage=payload.get("launch_stage"),
+                    last_success_at=payload.get("last_success_at"),
                 )
             except (KeyError, TypeError, ValueError):
                 continue
@@ -233,6 +250,25 @@ class LocalProcessSupervisor:
             json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         temporary_path.replace(self.state_path)
+
+    def _append_startup_audit(self, service_id: str, record: ManagedRecord) -> None:
+        """Append only redacted protocol evidence for local failure trend analysis."""
+        if not record.failure_code:
+            return
+        payload = {
+            "service_id": service_id,
+            "failure_code": record.failure_code,
+            "failure_summary": record.last_failure_summary,
+            "recovery_hint": record.recovery_hint,
+            "launch_stage": record.launch_stage,
+            "source_exit_code": record.source_exit_code,
+            "wrapper_exit_code": record.wrapper_exit_code,
+            "recorded_at": self._time_provider(),
+        }
+        audit_path = self.log_dir / "startup-audit.jsonl"
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        with audit_path.open("a", encoding="utf-8") as audit_file:
+            audit_file.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
     @staticmethod
     def _process_is_running(process: Any) -> bool:
@@ -301,6 +337,13 @@ class LocalProcessSupervisor:
             "pid": record.pid if record else None,
             "launch_url": record.launch_url if record else None,
             "last_error": record.last_error if record else None,
+            "failure_code": record.failure_code if record else None,
+            "source_exit_code": record.source_exit_code if record else None,
+            "wrapper_exit_code": record.wrapper_exit_code if record else None,
+            "last_failure_summary": record.last_failure_summary if record else None,
+            "recovery_hint": record.recovery_hint if record else None,
+            "launch_stage": record.launch_stage if record else None,
+            "last_success_at": record.last_success_at if record else None,
             "log_available": (self.log_dir / spec.log_filename).exists(),
         }
 
@@ -328,6 +371,8 @@ class LocalProcessSupervisor:
                     record.state = "failed" if exit_code not in (None, 0) else "stopped"
                     if record.state == "failed" and not record.last_error:
                         record.last_error = f"进程已退出，退出码 {exit_code}"
+                    if record.state == "failed":
+                        record.wrapper_exit_code = exit_code
                     if record.state == "stopped":
                         self._records.pop(service_id, None)
                     self._handles.pop(service_id, None)
@@ -341,7 +386,10 @@ class LocalProcessSupervisor:
                 if service_id == INSPECTION_PANEL and record.launch_url:
                     record.state = "running"
                 elif self._readiness_probe(service_id):
+                    was_running = record.state == "running"
                     record.state = "running"
+                    if not was_running:
+                        record.last_success_at = self._time_provider()
                 elif (
                     record.state == "starting"
                     and self._time_provider() - record.started_at
@@ -351,6 +399,8 @@ class LocalProcessSupervisor:
                     record.last_error = (
                         f"启动超时（超过 {int(self._startup_timeout_seconds)} 秒）"
                     )
+                    record.failure_code = "startup_timeout"
+                    record.last_failure_summary = record.last_error
                     self._terminate_owned_process(service_id, process)
                     self._handles.pop(service_id, None)
                 elif record.state not in {"stopping", "failed"}:
@@ -431,6 +481,27 @@ class LocalProcessSupervisor:
                 log_file.write(safe_line)
                 log_file.flush()
                 launch_url: str | None = None
+                marker = PROTOCOL_MARKER_PATTERN.match(line.strip())
+                if marker:
+                    with self._lock:
+                        record = self._records.get(service_id)
+                        if record and record.pid == process.pid:
+                            name = marker.group("name")
+                            value = redact_output_line(marker.group("value").strip())
+                            if name == "STAGE":
+                                record.launch_stage = value
+                            elif name == "FAILURE_CODE":
+                                record.failure_code = value[:80]
+                            elif name == "FAILURE_SUMMARY":
+                                record.last_failure_summary = value[:500]
+                                record.last_error = record.last_failure_summary
+                            elif name == "RECOVERY_HINT":
+                                record.recovery_hint = value[:300]
+                            elif name == "SOURCE_EXIT_CODE":
+                                record.source_exit_code = _optional_int(value)
+                            self._save_state()
+                            if name in {"FAILURE_CODE", "FAILURE_SUMMARY", "RECOVERY_HINT"}:
+                                self._append_startup_audit(service_id, record)
                 if service_id == INSPECTION_PANEL and line.startswith(
                     INSPECTION_URL_PREFIX
                 ):
@@ -457,7 +528,14 @@ class LocalProcessSupervisor:
                 record = self._records.get(service_id)
                 if record and record.pid == process.pid:
                     record.state = "failed"
-                    record.last_error = f"进程已退出，退出码 {exit_code}"
+                    if record.last_failure_summary is None:
+                        record.last_error = f"进程已退出，退出码 {exit_code}"
+                    else:
+                        record.last_error = record.last_failure_summary
+                    record.wrapper_exit_code = exit_code
+                    if record.last_failure_summary is None:
+                        record.last_failure_summary = record.last_error
+                    self._append_startup_audit(service_id, record)
                     self._save_state()
 
     def stop(self, service_id: str) -> dict[str, Any]:
@@ -536,3 +614,10 @@ class LocalProcessSupervisor:
         except OSError:
             return []
         return lines[-max(1, min(max_lines, 200)) :]
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
