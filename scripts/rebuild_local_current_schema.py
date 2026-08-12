@@ -103,7 +103,7 @@ def _normalized_local_database_url(database_url: str) -> str:
     """Use a sync SQLAlchemy PostgreSQL URL after target validation."""
     _validate_local_target(database_url)
     url = make_url(database_url)
-    return str(url.set(drivername="postgresql"))
+    return url.set(drivername="postgresql").render_as_string(hide_password=False)
 
 
 def _docker_context_endpoint() -> str:

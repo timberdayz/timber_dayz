@@ -132,6 +132,8 @@ def test_rebuild_normalizes_accepted_postgresql_driver_to_sync_url():
 
     assert database_url.startswith("postgresql://")
     assert "+asyncpg" not in database_url
+    parsed = rebuild.make_url(database_url)
+    assert parsed.password == "password"
 
 
 def test_rebuild_cli_loads_collection_environment_before_resolving_database_url(
