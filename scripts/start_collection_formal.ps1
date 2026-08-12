@@ -20,12 +20,53 @@ function Write-FailureResult {
         [string]$Code,
         [string]$Summary,
         [string]$Hint,
-        [int]$SourceExitCode = 0
+        [int]$SourceExitCode = 0,
+        [string]$ActualFingerprint = "",
+        [string]$ApprovedFingerprint = ""
     )
     Write-Host "XIHONG_FAILURE_CODE=$Code"
     Write-Host "XIHONG_FAILURE_SUMMARY=$Summary"
     Write-Host "XIHONG_RECOVERY_HINT=$Hint"
     Write-Host "XIHONG_SOURCE_EXIT_CODE=$SourceExitCode"
+    if (-not [string]::IsNullOrWhiteSpace($ActualFingerprint)) {
+        Write-Host "XIHONG_ACTUAL_FINGERPRINT=$ActualFingerprint"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ApprovedFingerprint)) {
+        Write-Host "XIHONG_APPROVED_FINGERPRINT=$ApprovedFingerprint"
+    }
+}
+
+function Invoke-CapturedNativeCommand {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList
+    )
+
+    $stdoutPath = [System.IO.Path]::GetTempFileName()
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        return [PSCustomObject]@{
+            ExitCode = $process.ExitCode
+            StdOut = [System.IO.File]::ReadAllText($stdoutPath)
+            StdErr = [System.IO.File]::ReadAllText($stderrPath)
+        }
+    } finally {
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-ProtocolValue {
+    param(
+        [string]$Output,
+        [string]$Name
+    )
+
+    $match = [regex]::Matches($Output, "(?m)^XIHONG_$Name=(.*)$") | Select-Object -Last 1
+    if ($match) {
+        return $match.Groups[1].Value.Trim()
+    }
+    return $null
 }
 
 function Import-EnvFile {
@@ -146,33 +187,44 @@ function Invoke-LocalCurrentSchemaMigration {
     Write-Host "[Migration] Running fail-closed current-schema migration before backend startup..."
     Push-Location $repoRoot
     try {
-        $migrationOutput = & python "$repoRoot\scripts\run_current_schema_migrations.py" 2>&1
-        $migrationOutput | ForEach-Object { Write-Host $_ }
-        $migrationExitCode = $LASTEXITCODE
+        $migrationResult = Invoke-CapturedNativeCommand -FilePath "python" -ArgumentList @("$repoRoot\scripts\run_current_schema_migrations.py")
+        $migrationOutput = "$($migrationResult.StdOut)`n$($migrationResult.StdErr)"
+        $migrationOutput.TrimEnd() -split "`r?`n" | Where-Object { $_ } | ForEach-Object { Write-Host $_ }
+        $migrationExitCode = $migrationResult.ExitCode
         if ($migrationExitCode -ne 0) {
-            $existingFailureCode = ($migrationOutput | Select-String -Pattern '^XIHONG_FAILURE_CODE=' | Select-Object -Last 1).Line
-            $existingFailureSummary = ($migrationOutput | Select-String -Pattern '^XIHONG_FAILURE_SUMMARY=' | Select-Object -Last 1).Line
-            $existingRecoveryHint = ($migrationOutput | Select-String -Pattern '^XIHONG_RECOVERY_HINT=' | Select-Object -Last 1).Line
-            $diagnosticJson = & python "$repoRoot\scripts\run_current_schema_migrations.py" --diagnose --json 2>$null
+            $existingFailureCode = Get-ProtocolValue -Output $migrationOutput -Name "FAILURE_CODE"
+            $existingFailureSummary = Get-ProtocolValue -Output $migrationOutput -Name "FAILURE_SUMMARY"
+            $existingRecoveryHint = Get-ProtocolValue -Output $migrationOutput -Name "RECOVERY_HINT"
+            $sourceExitCode = Get-ProtocolValue -Output $migrationOutput -Name "SOURCE_EXIT_CODE"
+            $diagnosticResult = Invoke-CapturedNativeCommand -FilePath "python" -ArgumentList @("$repoRoot\scripts\run_current_schema_migrations.py", "--diagnose", "--json")
+            $diagnosticJson = $diagnosticResult.StdOut
             $diagnosis = $null
             try {
                 $diagnosis = $diagnosticJson | ConvertFrom-Json
             } catch {
                 $diagnosis = $null
             }
-            $failureCode = if ($existingFailureCode) { $existingFailureCode.Substring("XIHONG_FAILURE_CODE=".Length) } elseif ($diagnosis -and $diagnosis.failure_code) { $diagnosis.failure_code } else { "migration_failed" }
-            $failureSummary = if ($existingFailureSummary) { $existingFailureSummary.Substring("XIHONG_FAILURE_SUMMARY=".Length) } elseif ($diagnosis -and $diagnosis.failure_summary) { $diagnosis.failure_summary } else { "Current-schema migration was rejected before write." }
-            $recoveryHint = if ($existingRecoveryHint) { $existingRecoveryHint.Substring("XIHONG_RECOVERY_HINT=".Length) } elseif ($diagnosis -and $diagnosis.recommended_action) { $diagnosis.recommended_action } else { "Review the migration diagnostic and request schema approval if required." }
+            $failureCode = if ($existingFailureCode) { $existingFailureCode } elseif ($diagnosis -and $diagnosis.failure_code) { $diagnosis.failure_code } else { "migration_failed" }
+            $failureSummary = if ($existingFailureSummary) { $existingFailureSummary } elseif ($diagnosis -and $diagnosis.failure_summary) { $diagnosis.failure_summary } else { "Current-schema migration was rejected before write." }
+            $recoveryHint = if ($existingRecoveryHint) { $existingRecoveryHint } elseif ($diagnosis -and $diagnosis.recommended_action) { $diagnosis.recommended_action } else { "Review the migration diagnostic and request schema approval if required." }
+            $actualFingerprint = if ($diagnosis -and $diagnosis.actual_fingerprint) { $diagnosis.actual_fingerprint } else { Get-ProtocolValue -Output $migrationOutput -Name "ACTUAL_FINGERPRINT" }
+            $approvedFingerprint = if ($diagnosis -and $diagnosis.approved_fingerprint) { $diagnosis.approved_fingerprint } else { Get-ProtocolValue -Output $migrationOutput -Name "APPROVED_FINGERPRINT" }
             if (
                 $failureCode -eq "migration_schema_drift" -and
-                $diagnosis -and
-                $diagnosis.actual_fingerprint -and
-                $diagnosis.approved_fingerprint
+                $actualFingerprint -and
+                $approvedFingerprint
             ) {
-                $failureSummary = "$failureSummary Actual fingerprint: $($diagnosis.actual_fingerprint); approved fingerprint: $($diagnosis.approved_fingerprint)."
+                $failureSummary = "$failureSummary Actual fingerprint: $actualFingerprint; approved fingerprint: $approvedFingerprint."
+            }
+            $reportedSourceExitCode = $migrationExitCode
+            if (-not [string]::IsNullOrWhiteSpace($sourceExitCode)) {
+                $parsedSourceExitCode = 0
+                if ([int]::TryParse($sourceExitCode, [ref]$parsedSourceExitCode)) {
+                    $reportedSourceExitCode = $parsedSourceExitCode
+                }
             }
             Write-StageResult -Stage "migration_write" -Status "failed"
-            Write-FailureResult -Code $failureCode -Summary $failureSummary -Hint $recoveryHint -SourceExitCode $migrationExitCode
+            Write-FailureResult -Code $failureCode -Summary $failureSummary -Hint $recoveryHint -SourceExitCode $reportedSourceExitCode -ActualFingerprint $actualFingerprint -ApprovedFingerprint $approvedFingerprint
             exit $migrationExitCode
         }
         Write-StageResult -Stage "backup" -Status "passed"

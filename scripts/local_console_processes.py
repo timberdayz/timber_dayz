@@ -41,7 +41,7 @@ QUERY_SECRET_PATTERN = re.compile(
     r"(?P<prefix>[?&](?:access_token|token)=)[^&\s]+", re.IGNORECASE
 )
 PROTOCOL_MARKER_PATTERN = re.compile(
-    r"^XIHONG_(?P<name>STAGE|FAILURE_CODE|FAILURE_SUMMARY|RECOVERY_HINT|SOURCE_EXIT_CODE)=(?P<value>.*)$"
+    r"^XIHONG_(?P<name>STAGE|FAILURE_CODE|FAILURE_SUMMARY|RECOVERY_HINT|SOURCE_EXIT_CODE|ACTUAL_FINGERPRINT|APPROVED_FINGERPRINT)=(?P<value>.*)$"
 )
 
 
@@ -98,6 +98,8 @@ class ManagedRecord:
     wrapper_exit_code: int | None = None
     last_failure_summary: str | None = None
     recovery_hint: str | None = None
+    actual_fingerprint: str | None = None
+    approved_fingerprint: str | None = None
     launch_stage: str | None = None
     last_success_at: float | None = None
 
@@ -232,6 +234,8 @@ class LocalProcessSupervisor:
                     wrapper_exit_code=_optional_int(payload.get("wrapper_exit_code")),
                     last_failure_summary=payload.get("last_failure_summary"),
                     recovery_hint=payload.get("recovery_hint"),
+                    actual_fingerprint=payload.get("actual_fingerprint"),
+                    approved_fingerprint=payload.get("approved_fingerprint"),
                     launch_stage=payload.get("launch_stage"),
                     last_success_at=payload.get("last_success_at"),
                 )
@@ -260,6 +264,8 @@ class LocalProcessSupervisor:
             "failure_code": record.failure_code,
             "failure_summary": record.last_failure_summary,
             "recovery_hint": record.recovery_hint,
+            "actual_fingerprint": record.actual_fingerprint,
+            "approved_fingerprint": record.approved_fingerprint,
             "launch_stage": record.launch_stage,
             "source_exit_code": record.source_exit_code,
             "wrapper_exit_code": record.wrapper_exit_code,
@@ -342,6 +348,8 @@ class LocalProcessSupervisor:
             "wrapper_exit_code": record.wrapper_exit_code if record else None,
             "last_failure_summary": record.last_failure_summary if record else None,
             "recovery_hint": record.recovery_hint if record else None,
+            "actual_fingerprint": record.actual_fingerprint if record else None,
+            "approved_fingerprint": record.approved_fingerprint if record else None,
             "launch_stage": record.launch_stage if record else None,
             "last_success_at": record.last_success_at if record else None,
             "log_available": (self.log_dir / spec.log_filename).exists(),
@@ -499,8 +507,18 @@ class LocalProcessSupervisor:
                                 record.recovery_hint = value[:300]
                             elif name == "SOURCE_EXIT_CODE":
                                 record.source_exit_code = _optional_int(value)
+                            elif name == "ACTUAL_FINGERPRINT":
+                                record.actual_fingerprint = value[:128]
+                            elif name == "APPROVED_FINGERPRINT":
+                                record.approved_fingerprint = value[:128]
                             self._save_state()
-                            if name in {"FAILURE_CODE", "FAILURE_SUMMARY", "RECOVERY_HINT"}:
+                            if name in {
+                                "FAILURE_CODE",
+                                "FAILURE_SUMMARY",
+                                "RECOVERY_HINT",
+                                "ACTUAL_FINGERPRINT",
+                                "APPROVED_FINGERPRINT",
+                            }:
                                 self._append_startup_audit(service_id, record)
                 if service_id == INSPECTION_PANEL and line.startswith(
                     INSPECTION_URL_PREFIX

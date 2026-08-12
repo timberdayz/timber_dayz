@@ -38,7 +38,7 @@ def test_formal_collection_start_script_emits_machine_readable_failure_protocol(
         "XIHONG_SOURCE_EXIT_CODE=",
     ]:
         assert marker in text
-    assert "--diagnose --json" in text
+    assert '"--diagnose", "--json"' in text
     assert 'XIHONG_REQUIRE_LOCAL_MIGRATION_BACKUP = "1"' in text
     assert 'Write-StageResult -Stage "backup" -Status "started"' in text
     assert "$migrationOutput" in text

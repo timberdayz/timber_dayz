@@ -142,6 +142,29 @@ skip the preflight/backup guard. The structured local audit trail is written to
 `logs/local-console/startup-audit.jsonl` and contains only redacted protocol
 fields for failure trend analysis.
 
+## Controlled Local Database Rebuild
+
+When cloud data is the authority and the Local Console reports
+`migration_schema_drift`, the local database may be rebuilt only with the
+controlled local command below. It never contacts cloud PostgreSQL, does not
+delete a Docker volume, and rejects every database except the loopback Docker
+database `xihong_erp` in `xihong_erp_postgres`.
+
+```powershell
+python .\scripts\rebuild_local_current_schema.py --confirm REBUILD_LOCAL_XIHONG_ERP
+```
+
+The command first requires that the local collection backend is stopped and
+the target database has no active client connections. It then creates and
+validates a local `pg_dump -Fc` recovery package, recreates only the local
+database, upgrades the empty database through the current-schema chain, and
+bootstraps and verifies the `business_overview` dashboard assets. A redacted
+rebuild receipt is retained under `backups/local-migration/rebuild-receipts/`.
+
+Do not substitute another database URL, database name, Docker container, or
+confirmation phrase. A failed validation stops before `dropdb`; retain the
+created backup and resolve the displayed failure before retrying.
+
 For development, use the flexible wrapper:
 
 ```powershell

@@ -321,9 +321,20 @@ def test_static_console_renders_structured_failure_context_without_unsafe_html()
     assert "failure_code" in script
     assert "last_failure_summary" in script
     assert "recovery_hint" in script
+    assert "actual_fingerprint" in script
+    assert "approved_fingerprint" in script
+    assert "source_exit_code" in script
+    assert "wrapper_exit_code" in script
     assert "launch_stage" in script
     assert "last_success_at" in script
     assert "data-role=\"diagnostic\"" in html
+    for role in (
+        "actual-fingerprint",
+        "approved-fingerprint",
+        "source-exit-code",
+        "wrapper-exit-code",
+    ):
+        assert html.count(f'data-role="{role}"') == 2
     assert ".textContent" in script
     assert ".innerHTML" not in script
 

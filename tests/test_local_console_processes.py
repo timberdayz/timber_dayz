@@ -194,6 +194,8 @@ def test_collection_protocol_markers_propagate_failure_details_without_overwriti
             b"XIHONG_FAILURE_SUMMARY=schema fingerprint mismatch token=hidden\n"
             b"XIHONG_RECOVERY_HINT=manual_schema_review\n"
             b"XIHONG_SOURCE_EXIT_CODE=2\n"
+            b"XIHONG_ACTUAL_FINGERPRINT=actual-fingerprint\n"
+            b"XIHONG_APPROVED_FINGERPRINT=approved-fingerprint\n"
         ),
         log_path,
     )
@@ -206,6 +208,8 @@ def test_collection_protocol_markers_propagate_failure_details_without_overwriti
     assert status["wrapper_exit_code"] == 2
     assert status["last_failure_summary"] == "schema fingerprint mismatch token=<redacted>"
     assert status["recovery_hint"] == "manual_schema_review"
+    assert status["actual_fingerprint"] == "actual-fingerprint"
+    assert status["approved_fingerprint"] == "approved-fingerprint"
     assert status["launch_stage"] == "migration_preflight:started"
     assert "hidden" not in "\n".join(supervisor.read_log(LOCAL_COLLECTION, max_lines=10))
 
@@ -437,6 +441,8 @@ def test_failure_protocol_creates_redacted_structured_audit_record(
             b"XIHONG_FAILURE_CODE=migration_schema_drift\n"
             b"XIHONG_FAILURE_SUMMARY=drift token=private-value\n"
             b"XIHONG_RECOVERY_HINT=manual_schema_review\n"
+            b"XIHONG_ACTUAL_FINGERPRINT=actual-fingerprint\n"
+            b"XIHONG_APPROVED_FINGERPRINT=approved-fingerprint\n"
         ),
         tmp_path / "logs" / "local-collection.log",
     )
@@ -445,3 +451,5 @@ def test_failure_protocol_creates_redacted_structured_audit_record(
     assert '"failure_code": "migration_schema_drift"' in audit
     assert "private-value" not in audit
     assert "token=<redacted>" in audit
+    assert '"actual_fingerprint": "actual-fingerprint"' in audit
+    assert '"approved_fingerprint": "approved-fingerprint"' in audit

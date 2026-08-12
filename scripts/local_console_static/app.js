@@ -26,6 +26,12 @@ const DEFAULT_MESSAGES = {
   'external-running': '检测到控制台外部启动的实例',
 };
 
+const FAILURE_CODE_MESSAGES = {
+  migration_schema_drift: '本地数据库结构与批准基线不一致，已阻止写入。',
+  migration_unapproved_source: '本地版本来源未获批准，已阻止写入。',
+  migration_backup_failed: '本地恢复包未通过验证，已阻止写入。',
+};
+
 const ROUTES = {
   'local-collection': {
     start: '/api/services/local-collection/start',
@@ -86,6 +92,10 @@ function renderService(service) {
   const failureCode = card.querySelector('[data-role="failure-code"]');
   const failureSummary = card.querySelector('[data-role="failure-summary"]');
   const recoveryHint = card.querySelector('[data-role="recovery-hint"]');
+  const actualFingerprint = card.querySelector('[data-role="actual-fingerprint"]');
+  const approvedFingerprint = card.querySelector('[data-role="approved-fingerprint"]');
+  const sourceExitCode = card.querySelector('[data-role="source-exit-code"]');
+  const wrapperExitCode = card.querySelector('[data-role="wrapper-exit-code"]');
   const launchStage = card.querySelector('[data-role="launch-stage"]');
   const lastSuccess = card.querySelector('[data-role="last-success"]');
 
@@ -97,9 +107,15 @@ function renderService(service) {
     service.failure_code || service.last_failure_summary || service.recovery_hint || service.launch_stage || service.last_success_at
   );
   diagnostic.hidden = !hasDiagnostic;
-  failureCode.textContent = service.failure_code ? `故障代码: ${service.failure_code}` : '';
+  failureCode.textContent = service.failure_code
+    ? `故障代码: ${service.failure_code}${FAILURE_CODE_MESSAGES[service.failure_code] ? `。${FAILURE_CODE_MESSAGES[service.failure_code]}` : ''}`
+    : '';
   failureSummary.textContent = service.last_failure_summary || '';
   recoveryHint.textContent = service.recovery_hint ? `恢复建议: ${service.recovery_hint}` : '';
+  actualFingerprint.textContent = service.actual_fingerprint ? `实际指纹: ${service.actual_fingerprint}` : '';
+  approvedFingerprint.textContent = service.approved_fingerprint ? `批准指纹: ${service.approved_fingerprint}` : '';
+  sourceExitCode.textContent = service.source_exit_code !== null && service.source_exit_code !== undefined ? `源退出码: ${service.source_exit_code}` : '';
+  wrapperExitCode.textContent = service.wrapper_exit_code !== null && service.wrapper_exit_code !== undefined ? `包装器退出码: ${service.wrapper_exit_code}` : '';
   launchStage.textContent = service.launch_stage ? `启动阶段: ${service.launch_stage}` : '';
   lastSuccess.textContent = service.last_success_at
     ? `最近成功: ${new Date(service.last_success_at * 1000).toLocaleString('zh-CN', { hour12: false })}`
