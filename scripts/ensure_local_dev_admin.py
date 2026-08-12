@@ -9,6 +9,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,7 @@ from backend.services.system_role_service import DEFAULT_SYSTEM_ROLES
 from modules.core.db import DimRole, DimUser
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
+LOOPBACK_DATABASE_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,14 @@ def load_local_dev_admin_config(
     if not email:
         raise ValueError("LOCAL_DEV_ADMIN_EMAIL must not be empty")
     return LocalDevAdminConfig(username=username, password=password, email=email)
+
+
+def ensure_local_database_target(database_url: str) -> None:
+    parsed = urlparse(database_url)
+    if parsed.scheme.split("+", 1)[0] != "postgresql" or (
+        parsed.hostname or ""
+    ).lower() not in LOOPBACK_DATABASE_HOSTS:
+        raise ValueError("LOCAL_DEV_BOOTSTRAP_ADMIN requires a loopback PostgreSQL target")
 
 
 async def ensure_local_dev_admin(
@@ -106,6 +116,8 @@ async def main() -> int:
     if config is None:
         print("[local-dev-admin] skipped")
         return 0
+
+    ensure_local_database_target(os.getenv("DATABASE_URL", ""))
 
     async with AsyncSessionLocal() as db:
         try:

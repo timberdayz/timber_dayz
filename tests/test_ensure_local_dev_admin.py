@@ -7,6 +7,7 @@ import pytest
 from scripts.ensure_local_dev_admin import (
     LocalDevAdminConfig,
     ensure_local_dev_admin,
+    ensure_local_database_target,
     load_local_dev_admin_config,
 )
 
@@ -18,6 +19,15 @@ def test_enabled_local_admin_bootstrap_requires_password():
 
 def test_local_admin_bootstrap_is_disabled_by_default():
     assert load_local_dev_admin_config({}) is None
+
+
+def test_local_admin_bootstrap_rejects_a_non_loopback_database_target():
+    with pytest.raises(ValueError, match="loopback"):
+        ensure_local_database_target("postgresql://user:password@db.example.com/xihong_erp")
+
+
+def test_local_admin_bootstrap_allows_loopback_database_target():
+    ensure_local_database_target("postgresql://user:password@127.0.0.1/xihong_erp")
 
 
 @pytest.mark.asyncio
