@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterable
 
 import psutil
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 try:
     from backend.utils.project_env import load_project_env
@@ -78,7 +79,10 @@ def _safe_identifier(value: str | None, field: str) -> str:
 
 
 def _validate_local_target(database_url: str) -> tuple[str, str]:
-    url = make_url(database_url)
+    try:
+        url = make_url(database_url)
+    except ArgumentError as exc:
+        raise RebuildSafetyError("local rebuild requires a PostgreSQL URL") from exc
     if url.drivername.split("+", 1)[0] != "postgresql":
         raise RebuildSafetyError("local rebuild requires a PostgreSQL URL")
     if url.host not in {"127.0.0.1", "localhost"} or url.port != EXPECTED_PORT:
@@ -94,8 +98,8 @@ def _validate_local_target(database_url: str) -> tuple[str, str]:
 
 def _normalized_local_database_url(database_url: str) -> str:
     """Use a sync SQLAlchemy PostgreSQL URL after target validation."""
-    url = make_url(database_url)
     _validate_local_target(database_url)
+    url = make_url(database_url)
     return str(url.set(drivername="postgresql"))
 
 

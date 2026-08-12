@@ -73,6 +73,15 @@ def test_rebuild_rejects_non_local_or_unexpected_database_before_backup(database
         )
 
 
+def test_rebuild_rejects_unparseable_database_url_before_docker_commands():
+    with pytest.raises(rebuild.RebuildSafetyError, match="PostgreSQL URL"):
+        rebuild.rebuild_local_current_schema(
+            "not a database URL",
+            confirmation=rebuild.CONFIRMATION_PHRASE,
+            docker_runner=lambda *_args, **_kwargs: pytest.fail("docker must not run"),
+        )
+
+
 def test_rebuild_rejects_remote_docker_daemon_before_backup_or_drop(monkeypatch):
     monkeypatch.setattr(rebuild, "_local_collection_backend_running", lambda _iterator: False)
     monkeypatch.setattr(rebuild, "_docker_context_endpoint", lambda: "tcp://remote:2376")
