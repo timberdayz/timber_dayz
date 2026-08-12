@@ -47,6 +47,15 @@ def test_rebuild_rejects_missing_confirmation_before_backup_or_docker_commands()
     assert not any("dropdb" in command for command in calls)
 
 
+def test_rebuild_cli_shows_read_only_plan_without_confirmation(capsys):
+    assert rebuild.main([]) == 2
+
+    plan = capsys.readouterr().out
+    assert '"action": "rebuild_local_current_schema"' in plan
+    assert '"database": "xihong_erp"' in plan
+    assert rebuild.CONFIRMATION_PHRASE not in plan
+
+
 @pytest.mark.parametrize(
     "database_url",
     [

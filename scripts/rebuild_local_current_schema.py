@@ -54,6 +54,17 @@ EXPECTED_CONTAINER = DEFAULT_POSTGRES_CONTAINER
 EXPECTED_PORT = 15432
 CONFIRMATION_PHRASE = "REBUILD_LOCAL_XIHONG_ERP"
 DEFAULT_RECEIPT_DIRECTORY = DEFAULT_BACKUP_DIRECTORY / "rebuild-receipts"
+READ_ONLY_PLAN = {
+    "action": "rebuild_local_current_schema",
+    "database": EXPECTED_DATABASE,
+    "docker_container": EXPECTED_CONTAINER,
+    "sequence": [
+        "verify_local_target_and_backup",
+        "recreate_database_without_deleting_volume",
+        "upgrade_current_schema",
+        "verify_business_overview_dashboard",
+    ],
+}
 
 
 class RebuildSafetyError(RuntimeError):
@@ -399,6 +410,8 @@ def main(argv: list[str] | None = None) -> int:
     if load_project_env is not None:
         load_project_env(ROOT, profile="collection", override=True)
     database_url = args.database_url or os.getenv("DATABASE_URL")
+    if args.confirm != CONFIRMATION_PHRASE:
+        print(json.dumps(READ_ONLY_PLAN, ensure_ascii=True, sort_keys=True))
     try:
         result = rebuild_local_current_schema(
             (database_url or "").strip(), confirmation=args.confirm
