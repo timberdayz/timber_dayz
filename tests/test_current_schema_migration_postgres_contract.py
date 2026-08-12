@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 import shutil
 import socket
 import subprocess
@@ -51,6 +52,76 @@ def _wait_for_postgres(container_id: str) -> None:
             return
         time.sleep(1)
     raise RuntimeError("temporary PostgreSQL container did not become ready")
+
+
+def _write_approved_policy(tmp_path: Path, fingerprint: str) -> Path:
+    manifest_path = tmp_path / "approved-manifest.json"
+    manifest = {
+        "manifest_version": 1,
+        "legacy_revision": LEGACY_REVISION,
+        "baseline_revision": CURRENT_BASELINE_REVISION,
+        "schema_fingerprint": fingerprint,
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    policy_path = tmp_path / "support_policy.json"
+    policy_path.write_text(
+        json.dumps(
+            {
+                "approved_legacy_sources": [
+                    {
+                        "legacy_revision": LEGACY_REVISION,
+                        "schema_fingerprint": fingerprint,
+                        "baseline_revision": CURRENT_BASELINE_REVISION,
+                        "manifest_version": 1,
+                        "manifest_path": str(manifest_path),
+                        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                        "approval_note": "temporary PostgreSQL integration fixture",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return policy_path
+
+
+def test_migration_advisory_lock_rejects_a_second_writer_without_ddl():
+    if not _docker_available():
+        pytest.skip("requires a reachable Docker daemon and PostgreSQL 15 image")
+
+    port = _free_port()
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "-e",
+            "POSTGRES_USER=current_test",
+            "-e",
+            "POSTGRES_PASSWORD=current_test",
+            "-e",
+            "POSTGRES_DB=current_test",
+            "-p",
+            f"127.0.0.1:{port}:5432",
+            "postgres:15",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    container_id = started.stdout.strip()
+    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    try:
+        _wait_for_postgres(container_id)
+        with migration_runner.migration_advisory_lock(database_url):
+            with pytest.raises(migration_runner.MigrationSafetyError, match="lock is already held"):
+                with migration_runner.migration_advisory_lock(database_url):
+                    pass
+        engine = create_engine(database_url)
+        assert not inspect(engine).get_table_names(schema="public")
+    finally:
+        subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
 
 
 def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstraps_fresh():
@@ -257,18 +328,10 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
 
         with engine.connect() as connection:
             fingerprint = migration_runner.schema_fingerprint(connection)
-        policy_path = tmp_path / "support_policy.json"
-        policy_path.write_text(
-            '{"approved_legacy_sources":[{"legacy_revision":"'
-            + LEGACY_REVISION
-            + '","schema_fingerprint":"'
-            + fingerprint
-            + '","baseline_revision":"'
-            + CURRENT_BASELINE_REVISION
-            + '"}]}',
-            encoding="utf-8",
-        )
+        policy_path = _write_approved_policy(tmp_path, fingerprint)
         monkeypatch.setattr(migration_runner, "SUPPORT_POLICY_PATH", policy_path)
+        monkeypatch.setenv("LOCAL_POSTGRES_CONTAINER", container_id)
+        monkeypatch.setenv(migration_runner.LOCAL_BACKUP_GUARD_ENV, "1")
 
         assert (
             migration_runner.run_current_schema_migrations(
@@ -448,18 +511,10 @@ def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits
 
         with engine.connect() as connection:
             fingerprint = migration_runner.schema_fingerprint(connection)
-        policy_path = tmp_path / "support_policy.json"
-        policy_path.write_text(
-            '{"approved_legacy_sources":[{"legacy_revision":"'
-            + LEGACY_REVISION
-            + '","schema_fingerprint":"'
-            + fingerprint
-            + '","baseline_revision":"'
-            + CURRENT_BASELINE_REVISION
-            + '"}]}',
-            encoding="utf-8",
-        )
+        policy_path = _write_approved_policy(tmp_path, fingerprint)
         monkeypatch.setattr(migration_runner, "SUPPORT_POLICY_PATH", policy_path)
+        monkeypatch.setenv("LOCAL_POSTGRES_CONTAINER", container_id)
+        monkeypatch.setenv(migration_runner.LOCAL_BACKUP_GUARD_ENV, "1")
 
         assert (
             migration_runner.run_current_schema_migrations(

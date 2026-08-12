@@ -1,0 +1,21 @@
+{
+  "manifest_version": 1,
+  "legacy_revision": "20260805_payroll_backfill_audit",
+  "baseline_revision": "current_schema_20260805",
+  "schema_fingerprint": "5f27584d2911a7fff4ea659c954f5e8d152f984a9226f8d505acae46d8037578",
+  "approval_scope": "Reviewed legacy production schema baseline. This manifest is immutable evidence and does not approve other database fingerprints.",
+  "object_categories": [
+    "tables",
+    "columns",
+    "primary_keys",
+    "unique_constraints",
+    "foreign_keys",
+    "check_constraints",
+    "indexes",
+    "views",
+    "functions",
+    "triggers",
+    "types",
+    "extensions"
+  ]
+}

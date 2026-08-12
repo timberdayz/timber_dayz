@@ -168,6 +168,48 @@ def test_terminal_and_log_output_redact_sensitive_values(tmp_path: Path, runtime
     assert "token=<redacted>" in text
 
 
+def test_collection_protocol_markers_propagate_failure_details_without_overwriting_exit_code(
+    tmp_path: Path, runtime: FakeRuntime
+):
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda _service: False,
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+    )
+    started = supervisor.start(LOCAL_COLLECTION)
+    process = runtime.by_pid[started["pid"]]
+    log_path = tmp_path / "logs" / "local-collection.log"
+
+    supervisor._consume_output(
+        LOCAL_COLLECTION,
+        process,
+        io.BytesIO(
+            b"XIHONG_STAGE=migration_preflight:started\n"
+            b"XIHONG_FAILURE_CODE=migration_schema_drift\n"
+            b"XIHONG_FAILURE_SUMMARY=schema fingerprint mismatch token=hidden\n"
+            b"XIHONG_RECOVERY_HINT=manual_schema_review\n"
+            b"XIHONG_SOURCE_EXIT_CODE=2\n"
+        ),
+        log_path,
+    )
+    process.returncode = 2
+
+    status = supervisor.status(LOCAL_COLLECTION)
+
+    assert status["failure_code"] == "migration_schema_drift"
+    assert status["source_exit_code"] == 2
+    assert status["wrapper_exit_code"] == 2
+    assert status["last_failure_summary"] == "schema fingerprint mismatch token=<redacted>"
+    assert status["recovery_hint"] == "manual_schema_review"
+    assert status["launch_stage"] == "migration_preflight:started"
+    assert "hidden" not in "\n".join(supervisor.read_log(LOCAL_COLLECTION, max_lines=10))
+
+
 def test_start_is_idempotent_for_a_managed_process(supervisor: LocalProcessSupervisor, runtime: FakeRuntime):
     first = supervisor.start(LOCAL_COLLECTION)
     second = supervisor.start(LOCAL_COLLECTION)
@@ -314,3 +356,92 @@ def test_early_process_exit_failure_persists_until_the_next_start(
     assert first["state"] == "failed"
     assert second["state"] == "failed"
     assert "退出码 7" in first["last_error"]
+
+
+def test_running_service_records_the_most_recent_success_timestamp(
+    tmp_path: Path, runtime: FakeRuntime
+):
+    now = [100.0]
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda service: service == LOCAL_COLLECTION,
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+        time_provider=lambda: now[0],
+    )
+
+    supervisor.start(LOCAL_COLLECTION)
+    now[0] = 101.0
+
+    assert supervisor.status(LOCAL_COLLECTION)["last_success_at"] == 101.0
+    now[0] = 102.0
+    assert supervisor.status(LOCAL_COLLECTION)["last_success_at"] == 101.0
+
+
+def test_diagnostic_summary_is_not_replaced_by_generic_wrapper_exit_message(
+    tmp_path: Path, runtime: FakeRuntime
+):
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda _service: False,
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+    )
+    started = supervisor.start(LOCAL_COLLECTION)
+    process = runtime.by_pid[started["pid"]]
+    process.returncode = 2
+
+    supervisor._consume_output(
+        LOCAL_COLLECTION,
+        process,
+        io.BytesIO(b"XIHONG_FAILURE_SUMMARY=approved schema fingerprint mismatch\n"),
+        tmp_path / "logs" / "local-collection.log",
+    )
+
+    assert supervisor.status(LOCAL_COLLECTION)["last_failure_summary"] == (
+        "approved schema fingerprint mismatch"
+    )
+    assert supervisor.status(LOCAL_COLLECTION)["last_error"] == (
+        "approved schema fingerprint mismatch"
+    )
+
+
+def test_failure_protocol_creates_redacted_structured_audit_record(
+    tmp_path: Path, runtime: FakeRuntime
+):
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda _service: False,
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+    )
+    started = supervisor.start(LOCAL_COLLECTION)
+    process = runtime.by_pid[started["pid"]]
+
+    supervisor._consume_output(
+        LOCAL_COLLECTION,
+        process,
+        io.BytesIO(
+            b"XIHONG_FAILURE_CODE=migration_schema_drift\n"
+            b"XIHONG_FAILURE_SUMMARY=drift token=private-value\n"
+            b"XIHONG_RECOVERY_HINT=manual_schema_review\n"
+        ),
+        tmp_path / "logs" / "local-collection.log",
+    )
+
+    audit = (tmp_path / "logs" / "startup-audit.jsonl").read_text(encoding="utf-8")
+    assert '"failure_code": "migration_schema_drift"' in audit
+    assert "private-value" not in audit
+    assert "token=<redacted>" in audit

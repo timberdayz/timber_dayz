@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -9,9 +10,12 @@ from scripts.generate_current_schema_baseline import (
     generate_baseline_source,
 )
 from scripts.run_current_schema_migrations import (
+    MigrationDiagnosis,
     MigrationSafetyError,
     MigrationState,
     choose_migration_action,
+    diagnose_migration_state,
+    failure_code_for,
     run_current_schema_migrations,
     schema_fingerprint,
 )
@@ -189,6 +193,179 @@ def test_existing_database_rejects_a_mismatched_schema_fingerprint_before_stampi
         )
 
 
+def test_schema_drift_has_a_stable_failure_code_and_actionable_diagnosis(monkeypatch):
+    state = MigrationState(
+        database_empty=False,
+        current_revision=None,
+        legacy_revision=APPROVED_LEGACY_REVISION,
+        schema_fingerprint="unexpected-fingerprint",
+    )
+    monkeypatch.setattr(
+        migration_runner,
+        "probe_migration_state",
+        lambda _database_url: state,
+    )
+    monkeypatch.setattr(
+        migration_runner,
+        "schema_object_summary",
+        lambda _database_url: {"tables": [{"schema": "public", "name": "orders"}]},
+    )
+
+    diagnosis = diagnose_migration_state("postgresql://not-disclosed")
+
+    assert isinstance(diagnosis, MigrationDiagnosis)
+    assert diagnosis.failure_code == "migration_schema_drift"
+    assert diagnosis.recommended_action == "manual_schema_review"
+    assert diagnosis.actual_fingerprint == "unexpected-fingerprint"
+    assert diagnosis.approved_fingerprint == APPROVED_LEGACY_FINGERPRINT
+    assert diagnosis.object_summary["tables"] == [{"schema": "public", "name": "orders"}]
+    assert "postgresql" not in diagnosis.to_dict().__repr__()
+
+
+def test_schema_object_summary_reports_column_defaults_without_business_rows(monkeypatch):
+    class Inspector:
+        def get_schema_names(self):
+            return ["public"]
+
+        def get_table_names(self, schema):
+            return ["orders"]
+
+        def get_columns(self, table, schema):
+            return [{"name": "id", "type": "integer", "nullable": False, "default": "nextval('orders_id_seq')"}]
+
+        def get_pk_constraint(self, table, schema):
+            return {"constrained_columns": ["id"]}
+
+        def get_unique_constraints(self, table, schema):
+            return []
+
+        def get_foreign_keys(self, table, schema):
+            return []
+
+        def get_check_constraints(self, table, schema):
+            return []
+
+        def get_indexes(self, table, schema):
+            return []
+
+        def get_view_names(self, schema):
+            return []
+
+    class Connection:
+        def execute(self, _query):
+            raise RuntimeError("catalog unavailable in unit test")
+
+    class Engine:
+        def connect(self):
+            class Context:
+                def __enter__(self):
+                    return Connection()
+
+                def __exit__(self, *_args):
+                    return None
+
+            return Context()
+
+        def dispose(self):
+            return None
+
+    monkeypatch.setattr(migration_runner, "create_engine", lambda _url: Engine())
+    monkeypatch.setattr(migration_runner, "inspect", lambda _connection: Inspector())
+
+    summary = migration_runner.schema_object_summary("postgresql://not-disclosed")
+
+    assert summary["columns"] == [
+        {
+            "schema": "public",
+            "table": "orders",
+            "columns": [
+                {"name": "id", "type": "integer", "nullable": False, "default": "nextval('orders_id_seq')"}
+            ],
+        }
+    ]
+
+
+def test_migration_failure_code_classifies_unapproved_sources_and_backup_failures():
+    assert failure_code_for(MigrationSafetyError("database revision is not an approved legacy source")) == (
+        "migration_unapproved_source"
+    )
+    assert failure_code_for(MigrationSafetyError("database schema fingerprint is not approved")) == (
+        "migration_schema_drift"
+    )
+    assert failure_code_for(MigrationSafetyError("migration backup validation failed")) == (
+        "migration_backup_failed"
+    )
+
+
+def test_migration_cli_emits_backup_failure_protocol_without_connection_details(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        migration_runner,
+        "run_current_schema_migrations",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            MigrationSafetyError("migration backup validation failed: pg_restore --list failed")
+        ),
+    )
+    monkeypatch.setattr(
+        migration_runner.sys,
+        "argv",
+        ["run_current_schema_migrations.py", "--database-url", "postgresql://user:secret@example/db"],
+    )
+
+    assert migration_runner.main() == 2
+    captured = capsys.readouterr()
+    assert "XIHONG_FAILURE_CODE=migration_backup_failed" in captured.err
+    assert "XIHONG_SOURCE_EXIT_CODE=2" in captured.err
+    assert "secret" not in captured.err
+
+
+def test_support_policy_requires_a_versioned_manifest_with_integrity_metadata():
+    policy = json.loads(
+        (ROOT / "current_migrations" / "support_policy.json").read_text(encoding="utf-8")
+    )
+    source = policy["approved_legacy_sources"][0]
+
+    assert source["manifest_version"] == 1
+    assert source["manifest_path"].startswith("current_migrations/manifests/")
+    assert len(source["manifest_sha256"]) == 64
+    assert source["approval_note"]
+
+
+def test_approved_source_rejects_tampered_schema_manifest(tmp_path, monkeypatch):
+    policy_path = tmp_path / "support_policy.json"
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text('{"manifest_version":1}', encoding="utf-8")
+    policy_path.write_text(
+        json.dumps(
+            {
+                "approved_legacy_sources": [
+                    {
+                        "legacy_revision": APPROVED_LEGACY_REVISION,
+                        "schema_fingerprint": APPROVED_LEGACY_FINGERPRINT,
+                        "baseline_revision": "current_schema_20260805",
+                        "manifest_version": 1,
+                        "manifest_path": str(manifest_path),
+                        "manifest_sha256": "0" * 64,
+                        "approval_note": "test approval",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(migration_runner, "SUPPORT_POLICY_PATH", policy_path)
+    state = MigrationState(
+        database_empty=False,
+        current_revision=None,
+        legacy_revision=APPROVED_LEGACY_REVISION,
+        schema_fingerprint=APPROVED_LEGACY_FINGERPRINT,
+    )
+
+    with pytest.raises(MigrationSafetyError, match="manifest integrity check failed"):
+        choose_migration_action(state, expected_source_revision=None)
+
+
 def test_current_migration_files_are_isolated_from_historical_versions_and_static():
     config_source = CURRENT_CONFIG.read_text(encoding="utf-8")
     baseline_source = CURRENT_BASELINE.read_text(encoding="utf-8")
@@ -327,6 +504,25 @@ def test_legacy_adoption_stamps_the_baseline_then_runs_current_increments(monkey
         "assert_legacy_adoption_data_is_safe",
         lambda _: None,
     )
+    monkeypatch.setattr(
+        migration_runner,
+        "create_and_verify_backup",
+        lambda *_args, **_kwargs: {"metadata_path": "backup.json"},
+    )
+    monkeypatch.setattr(
+        migration_runner,
+        "verify_backup_metadata",
+        lambda *_args, **_kwargs: None,
+    )
+
+    class Lock:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(migration_runner, "migration_advisory_lock", lambda _: Lock())
 
     def record_command(command, **_kwargs):
         commands.append(command)
@@ -364,6 +560,78 @@ def test_legacy_adoption_stamps_the_baseline_then_runs_current_increments(monkey
     ]
 
 
+def test_nonempty_migration_creates_verified_backup_and_rechecks_under_lock(monkeypatch):
+    state = MigrationState(
+        database_empty=False,
+        current_revision=None,
+        legacy_revision=APPROVED_LEGACY_REVISION,
+        schema_fingerprint=APPROVED_LEGACY_FINGERPRINT,
+    )
+    events: list[str] = []
+    monkeypatch.setenv(migration_runner.LOCAL_BACKUP_GUARD_ENV, "1")
+    monkeypatch.setattr(migration_runner, "probe_migration_state", lambda _: state)
+    monkeypatch.setattr(
+        migration_runner,
+        "preflight_current_schema_migrations",
+        lambda *_args, **_kwargs: events.append("preflight") or "stamp",
+    )
+    monkeypatch.setattr(
+        migration_runner,
+        "create_and_verify_backup",
+        lambda *_args, **_kwargs: events.append("backup") or {"metadata_path": "backup.json"},
+    )
+    monkeypatch.setattr(
+        migration_runner,
+        "verify_backup_metadata",
+        lambda *_args, **_kwargs: events.append("verify-backup"),
+    )
+
+    class Lock:
+        def __enter__(self):
+            events.append("lock")
+
+        def __exit__(self, *_args):
+            events.append("unlock")
+
+    monkeypatch.setattr(migration_runner, "migration_advisory_lock", lambda _: Lock())
+    monkeypatch.setattr(migration_runner, "get_current_schema_baseline_revision", lambda: "current_schema_20260805")
+    monkeypatch.setattr(
+        migration_runner.subprocess,
+        "run",
+        lambda *_args, **_kwargs: type("Result", (), {"returncode": 0})(),
+    )
+
+    assert run_current_schema_migrations("postgresql://example", expected_source_revision=None, expected_source_fingerprint=None) == "stamp"
+    assert events == ["preflight", "backup", "lock", "preflight", "verify-backup", "unlock"]
+
+
+def test_empty_database_does_not_attempt_backup_before_migration(monkeypatch):
+    state = MigrationState(True, None, None, None)
+    monkeypatch.setattr(migration_runner, "probe_migration_state", lambda _: state)
+    monkeypatch.setattr(migration_runner, "preflight_current_schema_migrations", lambda *_args, **_kwargs: "upgrade")
+    monkeypatch.setattr(
+        migration_runner,
+        "create_and_verify_backup",
+        lambda *_args, **_kwargs: pytest.fail("empty database must not be backed up"),
+    )
+
+    class Lock:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(migration_runner, "migration_advisory_lock", lambda _: Lock())
+    monkeypatch.setattr(
+        migration_runner.subprocess,
+        "run",
+        lambda *_args, **_kwargs: type("Result", (), {"returncode": 0})(),
+    )
+
+    assert run_current_schema_migrations("postgresql://example", expected_source_revision=None, expected_source_fingerprint=None) == "upgrade"
+
+
 def test_schema_fingerprint_supports_postgresql_expression_indexes():
     class ExpressionIndexInspector:
         def get_schema_names(self):
@@ -396,6 +664,43 @@ def test_schema_fingerprint_supports_postgresql_expression_indexes():
             return []
 
     assert len(schema_fingerprint(None, ExpressionIndexInspector())) == 64
+
+
+def test_schema_fingerprint_ignores_only_exact_current_and_historical_version_tables():
+    class VersionTableInspector:
+        def get_schema_names(self):
+            return ["core", "public", "archive"]
+
+        def get_table_names(self, schema):
+            return ["alembic_version"] if schema in {"core", "archive"} else [
+                "alembic_version",
+                "alembic_version__archive_retired",
+                "current_schema_alembic_version",
+            ]
+
+        def get_columns(self, table, schema):
+            return [{"name": "version_num", "nullable": False, "type": "varchar", "default": None}]
+
+        def get_foreign_keys(self, table, schema):
+            return []
+
+        def get_indexes(self, table, schema):
+            return []
+
+        def get_pk_constraint(self, table, schema):
+            return {"constrained_columns": ["version_num"]}
+
+        def get_unique_constraints(self, table, schema):
+            return []
+
+    exact = schema_fingerprint(None, VersionTableInspector())
+
+    class WithoutArchiveVersionInspector(VersionTableInspector):
+        def get_table_names(self, schema):
+            tables = super().get_table_names(schema)
+            return [table for table in tables if not (schema == "archive" and table == "alembic_version")]
+
+    assert exact != schema_fingerprint(None, WithoutArchiveVersionInspector())
 
 
 def test_baseline_generator_omits_only_retired_quarantine_columns():
