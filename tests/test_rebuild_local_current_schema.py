@@ -317,7 +317,9 @@ def test_rebuild_runs_only_fixed_local_drop_create_then_bootstraps(monkeypatch, 
         command_runner=lambda command, **_kwargs: SimpleNamespace(
             returncode=0,
             stdout=(
-                '{"ready": true}' if "--check" in command else "{}"
+                '{"ready": false, "modules": {"business_overview": {"ready": true}}}'
+                if "--check" in command
+                else "{}"
             ),
             stderr="",
         ),

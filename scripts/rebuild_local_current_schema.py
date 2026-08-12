@@ -386,7 +386,8 @@ def rebuild_local_current_schema(
         dashboard_check = json.loads(dashboard_result.stdout)
     except (TypeError, ValueError) as exc:
         raise RebuildSafetyError("local rebuild dashboard check returned invalid data") from exc
-    if not dashboard_check.get("ready"):
+    module_check = dashboard_check.get("modules", {}).get("business_overview")
+    if not isinstance(module_check, dict) or not module_check.get("ready"):
         raise RebuildSafetyError("local rebuild dashboard assets are not ready")
 
     rebuilt_state = migration_state_probe(database_url)
@@ -400,7 +401,7 @@ def rebuild_local_current_schema(
         database=database,
         backup_metadata=backup_metadata,
         current_revision=rebuilt_state.current_revision,
-        dashboard_check=dashboard_check,
+        dashboard_check=module_check,
     )
     return {
         "database": database,
