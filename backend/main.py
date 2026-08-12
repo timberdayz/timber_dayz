@@ -125,7 +125,9 @@ def resolve_background_task_role(environment: str) -> str:
 
 
 def should_start_cloud_sync_worker(background_role: str) -> bool:
-    return background_role in {"collector", "local", "all"}
+    return background_role in {"collector", "local", "all"} and _env_flag(
+        "CLOUD_SYNC_WORKER_ENABLED", default=False
+    )
 
 
 def should_start_resource_monitor(background_role: str) -> bool:

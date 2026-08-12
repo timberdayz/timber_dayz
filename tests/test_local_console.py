@@ -129,6 +129,15 @@ def test_fixed_service_routes_delegate_without_accepting_commands(tmp_path: Path
     ).status_code == 404
 
 
+def test_stop_action_keeps_controller_status_api_available(tmp_path: Path):
+    client = _client(tmp_path, FakeSupervisor())
+
+    assert client.post(
+        "/api/services/local-collection/stop", headers=_headers()
+    ).status_code == 200
+    assert client.get("/api/status", headers=_headers()).status_code == 200
+
+
 def test_log_api_is_token_protected_bounded_and_redacted(tmp_path: Path):
     supervisor = FakeSupervisor()
     client = _client(tmp_path, supervisor)
@@ -309,6 +318,8 @@ def test_static_console_has_the_approved_content_and_token_handling():
     assert "logDialog" not in script
     assert "查看日志" not in combined
     assert "请查看本地控制台窗口" in script
+    assert "\u672c\u5730\u63a7\u5236\u53f0\u8fde\u63a5\u5df2\u4e2d\u65ad\uff0c\u8bf7\u91cd\u65b0\u6253\u5f00 local_console.cmd\u3002" in script
+    assert "formatRequestError" in script
     assert "@media" in styles
     assert "border-radius: 8px" in styles
 

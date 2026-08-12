@@ -7,6 +7,7 @@ if (tokenParam) {
 const token = tokenParam || window.sessionStorage.getItem('xihong-local-console-token') || '';
 const TOKEN_HEADER = 'X-Local-Console-Token';
 const POLL_INTERVAL_MS = 2000;
+const LOCAL_CONSOLE_OFFLINE_MESSAGE = '本地控制台连接已中断，请重新打开 local_console.cmd。';
 
 const STATE_LABELS = {
   stopped: '未运行',
@@ -65,6 +66,13 @@ async function api(path, options = {}) {
     throw new Error(payload.detail || `请求失败 (${response.status})`);
   }
   return payload;
+}
+
+function formatRequestError(error) {
+  if (error instanceof TypeError || error?.name === 'TypeError') {
+    return LOCAL_CONSOLE_OFFLINE_MESSAGE;
+  }
+  return error instanceof Error && error.message ? error.message : '请求失败，请稍后重试。';
 }
 
 function setConnection(online, message) {
@@ -140,7 +148,7 @@ async function refreshStatus() {
     showNotice('');
   } catch (error) {
     setConnection(false, '连接中断');
-    showNotice(error.message);
+    showNotice(formatRequestError(error));
   }
 }
 
@@ -152,7 +160,7 @@ async function runServiceAction(serviceId, action, button) {
   try {
     await api(route, { method: 'POST' });
   } catch (error) {
-    showNotice(error.message);
+    showNotice(formatRequestError(error));
   } finally {
     await refreshStatus();
   }
@@ -176,7 +184,7 @@ stopAllButton.addEventListener('click', async () => {
     await api('/api/services/stop-all', { method: 'POST' });
     await refreshStatus();
   } catch (error) {
-    showNotice(error.message);
+    showNotice(formatRequestError(error));
   } finally {
     stopAllButton.disabled = false;
   }
