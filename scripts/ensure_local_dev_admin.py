@@ -41,7 +41,8 @@ class LocalDevAdminConfig:
 def load_local_dev_admin_config(
     environment: Mapping[str, str] | None = None,
 ) -> LocalDevAdminConfig | None:
-    environment = environment or os.environ
+    if environment is None:
+        environment = os.environ
     enabled = environment.get("LOCAL_DEV_BOOTSTRAP_ADMIN", "").strip().lower()
     if enabled not in TRUE_VALUES:
         return None
