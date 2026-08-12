@@ -108,7 +108,7 @@ def build_service_specs(
     repo_root: Path, python_executable: str | None = None
 ) -> dict[str, ServiceSpec]:
     python_executable = python_executable or sys.executable
-    collection_script = repo_root / "scripts" / "start_local_collection_mode.ps1"
+    collection_script = repo_root / "scripts" / "start_collection_formal.ps1"
     collection_script_text = str(collection_script).replace("'", "''")
     inspection_script = repo_root / "scripts" / "pwcli_inspection_panel.py"
     return {
@@ -128,7 +128,7 @@ def build_service_specs(
                     f"& '{collection_script_text}'"
                 ),
             ),
-            command_markers=("start_local_collection_mode.ps1",),
+            command_markers=("start_collection_formal.ps1",),
             stop_process_tree=True,
             log_filename="local-collection.log",
         ),

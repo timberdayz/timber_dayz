@@ -124,8 +124,8 @@ def test_local_collection_console_uses_the_development_startup_wrapper(tmp_path:
         "-Command",
     )
     assert "OutputEncoding" in specs[LOCAL_COLLECTION].command[5]
-    assert "start_local_collection_mode.ps1" in specs[LOCAL_COLLECTION].command[5]
-    assert "start_collection_formal.ps1" not in specs[LOCAL_COLLECTION].command[5]
+    assert "start_collection_formal.ps1" in specs[LOCAL_COLLECTION].command[5]
+    assert "start_local_collection_mode.ps1" not in specs[LOCAL_COLLECTION].command[5]
     assert specs[INSPECTION_PANEL].command == (
         "python-test",
         "-u",

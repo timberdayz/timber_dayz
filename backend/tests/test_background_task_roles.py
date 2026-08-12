@@ -16,7 +16,6 @@ def test_api_role_disables_collection_background_workers(monkeypatch):
 def test_collector_role_enables_collection_background_workers(monkeypatch):
     monkeypatch.setenv("DEPLOYMENT_ROLE", "collector")
     monkeypatch.setenv("ENABLE_COLLECTION", "true")
-    monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "true")
 
     role = main.resolve_background_task_role("development")
 
@@ -28,23 +27,14 @@ def test_collector_role_enables_collection_background_workers(monkeypatch):
     assert main.should_start_websocket_cleanup(role) is False
 
 
-def test_development_role_does_not_start_cloud_sync_without_explicit_opt_in(monkeypatch):
+def test_development_role_starts_cloud_sync_for_real_collection_testing(monkeypatch):
     monkeypatch.delenv("DEPLOYMENT_ROLE", raising=False)
     monkeypatch.delenv("APP_RUNTIME_MODE", raising=False)
-    monkeypatch.delenv("CLOUD_SYNC_WORKER_ENABLED", raising=False)
 
     role = main.resolve_background_task_role("development")
 
     assert role == "all"
-    assert main.should_start_cloud_sync_worker(role) is False
-
-
-def test_cloud_sync_worker_requires_explicit_enabled_flag(monkeypatch):
-    monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "false")
-    assert main.should_start_cloud_sync_worker("collector") is False
-
-    monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "true")
-    assert main.should_start_cloud_sync_worker("collector") is True
+    assert main.should_start_cloud_sync_worker(role) is True
 
 
 def test_production_without_explicit_role_defaults_to_api(monkeypatch):
