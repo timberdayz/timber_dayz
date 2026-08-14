@@ -17,10 +17,12 @@ from scripts.run_current_schema_migrations import MigrationState
 class RecordingRunner:
     def __init__(self, *, restore_exit_code: int = 0) -> None:
         self.commands: list[list[str]] = []
+        self.kwargs: list[dict[str, object]] = []
         self.restore_exit_code = restore_exit_code
 
-    def __call__(self, command: list[str], **_kwargs):
+    def __call__(self, command: list[str], **kwargs):
         self.commands.append(command)
+        self.kwargs.append(kwargs)
         if command[:2] == ["docker", "cp"]:
             Path(command[-1]).write_bytes(b"PGDMP-test-backup")
         return type("Result", (), {"returncode": self.restore_exit_code if "pg_restore" in command else 0, "stderr": ""})()
@@ -67,6 +69,26 @@ def test_backup_rejects_an_unreadable_restore_archive(tmp_path: Path):
             docker_runner=RecordingRunner(restore_exit_code=1),
             now=lambda: "20260812T010203Z",
         )
+
+
+def test_backup_decodes_docker_output_as_utf8_with_replacement(tmp_path: Path):
+    runner = RecordingRunner()
+
+    create_and_verify_backup(
+        "postgresql://erp_user:secret@127.0.0.1:15432/xihong_erp",
+        _state(),
+        backup_directory=tmp_path,
+        docker_runner=runner,
+        now=lambda: "20260812T010203Z",
+    )
+
+    docker_kwargs = [
+        kwargs for command, kwargs in zip(runner.commands, runner.kwargs)
+        if command[0] == "docker"
+    ]
+    assert docker_kwargs
+    assert all(kwargs["encoding"] == "utf-8" for kwargs in docker_kwargs)
+    assert all(kwargs["errors"] == "replace" for kwargs in docker_kwargs)
 
 
 def test_backup_metadata_rejects_changed_schema_evidence(tmp_path: Path):

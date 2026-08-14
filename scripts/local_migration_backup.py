@@ -34,7 +34,14 @@ def _sha256(path: Path) -> str:
 def _run_docker(
     command: list[str], docker_runner: Callable[..., Any]
 ) -> Any:
-    result = docker_runner(command, capture_output=True, text=True, check=False)
+    result = docker_runner(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
     if getattr(result, "returncode", 1) != 0:
         raise BackupValidationError("migration backup command failed")
     return result
@@ -98,6 +105,8 @@ def create_and_verify_backup(
             ["docker", "exec", container, "pg_restore", "--list", container_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         if getattr(restore, "returncode", 1) != 0:
@@ -107,6 +116,8 @@ def create_and_verify_backup(
             ["docker", "exec", container, "rm", "-f", container_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
 
