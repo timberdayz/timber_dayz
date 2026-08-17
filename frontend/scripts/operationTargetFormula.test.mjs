@@ -2,9 +2,26 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  allocateOperationMetricScores,
   buildOperationEntryPreview,
   buildOperationTargetPreview
 } from '../src/domains/business/views/target/operationTargetFormula.js'
+
+test('allocateOperationMetricScores previews the fixed 20-point integer budget in catalog order', () => {
+  assert.deepEqual(
+    allocateOperationMetricScores([
+      { metric_code: 'training_completion_rate', sort_key: 40, is_enabled: true },
+      { metric_code: 'customer_satisfaction', sort_key: 10, is_enabled: true },
+      { metric_code: 'complaint_count', sort_key: 20, is_enabled: true },
+      { metric_code: 'reply_timeliness', sort_key: 30, is_enabled: false }
+    ]),
+    {
+      customer_satisfaction: 7,
+      complaint_count: 7,
+      training_completion_rate: 6
+    }
+  )
+})
 
 test('buildOperationTargetPreview handles manual score metrics', () => {
   const preview = buildOperationTargetPreview(

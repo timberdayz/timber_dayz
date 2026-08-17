@@ -2,6 +2,23 @@ function roundHalfUp(value) {
   return Math.floor(value + 0.5)
 }
 
+export function allocateOperationMetricScores(metrics = []) {
+  const enabled = metrics
+    .filter((metric) => metric?.is_enabled)
+    .sort((left, right) => (
+      Number(left.sort_key || 0) - Number(right.sort_key || 0)
+      || String(left.metric_code || '').localeCompare(String(right.metric_code || ''))
+    ))
+
+  if (!enabled.length) return {}
+
+  const [baseScore, remainder] = [Math.floor(20 / enabled.length), 20 % enabled.length]
+  return Object.fromEntries(enabled.map((metric, index) => [
+    metric.metric_code,
+    baseScore + Number(index < remainder)
+  ]))
+}
+
 function pending(formula) {
   return { status: 'pending', auto_score: null, formula }
 }

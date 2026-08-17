@@ -41,7 +41,7 @@
         <el-table-column prop="metric_name" label="运营指标" min-width="180"><template #default="{ row }"><span>{{ row.metric_name }}</span><small>{{ row.metric_code }}</small></template></el-table-column>
         <el-table-column prop="metric_direction" label="评分方向" width="128" />
         <el-table-column label="固定目标" width="165"><template #default="{ row }"><span>{{ row.target_value ?? '专项检查' }} {{ row.unit || '' }}</span></template></el-table-column>
-        <el-table-column label="自动满分" width="110"><template #default="{ row }"><strong>{{ row.max_score }}</strong></template></el-table-column>
+        <el-table-column label="自动满分" width="110"><template #default="{ row }"><strong>{{ metricPreviewMaxScore(row) }}</strong></template></el-table-column>
         <el-table-column prop="guidance" label="评分说明" min-width="240" />
       </el-table>
     </section>
@@ -132,7 +132,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '@/components/common/PageHeader.vue'
 import api from '@/api'
 import { buildEntryPayload, buildScopePayload } from './operationPerformanceWorkbench'
-import { buildOperationEntryPreview } from './operationTargetFormula'
+import { allocateOperationMetricScores, buildOperationEntryPreview } from './operationTargetFormula'
 
 const yearMonth = ref(new Date().toISOString().slice(0, 7))
 const activeStep = ref(0)
@@ -159,7 +159,8 @@ const expectedRuleUpdatedAt = ref(null)
 const operationMaxScore = ref(0)
 const legacyMigration = ref({ required: false, legacy_metric_codes: [] })
 
-const assignedMaxScore = computed(() => metrics.value.filter((row) => row.is_enabled).reduce((sum, row) => sum + Number(row.max_score || 0), 0))
+const previewMetricScores = computed(() => allocateOperationMetricScores(metrics.value))
+const assignedMaxScore = computed(() => Object.values(previewMetricScores.value).reduce((sum, score) => sum + Number(score || 0), 0))
 const scoreBudgetMatches = computed(() => Math.abs(assignedMaxScore.value - operationMaxScore.value) < 0.0001)
 const canSaveRules = computed(() => catalogVersion.value && scoreBudgetMatches.value)
 const includedShopCount = computed(() => scopeShops.value.filter((shop) => shop.is_included).length)
@@ -172,6 +173,7 @@ const liveEntryCompletion = computed(() => entryShops.value.reduce((summary, sho
 function unwrap(response) { return response?.data?.data || response?.data || response }
 function errorMessage(error, fallback) { return error?.response?.data?.detail || error?.message || fallback }
 function isNumericInput(metric) { return !['training_counts', 'special_check'].includes(metric.input_kind) }
+function metricPreviewMaxScore(metric) { return previewMetricScores.value[metric.metric_code] || 0 }
 function entryPreview(metric) { return buildOperationEntryPreview(metric) }
 function isMetricComplete(metric) { return entryPreview(metric).status === 'completed' }
 function getLiveStoreEntryStatus(shop) { return (shop.metrics || []).every(isMetricComplete) ? 'completed' : 'pending' }
