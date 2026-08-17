@@ -367,6 +367,11 @@ def _patch_successful_shop_recalc(monkeypatch, *, payroll_raises=False):
         AsyncMock(return_value={}),
     )
     monkeypatch.setattr(
+        performance_module,
+        "_load_included_operation_scope_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+    )
+    monkeypatch.setattr(
         performance_module, "load_shop_monthly_target_achievement", _fake_source_rows
     )
     monkeypatch.setattr(

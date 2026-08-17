@@ -58,6 +58,8 @@ from backend.schemas.target import (
     BreakdownResponse,
     ShopTargetWorkbenchApplyRequest,
     OperationWorkbenchApplyRequest,
+    OperationWorkbenchScopeApplyRequest,
+    OperationWorkbenchEntryApplyRequest,
 )
 from backend.services.shop_target_workbench_service import ShopTargetWorkbenchService
 from backend.services.operation_performance_workbench_service import (
@@ -69,7 +71,10 @@ from backend.services.payroll_period_lock_service import (
     PayrollPeriodLockService,
 )
 from backend.services.target_breakdown_selection import select_effective_shop_breakdowns
-from backend.dependencies.auth import get_current_user  # [OK] 2026-01-08: 添加用户认证
+from backend.dependencies.auth import (
+    get_current_user,
+    require_admin as require_platform_admin,
+)  # [OK] 2026-01-08: 添加用户认证
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/targets", tags=["目标管理"])
@@ -247,7 +252,7 @@ async def get_operation_performance_workbench(
 async def apply_operation_performance_workbench(
     request: OperationWorkbenchApplyRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_platform_admin),
 ):
     try:
         data = await OperationPerformanceWorkbenchService(db).apply(
@@ -266,11 +271,73 @@ async def apply_operation_performance_workbench(
     return {"success": True, "data": data}
 
 
+@router.get("/operation-workbench/scope", response_model=Dict[str, Any])
+async def get_operation_performance_workbench_scope(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(get_current_user),
+):
+    return {
+        "success": True,
+        "data": await OperationPerformanceWorkbenchService(db).get_scope(year_month),
+    }
+
+
+@router.put("/operation-workbench/scope", response_model=Dict[str, Any])
+async def apply_operation_performance_workbench_scope(
+    request: OperationWorkbenchScopeApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_platform_admin),
+):
+    try:
+        data = await OperationPerformanceWorkbenchService(db).apply_scope(
+            request, username=getattr(current_user, "username", None)
+        )
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "data": data}
+
+
+@router.get("/operation-workbench/entries", response_model=Dict[str, Any])
+async def get_operation_performance_workbench_entries(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(get_current_user),
+):
+    return {
+        "success": True,
+        "data": await OperationPerformanceWorkbenchService(db).get_entries(year_month),
+    }
+
+
+@router.put("/operation-workbench/entries", response_model=Dict[str, Any])
+async def apply_operation_performance_workbench_entries(
+    request: OperationWorkbenchEntryApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_platform_admin),
+):
+    try:
+        data = await OperationPerformanceWorkbenchService(db).apply_entries(
+            request, username=getattr(current_user, "username", None)
+        )
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "data": data}
+
+
 @router.post("/operation-workbench/copy-prev-month", response_model=Dict[str, Any])
 async def copy_prev_month_operation_performance_workbench(
     year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_platform_admin),
 ):
     try:
         data = await OperationPerformanceWorkbenchService(db).copy_prev_month(

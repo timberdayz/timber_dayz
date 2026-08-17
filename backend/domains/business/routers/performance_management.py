@@ -44,6 +44,7 @@ from modules.core.db import (
     ShopProfitBasis,
     ShopAlert,
     TargetBreakdown,
+    OperationPerformanceShopScope,
     Employee,
     EmployeePerformance,
     EmployeePerformanceAdjustment,
@@ -1209,6 +1210,37 @@ async def _load_operation_target_breakdowns_by_shop(
     return grouped
 
 
+async def _load_included_operation_scope_keys(
+    db: AsyncSession, year_month: str
+) -> set[str] | None:
+    rows = (
+        (
+            await db.execute(
+                select(OperationPerformanceShopScope).where(
+                    OperationPerformanceShopScope.year_month == year_month
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return None
+    return {
+        f"{str(row.platform_code).lower()}|{row.shop_id}"
+        for row in rows
+        if row.is_included
+    }
+
+
+def _filter_source_rows_by_operation_scope(
+    source_rows: Dict[str, Dict[str, Any]], included_scope_keys: set[str]
+) -> Dict[str, Dict[str, Any]]:
+    return {
+        key: row for key, row in source_rows.items() if key in included_scope_keys
+    }
+
+
 async def invalidate_performance_related_caches(cache_service) -> None:
     await cache_service.invalidate("performance_scores")
     await cache_service.invalidate("performance_scores_shop")
@@ -2079,6 +2111,27 @@ async def calculate_performance_scores(
         )
 
         operation_targets = await _load_operation_targets_for_month(db, period)
+        if operation_targets:
+            included_scope_keys = await _load_included_operation_scope_keys(db, period)
+            if included_scope_keys is None:
+                return error_response(
+                    code=ErrorCode.PERF_CALC_NOT_READY,
+                    message="请先确认本月运营绩效店铺范围",
+                    error_type=get_error_type(ErrorCode.PERF_CALC_NOT_READY),
+                    recovery_suggestion="请在运营绩效工作台确认参与店铺后重试",
+                    status_code=400,
+                )
+            source_rows = _filter_source_rows_by_operation_scope(
+                source_rows, included_scope_keys
+            )
+            if not source_rows:
+                return error_response(
+                    code=ErrorCode.PERF_CALC_NOT_READY,
+                    message="本月没有参与运营绩效的店铺",
+                    error_type=get_error_type(ErrorCode.PERF_CALC_NOT_READY),
+                    recovery_suggestion="请在运营绩效工作台调整店铺范围后重试",
+                    status_code=400,
+                )
         operation_breakdowns_by_shop = await _load_operation_target_breakdowns_by_shop(
             db,
             operation_targets,

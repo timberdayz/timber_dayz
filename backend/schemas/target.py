@@ -265,4 +265,74 @@ class OperationWorkbenchApplyRequest(BaseModel):
         ]
         if len(override_keys) != len(set(override_keys)):
             raise ValueError("店铺覆盖不能重复")
+        if self.shop_overrides:
+            raise ValueError("店铺数据必须通过店铺录入工作台保存")
+        if any(
+            item.achieved_value is not None or item.manual_score_value is not None
+            for item in self.metrics
+        ):
+            raise ValueError("实际值和人工评分必须通过店铺录入工作台保存")
+        return self
+
+
+class OperationWorkbenchScopeShopInput(BaseModel):
+    platform_code: str = Field(..., min_length=1, max_length=32)
+    shop_id: str = Field(..., min_length=1, max_length=256)
+    is_included: bool = True
+    exclusion_reason: Optional[str] = Field(default=None, max_length=512)
+
+    @model_validator(mode="after")
+    def validate_exclusion_reason(self):
+        if not self.is_included and not (self.exclusion_reason or "").strip():
+            raise ValueError("不参与店铺必须填写不参与原因")
+        return self
+
+
+class OperationWorkbenchScopeApplyRequest(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    shops: List[OperationWorkbenchScopeShopInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_shop_keys(self):
+        keys = [
+            (item.platform_code.strip().lower(), item.shop_id.strip())
+            for item in self.shops
+        ]
+        if len(keys) != len(set(keys)):
+            raise ValueError("店铺范围不能重复")
+        return self
+
+
+class OperationWorkbenchEntryInput(BaseModel):
+    metric_code: str = Field(..., min_length=1, max_length=64)
+    platform_code: str = Field(..., min_length=1, max_length=32)
+    shop_id: str = Field(..., min_length=1, max_length=256)
+    achieved_value: Optional[float] = None
+    manual_score_value: Optional[float] = None
+
+    @model_validator(mode="after")
+    def validate_single_entry_value(self):
+        has_achieved = self.achieved_value is not None
+        has_manual = self.manual_score_value is not None
+        if has_achieved == has_manual:
+            raise ValueError("每条店铺指标必须且只能填写实际值或人工评分")
+        return self
+
+
+class OperationWorkbenchEntryApplyRequest(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    entries: List[OperationWorkbenchEntryInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_entry_keys(self):
+        keys = [
+            (
+                item.metric_code.strip(),
+                item.platform_code.strip().lower(),
+                item.shop_id.strip(),
+            )
+            for item in self.entries
+        ]
+        if len(keys) != len(set(keys)):
+            raise ValueError("店铺指标不能重复")
         return self

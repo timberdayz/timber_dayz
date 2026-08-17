@@ -64,7 +64,7 @@ def test_runtime_operation_paths_are_isolated_from_legacy_targets():
 
 
 @pytest.mark.asyncio
-async def test_workbench_override_queries_require_parent_contract_version():
+async def test_workbench_rules_do_not_query_store_entries():
     class _Result:
         def __init__(self, rows=None, scalar=None):
             self.rows = rows or []
@@ -117,19 +117,14 @@ async def test_workbench_override_queries_require_parent_contract_version():
     db = _Db()
     await OperationPerformanceWorkbenchService(db).get_workbench("2026-08")
 
-    override_queries = [
+    store_entry_queries = [
         statement for statement in db.statements if "target_breakdown" in str(statement)
     ]
-    assert override_queries, "workbench must query shop overrides"
-    assert all(
-        "operation_contract_version" in str(statement)
-        and "metric_catalog_version" in str(statement)
-        for statement in override_queries
-    )
+    assert not store_entry_queries
 
 
 @pytest.mark.asyncio
-async def test_copy_previous_month_reads_only_version_matched_shop_overrides(
+async def test_copy_previous_month_does_not_copy_store_scope_or_entries(
     monkeypatch,
 ):
     from backend.services import (
@@ -180,15 +175,15 @@ async def test_copy_previous_month_reads_only_version_matched_shop_overrides(
 
     await service.copy_prev_month("2026-08")
 
-    override_query = next(
+    assert not [
         statement for statement in db.statements if "target_breakdown" in str(statement)
-    )
-    assert "operation_contract_version" in str(override_query)
-    assert "metric_catalog_version" in str(override_query)
+    ]
+    applied_request = service.apply.await_args.args[0]
+    assert applied_request.shop_overrides == []
 
 
 @pytest.mark.asyncio
-async def test_workbench_save_deletes_only_version_matched_shop_overrides(monkeypatch):
+async def test_workbench_save_preserves_store_entries(monkeypatch):
     from backend.schemas.target import OperationWorkbenchApplyRequest
     from backend.services import (
         operation_performance_workbench_service as workbench_module,
@@ -255,11 +250,9 @@ async def test_workbench_save_deletes_only_version_matched_shop_overrides(monkey
         )
     )
 
-    delete_statement = next(
+    assert not [
         statement for statement in db.statements if str(statement).startswith("DELETE")
-    )
-    assert "operation_contract_version" in str(delete_statement)
-    assert "metric_catalog_version" in str(delete_statement)
+    ]
 
 
 def test_lower_better_zero_target_scores_zero_actual_at_full_score():

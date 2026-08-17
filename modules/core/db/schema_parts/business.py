@@ -2121,6 +2121,51 @@ class OperationMetricCatalog(Base):
     )
 
 
+class OperationPerformanceShopScope(Base):
+    """Monthly participation snapshot for operation-performance shops."""
+
+    __tablename__ = "operation_performance_shop_scopes"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year_month = Column(String(7), nullable=False)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(256), nullable=False)
+    is_included = Column(Boolean, nullable=False, default=True)
+    exclusion_reason = Column(String(512), nullable=True)
+    created_by = Column(String(64), nullable=True)
+    updated_by = Column(String(64), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            name="fk_operation_performance_scope_shop",
+        ),
+        UniqueConstraint(
+            "year_month",
+            "platform_code",
+            "shop_id",
+            name="uq_operation_performance_shop_scope_month_shop",
+        ),
+        Index(
+            "ix_operation_performance_shop_scope_month_included",
+            "year_month",
+            "is_included",
+        ),
+        CheckConstraint(
+            "is_included OR NULLIF(btrim(exclusion_reason), '') IS NOT NULL",
+            name="chk_operation_performance_scope_exclusion_reason",
+        ),
+        {"schema": "a_class"},
+    )
+
+
 class ShopHealthScore(Base):
     """
     店铺健康度评分表(C类数据:系统自动计算)
