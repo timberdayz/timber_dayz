@@ -312,6 +312,7 @@ class OperationWorkbenchScopeShopInput(BaseModel):
 
 class OperationWorkbenchScopeApplyRequest(BaseModel):
     year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    expected_rule_updated_at: Optional[datetime] = None
     shops: List[OperationWorkbenchScopeShopInput] = Field(default_factory=list)
 
     @model_validator(mode="after")

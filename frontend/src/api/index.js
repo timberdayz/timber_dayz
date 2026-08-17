@@ -2061,6 +2061,9 @@ export default {
   async revokeOperationPerformanceScope(yearMonth) {
     return await this._post(`/targets/operation-workbench/scope/revoke?year_month=${encodeURIComponent(yearMonth)}`)
   },
+  async migrateOperationPerformanceWorkbenchToAutoIntegerV1(yearMonth) {
+    return await this._post(`/targets/operation-workbench/migrate-auto-integer-v1?year_month=${encodeURIComponent(yearMonth)}`)
+  },
   async getOperationPerformanceEntries(yearMonth) {
     return await this._get('/targets/operation-workbench/entries', { params: { year_month: yearMonth } })
   },

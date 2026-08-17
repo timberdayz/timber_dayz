@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from datetime import datetime, timezone
 
 
 def test_monthly_scope_model_uses_month_and_shop_as_its_identity():
@@ -46,6 +47,19 @@ def test_scope_contract_allows_empty_optional_note_for_an_excluded_shop():
     )
 
     assert request.shops[0].exclusion_reason is None
+
+
+def test_scope_contract_carries_the_rule_optimistic_lock_version():
+    from backend.schemas.target import OperationWorkbenchScopeApplyRequest
+
+    expected_rule_updated_at = datetime(2026, 8, 17, 8, 0, tzinfo=timezone.utc)
+    request = OperationWorkbenchScopeApplyRequest(
+        year_month="2026-08",
+        expected_rule_updated_at=expected_rule_updated_at,
+        shops=[],
+    )
+
+    assert request.expected_rule_updated_at == expected_rule_updated_at
 
 
 def test_entry_contract_rejects_duplicate_shop_metric_keys():
@@ -167,6 +181,33 @@ async def test_scope_confirmation_rejects_an_included_shop_without_sales_target(
 
     with pytest.raises(ValueError, match="销售目标"):
         await service.apply_scope(request, username="admin")
+
+
+@pytest.mark.asyncio
+async def test_scope_confirmation_rejects_a_stale_rule_version(monkeypatch):
+    from backend.schemas.target import OperationWorkbenchScopeApplyRequest
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=AsyncMock())
+    service._assert_scope_rule_ready = AsyncMock()
+    service._scope_rule_updated_at = AsyncMock(
+        return_value=datetime(2026, 8, 17, 9, 0, tzinfo=timezone.utc)
+    )
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+
+    with pytest.raises(module.OperationPerformanceWorkbenchConflictError, match="运营评分规则"):
+        await service.apply_scope(
+            OperationWorkbenchScopeApplyRequest(
+                year_month="2026-08",
+                expected_rule_updated_at=datetime(2026, 8, 17, 8, 0, tzinfo=timezone.utc),
+                shops=[],
+            ),
+            username="admin",
+        )
 
 
 @pytest.mark.asyncio
@@ -798,3 +839,172 @@ def test_settlement_filters_out_excluded_operation_scope_shops():
     assert _filter_source_rows_by_operation_scope(
         source_rows, {"shopee|S002"}
     ) == {"shopee|S002": {"shop_id": "S002"}}
+
+
+@pytest.mark.asyncio
+async def test_legacy_migration_rejects_a_month_with_existing_scope(monkeypatch):
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=AsyncMock())
+    service._scope_rows = AsyncMock(return_value=[SimpleNamespace(snapshot_version=1)])
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+
+    with pytest.raises(ValueError, match="店铺范围"):
+        await service.migrate_legacy_month("2026-08", username="admin")
+
+
+@pytest.mark.asyncio
+async def test_legacy_migration_preserves_the_old_rule_in_the_v1_snapshot(monkeypatch):
+    from backend.services import operation_performance_workbench_service as module
+
+    legacy_target = SimpleNamespace(
+        id=101,
+        metric_code="customer_satisfaction",
+        metric_name="Legacy satisfaction",
+        target_name="Legacy satisfaction",
+        metric_direction="higher_better",
+        target_value=88,
+        max_score=9,
+        penalty_enabled=True,
+        penalty_threshold=80,
+        penalty_per_unit=1,
+        penalty_max=5,
+        manual_score_enabled=False,
+        manual_score_value=3,
+        achieved_value=95,
+        operation_rule_snapshot={"legacy": True},
+        scoring_model_version="legacy",
+        metric_catalog_version=1,
+        is_enabled=True,
+    )
+    db = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
+        commit=AsyncMock(),
+    )
+    service = module.OperationPerformanceWorkbenchService(db=db)
+    service._scope_rows = AsyncMock(return_value=[])
+    service._targets = AsyncMock(return_value=[legacy_target])
+    service._config = AsyncMock(return_value=SimpleNamespace(id=7, operation_max_score=20, updated_at=None))
+    service._catalog = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                metric_code="customer_satisfaction",
+                metric_name="Customer satisfaction",
+                metric_direction="higher_better",
+                default_target_value=100,
+                sort_key=10,
+                input_kind="percentage",
+                unit="%",
+                guidance="",
+                scoring_rule_version="auto_integer_v1",
+                catalog_version=2,
+            )
+        ]
+    )
+    service.get_workbench = AsyncMock(return_value={"scoring_model_version": "auto_integer_v1"})
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+
+    result = await service.migrate_legacy_month("2026-08", username="admin")
+
+    assert legacy_target.scoring_model_version == "auto_integer_v1"
+    assert legacy_target.max_score == 20
+    assert legacy_target.operation_rule_snapshot["migration_audit"]["legacy_rule"] == {
+        "scoring_model_version": "legacy",
+        "metric_code": "customer_satisfaction",
+        "metric_name": "Legacy satisfaction",
+        "metric_direction": "higher_better",
+        "target_value": 88,
+        "max_score": 9,
+        "penalty_enabled": True,
+        "penalty_threshold": 80,
+        "penalty_per_unit": 1,
+        "penalty_max": 5,
+        "manual_score_enabled": False,
+        "operation_rule_snapshot": {"legacy": True},
+    }
+    assert result["migration"]["migrated_metric_codes"] == ["customer_satisfaction"]
+
+
+@pytest.mark.asyncio
+async def test_copy_previous_month_copies_only_enabled_metric_codes(monkeypatch):
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    service._targets = AsyncMock(
+        side_effect=[
+            [],
+            [
+                SimpleNamespace(metric_code="customer_satisfaction", is_enabled=True),
+                SimpleNamespace(metric_code="complaint_count", is_enabled=False),
+            ],
+        ]
+    )
+    service._catalog = AsyncMock(
+        return_value=[
+            SimpleNamespace(metric_code="customer_satisfaction", catalog_version=2),
+            SimpleNamespace(metric_code="complaint_count", catalog_version=2),
+        ]
+    )
+    service.apply = AsyncMock(return_value={"metrics": []})
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+
+    await service.copy_prev_month("2026-08", username="admin")
+
+    request = service.apply.await_args.args[0]
+    assert [item.metric_code for item in request.metrics] == ["customer_satisfaction"]
+    assert request.metrics[0].is_enabled is True
+
+
+def test_target_router_exposes_explicit_legacy_operation_migration_endpoint():
+    from backend.domains.business.routers.target_management import router
+
+    routes = {(route.path, tuple(route.methods)) for route in router.routes}
+    assert (
+        "/targets/operation-workbench/migrate-auto-integer-v1",
+        ("POST",),
+    ) in routes
+
+
+@pytest.mark.asyncio
+async def test_scope_route_returns_conflict_for_a_stale_rule_version(monkeypatch):
+    from fastapi import HTTPException
+    from backend.schemas.target import OperationWorkbenchScopeApplyRequest
+    from backend.domains.business.routers import target_management as router_module
+    from backend.services.operation_performance_workbench_service import (
+        OperationPerformanceWorkbenchConflictError,
+    )
+
+    class FakeWorkbenchService:
+        def __init__(self, _db):
+            pass
+
+        async def apply_scope(self, _request, username=None):
+            raise OperationPerformanceWorkbenchConflictError("stale rules")
+
+    monkeypatch.setattr(
+        router_module,
+        "OperationPerformanceWorkbenchService",
+        FakeWorkbenchService,
+    )
+    db = SimpleNamespace(rollback=AsyncMock())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router_module.apply_operation_performance_workbench_scope(
+            OperationWorkbenchScopeApplyRequest(year_month="2026-08", shops=[]),
+            db=db,
+            current_user=SimpleNamespace(username="admin"),
+        )
+
+    assert exc_info.value.status_code == 409

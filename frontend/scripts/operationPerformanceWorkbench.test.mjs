@@ -23,6 +23,16 @@ test('buildScopePayload sends the complete monthly shop scope without mutable sh
   })
 })
 
+test('buildScopePayload carries the rules optimistic lock version', () => {
+  const payload = buildScopePayload('2026-08', [], '2026-08-17T08:00:00+00:00')
+
+  assert.deepEqual(payload, {
+    year_month: '2026-08',
+    expected_rule_updated_at: '2026-08-17T08:00:00+00:00',
+    shops: []
+  })
+})
+
 test('buildEntryPayload sends only controlled structured inputs for each metric type', () => {
   const payload = buildEntryPayload('2026-08', [
     {
@@ -83,6 +93,7 @@ test('operation workbench exposes the three monthly steps and dedicated API meth
   assert.match(api, /getOperationPerformanceEntries/)
   assert.match(api, /applyOperationPerformanceEntries/)
   assert.match(api, /revokeOperationPerformanceScope/)
+  assert.match(api, /migrateOperationPerformanceWorkbenchToAutoIntegerV1/)
 })
 
 test('buildEntryPayload omits incomplete metrics so pending entries are not submitted', () => {

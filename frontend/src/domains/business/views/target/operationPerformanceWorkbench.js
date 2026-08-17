@@ -1,6 +1,7 @@
-export function buildScopePayload(yearMonth, shops = []) {
+export function buildScopePayload(yearMonth, shops = [], expectedRuleUpdatedAt = null) {
   return {
     year_month: yearMonth,
+    ...(expectedRuleUpdatedAt ? { expected_rule_updated_at: expectedRuleUpdatedAt } : {}),
     shops: shops.map((shop) => ({
       platform_code: shop.platform_code,
       shop_id: shop.shop_id,

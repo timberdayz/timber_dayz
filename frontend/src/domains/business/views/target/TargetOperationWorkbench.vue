@@ -28,6 +28,13 @@
         <span>运营满分 {{ operationMaxScore }}</span>
         <span v-if="!scoreBudgetMatches">启用指标满分之和必须等于运营满分</span>
       </section>
+      <el-alert v-if="legacyMigration.required" type="warning" :closable="false" show-icon class="legacy-migration-alert">
+        <template #title>检测到旧版运营规则</template>
+        <template #default>
+          <span>仅在未锁期、未确认店铺范围且没有店铺运营录入时可迁移为自动整数计分。</span>
+          <el-button size="small" type="warning" :loading="migratingLegacy" @click="migrateLegacyMonth">迁移旧规则</el-button>
+        </template>
+      </el-alert>
 
       <el-table v-loading="loading" :data="metrics" border stripe class="erp-table">
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch v-model="row.is_enabled" /></template></el-table-column>
@@ -136,6 +143,7 @@ const savingRules = ref(false)
 const savingScope = ref(false)
 const savingEntries = ref(false)
 const copying = ref(false)
+const migratingLegacy = ref(false)
 const metrics = ref([])
 const scopeShops = ref([])
 const entryShops = ref([])
@@ -147,7 +155,9 @@ const catalogVersion = ref(null)
 const performanceConfigId = ref(null)
 const expectedPerformanceConfigUpdatedAt = ref(null)
 const expectedUpdatedAt = ref(null)
+const expectedRuleUpdatedAt = ref(null)
 const operationMaxScore = ref(0)
+const legacyMigration = ref({ required: false, legacy_metric_codes: [] })
 
 const assignedMaxScore = computed(() => metrics.value.filter((row) => row.is_enabled).reduce((sum, row) => sum + Number(row.max_score || 0), 0))
 const scoreBudgetMatches = computed(() => Math.abs(assignedMaxScore.value - operationMaxScore.value) < 0.0001)
@@ -173,6 +183,7 @@ async function loadRules() {
   performanceConfigId.value = data.performance_config_id
   expectedPerformanceConfigUpdatedAt.value = data.performance_config_updated_at
   expectedUpdatedAt.value = data.updated_at
+  legacyMigration.value = data.legacy_migration || { required: false, legacy_metric_codes: [] }
   operationMaxScore.value = Number(data.operation_max_score || 0)
 }
 
@@ -182,6 +193,7 @@ async function loadScope() {
     const data = unwrap(await api.getOperationPerformanceScope(yearMonth.value))
     scopeShops.value = data.shops || []
     scopeConfirmed.value = Boolean(data.is_confirmed)
+    expectedRuleUpdatedAt.value = data.rule_updated_at || null
     scopeDirty.value = false
   } finally { loadingScope.value = false }
 }
@@ -217,6 +229,7 @@ async function saveRules() {
       }))
     }))
     expectedUpdatedAt.value = data.updated_at
+    expectedRuleUpdatedAt.value = data.updated_at
     ElMessage.success('运营评分规则已保存')
     await loadEntries()
   } catch (error) { ElMessage.error(errorMessage(error, '保存运营评分规则失败')) } finally { savingRules.value = false }
@@ -235,9 +248,10 @@ function excludeAllShops() {
 async function saveScope() {
   savingScope.value = true
   try {
-    const data = unwrap(await api.applyOperationPerformanceScope(buildScopePayload(yearMonth.value, scopeShops.value)))
+    const data = unwrap(await api.applyOperationPerformanceScope(buildScopePayload(yearMonth.value, scopeShops.value, expectedRuleUpdatedAt.value)))
     scopeShops.value = data.shops || []
     scopeConfirmed.value = Boolean(data.is_confirmed)
+    expectedRuleUpdatedAt.value = data.rule_updated_at || expectedRuleUpdatedAt.value
     scopeDirty.value = false
     await loadEntries()
     activeStep.value = 2
@@ -253,6 +267,16 @@ async function revokeScope() {
     activeStep.value = 1
     ElMessage.success('本月店铺范围已撤销')
   } catch (error) { if (error !== 'cancel') ElMessage.error(errorMessage(error, '撤销范围失败')) }
+}
+
+async function migrateLegacyMonth() {
+  try {
+    await ElMessageBox.confirm('迁移会将当前旧规则替换为受控的自动整数计分规则，并在规则快照中保留旧规则审计记录。', '迁移旧规则', { type: 'warning' })
+    migratingLegacy.value = true
+    await api.migrateOperationPerformanceWorkbenchToAutoIntegerV1(yearMonth.value)
+    await loadAll()
+    ElMessage.success('旧版运营规则已迁移')
+  } catch (error) { if (error !== 'cancel') ElMessage.error(errorMessage(error, '迁移旧版运营规则失败')) } finally { migratingLegacy.value = false }
 }
 
 async function saveEntries() {

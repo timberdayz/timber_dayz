@@ -297,6 +297,9 @@ async def apply_operation_performance_workbench_scope(
     except PayrollPeriodLockedError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OperationPerformanceWorkbenchConflictError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -314,6 +317,28 @@ async def revoke_operation_performance_workbench_scope(
     except PayrollPeriodLockedError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "data": data}
+
+
+@router.post(
+    "/operation-workbench/migrate-auto-integer-v1", response_model=Dict[str, Any]
+)
+async def migrate_operation_performance_workbench_to_auto_integer_v1(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_platform_admin),
+):
+    try:
+        data = await OperationPerformanceWorkbenchService(db).migrate_legacy_month(
+            year_month,
+            username=getattr(current_user, "username", None),
+        )
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"success": True, "data": data}
 
 

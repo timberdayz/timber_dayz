@@ -301,9 +301,30 @@ class OperationPerformanceWorkbenchService:
             .all()
         )
 
+    async def _scope_rule_updated_at(self, year_month: str) -> datetime | None:
+        """Return the optimistic-lock version for the enabled controlled rules."""
+        updated_at_values = [
+            getattr(target, "updated_at", None)
+            for target in await self._targets(year_month, auto_integer_only=True)
+            if bool(getattr(target, "is_enabled", False))
+            and getattr(target, "updated_at", None) is not None
+        ]
+        return max(updated_at_values, default=None)
+
+    @staticmethod
+    def _same_timestamp(left: datetime | None, right: datetime | None) -> bool:
+        if left is None or right is None:
+            return left is right
+        if left.tzinfo is None:
+            left = left.replace(tzinfo=timezone.utc)
+        if right.tzinfo is None:
+            right = right.replace(tzinfo=timezone.utc)
+        return abs((left - right).total_seconds()) <= 0.001
+
     async def get_scope(self, year_month: str) -> dict[str, Any]:
         active_shops = await self._active_shops()
         stored_rows = await self._scope_rows(year_month)
+        rule_updated_at = await self._scope_rule_updated_at(year_month)
         if stored_rows and all(
             getattr(row, "snapshot_version", None) == 1 for row in stored_rows
         ):
@@ -324,6 +345,7 @@ class OperationPerformanceWorkbenchService:
                 "shops": shops,
                 "unresolved_shops": [],
                 "included_count": sum(1 for item in shops if item["is_included"]),
+                "rule_updated_at": rule_updated_at,
             }
         stored_by_key = {
             self._shop_key(row.platform_code, row.shop_id): row for row in stored_rows
@@ -349,6 +371,7 @@ class OperationPerformanceWorkbenchService:
             "shops": shops,
             "unresolved_shops": await self._unresolved_scope_shops(),
             "included_count": sum(1 for item in shops if item["is_included"]),
+            "rule_updated_at": rule_updated_at,
         }
 
     async def _assert_scope_rule_ready(self, year_month: str) -> None:
@@ -370,6 +393,17 @@ class OperationPerformanceWorkbenchService:
             year_month=request.year_month
         )
         await self._assert_scope_rule_ready(request.year_month)
+        expected_rule_updated_at = getattr(request, "expected_rule_updated_at", None)
+        current_rule_updated_at = await self._scope_rule_updated_at(request.year_month)
+        if (
+            expected_rule_updated_at is not None
+            and not self._same_timestamp(
+                expected_rule_updated_at, current_rule_updated_at
+            )
+        ):
+            raise OperationPerformanceWorkbenchConflictError(
+                "运营评分规则已被其他用户更新，请刷新后重新确认店铺范围"
+            )
         active_shops = await self._active_shops()
         unresolved_shops = await self._unresolved_scope_shops()
         if unresolved_shops:
@@ -708,6 +742,16 @@ class OperationPerformanceWorkbenchService:
         config = await self._config(year_month)
         catalog = await self._catalog()
         targets = await self._targets(year_month)
+        legacy_targets = [
+            target
+            for target in targets
+            if getattr(target, "scoring_model_version", None) != "auto_integer_v1"
+        ]
+        scoring_model_version = (
+            "legacy"
+            if legacy_targets
+            else "auto_integer_v1"
+        )
         by_code = {str(row.metric_code): row for row in targets if row.metric_code}
         rows = []
         for item in catalog:
@@ -781,6 +825,15 @@ class OperationPerformanceWorkbenchService:
             "updated_at": max(
                 (getattr(row, "updated_at", None) for row in targets), default=None
             ),
+            "scoring_model_version": scoring_model_version,
+            "legacy_migration": {
+                "required": bool(legacy_targets),
+                "legacy_metric_codes": [
+                    str(target.metric_code)
+                    for target in legacy_targets
+                    if getattr(target, "metric_code", None)
+                ],
+            },
             "metrics": rows,
         }
 
@@ -933,15 +986,19 @@ class OperationPerformanceWorkbenchService:
         metrics = []
         skipped = []
         for row in previous:
+            if not bool(row.is_enabled):
+                continue
             if row.metric_code not in active_catalog:
                 skipped.append({"metric_code": row.metric_code, "reason": "指标已退役"})
                 continue
             metrics.append(
                 {
                     "metric_code": row.metric_code,
-                    "is_enabled": bool(row.is_enabled),
+                    "is_enabled": True,
                 }
             )
+        if not metrics:
+            raise ValueError("上月没有启用且可复制的运营指标")
         result = await self.apply(
             OperationWorkbenchApplyRequest(
                 year_month=year_month,
@@ -953,4 +1010,135 @@ class OperationPerformanceWorkbenchService:
             username=username,
         )
         result["skipped"] = skipped
+        return result
+
+    @staticmethod
+    def _legacy_rule_audit(target: SalesTarget) -> dict[str, Any]:
+        """Keep the prior editable rule in the new immutable rule snapshot."""
+        return {
+            "scoring_model_version": getattr(target, "scoring_model_version", None),
+            "metric_code": getattr(target, "metric_code", None),
+            "metric_name": getattr(target, "metric_name", None),
+            "metric_direction": getattr(target, "metric_direction", None),
+            "target_value": getattr(target, "target_value", None),
+            "max_score": getattr(target, "max_score", None),
+            "penalty_enabled": getattr(target, "penalty_enabled", None),
+            "penalty_threshold": getattr(target, "penalty_threshold", None),
+            "penalty_per_unit": getattr(target, "penalty_per_unit", None),
+            "penalty_max": getattr(target, "penalty_max", None),
+            "manual_score_enabled": getattr(target, "manual_score_enabled", None),
+            "operation_rule_snapshot": getattr(target, "operation_rule_snapshot", None),
+        }
+
+    async def migrate_legacy_month(
+        self, year_month: str, username: str | None = None
+    ) -> dict[str, Any]:
+        """Explicitly convert an untouched legacy month to the controlled V1 model."""
+        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=year_month)
+        scope_rows = await self._scope_rows(year_month)
+        if any(getattr(row, "snapshot_version", None) == 1 for row in scope_rows):
+            raise ValueError("本月店铺范围已确认，不能迁移旧模式")
+
+        targets = await self._targets(year_month)
+        legacy_targets = [
+            target
+            for target in targets
+            if getattr(target, "scoring_model_version", None) != "auto_integer_v1"
+        ]
+        if not legacy_targets:
+            raise ValueError("本月不存在可迁移的旧模式运营规则")
+        if len(legacy_targets) != len(targets):
+            raise ValueError("本月同时存在旧模式和自动计分规则，不能迁移")
+
+        target_ids = [target.id for target in targets if getattr(target, "id", None)]
+        if target_ids:
+            existing_entry = (
+                await self.db.execute(
+                    select(TargetBreakdown.id)
+                    .where(
+                        TargetBreakdown.target_id.in_(target_ids),
+                        TargetBreakdown.breakdown_type == "shop",
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if existing_entry is not None:
+                raise ValueError("本月已有店铺运营录入，不能迁移旧模式")
+
+        config = await self._config(year_month)
+        if config is None or float(getattr(config, "operation_max_score", 0) or 0) != 20:
+            raise ValueError("自动整数计分要求绩效配置的运营满分为 20")
+        catalog = await self._catalog()
+        catalog_by_code = {item.metric_code: item for item in catalog}
+        duplicate_codes = [
+            target.metric_code
+            for target in legacy_targets
+            if sum(row.metric_code == target.metric_code for row in legacy_targets) > 1
+        ]
+        if duplicate_codes:
+            raise ValueError("旧模式运营指标存在重复编码，不能迁移")
+        unknown_codes = [
+            target.metric_code
+            for target in legacy_targets
+            if target.metric_code not in catalog_by_code
+        ]
+        if unknown_codes:
+            raise ValueError(f"旧模式包含不受控的运营指标: {', '.join(unknown_codes)}")
+
+        enabled_targets = [target for target in legacy_targets if target.is_enabled]
+        if not enabled_targets:
+            raise ValueError("旧模式至少需要一项启用指标才能迁移")
+        allocations = OperationPerformanceScoringService.allocate_integer_budget(
+            [
+                {
+                    "metric_code": target.metric_code,
+                    "sort_key": catalog_by_code[target.metric_code].sort_key,
+                }
+                for target in enabled_targets
+            ]
+        )
+        migrated_at = datetime.now(timezone.utc)
+        for target in legacy_targets:
+            catalog_item = catalog_by_code[target.metric_code]
+            legacy_audit = self._legacy_rule_audit(target)
+            target.target_name = catalog_item.metric_name
+            target.metric_name = catalog_item.metric_name
+            target.metric_direction = catalog_item.metric_direction
+            target.target_value = catalog_item.default_target_value
+            target.achieved_value = None
+            target.max_score = allocations.get(target.metric_code, 0)
+            target.penalty_enabled = False
+            target.penalty_threshold = None
+            target.penalty_per_unit = None
+            target.penalty_max = None
+            target.manual_score_enabled = False
+            target.manual_score_value = None
+            target.metric_catalog_version = catalog_item.catalog_version
+            target.scoring_model_version = "auto_integer_v1"
+            target.operation_rule_snapshot = {
+                "metric_code": catalog_item.metric_code,
+                "metric_name": catalog_item.metric_name,
+                "sort_key": catalog_item.sort_key,
+                "input_kind": catalog_item.input_kind,
+                "direction": catalog_item.metric_direction,
+                "unit": catalog_item.unit,
+                "guidance": catalog_item.guidance,
+                "target_value": catalog_item.default_target_value,
+                "max_score": allocations.get(target.metric_code, 0),
+                "scoring_rule_version": catalog_item.scoring_rule_version,
+                "migration_audit": {
+                    "migrated_at": migrated_at.isoformat(),
+                    "migrated_by": username,
+                    "legacy_rule": legacy_audit,
+                },
+            }
+            target.performance_config_id = config.id
+            target.performance_config_updated_at = getattr(config, "updated_at", None)
+            target.status = "active"
+            target.updated_at = migrated_at
+        await self.db.commit()
+        result = await self.get_workbench(year_month)
+        result["migration"] = {
+            "migrated_metric_codes": [target.metric_code for target in legacy_targets]
+        }
         return result
