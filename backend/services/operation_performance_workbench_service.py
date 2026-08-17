@@ -208,7 +208,6 @@ class OperationPerformanceWorkbenchService:
             conditions.extend(
                 [
                     SalesTarget.scoring_model_version == "auto_integer_v1",
-                    SalesTarget.operation_rule_snapshot.is_not(None),
                 ]
             )
         return (
@@ -487,12 +486,21 @@ class OperationPerformanceWorkbenchService:
             }
 
         targets_with_rules = []
+        configuration_errors = []
         for target in await self._targets(year_month, auto_integer_only=True):
             if not target.is_enabled:
                 continue
+            if getattr(target, "scoring_model_version", None) != "auto_integer_v1":
+                continue
             try:
                 targets_with_rules.append((target, self._auto_integer_rule(target)))
-            except ValueError:
+            except ValueError as exc:
+                configuration_errors.append(
+                    {
+                        "metric_code": getattr(target, "metric_code", None),
+                        "message": str(exc),
+                    }
+                )
                 continue
         breakdowns = await self._entry_breakdowns(
             [target for target, _ in targets_with_rules]
@@ -503,7 +511,7 @@ class OperationPerformanceWorkbenchService:
         for scope in included_rows:
             key = self._shop_key(scope.platform_code, scope.shop_id)
             metrics = []
-            shop_complete = True
+            shop_complete = not configuration_errors
             for target, rule in targets_with_rules:
                 breakdown = breakdowns.get((target.id, *key))
                 input_kind = str(rule["input_kind"])
@@ -545,6 +553,7 @@ class OperationPerformanceWorkbenchService:
                     or key[1],
                     "aliases": getattr(scope, "alias_snapshots", None) or [],
                     "status": "completed" if shop_complete else "pending",
+                    "configuration_errors": configuration_errors,
                     "metrics": metrics,
                 }
             )
@@ -553,6 +562,7 @@ class OperationPerformanceWorkbenchService:
             "scope_confirmed": True,
             "shops": shops,
             "completion": {"completed": completed, "pending": pending},
+            "configuration_errors": configuration_errors,
         }
 
     @staticmethod
@@ -588,17 +598,25 @@ class OperationPerformanceWorkbenchService:
                 raise ValueError("该店铺未参与本月运营绩效，不能录入")
         targets_by_code = {}
         rules_by_code = {}
+        configuration_errors = []
         for target in await self._targets(
             request.year_month, auto_integer_only=True
         ):
             if not target.is_enabled:
                 continue
+            if getattr(target, "scoring_model_version", None) != "auto_integer_v1":
+                continue
             try:
                 rule = self._auto_integer_rule(target)
-            except ValueError:
+            except ValueError as exc:
+                configuration_errors.append(str(exc))
                 continue
             targets_by_code[target.metric_code] = target
             rules_by_code[target.metric_code] = rule
+        if configuration_errors:
+            raise ValueError(
+                f"运营绩效规则配置错误，不能录入: {'; '.join(configuration_errors)}"
+            )
         breakdowns = await self._entry_breakdowns(list(targets_by_code.values()))
         month_start, month_end = self.month_range(request.year_month)
         for entry in request.entries:

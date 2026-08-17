@@ -240,7 +240,7 @@ async def test_entries_read_structured_payload_and_auto_score_from_rule_snapshot
 
 
 @pytest.mark.asyncio
-async def test_entries_exclude_non_v1_or_invalid_snapshot_targets_and_ignore_legacy_values():
+async def test_entries_block_completion_for_invalid_v1_rules_and_ignore_legacy_values():
     from backend.services import operation_performance_workbench_service as module
 
     service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
@@ -296,9 +296,26 @@ async def test_entries_exclude_non_v1_or_invalid_snapshot_targets_and_ignore_leg
         max_score=5,
         operation_rule_snapshot={"input_kind": "manual_score"},
     )
+    missing_snapshot_target = SimpleNamespace(
+        id=105,
+        is_enabled=True,
+        scoring_model_version="auto_integer_v1",
+        metric_code="missing_snapshot_metric",
+        metric_name="Missing snapshot metric",
+        metric_direction="higher_better",
+        target_value=1,
+        max_score=5,
+        operation_rule_snapshot=None,
+    )
     service._scope_rows = AsyncMock(return_value=[scope])
     service._targets = AsyncMock(
-        return_value=[percentage_target, special_check_target, old_target, invalid_target]
+        return_value=[
+            percentage_target,
+            special_check_target,
+            old_target,
+            invalid_target,
+            missing_snapshot_target,
+        ]
     )
     service._entry_breakdowns = AsyncMock(
         return_value={
@@ -323,10 +340,17 @@ async def test_entries_exclude_non_v1_or_invalid_snapshot_targets_and_ignore_leg
         "operation_special_check",
     ]
     assert [metric["auto_score"] for metric in metrics] == [18, 10]
+    assert result["completion"] == {"completed": 0, "pending": 1}
+    assert result["shops"][0]["status"] == "pending"
+    assert {item["metric_code"] for item in result["configuration_errors"]} == {
+        "invalid_metric",
+        "missing_snapshot_metric",
+    }
 
 
 @pytest.mark.asyncio
-async def test_entries_keep_failed_special_check_pending_without_its_required_note():
+async def test_entry_save_rejects_failed_special_check_without_note(monkeypatch):
+    from backend.schemas.target import OperationWorkbenchEntryApplyRequest
     from backend.services import operation_performance_workbench_service as module
 
     service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
@@ -351,18 +375,66 @@ async def test_entries_keep_failed_special_check_pending_without_its_required_no
     )
     service._scope_rows = AsyncMock(return_value=[scope])
     service._targets = AsyncMock(return_value=[target])
-    service._entry_breakdowns = AsyncMock(
-        return_value={
-            (101, "shopee", "S001"): SimpleNamespace(
-                operation_input_payload={"result": "failed"},
-                achieved_value=999,
-                manual_score_value=0,
-            )
-        }
+    service._entry_breakdowns = AsyncMock(return_value={})
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+    request = OperationWorkbenchEntryApplyRequest(
+        year_month="2026-08",
+        entries=[
+            {
+                "metric_code": "operation_special_check",
+                "platform_code": "shopee",
+                "shop_id": "S001",
+                "result": "failed",
+            }
+        ],
     )
 
     with pytest.raises(ValueError, match="说明"):
-        await service.get_entries("2026-08")
+        await service.apply_entries(request, username="admin")
+
+
+@pytest.mark.asyncio
+async def test_entry_save_rejects_any_enabled_v1_target_with_invalid_rule(monkeypatch):
+    from backend.schemas.target import OperationWorkbenchEntryApplyRequest
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    service._scope_rows = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                platform_code="shopee",
+                shop_id="S001",
+                is_included=True,
+                snapshot_version=1,
+            )
+        ]
+    )
+    service._targets = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                id=101,
+                is_enabled=True,
+                scoring_model_version="auto_integer_v1",
+                metric_code="broken_metric",
+                operation_rule_snapshot=None,
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+
+    with pytest.raises(ValueError, match="配置错误"):
+        await service.apply_entries(
+            OperationWorkbenchEntryApplyRequest(year_month="2026-08", entries=[]),
+            username="admin",
+        )
 
 
 def test_auto_integer_rule_rejects_old_targets_missing_snapshots_and_unknown_input_kinds():
