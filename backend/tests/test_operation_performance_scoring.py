@@ -96,3 +96,16 @@ def test_auto_integer_migration_seeds_the_five_controlled_metrics():
         "operation_special_check",
     ):
         assert metric_code in source
+
+
+def test_auto_integer_rule_input_rejects_client_target_and_score_fields():
+    from pydantic import ValidationError
+
+    from backend.schemas.target import OperationWorkbenchMetricInput
+
+    with pytest.raises(ValidationError, match="target_value"):
+        OperationWorkbenchMetricInput(
+            metric_code="customer_satisfaction",
+            is_enabled=True,
+            target_value=80,
+        )

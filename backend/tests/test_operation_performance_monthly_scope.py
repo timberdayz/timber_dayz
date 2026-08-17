@@ -92,7 +92,7 @@ def test_entry_contract_requires_exactly_one_entry_value():
 def test_rule_contract_rejects_actual_values_and_manual_scores():
     from backend.schemas.target import OperationWorkbenchApplyRequest
 
-    with pytest.raises(ValidationError, match="店铺录入"):
+    with pytest.raises(ValidationError, match="achieved_value"):
         OperationWorkbenchApplyRequest(
             year_month="2026-08",
             catalog_version=1,

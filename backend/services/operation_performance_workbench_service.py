@@ -12,6 +12,9 @@ from backend.services.payroll_period_lock_service import PayrollPeriodLockServic
 from backend.services.operation_performance_shop_scope_service import (
     OperationPerformanceShopScopeService,
 )
+from backend.services.operation_performance_scoring_service import (
+    OperationPerformanceScoringService,
+)
 from modules.core.db import (
     OperationMetricCatalog,
     OperationPerformanceShopScope,
@@ -590,6 +593,10 @@ class OperationPerformanceWorkbenchService:
                     "metric_name": item.metric_name,
                     "metric_direction": item.metric_direction,
                     "catalog_version": item.catalog_version,
+                    "sort_key": item.sort_key,
+                    "input_kind": item.input_kind,
+                    "unit": item.unit,
+                    "guidance": item.guidance,
                     "is_enabled": (
                         bool(getattr(target, "is_enabled", True)) if target else False
                     ),
@@ -692,9 +699,16 @@ class OperationPerformanceWorkbenchService:
         if unknown_codes:
             raise ValueError(f"运营指标不在目录中: {', '.join(unknown_codes)}")
         active_metrics = [item for item in request.metrics if item.is_enabled]
-        score_sum = sum(float(item.max_score or 0) for item in active_metrics)
-        if round(score_sum, 4) != round(float(config.operation_max_score), 4):
-            raise ValueError("运营指标满分之和必须等于绩效配置的运营满分")
+        if not active_metrics:
+            raise ValueError("至少启用一项运营指标")
+        if float(config.operation_max_score) != 20:
+            raise ValueError("自动整数计分要求运营满分为 20")
+        allocations = OperationPerformanceScoringService.allocate_integer_budget(
+            [
+                {"metric_code": item.metric_code, "sort_key": catalog_by_code[item.metric_code].sort_key}
+                for item in active_metrics
+            ]
+        )
 
         existing = await self._targets(request.year_month)
         existing_by_code = {row.metric_code: row for row in existing if row.metric_code}
@@ -733,20 +747,27 @@ class OperationPerformanceWorkbenchService:
             row.metric_code = item.metric_code
             row.metric_name = catalog_item.metric_name
             row.metric_direction = catalog_item.metric_direction
-            row.target_value = item.target_value
+            row.target_value = catalog_item.default_target_value
             row.achieved_value = None
-            row.max_score = item.max_score
-            row.penalty_enabled = item.penalty_enabled
-            row.penalty_threshold = item.penalty_threshold
-            row.penalty_per_unit = item.penalty_per_unit
-            row.penalty_max = item.penalty_max
-            row.manual_score_enabled = bool(
-                catalog_item.manual_score_enabled
-                or catalog_item.metric_direction == "manual_score"
-            )
+            row.max_score = allocations.get(item.metric_code, 0)
+            row.penalty_enabled = False
+            row.penalty_threshold = None
+            row.penalty_per_unit = None
+            row.penalty_max = None
+            row.manual_score_enabled = False
             row.manual_score_value = None
             row.is_enabled = item.is_enabled
             row.metric_catalog_version = request.catalog_version
+            row.scoring_model_version = "auto_integer_v1"
+            row.operation_rule_snapshot = {
+                "metric_code": catalog_item.metric_code,
+                "sort_key": catalog_item.sort_key,
+                "input_kind": catalog_item.input_kind,
+                "unit": catalog_item.unit,
+                "guidance": catalog_item.guidance,
+                "target_value": catalog_item.default_target_value,
+                "scoring_rule_version": catalog_item.scoring_rule_version,
+            }
             row.performance_config_id = config.id
             row.performance_config_updated_at = getattr(config, "updated_at", None)
             row.status = "active"

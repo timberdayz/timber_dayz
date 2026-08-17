@@ -5,7 +5,7 @@
 from datetime import date, datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TargetCreateRequest(BaseModel):
@@ -217,16 +217,10 @@ class ShopTargetWorkbenchApplyResponse(BaseModel):
 
 
 class OperationWorkbenchMetricInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     metric_code: str
     is_enabled: bool = True
-    target_value: Optional[float] = None
-    achieved_value: Optional[float] = None
-    max_score: float = Field(0.0, ge=0)
-    penalty_enabled: bool = False
-    penalty_threshold: Optional[float] = None
-    penalty_per_unit: Optional[float] = None
-    penalty_max: Optional[float] = None
-    manual_score_value: Optional[float] = None
 
 
 class OperationWorkbenchShopOverrideInput(BaseModel):
@@ -267,11 +261,6 @@ class OperationWorkbenchApplyRequest(BaseModel):
             raise ValueError("店铺覆盖不能重复")
         if self.shop_overrides:
             raise ValueError("店铺数据必须通过店铺录入工作台保存")
-        if any(
-            item.achieved_value is not None or item.manual_score_value is not None
-            for item in self.metrics
-        ):
-            raise ValueError("实际值和人工评分必须通过店铺录入工作台保存")
         return self
 
 

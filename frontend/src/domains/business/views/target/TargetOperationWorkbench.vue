@@ -18,14 +18,14 @@
       <div class="panel-heading">
         <div>
           <h2>评分规则</h2>
-          <p>量化指标使用所有参与店铺共用的目标值；人工指标仅配置单项满分。</p>
+          <p>只选择本月启用指标；系统按目录规则自动分配 20 分并统一计算。</p>
         </div>
         <el-button type="primary" :icon="Check" :disabled="!canSaveRules" :loading="savingRules" @click="saveRules">保存规则</el-button>
       </div>
 
       <section class="score-summary" :class="{ invalid: !scoreBudgetMatches }">
-        <span>已分配满分 {{ assignedMaxScore.toFixed(2) }}</span>
-        <span>运营满分 {{ operationMaxScore.toFixed(2) }}</span>
+        <span>已分配满分 {{ assignedMaxScore }}</span>
+        <span>运营满分 {{ operationMaxScore }}</span>
         <span v-if="!scoreBudgetMatches">启用指标满分之和必须等于运营满分</span>
       </section>
 
@@ -33,14 +33,9 @@
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch v-model="row.is_enabled" /></template></el-table-column>
         <el-table-column prop="metric_name" label="运营指标" min-width="180"><template #default="{ row }"><span>{{ row.metric_name }}</span><small>{{ row.metric_code }}</small></template></el-table-column>
         <el-table-column prop="metric_direction" label="评分方向" width="128" />
-        <el-table-column label="统一目标值" width="165">
-          <template #default="{ row }">
-            <span v-if="row.manual_score_enabled" class="muted">人工评分无需目标值</span>
-            <el-input-number v-else v-model="row.target_value" :disabled="!row.is_enabled" :min="0" :precision="2" controls-position="right" />
-          </template>
-        </el-table-column>
-        <el-table-column label="满分" width="130"><template #default="{ row }"><el-input-number v-model="row.max_score" :disabled="!row.is_enabled" :min="0" :precision="2" controls-position="right" /></template></el-table-column>
-        <el-table-column label="罚分" width="96" align="center"><template #default="{ row }"><el-switch v-model="row.penalty_enabled" :disabled="!row.is_enabled || row.manual_score_enabled" /></template></el-table-column>
+        <el-table-column label="固定目标" width="165"><template #default="{ row }"><span>{{ row.target_value ?? '专项检查' }} {{ row.unit || '' }}</span></template></el-table-column>
+        <el-table-column label="自动满分" width="110"><template #default="{ row }"><strong>{{ row.max_score }}</strong></template></el-table-column>
+        <el-table-column prop="guidance" label="评分说明" min-width="240" />
       </el-table>
     </section>
 
@@ -194,10 +189,7 @@ async function saveRules() {
       expected_performance_config_updated_at: expectedPerformanceConfigUpdatedAt.value,
       expected_updated_at: expectedUpdatedAt.value,
       metrics: metrics.value.map((row) => ({
-        metric_code: row.metric_code, is_enabled: row.is_enabled,
-        target_value: row.manual_score_enabled ? null : row.target_value,
-        max_score: row.max_score, penalty_enabled: row.manual_score_enabled ? false : row.penalty_enabled,
-        penalty_threshold: row.penalty_threshold, penalty_per_unit: row.penalty_per_unit, penalty_max: row.penalty_max
+        metric_code: row.metric_code, is_enabled: row.is_enabled
       }))
     }))
     expectedUpdatedAt.value = data.updated_at
