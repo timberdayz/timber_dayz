@@ -52,6 +52,7 @@ COPY scripts/verify_system_role_integrity.py /app/scripts/verify_system_role_int
 COPY scripts/verify_schema_consistency.py /app/scripts/verify_schema_consistency.py
 COPY scripts/sync_schema_columns.py /app/scripts/sync_schema_columns.py
 COPY scripts/run_current_schema_migrations.py /app/scripts/run_current_schema_migrations.py
+COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py
 COPY sql/api_modules /app/sql/api_modules
 COPY sql/mart /app/sql/mart
 COPY sql/ops /app/sql/ops

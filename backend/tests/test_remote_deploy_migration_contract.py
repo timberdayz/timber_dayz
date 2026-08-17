@@ -65,6 +65,13 @@ def test_backend_gunicorn_errors_are_written_to_container_stderr():
     assert '"--error-logfile", "-"' in dockerfile
 
 
+def test_backend_image_includes_current_schema_migration_helper_module():
+    dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "COPY scripts/run_current_schema_migrations.py /app/scripts/run_current_schema_migrations.py" in dockerfile
+    assert "COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py" in dockerfile
+
+
 def test_current_schema_preflight_only_performs_read_only_adoption_checks(monkeypatch):
     state = migration_runner.MigrationState(
         database_empty=False,
