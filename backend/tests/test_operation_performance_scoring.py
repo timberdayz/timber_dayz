@@ -67,3 +67,32 @@ def test_special_check_requires_note_for_partial_result():
             },
             payload={"result": "partial"},
         )
+
+
+def test_operation_models_persist_auto_integer_rule_and_input_snapshots():
+    from modules.core.db import OperationMetricCatalog, SalesTarget, TargetBreakdown
+
+    assert {"sort_key", "input_kind", "unit", "guidance", "scoring_rule_version"}.issubset(
+        OperationMetricCatalog.__table__.c.keys()
+    )
+    assert {"scoring_model_version", "operation_rule_snapshot"}.issubset(
+        SalesTarget.__table__.c.keys()
+    )
+    assert "operation_input_payload" in TargetBreakdown.__table__.c.keys()
+
+
+def test_auto_integer_migration_seeds_the_five_controlled_metrics():
+    from pathlib import Path
+
+    source = Path(
+        "current_migrations/versions/20260817_operation_performance_auto_integer_v1.py"
+    ).read_text(encoding="utf-8")
+
+    for metric_code in (
+        "customer_satisfaction",
+        "complaint_count",
+        "reply_timeliness",
+        "training_completion_rate",
+        "operation_special_check",
+    ):
+        assert metric_code in source

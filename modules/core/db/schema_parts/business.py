@@ -1938,6 +1938,12 @@ class SalesTarget(Base):
     performance_config_updated_at = Column(
         DateTime(timezone=True), nullable=True, comment="保存时绩效配置版本"
     )
+    scoring_model_version = Column(
+        String(32), nullable=True, comment="运营评分模型版本"
+    )
+    operation_rule_snapshot = Column(
+        JSON_COMPAT, nullable=True, comment="运营指标不可变规则快照"
+    )
 
     # 状态
     status = Column(
@@ -2054,6 +2060,9 @@ class TargetBreakdown(Base):
     operation_contract_version = Column(
         Integer, nullable=True, comment="运营工作台合同版本快照"
     )
+    operation_input_payload = Column(
+        JSON_COMPAT, nullable=True, comment="运营指标结构化录入"
+    )
 
     # 审计字段
     created_at = Column(
@@ -2095,6 +2104,11 @@ class OperationMetricCatalog(Base):
     default_penalty_per_unit = Column(Float, nullable=True)
     default_penalty_max = Column(Float, nullable=True)
     manual_score_enabled = Column(Boolean, nullable=False, default=False)
+    sort_key = Column(Integer, nullable=True)
+    input_kind = Column(String(32), nullable=True)
+    unit = Column(String(32), nullable=True)
+    guidance = Column(Text, nullable=True)
+    scoring_rule_version = Column(String(32), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -2132,6 +2146,12 @@ class OperationPerformanceShopScope(Base):
     shop_id = Column(String(256), nullable=False)
     is_included = Column(Boolean, nullable=False, default=True)
     exclusion_reason = Column(String(512), nullable=True)
+    source_shop_account_id = Column(Integer, nullable=True)
+    standard_name_snapshot = Column(String(200), nullable=True)
+    alias_snapshots = Column(JSON_COMPAT, nullable=True)
+    snapshot_version = Column(Integer, nullable=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    confirmed_by = Column(String(64), nullable=True)
     created_by = Column(String(64), nullable=True)
     updated_by = Column(String(64), nullable=True)
     created_at = Column(
@@ -2157,10 +2177,6 @@ class OperationPerformanceShopScope(Base):
             "ix_operation_performance_shop_scope_month_included",
             "year_month",
             "is_included",
-        ),
-        CheckConstraint(
-            "is_included OR NULLIF(btrim(exclusion_reason), '') IS NOT NULL",
-            name="chk_operation_performance_scope_exclusion_reason",
         ),
         {"schema": "a_class"},
     )

@@ -281,12 +281,6 @@ class OperationWorkbenchScopeShopInput(BaseModel):
     is_included: bool = True
     exclusion_reason: Optional[str] = Field(default=None, max_length=512)
 
-    @model_validator(mode="after")
-    def validate_exclusion_reason(self):
-        if not self.is_included and not (self.exclusion_reason or "").strip():
-            raise ValueError("不参与店铺必须填写不参与原因")
-        return self
-
 
 class OperationWorkbenchScopeApplyRequest(BaseModel):
     year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")

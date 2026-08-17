@@ -16,33 +16,36 @@ def test_monthly_scope_model_uses_month_and_shop_as_its_identity():
     )
 
 
-def test_current_schema_migration_creates_monthly_scope_table():
+def test_auto_integer_migration_adds_scope_identity_snapshot_columns():
     from pathlib import Path
 
     source = (
         Path("current_migrations/versions")
-        / "20260817_operation_performance_monthly_scope.py"
+        / "20260817_operation_performance_auto_integer_v1.py"
     ).read_text(encoding="utf-8")
 
-    assert 'down_revision = "current_schema_20260810_operation_contract_isolation"' in source
-    assert "operation_performance_shop_scopes" in source
-    assert "uq_operation_performance_shop_scope_month_shop" in source
+    assert 'down_revision = "current_schema_20260817_operation_performance_monthly_scope"' in source
+    assert "source_shop_account_id" in source
+    assert "standard_name_snapshot" in source
+    assert "alias_snapshots" in source
+    assert "chk_operation_performance_scope_exclusion_reason" in source
 
 
-def test_scope_contract_requires_reason_for_an_excluded_shop():
+def test_scope_contract_allows_empty_optional_note_for_an_excluded_shop():
     from backend.schemas.target import OperationWorkbenchScopeApplyRequest
 
-    with pytest.raises(ValidationError, match="不参与原因"):
-        OperationWorkbenchScopeApplyRequest(
-            year_month="2026-08",
-            shops=[
-                {
-                    "platform_code": "shopee",
-                    "shop_id": "S001",
-                    "is_included": False,
-                }
-            ],
-        )
+    request = OperationWorkbenchScopeApplyRequest(
+        year_month="2026-08",
+        shops=[
+            {
+                "platform_code": "shopee",
+                "shop_id": "S001",
+                "is_included": False,
+            }
+        ],
+    )
+
+    assert request.shops[0].exclusion_reason is None
 
 
 def test_entry_contract_rejects_duplicate_shop_metric_keys():
