@@ -67,7 +67,7 @@
       <div class="panel-heading">
         <div>
           <h2>店铺数据录入与保存</h2>
-          <p>仅展示已参与店铺。量化指标填写实际值；人工指标填写 0 至该指标满分之间的人工评分。</p>
+          <p>仅展示已参与店铺。量化指标填写实际值；培训指标填写已完成与应完成人数；专项检查选择结论并按需填写说明。</p>
         </div>
         <el-button type="primary" :icon="Check" :disabled="!scopeReady" :loading="savingEntries" @click="saveEntries">保存店铺数据</el-button>
       </div>
@@ -89,10 +89,21 @@
               <div class="metric-entry-list">
                 <div v-for="metric in row.metrics" :key="metric.metric_code" class="metric-entry-row">
                   <div class="metric-entry-name"><strong>{{ metric.metric_name }}</strong><small>{{ metric.metric_code }}</small></div>
-                  <span v-if="metric.is_manual" class="target-display">人工评分，满分 {{ Number(metric.max_score || 0).toFixed(2) }}</span>
-                  <span v-else class="target-display">统一目标 {{ metric.target_value ?? '-' }}</span>
-                  <el-input-number v-if="metric.is_manual" v-model="metric.manual_score_value" :min="0" :max="metric.max_score" :precision="2" controls-position="right" placeholder="人工评分" />
-                  <el-input-number v-else v-model="metric.achieved_value" :min="0" :precision="2" controls-position="right" placeholder="实际值" />
+                  <span class="target-display">目标 {{ metric.target_value ?? '-' }} {{ metric.unit || '' }} · 满分 {{ metric.max_score }} · {{ metric.formula }}</span>
+                  <el-input-number v-if="isNumericInput(metric)" v-model="metric.input_payload.actual_value" :min="0" :precision="2" controls-position="right" placeholder="实际值" />
+                  <div v-else-if="metric.input_kind === 'training_counts'" class="training-inputs">
+                    <el-input-number v-model="metric.input_payload.completed_count" :min="0" :precision="0" controls-position="right" placeholder="已完成人数" />
+                    <el-input-number v-model="metric.input_payload.required_count" :min="0" :precision="0" controls-position="right" placeholder="应完成人数" />
+                  </div>
+                  <div v-else-if="metric.input_kind === 'special_check'" class="special-check-inputs">
+                    <el-select v-model="metric.input_payload.result" placeholder="检查结论" clearable>
+                      <el-option label="通过" value="passed" />
+                      <el-option label="部分完成" value="partial" />
+                      <el-option label="未通过" value="failed" />
+                    </el-select>
+                    <el-input v-if="['partial', 'failed'].includes(metric.input_payload.result)" v-model="metric.input_payload.note" placeholder="请填写说明" maxlength="512" show-word-limit />
+                  </div>
+                  <span class="auto-score">自动得分 {{ metric.auto_score ?? '-' }}</span>
                   <el-tag size="small" :type="isMetricComplete(metric) ? 'success' : 'warning'">{{ isMetricComplete(metric) ? '已录入' : '待录入' }}</el-tag>
                 </div>
               </div>
@@ -141,7 +152,8 @@ const scopeReady = computed(() => scopeConfirmed.value && !scopeDirty.value)
 
 function unwrap(response) { return response?.data?.data || response?.data || response }
 function errorMessage(error, fallback) { return error?.response?.data?.detail || error?.message || fallback }
-function isMetricComplete(metric) { return metric.is_manual ? metric.manual_score_value !== null && metric.manual_score_value !== undefined : metric.achieved_value !== null && metric.achieved_value !== undefined }
+function isNumericInput(metric) { return !['training_counts', 'special_check'].includes(metric.input_kind) }
+function isMetricComplete(metric) { return metric.status === 'completed' }
 
 async function loadRules() {
   const data = unwrap(await api.getOperationPerformanceWorkbench(yearMonth.value))
@@ -273,10 +285,14 @@ onMounted(loadAll)
 .muted, small { color: var(--el-text-color-secondary); }
 small { display: block; margin-top: 3px; font-size: 12px; }
 .metric-entry-list { display: grid; gap: 8px; }
-.metric-entry-row { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(145px, 1fr) 150px 64px; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
+.metric-entry-row { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(145px, 1.2fr) minmax(170px, 1fr) 80px 64px; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
 .metric-entry-row:last-child { border-bottom: 0; }
 .metric-entry-name { min-width: 0; }
 .metric-entry-name strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .target-display { color: var(--el-text-color-regular); font-size: 13px; }
+.training-inputs, .special-check-inputs { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.training-inputs :deep(.el-input-number), .special-check-inputs :deep(.el-select) { width: 140px; }
+.special-check-inputs :deep(.el-input) { min-width: 150px; }
+.auto-score { color: var(--el-color-success); font-size: 13px; font-weight: 600; white-space: nowrap; }
 @media (max-width: 900px) { .panel-heading { align-items: flex-start; flex-direction: column; } .metric-entry-row { grid-template-columns: 1fr 1fr; } }
 </style>

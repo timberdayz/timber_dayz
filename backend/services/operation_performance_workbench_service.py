@@ -451,30 +451,48 @@ class OperationPerformanceWorkbenchService:
                 "shops": [],
                 "completion": {"completed": 0, "pending": 0},
             }
+        if not all(getattr(row, "snapshot_version", None) == 1 for row in scope_rows):
+            return {
+                "year_month": year_month,
+                "scope_confirmed": False,
+                "shops": [],
+                "completion": {"completed": 0, "pending": 0},
+            }
 
-        active_by_key = {
-            self._shop_key(shop.platform_code, shop.shop_id): shop
-            for shop in await self._active_shops()
-        }
-        targets = [target for target in await self._targets(year_month) if target.is_enabled]
+        targets = [
+            target for target in await self._targets(year_month) if target.is_enabled
+        ]
         breakdowns = await self._entry_breakdowns(targets)
         shops = []
         completed = 0
         pending = 0
         for scope in included_rows:
             key = self._shop_key(scope.platform_code, scope.shop_id)
-            shop = active_by_key.get(key)
             metrics = []
             shop_complete = True
             for target in targets:
                 breakdown = breakdowns.get((target.id, *key))
-                is_manual = self._is_manual_metric(target)
-                value = (
-                    getattr(breakdown, "manual_score_value", None)
-                    if is_manual
-                    else getattr(breakdown, "achieved_value", None)
+                rule = dict(getattr(target, "operation_rule_snapshot", None) or {})
+                rule.update(
+                    {
+                        "metric_code": target.metric_code,
+                        "metric_name": target.metric_name,
+                        "metric_direction": target.metric_direction,
+                        "target_value": target.target_value,
+                        "max_score": target.max_score,
+                    }
                 )
-                metric_complete = value is not None
+                input_kind = str(rule.get("input_kind") or "numeric")
+                payload = dict(
+                    getattr(breakdown, "operation_input_payload", None) or {}
+                )
+                auto_score, scoring_detail = (
+                    OperationPerformanceScoringService.calculate_metric_score(
+                        metric=rule,
+                        payload=payload or None,
+                    )
+                )
+                metric_complete = auto_score is not None
                 shop_complete = shop_complete and metric_complete
                 metrics.append(
                     {
@@ -483,15 +501,13 @@ class OperationPerformanceWorkbenchService:
                         "metric_direction": target.metric_direction,
                         "target_value": target.target_value,
                         "max_score": float(target.max_score or 0.0),
-                        "is_manual": is_manual,
-                        "achieved_value": (
-                            None if is_manual else getattr(breakdown, "achieved_value", None)
-                        ),
-                        "manual_score_value": (
-                            getattr(breakdown, "manual_score_value", None)
-                            if is_manual
-                            else None
-                        ),
+                        "input_kind": input_kind,
+                        "input_payload": payload,
+                        "auto_score": auto_score,
+                        "scoring_detail": scoring_detail,
+                        "unit": rule.get("unit"),
+                        "guidance": rule.get("guidance"),
+                        "formula": self._operation_metric_formula(rule),
                         "status": "completed" if metric_complete else "pending",
                     }
                 )
@@ -502,11 +518,8 @@ class OperationPerformanceWorkbenchService:
                     "platform_code": key[0],
                     "shop_id": key[1],
                     "standard_name": getattr(scope, "standard_name_snapshot", None)
-                    or (shop or {}).get("standard_name")
                     or key[1],
-                    "aliases": getattr(scope, "alias_snapshots", None)
-                    or (shop or {}).get("aliases")
-                    or [],
+                    "aliases": getattr(scope, "alias_snapshots", None) or [],
                     "status": "completed" if shop_complete else "pending",
                     "metrics": metrics,
                 }
@@ -518,6 +531,20 @@ class OperationPerformanceWorkbenchService:
             "completion": {"completed": completed, "pending": pending},
         }
 
+    @staticmethod
+    def _operation_metric_formula(rule: dict[str, Any]) -> str:
+        input_kind = str(rule.get("input_kind") or "numeric")
+        max_score = int(float(rule.get("max_score") or 0))
+        if input_kind == "training_counts":
+            return f"得分 = 四舍五入({max_score} × 已完成人数 / 应完成人数)；应完成人数为 0 时按 100% 计。"
+        if input_kind == "special_check":
+            return f"通过得 {max_score} 分，部分完成得四舍五入({max_score} × 50%) 分，未通过得 0 分。"
+        direction = str(rule.get("metric_direction") or "higher_better")
+        target = rule.get("target_value")
+        if direction == "lower_better":
+            return f"实际值不高于目标 {target} 时得 {max_score} 分；超过目标时按目标值 / 实际值比例四舍五入。"
+        return f"得分 = 四舍五入({max_score} × min(实际值 / 目标值 {target}, 100%))。"
+
     async def apply_entries(self, request: Any, username: str | None = None):
         await PayrollPeriodLockService(self.db).assert_month_mutable(
             year_month=request.year_month
@@ -525,6 +552,8 @@ class OperationPerformanceWorkbenchService:
         scope_rows = await self._scope_rows(request.year_month)
         if not scope_rows:
             raise ValueError("请先确认本月运营绩效店铺范围")
+        if not all(getattr(row, "snapshot_version", None) == 1 for row in scope_rows):
+            raise ValueError("店铺范围尚未按当前规则确认，请先撤销并重新确认范围")
         included_keys = {
             self._shop_key(row.platform_code, row.shop_id)
             for row in scope_rows
@@ -546,22 +575,45 @@ class OperationPerformanceWorkbenchService:
             if target is None:
                 raise ValueError("店铺录入指标不存在或未启用")
             rule = dict(getattr(target, "operation_rule_snapshot", None) or {})
-            rule.update({
-                "metric_code": target.metric_code,
-                "metric_direction": target.metric_direction,
-                "target_value": target.target_value,
-                "max_score": target.max_score,
-            })
-            input_kind = rule.get("input_kind")
+            rule.update(
+                {
+                    "metric_code": target.metric_code,
+                    "metric_direction": target.metric_direction,
+                    "target_value": target.target_value,
+                    "max_score": target.max_score,
+                }
+            )
+            input_kind = str(rule.get("input_kind") or "numeric")
             if input_kind == "training_counts":
+                if (
+                    entry.actual_value is not None
+                    or entry.result is not None
+                    or entry.note is not None
+                ):
+                    raise ValueError("录入字段与培训完成率指标类型不匹配")
                 payload = {
                     "completed_count": entry.completed_count,
                     "required_count": entry.required_count,
                 }
             elif input_kind == "special_check":
+                if (
+                    entry.actual_value is not None
+                    or entry.completed_count is not None
+                    or entry.required_count is not None
+                ):
+                    raise ValueError("录入字段与专项检查指标类型不匹配")
                 payload = {"result": entry.result, "note": entry.note}
-            else:
+            elif input_kind in {"numeric", "percentage", "count"}:
+                if (
+                    entry.completed_count is not None
+                    or entry.required_count is not None
+                    or entry.result is not None
+                    or entry.note is not None
+                ):
+                    raise ValueError("录入字段与数值指标类型不匹配")
                 payload = {"actual_value": entry.actual_value}
+            else:
+                raise ValueError("运营指标录入类型无效")
             OperationPerformanceScoringService.calculate_metric_score(
                 metric=rule, payload=payload
             )
@@ -580,7 +632,7 @@ class OperationPerformanceWorkbenchService:
                 self.db.add(breakdown)
                 breakdowns[(target.id, *key)] = breakdown
             breakdown.operation_input_payload = payload
-            breakdown.achieved_value = payload.get("actual_value")
+            breakdown.achieved_value = None
             breakdown.manual_score_value = None
             breakdown.updated_at = datetime.now(timezone.utc)
         await self.db.commit()

@@ -19,8 +19,16 @@ export function buildEntryPayload(yearMonth, shops = []) {
         shop_id: shop.shop_id,
         metric_code: metric.metric_code
       }
-      if (metric.is_manual) entry.manual_score_value = metric.manual_score_value
-      else entry.achieved_value = metric.achieved_value
+      const input = metric.input_payload || {}
+      if (metric.input_kind === 'training_counts') {
+        entry.completed_count = input.completed_count
+        entry.required_count = input.required_count
+      } else if (metric.input_kind === 'special_check') {
+        entry.result = input.result
+        entry.note = input.note || undefined
+      } else {
+        entry.actual_value = input.actual_value
+      }
       return entry
     }))
   }

@@ -23,14 +23,15 @@ test('buildScopePayload sends the complete monthly shop scope without mutable sh
   })
 })
 
-test('buildEntryPayload sends only the applicable value for each metric direction', () => {
+test('buildEntryPayload sends only controlled structured inputs for each metric type', () => {
   const payload = buildEntryPayload('2026-08', [
     {
       platform_code: 'shopee',
       shop_id: 'shop-1',
       metrics: [
-        { metric_code: 'conversion_rate', is_manual: false, achieved_value: 8.5, manual_score_value: 9 },
-        { metric_code: 'content_quality', is_manual: true, achieved_value: 99, manual_score_value: 7 }
+        { metric_code: 'customer_satisfaction', input_kind: 'numeric', input_payload: { actual_value: 90 } },
+        { metric_code: 'training_completion_rate', input_kind: 'training_counts', input_payload: { completed_count: 9, required_count: 10 } },
+        { metric_code: 'operation_special_check', input_kind: 'special_check', input_payload: { result: 'partial', note: 'Need follow-up' } }
       ]
     }
   ])
@@ -38,8 +39,9 @@ test('buildEntryPayload sends only the applicable value for each metric directio
   assert.deepEqual(payload, {
     year_month: '2026-08',
     entries: [
-      { platform_code: 'shopee', shop_id: 'shop-1', metric_code: 'conversion_rate', achieved_value: 8.5 },
-      { platform_code: 'shopee', shop_id: 'shop-1', metric_code: 'content_quality', manual_score_value: 7 }
+      { platform_code: 'shopee', shop_id: 'shop-1', metric_code: 'customer_satisfaction', actual_value: 90 },
+      { platform_code: 'shopee', shop_id: 'shop-1', metric_code: 'training_completion_rate', completed_count: 9, required_count: 10 },
+      { platform_code: 'shopee', shop_id: 'shop-1', metric_code: 'operation_special_check', result: 'partial', note: 'Need follow-up' }
     ]
   })
 })
@@ -66,6 +68,13 @@ test('operation workbench exposes the three monthly steps and dedicated API meth
   assert.match(component, /aliases/)
   assert.match(component, /备注（可选）/)
   assert.match(component, /revokeScope/)
+  assert.match(component, /training_counts/)
+  assert.match(component, /special_check/)
+  assert.match(component, /isNumericInput\(metric\)/)
+  assert.match(component, /auto_score/)
+  assert.doesNotMatch(component, /metric\.is_manual/)
+  assert.doesNotMatch(component, /metric\.achieved_value/)
+  assert.doesNotMatch(component, /metric\.manual_score_value/)
   assert.doesNotMatch(component, /el-drawer/)
   assert.match(api, /getOperationPerformanceScope/)
   assert.match(api, /applyOperationPerformanceScope/)

@@ -158,7 +158,10 @@ async def test_entry_save_rejects_an_excluded_shop(monkeypatch):
     service._scope_rows = AsyncMock(
         return_value=[
             SimpleNamespace(
-                platform_code="shopee", shop_id="S001", is_included=False
+                platform_code="shopee",
+                shop_id="S001",
+                is_included=False,
+                snapshot_version=1,
             )
         ]
     )
@@ -182,6 +185,234 @@ async def test_entry_save_rejects_an_excluded_shop(monkeypatch):
 
     with pytest.raises(ValueError, match="未参与"):
         await service.apply_entries(request, username="admin")
+
+
+@pytest.mark.asyncio
+async def test_entries_read_structured_payload_and_auto_score_from_rule_snapshot():
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    scope = SimpleNamespace(
+        platform_code="shopee",
+        shop_id="S001",
+        is_included=True,
+        snapshot_version=1,
+        standard_name_snapshot="Standard shop",
+        alias_snapshots=["Shop alias"],
+    )
+    target = SimpleNamespace(
+        id=101,
+        is_enabled=True,
+        metric_code="training_completion_rate",
+        metric_name="Training completion",
+        metric_direction="higher_better",
+        target_value=100,
+        max_score=20,
+        operation_rule_snapshot={
+            "input_kind": "training_counts",
+            "target_value": 100,
+            "guidance": "Enter completed and required counts",
+        },
+    )
+    breakdown = SimpleNamespace(
+        operation_input_payload={"completed_count": 9, "required_count": 10},
+        achieved_value=999,
+        manual_score_value=7,
+    )
+    service._scope_rows = AsyncMock(return_value=[scope])
+    service._active_shops = AsyncMock(return_value=[])
+    service._targets = AsyncMock(return_value=[target])
+    service._entry_breakdowns = AsyncMock(
+        return_value={(101, "shopee", "S001"): breakdown}
+    )
+
+    result = await service.get_entries("2026-08")
+
+    metric = result["shops"][0]["metrics"][0]
+    assert metric["input_kind"] == "training_counts"
+    assert metric["input_payload"] == {"completed_count": 9, "required_count": 10}
+    assert metric["auto_score"] == 18
+    assert metric["status"] == "completed"
+    assert metric["scoring_detail"]["achievement_rate"] == 0.9
+    assert "achieved_value" not in metric
+    assert "manual_score_value" not in metric
+
+
+@pytest.mark.asyncio
+async def test_entry_save_requires_confirmed_scope(monkeypatch):
+    from backend.schemas.target import OperationWorkbenchEntryApplyRequest
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    service._scope_rows = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                platform_code="shopee",
+                shop_id="S001",
+                is_included=True,
+                snapshot_version=None,
+            )
+        ]
+    )
+    service._targets = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+    request = OperationWorkbenchEntryApplyRequest(
+        year_month="2026-08",
+        entries=[
+            {
+                "metric_code": "reply_timeliness",
+                "platform_code": "shopee",
+                "shop_id": "S001",
+                "actual_value": 95,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError):
+        await service.apply_entries(request, username="admin")
+
+
+@pytest.mark.asyncio
+async def test_entries_do_not_expose_unconfirmed_legacy_scope_as_writable():
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    service._scope_rows = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                platform_code="shopee",
+                shop_id="S001",
+                is_included=True,
+                snapshot_version=None,
+            )
+        ]
+    )
+    service._targets = AsyncMock(return_value=[])
+
+    result = await service.get_entries("2026-08")
+
+    assert result["scope_confirmed"] is False
+    assert result["shops"] == []
+
+
+@pytest.mark.asyncio
+async def test_entry_save_rejects_payload_that_does_not_match_metric_input_kind(
+    monkeypatch,
+):
+    from backend.schemas.target import OperationWorkbenchEntryApplyRequest
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    service._scope_rows = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                platform_code="shopee",
+                shop_id="S001",
+                is_included=True,
+                snapshot_version=1,
+            )
+        ]
+    )
+    service._targets = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                id=101,
+                metric_code="operation_special_check",
+                metric_direction="manual_score",
+                target_value=None,
+                max_score=20,
+                metric_catalog_version=2,
+                is_enabled=True,
+                operation_rule_snapshot={"input_kind": "special_check"},
+            )
+        ]
+    )
+    service._entry_breakdowns = AsyncMock(return_value={})
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+    request = OperationWorkbenchEntryApplyRequest(
+        year_month="2026-08",
+        entries=[
+            {
+                "metric_code": "operation_special_check",
+                "platform_code": "shopee",
+                "shop_id": "S001",
+                "actual_value": 90,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="专项检查"):
+        await service.apply_entries(request, username="admin")
+
+
+@pytest.mark.asyncio
+async def test_entry_save_accepts_catalog_percentage_as_numeric_input(monkeypatch):
+    from backend.schemas.target import OperationWorkbenchEntryApplyRequest
+    from backend.services import operation_performance_workbench_service as module
+
+    breakdown = SimpleNamespace(
+        operation_input_payload=None,
+        achieved_value=None,
+        manual_score_value=None,
+        updated_at=None,
+    )
+    db = SimpleNamespace(commit=AsyncMock())
+    service = module.OperationPerformanceWorkbenchService(db=db)
+    service._scope_rows = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                platform_code="shopee",
+                shop_id="S001",
+                is_included=True,
+                snapshot_version=1,
+            )
+        ]
+    )
+    service._targets = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                id=101,
+                metric_code="customer_satisfaction",
+                metric_direction="higher_better",
+                target_value=100,
+                max_score=20,
+                metric_catalog_version=2,
+                is_enabled=True,
+                operation_rule_snapshot={"input_kind": "percentage"},
+            )
+        ]
+    )
+    service._entry_breakdowns = AsyncMock(
+        return_value={(101, "shopee", "S001"): breakdown}
+    )
+    service.get_entries = AsyncMock(return_value={"saved": True})
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService,
+        "assert_month_mutable",
+        AsyncMock(),
+    )
+    request = OperationWorkbenchEntryApplyRequest(
+        year_month="2026-08",
+        entries=[
+            {
+                "metric_code": "customer_satisfaction",
+                "platform_code": "shopee",
+                "shop_id": "S001",
+                "actual_value": 90,
+            }
+        ],
+    )
+
+    assert await service.apply_entries(request, username="admin") == {"saved": True}
+    assert breakdown.operation_input_payload == {"actual_value": 90.0}
 
 
 def test_target_router_exposes_monthly_scope_and_entry_endpoints():

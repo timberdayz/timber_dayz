@@ -55,6 +55,20 @@ def test_training_with_zero_required_people_is_complete_without_manual_score():
     assert detail["message"] == "无需培训，按 100% 达成"
 
 
+def test_training_rejects_completed_people_above_required_people():
+    with pytest.raises(ValueError, match="完成人数"):
+        OperationPerformanceScoringService.calculate_metric_score(
+            metric={
+                "metric_code": "training_completion_rate",
+                "input_kind": "training_counts",
+                "metric_direction": "higher_better",
+                "target_value": 100,
+                "max_score": 10,
+            },
+            payload={"completed_count": 6, "required_count": 5},
+        )
+
+
 def test_special_check_requires_note_for_partial_result():
     with pytest.raises(ValueError, match="说明"):
         OperationPerformanceScoringService.calculate_metric_score(
