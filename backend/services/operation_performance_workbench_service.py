@@ -194,20 +194,28 @@ class OperationPerformanceWorkbenchService:
             )
         return (await self.db.execute(query.limit(1))).scalar_one_or_none()
 
-    async def _targets(self, year_month: str):
+    async def _targets(self, year_month: str, *, auto_integer_only: bool = False):
         month_start, month_end = self.month_range(year_month)
+        conditions = [
+            SalesTarget.target_type == "operation",
+            SalesTarget.period_start == month_start,
+            SalesTarget.period_end == month_end,
+            SalesTarget.metric_catalog_version.is_not(None),
+            SalesTarget.scope_type.in_(("shop", None)),
+            SalesTarget.status != "cancelled",
+        ]
+        if auto_integer_only:
+            conditions.extend(
+                [
+                    SalesTarget.scoring_model_version == "auto_integer_v1",
+                    SalesTarget.operation_rule_snapshot.is_not(None),
+                ]
+            )
         return (
             (
                 await self.db.execute(
                     select(SalesTarget)
-                    .where(
-                        SalesTarget.target_type == "operation",
-                        SalesTarget.period_start == month_start,
-                        SalesTarget.period_end == month_end,
-                        SalesTarget.metric_catalog_version.is_not(None),
-                        SalesTarget.scope_type.in_(("shop", None)),
-                        SalesTarget.status != "cancelled",
-                    )
+                    .where(*conditions)
                     .order_by(SalesTarget.metric_code, SalesTarget.id)
                 )
             )
@@ -218,6 +226,25 @@ class OperationPerformanceWorkbenchService:
     @staticmethod
     def _shop_key(platform_code: str, shop_id: str) -> tuple[str, str]:
         return str(platform_code).strip().lower(), str(shop_id).strip()
+
+    @staticmethod
+    def _auto_integer_rule(target: SalesTarget) -> dict[str, Any]:
+        if getattr(target, "scoring_model_version", None) != "auto_integer_v1":
+            raise ValueError("运营指标不是 auto_integer_v1 受控规则")
+        snapshot = getattr(target, "operation_rule_snapshot", None)
+        if not isinstance(snapshot, dict):
+            raise ValueError("运营指标缺少受控规则快照")
+        input_kind = str(snapshot.get("input_kind") or "")
+        if input_kind not in {"percentage", "count", "training_counts", "special_check"}:
+            raise ValueError("运营指标规则快照的录入类型无效")
+        return {
+            **snapshot,
+            "metric_code": target.metric_code,
+            "metric_name": getattr(target, "metric_name", None),
+            "metric_direction": target.metric_direction,
+            "target_value": target.target_value,
+            "max_score": target.max_score,
+        }
 
     async def _active_shops(self):
         candidates, _ = await OperationPerformanceShopScopeService(
@@ -459,10 +486,17 @@ class OperationPerformanceWorkbenchService:
                 "completion": {"completed": 0, "pending": 0},
             }
 
-        targets = [
-            target for target in await self._targets(year_month) if target.is_enabled
-        ]
-        breakdowns = await self._entry_breakdowns(targets)
+        targets_with_rules = []
+        for target in await self._targets(year_month, auto_integer_only=True):
+            if not target.is_enabled:
+                continue
+            try:
+                targets_with_rules.append((target, self._auto_integer_rule(target)))
+            except ValueError:
+                continue
+        breakdowns = await self._entry_breakdowns(
+            [target for target, _ in targets_with_rules]
+        )
         shops = []
         completed = 0
         pending = 0
@@ -470,19 +504,9 @@ class OperationPerformanceWorkbenchService:
             key = self._shop_key(scope.platform_code, scope.shop_id)
             metrics = []
             shop_complete = True
-            for target in targets:
+            for target, rule in targets_with_rules:
                 breakdown = breakdowns.get((target.id, *key))
-                rule = dict(getattr(target, "operation_rule_snapshot", None) or {})
-                rule.update(
-                    {
-                        "metric_code": target.metric_code,
-                        "metric_name": target.metric_name,
-                        "metric_direction": target.metric_direction,
-                        "target_value": target.target_value,
-                        "max_score": target.max_score,
-                    }
-                )
-                input_kind = str(rule.get("input_kind") or "numeric")
+                input_kind = str(rule["input_kind"])
                 payload = dict(
                     getattr(breakdown, "operation_input_payload", None) or {}
                 )
@@ -562,11 +586,19 @@ class OperationPerformanceWorkbenchService:
         for entry in request.entries:
             if self._shop_key(entry.platform_code, entry.shop_id) not in included_keys:
                 raise ValueError("该店铺未参与本月运营绩效，不能录入")
-        targets_by_code = {
-            target.metric_code: target
-            for target in await self._targets(request.year_month)
-            if target.is_enabled
-        }
+        targets_by_code = {}
+        rules_by_code = {}
+        for target in await self._targets(
+            request.year_month, auto_integer_only=True
+        ):
+            if not target.is_enabled:
+                continue
+            try:
+                rule = self._auto_integer_rule(target)
+            except ValueError:
+                continue
+            targets_by_code[target.metric_code] = target
+            rules_by_code[target.metric_code] = rule
         breakdowns = await self._entry_breakdowns(list(targets_by_code.values()))
         month_start, month_end = self.month_range(request.year_month)
         for entry in request.entries:
@@ -574,16 +606,8 @@ class OperationPerformanceWorkbenchService:
             target = targets_by_code.get(entry.metric_code)
             if target is None:
                 raise ValueError("店铺录入指标不存在或未启用")
-            rule = dict(getattr(target, "operation_rule_snapshot", None) or {})
-            rule.update(
-                {
-                    "metric_code": target.metric_code,
-                    "metric_direction": target.metric_direction,
-                    "target_value": target.target_value,
-                    "max_score": target.max_score,
-                }
-            )
-            input_kind = str(rule.get("input_kind") or "numeric")
+            rule = rules_by_code[entry.metric_code]
+            input_kind = str(rule["input_kind"])
             if input_kind == "training_counts":
                 if (
                     entry.actual_value is not None
@@ -603,7 +627,7 @@ class OperationPerformanceWorkbenchService:
                 ):
                     raise ValueError("录入字段与专项检查指标类型不匹配")
                 payload = {"result": entry.result, "note": entry.note}
-            elif input_kind in {"numeric", "percentage", "count"}:
+            elif input_kind in {"percentage", "count"}:
                 if (
                     entry.completed_count is not None
                     or entry.required_count is not None

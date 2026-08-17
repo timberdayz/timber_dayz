@@ -82,3 +82,22 @@ test('operation workbench exposes the three monthly steps and dedicated API meth
   assert.match(api, /applyOperationPerformanceEntries/)
   assert.match(api, /revokeOperationPerformanceScope/)
 })
+
+test('buildEntryPayload omits incomplete metrics so pending entries are not submitted', () => {
+  const payload = buildEntryPayload('2026-08', [
+    {
+      platform_code: 'shopee',
+      shop_id: 'shop-1',
+      metrics: [
+        { metric_code: 'customer_satisfaction', input_kind: 'percentage', input_payload: { actual_value: 90 } },
+        { metric_code: 'complaint_count', input_kind: 'count', input_payload: {} },
+        { metric_code: 'training_completion_rate', input_kind: 'training_counts', input_payload: { completed_count: 2 } },
+        { metric_code: 'operation_special_check', input_kind: 'special_check', input_payload: { result: 'failed' } }
+      ]
+    }
+  ])
+
+  assert.deepEqual(payload.entries, [
+    { platform_code: 'shopee', shop_id: 'shop-1', metric_code: 'customer_satisfaction', actual_value: 90 }
+  ])
+})

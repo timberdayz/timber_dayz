@@ -203,6 +203,7 @@ async def test_entries_read_structured_payload_and_auto_score_from_rule_snapshot
     target = SimpleNamespace(
         id=101,
         is_enabled=True,
+        scoring_model_version="auto_integer_v1",
         metric_code="training_completion_rate",
         metric_name="Training completion",
         metric_direction="higher_better",
@@ -236,6 +237,148 @@ async def test_entries_read_structured_payload_and_auto_score_from_rule_snapshot
     assert metric["scoring_detail"]["achievement_rate"] == 0.9
     assert "achieved_value" not in metric
     assert "manual_score_value" not in metric
+
+
+@pytest.mark.asyncio
+async def test_entries_exclude_non_v1_or_invalid_snapshot_targets_and_ignore_legacy_values():
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    scope = SimpleNamespace(
+        platform_code="shopee",
+        shop_id="S001",
+        is_included=True,
+        snapshot_version=1,
+        standard_name_snapshot="Standard shop",
+        alias_snapshots=[],
+    )
+    percentage_target = SimpleNamespace(
+        id=101,
+        is_enabled=True,
+        scoring_model_version="auto_integer_v1",
+        metric_code="customer_satisfaction",
+        metric_name="Customer satisfaction",
+        metric_direction="higher_better",
+        target_value=100,
+        max_score=20,
+        operation_rule_snapshot={"input_kind": "percentage"},
+    )
+    special_check_target = SimpleNamespace(
+        id=102,
+        is_enabled=True,
+        scoring_model_version="auto_integer_v1",
+        metric_code="operation_special_check",
+        metric_name="Special check",
+        metric_direction="manual_score",
+        target_value=None,
+        max_score=10,
+        operation_rule_snapshot={"input_kind": "special_check"},
+    )
+    old_target = SimpleNamespace(
+        id=103,
+        is_enabled=True,
+        scoring_model_version="legacy",
+        metric_code="legacy_metric",
+        metric_name="Legacy metric",
+        metric_direction="higher_better",
+        target_value=1,
+        max_score=5,
+        operation_rule_snapshot={"input_kind": "percentage"},
+    )
+    invalid_target = SimpleNamespace(
+        id=104,
+        is_enabled=True,
+        scoring_model_version="auto_integer_v1",
+        metric_code="invalid_metric",
+        metric_name="Invalid metric",
+        metric_direction="higher_better",
+        target_value=1,
+        max_score=5,
+        operation_rule_snapshot={"input_kind": "manual_score"},
+    )
+    service._scope_rows = AsyncMock(return_value=[scope])
+    service._targets = AsyncMock(
+        return_value=[percentage_target, special_check_target, old_target, invalid_target]
+    )
+    service._entry_breakdowns = AsyncMock(
+        return_value={
+            (101, "shopee", "S001"): SimpleNamespace(
+                operation_input_payload={"actual_value": 90},
+                achieved_value=10,
+                manual_score_value=1,
+            ),
+            (102, "shopee", "S001"): SimpleNamespace(
+                operation_input_payload={"result": "passed"},
+                achieved_value=999,
+                manual_score_value=0,
+            ),
+        }
+    )
+
+    result = await service.get_entries("2026-08")
+
+    metrics = result["shops"][0]["metrics"]
+    assert [metric["metric_code"] for metric in metrics] == [
+        "customer_satisfaction",
+        "operation_special_check",
+    ]
+    assert [metric["auto_score"] for metric in metrics] == [18, 10]
+
+
+@pytest.mark.asyncio
+async def test_entries_keep_failed_special_check_pending_without_its_required_note():
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    scope = SimpleNamespace(
+        platform_code="shopee",
+        shop_id="S001",
+        is_included=True,
+        snapshot_version=1,
+        standard_name_snapshot="Standard shop",
+        alias_snapshots=[],
+    )
+    target = SimpleNamespace(
+        id=101,
+        is_enabled=True,
+        scoring_model_version="auto_integer_v1",
+        metric_code="operation_special_check",
+        metric_name="Special check",
+        metric_direction="manual_score",
+        target_value=None,
+        max_score=10,
+        operation_rule_snapshot={"input_kind": "special_check"},
+    )
+    service._scope_rows = AsyncMock(return_value=[scope])
+    service._targets = AsyncMock(return_value=[target])
+    service._entry_breakdowns = AsyncMock(
+        return_value={
+            (101, "shopee", "S001"): SimpleNamespace(
+                operation_input_payload={"result": "failed"},
+                achieved_value=999,
+                manual_score_value=0,
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="说明"):
+        await service.get_entries("2026-08")
+
+
+def test_auto_integer_rule_rejects_old_targets_missing_snapshots_and_unknown_input_kinds():
+    from backend.services.operation_performance_workbench_service import (
+        OperationPerformanceWorkbenchService,
+    )
+
+    invalid_targets = [
+        SimpleNamespace(scoring_model_version="legacy", operation_rule_snapshot={"input_kind": "percentage"}),
+        SimpleNamespace(scoring_model_version="auto_integer_v1", operation_rule_snapshot=None),
+        SimpleNamespace(scoring_model_version="auto_integer_v1", operation_rule_snapshot={"input_kind": "manual_score"}),
+    ]
+
+    for target in invalid_targets:
+        with pytest.raises(ValueError):
+            OperationPerformanceWorkbenchService._auto_integer_rule(target)
 
 
 @pytest.mark.asyncio
@@ -327,6 +470,7 @@ async def test_entry_save_rejects_payload_that_does_not_match_metric_input_kind(
                 max_score=20,
                 metric_catalog_version=2,
                 is_enabled=True,
+                scoring_model_version="auto_integer_v1",
                 operation_rule_snapshot={"input_kind": "special_check"},
             )
         ]
@@ -386,6 +530,7 @@ async def test_entry_save_accepts_catalog_percentage_as_numeric_input(monkeypatc
                 max_score=20,
                 metric_catalog_version=2,
                 is_enabled=True,
+                scoring_model_version="auto_integer_v1",
                 operation_rule_snapshot={"input_kind": "percentage"},
             )
         ]
