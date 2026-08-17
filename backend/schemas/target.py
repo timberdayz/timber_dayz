@@ -3,7 +3,7 @@
 """
 
 from datetime import date, datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -262,6 +262,45 @@ class OperationWorkbenchApplyRequest(BaseModel):
         if self.shop_overrides:
             raise ValueError("店铺数据必须通过店铺录入工作台保存")
         return self
+
+
+class OperationWorkbenchEntryMetricResponse(BaseModel):
+    metric_code: str
+    metric_name: Optional[str] = None
+    metric_direction: Optional[str] = None
+    target_value: Optional[float] = None
+    max_score: float = 0
+    input_kind: str
+    input_payload: Dict[str, Any] = Field(default_factory=dict)
+    auto_score: Optional[int] = None
+    scoring_detail: Dict[str, Any] = Field(default_factory=dict)
+    unit: Optional[str] = None
+    guidance: Optional[str] = None
+    formula: Optional[str] = None
+    status: str
+
+
+class OperationWorkbenchEntryShopResponse(BaseModel):
+    platform_code: str
+    shop_id: str
+    standard_name: str
+    aliases: List[str] = Field(default_factory=list)
+    status: str
+    configuration_errors: List[Dict[str, Any]] = Field(default_factory=list)
+    metrics: List[OperationWorkbenchEntryMetricResponse] = Field(default_factory=list)
+
+
+class OperationWorkbenchEntriesResponse(BaseModel):
+    year_month: str
+    scope_confirmed: bool
+    shops: List[OperationWorkbenchEntryShopResponse] = Field(default_factory=list)
+    completion: Dict[str, int] = Field(default_factory=dict)
+    configuration_errors: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class OperationWorkbenchEntriesApiResponse(BaseModel):
+    success: bool = True
+    data: OperationWorkbenchEntriesResponse
 
 
 class OperationWorkbenchScopeShopInput(BaseModel):

@@ -204,15 +204,21 @@ async def test_entries_read_structured_payload_and_auto_score_from_rule_snapshot
         id=101,
         is_enabled=True,
         scoring_model_version="auto_integer_v1",
-        metric_code="training_completion_rate",
-        metric_name="Training completion",
-        metric_direction="higher_better",
-        target_value=100,
-        max_score=20,
+        metric_code="mutated_metric_code",
+        metric_name="Mutated metric name",
+        metric_direction="lower_better",
+        target_value=3,
+        max_score=1,
         operation_rule_snapshot={
+            "metric_code": "training_completion_rate",
+            "sort_key": 40,
             "input_kind": "training_counts",
+            "direction": "higher_better",
             "target_value": 100,
+            "max_score": 20,
+            "unit": "%",
             "guidance": "Enter completed and required counts",
+            "scoring_rule_version": "auto_integer_v1",
         },
     )
     breakdown = SimpleNamespace(
@@ -231,6 +237,9 @@ async def test_entries_read_structured_payload_and_auto_score_from_rule_snapshot
 
     metric = result["shops"][0]["metrics"][0]
     assert metric["input_kind"] == "training_counts"
+    assert metric["metric_code"] == "training_completion_rate"
+    assert metric["target_value"] == 100
+    assert metric["max_score"] == 20
     assert metric["input_payload"] == {"completed_count": 9, "required_count": 10}
     assert metric["auto_score"] == 18
     assert metric["status"] == "completed"
@@ -261,7 +270,7 @@ async def test_entries_block_completion_for_invalid_v1_rules_and_ignore_legacy_v
         metric_direction="higher_better",
         target_value=100,
         max_score=20,
-        operation_rule_snapshot={"input_kind": "percentage"},
+        operation_rule_snapshot={"metric_code": "customer_satisfaction", "sort_key": 10, "input_kind": "percentage", "direction": "higher_better", "target_value": 100, "max_score": 20, "unit": "%", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
     )
     special_check_target = SimpleNamespace(
         id=102,
@@ -272,7 +281,7 @@ async def test_entries_block_completion_for_invalid_v1_rules_and_ignore_legacy_v
         metric_direction="manual_score",
         target_value=None,
         max_score=10,
-        operation_rule_snapshot={"input_kind": "special_check"},
+        operation_rule_snapshot={"metric_code": "operation_special_check", "sort_key": 50, "input_kind": "special_check", "direction": "manual_score", "target_value": None, "max_score": 10, "unit": "", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
     )
     old_target = SimpleNamespace(
         id=103,
@@ -371,7 +380,7 @@ async def test_entry_save_rejects_failed_special_check_without_note(monkeypatch)
         metric_direction="manual_score",
         target_value=None,
         max_score=10,
-        operation_rule_snapshot={"input_kind": "special_check"},
+        operation_rule_snapshot={"metric_code": "operation_special_check", "sort_key": 50, "input_kind": "special_check", "direction": "manual_score", "target_value": None, "max_score": 10, "unit": "", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
     )
     service._scope_rows = AsyncMock(return_value=[scope])
     service._targets = AsyncMock(return_value=[target])
@@ -451,6 +460,39 @@ def test_auto_integer_rule_rejects_old_targets_missing_snapshots_and_unknown_inp
     for target in invalid_targets:
         with pytest.raises(ValueError):
             OperationPerformanceWorkbenchService._auto_integer_rule(target)
+
+
+def test_auto_integer_rule_uses_immutable_snapshot_after_target_row_is_mutated():
+    from backend.services.operation_performance_workbench_service import (
+        OperationPerformanceWorkbenchService,
+    )
+
+    target = SimpleNamespace(
+        scoring_model_version="auto_integer_v1",
+        metric_code="mutated_code",
+        metric_name="Mutated name",
+        metric_direction="lower_better",
+        target_value=3,
+        max_score=1,
+        operation_rule_snapshot={
+            "metric_code": "customer_satisfaction",
+            "sort_key": 10,
+            "input_kind": "percentage",
+            "direction": "higher_better",
+            "target_value": 100,
+            "max_score": 20,
+            "unit": "%",
+            "guidance": "Snapshot guidance",
+            "scoring_rule_version": "auto_integer_v1",
+        },
+    )
+
+    rule = OperationPerformanceWorkbenchService._auto_integer_rule(target)
+
+    assert rule["metric_code"] == "customer_satisfaction"
+    assert rule["metric_direction"] == "higher_better"
+    assert rule["target_value"] == 100
+    assert rule["max_score"] == 20
 
 
 @pytest.mark.asyncio
@@ -543,7 +585,7 @@ async def test_entry_save_rejects_payload_that_does_not_match_metric_input_kind(
                 metric_catalog_version=2,
                 is_enabled=True,
                 scoring_model_version="auto_integer_v1",
-                operation_rule_snapshot={"input_kind": "special_check"},
+                operation_rule_snapshot={"metric_code": "operation_special_check", "sort_key": 50, "input_kind": "special_check", "direction": "manual_score", "target_value": None, "max_score": 20, "unit": "", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
             )
         ]
     )
@@ -603,7 +645,7 @@ async def test_entry_save_accepts_catalog_percentage_as_numeric_input(monkeypatc
                 metric_catalog_version=2,
                 is_enabled=True,
                 scoring_model_version="auto_integer_v1",
-                operation_rule_snapshot={"input_kind": "percentage"},
+                operation_rule_snapshot={"metric_code": "customer_satisfaction", "sort_key": 10, "input_kind": "percentage", "direction": "higher_better", "target_value": 100, "max_score": 20, "unit": "%", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
             )
         ]
     )
@@ -641,6 +683,8 @@ def test_target_router_exposes_monthly_scope_and_entry_endpoints():
     assert ("/targets/operation-workbench/entries", ("GET",)) in routes
     assert ("/targets/operation-workbench/entries", ("PUT",)) in routes
     assert ("/targets/operation-workbench/scope/revoke", ("POST",)) in routes
+    entry_routes = [route for route in router.routes if route.path.endswith("/entries")]
+    assert all(route.response_model is not dict for route in entry_routes)
 
 
 def test_operation_workbench_write_routes_require_an_administrator():

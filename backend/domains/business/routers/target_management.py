@@ -60,6 +60,7 @@ from backend.schemas.target import (
     OperationWorkbenchApplyRequest,
     OperationWorkbenchScopeApplyRequest,
     OperationWorkbenchEntryApplyRequest,
+    OperationWorkbenchEntriesApiResponse,
 )
 from backend.services.shop_target_workbench_service import ShopTargetWorkbenchService
 from backend.services.operation_performance_workbench_service import (
@@ -316,7 +317,10 @@ async def revoke_operation_performance_workbench_scope(
     return {"success": True, "data": data}
 
 
-@router.get("/operation-workbench/entries", response_model=Dict[str, Any])
+@router.get(
+    "/operation-workbench/entries",
+    response_model=OperationWorkbenchEntriesApiResponse,
+)
 async def get_operation_performance_workbench_entries(
     year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db),
@@ -328,7 +332,10 @@ async def get_operation_performance_workbench_entries(
     }
 
 
-@router.put("/operation-workbench/entries", response_model=Dict[str, Any])
+@router.put(
+    "/operation-workbench/entries",
+    response_model=OperationWorkbenchEntriesApiResponse,
+)
 async def apply_operation_performance_workbench_entries(
     request: OperationWorkbenchEntryApplyRequest,
     db: AsyncSession = Depends(get_async_db),

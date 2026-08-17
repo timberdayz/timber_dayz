@@ -236,13 +236,21 @@ class OperationPerformanceWorkbenchService:
         input_kind = str(snapshot.get("input_kind") or "")
         if input_kind not in {"percentage", "count", "training_counts", "special_check"}:
             raise ValueError("运营指标规则快照的录入类型无效")
+        required_fields = {
+            "metric_code",
+            "sort_key",
+            "direction",
+            "target_value",
+            "max_score",
+            "unit",
+            "guidance",
+            "scoring_rule_version",
+        }
+        if not required_fields.issubset(snapshot):
+            raise ValueError("运营指标规则快照不完整")
         return {
             **snapshot,
-            "metric_code": target.metric_code,
-            "metric_name": getattr(target, "metric_name", None),
-            "metric_direction": target.metric_direction,
-            "target_value": target.target_value,
-            "max_score": target.max_score,
+            "metric_direction": snapshot["direction"],
         }
 
     async def _active_shops(self):
@@ -528,11 +536,11 @@ class OperationPerformanceWorkbenchService:
                 shop_complete = shop_complete and metric_complete
                 metrics.append(
                     {
-                        "metric_code": target.metric_code,
-                        "metric_name": target.metric_name,
-                        "metric_direction": target.metric_direction,
-                        "target_value": target.target_value,
-                        "max_score": float(target.max_score or 0.0),
+                        "metric_code": rule["metric_code"],
+                        "metric_name": rule.get("metric_name"),
+                        "metric_direction": rule["metric_direction"],
+                        "target_value": rule["target_value"],
+                        "max_score": float(rule["max_score"] or 0.0),
                         "input_kind": input_kind,
                         "input_payload": payload,
                         "auto_score": auto_score,
@@ -863,11 +871,14 @@ class OperationPerformanceWorkbenchService:
             row.scoring_model_version = "auto_integer_v1"
             row.operation_rule_snapshot = {
                 "metric_code": catalog_item.metric_code,
+                "metric_name": catalog_item.metric_name,
                 "sort_key": catalog_item.sort_key,
                 "input_kind": catalog_item.input_kind,
+                "direction": catalog_item.metric_direction,
                 "unit": catalog_item.unit,
                 "guidance": catalog_item.guidance,
                 "target_value": catalog_item.default_target_value,
+                "max_score": allocations.get(item.metric_code, 0),
                 "scoring_rule_version": catalog_item.scoring_rule_version,
             }
             row.performance_config_id = config.id

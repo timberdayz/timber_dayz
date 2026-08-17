@@ -69,27 +69,30 @@
           <h2>店铺数据录入与保存</h2>
           <p>仅展示已参与店铺。量化指标填写实际值；培训指标填写已完成与应完成人数；专项检查选择结论并按需填写说明。</p>
         </div>
-        <el-button type="primary" :icon="Check" :disabled="!scopeReady" :loading="savingEntries" @click="saveEntries">保存店铺数据</el-button>
+        <el-button type="primary" :icon="Check" :disabled="!scopeReady || configurationErrors.length > 0" :loading="savingEntries" @click="saveEntries">保存店铺数据</el-button>
       </div>
 
       <el-alert v-if="!scopeReady" title="请先确认当前店铺范围后再录入店铺运营数据。" type="warning" :closable="false" show-icon />
       <template v-else>
+        <el-alert v-if="configurationErrors.length" title="运营绩效规则配置错误，无法录入" type="error" :closable="false" show-icon>
+          <template #default><div v-for="item in configurationErrors" :key="item.metric_code">{{ item.metric_code || '未知指标' }}：{{ item.message }}</div></template>
+        </el-alert>
         <section class="scope-summary">
-          <span>已完成 {{ entryCompletion.completed }}</span><span>待完成 {{ entryCompletion.pending }}</span>
-          <el-tag :type="entryCompletion.pending ? 'warning' : 'success'">{{ entryCompletion.pending ? '存在待录入店铺' : '全部店铺已完成' }}</el-tag>
+          <span>已完成 {{ liveEntryCompletion.completed }}</span><span>待完成 {{ liveEntryCompletion.pending }}</span>
+          <el-tag :type="liveEntryCompletion.pending ? 'warning' : 'success'">{{ liveEntryCompletion.pending ? '存在待录入店铺' : '全部店铺已完成' }}</el-tag>
         </section>
         <el-table v-loading="loadingEntries" :data="entryShops" border stripe class="erp-table entry-shop-table">
           <el-table-column prop="platform_code" label="平台" width="130" />
           <el-table-column prop="shop_id" label="店铺 ID" min-width="165" />
           <el-table-column prop="standard_name" label="标准店铺名" min-width="160"><template #default="{ row }">{{ row.standard_name || row.shop_id }}</template></el-table-column>
           <el-table-column label="店铺别名" min-width="180"><template #default="{ row }">{{ (row.aliases || []).join('、') || '-' }}</template></el-table-column>
-          <el-table-column label="完成状态" width="120" align="center"><template #default="{ row }"><el-tag :type="getStoreEntryStatus(row) === 'completed' ? 'success' : 'warning'">{{ getStoreEntryStatus(row) === 'completed' ? '已完成' : '待录入' }}</el-tag></template></el-table-column>
+          <el-table-column label="完成状态" width="120" align="center"><template #default="{ row }"><el-tag :type="getLiveStoreEntryStatus(row) === 'completed' ? 'success' : 'warning'">{{ getLiveStoreEntryStatus(row) === 'completed' ? '已完成' : '待录入' }}</el-tag></template></el-table-column>
           <el-table-column label="指标录入" min-width="520">
             <template #default="{ row }">
               <div class="metric-entry-list">
                 <div v-for="metric in row.metrics" :key="metric.metric_code" class="metric-entry-row">
                   <div class="metric-entry-name"><strong>{{ metric.metric_name }}</strong><small>{{ metric.metric_code }}</small></div>
-                  <span class="target-display">目标 {{ metric.target_value ?? '-' }} {{ metric.unit || '' }} · 满分 {{ metric.max_score }} · {{ metric.formula }}</span>
+                  <span class="target-display">目标 {{ metric.target_value ?? '-' }} {{ metric.unit || '' }} · 满分 {{ metric.max_score }} · {{ entryPreview(metric).formula }}</span>
                   <el-input-number v-if="isNumericInput(metric)" v-model="metric.input_payload.actual_value" :min="0" :precision="2" controls-position="right" placeholder="实际值" />
                   <div v-else-if="metric.input_kind === 'training_counts'" class="training-inputs">
                     <el-input-number v-model="metric.input_payload.completed_count" :min="0" :precision="0" controls-position="right" placeholder="已完成人数" />
@@ -103,7 +106,7 @@
                     </el-select>
                     <el-input v-if="['partial', 'failed'].includes(metric.input_payload.result)" v-model="metric.input_payload.note" placeholder="请填写说明" maxlength="512" show-word-limit />
                   </div>
-                  <span class="auto-score">自动得分 {{ metric.auto_score ?? '-' }}</span>
+                  <span class="auto-score">自动得分 {{ entryPreview(metric).auto_score ?? '-' }}</span>
                   <el-tag size="small" :type="isMetricComplete(metric) ? 'success' : 'warning'">{{ isMetricComplete(metric) ? '已录入' : '待录入' }}</el-tag>
                 </div>
               </div>
@@ -121,7 +124,8 @@ import { Check, CopyDocument, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '@/components/common/PageHeader.vue'
 import api from '@/api'
-import { buildEntryPayload, buildScopePayload, getStoreEntryStatus } from './operationPerformanceWorkbench'
+import { buildEntryPayload, buildScopePayload } from './operationPerformanceWorkbench'
+import { buildOperationEntryPreview } from './operationTargetFormula'
 
 const yearMonth = ref(new Date().toISOString().slice(0, 7))
 const activeStep = ref(0)
@@ -138,6 +142,7 @@ const entryShops = ref([])
 const scopeConfirmed = ref(false)
 const scopeDirty = ref(false)
 const entryCompletion = ref({ completed: 0, pending: 0 })
+const configurationErrors = ref([])
 const catalogVersion = ref(null)
 const performanceConfigId = ref(null)
 const expectedPerformanceConfigUpdatedAt = ref(null)
@@ -149,11 +154,17 @@ const scoreBudgetMatches = computed(() => Math.abs(assignedMaxScore.value - oper
 const canSaveRules = computed(() => catalogVersion.value && scoreBudgetMatches.value)
 const includedShopCount = computed(() => scopeShops.value.filter((shop) => shop.is_included).length)
 const scopeReady = computed(() => scopeConfirmed.value && !scopeDirty.value)
+const liveEntryCompletion = computed(() => entryShops.value.reduce((summary, shop) => {
+  summary[getLiveStoreEntryStatus(shop) === 'completed' ? 'completed' : 'pending'] += 1
+  return summary
+}, { completed: 0, pending: 0 }))
 
 function unwrap(response) { return response?.data?.data || response?.data || response }
 function errorMessage(error, fallback) { return error?.response?.data?.detail || error?.message || fallback }
 function isNumericInput(metric) { return !['training_counts', 'special_check'].includes(metric.input_kind) }
-function isMetricComplete(metric) { return metric.status === 'completed' }
+function entryPreview(metric) { return buildOperationEntryPreview(metric) }
+function isMetricComplete(metric) { return entryPreview(metric).status === 'completed' }
+function getLiveStoreEntryStatus(shop) { return (shop.metrics || []).every(isMetricComplete) ? 'completed' : 'pending' }
 
 async function loadRules() {
   const data = unwrap(await api.getOperationPerformanceWorkbench(yearMonth.value))
@@ -182,6 +193,7 @@ async function loadEntries() {
     entryShops.value = data.shops || []
     scopeConfirmed.value = Boolean(data.scope_confirmed)
     entryCompletion.value = data.completion || { completed: 0, pending: 0 }
+    configurationErrors.value = data.configuration_errors || []
   } finally { loadingEntries.value = false }
 }
 

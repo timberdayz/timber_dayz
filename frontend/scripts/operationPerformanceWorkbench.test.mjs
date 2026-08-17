@@ -72,6 +72,8 @@ test('operation workbench exposes the three monthly steps and dedicated API meth
   assert.match(component, /special_check/)
   assert.match(component, /isNumericInput\(metric\)/)
   assert.match(component, /auto_score/)
+  assert.match(component, /buildOperationEntryPreview/)
+  assert.match(component, /configurationErrors/)
   assert.doesNotMatch(component, /metric\.is_manual/)
   assert.doesNotMatch(component, /metric\.achieved_value/)
   assert.doesNotMatch(component, /metric\.manual_score_value/)
