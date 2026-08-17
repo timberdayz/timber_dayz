@@ -4,16 +4,18 @@ from calendar import monthrange
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas.target import OperationWorkbenchApplyRequest
 from backend.services.payroll_period_lock_service import PayrollPeriodLockService
 from modules.core.db import (
     OperationMetricCatalog,
+    OperationPerformanceShopScope,
     PerformanceConfig,
     SalesTarget,
     TargetBreakdown,
+    DimShop,
 )
 
 
@@ -208,40 +210,311 @@ class OperationPerformanceWorkbenchService:
             .all()
         )
 
+    @staticmethod
+    def _shop_key(platform_code: str, shop_id: str) -> tuple[str, str]:
+        return str(platform_code).strip().lower(), str(shop_id).strip()
+
+    async def _active_shops(self):
+        return (
+            (
+                await self.db.execute(
+                    select(DimShop)
+                    .where(DimShop.is_active.is_(True))
+                    .order_by(DimShop.platform_code, DimShop.shop_name, DimShop.shop_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def _sales_target_shop_keys(self, year_month: str) -> set[tuple[str, str]]:
+        month_start, month_end = self.month_range(year_month)
+        rows = await self.db.execute(
+            select(TargetBreakdown.platform_code, TargetBreakdown.shop_id)
+            .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
+            .where(
+                SalesTarget.target_type == "shop",
+                SalesTarget.period_start == month_start,
+                SalesTarget.period_end == month_end,
+                SalesTarget.status != "cancelled",
+                TargetBreakdown.breakdown_type == "shop",
+                TargetBreakdown.platform_code.is_not(None),
+                TargetBreakdown.shop_id.is_not(None),
+            )
+        )
+        return {
+            self._shop_key(platform_code, shop_id)
+            for platform_code, shop_id in rows.all()
+        }
+
+    async def _scope_rows(self, year_month: str):
+        return (
+            (
+                await self.db.execute(
+                    select(OperationPerformanceShopScope)
+                    .where(OperationPerformanceShopScope.year_month == year_month)
+                    .order_by(
+                        OperationPerformanceShopScope.platform_code,
+                        OperationPerformanceShopScope.shop_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def get_scope(self, year_month: str) -> dict[str, Any]:
+        active_shops = await self._active_shops()
+        stored_rows = await self._scope_rows(year_month)
+        stored_by_key = {
+            self._shop_key(row.platform_code, row.shop_id): row for row in stored_rows
+        }
+        shops = []
+        for shop in active_shops:
+            key = self._shop_key(shop.platform_code, shop.shop_id)
+            stored = stored_by_key.get(key)
+            shops.append(
+                {
+                    "platform_code": key[0],
+                    "shop_id": key[1],
+                    "shop_name": getattr(shop, "shop_name", None),
+                    "is_included": bool(getattr(stored, "is_included", True)),
+                    "exclusion_reason": getattr(stored, "exclusion_reason", None),
+                }
+            )
+        return {
+            "year_month": year_month,
+            "is_confirmed": bool(stored_rows),
+            "shops": shops,
+            "included_count": sum(1 for item in shops if item["is_included"]),
+        }
+
+    async def apply_scope(self, request: Any, username: str | None = None):
+        await PayrollPeriodLockService(self.db).assert_month_mutable(
+            year_month=request.year_month
+        )
+        active_shops = await self._active_shops()
+        active_by_key = {
+            self._shop_key(shop.platform_code, shop.shop_id): shop
+            for shop in active_shops
+        }
+        requested_by_key = {
+            self._shop_key(item.platform_code, item.shop_id): item
+            for item in request.shops
+        }
+        unknown_keys = sorted(set(requested_by_key) - set(active_by_key))
+        if unknown_keys:
+            raise ValueError("店铺必须来自当前启用店铺主数据")
+
+        requested_scope = {
+            key: requested_by_key.get(key) for key in active_by_key
+        }
+        included_keys = {
+            key
+            for key, item in requested_scope.items()
+            if item is None or item.is_included
+        }
+        target_keys = await self._sales_target_shop_keys(request.year_month)
+        missing_target_keys = sorted(included_keys - target_keys)
+        if missing_target_keys:
+            rendered = ", ".join(f"{platform}/{shop}" for platform, shop in missing_target_keys)
+            raise ValueError(f"参与运营绩效的店铺缺少当月销售目标: {rendered}")
+
+        existing_by_key = {
+            self._shop_key(row.platform_code, row.shop_id): row
+            for row in await self._scope_rows(request.year_month)
+        }
+        for key in active_by_key:
+            request_item = requested_scope[key]
+            is_included = True if request_item is None else request_item.is_included
+            reason = None if is_included else request_item.exclusion_reason.strip()
+            row = existing_by_key.get(key)
+            if row is None:
+                row = OperationPerformanceShopScope(
+                    year_month=request.year_month,
+                    platform_code=key[0],
+                    shop_id=key[1],
+                    created_by=username,
+                )
+                self.db.add(row)
+            row.is_included = is_included
+            row.exclusion_reason = reason
+            row.updated_by = username
+            row.updated_at = datetime.now(timezone.utc)
+        await self.db.commit()
+        return await self.get_scope(request.year_month)
+
+    @staticmethod
+    def _is_manual_metric(metric: Any) -> bool:
+        return bool(
+            getattr(metric, "manual_score_enabled", False)
+            or getattr(metric, "metric_direction", None) == "manual_score"
+        )
+
+    async def _entry_breakdowns(self, targets: list[SalesTarget]):
+        target_ids = [target.id for target in targets if getattr(target, "id", None)]
+        if not target_ids:
+            return {}
+        rows = (
+            (
+                await self.db.execute(
+                    select(TargetBreakdown)
+                    .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
+                    .where(
+                        TargetBreakdown.target_id.in_(target_ids),
+                        TargetBreakdown.breakdown_type == "shop",
+                        SalesTarget.metric_catalog_version.is_not(None),
+                        TargetBreakdown.operation_contract_version
+                        == SalesTarget.metric_catalog_version,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {
+            (row.target_id, *self._shop_key(row.platform_code, row.shop_id)): row
+            for row in rows
+        }
+
+    async def get_entries(self, year_month: str) -> dict[str, Any]:
+        scope_rows = await self._scope_rows(year_month)
+        included_rows = [row for row in scope_rows if row.is_included]
+        if not scope_rows:
+            return {
+                "year_month": year_month,
+                "scope_confirmed": False,
+                "shops": [],
+                "completion": {"completed": 0, "pending": 0},
+            }
+
+        active_by_key = {
+            self._shop_key(shop.platform_code, shop.shop_id): shop
+            for shop in await self._active_shops()
+        }
+        targets = [target for target in await self._targets(year_month) if target.is_enabled]
+        breakdowns = await self._entry_breakdowns(targets)
+        shops = []
+        completed = 0
+        pending = 0
+        for scope in included_rows:
+            key = self._shop_key(scope.platform_code, scope.shop_id)
+            shop = active_by_key.get(key)
+            metrics = []
+            shop_complete = True
+            for target in targets:
+                breakdown = breakdowns.get((target.id, *key))
+                is_manual = self._is_manual_metric(target)
+                value = (
+                    getattr(breakdown, "manual_score_value", None)
+                    if is_manual
+                    else getattr(breakdown, "achieved_value", None)
+                )
+                metric_complete = value is not None
+                shop_complete = shop_complete and metric_complete
+                metrics.append(
+                    {
+                        "metric_code": target.metric_code,
+                        "metric_name": target.metric_name,
+                        "metric_direction": target.metric_direction,
+                        "target_value": target.target_value,
+                        "max_score": float(target.max_score or 0.0),
+                        "is_manual": is_manual,
+                        "achieved_value": (
+                            None if is_manual else getattr(breakdown, "achieved_value", None)
+                        ),
+                        "manual_score_value": (
+                            getattr(breakdown, "manual_score_value", None)
+                            if is_manual
+                            else None
+                        ),
+                        "status": "completed" if metric_complete else "pending",
+                    }
+                )
+            completed += int(shop_complete)
+            pending += int(not shop_complete)
+            shops.append(
+                {
+                    "platform_code": key[0],
+                    "shop_id": key[1],
+                    "shop_name": getattr(shop, "shop_name", None),
+                    "status": "completed" if shop_complete else "pending",
+                    "metrics": metrics,
+                }
+            )
+        return {
+            "year_month": year_month,
+            "scope_confirmed": True,
+            "shops": shops,
+            "completion": {"completed": completed, "pending": pending},
+        }
+
+    async def apply_entries(self, request: Any, username: str | None = None):
+        await PayrollPeriodLockService(self.db).assert_month_mutable(
+            year_month=request.year_month
+        )
+        scope_rows = await self._scope_rows(request.year_month)
+        if not scope_rows:
+            raise ValueError("请先确认本月运营绩效店铺范围")
+        included_keys = {
+            self._shop_key(row.platform_code, row.shop_id)
+            for row in scope_rows
+            if row.is_included
+        }
+        for entry in request.entries:
+            if self._shop_key(entry.platform_code, entry.shop_id) not in included_keys:
+                raise ValueError("该店铺未参与本月运营绩效，不能录入")
+        targets_by_code = {
+            target.metric_code: target
+            for target in await self._targets(request.year_month)
+            if target.is_enabled
+        }
+        breakdowns = await self._entry_breakdowns(list(targets_by_code.values()))
+        month_start, month_end = self.month_range(request.year_month)
+        for entry in request.entries:
+            key = self._shop_key(entry.platform_code, entry.shop_id)
+            target = targets_by_code.get(entry.metric_code)
+            if target is None:
+                raise ValueError("店铺录入指标不存在或未启用")
+            is_manual = self._is_manual_metric(target)
+            if is_manual and entry.manual_score_value is None:
+                raise ValueError("人工指标只能填写人工评分")
+            if not is_manual and entry.achieved_value is None:
+                raise ValueError("量化指标只能填写实际值")
+            if entry.achieved_value is not None and entry.achieved_value < 0:
+                raise ValueError("实际值不能小于零")
+            if entry.manual_score_value is not None and not (
+                0 <= entry.manual_score_value <= float(target.max_score or 0.0)
+            ):
+                raise ValueError("人工评分必须在零到指标满分之间")
+
+            breakdown = breakdowns.get((target.id, *key))
+            if breakdown is None:
+                breakdown = TargetBreakdown(
+                    target_id=target.id,
+                    breakdown_type="shop",
+                    platform_code=key[0],
+                    shop_id=key[1],
+                    period_start=month_start,
+                    period_end=month_end,
+                    operation_contract_version=target.metric_catalog_version,
+                )
+                self.db.add(breakdown)
+                breakdowns[(target.id, *key)] = breakdown
+            breakdown.achieved_value = entry.achieved_value if not is_manual else None
+            breakdown.manual_score_value = (
+                entry.manual_score_value if is_manual else None
+            )
+            breakdown.updated_at = datetime.now(timezone.utc)
+        await self.db.commit()
+        return await self.get_entries(request.year_month)
+
     async def get_workbench(self, year_month: str) -> dict[str, Any]:
         month_start, month_end = self.month_range(year_month)
         config = await self._config(year_month)
         catalog = await self._catalog()
         targets = await self._targets(year_month)
         by_code = {str(row.metric_code): row for row in targets if row.metric_code}
-        code_by_id = {
-            row.id: str(row.metric_code) for row in targets if row.metric_code
-        }
-        target_ids = [row.id for row in targets]
-        overrides = []
-        if target_ids:
-            overrides = (
-                (
-                    await self.db.execute(
-                        select(TargetBreakdown)
-                        .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
-                        .where(
-                            TargetBreakdown.target_id.in_(target_ids),
-                            TargetBreakdown.breakdown_type == "shop",
-                            SalesTarget.metric_catalog_version.is_not(None),
-                            TargetBreakdown.operation_contract_version
-                            == SalesTarget.metric_catalog_version,
-                        )
-                        .order_by(
-                            TargetBreakdown.target_id,
-                            TargetBreakdown.platform_code,
-                            TargetBreakdown.shop_id,
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
         rows = []
         for item in catalog:
             target = by_code.get(item.metric_code)
@@ -259,9 +532,6 @@ class OperationPerformanceWorkbenchService:
                         getattr(target, "target_value", None)
                         if target
                         else item.default_target_value
-                    ),
-                    "achieved_value": (
-                        getattr(target, "achieved_value", None) if target else None
                     ),
                     "max_score": (
                         float(
@@ -298,9 +568,6 @@ class OperationPerformanceWorkbenchService:
                         item.manual_score_enabled
                         or item.metric_direction == "manual_score"
                     ),
-                    "manual_score_value": (
-                        getattr(target, "manual_score_value", None) if target else None
-                    ),
                 }
             )
         return {
@@ -317,18 +584,6 @@ class OperationPerformanceWorkbenchService:
                 (getattr(row, "updated_at", None) for row in targets), default=None
             ),
             "metrics": rows,
-            "shop_overrides": [
-                {
-                    "target_id": row.target_id,
-                    "metric_code": code_by_id.get(row.target_id),
-                    "platform_code": row.platform_code,
-                    "shop_id": row.shop_id,
-                    "target_value": row.target_value,
-                    "achieved_value": row.achieved_value,
-                    "manual_score_value": row.manual_score_value,
-                }
-                for row in overrides
-            ],
         }
 
     async def apply(
@@ -370,16 +625,6 @@ class OperationPerformanceWorkbenchService:
         ]
         if unknown_codes:
             raise ValueError(f"运营指标不在目录中: {', '.join(unknown_codes)}")
-        invalid_overrides = [
-            item.metric_code
-            for item in request.shop_overrides
-            if item.metric_code
-            not in {metric.metric_code for metric in request.metrics}
-            or not item.platform_code.strip()
-            or not item.shop_id.strip()
-        ]
-        if invalid_overrides:
-            raise ValueError("店铺覆盖必须对应工作台指标且包含平台和店铺 ID")
         active_metrics = [item for item in request.metrics if item.is_enabled]
         score_sum = sum(float(item.max_score or 0) for item in active_metrics)
         if round(score_sum, 4) != round(float(config.operation_max_score), 4):
@@ -423,7 +668,7 @@ class OperationPerformanceWorkbenchService:
             row.metric_name = catalog_item.metric_name
             row.metric_direction = catalog_item.metric_direction
             row.target_value = item.target_value
-            row.achieved_value = item.achieved_value
+            row.achieved_value = None
             row.max_score = item.max_score
             row.penalty_enabled = item.penalty_enabled
             row.penalty_threshold = item.penalty_threshold
@@ -433,7 +678,7 @@ class OperationPerformanceWorkbenchService:
                 catalog_item.manual_score_enabled
                 or catalog_item.metric_direction == "manual_score"
             )
-            row.manual_score_value = item.manual_score_value
+            row.manual_score_value = None
             row.is_enabled = item.is_enabled
             row.metric_catalog_version = request.catalog_version
             row.performance_config_id = config.id
@@ -446,43 +691,6 @@ class OperationPerformanceWorkbenchService:
             if row.metric_code not in rows_by_code:
                 row.is_enabled = False
                 row.updated_at = datetime.now(timezone.utc)
-        await self.db.flush()
-        target_ids = [row.id for row in rows_by_code.values()]
-        if target_ids:
-            current_contract_breakdown_ids = (
-                select(TargetBreakdown.id)
-                .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
-                .where(
-                    TargetBreakdown.target_id.in_(target_ids),
-                    TargetBreakdown.breakdown_type == "shop",
-                    SalesTarget.metric_catalog_version.is_not(None),
-                    TargetBreakdown.operation_contract_version
-                    == SalesTarget.metric_catalog_version,
-                )
-            )
-            await self.db.execute(
-                delete(TargetBreakdown).where(
-                    TargetBreakdown.id.in_(current_contract_breakdown_ids)
-                )
-            )
-        for override in request.shop_overrides:
-            target = rows_by_code.get(override.metric_code)
-            if target is None:
-                raise ValueError(f"店铺覆盖指标不存在: {override.metric_code}")
-            self.db.add(
-                TargetBreakdown(
-                    target_id=target.id,
-                    breakdown_type="shop",
-                    platform_code=override.platform_code.lower(),
-                    shop_id=override.shop_id,
-                    period_start=month_start,
-                    period_end=month_end,
-                    target_value=override.target_value,
-                    achieved_value=override.achieved_value,
-                    manual_score_value=override.manual_score_value,
-                    operation_contract_version=target.metric_catalog_version,
-                )
-            )
         await self.db.commit()
         return await self.get_workbench(request.year_month)
 
@@ -527,39 +735,6 @@ class OperationPerformanceWorkbenchService:
                     "manual_score_value": None,
                 }
             )
-        previous_ids = [row.id for row in previous]
-        overrides = []
-        if previous_ids:
-            rows = (
-                (
-                    await self.db.execute(
-                        select(TargetBreakdown)
-                        .join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
-                        .where(
-                            TargetBreakdown.target_id.in_(previous_ids),
-                            TargetBreakdown.breakdown_type == "shop",
-                            SalesTarget.metric_catalog_version.is_not(None),
-                            TargetBreakdown.operation_contract_version
-                            == SalesTarget.metric_catalog_version,
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            code_by_id = {row.id: row.metric_code for row in previous}
-            overrides = [
-                {
-                    "metric_code": code_by_id[row.target_id],
-                    "platform_code": row.platform_code,
-                    "shop_id": row.shop_id,
-                    "target_value": row.target_value,
-                    "achieved_value": None,
-                    "manual_score_value": None,
-                }
-                for row in rows
-                if code_by_id[row.target_id] in active_catalog
-            ]
         result = await self.apply(
             OperationWorkbenchApplyRequest(
                 year_month=year_month,
@@ -567,7 +742,6 @@ class OperationPerformanceWorkbenchService:
                     active_catalog.values(), key=lambda item: item.catalog_version
                 ).catalog_version,
                 metrics=metrics,
-                shop_overrides=overrides,
             ),
             username=username,
         )

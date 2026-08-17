@@ -2052,6 +2052,18 @@ export default {
   async copyPrevMonthOperationPerformanceWorkbench(yearMonth) {
     return await this._post(`/targets/operation-workbench/copy-prev-month?year_month=${encodeURIComponent(yearMonth)}`)
   },
+  async getOperationPerformanceScope(yearMonth) {
+    return await this._get('/targets/operation-workbench/scope', { params: { year_month: yearMonth } })
+  },
+  async applyOperationPerformanceScope(data) {
+    return await this._put('/targets/operation-workbench/scope', data)
+  },
+  async getOperationPerformanceEntries(yearMonth) {
+    return await this._get('/targets/operation-workbench/entries', { params: { year_month: yearMonth } })
+  },
+  async applyOperationPerformanceEntries(data) {
+    return await this._put('/targets/operation-workbench/entries', data)
+  },
 
   // === 绩效查询（只读） ===
   async getHrPerformance(params = {}) {

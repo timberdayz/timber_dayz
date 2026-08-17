@@ -20,7 +20,7 @@ import scripts.run_current_schema_migrations as migration_runner
 
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_BASELINE_REVISION = "current_schema_20260805"
-CURRENT_HEAD_REVISION = "current_schema_20260810_operation_contract_isolation"
+CURRENT_HEAD_REVISION = "current_schema_20260817_operation_performance_monthly_scope"
 LEGACY_REVISION = "20260805_payroll_backfill_audit"
 
 
@@ -247,6 +247,9 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
             "current_schema_alembic_version", schema="public"
         )
         assert len(inspect(engine).get_table_names(schema="a_class")) > 0
+        assert inspect(engine).has_table(
+            "operation_performance_shop_scopes", schema="a_class"
+        )
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
 
