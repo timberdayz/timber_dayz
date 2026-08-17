@@ -498,7 +498,12 @@ class OperationPerformanceWorkbenchService:
                 {
                     "platform_code": key[0],
                     "shop_id": key[1],
-                    "shop_name": getattr(shop, "shop_name", None),
+                    "standard_name": getattr(scope, "standard_name_snapshot", None)
+                    or (shop or {}).get("standard_name")
+                    or key[1],
+                    "aliases": getattr(scope, "alias_snapshots", None)
+                    or (shop or {}).get("aliases")
+                    or [],
                     "status": "completed" if shop_complete else "pending",
                     "metrics": metrics,
                 }

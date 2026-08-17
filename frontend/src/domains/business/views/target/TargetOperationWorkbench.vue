@@ -86,7 +86,8 @@
         <el-table v-loading="loadingEntries" :data="entryShops" border stripe class="erp-table entry-shop-table">
           <el-table-column prop="platform_code" label="平台" width="130" />
           <el-table-column prop="shop_id" label="店铺 ID" min-width="165" />
-          <el-table-column prop="shop_name" label="店铺名称" min-width="160"><template #default="{ row }">{{ row.shop_name || '-' }}</template></el-table-column>
+          <el-table-column prop="standard_name" label="标准店铺名" min-width="160"><template #default="{ row }">{{ row.standard_name || row.shop_id }}</template></el-table-column>
+          <el-table-column label="店铺别名" min-width="180"><template #default="{ row }">{{ (row.aliases || []).join('、') || '-' }}</template></el-table-column>
           <el-table-column label="完成状态" width="120" align="center"><template #default="{ row }"><el-tag :type="getStoreEntryStatus(row) === 'completed' ? 'success' : 'warning'">{{ getStoreEntryStatus(row) === 'completed' ? '已完成' : '待录入' }}</el-tag></template></el-table-column>
           <el-table-column label="指标录入" min-width="520">
             <template #default="{ row }">
