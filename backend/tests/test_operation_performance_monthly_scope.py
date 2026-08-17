@@ -128,6 +128,26 @@ async def test_scope_confirmation_rejects_an_included_shop_without_sales_target(
     )
     service._unresolved_scope_shops = AsyncMock(return_value=[])
     service._sales_target_shop_keys = AsyncMock(return_value=set())
+    service._config = AsyncMock(return_value=SimpleNamespace(operation_max_score=20))
+    service._targets = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                is_enabled=True,
+                scoring_model_version="auto_integer_v1",
+                operation_rule_snapshot={
+                    "metric_code": "customer_satisfaction",
+                    "sort_key": 10,
+                    "input_kind": "percentage",
+                    "direction": "higher_better",
+                    "target_value": 100,
+                    "max_score": 20,
+                    "unit": "%",
+                    "guidance": "",
+                    "scoring_rule_version": "auto_integer_v1",
+                },
+            )
+        ]
+    )
     monkeypatch.setattr(
         module.PayrollPeriodLockService,
         "assert_month_mutable",
@@ -493,6 +513,66 @@ def test_auto_integer_rule_uses_immutable_snapshot_after_target_row_is_mutated()
     assert rule["metric_direction"] == "higher_better"
     assert rule["target_value"] == 100
     assert rule["max_score"] == 20
+
+
+@pytest.mark.asyncio
+async def test_scope_confirmation_requires_an_enabled_auto_integer_rule(monkeypatch):
+    from backend.schemas.target import OperationWorkbenchScopeApplyRequest
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    service._active_shops = AsyncMock(return_value=[])
+    service._unresolved_scope_shops = AsyncMock(return_value=[])
+    service._targets = AsyncMock(return_value=[])
+    service._sales_target_shop_keys = AsyncMock(return_value=set())
+    service._scope_rows = AsyncMock(return_value=[])
+    service._config = AsyncMock(return_value=SimpleNamespace(operation_max_score=20))
+    monkeypatch.setattr(module.PayrollPeriodLockService, "assert_month_mutable", AsyncMock())
+
+    with pytest.raises(ValueError, match="运营评分规则"):
+        await service.apply_scope(
+            OperationWorkbenchScopeApplyRequest(year_month="2026-08", shops=[]),
+            username="admin",
+        )
+
+
+@pytest.mark.asyncio
+async def test_scope_confirmation_rejects_non_twenty_point_auto_integer_rule(monkeypatch):
+    from backend.schemas.target import OperationWorkbenchScopeApplyRequest
+    from backend.services import operation_performance_workbench_service as module
+
+    service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    service._active_shops = AsyncMock(return_value=[])
+    service._unresolved_scope_shops = AsyncMock(return_value=[])
+    service._sales_target_shop_keys = AsyncMock(return_value=set())
+    service._scope_rows = AsyncMock(return_value=[])
+    service._config = AsyncMock(return_value=SimpleNamespace(operation_max_score=20))
+    service._targets = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                is_enabled=True,
+                scoring_model_version="auto_integer_v1",
+                operation_rule_snapshot={
+                    "metric_code": "customer_satisfaction",
+                    "sort_key": 10,
+                    "input_kind": "percentage",
+                    "direction": "higher_better",
+                    "target_value": 100,
+                    "max_score": 19,
+                    "unit": "%",
+                    "guidance": "",
+                    "scoring_rule_version": "auto_integer_v1",
+                },
+            )
+        ]
+    )
+    monkeypatch.setattr(module.PayrollPeriodLockService, "assert_month_mutable", AsyncMock())
+
+    with pytest.raises(ValueError, match="20"):
+        await service.apply_scope(
+            OperationWorkbenchScopeApplyRequest(year_month="2026-08", shops=[]),
+            username="admin",
+        )
 
 
 @pytest.mark.asyncio

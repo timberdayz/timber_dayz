@@ -351,10 +351,25 @@ class OperationPerformanceWorkbenchService:
             "included_count": sum(1 for item in shops if item["is_included"]),
         }
 
+    async def _assert_scope_rule_ready(self, year_month: str) -> None:
+        config = await self._config(year_month)
+        if config is None or float(getattr(config, "operation_max_score", 0) or 0) != 20:
+            raise ValueError("自动整数计分要求绩效配置的运营满分为 20")
+
+        targets = await self._targets(year_month, auto_integer_only=True)
+        enabled_targets = [target for target in targets if bool(getattr(target, "is_enabled", False))]
+        if not enabled_targets:
+            raise ValueError("请先保存至少一项启用的运营评分规则")
+
+        rules = [self._auto_integer_rule(target) for target in enabled_targets]
+        if sum(int(rule["max_score"]) for rule in rules) != 20:
+            raise ValueError("启用运营指标的自动满分合计必须为 20")
+
     async def apply_scope(self, request: Any, username: str | None = None):
         await PayrollPeriodLockService(self.db).assert_month_mutable(
             year_month=request.year_month
         )
+        await self._assert_scope_rule_ready(request.year_month)
         active_shops = await self._active_shops()
         unresolved_shops = await self._unresolved_scope_shops()
         if unresolved_shops:
@@ -909,7 +924,7 @@ class OperationPerformanceWorkbenchService:
         current = await self._targets(year_month)
         if current:
             raise ValueError("目标月份已有运营配置，请清空后再复制")
-        previous = await self._targets(previous_month)
+        previous = await self._targets(previous_month, auto_integer_only=True)
         if not previous:
             raise ValueError("上月没有可复制的运营配置")
         active_catalog = {item.metric_code: item for item in await self._catalog()}
@@ -925,14 +940,6 @@ class OperationPerformanceWorkbenchService:
                 {
                     "metric_code": row.metric_code,
                     "is_enabled": bool(row.is_enabled),
-                    "target_value": row.target_value,
-                    "achieved_value": None,
-                    "max_score": row.max_score,
-                    "penalty_enabled": row.penalty_enabled,
-                    "penalty_threshold": row.penalty_threshold,
-                    "penalty_per_unit": row.penalty_per_unit,
-                    "penalty_max": row.penalty_max,
-                    "manual_score_value": None,
                 }
             )
         result = await self.apply(
