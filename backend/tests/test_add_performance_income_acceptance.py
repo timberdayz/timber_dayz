@@ -476,26 +476,13 @@ def test_calculate_uses_operation_target_achieved_value(monkeypatch):
         penalty_max=None,
         manual_score_enabled=False,
         manual_score_value=None,
+        scoring_model_version=None,
     )
 
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+    async def _execute(stmt, *args, **kwargs):
+        if "performance_config" in str(stmt):
             return _ScalarOneResult(config)
-        if n == 2:
-            return _ScalarsResult([])
-        if n == 3:
-            return _ScalarOneResult(operation_target)
-        if n == 4:
-            return _ScalarOneResult(None)
-        if n == 5:
-            return _ScalarOneResult(None)
-        if n == 6:
-            return _ScalarsResult([("shopee", "shop-1")])
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _AcceptanceResult()
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -542,7 +529,34 @@ def test_calculate_uses_operation_target_achieved_value(monkeypatch):
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_load_effective_target_for_month",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(return_value={"shopee|shop-1": {"profit_basis_amount": 0.0}}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[operation_target]),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "_load_valid_performance_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_monthly_source_shop_keys",
         AsyncMock(return_value={"shopee|shop-1"}),
         raising=False,
     )
@@ -573,6 +587,12 @@ def test_calculate_uses_operation_target_achieved_value(monkeypatch):
     monkeypatch.setattr(
         performance_management_module,
         "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_verify_persisted_shop_performance_keys",
         AsyncMock(return_value=None),
         raising=False,
     )
@@ -613,8 +633,9 @@ def test_calculate_uses_operation_target_achieved_value(monkeypatch):
     assert created.operation_score == 17.0
     assert created.total_score == 41.0
     assert created.score_details["operation"]["status"] == "calculated"
-    assert created.score_details["operation"]["achieved"] == 85.0
-    assert created.score_details["operation"]["target"] == 100.0
+    operation_item = created.score_details["operation"]["items"][0]
+    assert operation_item["achieved"] == 85.0
+    assert operation_item["target"] == 100.0
 
 
 def test_calculate_skips_invalid_unknown_shop_ids(monkeypatch):
@@ -661,26 +682,13 @@ def test_calculate_skips_invalid_unknown_shop_ids(monkeypatch):
         penalty_max=None,
         manual_score_enabled=False,
         manual_score_value=None,
+        scoring_model_version=None,
     )
 
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+    async def _execute(stmt, *args, **kwargs):
+        if "performance_config" in str(stmt):
             return _ScalarOneResult(config)
-        if n == 2:
-            return _ScalarsResult([])
-        if n == 3:
-            return _ScalarOneResult(operation_target)
-        if n == 4:
-            return _ScalarOneResult(None)
-        if n == 5:
-            return _ScalarOneResult(None)
-        if n == 6:
-            return _ScalarsResult([("shopee", "shop-1")])
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _AcceptanceResult()
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -735,7 +743,34 @@ def test_calculate_skips_invalid_unknown_shop_ids(monkeypatch):
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_load_effective_target_for_month",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(return_value={"shopee|shop-1": {"profit_basis_amount": 0.0}}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[operation_target]),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "_load_valid_performance_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_monthly_source_shop_keys",
         AsyncMock(return_value={"shopee|shop-1"}),
         raising=False,
     )
@@ -766,6 +801,12 @@ def test_calculate_skips_invalid_unknown_shop_ids(monkeypatch):
     monkeypatch.setattr(
         performance_management_module,
         "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_verify_persisted_shop_performance_keys",
         AsyncMock(return_value=None),
         raising=False,
     )
@@ -851,26 +892,13 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
         penalty_max=None,
         manual_score_enabled=False,
         manual_score_value=None,
+        scoring_model_version=None,
     )
 
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+    async def _execute(stmt, *args, **kwargs):
+        if "performance_config" in str(stmt):
             return _ScalarOneResult(config)
-        if n == 2:
-            return _ScalarsResult([])
-        if n == 3:
-            return _ScalarOneResult(operation_target)
-        if n == 4:
-            return _ScalarOneResult(None)
-        if n == 5:
-            return _ScalarOneResult(None)
-        if n == 6:
-            return _ScalarsResult([("shopee", "shop-1")])
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _AcceptanceResult()
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -901,7 +929,34 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_load_effective_target_for_month",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(return_value={"shopee|shop-1": {"profit_basis_amount": 0.0}}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[operation_target]),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "_load_valid_performance_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_monthly_source_shop_keys",
         AsyncMock(return_value={"shopee|shop-1"}),
         raising=False,
     )
@@ -932,6 +987,12 @@ def test_calculate_skips_source_rows_not_in_dim_shops(monkeypatch):
     monkeypatch.setattr(
         performance_management_module,
         "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_verify_persisted_shop_performance_keys",
         AsyncMock(return_value=None),
         raising=False,
     )
@@ -1147,26 +1208,16 @@ def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_ze
         achieved_amount=0.0,
         target_profit_amount=500.0,
         achieved_profit_amount=200.0,
+        target_profit_basis_amount=500.0,
     )
 
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+    async def _execute(stmt, *args, **kwargs):
+        statement = str(stmt)
+        if "performance_config" in statement:
             return _ScalarOneResult(config)
-        if n == 2:
+        if "target_breakdown" in statement:
             return _ScalarsResult([target_breakdown_row])
-        if n == 3:
-            return _ScalarsResult([])
-        if n == 4:
-            return _ScalarOneResult(None)
-        if n == 5:
-            return _ScalarsResult([])
-        if n == 6:
-            return _ScalarsResult([("shopee", "shop-1")])
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _AcceptanceResult()
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -1208,12 +1259,41 @@ def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_ze
     monkeypatch.setattr(
         performance_management_module,
         "_load_effective_target_for_month",
-        AsyncMock(side_effect=[SimpleNamespace(id=4), None]),
+        AsyncMock(return_value=SimpleNamespace(id=4)),
         raising=False,
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {
+                    "profit_basis_amount": 200.0,
+                    "calculation_mode": "forecast",
+                    "source": "forecast.profit_basis",
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "_load_valid_performance_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_monthly_source_shop_keys",
         AsyncMock(return_value={"shopee|shop-1"}),
         raising=False,
     )
@@ -1238,6 +1318,12 @@ def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_ze
     monkeypatch.setattr(
         performance_management_module,
         "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_verify_persisted_shop_performance_keys",
         AsyncMock(return_value=None),
         raising=False,
     )
@@ -1272,7 +1358,7 @@ def test_calculate_uses_monthly_sales_when_target_breakdown_actual_is_default_ze
     assert created.sales_score == 24.0
     assert created.profit_score == 10.0
     assert created.total_score == 34.0
-    assert created.score_details["profit"]["status"] == "calculated"
+    assert created.score_details["profit"]["status"] == "forecast"
     assert created.score_details["profit"]["target"] == 500.0
     assert created.score_details["profit"]["achieved"] == 200.0
     assert created.score_details["profit"]["rate"] == 40.0
@@ -1322,6 +1408,7 @@ def test_calculate_profit_score_allocates_parent_profit_target_when_breakdown_pr
         achieved_amount=800.0,
         target_profit_amount=0.0,
         achieved_profit_amount=200.0,
+        target_profit_basis_amount=250.0,
     )
     parent_shop_target = SimpleNamespace(
         id=4,
@@ -1330,24 +1417,13 @@ def test_calculate_profit_score_allocates_parent_profit_target_when_breakdown_pr
         target_profit_amount=500.0,
     )
 
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+    async def _execute(stmt, *args, **kwargs):
+        statement = str(stmt)
+        if "performance_config" in statement:
             return _ScalarOneResult(config)
-        if n == 2:
+        if "target_breakdown" in statement:
             return _ScalarsResult([target_breakdown_row])
-        if n == 3:
-            return _ScalarsResult([parent_shop_target])
-        if n == 4:
-            return _ScalarsResult([])
-        if n == 5:
-            return _ScalarsResult([])
-        if n == 6:
-            return _ScalarsResult([("shopee", "shop-1")])
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _AcceptanceResult()
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -1384,7 +1460,42 @@ def test_calculate_profit_score_allocates_parent_profit_target_when_breakdown_pr
     monkeypatch.setattr(
         performance_management_module,
         "_load_effective_target_for_month",
-        AsyncMock(side_effect=[SimpleNamespace(id=4), None]),
+        AsyncMock(return_value=SimpleNamespace(id=4)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {
+                    "profit_basis_amount": 200.0,
+                    "calculation_mode": "forecast",
+                    "source": "forecast.profit_basis",
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_valid_performance_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_monthly_source_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1408,6 +1519,12 @@ def test_calculate_profit_score_allocates_parent_profit_target_when_breakdown_pr
     monkeypatch.setattr(
         performance_management_module,
         "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_verify_persisted_shop_performance_keys",
         AsyncMock(return_value=None),
         raising=False,
     )
