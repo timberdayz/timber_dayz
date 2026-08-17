@@ -97,6 +97,72 @@ def test_generate_month_creates_draft_payroll_from_salary_commission_and_perform
     assert created.status == "draft"
 
 
+def test_generate_month_limits_writes_to_formal_employee_codes():
+    service_cls = _load_service_cls()
+    db = AsyncMock()
+    added = []
+    salary_rows = [
+        SimpleNamespace(
+            employee_code="EMP_FORMAL",
+            base_salary=Decimal("1000"),
+            position_salary=Decimal("0"),
+            performance_package_amount=Decimal("0"),
+            housing_allowance=Decimal("0"),
+            transport_allowance=Decimal("0"),
+            meal_allowance=Decimal("0"),
+            communication_allowance=Decimal("0"),
+            other_allowance=Decimal("0"),
+            performance_ratio=0.0,
+            status="active",
+        ),
+        SimpleNamespace(
+            employee_code="EMP_PARTIAL",
+            base_salary=Decimal("1000"),
+            position_salary=Decimal("0"),
+            performance_package_amount=Decimal("0"),
+            housing_allowance=Decimal("0"),
+            transport_allowance=Decimal("0"),
+            meal_allowance=Decimal("0"),
+            communication_allowance=Decimal("0"),
+            other_allowance=Decimal("0"),
+            performance_ratio=0.0,
+            status="active",
+        ),
+    ]
+    performance_rows = [
+        SimpleNamespace(employee_code="EMP_FORMAL", year_month="2025-01", performance_score=80),
+        SimpleNamespace(employee_code="EMP_PARTIAL", year_month="2025-01", performance_score=None),
+    ]
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is SalaryStructure:
+                return _MockResult(rows=salary_rows)
+            if entity is EmployeeCommission:
+                return _MockResult(rows=[])
+            if entity is EmployeePerformance:
+                return _MockResult(rows=performance_rows)
+            if entity is PayrollRecord:
+                return _MockResult(rows=[])
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: added.append(obj)
+
+    result = asyncio.run(
+        service_cls(db=db).generate_month(
+            "2025-01",
+            employee_codes={"EMP_FORMAL"},
+        )
+    )
+
+    assert result["employee_count"] == 1
+    assert [item.employee_code for item in added if isinstance(item, PayrollRecord)] == [
+        "EMP_FORMAL"
+    ]
+
+
 def test_generate_month_uses_performance_package_amount_and_normalized_score():
     service_cls = _load_service_cls()
     db = AsyncMock()

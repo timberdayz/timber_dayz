@@ -513,7 +513,10 @@ class HRIncomeCalculationService:
         return ratio_by_employee
 
     async def calculate_month(
-        self, year_month: str, commit: bool = True
+        self,
+        year_month: str,
+        commit: bool = True,
+        eligible_shop_keys: set[str] | None = None,
     ) -> Dict[str, Any]:
         try:
             datetime.strptime(year_month, "%Y-%m")
@@ -550,6 +553,19 @@ class HRIncomeCalculationService:
             .scalars()
             .all()
         )
+        if eligible_shop_keys is not None:
+            normalized_eligible_shop_keys = {
+                str(key).strip().lower() for key in eligible_shop_keys
+            }
+            assignment_rows = [
+                row
+                for row in assignment_rows
+                if self._shop_key(
+                    getattr(row, "platform_code", None),
+                    getattr(row, "shop_id", None),
+                )
+                in normalized_eligible_shop_keys
+            ]
         input_population_rows = (
             (
                 await self.db.execute(
@@ -590,6 +606,7 @@ class HRIncomeCalculationService:
                 "employee_count": 0,
                 "commission_upserts": 0,
                 "performance_upserts": 0,
+                "formal_employee_codes": [],
                 "source": "employee_shop_assignments + shop_commission_config + profit_basis_amount",
             }
         assignments = [
@@ -742,6 +759,7 @@ class HRIncomeCalculationService:
         commission_upserts = 0
         performance_upserts = 0
         commission_allocations: list[dict[str, Any]] = []
+        formal_employee_codes: set[str] = set()
 
         for employee_code, rec in commission_agg.items():
             sales_amount = rec["sales_amount"]
@@ -876,6 +894,8 @@ class HRIncomeCalculationService:
                     0.0,
                 )
                 performance_score = min(max(performance_score, 0.0), 100.0)
+                if calculation_status == "complete":
+                    formal_employee_codes.add(employee_code)
 
             perf = (
                 await self.db.execute(
@@ -914,6 +934,7 @@ class HRIncomeCalculationService:
             "employee_count": len(performance_agg),
             "commission_upserts": commission_upserts,
             "performance_upserts": performance_upserts,
+            "formal_employee_codes": sorted(formal_employee_codes),
             "commission_allocations": commission_allocations,
             "source": "employee_shop_assignments + employee_performance_inputs + performance_scores + shop_profit_basis",
         }

@@ -575,9 +575,19 @@ class PayrollGenerationService:
             "payroll_record": record,
         }
 
-    async def generate_month(self, year_month: str) -> Dict[str, Any]:
+    async def generate_month(
+        self,
+        year_month: str,
+        *,
+        employee_codes: set[str] | list[str] | None = None,
+    ) -> Dict[str, Any]:
         await PerformanceReadinessService(self.db).assert_month_performance_ready(
-            year_month
+            year_month,
+            employee_codes=(
+                {str(employee_code).strip() for employee_code in employee_codes}
+                if employee_codes is not None
+                else None
+            ),
         )
         salary_rows = (
             (
@@ -628,6 +638,12 @@ class PayrollGenerationService:
             | set(performance_by_employee)
             | set(payroll_by_employee)
         )
+        if employee_codes is not None:
+            candidate_employee_codes &= {
+                str(employee_code).strip()
+                for employee_code in employee_codes
+                if str(employee_code).strip()
+            }
         employee_codes = []
         for employee_code in sorted(candidate_employee_codes):
             if await self._is_salary_eligible_employee(employee_code):

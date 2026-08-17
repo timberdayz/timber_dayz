@@ -67,7 +67,12 @@ class PerformanceReadinessService:
             if getattr(row, "performance_source_type", None) != "personal_inputs"
         }
 
-    async def assert_month_performance_ready(self, year_month: str) -> None:
+    async def assert_month_performance_ready(
+        self,
+        year_month: str,
+        *,
+        employee_codes: set[str] | None = None,
+    ) -> None:
         period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
         period_end = period_start.replace(
             day=monthrange(period_start.year, period_start.month)[1]
@@ -120,17 +125,24 @@ class PerformanceReadinessService:
             .all()
         )
 
-        employee_codes = {
+        month_employee_codes = {
             str(getattr(row, "employee_code", "") or "").strip()
             for row in [*assignments, *inputs, *salaries, *payrolls]
             if str(getattr(row, "employee_code", "") or "").strip()
         }
-        if not employee_codes:
+        if employee_codes is not None:
+            requested_codes = {
+                str(employee_code).strip()
+                for employee_code in employee_codes
+                if str(employee_code).strip()
+            }
+            month_employee_codes &= requested_codes
+        if not month_employee_codes:
             return
         performance_result = await self.db.execute(
             select(EmployeePerformance).where(
                 EmployeePerformance.year_month == year_month,
-                EmployeePerformance.employee_code.in_(employee_codes),
+                EmployeePerformance.employee_code.in_(month_employee_codes),
             )
         )
         performance_rows = performance_result.scalars().all()
@@ -141,10 +153,13 @@ class PerformanceReadinessService:
                 if legacy_row is not None:
                     performance_rows = [legacy_row]
         rows_by_employee = {
-            str(getattr(row, "employee_code", None) or next(iter(employee_codes))): row
+            str(
+                getattr(row, "employee_code", None)
+                or next(iter(month_employee_codes))
+            ): row
             for row in performance_rows
         }
-        self.assert_employee_rows_ready(employee_codes, rows_by_employee)
+        self.assert_employee_rows_ready(month_employee_codes, rows_by_employee)
         shop_dependent_codes = self.shop_dependent_employee_codes(rows_by_employee)
 
         shop_keys = {

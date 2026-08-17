@@ -61,6 +61,44 @@ def test_calculate_month_no_assignments():
     assert result["performance_upserts"] == 0
 
 
+def test_calculate_month_skips_assignment_outside_formal_shop_scope():
+    assignment = SimpleNamespace(
+        employee_code="E_PARTIAL",
+        platform_code="Shopee",
+        shop_id="S_PARTIAL",
+        commission_ratio=0.1,
+        status="active",
+        year_month="2026-03",
+    )
+    db = AsyncMock()
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is EmployeeShopAssignment:
+                return _MockResult(rows=[assignment])
+            if entity in {EmployeePerformanceInput, SalaryStructure}:
+                return _MockResult(rows=[])
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = AsyncMock()
+    db.commit = AsyncMock()
+
+    result = asyncio.run(
+        HRIncomeCalculationService(db=db).calculate_month(
+            "2026-03",
+            eligible_shop_keys={"shopee|S_FORMAL"},
+        )
+    )
+
+    assert result["employee_count"] == 0
+    assert result["commission_upserts"] == 0
+    assert result["performance_upserts"] == 0
+    assert result["formal_employee_codes"] == []
+    db.add.assert_not_called()
+
+
 def test_calculate_month_creates_personal_only_performance_without_commission():
     db = AsyncMock()
     added = []

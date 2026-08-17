@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse
 from copy import copy
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_, text
+from sqlalchemy import delete, select, func, and_, or_, text, tuple_
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import date, datetime, timedelta, timezone
@@ -83,6 +83,9 @@ from backend.services.performance_coefficient import calculate_performance_coeff
 from backend.services.employee_task_sources import sync_performance_confirmation_task
 from backend.services.operation_performance_workbench_service import (
     OperationPerformanceWorkbenchService,
+)
+from backend.services.operation_performance_scoring_service import (
+    OperationPerformanceScoringService,
 )
 from backend.services.performance_readiness_service import PerformanceReadinessError
 
@@ -1118,6 +1121,20 @@ def _calculate_operation_metrics_for_shop(
     expected_max_score: float,
 ) -> tuple[float | None, dict[str, Any]]:
     """Aggregate every enabled operation metric, applying one optional shop override per metric."""
+    auto_integer_targets = [
+        target
+        for target in operation_targets
+        if getattr(target, "scoring_model_version", None) == "auto_integer_v1"
+    ]
+    if auto_integer_targets:
+        if len(auto_integer_targets) != len(operation_targets):
+            raise ValueError("运营绩效不能混用 auto_integer_v1 与旧评分规则")
+        return _calculate_auto_integer_operation_metrics_for_shop(
+            auto_integer_targets,
+            shop_overrides,
+            expected_max_score=expected_max_score,
+        )
+
     scoped_metrics = []
     for target in operation_targets:
         scoped = copy(target)
@@ -1141,6 +1158,83 @@ def _calculate_operation_metrics_for_shop(
     details.setdefault("calculation", "sum(operation.items[].score)")
     details.setdefault("message", None if score is not None else "存在未完成的运营指标")
     return score, details
+
+
+def _calculate_auto_integer_operation_metrics_for_shop(
+    operation_targets: list[Any],
+    shop_breakdowns: dict[int, Any],
+    *,
+    expected_max_score: float,
+) -> tuple[float | None, dict[str, Any]]:
+    """Calculate controlled V1 operation metrics from immutable rules and inputs."""
+    rules: list[tuple[Any, dict[str, Any]]] = []
+    for target in operation_targets:
+        if not bool(getattr(target, "is_enabled", True)):
+            continue
+        rules.append((target, OperationPerformanceWorkbenchService._auto_integer_rule(target)))
+
+    configured_max_score = sum(int(rule["max_score"]) for _, rule in rules)
+    if configured_max_score != int(expected_max_score):
+        raise ValueError("运营指标自动满分之和必须等于绩效配置的运营满分")
+
+    total_score = 0
+    pending = False
+    items: list[dict[str, Any]] = []
+    for target, rule in rules:
+        breakdown = shop_breakdowns.get(getattr(target, "id", None))
+        payload = dict(
+            getattr(breakdown, "operation_input_payload", None) or {}
+        )
+        score, detail = OperationPerformanceScoringService.calculate_metric_score(
+            metric=rule,
+            payload=payload or None,
+        )
+        item = {
+            "metric_code": rule["metric_code"],
+            "metric_name": rule.get("metric_name")
+            or getattr(target, "metric_name", None),
+            "input_kind": rule["input_kind"],
+            "target": rule.get("target_value"),
+            "max_score": int(rule["max_score"]),
+            "input_payload": payload,
+            "source": "operation_input_payload",
+            "status": detail.get("status"),
+            "score": score,
+            "rate": detail.get("achievement_rate"),
+            "calculation": "auto_integer_v1",
+            "message": detail.get("message"),
+        }
+        items.append(item)
+        if score is None:
+            pending = True
+        else:
+            total_score += int(score)
+
+    if pending:
+        return None, {
+            "status": "pending",
+            "source": "operation_input_payload",
+            "target": None,
+            "achieved": None,
+            "rate": None,
+            "calculation": "sum(operation.items[].score)",
+            "message": "存在未完成的运营指标",
+            "items": items,
+            "max_score": int(expected_max_score),
+            "score": None,
+        }
+    return float(total_score), {
+        "status": "calculated",
+        "source": "operation_input_payload",
+        "target": None,
+        "achieved": None,
+        "rate": None,
+        "calculation": "sum(operation.items[].score)",
+        "message": None,
+        "items": items,
+        "max_score": int(expected_max_score),
+        "score": total_score,
+    }
 
 
 async def _load_operation_targets_for_month(
@@ -1224,7 +1318,17 @@ async def _load_included_operation_scope_keys(
         .scalars()
         .all()
     )
+    return _confirmed_included_operation_scope_keys(rows)
+
+
+def _confirmed_included_operation_scope_keys(rows: list[Any]) -> set[str] | None:
     if not rows:
+        return None
+    if not all(
+        getattr(row, "snapshot_version", None) == 1
+        and getattr(row, "confirmed_at", None) is not None
+        for row in rows
+    ):
         return None
     return {
         f"{str(row.platform_code).lower()}|{row.shop_id}"
@@ -1239,6 +1343,30 @@ def _filter_source_rows_by_operation_scope(
     return {
         key: row for key, row in source_rows.items() if key in included_scope_keys
     }
+
+
+async def _remove_excluded_operation_performance_scores(
+    db: AsyncSession,
+    *,
+    period: str,
+    included_scope_keys: set[str],
+) -> None:
+    """Remove stale formal scores for stores excluded from a V1 scope snapshot."""
+    statement = delete(PerformanceScore).where(PerformanceScore.period == period)
+    included_pairs = [
+        (platform_code, shop_id)
+        for platform_code, shop_id in (
+            key.split("|", 1) for key in sorted(included_scope_keys)
+        )
+    ]
+    if included_pairs:
+        statement = statement.where(
+            ~tuple_(
+                func.lower(PerformanceScore.platform_code),
+                PerformanceScore.shop_id,
+            ).in_(included_pairs)
+        )
+    await db.execute(statement)
 
 
 async def invalidate_performance_related_caches(cache_service) -> None:
@@ -2112,6 +2240,10 @@ async def calculate_performance_scores(
 
         operation_targets = await _load_operation_targets_for_month(db, period)
         if operation_targets:
+            is_auto_integer_operation_month = all(
+                getattr(target, "scoring_model_version", None) == "auto_integer_v1"
+                for target in operation_targets
+            )
             included_scope_keys = await _load_included_operation_scope_keys(db, period)
             if included_scope_keys is None:
                 return error_response(
@@ -2137,10 +2269,43 @@ async def calculate_performance_scores(
             operation_targets,
         )
         if operation_targets:
-            configured_operation_score = sum(
-                float(getattr(target, "max_score", 0.0) or 0.0)
+            auto_integer_targets = [
+                target
                 for target in operation_targets
-            )
+                if getattr(target, "scoring_model_version", None) == "auto_integer_v1"
+            ]
+            if auto_integer_targets and len(auto_integer_targets) != len(operation_targets):
+                return error_response(
+                    code=ErrorCode.DATA_VALIDATION_FAILED,
+                    message="运营绩效不能混用 auto_integer_v1 与旧评分规则",
+                    error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                    recovery_suggestion="请撤销范围后使用运营绩效工作台重新保存受控规则",
+                    status_code=400,
+                )
+            try:
+                configured_operation_score = (
+                    sum(
+                        int(
+                            OperationPerformanceWorkbenchService._auto_integer_rule(
+                                target
+                            )["max_score"]
+                        )
+                        for target in auto_integer_targets
+                    )
+                    if auto_integer_targets
+                    else sum(
+                        float(getattr(target, "max_score", 0.0) or 0.0)
+                        for target in operation_targets
+                    )
+                )
+            except ValueError as exc:
+                return error_response(
+                    code=ErrorCode.DATA_VALIDATION_FAILED,
+                    message=str(exc),
+                    error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                    recovery_suggestion="请在运营绩效工作台重新保存受控规则",
+                    status_code=400,
+                )
             if round(configured_operation_score, 4) != round(
                 float(config.operation_max_score), 4
             ):
@@ -2151,6 +2316,12 @@ async def calculate_performance_scores(
                     recovery_suggestion="请在运营绩效工作台调整启用指标的满分",
                     status_code=400,
                 )
+        if operation_targets and is_auto_integer_operation_month:
+            await _remove_excluded_operation_performance_scores(
+                db,
+                period=period,
+                included_scope_keys=included_scope_keys,
+            )
         valid_shop_keys = await _load_valid_performance_shop_keys(db, source_rows)
         monthly_source_shop_keys = await _load_monthly_source_shop_keys(db, period)
         if valid_shop_keys is not None and monthly_source_shop_keys is not None:
@@ -2425,12 +2596,33 @@ async def calculate_performance_scores(
             "commission_upserts": 0,
             "performance_upserts": 0,
             "blocked": True,
-            "blocker": "Formal shop performance is not ready for every calculated store.",
+            "blocker": "No calculated store has formal performance readiness.",
         }
-        all_rows_formal = bool(calc_list) and all(
-            _summary_is_formal_ready(row.get("score_details", {})) for row in calc_list
+        formal_shop_keys = {
+            f"{str(row['platform_code']).lower()}|{row['shop_id']}"
+            for row in calc_list
+            if _summary_is_formal_ready(row.get("score_details", {}))
+        }
+        is_auto_integer_operation_month = bool(operation_targets) and all(
+            getattr(target, "scoring_model_version", None) == "auto_integer_v1"
+            for target in operation_targets
         )
-        if all_rows_formal:
+        all_rows_formal = bool(calc_list) and len(formal_shop_keys) == len(calc_list)
+        if is_auto_integer_operation_month and formal_shop_keys:
+            income_service = HRIncomeCalculationService(db=db)
+            income_result = await income_service.calculate_month(
+                period,
+                commit=False,
+                eligible_shop_keys=formal_shop_keys,
+            )
+            formal_employee_codes = income_result.get("formal_employee_codes", [])
+            if formal_employee_codes:
+                payroll_service = PayrollGenerationService(db=db)
+                payroll_result = await payroll_service.generate_month(
+                    period,
+                    employee_codes=formal_employee_codes,
+                )
+        elif all_rows_formal:
             income_service = HRIncomeCalculationService(db=db)
             income_result = await income_service.calculate_month(period, commit=False)
             payroll_service = PayrollGenerationService(db=db)

@@ -465,6 +465,127 @@ def test_shop_operation_breakdown_overrides_global_manual_score():
     assert details["calculation"] == "manual_score=7.25"
 
 
+def test_auto_integer_operation_score_uses_rule_snapshot_and_structured_payload():
+    targets = [
+        SimpleNamespace(
+            id=101,
+            scoring_model_version="auto_integer_v1",
+            operation_rule_snapshot={
+                "metric_code": "customer_satisfaction",
+                "metric_name": "Customer satisfaction",
+                "sort_key": 10,
+                "input_kind": "percentage",
+                "direction": "higher_better",
+                "target_value": 100,
+                "max_score": 10,
+                "unit": "%",
+                "guidance": "",
+                "scoring_rule_version": "auto_integer_v1",
+            },
+        ),
+        SimpleNamespace(
+            id=102,
+            scoring_model_version="auto_integer_v1",
+            operation_rule_snapshot={
+                "metric_code": "operation_special_check",
+                "metric_name": "Special check",
+                "sort_key": 50,
+                "input_kind": "special_check",
+                "direction": "manual_score",
+                "target_value": None,
+                "max_score": 10,
+                "unit": "",
+                "guidance": "",
+                "scoring_rule_version": "auto_integer_v1",
+            },
+        ),
+    ]
+    breakdowns = {
+        101: SimpleNamespace(operation_input_payload={"actual_value": 90}),
+        102: SimpleNamespace(operation_input_payload={"result": "passed"}),
+    }
+
+    score, details = performance_module._calculate_auto_integer_operation_metrics_for_shop(
+        targets, breakdowns, expected_max_score=20
+    )
+
+    assert score == 19
+    assert details["status"] == "calculated"
+    assert [item["score"] for item in details["items"]] == [9, 10]
+    assert details["items"][0]["source"] == "operation_input_payload"
+
+
+def test_auto_integer_operation_score_is_partial_when_a_structured_input_is_missing():
+    targets = [
+        SimpleNamespace(
+            id=101,
+            scoring_model_version="auto_integer_v1",
+            operation_rule_snapshot={
+                "metric_code": "training_completion_rate",
+                "metric_name": "Training completion",
+                "sort_key": 40,
+                "input_kind": "training_counts",
+                "direction": "higher_better",
+                "target_value": 100,
+                "max_score": 20,
+                "unit": "%",
+                "guidance": "",
+                "scoring_rule_version": "auto_integer_v1",
+            },
+        )
+    ]
+
+    score, details = performance_module._calculate_auto_integer_operation_metrics_for_shop(
+        targets, {}, expected_max_score=20
+    )
+
+    assert score is None
+    assert details["status"] == "pending"
+    assert details["items"][0]["status"] == "pending"
+
+
+def test_confirmed_operation_scope_requires_current_snapshot_version():
+    rows = [
+        SimpleNamespace(
+            platform_code="shopee",
+            shop_id="shop-1",
+            is_included=True,
+            snapshot_version=1,
+            confirmed_at=datetime.now(timezone.utc),
+        ),
+        SimpleNamespace(
+            platform_code="shopee",
+            shop_id="shop-2",
+            is_included=False,
+            snapshot_version=1,
+            confirmed_at=datetime.now(timezone.utc),
+        ),
+    ]
+
+    assert performance_module._confirmed_included_operation_scope_keys(rows) == {
+        "shopee|shop-1"
+    }
+    rows[1].snapshot_version = 0
+    assert performance_module._confirmed_included_operation_scope_keys(rows) is None
+
+
+def test_auto_integer_settlement_removes_excluded_persisted_shop_scores():
+    db = AsyncMock()
+
+    asyncio.run(
+        performance_module._remove_excluded_operation_performance_scores(
+            db,
+            period="2026-08",
+            included_scope_keys={"shopee|shop-1"},
+        )
+    )
+
+    statement = db.execute.await_args.args[0]
+    assert statement.is_delete
+    assert "performance_scores" in str(statement)
+    assert "shop-1" in str(statement.compile(compile_kwargs={"literal_binds": True}))
+
+
 def test_recalculation_uses_shop_operation_breakdown(monkeypatch):
     _patch_successful_shop_recalc(monkeypatch)
     monkeypatch.setattr(
@@ -500,6 +621,85 @@ def test_recalculation_uses_shop_operation_breakdown(monkeypatch):
         created.score_details["operation"]["source"]
         == "target_management_shop_breakdown"
     )
+
+
+def test_recalculation_uses_auto_integer_operation_snapshot_and_payload(monkeypatch):
+    _patch_successful_shop_recalc(monkeypatch)
+    targets = [
+        SimpleNamespace(
+            id=101,
+            metric_catalog_version=2,
+            metric_code="customer_satisfaction",
+            metric_name="Customer satisfaction",
+            is_enabled=True,
+            scoring_model_version="auto_integer_v1",
+            operation_rule_snapshot={
+                "metric_code": "customer_satisfaction",
+                "metric_name": "Customer satisfaction",
+                "sort_key": 10,
+                "input_kind": "percentage",
+                "direction": "higher_better",
+                "target_value": 100,
+                "max_score": 10,
+                "unit": "%",
+                "guidance": "",
+                "scoring_rule_version": "auto_integer_v1",
+            },
+        ),
+        SimpleNamespace(
+            id=102,
+            metric_catalog_version=2,
+            metric_code="operation_special_check",
+            metric_name="Special check",
+            is_enabled=True,
+            scoring_model_version="auto_integer_v1",
+            operation_rule_snapshot={
+                "metric_code": "operation_special_check",
+                "metric_name": "Special check",
+                "sort_key": 50,
+                "input_kind": "special_check",
+                "direction": "manual_score",
+                "target_value": None,
+                "max_score": 10,
+                "unit": "",
+                "guidance": "",
+                "scoring_rule_version": "auto_integer_v1",
+            },
+        ),
+    ]
+    monkeypatch.setattr(
+        performance_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=targets),
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {
+                    101: SimpleNamespace(operation_input_payload={"actual_value": 90}),
+                    102: SimpleNamespace(operation_input_payload={"result": "passed"}),
+                }
+            }
+        ),
+    )
+    db = _CalcDb(_config())
+
+    response = asyncio.run(
+        performance_module.calculate_performance_scores(
+            period="2025-01", config_id=None, db=db
+        )
+    )
+
+    assert _json_body(response)["success"] is True
+    created = next(item for item in db.added if isinstance(item, PerformanceScore))
+    assert created.operation_score == 19.0
+    assert created.score_details["operation"]["source"] == "operation_input_payload"
+    assert [item["score"] for item in created.score_details["operation"]["items"]] == [
+        9,
+        10,
+    ]
 
 
 def test_recalculation_ignores_legacy_operation_target_and_skips_payroll(monkeypatch):
@@ -748,6 +948,136 @@ def test_partial_recalculation_does_not_write_income_or_payroll(monkeypatch):
     assert downstream_calls == []
     created = next(item for item in db.added if isinstance(item, PerformanceScore))
     assert created.performance_coefficient is None
+
+
+def test_complete_operation_store_settles_when_another_store_is_partial(monkeypatch):
+    _patch_successful_shop_recalc(monkeypatch)
+    downstream_calls = []
+    target = SimpleNamespace(
+        id=101,
+        metric_catalog_version=2,
+        metric_code="customer_satisfaction",
+        metric_name="Customer satisfaction",
+        is_enabled=True,
+        scoring_model_version="auto_integer_v1",
+        operation_rule_snapshot={
+            "metric_code": "customer_satisfaction",
+            "metric_name": "Customer satisfaction",
+            "sort_key": 10,
+            "input_kind": "percentage",
+            "direction": "higher_better",
+            "target_value": 100,
+            "max_score": 20,
+            "unit": "%",
+            "guidance": "",
+            "scoring_rule_version": "auto_integer_v1",
+        },
+    )
+
+    async def _source_rows(_db, _period):
+        return {
+            "shopee|shop-1": {
+                "platform_code": "shopee",
+                "shop_id": "shop-1",
+                "target": 1000.0,
+                "achieved": 1000.0,
+                "target_profit_basis_amount": 100.0,
+            },
+            "shopee|shop-2": {
+                "platform_code": "shopee",
+                "shop_id": "shop-2",
+                "target": 1000.0,
+                "achieved": 1000.0,
+                "target_profit_basis_amount": 100.0,
+            },
+        }
+
+    class _IncomeService:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def calculate_month(self, *_args, **_kwargs):
+            downstream_calls.append("income")
+            return {
+                "employee_count": 1,
+                "commission_upserts": 1,
+                "performance_upserts": 1,
+                "formal_employee_codes": ["emp-1"],
+            }
+
+    class _PayrollService:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def generate_month(self, _period, *, employee_codes=None):
+            downstream_calls.append(("payroll", employee_codes))
+            return {"payroll_upserts": 1, "locked_conflicts": 0, "locked_conflict_details": []}
+
+    monkeypatch.setattr(
+        performance_module, "_load_operation_targets_for_month", AsyncMock(return_value=[target])
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {
+                    101: SimpleNamespace(operation_input_payload={"actual_value": 100})
+                },
+                "shopee|shop-2": {},
+            }
+        ),
+    )
+    monkeypatch.setattr(performance_module, "load_shop_monthly_target_achievement", _source_rows)
+    monkeypatch.setattr(
+        performance_module,
+        "_load_included_operation_scope_keys",
+        AsyncMock(return_value={"shopee|shop-1", "shopee|shop-2"}),
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {
+                    "profit_basis_amount": 100.0,
+                    "basis_version": "A_ONLY_V1",
+                    "calculation_mode": "formal",
+                    "source": "finance.shop_profit_basis",
+                },
+                "shopee|shop-2": {
+                    "profit_basis_amount": 100.0,
+                    "basis_version": "A_ONLY_V1",
+                    "calculation_mode": "formal",
+                    "source": "finance.shop_profit_basis",
+                },
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        performance_module,
+        "_load_shop_monthly_operating_days",
+        AsyncMock(return_value={"shopee|shop-1": 31, "shopee|shop-2": 31}),
+    )
+    monkeypatch.setattr(performance_module, "HRIncomeCalculationService", _IncomeService)
+    monkeypatch.setattr(performance_module, "PayrollGenerationService", _PayrollService)
+    db = _CalcDb(_config())
+
+    response = asyncio.run(
+        performance_module.calculate_performance_scores(
+            period="2025-01", config_id=None, db=db
+        )
+    )
+
+    assert _json_body(response)["success"] is True
+    scores = [item for item in db.added if isinstance(item, PerformanceScore)]
+    complete = next(score for score in scores if score.shop_id == "shop-1")
+    partial = next(score for score in scores if score.shop_id == "shop-2")
+    assert complete.rank == 1
+    assert complete.performance_coefficient is not None
+    assert partial.rank is None
+    assert partial.performance_coefficient is None
+    assert downstream_calls == ["income", ("payroll", ["emp-1"])]
 
 
 def test_monthly_score_uses_shop_target_and_locked_profit_basis(monkeypatch):
