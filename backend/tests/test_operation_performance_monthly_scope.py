@@ -59,22 +59,22 @@ def test_entry_contract_rejects_duplicate_shop_metric_keys():
                     "metric_code": "reply_timeliness",
                     "platform_code": "shopee",
                     "shop_id": "S001",
-                    "achieved_value": 95,
+                    "actual_value": 95,
                 },
                 {
                     "metric_code": "reply_timeliness",
                     "platform_code": "SHOPEE",
                     "shop_id": "S001",
-                    "achieved_value": 96,
+                    "actual_value": 96,
                 },
             ],
         )
 
 
-def test_entry_contract_requires_exactly_one_entry_value():
+def test_entry_contract_rejects_multiple_controlled_input_kinds():
     from backend.schemas.target import OperationWorkbenchEntryApplyRequest
 
-    with pytest.raises(ValidationError, match="实际值或人工评分"):
+    with pytest.raises(ValidationError, match="一种受控录入"):
         OperationWorkbenchEntryApplyRequest(
             year_month="2026-08",
             entries=[
@@ -82,8 +82,8 @@ def test_entry_contract_requires_exactly_one_entry_value():
                     "metric_code": "reply_timeliness",
                     "platform_code": "shopee",
                     "shop_id": "S001",
-                    "achieved_value": 95,
-                    "manual_score_value": 8,
+                    "actual_value": 95,
+                    "result": "passed",
                 }
             ],
         )
@@ -175,7 +175,7 @@ async def test_entry_save_rejects_an_excluded_shop(monkeypatch):
                 "metric_code": "reply_timeliness",
                 "platform_code": "shopee",
                 "shop_id": "S001",
-                "achieved_value": 95,
+                "actual_value": 95,
             }
         ],
     )

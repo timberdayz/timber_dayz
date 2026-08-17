@@ -287,18 +287,28 @@ class OperationWorkbenchScopeApplyRequest(BaseModel):
 
 
 class OperationWorkbenchEntryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     metric_code: str = Field(..., min_length=1, max_length=64)
     platform_code: str = Field(..., min_length=1, max_length=32)
     shop_id: str = Field(..., min_length=1, max_length=256)
-    achieved_value: Optional[float] = None
-    manual_score_value: Optional[float] = None
+    actual_value: Optional[float] = None
+    completed_count: Optional[int] = Field(default=None, ge=0)
+    required_count: Optional[int] = Field(default=None, ge=0)
+    result: Optional[str] = None
+    note: Optional[str] = Field(default=None, max_length=512)
 
     @model_validator(mode="after")
     def validate_single_entry_value(self):
-        has_achieved = self.achieved_value is not None
-        has_manual = self.manual_score_value is not None
-        if has_achieved == has_manual:
-            raise ValueError("每条店铺指标必须且只能填写实际值或人工评分")
+        has_numeric = self.actual_value is not None
+        has_training = self.completed_count is not None or self.required_count is not None
+        has_check = self.result is not None or self.note is not None
+        if sum((has_numeric, has_training, has_check)) != 1:
+            raise ValueError("每条店铺指标必须且只能填写一种受控录入")
+        if has_training and (
+            self.completed_count is None or self.required_count is None
+        ):
+            raise ValueError("培训完成率必须同时填写已完成和应完成人数")
         return self
 
 

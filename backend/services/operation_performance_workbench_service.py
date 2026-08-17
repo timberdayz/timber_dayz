@@ -545,17 +545,26 @@ class OperationPerformanceWorkbenchService:
             target = targets_by_code.get(entry.metric_code)
             if target is None:
                 raise ValueError("店铺录入指标不存在或未启用")
-            is_manual = self._is_manual_metric(target)
-            if is_manual and entry.manual_score_value is None:
-                raise ValueError("人工指标只能填写人工评分")
-            if not is_manual and entry.achieved_value is None:
-                raise ValueError("量化指标只能填写实际值")
-            if entry.achieved_value is not None and entry.achieved_value < 0:
-                raise ValueError("实际值不能小于零")
-            if entry.manual_score_value is not None and not (
-                0 <= entry.manual_score_value <= float(target.max_score or 0.0)
-            ):
-                raise ValueError("人工评分必须在零到指标满分之间")
+            rule = dict(getattr(target, "operation_rule_snapshot", None) or {})
+            rule.update({
+                "metric_code": target.metric_code,
+                "metric_direction": target.metric_direction,
+                "target_value": target.target_value,
+                "max_score": target.max_score,
+            })
+            input_kind = rule.get("input_kind")
+            if input_kind == "training_counts":
+                payload = {
+                    "completed_count": entry.completed_count,
+                    "required_count": entry.required_count,
+                }
+            elif input_kind == "special_check":
+                payload = {"result": entry.result, "note": entry.note}
+            else:
+                payload = {"actual_value": entry.actual_value}
+            OperationPerformanceScoringService.calculate_metric_score(
+                metric=rule, payload=payload
+            )
 
             breakdown = breakdowns.get((target.id, *key))
             if breakdown is None:
@@ -570,10 +579,9 @@ class OperationPerformanceWorkbenchService:
                 )
                 self.db.add(breakdown)
                 breakdowns[(target.id, *key)] = breakdown
-            breakdown.achieved_value = entry.achieved_value if not is_manual else None
-            breakdown.manual_score_value = (
-                entry.manual_score_value if is_manual else None
-            )
+            breakdown.operation_input_payload = payload
+            breakdown.achieved_value = payload.get("actual_value")
+            breakdown.manual_score_value = None
             breakdown.updated_at = datetime.now(timezone.utc)
         await self.db.commit()
         return await self.get_entries(request.year_month)

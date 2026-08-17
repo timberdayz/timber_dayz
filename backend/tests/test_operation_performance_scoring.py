@@ -109,3 +109,18 @@ def test_auto_integer_rule_input_rejects_client_target_and_score_fields():
             is_enabled=True,
             target_value=80,
         )
+
+
+def test_entry_contract_accepts_structured_training_input_only():
+    from backend.schemas.target import OperationWorkbenchEntryInput
+
+    entry = OperationWorkbenchEntryInput(
+        metric_code="training_completion_rate",
+        platform_code="shopee",
+        shop_id="S001",
+        completed_count=4,
+        required_count=5,
+    )
+
+    assert entry.completed_count == 4
+    assert entry.required_count == 5
