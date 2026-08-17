@@ -57,6 +57,156 @@ def _json_body(resp) -> dict:
     return json.loads(resp.body.decode("utf-8"))
 
 
+class _AcceptanceResult:
+    def __init__(self, *, scalar_value=None, rows=None):
+        self._scalar_value = scalar_value
+        self._rows = rows or []
+
+    def scalar_one_or_none(self):
+        return self._scalar_value
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+def _configure_formal_auto_integer_settlement(monkeypatch, db):
+    config = SimpleNamespace(
+        id=1,
+        sales_max_score=30,
+        profit_max_score=25,
+        key_product_max_score=25,
+        operation_max_score=20,
+    )
+    operation_target = SimpleNamespace(
+        id=101,
+        is_enabled=True,
+        scoring_model_version="auto_integer_v1",
+        operation_rule_snapshot={
+            "metric_code": "customer_satisfaction",
+            "metric_name": "Customer satisfaction",
+            "sort_key": 10,
+            "input_kind": "percentage",
+            "direction": "higher_better",
+            "target_value": 100,
+            "max_score": 20,
+            "unit": "%",
+            "guidance": "",
+            "scoring_rule_version": "auto_integer_v1",
+        },
+    )
+
+    async def _execute(statement, *_args, **_kwargs):
+        if "performance_config" in str(statement):
+            return _AcceptanceResult(scalar_value=config)
+        return _AcceptanceResult()
+
+    async def _source_rows(_db, _period):
+        return {
+            "shopee|shop-1": {
+                "platform_code": "shopee",
+                "shop_id": "shop-1",
+                "target": 1000.0,
+                "achieved": 800.0,
+                "target_profit_basis_amount": 100.0,
+            }
+        }
+
+    db.execute = AsyncMock(side_effect=_execute)
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_effective_target_for_month",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "load_shop_monthly_target_achievement",
+        _source_rows,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "load_shop_monthly_metrics",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {
+                    "profit_basis_amount": 100.0,
+                    "basis_version": "A_ONLY_V1",
+                    "calculation_mode": "formal",
+                    "source": "finance.shop_profit_basis",
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[operation_target]),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_included_operation_scope_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(
+            return_value={
+                "shopee|shop-1": {
+                    101: SimpleNamespace(operation_input_payload={"actual_value": 100})
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_remove_excluded_operation_performance_scores",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_monthly_source_shop_keys",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_shop_monthly_operating_days",
+        AsyncMock(return_value={"shopee|shop-1": 31}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_prior_red_streak_by_shop",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_sync_performance_alerts",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_verify_persisted_shop_performance_keys",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "sync_performance_confirmation_task",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "invalidate_performance_related_caches",
+        AsyncMock(return_value=None),
+    )
+
+
 def test_calculate_returns_404_when_config_missing():
     db = AsyncMock()
     result = MagicMock()
@@ -102,59 +252,11 @@ def test_calculate_returns_400_when_period_invalid():
 
 
 def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeypatch):
-    class _ScalarOneResult:
-        def __init__(self, value):
-            self._value = value
-
-        def scalar_one_or_none(self):
-            return self._value
-
-    class _ScalarsResult:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def scalars(self):
-            return self
-
-        def all(self):
-            return self._rows
-
-        def scalar_one_or_none(self):
-            return self._rows[0] if self._rows else None
-
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
-    config = SimpleNamespace(
-        id=1,
-        sales_max_score=30,
-        profit_max_score=25,
-        key_product_max_score=25,
-        operation_max_score=20,
-    )
-
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        if execute_calls["n"] == 1:
-            return _ScalarOneResult(config)
-        if execute_calls["n"] == 7:
-            return _ScalarsResult([("shopee", "shop-1")])
-        return _ScalarsResult([])
-
-    db.execute = AsyncMock(side_effect=_execute)
-
-    async def _fake_source_rows(_db, _period):
-        return {
-            "shopee|shop-1": {
-                "platform_code": "shopee",
-                "shop_id": "shop-1",
-                "target": 1000.0,
-                "achieved": 800.0,
-            }
-        }
+    _configure_formal_auto_integer_settlement(monkeypatch, db)
 
     income_calls = {"count": 0}
     payroll_calls = {"count": 0}
@@ -167,11 +269,16 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         async def calculate_month(self, year_month, **kwargs):
             income_calls["count"] += 1
             assert year_month == "2025-01"
+            assert kwargs == {
+                "commit": False,
+                "eligible_shop_keys": {"shopee|shop-1"},
+            }
             return {
                 "year_month": year_month,
                 "employee_count": 2,
                 "commission_upserts": 2,
                 "performance_upserts": 2,
+                "formal_employee_codes": ["EMP001"],
                 "source": "test",
             }
 
@@ -179,9 +286,10 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         def __init__(self, db):
             self.db = db
 
-        async def generate_month(self, year_month):
+        async def generate_month(self, year_month, *, employee_codes=None):
             payroll_calls["count"] += 1
             assert year_month == "2025-01"
+            assert employee_codes == ["EMP001"]
             return {
                 "year_month": year_month,
                 "payroll_upserts": 2,
@@ -200,31 +308,8 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
 
     monkeypatch.setattr(
         performance_management_module,
-        "load_shop_monthly_target_achievement",
-        _fake_source_rows,
-    )
-    monkeypatch.setattr(
-        performance_management_module,
         "HRIncomeCalculationService",
         _FakeIncomeService,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        performance_management_module,
-        "_load_shop_monthly_operating_days",
-        AsyncMock(return_value={}),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        performance_management_module,
-        "_load_prior_red_streak_by_shop",
-        AsyncMock(return_value={}),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        performance_management_module,
-        "_sync_performance_alerts",
-        AsyncMock(return_value=None),
         raising=False,
     )
     monkeypatch.setattr(
@@ -268,83 +353,40 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
     assert len(perf_score_rows) == 1
     created = perf_score_rows[0]
     assert created.sales_score == 24.0
-    assert created.profit_score == 0.0
+    assert created.profit_score == 25.0
     assert created.key_product_score == 0.0
-    assert created.operation_score == 0.0
-    assert created.performance_coefficient == 1.0
-    assert created.total_score == 24.0
+    assert created.operation_score == 20.0
+    assert created.performance_coefficient == 0.8
+    assert created.total_score == 69.0
     assert created.score_details["sales"]["status"] == "calculated"
-    assert created.score_details["profit"]["status"] == "pending_design"
+    assert created.score_details["profit"]["status"] == "calculated"
     assert created.score_details["key_product"]["status"] == "not_in_scope"
-    assert created.score_details["operation"]["status"] == "pending_design"
+    assert created.score_details["operation"]["status"] == "calculated"
 
 
 def test_calculate_rolls_back_when_payroll_generation_fails(monkeypatch):
-    class _ScalarOneResult:
-        def __init__(self, value):
-            self._value = value
-
-        def scalar_one_or_none(self):
-            return self._value
-
-    class _ScalarsResult:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def scalars(self):
-            return self
-
-        def all(self):
-            return self._rows
-
-        def scalar_one_or_none(self):
-            return self._rows[0] if self._rows else None
-
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
-
-    config = SimpleNamespace(
-        id=1,
-        sales_max_score=30,
-        profit_max_score=25,
-        key_product_max_score=25,
-        operation_max_score=20,
-    )
-
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        if execute_calls["n"] == 1:
-            return _ScalarOneResult(config)
-        if execute_calls["n"] == 7:
-            return _ScalarsResult([("shopee", "shop-1")])
-        return _ScalarsResult([])
-
-    db.execute = AsyncMock(side_effect=_execute)
-
-    async def _fake_source_rows(_db, _period):
-        return {
-            "shopee|shop-1": {
-                "platform_code": "shopee",
-                "shop_id": "shop-1",
-                "target": 1000.0,
-                "achieved": 800.0,
-            }
-        }
+    _configure_formal_auto_integer_settlement(monkeypatch, db)
 
     class _FakeIncomeService:
         def __init__(self, db, metabase_service=None):
             self.db = db
 
         async def calculate_month(self, year_month, **kwargs):
+            assert year_month == "2025-01"
+            assert kwargs == {
+                "commit": False,
+                "eligible_shop_keys": {"shopee|shop-1"},
+            }
             return {
                 "year_month": year_month,
                 "employee_count": 2,
                 "commission_upserts": 2,
                 "performance_upserts": 2,
+                "formal_employee_codes": ["EMP001"],
                 "source": "test",
             }
 
@@ -352,36 +394,14 @@ def test_calculate_rolls_back_when_payroll_generation_fails(monkeypatch):
         def __init__(self, db):
             self.db = db
 
-        async def generate_month(self, year_month):
+        async def generate_month(self, year_month, *, employee_codes=None):
+            assert employee_codes == ["EMP001"]
             raise RuntimeError("employee_commissions schema mismatch")
 
     monkeypatch.setattr(
         performance_management_module,
-        "load_shop_monthly_target_achievement",
-        _fake_source_rows,
-    )
-    monkeypatch.setattr(
-        performance_management_module,
         "HRIncomeCalculationService",
         _FakeIncomeService,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        performance_management_module,
-        "_load_shop_monthly_operating_days",
-        AsyncMock(return_value={}),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        performance_management_module,
-        "_load_prior_red_streak_by_shop",
-        AsyncMock(return_value={}),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        performance_management_module,
-        "_sync_performance_alerts",
-        AsyncMock(return_value=None),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1484,28 +1504,16 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
         penalty_max=10.0,
         manual_score_enabled=False,
         manual_score_value=None,
+        scoring_model_version=None,
     )
 
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+    async def _execute(stmt, *args, **kwargs):
+        statement = str(stmt)
+        if "performance_configs" in statement:
             return _ScalarOneResult(config)
-        if n == 2:
+        if "target_breakdown" in statement:
             return _ScalarsResult([target_breakdown_row])
-        if n == 3:
-            return _ScalarsResult([operation_target])
-        if n == 4:
-            return _ScalarsResult([])
-        if n == 5:
-            return _ScalarOneResult(None)
-        if n == 6:
-            return _ScalarOneResult(None)
-        if n == 7:
-            return _ScalarsResult([("shopee", "shop-1")])
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _ScalarOneResult(None)
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -1547,8 +1555,38 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
     monkeypatch.setattr(
         performance_management_module,
         "_load_effective_target_for_month",
-        AsyncMock(side_effect=[SimpleNamespace(id=4), operation_target]),
+        AsyncMock(return_value=SimpleNamespace(id=4)),
         raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(return_value={"shopee|shop-1": {"profit_basis_amount": 0.0}}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[operation_target]),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_included_operation_scope_keys",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_valid_performance_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_monthly_source_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
     )
     monkeypatch.setattr(
         performance_management_module,
