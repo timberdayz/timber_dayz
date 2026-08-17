@@ -2239,11 +2239,11 @@ async def calculate_performance_scores(
         )
 
         operation_targets = await _load_operation_targets_for_month(db, period)
-        if operation_targets:
-            is_auto_integer_operation_month = all(
-                getattr(target, "scoring_model_version", None) == "auto_integer_v1"
-                for target in operation_targets
-            )
+        is_auto_integer_operation_month = bool(operation_targets) and all(
+            getattr(target, "scoring_model_version", None) == "auto_integer_v1"
+            for target in operation_targets
+        )
+        if is_auto_integer_operation_month:
             included_scope_keys = await _load_included_operation_scope_keys(db, period)
             if included_scope_keys is None:
                 return error_response(

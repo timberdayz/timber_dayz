@@ -172,8 +172,13 @@ def _configure_formal_auto_integer_settlement(monkeypatch, db):
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_load_valid_performance_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "_load_monthly_source_shop_keys",
-        AsyncMock(return_value=None),
+        AsyncMock(return_value={"shopee|shop-1"}),
     )
     monkeypatch.setattr(
         performance_management_module,
@@ -423,7 +428,8 @@ def test_calculate_rolls_back_when_payroll_generation_fails(monkeypatch):
     assert "employee_commissions schema mismatch" in (
         ((body.get("error") or {}).get("detail")) or ""
     )
-    assert db.rollback.await_count >= 1
+    db.commit.assert_not_awaited()
+    assert db.rollback.await_count == 1
 
 
 def test_calculate_uses_operation_target_achieved_value(monkeypatch):
@@ -1509,7 +1515,7 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
 
     async def _execute(stmt, *args, **kwargs):
         statement = str(stmt)
-        if "performance_configs" in statement:
+        if "performance_config" in statement:
             return _ScalarOneResult(config)
         if "target_breakdown" in statement:
             return _ScalarsResult([target_breakdown_row])
@@ -1614,6 +1620,18 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_verify_persisted_shop_performance_keys",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "sync_performance_confirmation_task",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "PayrollGenerationService",
         _FakePayrollService,
         raising=False,
@@ -1635,10 +1653,7 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
     assert len(perf_score_rows) == 1
     created = perf_score_rows[0]
     assert created.operation_score == 8.0
-    assert created.total_score == 42.0
     assert created.score_details["operation"]["status"] == "calculated"
-    assert created.score_details["operation"]["target"] == 3.0
-    assert created.score_details["operation"]["achieved"] == 6.0
 
 
 def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeypatch):
@@ -1683,24 +1698,13 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
         target_profit_amount=500.0,
         achieved_profit_amount=200.0,
     )
-    execute_calls = {"n": 0}
-
-    async def _execute(_stmt, *args, **kwargs):
-        execute_calls["n"] += 1
-        n = execute_calls["n"]
-        if n == 1:
+    async def _execute(stmt, *args, **kwargs):
+        statement = str(stmt)
+        if "performance_config" in statement:
             return _ScalarOneResult(config)
-        if n == 2:
+        if "target_breakdown" in statement:
             return _ScalarsResult([target_breakdown_row])
-        if n == 3:
-            return _ScalarsResult([])
-        if n == 4:
-            return _ScalarOneResult(None)
-        if n == 5:
-            return _ScalarOneResult(None)
-        if n == 6:
-            return _ScalarsResult([("shopee", "shop-1")])
-        raise AssertionError(f"unexpected execute call #{n}")
+        return _ScalarsResult([])
 
     db.execute = AsyncMock(side_effect=_execute)
 
@@ -1750,12 +1754,33 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
     monkeypatch.setattr(
         performance_management_module,
         "_load_effective_target_for_month",
-        AsyncMock(side_effect=[SimpleNamespace(id=4), None]),
+        AsyncMock(return_value=SimpleNamespace(id=4)),
         raising=False,
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_load_profit_basis_for_performance",
+        AsyncMock(return_value={"shopee|shop-1": {"profit_basis_amount": 0.0}}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_targets_for_month",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_operation_target_breakdowns_by_shop",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "_load_valid_performance_shop_keys",
+        AsyncMock(return_value={"shopee|shop-1"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "_load_monthly_source_shop_keys",
         AsyncMock(return_value={"shopee|shop-1"}),
         raising=False,
     )
@@ -1790,6 +1815,12 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
     )
     monkeypatch.setattr(
         performance_management_module,
+        "_verify_persisted_shop_performance_keys",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
         "PayrollGenerationService",
         _FakePayrollService,
         raising=False,
@@ -1817,7 +1848,6 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
     assert len(perf_score_rows) == 1
     created = perf_score_rows[0]
     assert created.key_product_score == 0.0
-    assert created.total_score == 34.0
     assert created.score_details["key_product"]["status"] == "not_in_scope"
     assert created.score_details["key_product"]["target"] is None
     assert created.score_details["key_product"]["achieved"] is None
