@@ -48,9 +48,9 @@
       <div class="panel-heading">
         <div>
           <h2>店铺范围确认</h2>
-          <p>系统已载入全部启用店铺。不参与店铺必须填写原因；确认后才可录入店铺运营数据。</p>
+          <p>系统载入当月有效经营店铺。标准名与别名用于识别；不参与备注可选。</p>
         </div>
-        <div class="panel-actions"><el-button @click="includeAllShops">全部参与</el-button><el-button @click="excludeAllShops">全部不参与</el-button><el-button type="primary" :icon="Check" :loading="savingScope" @click="saveScope">确认范围</el-button></div>
+        <div class="panel-actions"><el-button @click="includeAllShops">全部参与</el-button><el-button @click="excludeAllShops">全部不参与</el-button><el-button v-if="scopeConfirmed" @click="revokeScope">撤销范围</el-button><el-button type="primary" :icon="Check" :loading="savingScope" @click="saveScope">确认范围</el-button></div>
       </div>
 
       <section class="scope-summary">
@@ -61,9 +61,10 @@
       <el-table v-loading="loadingScope" :data="scopeShops" border stripe class="erp-table">
         <el-table-column prop="platform_code" label="平台" width="140" />
         <el-table-column prop="shop_id" label="店铺 ID" min-width="180" />
-        <el-table-column prop="shop_name" label="店铺名称" min-width="180"><template #default="{ row }">{{ row.shop_name || '-' }}</template></el-table-column>
+        <el-table-column prop="standard_name" label="标准店铺名" min-width="180"><template #default="{ row }">{{ row.standard_name || row.shop_id }}</template></el-table-column>
+        <el-table-column label="店铺别名" min-width="200"><template #default="{ row }"><span>{{ (row.aliases || []).join('、') || '-' }}</span></template></el-table-column>
         <el-table-column label="是否参与" width="125" align="center"><template #default="{ row }"><el-switch v-model="row.is_included" active-text="参与" inactive-text="不参与" @change="scopeDirty = true" /></template></el-table-column>
-        <el-table-column label="不参与原因" min-width="260"><template #default="{ row }"><el-input v-model="row.exclusion_reason" :disabled="row.is_included" placeholder="不参与时必填" maxlength="512" show-word-limit clearable @input="scopeDirty = true" /></template></el-table-column>
+        <el-table-column label="备注（可选）" min-width="260"><template #default="{ row }"><el-input v-model="row.exclusion_reason" :disabled="row.is_included" placeholder="不参与时可填写备注" maxlength="512" show-word-limit clearable @input="scopeDirty = true" /></template></el-table-column>
       </el-table>
     </section>
 
@@ -215,8 +216,6 @@ function excludeAllShops() {
 }
 
 async function saveScope() {
-  const missingReason = scopeShops.value.find((shop) => !shop.is_included && !shop.exclusion_reason?.trim())
-  if (missingReason) { ElMessage.warning(`请填写 ${missingReason.platform_code}/${missingReason.shop_id} 的不参与原因`); return }
   savingScope.value = true
   try {
     const data = unwrap(await api.applyOperationPerformanceScope(buildScopePayload(yearMonth.value, scopeShops.value)))
@@ -227,6 +226,16 @@ async function saveScope() {
     activeStep.value = 2
     ElMessage.success('本月店铺范围已确认')
   } catch (error) { ElMessage.error(errorMessage(error, '确认店铺范围失败')) } finally { savingScope.value = false }
+}
+
+async function revokeScope() {
+  try {
+    await ElMessageBox.confirm('撤销后将清空本月店铺运营录入草稿，需重新确认店铺范围。', '撤销范围', { type: 'warning' })
+    await api.revokeOperationPerformanceScope(yearMonth.value)
+    await loadAll()
+    activeStep.value = 1
+    ElMessage.success('本月店铺范围已撤销')
+  } catch (error) { if (error !== 'cancel') ElMessage.error(errorMessage(error, '撤销范围失败')) }
 }
 
 async function saveEntries() {

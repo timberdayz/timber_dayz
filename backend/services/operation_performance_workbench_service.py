@@ -4,18 +4,20 @@ from calendar import monthrange
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas.target import OperationWorkbenchApplyRequest
 from backend.services.payroll_period_lock_service import PayrollPeriodLockService
+from backend.services.operation_performance_shop_scope_service import (
+    OperationPerformanceShopScopeService,
+)
 from modules.core.db import (
     OperationMetricCatalog,
     OperationPerformanceShopScope,
     PerformanceConfig,
     SalesTarget,
     TargetBreakdown,
-    DimShop,
 )
 
 
@@ -215,17 +217,16 @@ class OperationPerformanceWorkbenchService:
         return str(platform_code).strip().lower(), str(shop_id).strip()
 
     async def _active_shops(self):
-        return (
-            (
-                await self.db.execute(
-                    select(DimShop)
-                    .where(DimShop.is_active.is_(True))
-                    .order_by(DimShop.platform_code, DimShop.shop_name, DimShop.shop_id)
-                )
-            )
-            .scalars()
-            .all()
-        )
+        candidates, _ = await OperationPerformanceShopScopeService(
+            self.db
+        ).load_candidates()
+        return candidates
+
+    async def _unresolved_scope_shops(self):
+        _, unresolved = await OperationPerformanceShopScopeService(
+            self.db
+        ).load_candidates()
+        return unresolved
 
     async def _sales_target_shop_keys(self, year_month: str) -> set[tuple[str, str]]:
         month_start, month_end = self.month_range(year_month)
@@ -266,26 +267,50 @@ class OperationPerformanceWorkbenchService:
     async def get_scope(self, year_month: str) -> dict[str, Any]:
         active_shops = await self._active_shops()
         stored_rows = await self._scope_rows(year_month)
+        if stored_rows and all(
+            getattr(row, "snapshot_version", None) == 1 for row in stored_rows
+        ):
+            shops = [
+                {
+                    "platform_code": row.platform_code,
+                    "shop_id": row.shop_id,
+                    "standard_name": row.standard_name_snapshot or row.shop_id,
+                    "aliases": row.alias_snapshots or [],
+                    "is_included": bool(row.is_included),
+                    "exclusion_reason": row.exclusion_reason,
+                }
+                for row in stored_rows
+            ]
+            return {
+                "year_month": year_month,
+                "is_confirmed": True,
+                "shops": shops,
+                "unresolved_shops": [],
+                "included_count": sum(1 for item in shops if item["is_included"]),
+            }
         stored_by_key = {
             self._shop_key(row.platform_code, row.shop_id): row for row in stored_rows
         }
         shops = []
         for shop in active_shops:
-            key = self._shop_key(shop.platform_code, shop.shop_id)
+            key = self._shop_key(shop["platform_code"], shop["shop_id"])
             stored = stored_by_key.get(key)
             shops.append(
                 {
                     "platform_code": key[0],
                     "shop_id": key[1],
-                    "shop_name": getattr(shop, "shop_name", None),
+                    "standard_name": shop["standard_name"],
+                    "aliases": shop["aliases"],
                     "is_included": bool(getattr(stored, "is_included", True)),
                     "exclusion_reason": getattr(stored, "exclusion_reason", None),
                 }
             )
         return {
             "year_month": year_month,
-            "is_confirmed": bool(stored_rows),
+            "is_confirmed": False,
+            "requires_reconfirmation": bool(stored_rows),
             "shops": shops,
+            "unresolved_shops": await self._unresolved_scope_shops(),
             "included_count": sum(1 for item in shops if item["is_included"]),
         }
 
@@ -294,8 +319,11 @@ class OperationPerformanceWorkbenchService:
             year_month=request.year_month
         )
         active_shops = await self._active_shops()
+        unresolved_shops = await self._unresolved_scope_shops()
+        if unresolved_shops:
+            raise ValueError("存在待身份对齐的经营店铺，不能确认范围")
         active_by_key = {
-            self._shop_key(shop.platform_code, shop.shop_id): shop
+            self._shop_key(shop["platform_code"], shop["shop_id"]): shop
             for shop in active_shops
         }
         requested_by_key = {
@@ -324,25 +352,58 @@ class OperationPerformanceWorkbenchService:
             self._shop_key(row.platform_code, row.shop_id): row
             for row in await self._scope_rows(request.year_month)
         }
+        if any(getattr(row, "snapshot_version", None) == 1 for row in existing_by_key.values()):
+            raise ValueError("本月店铺范围已确认，请先撤销范围")
+        if existing_by_key:
+            await self.db.execute(
+                delete(OperationPerformanceShopScope).where(
+                    OperationPerformanceShopScope.year_month == request.year_month
+                )
+            )
         for key in active_by_key:
             request_item = requested_scope[key]
             is_included = True if request_item is None else request_item.is_included
-            reason = None if is_included else request_item.exclusion_reason.strip()
-            row = existing_by_key.get(key)
-            if row is None:
-                row = OperationPerformanceShopScope(
+            reason = (
+                None
+                if is_included
+                else (str(request_item.exclusion_reason or "").strip() or None)
+            )
+            shop = active_by_key[key]
+            self.db.add(
+                OperationPerformanceShopScope(
                     year_month=request.year_month,
                     platform_code=key[0],
                     shop_id=key[1],
+                    is_included=is_included,
+                    exclusion_reason=reason,
+                    source_shop_account_id=shop["source_shop_account_id"],
+                    standard_name_snapshot=shop["standard_name"],
+                    alias_snapshots=shop["aliases"],
+                    snapshot_version=1,
+                    confirmed_at=datetime.now(timezone.utc),
+                    confirmed_by=username,
                     created_by=username,
+                    updated_by=username,
+                    updated_at=datetime.now(timezone.utc),
                 )
-                self.db.add(row)
-            row.is_included = is_included
-            row.exclusion_reason = reason
-            row.updated_by = username
-            row.updated_at = datetime.now(timezone.utc)
+            )
         await self.db.commit()
         return await self.get_scope(request.year_month)
+
+    async def revoke_scope(self, year_month: str):
+        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=year_month)
+        target_ids = [target.id for target in await self._targets(year_month) if target.id]
+        if target_ids:
+            await self.db.execute(
+                delete(TargetBreakdown).where(TargetBreakdown.target_id.in_(target_ids))
+            )
+        await self.db.execute(
+            delete(OperationPerformanceShopScope).where(
+                OperationPerformanceShopScope.year_month == year_month
+            )
+        )
+        await self.db.commit()
+        return await self.get_scope(year_month)
 
     @staticmethod
     def _is_manual_metric(metric: Any) -> bool:

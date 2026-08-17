@@ -116,8 +116,17 @@ async def test_scope_confirmation_rejects_an_included_shop_without_sales_target(
 
     service = module.OperationPerformanceWorkbenchService(db=SimpleNamespace())
     service._active_shops = AsyncMock(
-        return_value=[SimpleNamespace(platform_code="shopee", shop_id="S001")]
+        return_value=[
+            {
+                "source_shop_account_id": 1,
+                "platform_code": "shopee",
+                "shop_id": "S001",
+                "standard_name": "店铺 A",
+                "aliases": [],
+            }
+        ]
     )
+    service._unresolved_scope_shops = AsyncMock(return_value=[])
     service._sales_target_shop_keys = AsyncMock(return_value=set())
     monkeypatch.setattr(
         module.PayrollPeriodLockService,
@@ -183,6 +192,7 @@ def test_target_router_exposes_monthly_scope_and_entry_endpoints():
     assert ("/targets/operation-workbench/scope", ("PUT",)) in routes
     assert ("/targets/operation-workbench/entries", ("GET",)) in routes
     assert ("/targets/operation-workbench/entries", ("PUT",)) in routes
+    assert ("/targets/operation-workbench/scope/revoke", ("POST",)) in routes
 
 
 def test_operation_workbench_write_routes_require_an_administrator():

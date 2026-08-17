@@ -2058,6 +2058,9 @@ export default {
   async applyOperationPerformanceScope(data) {
     return await this._put('/targets/operation-workbench/scope', data)
   },
+  async revokeOperationPerformanceScope(yearMonth) {
+    return await this._post(`/targets/operation-workbench/scope/revoke?year_month=${encodeURIComponent(yearMonth)}`)
+  },
   async getOperationPerformanceEntries(yearMonth) {
     return await this._get('/targets/operation-workbench/entries', { params: { year_month: yearMonth } })
   },

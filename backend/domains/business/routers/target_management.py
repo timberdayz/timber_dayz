@@ -302,6 +302,20 @@ async def apply_operation_performance_workbench_scope(
     return {"success": True, "data": data}
 
 
+@router.post("/operation-workbench/scope/revoke", response_model=Dict[str, Any])
+async def revoke_operation_performance_workbench_scope(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_platform_admin),
+):
+    try:
+        data = await OperationPerformanceWorkbenchService(db).revoke_scope(year_month)
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "data": data}
+
+
 @router.get("/operation-workbench/entries", response_model=Dict[str, Any])
 async def get_operation_performance_workbench_entries(
     year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
