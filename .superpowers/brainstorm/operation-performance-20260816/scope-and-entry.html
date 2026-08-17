@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运营绩效流程草图</title>
+  <style>
+    :root { --ink:#172033; --muted:#637083; --line:#dfe5ec; --blue:#2f7cf6; --blue-soft:#eef5ff; --green:#168667; --amber:#a35a00; --panel:#fff; --bg:#f5f7fa; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.55 "Microsoft YaHei", system-ui, sans-serif; }
+    main { max-width:1240px; margin:0 auto; padding:32px 24px 48px; }
+    h1 { margin:0 0 4px; font-size:28px; letter-spacing:0; }
+    h2 { margin:0; font-size:17px; letter-spacing:0; }
+    .lead { margin:0 0 24px; color:var(--muted); }
+    .principle { display:flex; gap:12px; align-items:center; padding:14px 16px; background:#fff9ed; border:1px solid #f1d9a9; border-left:4px solid #f0a427; margin-bottom:22px; }
+    .tag { display:inline-flex; align-items:center; min-height:25px; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:700; }
+    .tag.rule { color:#1659b6; background:#e8f1ff; }.tag.data { color:#08735d; background:#e5f7f1; }.tag.manual { color:#9a5300; background:#fff0dc; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:7px; overflow:hidden; box-shadow:0 2px 10px rgb(22 32 51 / 4%); }
+    .head { padding:14px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .body { padding:16px; }
+    .caption { color:var(--muted); font-size:13px; }
+    .metric { display:grid; grid-template-columns:1.15fr .9fr .9fr .9fr; border:1px solid var(--line); border-radius:5px; overflow:hidden; margin-top:12px; }
+    .metric > div { padding:10px; border-right:1px solid var(--line); background:#fff; }.metric > div:last-child { border:0; }.metric .header { background:#f7f9fc; color:var(--muted); font-size:12px; }.metric .wrong { background:#fff8f2; color:#a35a00; }
+    .flow { display:flex; align-items:center; gap:10px; margin:20px 0; }.step { flex:1; border:1px solid var(--line); background:#fff; border-radius:6px; padding:12px; min-height:92px; }.arrow { color:#91a0b5; font-size:20px; }
+    .table { width:100%; margin-top:12px; border-collapse:collapse; font-size:13px; }.table th { background:#f7f9fc; color:var(--muted); text-align:left; font-weight:600; }.table th,.table td { padding:9px 8px; border:1px solid var(--line); }.table td input { width:100%; border:1px solid #bfcadd; border-radius:4px; padding:5px 6px; font:inherit; }.ready { color:var(--green); font-weight:700; }.pending { color:#b66000; font-weight:700; }
+    .choice { cursor:pointer; border:1px solid var(--line); border-radius:6px; margin-top:12px; padding:13px 14px; background:#fff; transition:.15s; }.choice:hover { border-color:var(--blue); background:var(--blue-soft); }.choice strong { display:block; margin-bottom:3px; }.choice p { margin:0; color:var(--muted); font-size:13px; }
+    .footer { margin-top:22px; display:grid; grid-template-columns:1.2fr 1fr; gap:20px; }.answer { background:#eaf8f4; border:1px solid #bde5d7; border-radius:7px; padding:16px; }.question { background:#fff; border:1px solid var(--line); border-radius:7px; padding:16px; }.question p,.answer p { margin:5px 0 0; color:var(--muted); }
+    @media (max-width:800px) { main { padding:20px 14px; }.grid,.footer { grid-template-columns:1fr; }.metric { grid-template-columns:1fr 1fr; }.metric > div:nth-child(2) { border-right:0; }.metric > div:nth-child(-n+2) { border-bottom:1px solid var(--line); }.flow { flex-direction:column; }.arrow { transform:rotate(90deg); }.step { width:100%; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>运营绩效：规则与店铺数据分离</h1>
+  <p class="lead">目标是让用户只录入业务数据和评分，系统负责确定哪些店铺适用、保存何处以及是否已完成。</p>
+  <div class="principle"><strong>结论：</strong><span>“运营满分 20 分”是评分预算，不是业务指标值。它不应与“目标值、实际值、人工评分”并排填写。</span></div>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="head"><h2>现状：一个表承担三件事</h2><span class="tag manual">应淘汰</span></div>
+      <div class="body">
+        <p class="caption">用户既要配置规则，又要填写全店数据，还要手工声明哪些店铺使用该规则。</p>
+        <div class="metric">
+          <div class="header">运营指标</div><div class="header">目标值</div><div class="header">实际值</div><div class="header">人工评分</div>
+          <div>客户满意度<br><small>满分 6</small></div><div class="wrong">全店？店铺？</div><div class="wrong">全店？店铺？</div><div class="wrong">何时填写？</div>
+        </div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="head"><h2>建议：两张工作台，各司其职</h2><span class="tag rule">推荐</span></div>
+      <div class="body">
+        <div class="flow">
+          <div class="step"><span class="tag rule">A. 评分规则</span><br><strong>配置 20 分如何分配</strong><br><small>指标、方向、满分、适用范围</small></div>
+          <div class="arrow">→</div>
+          <div class="step"><span class="tag data">B. 店铺录入清单</span><br><strong>系统列出当月应考核店铺</strong><br><small>只填目标/实际/人工评分</small></div>
+          <div class="arrow">→</div>
+          <div class="step"><span class="tag data">C. 结算</span><br><strong>仅使用已完成的数据</strong><br><small>未录入明确标为待处理</small></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:20px">
+    <div class="head"><h2>B. 店铺运营录入清单：系统自动生成，不录入店铺身份</h2><span class="tag data">按当月生效店铺</span></div>
+    <div class="body">
+      <p class="caption">来源为“当月纳入店铺绩效的有效店铺”。平台、店铺 ID、店铺名称为只读；用户只能录入指标数据。对于无需人工填写的指标，系统后续可自动回填实际值。</p>
+      <table class="table">
+        <thead><tr><th>店铺</th><th>客户满意度（满分 6）</th><th>客诉（满分 4）</th><th>培训完成（满分 5）</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>Shopee · MY-旗舰店<br><small>shopee / 10001</small></td><td>目标 4.7　实际 <input value="4.8" aria-label="旗舰店满意度实际值"></td><td>目标 2　实际 <input value="1" aria-label="旗舰店客诉实际值"></td><td>人工评分 <input value="4.5" aria-label="旗舰店培训人工评分"></td><td class="ready">已完成</td></tr>
+          <tr><td>TikTok · SG-二店<br><small>tiktok / 20003</small></td><td>目标 4.7　实际 <input placeholder="待录入" aria-label="二店满意度实际值"></td><td>目标 2　实际 <input placeholder="待录入" aria-label="二店客诉实际值"></td><td>人工评分 <input placeholder="待录入" aria-label="二店培训人工评分"></td><td class="pending">待录入</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="footer">
+    <section class="answer"><h2>字段应该填什么</h2><p><span class="tag rule">满分</span> 只在 A 配置：20 分拆成各指标的最高得分，例如 6+4+5+5。</p><p><span class="tag data">目标值 / 实际值</span> 仅对可量化指标，按店铺填写或由采集数据自动回填。</p><p><span class="tag manual">人工评分</span> 仅对人工指标，按店铺填写 0 到该指标满分；不再同时要求目标值和实际值。</p></section>
+    <section class="question"><h2>需要你确认的口径</h2><p>“当月应考核店铺”应默认取哪一个集合？点击选择你认为正确的来源。</p>
+      <div class="choice" data-choice="performance-shops" onclick="toggleSelect(this)"><strong>A. 当月已纳入店铺绩效的店铺（推荐）</strong><p>与最终结算对象完全一致，不会为未参与绩效的店铺制造录入任务。</p></div>
+      <div class="choice" data-choice="active-shops" onclick="toggleSelect(this)"><strong>B. 全部启用店铺</strong><p>覆盖完整，但会产生暂未经营、尚未配置绩效的待录入项。</p></div>
+      <div class="choice" data-choice="sales-target-shops" onclick="toggleSelect(this)"><strong>C. 当月销售目标已分解的店铺</strong><p>与目标管理一致，但新店或无销售目标的考核店铺可能遗漏。</p></div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

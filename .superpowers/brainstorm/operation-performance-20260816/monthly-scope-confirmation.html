@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>月度店铺范围确认</title>
+  <style>
+    :root{--ink:#1c2637;--muted:#68768a;--line:#dfe5ec;--blue:#2674e8;--green:#13795b;--orange:#b96300;--bg:#f5f7fa}*{box-sizing:border-box}body{margin:0;background:var(--bg);font:14px/1.5 "Microsoft YaHei",system-ui,sans-serif;color:var(--ink)}main{max-width:1120px;margin:auto;padding:30px 24px}h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:0}.sub{margin:0 0 20px;color:var(--muted)}.steps{display:flex;margin:24px 0;border:1px solid var(--line);background:#fff;border-radius:7px;overflow:hidden}.step{flex:1;padding:12px 16px;border-right:1px solid var(--line);color:var(--muted)}.step:last-child{border:0}.step.active{background:#eef5ff;color:#1459b8;font-weight:700;border-top:3px solid var(--blue);padding-top:9px}.badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:12px;font-weight:700}.on{background:#e5f7f1;color:#08735d}.off{background:#fff0de;color:#a45b00}.panel{background:#fff;border:1px solid var(--line);border-radius:7px;box-shadow:0 2px 9px #1825360a}.panel-head{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center}.hint{font-size:13px;color:var(--muted)}.controls{padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}button{font:inherit;padding:7px 10px;border:1px solid #c5d0df;border-radius:5px;background:#fff;color:#34445b}.primary{background:var(--blue);color:#fff;border-color:var(--blue)}table{width:100%;border-collapse:collapse}th,td{padding:11px 14px;border-bottom:1px solid var(--line);text-align:left}th{font-size:12px;color:var(--muted);font-weight:600;background:#f8fafc}.switch{display:inline-flex;border:1px solid #bed7c9;border-radius:5px;overflow:hidden}.switch span{padding:4px 8px;font-size:12px}.switch .yes{background:#e8f7ef;color:#08735d;font-weight:700}.reason{color:var(--muted);font-size:13px}.summary{display:flex;gap:12px;margin-top:18px}.summary>div{flex:1;padding:13px;border-radius:6px;border:1px solid var(--line);background:#fff}.num{font-size:24px;font-weight:700;margin-right:5px}.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.callout{margin-top:20px;padding:14px 16px;border-left:4px solid #f0a427;background:#fff9ee;border:1px solid #f1dba9}.choice{margin-top:14px;border:1px solid var(--line);border-radius:6px;padding:13px;cursor:pointer;background:#fff}.choice:hover{border-color:var(--blue);background:#eef5ff}.choice p{margin:3px 0 0;color:var(--muted);font-size:13px}@media(max-width:700px){main{padding:20px 14px}.steps,.controls,.summary{display:block}.step{border-right:0;border-bottom:1px solid var(--line)}.summary>div{margin-bottom:8px}th:nth-child(2),td:nth-child(2){display:none}}
+  </style>
+</head>
+<body><main>
+  <h1>2026-07 运营绩效</h1><p class="sub">先确认本月参与运营绩效的店铺，再录入运营数据。</p>
+  <div class="steps"><div class="step active">1. 确认店铺范围</div><div class="step">2. 录入店铺运营数据</div><div class="step">3. 检查并保存</div></div>
+  <section class="panel"><div class="panel-head"><div><h2>本月店铺范围</h2><span class="hint">系统已载入全部启用店铺；平台和店铺 ID 为主数据，只读。</span></div><span class="badge on">草稿，可修改</span></div>
+    <div class="controls"><span class="hint">5 家启用店铺</span><div><button>全部标记参与</button> <button>批量标记不参与</button></div></div>
+    <table><thead><tr><th>店铺</th><th>平台 / 店铺 ID</th><th>本月运营绩效</th><th>不参与原因</th></tr></thead><tbody>
+      <tr><td><strong>MY-旗舰店</strong></td><td>Shopee / 10001</td><td><div class="switch"><span class="yes">参与</span><span>不参与</span></div></td><td class="reason">-</td></tr>
+      <tr><td><strong>SG-二店</strong></td><td>TikTok / 20003</td><td><div class="switch"><span class="yes">参与</span><span>不参与</span></div></td><td class="reason">-</td></tr>
+      <tr><td><strong>TH-试运营店</strong></td><td>Shopee / 30007</td><td><div class="switch"><span>参与</span><span class="off">不参与</span></div></td><td class="reason">试运营期，暂不纳入月度运营考核</td></tr>
+      <tr><td><strong>MY-暂停店</strong></td><td>Lazada / 40011</td><td><div class="switch"><span>参与</span><span class="off">不参与</span></div></td><td class="reason">本月暂停经营</td></tr>
+    </tbody></table>
+  </section>
+  <div class="summary"><div><span class="num">3</span>家纳入本月运营绩效</div><div><span class="num">2</span>家不参与，已填写原因</div></div>
+  <div class="actions"><button>保存草稿</button><button class="primary">确认范围，进入录入</button></div>
+  <div class="callout"><strong>月度快照规则：</strong>点击“确认范围”后生成本月参与名单；之后仍可在绩效锁定前调整，每一次调整保留操作者、时间和原因。</div>
+  <section class="choice" data-choice="same-target" onclick="toggleSelect(this)"><strong>下一项需要确认：量化指标的目标值是否默认所有店铺相同？</strong><p>若相同，目标值只在评分规则中配置一次；若不同，系统在第二步为每个参与店铺提供目标值录入或批量设置。</p></section>
+</main></body></html>
