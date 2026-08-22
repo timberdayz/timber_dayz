@@ -163,6 +163,9 @@ async def test_copy_previous_month_does_not_copy_store_scope_or_entries(
         def __init__(self, _db):
             pass
 
+        async def acquire_month_transaction_lock(self, **_kwargs):
+            return None
+
         async def assert_month_mutable(self, **_kwargs):
             return None
 
@@ -232,6 +235,12 @@ async def test_workbench_save_preserves_store_entries(monkeypatch):
         metric_name="Reply",
         metric_direction="higher_better",
         manual_score_enabled=False,
+        sort_key=10,
+        input_kind="percentage",
+        default_target_value=95,
+        unit="%",
+        guidance="Fill the rate",
+        scoring_rule_version="auto_integer_v1",
     )
     config = SimpleNamespace(id=1, operation_max_score=20, updated_at=None)
     db = _Db()
@@ -246,7 +255,7 @@ async def test_workbench_save_preserves_store_entries(monkeypatch):
         OperationWorkbenchApplyRequest(
             year_month="2026-08",
             catalog_version=3,
-            metrics=[{"metric_code": "reply", "max_score": 20}],
+            metrics=[{"metric_code": "reply", "is_enabled": True}],
         )
     )
 

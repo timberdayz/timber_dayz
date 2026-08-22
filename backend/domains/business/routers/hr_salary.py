@@ -689,14 +689,14 @@ async def confirm_payroll_record(
             basis_version=basis_version,
             commit=False,
         )
+        if getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", None) == "postgresql":
+            await period_lock.assert_month_mutable(year_month=record.year_month)
         record.status = "confirmed"
         locked_at = datetime.now(timezone.utc)
         for allocation in allocations:
             allocation.source_payroll_status = "confirmed"
             allocation.calculation_status = "confirmed"
             allocation.pre_commission_locked_at = locked_at
-        if getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", None) == "postgresql":
-            await period_lock.assert_month_mutable(year_month=record.year_month)
         await db.commit()
         await db.refresh(record)
         return _payroll_success(record)

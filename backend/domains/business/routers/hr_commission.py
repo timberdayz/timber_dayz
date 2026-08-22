@@ -285,7 +285,7 @@ async def _employee_month_lock_conflict(
 ):
     try:
         await PayrollPeriodLockService(db).acquire_month_transaction_lock(
-            year_month=rec.year_month
+            year_month=year_month
         )
         await PayrollPeriodLockService(db).assert_employee_month_mutable(
             employee_code=employee_code,
@@ -1326,12 +1326,12 @@ async def delete_employee_shop_assignment(
         rec = result.scalar_one_or_none()
         if not rec:
             return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
+        await PayrollPeriodLockService(db).acquire_month_transaction_lock(
+            year_month=rec.year_month
+        )
         await PayrollPeriodLockService(db).assert_employee_month_mutable(
             employee_code=rec.employee_code,
             year_month=rec.year_month,
-        )
-        await PayrollPeriodLockService(db).acquire_month_transaction_lock(
-            year_month=rec.year_month
         )
         await db.delete(rec)
         await db.commit()
