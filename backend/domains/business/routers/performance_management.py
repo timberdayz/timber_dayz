@@ -2782,11 +2782,14 @@ async def calculate_performance_scores(
                 eligible_shop_keys=formal_shop_keys,
             )
             formal_employee_codes = income_result.get("formal_employee_codes", [])
-            if formal_employee_codes:
+            payroll_refresh_employee_codes = income_result.get(
+                "payroll_refresh_employee_codes", formal_employee_codes
+            )
+            if payroll_refresh_employee_codes:
                 payroll_service = PayrollGenerationService(db=db)
                 payroll_result = await payroll_service.generate_month(
                     period,
-                    employee_codes=formal_employee_codes,
+                    employee_codes=payroll_refresh_employee_codes,
                 )
         elif all_rows_formal:
             income_service = HRIncomeCalculationService(db=db)

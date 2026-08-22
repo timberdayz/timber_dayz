@@ -190,10 +190,10 @@ class HRIncomeCalculationService:
 
     async def _refresh_draft_payroll_variable_income(
         self, *, year_month: str, employee_codes: set[str]
-    ) -> None:
+    ) -> dict[str, Any]:
         """Remove stale controlled variable pay before applicable commission is rebuilt."""
         if not employee_codes:
-            return
+            return {}
         records = (
             await self.db.execute(
                 select(PayrollRecord).where(
@@ -207,6 +207,11 @@ class HRIncomeCalculationService:
             record.performance_salary = 0
             record.commission = 0
             PayrollGenerationService.recalculate_record_totals(record)
+        return {
+            str(record.employee_code).strip(): record
+            for record in records
+            if str(getattr(record, "employee_code", "") or "").strip()
+        }
 
     @staticmethod
     def _to_float(value: Any, default: float = 0.0) -> float:
@@ -1002,6 +1007,7 @@ class HRIncomeCalculationService:
         formal_employee_codes: set[str] = set()
         controlled_results: dict[str, dict[str, Any]] = {}
         blocked_commission_codes: set[str] = set()
+        refreshed_draft_payrolls: dict[str, Any] = {}
         if controlled_context is not None:
             if controlled_context["scope_confirmed"]:
                 controlled_results = self.build_controlled_personal_results(
@@ -1029,7 +1035,7 @@ class HRIncomeCalculationService:
             _, blocked_commission_codes = self.partition_controlled_commission_codes(
                 controlled_results
             )
-            await self._refresh_draft_payroll_variable_income(
+            refreshed_draft_payrolls = await self._refresh_draft_payroll_variable_income(
                 year_month=year_month,
                 employee_codes={
                     employee_code
@@ -1086,6 +1092,11 @@ class HRIncomeCalculationService:
             commission_amount = raw_commission_amount * inherited_coefficient
             if sales_amount > 0:
                 commission_rate = commission_amount / sales_amount
+
+            refreshed_payroll = refreshed_draft_payrolls.get(employee_code)
+            if refreshed_payroll is not None:
+                refreshed_payroll.commission = commission_amount
+                PayrollGenerationService.recalculate_record_totals(refreshed_payroll)
 
             for row in assignments:
                 if (row.employee_code or "").strip() != employee_code:
@@ -1148,9 +1159,20 @@ class HRIncomeCalculationService:
         if controlled_context is not None:
             # A controlled month has one authoritative personal population: its scope.
             # Live assignments may still feed independent commission, never personal scores.
-            performance_agg = {}
+            controlled_scope_codes = {
+                str(getattr(scope, "employee_code", "") or "").strip()
+                for scope in controlled_context["scopes"]
+                if str(getattr(scope, "employee_code", "") or "").strip()
+            }
+            performance_agg = {
+                employee_code: aggregate
+                for employee_code, aggregate in performance_agg.items()
+                if employee_code in controlled_scope_codes
+            }
 
-        for employee_code, rec in performance_agg.items():
+        for employee_code, rec in (
+            performance_agg.items() if controlled_context is None else ()
+        ):
             sales_amount = rec["sales_amount"]
             if rec["weighted_rate_den"] > 0:
                 achievement_rate = rec["weighted_rate_num"] / rec["weighted_rate_den"]
@@ -1284,6 +1306,14 @@ class HRIncomeCalculationService:
             "commission_upserts": commission_upserts,
             "performance_upserts": performance_upserts,
             "formal_employee_codes": sorted(formal_employee_codes),
+            "payroll_refresh_employee_codes": sorted(
+                set(formal_employee_codes)
+                | {
+                    employee_code
+                    for employee_code, result in controlled_results.items()
+                    if result.get("calculation_status") == "not_participating"
+                }
+            ),
             "commission_allocations": commission_allocations,
             "source": (
                 "controlled_targets_v1"

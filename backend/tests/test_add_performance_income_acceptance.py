@@ -45,6 +45,9 @@ def _allow_recalculation_for_acceptance_tests(monkeypatch):
         async def assert_month_mutable(self, **_kwargs):
             return None
 
+        async def acquire_month_transaction_lock(self, **_kwargs):
+            return None
+
     monkeypatch.setattr(
         performance_management_module,
         "PayrollPeriodLockService",
@@ -284,6 +287,7 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
                 "commission_upserts": 2,
                 "performance_upserts": 2,
                 "formal_employee_codes": ["EMP001"],
+                "payroll_refresh_employee_codes": ["EMP001", "OUT"],
                 "source": "test",
             }
 
@@ -294,7 +298,7 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         async def generate_month(self, year_month, *, employee_codes=None):
             payroll_calls["count"] += 1
             assert year_month == "2025-01"
-            assert employee_codes == ["EMP001"]
+            assert employee_codes == ["EMP001", "OUT"]
             return {
                 "year_month": year_month,
                 "payroll_upserts": 2,

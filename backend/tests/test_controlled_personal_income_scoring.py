@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from modules.core.db import (
+    EmployeeCommission,
     EmployeePerformance,
     EmployeePerformanceInput,
     EmployeeShopAssignment,
@@ -314,3 +315,111 @@ def test_confirmed_controlled_scope_never_falls_back_to_post_confirmation_assign
     scores = [row for row in added if isinstance(row, EmployeePerformance)]
     assert [row.employee_code for row in scores] == ["IN_SCOPE"]
     assert result["formal_employee_codes"] == ["IN_SCOPE"]
+
+
+def test_not_participating_employee_keeps_recalculated_independent_commission_in_draft_payroll():
+    added = []
+    plan = SimpleNamespace(
+        id=1,
+        calculation_mode="controlled_targets_v1",
+        scope_confirmed_at=object(),
+        rule_snapshot={"metrics": [{"metric_code": "attendance"}]},
+    )
+    scope = SimpleNamespace(id=2, employee_code="OUT", is_included=False)
+    assignment = SimpleNamespace(
+        employee_code="OUT", platform_code="shopee", shop_id="A",
+        commission_ratio=0.5, status="active", year_month="2026-08",
+    )
+    score = SimpleNamespace(
+        platform_code="shopee", shop_id="A", total_score=80,
+        performance_coefficient=1,
+        score_details={"summary": {"calculation_status": "complete", "formal_ready": True, "ranking_pool": "official"}},
+    )
+    payroll = SimpleNamespace(
+        employee_code="OUT", year_month="2026-08", status="draft",
+        base_salary=1000, position_salary=0, performance_salary=300, commission=400,
+        overtime_pay=0, allowances=0, bonus=0, social_insurance_personal=0,
+        housing_fund_personal=0, income_tax=0, other_deductions=0,
+        social_insurance_company=0, housing_fund_company=0,
+        gross_salary=1700, total_deductions=0, net_salary=1700, total_cost=1700,
+    )
+
+    async def execute(statement, _params=None):
+        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        rows_by_entity = {
+            PersonalPerformancePlan: _Result(scalar=plan),
+            PersonalPerformanceEmployeeScope: _Result(rows=[scope]),
+            PersonalPerformanceAssignmentSnapshot: _Result(rows=[]),
+            PersonalPerformanceEntry: _Result(rows=[]),
+            PerformanceScore: _Result(rows=[score]),
+            EmployeeShopAssignment: _Result(rows=[assignment]),
+            EmployeePerformanceInput: _Result(rows=[]),
+            SalaryStructure: _Result(rows=[]),
+            PayrollRecord: _Result(rows=[payroll]),
+            EmployeePerformance: _Result(scalar=None),
+            EmployeeCommission: _Result(scalar=None),
+        }
+        return rows_by_entity.get(entity, _Result(rows=[]))
+
+    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    service = HRIncomeCalculationService(db)
+    service._load_shop_metrics = AsyncMock(return_value={"shopee|a": {"monthly_sales": 100, "achievement_rate": 1}})
+    service._load_profit_basis_by_shop = AsyncMock(return_value={"shopee|a": {"profit_basis_amount": 100}})
+    service._load_store_performance_by_shop = AsyncMock(return_value={"shopee|a": {"performance_coefficient": 1, "total_score": 80, "sales_target": 100}})
+
+    asyncio.run(service.calculate_month("2026-08"))
+
+    assert payroll.performance_salary == 0
+    assert payroll.commission == 50
+    assert payroll.gross_salary == 1050
+
+
+def test_confirmed_scope_keeps_in_scope_sales_aggregate_without_writing_outside_employee():
+    added = []
+    plan = SimpleNamespace(
+        id=1,
+        calculation_mode="controlled_targets_v1",
+        scope_confirmed_at=object(),
+        rule_snapshot={"metrics": [{"metric_code": "attendance"}]},
+    )
+    scope = SimpleNamespace(id=2, employee_code="IN_SCOPE", is_included=True)
+    snapshot = SimpleNamespace(
+        scope_id=2, platform_code="shopee", shop_id="A", sales_target_amount_snapshot=100
+    )
+    entry = SimpleNamespace(scope_id=2, metric_code="attendance", auto_score=20)
+    score = SimpleNamespace(
+        platform_code="shopee", shop_id="A", total_score=80,
+        score_details={"summary": {"calculation_status": "complete", "formal_ready": True, "ranking_pool": "official"}},
+    )
+    assignments = [
+        SimpleNamespace(employee_code="IN_SCOPE", platform_code="shopee", shop_id="A", commission_ratio=0, status="active", year_month="2026-08"),
+        SimpleNamespace(employee_code="OUT_SCOPE", platform_code="shopee", shop_id="A", commission_ratio=0, status="active", year_month="2026-08"),
+    ]
+
+    async def execute(statement, _params=None):
+        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        rows_by_entity = {
+            PersonalPerformancePlan: _Result(scalar=plan),
+            PersonalPerformanceEmployeeScope: _Result(rows=[scope]),
+            PersonalPerformanceAssignmentSnapshot: _Result(rows=[snapshot]),
+            PersonalPerformanceEntry: _Result(rows=[entry]),
+            PerformanceScore: _Result(rows=[score]),
+            EmployeeShopAssignment: _Result(rows=assignments),
+            EmployeePerformanceInput: _Result(rows=[]),
+            SalaryStructure: _Result(rows=[]),
+            EmployeePerformance: _Result(scalar=None),
+        }
+        return rows_by_entity.get(entity, _Result(rows=[]))
+
+    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    service = HRIncomeCalculationService(db)
+    service._load_shop_metrics = AsyncMock(return_value={"shopee|a": {"monthly_sales": 120, "achievement_rate": 0.75}})
+    service._load_profit_basis_by_shop = AsyncMock(return_value={})
+    service._load_store_performance_by_shop = AsyncMock(return_value={"shopee|a": {"performance_coefficient": 1, "total_score": 80, "sales_target": 100}})
+
+    asyncio.run(service.calculate_month("2026-08"))
+
+    results = [row for row in added if isinstance(row, EmployeePerformance)]
+    assert [row.employee_code for row in results] == ["IN_SCOPE"]
+    assert results[0].actual_sales == 120
+    assert results[0].achievement_rate == 0.75
