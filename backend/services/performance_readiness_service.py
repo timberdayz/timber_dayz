@@ -11,6 +11,8 @@ from modules.core.db import (
     EmployeePerformance,
     EmployeePerformanceInput,
     EmployeeShopAssignment,
+    PersonalPerformanceEmployeeScope,
+    PersonalPerformancePlan,
     PayrollRecord,
     PerformanceScore,
     SalaryStructure,
@@ -48,6 +50,17 @@ class PerformanceReadinessService:
                 "绩效尚未完成，无法结算：" + "；".join(pending)
             )
 
+    @classmethod
+    def assert_controlled_employee_rows_ready(
+        cls, scopes: list[Any], rows_by_employee: dict[str, Any]
+    ) -> None:
+        included_codes = {
+            str(getattr(scope, "employee_code", "") or "").strip()
+            for scope in scopes
+            if bool(getattr(scope, "is_included", False))
+        }
+        cls.assert_employee_rows_ready(included_codes, rows_by_employee)
+
     @staticmethod
     def _is_formal_shop_score(score: Any) -> bool:
         details = getattr(score, "score_details", None) or {}
@@ -73,6 +86,49 @@ class PerformanceReadinessService:
         *,
         employee_codes: set[str] | None = None,
     ) -> None:
+        plan = (
+            await self.db.execute(
+                select(PersonalPerformancePlan).where(
+                    PersonalPerformancePlan.year_month == year_month
+                )
+            )
+        ).scalar_one_or_none()
+        if plan is not None and getattr(plan, "calculation_mode", None) == "controlled_targets_v1":
+            scopes = (
+                await self.db.execute(
+                    select(PersonalPerformanceEmployeeScope).where(
+                        PersonalPerformanceEmployeeScope.plan_id == plan.id
+                    )
+                )
+            ).scalars().all()
+            if getattr(plan, "scope_confirmed_at", None) is None:
+                raise PerformanceReadinessError("personal performance scope is not confirmed")
+            if employee_codes is not None:
+                requested_codes = {
+                    str(code).strip() for code in employee_codes if str(code).strip()
+                }
+                scopes = [scope for scope in scopes if scope.employee_code in requested_codes]
+            included_codes = {
+                str(scope.employee_code).strip()
+                for scope in scopes
+                if bool(getattr(scope, "is_included", False))
+            }
+            if not included_codes:
+                return
+            performance_rows = (
+                await self.db.execute(
+                    select(EmployeePerformance).where(
+                        EmployeePerformance.year_month == year_month,
+                        EmployeePerformance.employee_code.in_(included_codes),
+                    )
+                )
+            ).scalars().all()
+            self.assert_controlled_employee_rows_ready(
+                scopes,
+                {str(row.employee_code).strip(): row for row in performance_rows},
+            )
+            return
+
         period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
         period_end = period_start.replace(
             day=monthrange(period_start.year, period_start.month)[1]

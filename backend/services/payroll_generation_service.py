@@ -316,6 +316,12 @@ class PayrollGenerationService:
 
     @classmethod
     def _normalize_performance_coefficient(cls, performance: Any | None) -> Decimal:
+        if (
+            getattr(performance, "performance_source_type", None)
+            == "controlled_targets_v1"
+            and getattr(performance, "calculation_status", None) != "complete"
+        ):
+            return Decimal("0")
         raw_value = getattr(performance, "performance_coefficient", None)
         if raw_value is None:
             raw_value = getattr(performance, "performance_score", 0)

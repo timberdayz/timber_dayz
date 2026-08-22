@@ -36,6 +36,34 @@ router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
 # 员工管理API
 # ============================================================================
 
+def _display_employee_performance(employee_performance: Any) -> dict[str, Any]:
+    details = getattr(employee_performance, "calculation_details", None) or {}
+    display_details = dict(details) if isinstance(details, dict) else {}
+    for field in (
+        "store_base_score",
+        "store_weighted_contribution",
+        "personal_target_score",
+        "final_score",
+    ):
+        if display_details.get(field) is not None:
+            display_details[field] = round(float(display_details[field]), 1)
+    if isinstance(display_details.get("personal_metric_scores"), dict):
+        display_details["personal_metric_scores"] = {
+            code: round(float(score), 1)
+            for code, score in display_details["personal_metric_scores"].items()
+        }
+    score = getattr(employee_performance, "performance_score", None)
+    return {
+        "actual_sales": round(float(getattr(employee_performance, "actual_sales", 0) or 0), 2),
+        "achievement_rate": round(float(getattr(employee_performance, "achievement_rate", 0) or 0), 4),
+        "performance_score": round(float(score), 1) if score is not None else None,
+        "calculation_status": getattr(employee_performance, "calculation_status", None),
+        "performance_source_type": getattr(employee_performance, "performance_source_type", None),
+        "calculation_details": display_details,
+        "calculated_at": getattr(employee_performance, "calculated_at", None).isoformat() if getattr(employee_performance, "calculated_at", None) else None,
+    }
+
+
 async def _username_for_user_id(db: AsyncSession, user_id: Optional[int]) -> Optional[str]:
     """根据 dim_users.user_id 查询 username，用于 EmployeeResponse.username"""
     if not user_id:
@@ -442,12 +470,7 @@ async def _build_employee_income_audit(
                 for row in adjustments
             ],
             "employee_performance": (
-                {
-                    "actual_sales": float(getattr(employee_performance, "actual_sales", 0) or 0),
-                    "achievement_rate": float(getattr(employee_performance, "achievement_rate", 0) or 0),
-                    "performance_score": float(getattr(employee_performance, "performance_score", 0) or 0),
-                    "calculated_at": getattr(employee_performance, "calculated_at", None).isoformat() if getattr(employee_performance, "calculated_at", None) else None,
-                }
+                _display_employee_performance(employee_performance)
                 if employee_performance
                 else None
             ),

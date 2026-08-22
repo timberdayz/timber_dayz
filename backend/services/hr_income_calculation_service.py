@@ -27,6 +27,10 @@ from modules.core.db import (
     EmployeePerformanceAdjustment,
     EmployeePerformanceInput,
     EmployeeShopAssignment,
+    PersonalPerformanceAssignmentSnapshot,
+    PersonalPerformanceEmployeeScope,
+    PersonalPerformanceEntry,
+    PersonalPerformancePlan,
     PerformanceScore,
     SalaryStructure,
     ShopCommissionConfig,
@@ -52,6 +56,99 @@ class HRIncomeCalculationService:
     def __init__(self, db: AsyncSession, metabase_service: Optional[Any] = None):
         self.db = db
         self.metabase_service = metabase_service
+
+    @staticmethod
+    def _field(record: Any, name: str, default: Any = None) -> Any:
+        if isinstance(record, dict):
+            return record.get(name, default)
+        return getattr(record, name, default)
+
+    @classmethod
+    def build_controlled_personal_results(
+        cls,
+        *,
+        scopes: list[Any],
+        assignments_by_employee: dict[str, list[Any]],
+        metrics: list[dict[str, Any]],
+        entry_scores_by_employee: dict[str, dict[str, int | None]],
+        shop_scores: dict[str, float],
+    ) -> dict[str, dict[str, Any]]:
+        """Return final personal rows from confirmed controlled-workbench snapshots."""
+        metric_codes = [str(metric["metric_code"]) for metric in metrics]
+        results: dict[str, dict[str, Any]] = {}
+        for scope in scopes:
+            employee_code = str(cls._field(scope, "employee_code", "")).strip()
+            if not employee_code:
+                continue
+            if not bool(cls._field(scope, "is_included", False)):
+                results[employee_code] = {
+                    "performance_score": None,
+                    "calculation_status": "not_participating",
+                    "performance_source_type": "controlled_targets_v1",
+                    "calculation_details": {
+                        "source": "controlled_targets_v1",
+                        "status": "not_participating",
+                    },
+                }
+                continue
+
+            assignments = assignments_by_employee.get(employee_code, [])
+            weighted_score_numerator = 0.0
+            target_weight_total = 0.0
+            missing_shops: list[str] = []
+            for assignment in assignments:
+                platform = str(cls._field(assignment, "platform_code", "")).lower()
+                shop_id = str(cls._field(assignment, "shop_id", ""))
+                target = cls._to_float(
+                    cls._field(assignment, "sales_target_amount_snapshot", 0), 0.0
+                )
+                score = shop_scores.get(cls._shop_key(platform, shop_id))
+                if target <= 0 or score is None:
+                    missing_shops.append(f"{platform}|{shop_id}")
+                    continue
+                target_weight_total += target
+                weighted_score_numerator += cls._to_float(score) * target
+
+            entry_scores = entry_scores_by_employee.get(employee_code, {})
+            missing_metrics = [
+                metric_code
+                for metric_code in metric_codes
+                if entry_scores.get(metric_code) is None
+            ]
+            if missing_shops or target_weight_total <= 0 or missing_metrics:
+                results[employee_code] = {
+                    "performance_score": None,
+                    "calculation_status": "partial",
+                    "performance_source_type": "controlled_targets_v1",
+                    "calculation_details": {
+                        "source": "controlled_targets_v1",
+                        "status": "partial",
+                        "missing_shop_scores": missing_shops,
+                        "missing_personal_metrics": missing_metrics,
+                    },
+                }
+                continue
+
+            store_base_score = weighted_score_numerator / target_weight_total
+            personal_target_score = sum(int(entry_scores[code]) for code in metric_codes)
+            final_score = min(max(store_base_score * 0.8 + personal_target_score, 0.0), 100.0)
+            results[employee_code] = {
+                "performance_score": final_score,
+                "calculation_status": "complete",
+                "performance_source_type": "controlled_targets_v1",
+                "calculation_details": {
+                    "source": "controlled_targets_v1",
+                    "status": "complete",
+                    "store_base_score": store_base_score,
+                    "store_weighted_contribution": store_base_score * 0.8,
+                    "personal_target_score": personal_target_score,
+                    "personal_metric_scores": {
+                        code: int(entry_scores[code]) for code in metric_codes
+                    },
+                    "final_score": final_score,
+                },
+            }
+        return results
 
     @staticmethod
     def _to_float(value: Any, default: float = 0.0) -> float:
@@ -111,6 +208,76 @@ class HRIncomeCalculationService:
             and summary.get("ranking_pool") == "official"
             and summary.get("formal_ready") is True
         )
+
+    async def _load_controlled_personal_context(
+        self, year_month: str
+    ) -> dict[str, Any] | None:
+        plan = (
+            await self.db.execute(
+                select(PersonalPerformancePlan).where(
+                    PersonalPerformancePlan.year_month == year_month
+                )
+            )
+        ).scalar_one_or_none()
+        if plan is None or getattr(plan, "calculation_mode", None) != "controlled_targets_v1":
+            return None
+
+        scopes = (
+            await self.db.execute(
+                select(PersonalPerformanceEmployeeScope).where(
+                    PersonalPerformanceEmployeeScope.plan_id == plan.id
+                )
+            )
+        ).scalars().all()
+        scope_by_id = {row.id: row for row in scopes}
+        assignments = (
+            await self.db.execute(
+                select(PersonalPerformanceAssignmentSnapshot).where(
+                    PersonalPerformanceAssignmentSnapshot.scope_id.in_(scope_by_id)
+                )
+            )
+        ).scalars().all() if scope_by_id else []
+        assignments_by_employee: dict[str, list[Any]] = {}
+        for assignment in assignments:
+            scope = scope_by_id.get(assignment.scope_id)
+            if scope is not None:
+                assignments_by_employee.setdefault(scope.employee_code, []).append(assignment)
+
+        entries = (
+            await self.db.execute(
+                select(PersonalPerformanceEntry).where(
+                    PersonalPerformanceEntry.scope_id.in_(scope_by_id)
+                )
+            )
+        ).scalars().all() if scope_by_id else []
+        entry_scores_by_employee: dict[str, dict[str, int | None]] = {}
+        for entry in entries:
+            scope = scope_by_id.get(entry.scope_id)
+            if scope is not None:
+                entry_scores_by_employee.setdefault(scope.employee_code, {})[
+                    entry.metric_code
+                ] = entry.auto_score
+
+        score_rows = (
+            await self.db.execute(
+                select(PerformanceScore).where(PerformanceScore.period == year_month)
+            )
+        ).scalars().all()
+        shop_scores = {
+            self._shop_key(row.platform_code, row.shop_id): self._to_float(
+                row.total_score
+            )
+            for row in score_rows
+            if self._is_formal_store_performance(getattr(row, "score_details", None))
+        }
+        return {
+            "scope_confirmed": getattr(plan, "scope_confirmed_at", None) is not None,
+            "scopes": scopes,
+            "assignments_by_employee": assignments_by_employee,
+            "metrics": list((getattr(plan, "rule_snapshot", {}) or {}).get("metrics", [])),
+            "entry_scores_by_employee": entry_scores_by_employee,
+            "shop_scores": shop_scores,
+        }
 
     @staticmethod
     def _normalize_metric_direction(direction: Any) -> str:
@@ -526,6 +693,7 @@ class HRIncomeCalculationService:
         await PayrollPeriodLockService(self.db).assert_month_mutable(
             year_month=year_month,
         )
+        controlled_context = await self._load_controlled_personal_context(year_month)
 
         assignment_rows = (
             (
@@ -600,6 +768,12 @@ class HRIncomeCalculationService:
             ]
             if str(getattr(row, "employee_code", "") or "").strip()
         }
+        if controlled_context is not None:
+            population_codes.update(
+                str(getattr(scope, "employee_code", "") or "").strip()
+                for scope in controlled_context["scopes"]
+                if str(getattr(scope, "employee_code", "") or "").strip()
+            )
         if not population_codes:
             return {
                 "year_month": year_month,
@@ -927,6 +1101,57 @@ class HRIncomeCalculationService:
                 )
             performance_upserts += 1
 
+        if controlled_context is not None:
+            controlled_results = self.build_controlled_personal_results(
+                scopes=controlled_context["scopes"],
+                assignments_by_employee=controlled_context["assignments_by_employee"],
+                metrics=controlled_context["metrics"],
+                entry_scores_by_employee=controlled_context["entry_scores_by_employee"],
+                shop_scores=controlled_context["shop_scores"],
+            ) if controlled_context["scope_confirmed"] else {}
+            formal_employee_codes.clear()
+            for employee_code, result in controlled_results.items():
+                inherited = performance_agg.get(employee_code, {})
+                sales_amount = self._to_float(inherited.get("sales_amount"), 0.0)
+                rate_den = self._to_float(inherited.get("weighted_rate_den"), 0.0)
+                achievement_rate = (
+                    self._to_float(inherited.get("weighted_rate_num"), 0.0) / rate_den
+                    if rate_den > 0
+                    else 0.0
+                )
+                perf = (
+                    await self.db.execute(
+                        select(EmployeePerformance).where(
+                            EmployeePerformance.employee_code == employee_code,
+                            EmployeePerformance.year_month == year_month,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if perf is None:
+                    perf = EmployeePerformance(
+                        employee_code=employee_code,
+                        year_month=year_month,
+                        actual_sales=sales_amount,
+                        achievement_rate=achievement_rate,
+                        performance_score=result["performance_score"],
+                        calculation_status=result["calculation_status"],
+                        performance_source_type=result["performance_source_type"],
+                        calculation_details=result["calculation_details"],
+                        calculated_at=datetime.now(timezone.utc),
+                    )
+                    self.db.add(perf)
+                else:
+                    perf.actual_sales = sales_amount
+                    perf.achievement_rate = achievement_rate
+                    perf.performance_score = result["performance_score"]
+                    perf.calculation_status = result["calculation_status"]
+                    perf.performance_source_type = result["performance_source_type"]
+                    perf.calculation_details = result["calculation_details"]
+                    perf.calculated_at = datetime.now(timezone.utc)
+                if result["calculation_status"] == "complete":
+                    formal_employee_codes.add(employee_code)
+                performance_upserts += 1
+
         if commit:
             await self.db.commit()
         return {
@@ -936,5 +1161,9 @@ class HRIncomeCalculationService:
             "performance_upserts": performance_upserts,
             "formal_employee_codes": sorted(formal_employee_codes),
             "commission_allocations": commission_allocations,
-            "source": "employee_shop_assignments + employee_performance_inputs + performance_scores + shop_profit_basis",
+            "source": (
+                "controlled_targets_v1"
+                if controlled_context is not None
+                else "employee_shop_assignments + employee_performance_inputs + performance_scores + shop_profit_basis"
+            ),
         }
