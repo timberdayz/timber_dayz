@@ -396,6 +396,38 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     connection = op.get_bind()
+
+    protected_tables = (
+        "personal_performance_plans",
+        "personal_performance_employee_scopes",
+        "personal_performance_entries",
+    )
+    has_protected_personal_data = any(
+        _has_table(connection, table, "a_class")
+        and bool(
+            connection.execute(
+                sa.text(f"SELECT EXISTS (SELECT 1 FROM a_class.{table})")
+            ).scalar_one()
+        )
+        for table in protected_tables
+    )
+    has_controlled_performance = (
+        "performance_source_type"
+        in _columns(connection, "employee_performance", "c_class")
+        and bool(
+            connection.execute(
+                sa.text(
+                    "SELECT EXISTS (SELECT 1 FROM c_class.employee_performance "
+                    "WHERE performance_source_type = 'controlled_targets_v1')"
+                )
+            ).scalar_one()
+        )
+    )
+    if has_protected_personal_data or has_controlled_performance:
+        raise RuntimeError(
+            "cannot downgrade personal performance target workbench while controlled performance data exists"
+        )
+
     if _has_table(connection, "personal_performance_plans", "a_class"):
         connection.execute(
             sa.text(

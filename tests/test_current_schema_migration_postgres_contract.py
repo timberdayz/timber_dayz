@@ -1400,6 +1400,21 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
                 )
             immutable_mode.rollback()
 
+        blocked_personal_downgrade = run_alembic("downgrade", previous_revision)
+        assert blocked_personal_downgrade.returncode != 0
+        assert "cannot downgrade personal performance target workbench" in blocked_personal_downgrade.stderr
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                ).scalar_one()
+                == personal_revision
+            )
+
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM a_class.personal_performance_plans"))
+
         personal_downgrade = run_alembic("downgrade", previous_revision)
         assert personal_downgrade.returncode == 0, personal_downgrade.stderr
 
