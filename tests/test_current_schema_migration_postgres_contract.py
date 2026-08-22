@@ -1415,6 +1415,42 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
         with engine.begin() as connection:
             connection.execute(text("DELETE FROM a_class.personal_performance_plans"))
 
+            connection.execute(
+                text(
+                    "INSERT INTO c_class.employee_performance "
+                    "(employee_code, year_month, actual_sales, achievement_rate, "
+                    "performance_score, calculated_at, calculation_status, "
+                    "performance_source_type) VALUES "
+                    "('CONTROLLED-DOWNGRADE', '2026-10', 0, 0, 0, now(), "
+                    "'complete', 'controlled_targets_v1')"
+                )
+            )
+
+        blocked_controlled_result_downgrade = run_alembic(
+            "downgrade", previous_revision
+        )
+        assert blocked_controlled_result_downgrade.returncode != 0
+        assert (
+            "cannot downgrade personal performance target workbench"
+            in blocked_controlled_result_downgrade.stderr
+        )
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                ).scalar_one()
+                == personal_revision
+            )
+
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "DELETE FROM c_class.employee_performance "
+                    "WHERE employee_code = 'CONTROLLED-DOWNGRADE'"
+                )
+            )
+
         personal_downgrade = run_alembic("downgrade", previous_revision)
         assert personal_downgrade.returncode == 0, personal_downgrade.stderr
 
