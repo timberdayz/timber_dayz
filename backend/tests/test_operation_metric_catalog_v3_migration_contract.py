@@ -16,6 +16,10 @@ def test_operation_catalog_v3_is_an_independent_reversible_current_migration():
     assert "def downgrade()" in source
     assert "DELETE FROM a_class.operation_metric_catalog" in source
     assert "catalog_version = 3" in source
+    assert "operation_performance_shop_scopes" in source
+    assert "target_breakdown" in source
+    assert "RAISE EXCEPTION" in source
+    assert "cannot downgrade operation metric catalog V3" in source
 
 
 def test_operation_catalog_v3_contains_only_the_store_metrics():

@@ -852,6 +852,28 @@ class OperationPerformanceWorkbenchService:
     ) -> dict[str, Any]:
         month_start, month_end = self.month_range(request.year_month)
         await self._lock_month_mutation(request.year_month)
+        existing = await self._targets(request.year_month)
+        scope_rows = await self._scope_rows(request.year_month)
+        if any(
+            getattr(row, "confirmed_at", None) is not None
+            or getattr(row, "snapshot_version", None) == 1
+            for row in scope_rows
+        ):
+            raise ValueError(
+                "confirmed operation scope cannot have its rules rewritten"
+            )
+        existing_catalog_versions = {
+            int(row.metric_catalog_version)
+            for row in existing
+            if getattr(row, "metric_catalog_version", None) is not None
+        }
+        if existing_catalog_versions and (
+            len(existing_catalog_versions) != 1
+            or request.catalog_version not in existing_catalog_versions
+        ):
+            raise ValueError(
+                "controlled operation targets must use one catalog version matching the request"
+            )
         catalog = await self._catalog(request.catalog_version)
         catalog_by_code = {item.metric_code: item for item in catalog}
         config = await self._config(request.year_month)
@@ -896,7 +918,6 @@ class OperationPerformanceWorkbenchService:
             ]
         )
 
-        existing = await self._targets(request.year_month)
         existing_by_code = {row.metric_code: row for row in existing if row.metric_code}
         if request.expected_updated_at is not None:
             current = max(

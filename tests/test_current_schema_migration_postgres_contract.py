@@ -1555,6 +1555,75 @@ def test_operation_metric_catalog_v3_round_trips_without_changing_v2_catalog():
                     "AND metric_code = 'training_completion_rate'"
                 )
             ).scalar_one() == 1
+
+        v3_reupgrade = run_alembic("upgrade", v3_revision)
+        assert v3_reupgrade.returncode == 0, v3_reupgrade.stderr
+
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO core.dim_platforms (platform_code, name, is_active) "
+                    "VALUES ('v3_test', 'V3 test', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO core.dim_shops "
+                    "(platform_code, shop_id, shop_name, is_active) "
+                    "VALUES ('v3_test', 'S001', 'V3 test shop', true)"
+                )
+            )
+            target_id = connection.execute(
+                text(
+                    """
+                    INSERT INTO a_class.sales_targets
+                        (target_name, target_type, scope_type, period_start, period_end,
+                         metric_code, metric_name, metric_direction, metric_catalog_version,
+                         scoring_model_version, operation_rule_snapshot)
+                    VALUES
+                        ('V3 rule', 'operation', 'shop', '2026-08-01', '2026-08-31',
+                         'customer_satisfaction', 'Customer satisfaction', 'higher_better', 3,
+                         'auto_integer_v1', '{}'::jsonb)
+                    RETURNING id
+                    """
+                )
+            ).scalar_one()
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO a_class.operation_performance_shop_scopes
+                        (year_month, platform_code, shop_id, is_included, snapshot_version,
+                         confirmed_at)
+                    VALUES ('2026-08', 'v3_test', 'S001', true, 1, now())
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO a_class.target_breakdown
+                        (target_id, breakdown_type, platform_code, shop_id, period_start,
+                         period_end, target_amount, target_quantity, achieved_amount,
+                         achieved_quantity, achievement_rate, operation_contract_version,
+                         operation_input_payload)
+                    VALUES
+                        (:target_id, 'shop', 'v3_test', 'S001', '2026-08-01',
+                         '2026-08-31', 0, 0, 0, 0, 0, 3, '{}'::jsonb)
+                    """
+                ),
+                {"target_id": target_id},
+            )
+
+        blocked_downgrade = run_alembic("downgrade", personal_revision)
+        assert blocked_downgrade.returncode != 0
+        assert "cannot downgrade operation metric catalog V3" in blocked_downgrade.stderr
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                ).scalar_one()
+                == v3_revision
+            )
     finally:
         engine.dispose()
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)

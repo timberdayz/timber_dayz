@@ -82,7 +82,36 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.get_bind().execute(
+    connection = op.get_bind()
+    connection.execute(
+        sa.text(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM a_class.sales_targets
+                    WHERE target_type = 'operation'
+                      AND metric_catalog_version = 3
+                ) OR EXISTS (
+                    SELECT 1
+                    FROM a_class.target_breakdown
+                    WHERE operation_contract_version = 3
+                ) OR EXISTS (
+                    SELECT 1
+                    FROM a_class.operation_performance_shop_scopes AS scope
+                    JOIN a_class.sales_targets AS target
+                      ON target.target_type = 'operation'
+                     AND target.metric_catalog_version = 3
+                     AND to_char(target.period_start, 'YYYY-MM') = scope.year_month
+                ) THEN
+                    RAISE EXCEPTION 'cannot downgrade operation metric catalog V3 while rules, scopes, or entries reference it';
+                END IF;
+            END $$;
+            """
+        )
+    )
+    connection.execute(
         sa.text(
             "DELETE FROM a_class.operation_metric_catalog "
             "WHERE catalog_version = 3"
