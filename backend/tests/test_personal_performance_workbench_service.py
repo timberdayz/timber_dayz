@@ -193,6 +193,31 @@ def test_scope_candidate_blocks_employee_without_eligible_store_basis():
     assert candidate["blocking_reasons"]
 
 
+@pytest.mark.asyncio
+async def test_scope_assignment_query_requires_an_enabled_operating_store():
+    captured = []
+
+    class EmptyRows:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    async def execute(statement):
+        captured.append(statement)
+        return EmptyRows()
+
+    await PersonalPerformanceWorkbenchService(
+        SimpleNamespace(execute=AsyncMock(side_effect=execute))
+    )._assignments("2026-08")
+
+    rendered = str(captured[0])
+    assert "shop_accounts" in rendered
+    assert "enabled" in rendered
+    assert "business_role" in rendered
+
+
 def test_entry_payload_rejects_wrong_fields_and_normalizes_special_task_note():
     percentage = {"input_kind": "percentage"}
     with pytest.raises(ValueError, match="百分比"):

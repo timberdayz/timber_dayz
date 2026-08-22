@@ -22,6 +22,20 @@ def test_controlled_month_readiness_rejects_partial_participant():
         )
 
 
+def test_controlled_month_readiness_rejects_legacy_result_for_included_scope():
+    with pytest.raises(ValueError, match="controlled target"):
+        PerformanceReadinessService.assert_controlled_employee_rows_ready(
+            [SimpleNamespace(employee_code="EMP001", is_included=True)],
+            {
+                "EMP001": SimpleNamespace(
+                    calculation_status="complete",
+                    performance_score=90,
+                    performance_source_type="shop_inherited",
+                )
+            },
+        )
+
+
 @pytest.mark.asyncio
 async def test_controlled_month_readiness_rejects_unconfirmed_scope():
     class Result:

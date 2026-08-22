@@ -4,7 +4,7 @@ from calendar import monthrange
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.payroll_period_lock_service import PayrollPeriodLockService
@@ -24,6 +24,7 @@ from modules.core.db import (
     PersonalPerformancePlan,
     Position,
     SalesTarget,
+    ShopAccount,
     TargetBreakdown,
 )
 
@@ -294,7 +295,30 @@ class PersonalPerformanceWorkbenchService:
         )).all()
 
     async def _assignments(self, year_month: str) -> dict[str, list[Any]]:
-        rows = (await self.db.execute(select(EmployeeShopAssignment).where(EmployeeShopAssignment.year_month == year_month, EmployeeShopAssignment.status == "active"))).scalars().all()
+        rows = (
+            await self.db.execute(
+                select(EmployeeShopAssignment)
+                .join(
+                    ShopAccount,
+                    and_(
+                        func.lower(ShopAccount.platform)
+                        == func.lower(EmployeeShopAssignment.platform_code),
+                        ShopAccount.enabled.is_(True),
+                        ShopAccount.business_role == "operating_store",
+                        or_(
+                            ShopAccount.platform_shop_id
+                            == EmployeeShopAssignment.shop_id,
+                            ShopAccount.shop_account_id
+                            == EmployeeShopAssignment.shop_id,
+                        ),
+                    ),
+                )
+                .where(
+                    EmployeeShopAssignment.year_month == year_month,
+                    EmployeeShopAssignment.status == "active",
+                )
+            )
+        ).scalars().all()
         result: dict[str, list[Any]] = {}
         for row in rows:
             result.setdefault(str(row.employee_code).strip(), []).append(row)

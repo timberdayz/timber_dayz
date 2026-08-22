@@ -59,6 +59,21 @@ class PerformanceReadinessService:
             for scope in scopes
             if bool(getattr(scope, "is_included", False))
         }
+        non_controlled = [
+            employee_code
+            for employee_code in sorted(included_codes)
+            if (
+                rows_by_employee.get(employee_code) is not None
+                and getattr(
+                    rows_by_employee[employee_code], "performance_source_type", None
+                )
+                not in {None, "controlled_targets_v1"}
+            )
+        ]
+        if non_controlled:
+            raise PerformanceReadinessError(
+                "controlled target result required: " + ", ".join(non_controlled)
+            )
         cls.assert_employee_rows_ready(included_codes, rows_by_employee)
 
     @staticmethod
