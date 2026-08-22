@@ -163,3 +163,46 @@ def test_calculate_month_persists_controlled_final_score_for_confirmed_scope():
     assert controlled.performance_score == 82.0
     assert controlled.calculation_status == "complete"
     assert result["formal_employee_codes"] == ["EMP001"]
+
+
+def test_controlled_plan_without_confirmed_scope_clears_commission_and_stays_pending():
+    added = []
+    plan = SimpleNamespace(
+        id=1,
+        calculation_mode="controlled_targets_v1",
+        scope_confirmed_at=None,
+        rule_snapshot={"metrics": [{"metric_code": "attendance"}]},
+    )
+    assignment = SimpleNamespace(
+        employee_code="EMP001",
+        platform_code="shopee",
+        shop_id="A",
+        commission_ratio=0.5,
+        status="active",
+        year_month="2026-08",
+    )
+
+    async def execute(statement, _params=None):
+        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        rows_by_entity = {
+            PersonalPerformancePlan: _Result(scalar=plan),
+            PersonalPerformanceEmployeeScope: _Result(rows=[]),
+            PersonalPerformanceAssignmentSnapshot: _Result(rows=[]),
+            PersonalPerformanceEntry: _Result(rows=[]),
+            PerformanceScore: _Result(rows=[]),
+            EmployeeShopAssignment: _Result(rows=[assignment]),
+            EmployeePerformanceInput: _Result(rows=[]),
+            SalaryStructure: _Result(rows=[]),
+            EmployeePerformance: _Result(scalar=None),
+        }
+        return rows_by_entity.get(entity, _Result(rows=[]))
+
+    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    result = asyncio.run(HRIncomeCalculationService(db).calculate_month("2026-08"))
+
+    pending = next(row for row in added if isinstance(row, EmployeePerformance) and row.performance_source_type == "controlled_targets_v1")
+    assert pending.calculation_status == "pending_scope"
+    assert pending.performance_score is None
+    assert not any(row.__class__.__name__ == "EmployeeCommission" for row in added)
+    assert result["formal_employee_codes"] == []
+    assert result["commission_allocations"] == []

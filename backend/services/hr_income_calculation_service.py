@@ -182,7 +182,7 @@ class HRIncomeCalculationService:
         blocked = {
             employee_code
             for employee_code, result in results.items()
-            if result.get("calculation_status") == "partial"
+            if result.get("calculation_status") in {"partial", "pending_scope"}
         }
         return set(results) - blocked, blocked
 
@@ -980,15 +980,30 @@ class HRIncomeCalculationService:
         formal_employee_codes: set[str] = set()
         controlled_results: dict[str, dict[str, Any]] = {}
         blocked_commission_codes: set[str] = set()
-        if controlled_context is not None and controlled_context["scope_confirmed"]:
-            controlled_results = self.build_controlled_personal_results(
-                scopes=controlled_context["scopes"],
-                assignments_by_employee=controlled_context["assignments_by_employee"],
-                metrics=controlled_context["metrics"],
-                entry_scores_by_employee=controlled_context["entry_scores_by_employee"],
-                entry_details_by_employee=controlled_context["entry_details_by_employee"],
-                shop_scores=controlled_context["shop_scores"],
-            )
+        if controlled_context is not None:
+            if controlled_context["scope_confirmed"]:
+                controlled_results = self.build_controlled_personal_results(
+                    scopes=controlled_context["scopes"],
+                    assignments_by_employee=controlled_context["assignments_by_employee"],
+                    metrics=controlled_context["metrics"],
+                    entry_scores_by_employee=controlled_context["entry_scores_by_employee"],
+                    entry_details_by_employee=controlled_context["entry_details_by_employee"],
+                    shop_scores=controlled_context["shop_scores"],
+                )
+            else:
+                controlled_results = {
+                    employee_code: {
+                        "performance_score": None,
+                        "calculation_status": "pending_scope",
+                        "performance_source_type": "controlled_targets_v1",
+                        "calculation_details": {
+                            "source": "controlled_targets_v1",
+                            "status": "pending_scope",
+                            "message": "personal performance scope is not confirmed",
+                        },
+                    }
+                    for employee_code in assigned_codes
+                }
             _, blocked_commission_codes = self.partition_controlled_commission_codes(
                 controlled_results
             )
