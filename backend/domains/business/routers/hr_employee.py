@@ -36,6 +36,51 @@ router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
 # 员工管理API
 # ============================================================================
 
+def _audit_performance_inputs(
+    *, legacy_rows: list[Any], employee_performance: Any | None
+) -> list[dict[str, Any]]:
+    if getattr(employee_performance, "performance_source_type", None) == "controlled_targets_v1":
+        details = getattr(employee_performance, "calculation_details", None) or {}
+        entries = details.get("personal_target_entries", []) if isinstance(details, dict) else []
+        result = []
+        for entry in entries:
+            payload = dict(entry.get("input_payload") or {})
+            actual = payload.get("actual_value")
+            result.append(
+                {
+                    "metric_code": entry.get("metric_code"),
+                    "metric_name": entry.get("metric_name"),
+                    "metric_direction": entry.get("metric_direction"),
+                    "target_value": float(entry["target_value"]) if entry.get("target_value") is not None else None,
+                    "achieved_value": float(actual) if actual is not None else None,
+                    "max_score": float(entry["max_score"]) if entry.get("max_score") is not None else None,
+                    "manual_score_enabled": False,
+                    "manual_score_value": None,
+                    "auto_score": float(entry["auto_score"]) if entry.get("auto_score") is not None else None,
+                    "completion_status": entry.get("completion_status"),
+                    "input_payload": payload,
+                    "source": "controlled_targets_v1",
+                    "reason": entry.get("formula"),
+                }
+            )
+        return result
+    return [
+        {
+            "metric_code": row.metric_code,
+            "metric_name": row.metric_name,
+            "metric_direction": row.metric_direction,
+            "target_value": float(row.target_value or 0),
+            "achieved_value": float(row.achieved_value or 0),
+            "max_score": float(row.max_score or 0),
+            "manual_score_enabled": bool(row.manual_score_enabled),
+            "manual_score_value": float(row.manual_score_value) if row.manual_score_value is not None else None,
+            "source": row.source,
+            "reason": row.reason,
+        }
+        for row in legacy_rows
+    ]
+
+
 def _display_employee_performance(employee_performance: Any) -> dict[str, Any]:
     details = getattr(employee_performance, "calculation_details", None) or {}
     display_details = dict(details) if isinstance(details, dict) else {}
@@ -445,21 +490,10 @@ async def _build_employee_income_audit(
             "settlement_status": getattr(settlement, "status", None) if settlement else None,
             "my_income_projection": my_income_like,
             "shop_assignments": shop_rows,
-            "performance_inputs": [
-                {
-                    "metric_code": row.metric_code,
-                    "metric_name": row.metric_name,
-                    "metric_direction": row.metric_direction,
-                    "target_value": float(row.target_value or 0),
-                    "achieved_value": float(row.achieved_value or 0),
-                    "max_score": float(row.max_score or 0),
-                    "manual_score_enabled": bool(row.manual_score_enabled),
-                    "manual_score_value": float(row.manual_score_value) if row.manual_score_value is not None else None,
-                    "source": row.source,
-                    "reason": row.reason,
-                }
-                for row in perf_inputs
-            ],
+            "performance_inputs": _audit_performance_inputs(
+                legacy_rows=perf_inputs,
+                employee_performance=employee_performance,
+            ),
             "performance_adjustments": [
                 {
                     "adjustment_type": row.adjustment_type,

@@ -71,11 +71,13 @@ class HRIncomeCalculationService:
         assignments_by_employee: dict[str, list[Any]],
         metrics: list[dict[str, Any]],
         entry_scores_by_employee: dict[str, dict[str, int | None]],
+        entry_details_by_employee: dict[str, dict[str, dict[str, Any]]] | None = None,
         shop_scores: dict[str, float],
     ) -> dict[str, dict[str, Any]]:
         """Return final personal rows from confirmed controlled-workbench snapshots."""
         metric_codes = [str(metric["metric_code"]) for metric in metrics]
         results: dict[str, dict[str, Any]] = {}
+        entry_details_by_employee = entry_details_by_employee or {}
         for scope in scopes:
             employee_code = str(cls._field(scope, "employee_code", "")).strip()
             if not employee_code:
@@ -110,6 +112,26 @@ class HRIncomeCalculationService:
                 weighted_score_numerator += cls._to_float(score) * target
 
             entry_scores = entry_scores_by_employee.get(employee_code, {})
+            entry_details = entry_details_by_employee.get(employee_code, {})
+            personal_target_entries = [
+                {
+                    "metric_code": metric_code,
+                    "metric_name": metric.get("metric_name"),
+                    "metric_direction": metric.get("metric_direction"),
+                    "target_value": metric.get("default_target_value"),
+                    "input_payload": dict(
+                        (entry_details.get(metric_code) or {}).get("input_payload") or {}
+                    ),
+                    "max_score": metric.get("max_score"),
+                    "auto_score": entry_scores.get(metric_code),
+                    "formula": metric.get("guidance"),
+                    "completion_status": (entry_details.get(metric_code) or {}).get(
+                        "completion_status",
+                        "completed" if entry_scores.get(metric_code) is not None else "pending",
+                    ),
+                }
+                for metric, metric_code in zip(metrics, metric_codes)
+            ]
             missing_metrics = [
                 metric_code
                 for metric_code in metric_codes
@@ -125,6 +147,7 @@ class HRIncomeCalculationService:
                         "status": "partial",
                         "missing_shop_scores": missing_shops,
                         "missing_personal_metrics": missing_metrics,
+                        "personal_target_entries": personal_target_entries,
                     },
                 }
                 continue
@@ -145,6 +168,7 @@ class HRIncomeCalculationService:
                     "personal_metric_scores": {
                         code: int(entry_scores[code]) for code in metric_codes
                     },
+                    "personal_target_entries": personal_target_entries,
                     "final_score": final_score,
                 },
             }
@@ -263,12 +287,19 @@ class HRIncomeCalculationService:
             )
         ).scalars().all() if scope_by_id else []
         entry_scores_by_employee: dict[str, dict[str, int | None]] = {}
+        entry_details_by_employee: dict[str, dict[str, dict[str, Any]]] = {}
         for entry in entries:
             scope = scope_by_id.get(entry.scope_id)
             if scope is not None:
                 entry_scores_by_employee.setdefault(scope.employee_code, {})[
                     entry.metric_code
                 ] = entry.auto_score
+                entry_details_by_employee.setdefault(scope.employee_code, {})[
+                    entry.metric_code
+                ] = {
+                    "input_payload": getattr(entry, "input_payload", None) or {},
+                    "completion_status": getattr(entry, "completion_status", None),
+                }
 
         score_rows = (
             await self.db.execute(
@@ -288,6 +319,7 @@ class HRIncomeCalculationService:
             "assignments_by_employee": assignments_by_employee,
             "metrics": list((getattr(plan, "rule_snapshot", {}) or {}).get("metrics", [])),
             "entry_scores_by_employee": entry_scores_by_employee,
+            "entry_details_by_employee": entry_details_by_employee,
             "shop_scores": shop_scores,
         }
 
@@ -954,6 +986,7 @@ class HRIncomeCalculationService:
                 assignments_by_employee=controlled_context["assignments_by_employee"],
                 metrics=controlled_context["metrics"],
                 entry_scores_by_employee=controlled_context["entry_scores_by_employee"],
+                entry_details_by_employee=controlled_context["entry_details_by_employee"],
                 shop_scores=controlled_context["shop_scores"],
             )
             _, blocked_commission_codes = self.partition_controlled_commission_codes(

@@ -77,6 +77,47 @@ def test_controlled_personal_score_marks_missing_entry_partial_and_excluded_not_
     assert results["OUT"]["performance_score"] is None
 
 
+def test_controlled_personal_result_snapshots_auditable_personal_entries():
+    results = HRIncomeCalculationService.build_controlled_personal_results(
+        scopes=[{"employee_code": "EMP001", "is_included": True}],
+        assignments_by_employee={
+            "EMP001": [{"platform_code": "shopee", "shop_id": "A", "sales_target_amount_snapshot": 100}]
+        },
+        metrics=[
+            {
+                "metric_code": "attendance",
+                "metric_name": "Attendance rate",
+                "default_target_value": 100,
+                "max_score": 20,
+                "guidance": "actual / target",
+            }
+        ],
+        entry_scores_by_employee={"EMP001": {"attendance": 18}},
+        entry_details_by_employee={
+            "EMP001": {
+                "attendance": {
+                    "input_payload": {"actual_value": 90},
+                    "completion_status": "completed",
+                }
+            }
+        },
+        shop_scores={"shopee|a": 80},
+    )
+
+    entry = results["EMP001"]["calculation_details"]["personal_target_entries"][0]
+    assert entry == {
+        "metric_code": "attendance",
+        "metric_name": "Attendance rate",
+        "metric_direction": None,
+        "target_value": 100,
+        "input_payload": {"actual_value": 90},
+        "max_score": 20,
+        "auto_score": 18,
+        "formula": "actual / target",
+        "completion_status": "completed",
+    }
+
+
 def test_calculate_month_persists_controlled_final_score_for_confirmed_scope():
     added = []
     plan = SimpleNamespace(
