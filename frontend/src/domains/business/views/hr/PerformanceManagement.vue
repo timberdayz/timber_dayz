@@ -149,7 +149,10 @@
         <el-table-column v-if="filters.groupBy === 'person'" label="店铺汇总达成率" width="140" align="right">
           <template #default="{ row }">{{ formatPercent(row.sales_rate) }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'person'" label="个人运营加减分(人工)" width="160" align="right">
+        <el-table-column v-if="filters.groupBy === 'person' && isControlledPersonalMonth" label="店铺继承基础分" width="140" align="right"><template #default="{ row }">{{ formatPerformanceScore(row.calculation_details?.store_base_score) }}</template></el-table-column>
+        <el-table-column v-if="filters.groupBy === 'person' && isControlledPersonalMonth" label="店铺 80 分贡献" width="140" align="right"><template #default="{ row }">{{ formatPerformanceScore(row.calculation_details?.store_weighted_contribution) }}</template></el-table-column>
+        <el-table-column v-if="filters.groupBy === 'person' && isControlledPersonalMonth" label="个人运营目标分" width="140" align="right"><template #default="{ row }">{{ formatPerformanceScore(row.calculation_details?.personal_target_score) }}</template></el-table-column>
+        <el-table-column v-if="filters.groupBy === 'person' && !isControlledPersonalMonth" label="个人运营加减分(人工)" width="160" align="right">
           <template #default="{ row }">
             <el-tag v-if="row.personal_adjustment_total != null" :type="Number(row.personal_adjustment_total || 0) >= 0 ? 'success' : 'danger'" size="small">
               {{ Number(row.personal_adjustment_total || 0) > 0 ? '+' : '' }}{{ Number(row.personal_adjustment_total || 0).toFixed(1) }}
@@ -217,14 +220,14 @@
     <!-- 绩效详情 -->
 
 
-    <el-card v-if="hasPermission('performance:config') && filters.groupBy === 'person'" style="margin-top: 20px;">
+    <el-alert v-if="hasPermission('performance:config') && filters.groupBy === 'person' && isControlledPersonalMonth" type="info" :closable="false" show-icon style="margin-top: 20px;" title="当前月份使用个人运营目标工作台" description="规则、参与员工范围和实绩录入请在“个人运营目标管理”完成；历史个人输入项和人工调整项在受控月份只读。" />
+
+    <el-card v-if="hasPermission('performance:config') && filters.groupBy === 'person' && !isControlledPersonalMonth" style="margin-top: 20px;">
       <template #header>
         <div class="card-header">
           <span>个人绩效输入项</span>
           <div class="card-actions">
             <el-button size="small" @click="loadInputList">刷新</el-button>
-            <el-button size="small" @click="openApplyTemplate">套用默认模板</el-button>
-            <el-button size="small" type="primary" @click="openCreateInput">新增输入项</el-button>
           </div>
         </div>
       </template>
@@ -265,25 +268,18 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="openEditInput(row)">编辑</el-button>
-            <el-button size="small" type="danger" link @click="handleDeleteInput(row)">停用</el-button>
-          </template>
-        </el-table-column>
       </el-table>
       <div v-if="inputList.data.length === 0 && !inputList.loading" class="empty-state small">
         当前月份暂无个人绩效输入项。
       </div>
     </el-card>
 
-    <el-card v-if="hasPermission('performance:config') && filters.groupBy === 'person'" style="margin-top: 20px;">
+    <el-card v-if="hasPermission('performance:config') && filters.groupBy === 'person' && !isControlledPersonalMonth" style="margin-top: 20px;">
       <template #header>
         <div class="card-header">
           <span>个人绩效调整项</span>
           <div class="card-actions">
             <el-button size="small" @click="loadAdjustmentList">刷新</el-button>
-            <el-button size="small" type="primary" @click="openCreateAdjustment">新增调整项</el-button>
           </div>
         </div>
       </template>
@@ -307,12 +303,6 @@
             <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
               {{ row.status === 'active' ? '启用' : '停用' }}
             </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="openEditAdjustment(row)">编辑</el-button>
-            <el-button size="small" type="danger" link @click="handleDeleteAdjustment(row)">停用</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -606,6 +596,8 @@ const alertFilter = ref('all')
 const shopKeyword = ref('')
 const loadError = ref(false)
 const calculating = ref(false)
+const personalWorkbenchMode = ref('legacy_inputs')
+const isControlledPersonalMonth = computed(() => filters.groupBy === 'person' && personalWorkbenchMode.value === 'controlled_targets_v1')
 const periodLockStatus = reactive({
   period: '',
   is_locked: false,
@@ -709,14 +701,18 @@ const adjustmentForm = reactive({
 
 const formulaText = computed(() => {
   if (filters.groupBy === 'person') {
-    return '个人绩效输入项得分 + 个人调整项 + 考勤扣分；无输入项时才回退至店铺汇总绩效'
+    return isControlledPersonalMonth.value
+      ? '店铺继承基础分 × 80% + 个人运营目标得分（0~20）'
+      : '个人绩效输入项得分 + 个人调整项 + 考勤扣分；无输入项时才回退至店铺汇总绩效'
   }
   return `销售满分${weightConfig.sales_max_score} + 毛利满分${weightConfig.profit_max_score} + 运营满分${weightConfig.operation_max_score} = 100 分；重点产品暂不计分`
 })
 
 const currentGroupPolicyText = computed(() => {
   if (filters.groupBy === 'person') {
-    return '人员绩效优先来源于个人绩效输入项；人工调整和考勤扣分继续叠加。若当月未配置个人输入项，系统才回退到挂店店铺绩效聚合。'
+    return isControlledPersonalMonth.value
+      ? '个人绩效以店铺继承基础分为主，按 80 分折算；个人运营目标自动计分，最高贡献 20 分。'
+      : '人员绩效优先来源于个人绩效输入项；人工调整和考勤扣分继续叠加。若当月未配置个人输入项，系统才回退到挂店店铺绩效聚合。'
   }
   return '店铺总分由销售、毛利和运营三项组成；重点产品当前不纳入正式口径。正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
 })
@@ -750,6 +746,10 @@ function formatCell(v) {
   if (v == null || v === '') return '—'
   if (typeof v === 'number') return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return String(v)
+}
+
+function formatPerformanceScore(value) {
+  return value == null || value === '' || Number.isNaN(Number(value)) ? '—' : Number(value).toFixed(1)
 }
 
 // 加载绩效列表
@@ -1022,7 +1022,22 @@ const loadPeriodLockStatus = async () => {
   }
 }
 
+const loadPersonalWorkbenchMode = async () => {
+  if (filters.groupBy !== 'person') {
+    personalWorkbenchMode.value = 'legacy_inputs'
+    return
+  }
+  try {
+    const response = await api.getPersonalPerformanceWorkbench(selectedPeriod())
+    const data = response?.data?.data || response?.data || response || {}
+    personalWorkbenchMode.value = data.calculation_mode || 'legacy_inputs'
+  } catch (_error) {
+    personalWorkbenchMode.value = 'legacy_inputs'
+  }
+}
+
 const handleRefreshAll = async () => {
+  await loadPersonalWorkbenchMode()
   await loadPeriodLockStatus()
   await loadPerformanceList()
   if (filters.groupBy === 'person') {
@@ -1032,6 +1047,7 @@ const handleRefreshAll = async () => {
 }
 
 const handleGroupByChange = async () => {
+  await loadPersonalWorkbenchMode()
   await loadPerformanceList()
   if (filters.groupBy === 'person') {
     await loadInputList()

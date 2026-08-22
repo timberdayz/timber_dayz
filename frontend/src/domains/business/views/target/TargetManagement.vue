@@ -21,22 +21,17 @@
       </el-card>
 
       <el-card shadow="never" class="entry-card">
-        <template #header>个人目标</template>
-        <p class="entry-text">用于员工个人规划层目标维护，不直接参与个人绩效结果计算。</p>
-        <el-button type="primary" @click="go('/target-management/person')">进入个人目标管理</el-button>
+        <template #header>个人运营目标</template>
+        <p class="entry-text">按月启用个人考核项、确认参与员工并录入个人实绩。</p>
+        <el-button type="primary" @click="go('/target-management/person')">进入个人运营目标管理</el-button>
       </el-card>
 
       <el-card shadow="never" class="entry-card">
-        <template #header>运营目标</template>
-        <p class="entry-text">当前仅代表店铺运营目标，服务店铺绩效 `operation_score`。</p>
-        <el-button type="primary" @click="go('/target-management/operation')">进入运营目标管理</el-button>
+        <template #header>店铺绩效目标</template>
+        <p class="entry-text">店铺运营目标服务店铺绩效 `operation_score`。</p>
+        <el-button type="primary" @click="go('/target-management/operation')">进入店铺绩效目标管理</el-button>
       </el-card>
 
-      <el-card shadow="never" class="entry-card">
-        <template #header>人员绩效输入项</template>
-        <p class="entry-text">个人运营、考试、培训等真正参与个人绩效计算的内容，请到人员绩效页维护。</p>
-        <el-button @click="go('/hr-performance-management/person')">进入个人绩效管理</el-button>
-      </el-card>
     </div>
   </div>
 </template>

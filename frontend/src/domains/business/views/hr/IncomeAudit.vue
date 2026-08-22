@@ -58,7 +58,7 @@
         <el-table-column prop="profit_basis_amount" label="利润基数" width="120" align="right">
           <template #default="{ row }">{{ formatMoney(row.profit_basis_amount) }}</template>
         </el-table-column>
-        <el-table-column prop="shop_performance_score" label="店铺绩效分" width="110" align="right" />
+        <el-table-column label="店铺绩效分" width="110" align="right"><template #default="{ row }">{{ formatPerformanceScore(row.shop_performance_score) }}</template></el-table-column>
         <el-table-column prop="shop_performance_coefficient" label="店铺绩效系数" width="120" align="right" />
         <el-table-column prop="shop_performance_status" label="绩效状态" width="100" />
         <el-table-column label="待补维度" min-width="180">
@@ -68,17 +68,24 @@
     </el-card>
 
     <el-card v-if="audit" shadow="never" class="section-card">
-      <template #header>个人绩效输入与结果</template>
+      <template #header>{{ isControlledMonth ? '个人运营目标与结果' : '个人绩效输入与结果' }}</template>
+      <el-alert v-if="isControlledMonth" type="info" :closable="false" show-icon title="当前个人绩效使用受控个人运营目标" description="店铺继承基础分折算为 80 分贡献，个人运营目标自动计分为 0 至 20 分；未显示旧输入项是正常行为。" style="margin-bottom: 16px;" />
       <el-table :data="audit.performance_inputs || []" border stripe>
         <el-table-column prop="metric_name" label="指标" min-width="160" />
         <el-table-column prop="metric_direction" label="方向" width="100" />
         <el-table-column prop="target_value" label="目标值" width="100" align="right" />
-        <el-table-column prop="achieved_value" label="实际值" width="100" align="right" />
-        <el-table-column prop="max_score" label="满分" width="90" align="right" />
+        <el-table-column label="实际值" width="130" align="right"><template #default="{ row }">{{ formatInputValue(row) }}</template></el-table-column>
+        <el-table-column label="满分" width="90" align="right"><template #default="{ row }">{{ formatPerformanceScore(row.max_score) }}</template></el-table-column>
+        <el-table-column v-if="isControlledMonth" label="自动得分" width="100" align="right"><template #default="{ row }">{{ formatPerformanceScore(row.auto_score) }}</template></el-table-column>
+        <el-table-column v-if="isControlledMonth" prop="completion_status" label="完成状态" width="100" />
         <el-table-column prop="source" label="来源" width="120" />
       </el-table>
+      <div v-if="isControlledMonth && !(audit.performance_inputs || []).length" class="empty-explanation">本月尚未录入个人运营目标；个人绩效会保持待完成，不能进入正式收入和工资结算。</div>
       <el-descriptions :column="2" border style="margin-top: 16px;">
-        <el-descriptions-item label="个人绩效分">{{ audit.employee_performance?.performance_score ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item v-if="isControlledMonth" label="店铺基础分">{{ formatPerformanceScore(calculationDetails.store_base_score) }}</el-descriptions-item>
+        <el-descriptions-item v-if="isControlledMonth" label="店铺 80 分贡献">{{ formatPerformanceScore(calculationDetails.store_weighted_contribution) }}</el-descriptions-item>
+        <el-descriptions-item v-if="isControlledMonth" label="个人运营目标得分">{{ formatPerformanceScore(calculationDetails.personal_target_score) }}</el-descriptions-item>
+        <el-descriptions-item label="个人绩效分">{{ formatPerformanceScore(audit.employee_performance?.performance_score) }}</el-descriptions-item>
         <el-descriptions-item label="实际销售额">{{ audit.employee_performance?.actual_sales ?? '—' }}</el-descriptions-item>
       </el-descriptions>
     </el-card>
@@ -98,7 +105,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -114,6 +121,20 @@ function formatMoney(value) {
   if (value == null || value === '') return '—'
   return `¥${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
+
+function formatPerformanceScore(value) {
+  return value == null || value === '' || Number.isNaN(Number(value)) ? '—' : Number(value).toFixed(1)
+}
+
+function formatInputValue(row) {
+  const payload = row?.input_payload || {}
+  if (payload.completed_count != null || payload.required_count != null) return `${payload.completed_count ?? '—'} / ${payload.required_count ?? '—'}`
+  if (payload.result) return payload.result === 'passed' ? '完成' : payload.result === 'partial' ? '部分完成' : '未完成'
+  return row?.achieved_value ?? '—'
+}
+
+const isControlledMonth = computed(() => audit.value?.employee_performance?.performance_source_type === 'controlled_targets_v1')
+const calculationDetails = computed(() => audit.value?.employee_performance?.calculation_details || {})
 
 async function loadEmployees() {
   const response = await api.getHrEmployees({ page: 1, page_size: 500 })
@@ -174,4 +195,5 @@ onMounted(async () => {
   flex-wrap: wrap;
   align-items: center;
 }
+.empty-explanation { margin-top: 12px; color: var(--el-text-color-secondary); }
 </style>

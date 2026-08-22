@@ -394,9 +394,9 @@ const routes = [
   {
     path: '/target-management/person',
     name: 'TargetManagementPerson',
-    component: () => import('@/domains/business/views/target/TargetPersonManagement.vue'),
+    component: () => import('@/domains/business/views/target/TargetPersonalManagement.vue'),
     meta: {
-      title: '个人目标管理',
+      title: '个人运营目标管理',
       icon: 'Aim',
       permission: 'target:read',
       roles: ['admin']
@@ -407,7 +407,7 @@ const routes = [
     name: 'TargetManagementOperation',
     component: () => import('@/domains/business/views/target/TargetOperationWorkbench.vue'),
     meta: {
-      title: '运营目标管理',
+      title: '店铺绩效目标管理',
       icon: 'Aim',
       permission: 'target:read',
       roles: ['admin']

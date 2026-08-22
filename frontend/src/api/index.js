@@ -2071,6 +2071,28 @@ export default {
     return await this._put('/targets/operation-workbench/entries', data)
   },
 
+  async getPersonalPerformanceWorkbench(yearMonth) {
+    return await this._get('/performance/personal-workbench', { params: { year_month: yearMonth } })
+  },
+  async applyPersonalPerformanceWorkbench(data) {
+    return await this._put('/performance/personal-workbench', data)
+  },
+  async getPersonalPerformanceScope(yearMonth) {
+    return await this._get('/performance/personal-workbench/scope', { params: { year_month: yearMonth } })
+  },
+  async applyPersonalPerformanceScope(data) {
+    return await this._put('/performance/personal-workbench/scope', data)
+  },
+  async revokePersonalPerformanceScope(yearMonth, expectedPlanVersion) {
+    return await this._post(`/performance/personal-workbench/scope/revoke?year_month=${encodeURIComponent(yearMonth)}&expected_plan_version=${encodeURIComponent(expectedPlanVersion)}`)
+  },
+  async getPersonalPerformanceEntries(yearMonth) {
+    return await this._get('/performance/personal-workbench/entries', { params: { year_month: yearMonth } })
+  },
+  async applyPersonalPerformanceEntries(data) {
+    return await this._put('/performance/personal-workbench/entries', data)
+  },
+
   // === 绩效查询（只读） ===
   async getHrPerformance(params = {}) {
     return await this._get('/hr/performance', { params })
