@@ -49,6 +49,7 @@ from modules.core.db import (
     EmployeePerformance,
     EmployeePerformanceAdjustment,
     EmployeePerformanceInput,
+    DimUser,
     # [DELETED] v4.19.0: FactOrder 已删除
     FactProductMetric,
     DimShop,
@@ -87,10 +88,149 @@ from backend.services.operation_performance_workbench_service import (
 from backend.services.operation_performance_scoring_service import (
     OperationPerformanceScoringService,
 )
+from backend.services.personal_performance_workbench_service import (
+    PersonalPerformanceWorkbenchConflictError,
+    PersonalPerformanceWorkbenchService,
+)
 from backend.services.performance_readiness_service import PerformanceReadinessError
+from backend.schemas.hr import (
+    PersonalPerformanceEntriesResponse,
+    PersonalPerformanceEntryApplyRequest,
+    PersonalPerformanceScopeApplyRequest,
+    PersonalPerformanceScopeResponse,
+    PersonalPerformanceWorkbenchApplyRequest,
+    PersonalPerformanceWorkbenchResponse,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
+
+
+def _personal_workbench_username(current_user: DimUser) -> str:
+    return str(
+        getattr(current_user, "username", None)
+        or getattr(current_user, "user_id", None)
+        or "system"
+    )
+
+
+async def _run_personal_workbench_mutation(operation):
+    try:
+        return await operation()
+    except (PersonalPerformanceWorkbenchConflictError, PayrollPeriodLockedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse
+)
+async def get_personal_performance_workbench(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(get_current_user),
+):
+    return await PersonalPerformanceWorkbenchService(db).get_workbench(year_month)
+
+
+@router.put(
+    "/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse
+)
+async def apply_personal_performance_workbench(
+    request: PersonalPerformanceWorkbenchApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin),
+):
+    try:
+        return await _run_personal_workbench_mutation(
+            lambda: PersonalPerformanceWorkbenchService(db).apply(
+                request, _personal_workbench_username(current_user)
+            )
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+
+
+@router.get(
+    "/personal-workbench/scope", response_model=PersonalPerformanceScopeResponse
+)
+async def get_personal_performance_workbench_scope(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(get_current_user),
+):
+    return await PersonalPerformanceWorkbenchService(db).get_scope(year_month)
+
+
+@router.put(
+    "/personal-workbench/scope", response_model=PersonalPerformanceScopeResponse
+)
+async def apply_personal_performance_workbench_scope(
+    request: PersonalPerformanceScopeApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin),
+):
+    try:
+        return await _run_personal_workbench_mutation(
+            lambda: PersonalPerformanceWorkbenchService(db).apply_scope(
+                request, _personal_workbench_username(current_user)
+            )
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+
+
+@router.post(
+    "/personal-workbench/scope/revoke", response_model=PersonalPerformanceScopeResponse
+)
+async def revoke_personal_performance_workbench_scope(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    expected_plan_version: int = Query(..., ge=1),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
+):
+    try:
+        return await _run_personal_workbench_mutation(
+            lambda: PersonalPerformanceWorkbenchService(db).revoke_scope(
+                year_month, expected_plan_version
+            )
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+
+
+@router.get(
+    "/personal-workbench/entries", response_model=PersonalPerformanceEntriesResponse
+)
+async def get_personal_performance_workbench_entries(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(get_current_user),
+):
+    return await PersonalPerformanceWorkbenchService(db).get_entries(year_month)
+
+
+@router.put(
+    "/personal-workbench/entries", response_model=PersonalPerformanceEntriesResponse
+)
+async def apply_personal_performance_workbench_entries(
+    request: PersonalPerformanceEntryApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin),
+):
+    try:
+        return await _run_personal_workbench_mutation(
+            lambda: PersonalPerformanceWorkbenchService(db).apply_entries(
+                request, _personal_workbench_username(current_user)
+            )
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
 
 
 async def _load_profit_basis_for_performance(

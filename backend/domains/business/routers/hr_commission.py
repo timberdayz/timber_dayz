@@ -42,6 +42,7 @@ from modules.core.db import (
     EmployeePerformance, EmployeeCommission, ShopCommission,
     EmployeePerformanceAdjustment, EmployeePerformanceInput,
     EmployeeShopAssignment, ShopCommissionConfig, EmployeeTarget, ShopProfitBasis,
+    PersonalPerformancePlan,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-绩效提成"])
@@ -296,6 +297,26 @@ async def _employee_month_lock_conflict(
     return None
 
 
+async def _controlled_personal_target_write_conflict(
+    *, db: AsyncSession, year_month: str
+):
+    """Legacy personal inputs are immutable once the controlled workbench owns a month."""
+    plan = (
+        await db.execute(
+            select(PersonalPerformancePlan).where(
+                PersonalPerformancePlan.year_month == year_month
+            )
+        )
+    ).scalar_one_or_none()
+    if plan is not None and getattr(plan, "calculation_mode", None) == "controlled_targets_v1":
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            "This month uses controlled personal performance targets; legacy inputs are read-only.",
+            status_code=409,
+        )
+    return None
+
+
 async def _create_employee_performance_adjustment(
     *,
     body: EmployeePerformanceAdjustmentCreate,
@@ -307,6 +328,12 @@ async def _create_employee_performance_adjustment(
     ).scalar_one_or_none()
     if not employee:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+
+    controlled_conflict = await _controlled_personal_target_write_conflict(
+        db=db, year_month=body.year_month
+    )
+    if controlled_conflict:
+        return controlled_conflict
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -348,6 +375,12 @@ async def _update_employee_performance_adjustment(
     if not record:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效调整项不存在: {adjustment_id}", status_code=404)
 
+    controlled_conflict = await _controlled_personal_target_write_conflict(
+        db=db, year_month=record.year_month
+    )
+    if controlled_conflict:
+        return controlled_conflict
+
     conflict = await _employee_month_lock_conflict(
         db=db,
         employee_code=record.employee_code,
@@ -381,6 +414,12 @@ async def _delete_employee_performance_adjustment(
     ).scalar_one_or_none()
     if not record:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效调整项不存在: {adjustment_id}", status_code=404)
+
+    controlled_conflict = await _controlled_personal_target_write_conflict(
+        db=db, year_month=record.year_month
+    )
+    if controlled_conflict:
+        return controlled_conflict
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -465,6 +504,12 @@ async def _create_employee_performance_input(
     if not employee:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
 
+    controlled_conflict = await _controlled_personal_target_write_conflict(
+        db=db, year_month=body.year_month
+    )
+    if controlled_conflict:
+        return controlled_conflict
+
     conflict = await _employee_month_lock_conflict(
         db=db,
         employee_code=body.employee_code,
@@ -527,6 +572,12 @@ async def _update_employee_performance_input(
     if not record:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"个人绩效输入项不存在: {input_id}", status_code=404)
 
+    controlled_conflict = await _controlled_personal_target_write_conflict(
+        db=db, year_month=record.year_month
+    )
+    if controlled_conflict:
+        return controlled_conflict
+
     conflict = await _employee_month_lock_conflict(
         db=db,
         employee_code=record.employee_code,
@@ -560,6 +611,12 @@ async def _delete_employee_performance_input(
     ).scalar_one_or_none()
     if not record:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"个人绩效输入项不存在: {input_id}", status_code=404)
+
+    controlled_conflict = await _controlled_personal_target_write_conflict(
+        db=db, year_month=record.year_month
+    )
+    if controlled_conflict:
+        return controlled_conflict
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -632,6 +689,12 @@ async def _apply_employee_performance_template(
     ).scalar_one_or_none()
     if not employee:
         return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+
+    controlled_conflict = await _controlled_personal_target_write_conflict(
+        db=db, year_month=body.year_month
+    )
+    if controlled_conflict:
+        return controlled_conflict
 
     conflict = await _employee_month_lock_conflict(
         db=db,
