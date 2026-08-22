@@ -90,6 +90,9 @@ def test_performance_calculation_rejects_confirmed_payroll_month(monkeypatch):
         def __init__(self, _db):
             pass
 
+        async def acquire_month_transaction_lock(self, **_kwargs):
+            return None
+
         async def get_month_lock_status(self, **_kwargs):
             return {
                 "period": "2025-07",
