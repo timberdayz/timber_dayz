@@ -83,6 +83,12 @@ test('controlled income audit distinguishes partial completion from a non-partic
   assert.equal(getControlledPersonalAuditNotice({ calculation_status: 'complete', calculation_details: { status: 'complete' } }), '')
 })
 
+test('income audit only renders the empty completion warning for a controlled partial result', async () => {
+  const audit = await readFile(new URL('../src/domains/business/views/hr/IncomeAudit.vue', import.meta.url), 'utf8')
+
+  assert.match(audit, /v-if="isPartialControlledMonth && !\(audit\.performance_inputs \|\| \[\]\)\.length"/)
+})
+
 test('personal workbench exposes the three-step UI and the dedicated API methods', async () => {
   const [component, api, management, audit] = await Promise.all([
     readFile(new URL('../src/domains/business/views/target/TargetPersonalManagement.vue', import.meta.url), 'utf8'),

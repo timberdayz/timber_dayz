@@ -81,7 +81,7 @@
         <el-table-column v-if="isControlledMonth" prop="completion_status" label="完成状态" width="100" />
         <el-table-column prop="source" label="来源" width="120" />
       </el-table>
-      <div v-if="isControlledMonth && !(audit.performance_inputs || []).length" class="empty-explanation">本月尚未录入个人运营目标；个人绩效会保持待完成，不能进入正式收入和工资结算。</div>
+      <div v-if="isPartialControlledMonth && !(audit.performance_inputs || []).length" class="empty-explanation">本月尚未录入个人运营目标；个人绩效会保持待完成，不能进入正式收入和工资结算。</div>
       <el-descriptions :column="2" border style="margin-top: 16px;">
         <el-descriptions-item v-if="isControlledMonth" label="店铺基础分">{{ formatPerformanceScore(calculationDetails.store_base_score) }}</el-descriptions-item>
         <el-descriptions-item v-if="isControlledMonth" label="店铺 80 分贡献">{{ formatPerformanceScore(calculationDetails.store_weighted_contribution) }}</el-descriptions-item>
