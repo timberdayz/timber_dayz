@@ -2182,6 +2182,240 @@ class OperationPerformanceShopScope(Base):
     )
 
 
+class PersonalPerformanceMetricCatalog(Base):
+    """Versioned, controlled catalog for personal-performance metrics."""
+
+    __tablename__ = "personal_performance_metric_catalog"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    catalog_version = Column(Integer, nullable=False, default=1)
+    metric_code = Column(String(64), nullable=False)
+    metric_name = Column(String(128), nullable=False)
+    metric_direction = Column(String(32), nullable=False)
+    input_kind = Column(String(32), nullable=False)
+    default_target_value = Column(Float, nullable=True)
+    unit = Column(String(32), nullable=True)
+    sort_key = Column(Integer, nullable=False)
+    guidance = Column(Text, nullable=True)
+    scoring_rule_version = Column(String(32), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "catalog_version",
+            "metric_code",
+            name="uq_personal_performance_metric_catalog_version_code",
+        ),
+        CheckConstraint(
+            "metric_direction IN ('higher_better', 'manual_result')",
+            name="chk_personal_performance_metric_catalog_direction",
+        ),
+        CheckConstraint(
+            "input_kind IN ('percentage', 'training_counts', 'special_task')",
+            name="chk_personal_performance_metric_catalog_input_kind",
+        ),
+        Index(
+            "ix_personal_performance_metric_catalog_active",
+            "is_active",
+            "catalog_version",
+        ),
+        {"schema": "a_class"},
+    )
+
+
+class PersonalPerformancePlan(Base):
+    """Monthly controlled personal-performance rule snapshot."""
+
+    __tablename__ = "personal_performance_plans"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year_month = Column(String(7), nullable=False)
+    calculation_mode = Column(String(32), nullable=False)
+    catalog_version = Column(Integer, nullable=False)
+    scoring_model_version = Column(String(32), nullable=False)
+    rule_snapshot = Column(JSON_COMPAT, nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    scope_confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    scope_confirmed_by = Column(String(64), nullable=True)
+    created_by = Column(String(64), nullable=True)
+    updated_by = Column(String(64), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "year_month", name="uq_personal_performance_plan_month"
+        ),
+        CheckConstraint(
+            "calculation_mode = 'controlled_targets_v1'",
+            name="chk_personal_performance_plan_controlled_mode",
+        ),
+        Index("ix_personal_performance_plan_month", "year_month"),
+        {"schema": "a_class"},
+    )
+
+
+class PersonalPerformanceEmployeeScope(Base):
+    """Monthly employee participation and identity snapshot."""
+
+    __tablename__ = "personal_performance_employee_scopes"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    plan_id = Column(
+        BigInteger,
+        ForeignKey("a_class.personal_performance_plans.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    employee_code = Column(String(64), nullable=False)
+    employee_name_snapshot = Column(String(128), nullable=False)
+    department_name_snapshot = Column(String(128), nullable=True)
+    position_name_snapshot = Column(String(128), nullable=True)
+    is_included = Column(Boolean, nullable=False, default=True)
+    exclusion_note = Column(String(512), nullable=True)
+    snapshot_version = Column(Integer, nullable=False, default=1)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    confirmed_by = Column(String(64), nullable=True)
+    created_by = Column(String(64), nullable=True)
+    updated_by = Column(String(64), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id",
+            "employee_code",
+            name="uq_personal_performance_scope_plan_employee",
+        ),
+        Index(
+            "ix_personal_performance_scope_plan_included", "plan_id", "is_included"
+        ),
+        {"schema": "a_class"},
+    )
+
+
+class PersonalPerformanceAssignmentSnapshot(Base):
+    """Frozen employee-store assignment and target weight for a scope row."""
+
+    __tablename__ = "personal_performance_assignment_snapshots"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    scope_id = Column(
+        BigInteger,
+        ForeignKey(
+            "a_class.personal_performance_employee_scopes.id", ondelete="CASCADE"
+        ),
+        nullable=False,
+    )
+    source_assignment_id = Column(BigInteger, nullable=True)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(256), nullable=False)
+    assignment_ratio_snapshot = Column(Float, nullable=False)
+    role_snapshot = Column(String(32), nullable=True)
+    sales_target_breakdown_id_snapshot = Column(Integer, nullable=False)
+    sales_target_amount_snapshot = Column(Float, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            name="fk_personal_performance_assignment_snapshot_shop",
+        ),
+        UniqueConstraint(
+            "scope_id",
+            "platform_code",
+            "shop_id",
+            name="uq_personal_performance_assignment_snapshot_scope_shop",
+        ),
+        CheckConstraint(
+            "assignment_ratio_snapshot >= 0",
+            name="chk_personal_performance_assignment_snapshot_ratio",
+        ),
+        CheckConstraint(
+            "sales_target_amount_snapshot > 0",
+            name="chk_personal_performance_assignment_snapshot_positive_target",
+        ),
+        Index("ix_personal_performance_assignment_snapshot_scope", "scope_id"),
+        {"schema": "a_class"},
+    )
+
+
+class PersonalPerformanceEntry(Base):
+    """Structured personal metric input and calculated-score snapshot."""
+
+    __tablename__ = "personal_performance_entries"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    scope_id = Column(
+        BigInteger,
+        ForeignKey(
+            "a_class.personal_performance_employee_scopes.id", ondelete="CASCADE"
+        ),
+        nullable=False,
+    )
+    metric_code = Column(String(64), nullable=False)
+    input_payload = Column(JSON_COMPAT, nullable=False)
+    metric_snapshot = Column(JSON_COMPAT, nullable=False)
+    auto_score = Column(Integer, nullable=True)
+    completion_status = Column(String(32), nullable=False, default="pending")
+    created_by = Column(String(64), nullable=True)
+    updated_by = Column(String(64), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "scope_id",
+            "metric_code",
+            name="uq_personal_performance_entry_scope_metric",
+        ),
+        CheckConstraint(
+            "auto_score IS NULL OR (auto_score >= 0 AND auto_score <= 20)",
+            name="chk_personal_performance_entry_auto_score",
+        ),
+        Index("ix_personal_performance_entry_scope", "scope_id"),
+        {"schema": "a_class"},
+    )
+
+
 class ShopHealthScore(Base):
     """
     店铺健康度评分表(C类数据:系统自动计算)
@@ -3948,6 +4182,9 @@ class EmployeePerformance(Base):
         String(32), nullable=False, default="historical_unknown"
     )
     performance_source_type = Column(String(32), nullable=False, default="historical")
+    calculation_details = Column(
+        JSON_COMPAT, nullable=True, comment="Personal performance calculation audit"
+    )
     calculated_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )  # 迁移时将重命名为"计算时间"
