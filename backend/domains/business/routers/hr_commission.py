@@ -12,7 +12,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from backend.models.database import get_async_db
-from backend.dependencies.auth import get_current_user
+from backend.dependencies.auth import get_current_user, require_admin
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
@@ -300,7 +300,10 @@ async def _employee_month_lock_conflict(
 async def _controlled_personal_target_write_conflict(
     *, db: AsyncSession, year_month: str
 ):
-    """Legacy personal inputs are immutable once the controlled workbench owns a month."""
+    """Retire legacy personal writes under the workbench month lock."""
+    await PayrollPeriodLockService(db).acquire_month_transaction_lock(
+        year_month=year_month
+    )
     plan = (
         await db.execute(
             select(PersonalPerformancePlan).where(
@@ -314,7 +317,11 @@ async def _controlled_personal_target_write_conflict(
             "This month uses controlled personal performance targets; legacy inputs are read-only.",
             status_code=409,
         )
-    return None
+    return error_response(
+        ErrorCode.PARAMETER_INVALID,
+        "Legacy personal performance inputs are read-only; use the personal target workbench.",
+        status_code=409,
+    )
 
 
 async def _create_employee_performance_adjustment(
@@ -323,17 +330,17 @@ async def _create_employee_performance_adjustment(
     db: AsyncSession,
     current_user,
 ) -> Dict[str, Any]:
-    employee = (
-        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
-    ).scalar_one_or_none()
-    if not employee:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
-
     controlled_conflict = await _controlled_personal_target_write_conflict(
         db=db, year_month=body.year_month
     )
     if controlled_conflict:
         return controlled_conflict
+
+    employee = (
+        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+    ).scalar_one_or_none()
+    if not employee:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -498,17 +505,17 @@ async def _create_employee_performance_input(
     db: AsyncSession,
     current_user,
 ) -> Dict[str, Any]:
-    employee = (
-        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
-    ).scalar_one_or_none()
-    if not employee:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
-
     controlled_conflict = await _controlled_personal_target_write_conflict(
         db=db, year_month=body.year_month
     )
     if controlled_conflict:
         return controlled_conflict
+
+    employee = (
+        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+    ).scalar_one_or_none()
+    if not employee:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -684,17 +691,17 @@ async def _apply_employee_performance_template(
     db: AsyncSession,
     current_user,
 ) -> Dict[str, Any]:
-    employee = (
-        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
-    ).scalar_one_or_none()
-    if not employee:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
-
     controlled_conflict = await _controlled_personal_target_write_conflict(
         db=db, year_month=body.year_month
     )
     if controlled_conflict:
         return controlled_conflict
+
+    employee = (
+        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+    ).scalar_one_or_none()
+    if not employee:
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -803,7 +810,7 @@ async def list_employee_performance_templates(
 async def apply_employee_performance_template(
     body: EmployeePerformanceTemplateApplyRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _apply_employee_performance_template(
@@ -928,7 +935,7 @@ async def list_employee_performance_adjustments(
 async def create_employee_performance_adjustment(
     body: EmployeePerformanceAdjustmentCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _create_employee_performance_adjustment(
@@ -947,7 +954,7 @@ async def update_employee_performance_adjustment(
     adjustment_id: int,
     body: EmployeePerformanceAdjustmentUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _update_employee_performance_adjustment(
@@ -965,7 +972,7 @@ async def update_employee_performance_adjustment(
 async def delete_employee_performance_adjustment(
     adjustment_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _delete_employee_performance_adjustment(
@@ -1006,7 +1013,7 @@ async def list_employee_performance_inputs(
 async def create_employee_performance_input(
     body: EmployeePerformanceInputCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _create_employee_performance_input(
@@ -1025,7 +1032,7 @@ async def update_employee_performance_input(
     input_id: int,
     body: EmployeePerformanceInputUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _update_employee_performance_input(
@@ -1043,7 +1050,7 @@ async def update_employee_performance_input(
 async def delete_employee_performance_input(
     input_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _delete_employee_performance_input(
@@ -1076,7 +1083,7 @@ async def list_employee_performance_templates(
 async def apply_employee_performance_template(
     body: EmployeePerformanceTemplateApplyRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _apply_employee_performance_template(
@@ -1240,6 +1247,7 @@ async def list_employee_shop_assignments(
 async def create_employee_shop_assignment(
     body: EmployeeShopAssignmentCreate,
     db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
 ):
     """新增归属"""
     try:
@@ -1327,6 +1335,7 @@ async def update_employee_shop_assignment(
     id: int,
     body: EmployeeShopAssignmentUpdate,
     db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
 ):
     """更新归属"""
     try:
@@ -1382,6 +1391,7 @@ async def update_employee_shop_assignment(
 async def delete_employee_shop_assignment(
     id: int,
     db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
 ):
     """删除归属"""
     try:
