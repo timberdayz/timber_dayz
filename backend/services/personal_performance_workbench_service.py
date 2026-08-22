@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from calendar import monthrange
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -12,6 +13,7 @@ from backend.services.personal_performance_scoring_service import (
 )
 from modules.core.db import (
     Employee,
+    Department,
     EmployeePerformanceAdjustment,
     EmployeePerformanceInput,
     EmployeeShopAssignment,
@@ -20,6 +22,7 @@ from modules.core.db import (
     PersonalPerformanceEntry,
     PersonalPerformanceMetricCatalog,
     PersonalPerformancePlan,
+    Position,
     SalesTarget,
     TargetBreakdown,
 )
@@ -34,6 +37,15 @@ class PersonalPerformanceWorkbenchService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _begin_month_mutation(self, year_month: str) -> None:
+        lock = PayrollPeriodLockService(self.db)
+        await lock.acquire_month_transaction_lock(year_month=year_month)
+        await lock.assert_month_mutable(year_month=year_month)
+
+    async def _commit_month_mutation(self, year_month: str) -> None:
+        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=year_month)
+        await self.db.commit()
 
     @staticmethod
     def _clean_code(value: str | None) -> str:
@@ -94,6 +106,31 @@ class PersonalPerformanceWorkbenchService:
             valid.append(f"{key[0]}/{key[1]}")
         return valid
 
+    @staticmethod
+    def _employee_snapshot(employee: Any, department: Any | None, position: Any | None) -> dict[str, Any]:
+        return {
+            "employee_code": str(employee.employee_code).strip(),
+            "employee_name": employee.name,
+            "department_name": getattr(department, "department_name", None),
+            "position_name": getattr(position, "position_name", None),
+        }
+
+    @staticmethod
+    def _sales_target_query_parts(year_month: str) -> tuple[list[Any], list[Any]]:
+        year, month = (int(part) for part in year_month.split("-"))
+        start = date(year, month, 1)
+        end = date(year, month, monthrange(year, month)[1])
+        return (
+            [
+                SalesTarget.target_type == "shop",
+                SalesTarget.status == "active",
+                SalesTarget.period_start <= end,
+                SalesTarget.period_end >= start,
+                TargetBreakdown.breakdown_type == "shop",
+            ],
+            [SalesTarget.period_start.desc(), SalesTarget.created_at.desc(), SalesTarget.id.desc(), TargetBreakdown.id.desc()],
+        )
+
     async def _catalog(self, catalog_version: int | None = None) -> list[Any]:
         if catalog_version is None:
             result = await self.db.execute(
@@ -114,9 +151,12 @@ class PersonalPerformanceWorkbenchService:
             .order_by(PersonalPerformanceMetricCatalog.sort_key, PersonalPerformanceMetricCatalog.metric_code)
         )).scalars().all()
 
-    async def _plan(self, year_month: str) -> Any | None:
+    async def _plan(self, year_month: str, *, for_update: bool = False) -> Any | None:
+        statement = select(PersonalPerformancePlan).where(PersonalPerformancePlan.year_month == year_month)
+        if for_update:
+            statement = statement.with_for_update()
         return (await self.db.execute(
-            select(PersonalPerformancePlan).where(PersonalPerformancePlan.year_month == year_month)
+            statement
         )).scalar_one_or_none()
 
     async def _assert_no_legacy_data(self, year_month: str) -> None:
@@ -149,8 +189,8 @@ class PersonalPerformanceWorkbenchService:
         return {"year_month": year_month, "calculation_mode": self.CALCULATION_MODE, "plan_version": plan.version, "scope_confirmed": plan.scope_confirmed_at is not None, "metrics": metrics}
 
     async def apply(self, request: Any, username: str | None = None) -> dict[str, Any]:
-        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=request.year_month)
-        plan = await self._plan(request.year_month)
+        await self._begin_month_mutation(request.year_month)
+        plan = await self._plan(request.year_month, for_update=True)
         if plan is not None:
             self._assert_version(plan, getattr(request, "expected_plan_version", None))
             if plan.scope_confirmed_at is not None:
@@ -181,13 +221,17 @@ class PersonalPerformanceWorkbenchService:
             plan.version += 1
             plan.updated_by = username
             plan.updated_at = now
-        await self.db.commit()
+        await self._commit_month_mutation(request.year_month)
         return await self.get_workbench(request.year_month)
 
     async def _active_employees(self) -> list[Any]:
         return (await self.db.execute(
-            select(Employee).where(Employee.status.in_(("active", "probation"))).order_by(Employee.employee_code)
-        )).scalars().all()
+            select(Employee, Department, Position)
+            .outerjoin(Department, Department.id == Employee.department_id)
+            .outerjoin(Position, Position.id == Employee.position_id)
+            .where(Employee.status.in_(("active", "probation")))
+            .order_by(Employee.employee_code)
+        )).all()
 
     async def _assignments(self, year_month: str) -> dict[str, list[Any]]:
         rows = (await self.db.execute(select(EmployeeShopAssignment).where(EmployeeShopAssignment.year_month == year_month, EmployeeShopAssignment.status == "active"))).scalars().all()
@@ -197,12 +241,17 @@ class PersonalPerformanceWorkbenchService:
         return result
 
     async def _sales_targets(self, year_month: str) -> dict[tuple[str, str], Any]:
+        conditions, ordering = self._sales_target_query_parts(year_month)
         rows = (await self.db.execute(
-            select(TargetBreakdown).join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id).where(
-                SalesTarget.target_type == "shop", SalesTarget.status == "active", TargetBreakdown.breakdown_type == "shop"
-            )
+            select(TargetBreakdown).join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
+            .where(*conditions).order_by(*ordering)
         )).scalars().all()
-        return {(str(row.platform_code).lower(), str(row.shop_id)): row for row in rows if float(getattr(row, "target_amount", 0) or 0) > 0}
+        targets = {}
+        for row in rows:
+            key = (str(row.platform_code).lower(), str(row.shop_id))
+            if key not in targets and float(getattr(row, "target_amount", 0) or 0) > 0:
+                targets[key] = row
+        return targets
 
     async def get_scope(self, year_month: str) -> dict[str, Any]:
         plan = await self._plan(year_month)
@@ -213,23 +262,23 @@ class PersonalPerformanceWorkbenchService:
             return {"year_month": year_month, "plan_version": plan.version, "scope_confirmed": True, "employees": [{"employee_code": row.employee_code, "employee_name": row.employee_name_snapshot, "department_name": row.department_name_snapshot, "position_name": row.position_name_snapshot, "is_included": row.is_included, "exclusion_note": row.exclusion_note, "eligibility_status": "eligible" if row.is_included else "not_participating", "blocking_reasons": []} for row in stored]}
         assignments = await self._assignments(year_month)
         targets = await self._sales_targets(year_month)
-        return {"year_month": year_month, "plan_version": plan.version, "scope_confirmed": False, "employees": [self._candidate_employee(employee, assignments.get(str(employee.employee_code).strip(), []), targets) for employee in await self._active_employees()]}
+        return {"year_month": year_month, "plan_version": plan.version, "scope_confirmed": False, "employees": [self._candidate_employee(employee, department, position, assignments.get(str(employee.employee_code).strip(), []), targets) for employee, department, position in await self._active_employees()]}
 
     @classmethod
-    def _candidate_employee(cls, employee: Any, assignments: list[Any], targets: dict[tuple[str, str], Any]) -> dict[str, Any]:
+    def _candidate_employee(cls, employee: Any, department: Any | None, position: Any | None, assignments: list[Any], targets: dict[tuple[str, str], Any]) -> dict[str, Any]:
         eligible = cls._eligibility(assignments, targets)
         reasons = [] if eligible else ["缺少有效店铺归属、正归属比例或正销售目标"]
-        return {"employee_code": str(employee.employee_code).strip(), "employee_name": employee.name, "department_name": None, "position_name": None, "is_included": bool(eligible), "exclusion_note": None, "eligibility_status": "eligible" if eligible else "blocked", "blocking_reasons": reasons}
+        return {**cls._employee_snapshot(employee, department, position), "is_included": bool(eligible), "exclusion_note": None, "eligibility_status": "eligible" if eligible else "blocked", "blocking_reasons": reasons}
 
     async def apply_scope(self, request: Any, username: str | None = None) -> dict[str, Any]:
-        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=request.year_month)
-        plan = await self._plan(request.year_month)
+        await self._begin_month_mutation(request.year_month)
+        plan = await self._plan(request.year_month, for_update=True)
         if plan is None:
             raise ValueError("请先保存个人运营目标规则")
         self._assert_version(plan, request.expected_plan_version)
         if plan.scope_confirmed_at is not None:
             raise ValueError("本月员工范围已确认，请先撤销范围")
-        employees = {str(row.employee_code).strip(): row for row in await self._active_employees()}
+        employees = {str(employee.employee_code).strip(): (employee, department, position) for employee, department, position in await self._active_employees()}
         requested = {self._clean_code(item.employee_code): item for item in request.employees}
         unknown = set(requested) - set(employees)
         if unknown:
@@ -237,13 +286,14 @@ class PersonalPerformanceWorkbenchService:
         assignments, targets = await self._assignments(request.year_month), await self._sales_targets(request.year_month)
         await self.db.execute(delete(PersonalPerformanceEmployeeScope).where(PersonalPerformanceEmployeeScope.plan_id == plan.id))
         now = datetime.now(timezone.utc)
-        for code, employee in employees.items():
+        for code, (employee, department, position) in employees.items():
             item = requested.get(code)
             included = True if item is None else bool(item.is_included)
             employee_assignments = assignments.get(code, [])
             if included and not self._eligibility(employee_assignments, targets):
                 raise ValueError(f"员工 {code} 缺少有效店铺归属或正销售目标，不能参与正式个人绩效")
-            scope = PersonalPerformanceEmployeeScope(plan_id=plan.id, employee_code=code, employee_name_snapshot=employee.name, is_included=included, exclusion_note=None if included else (str(getattr(item, 'exclusion_note', '') or '').strip() or None), snapshot_version=1, confirmed_at=now, confirmed_by=username, created_by=username, updated_by=username)
+            identity = self._employee_snapshot(employee, department, position)
+            scope = PersonalPerformanceEmployeeScope(plan_id=plan.id, employee_code=code, employee_name_snapshot=identity["employee_name"], department_name_snapshot=identity["department_name"], position_name_snapshot=identity["position_name"], is_included=included, exclusion_note=None if included else (str(getattr(item, 'exclusion_note', '') or '').strip() or None), snapshot_version=1, confirmed_at=now, confirmed_by=username, created_by=username, updated_by=username)
             self.db.add(scope)
             await self.db.flush()
             if included:
@@ -255,7 +305,7 @@ class PersonalPerformanceWorkbenchService:
                     self.db.add(PersonalPerformanceAssignmentSnapshot(scope_id=scope.id, source_assignment_id=assignment.id, platform_code=key[0], shop_id=key[1], assignment_ratio_snapshot=assignment.target_allocation_ratio, role_snapshot=assignment.role, sales_target_breakdown_id_snapshot=target.id, sales_target_amount_snapshot=target.target_amount))
         plan.scope_confirmed_at, plan.scope_confirmed_by = now, username
         plan.version += 1
-        await self.db.commit()
+        await self._commit_month_mutation(request.year_month)
         return await self.get_scope(request.year_month)
 
     async def _scope_rows(self, plan_id: int) -> list[Any]:
@@ -284,8 +334,8 @@ class PersonalPerformanceWorkbenchService:
         return {"year_month": year_month, "scope_confirmed": True, "employees": result, "completion": {"completed": completed, "pending": len(scopes) - completed}}
 
     async def apply_entries(self, request: Any, username: str | None = None) -> dict[str, Any]:
-        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=request.year_month)
-        plan = await self._plan(request.year_month)
+        await self._begin_month_mutation(request.year_month)
+        plan = await self._plan(request.year_month, for_update=True)
         if plan is None or plan.scope_confirmed_at is None:
             raise ValueError("请先确认本月参与员工范围")
         self._assert_version(plan, request.expected_plan_version)
@@ -308,19 +358,20 @@ class PersonalPerformanceWorkbenchService:
                 row = PersonalPerformanceEntry(scope_id=scope.id, metric_code=item.metric_code, created_by=username)
                 self.db.add(row)
             row.input_payload, row.metric_snapshot, row.auto_score, row.completion_status, row.updated_by = payload, metric, score, "completed" if score is not None else "pending", username
-        await self.db.commit()
+        await self._commit_month_mutation(request.year_month)
         return await self.get_entries(request.year_month)
 
-    async def revoke_scope(self, year_month: str) -> dict[str, Any]:
-        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=year_month)
-        plan = await self._plan(year_month)
+    async def revoke_scope(self, year_month: str, expected_plan_version: int) -> dict[str, Any]:
+        await self._begin_month_mutation(year_month)
+        plan = await self._plan(year_month, for_update=True)
         if plan is None:
             raise ValueError("本月没有个人运营目标规则")
+        self._assert_version(plan, expected_plan_version)
         scope_ids = select(PersonalPerformanceEmployeeScope.id).where(PersonalPerformanceEmployeeScope.plan_id == plan.id)
         await self.db.execute(delete(PersonalPerformanceEntry).where(PersonalPerformanceEntry.scope_id.in_(scope_ids)))
         await self.db.execute(delete(PersonalPerformanceAssignmentSnapshot).where(PersonalPerformanceAssignmentSnapshot.scope_id.in_(scope_ids)))
         await self.db.execute(delete(PersonalPerformanceEmployeeScope).where(PersonalPerformanceEmployeeScope.plan_id == plan.id))
         plan.scope_confirmed_at = plan.scope_confirmed_by = None
         plan.version += 1
-        await self.db.commit()
+        await self._commit_month_mutation(year_month)
         return await self.get_scope(year_month)

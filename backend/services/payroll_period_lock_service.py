@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import EmployeeShopAssignment, PayrollRecord
@@ -20,6 +20,13 @@ class PayrollPeriodLockService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def acquire_month_transaction_lock(self, *, year_month: str) -> None:
+        """Serialize monthly performance mutations on PostgreSQL until commit/rollback."""
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"payroll-period:{year_month}"},
+        )
 
     async def _has_locked_payroll(self, statement) -> bool:
         result = await self.db.execute(select(statement.exists()))

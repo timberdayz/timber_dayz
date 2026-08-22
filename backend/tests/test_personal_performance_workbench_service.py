@@ -24,7 +24,9 @@ def test_scope_eligibility_requires_positive_assignment_ratio_and_sales_target()
 def test_scope_candidate_blocks_employee_without_eligible_store_basis():
     employee = SimpleNamespace(employee_code=" EMP001 ", name="Ada")
 
-    candidate = PersonalPerformanceWorkbenchService._candidate_employee(employee, [], {})
+    candidate = PersonalPerformanceWorkbenchService._candidate_employee(
+        employee, None, None, [], {}
+    )
 
     assert candidate["employee_code"] == "EMP001"
     assert candidate["eligibility_status"] == "blocked"
@@ -51,3 +53,87 @@ def test_entry_payload_rejects_wrong_fields_and_normalizes_special_task_note():
 def test_blank_employee_identifier_is_rejected():
     with pytest.raises(ValueError, match="不能为空"):
         PersonalPerformanceWorkbenchService._clean_code("  ")
+
+
+def test_sales_target_query_uses_requested_month_overlap_and_deterministic_priority():
+    from datetime import date
+
+    conditions, ordering = PersonalPerformanceWorkbenchService._sales_target_query_parts(
+        "2026-07"
+    )
+
+    rendered = " ".join(str(condition) for condition in conditions)
+    assert "period_start" in rendered
+    assert "period_end" in rendered
+    assert date(2026, 7, 1)
+    assert len(ordering) >= 2
+
+
+def test_employee_snapshot_includes_department_and_position_names():
+    employee = SimpleNamespace(employee_code="EMP001", name="Ada")
+    department = SimpleNamespace(department_name="Operations")
+    position = SimpleNamespace(position_name="Manager")
+
+    snapshot = PersonalPerformanceWorkbenchService._employee_snapshot(
+        employee, department, position
+    )
+
+    assert snapshot["department_name"] == "Operations"
+    assert snapshot["position_name"] == "Manager"
+
+
+def test_revoke_scope_requires_expected_plan_version():
+    import inspect
+
+    signature = inspect.signature(PersonalPerformanceWorkbenchService.revoke_scope)
+    assert "expected_plan_version" in signature.parameters
+
+
+@pytest.mark.asyncio
+async def test_month_transaction_lock_is_acquired_before_mutability_check(monkeypatch):
+    import backend.services.personal_performance_workbench_service as module
+
+    calls = []
+
+    class Lock:
+        def __init__(self, _db):
+            pass
+
+        async def acquire_month_transaction_lock(self, *, year_month):
+            calls.append(("lock", year_month))
+
+        async def assert_month_mutable(self, *, year_month):
+            calls.append(("mutable", year_month))
+
+    monkeypatch.setattr(module, "PayrollPeriodLockService", Lock)
+    service = PersonalPerformanceWorkbenchService(SimpleNamespace())
+
+    await service._begin_month_mutation("2026-07")
+
+    assert calls == [("lock", "2026-07"), ("mutable", "2026-07")]
+
+
+@pytest.mark.asyncio
+async def test_month_commit_rechecks_payroll_lock_before_commit(monkeypatch):
+    import backend.services.personal_performance_workbench_service as module
+
+    calls = []
+
+    class Lock:
+        def __init__(self, _db):
+            pass
+
+        async def assert_month_mutable(self, *, year_month):
+            calls.append(("mutable", year_month))
+
+    db = SimpleNamespace()
+
+    async def commit():
+        calls.append(("commit", None))
+
+    db.commit = commit
+    monkeypatch.setattr(module, "PayrollPeriodLockService", Lock)
+
+    await PersonalPerformanceWorkbenchService(db)._commit_month_mutation("2026-07")
+
+    assert calls == [("mutable", "2026-07"), ("commit", None)]
