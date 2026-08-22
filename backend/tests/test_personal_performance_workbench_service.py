@@ -21,6 +21,29 @@ def test_scope_eligibility_requires_positive_assignment_ratio_and_sales_target()
     assert PersonalPerformanceWorkbenchService._eligibility([assignment], {}) == []
 
 
+def test_mixed_store_assignments_block_employee_and_identify_invalid_target_shop():
+    valid_assignment = SimpleNamespace(
+        platform_code="Shopee", shop_id="S001", target_allocation_ratio=0.5
+    )
+    invalid_assignment = SimpleNamespace(
+        platform_code="Shopee", shop_id="S002", target_allocation_ratio=0.5
+    )
+    employee = SimpleNamespace(employee_code="EMP001", name="Ada")
+    targets = {("shopee", "S001"): SimpleNamespace(target_amount=100)}
+
+    assert (
+        PersonalPerformanceWorkbenchService._eligibility(
+            [valid_assignment, invalid_assignment], targets
+        )
+        == []
+    )
+    candidate = PersonalPerformanceWorkbenchService._candidate_employee(
+        employee, None, None, [valid_assignment, invalid_assignment], targets
+    )
+    assert candidate["eligibility_status"] == "blocked"
+    assert "shopee/S002" in candidate["blocking_reasons"][0]
+
+
 def test_scope_candidate_blocks_employee_without_eligible_store_basis():
     employee = SimpleNamespace(employee_code=" EMP001 ", name="Ada")
 

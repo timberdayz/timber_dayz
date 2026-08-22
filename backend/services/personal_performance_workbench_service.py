@@ -95,6 +95,7 @@ class PersonalPerformanceWorkbenchService:
     @staticmethod
     def _eligibility(assignments: list[Any], sales_targets: dict[tuple[str, str], Any]) -> list[str]:
         valid = []
+        invalid = []
         for assignment in assignments:
             ratio = float(getattr(assignment, "target_allocation_ratio", 0) or 0)
             key = (str(getattr(assignment, "platform_code", "")).lower(), str(getattr(assignment, "shop_id", "")))
@@ -102,9 +103,27 @@ class PersonalPerformanceWorkbenchService:
             if ratio <= 0:
                 continue
             if target is None or float(getattr(target, "target_amount", 0) or 0) <= 0:
+                invalid.append(f"{key[0]}/{key[1]}")
                 continue
             valid.append(f"{key[0]}/{key[1]}")
-        return valid
+        return [] if invalid else valid
+
+    @staticmethod
+    def _invalid_target_shops(
+        assignments: list[Any], sales_targets: dict[tuple[str, str], Any]
+    ) -> list[str]:
+        invalid = []
+        for assignment in assignments:
+            if float(getattr(assignment, "target_allocation_ratio", 0) or 0) <= 0:
+                continue
+            key = (
+                str(getattr(assignment, "platform_code", "")).lower(),
+                str(getattr(assignment, "shop_id", "")),
+            )
+            target = sales_targets.get(key)
+            if target is None or float(getattr(target, "target_amount", 0) or 0) <= 0:
+                invalid.append(f"{key[0]}/{key[1]}")
+        return invalid
 
     @staticmethod
     def _employee_snapshot(employee: Any, department: Any | None, position: Any | None) -> dict[str, Any]:
@@ -275,7 +294,15 @@ class PersonalPerformanceWorkbenchService:
     @classmethod
     def _candidate_employee(cls, employee: Any, department: Any | None, position: Any | None, assignments: list[Any], targets: dict[tuple[str, str], Any]) -> dict[str, Any]:
         eligible = cls._eligibility(assignments, targets)
-        reasons = [] if eligible else ["缺少有效店铺归属、正归属比例或正销售目标"]
+        invalid_shops = cls._invalid_target_shops(assignments, targets)
+        reasons = (
+            []
+            if eligible
+            else [
+                "缺少有效店铺归属、正归属比例或正销售目标"
+                + (f": {', '.join(invalid_shops)}" if invalid_shops else "")
+            ]
+        )
         return {**cls._employee_snapshot(employee, department, position), "is_included": bool(eligible), "exclusion_note": None, "eligibility_status": "eligible" if eligible else "blocked", "blocking_reasons": reasons}
 
     async def apply_scope(self, request: Any, username: str | None = None) -> dict[str, Any]:
@@ -299,7 +326,9 @@ class PersonalPerformanceWorkbenchService:
             included = True if item is None else bool(item.is_included)
             employee_assignments = assignments.get(code, [])
             if included and not self._eligibility(employee_assignments, targets):
-                raise ValueError(f"员工 {code} 缺少有效店铺归属或正销售目标，不能参与正式个人绩效")
+                invalid_shops = self._invalid_target_shops(employee_assignments, targets)
+                detail = f"，无效销售目标店铺: {', '.join(invalid_shops)}" if invalid_shops else ""
+                raise ValueError(f"员工 {code} 缺少有效店铺归属或正销售目标，不能参与正式个人绩效{detail}")
             identity = self._employee_snapshot(employee, department, position)
             scope = PersonalPerformanceEmployeeScope(plan_id=plan.id, employee_code=code, employee_name_snapshot=identity["employee_name"], department_name_snapshot=identity["department_name"], position_name_snapshot=identity["position_name"], is_included=included, exclusion_note=None if included else (str(getattr(item, 'exclusion_note', '') or '').strip() or None), snapshot_version=1, confirmed_at=now, confirmed_by=username, created_by=username, updated_by=username)
             self.db.add(scope)
