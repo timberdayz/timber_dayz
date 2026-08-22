@@ -9,6 +9,7 @@ import {
   formatPerformanceScore,
   isControlledPersonalMonth
 } from '../src/domains/business/views/target/personalPerformanceWorkbench.js'
+import { getControlledPersonalAuditNotice } from '../src/domains/business/views/hr/incomeAuditStatus.js'
 
 test('personal metrics allocate the fixed twenty point budget by catalog order', () => {
   assert.deepEqual(allocatePersonalMetricScores([
@@ -64,6 +65,22 @@ test('controlled month detection and score display use the audited one decimal c
   assert.equal(isControlledPersonalMonth({ calculation_mode: 'controlled_targets_v1' }), true)
   assert.equal(isControlledPersonalMonth({ calculation_mode: 'legacy_inputs' }), false)
   assert.equal(formatPerformanceScore(71.95418558631921), '72.0')
+})
+
+test('controlled income audit distinguishes partial completion from a non-participating employee', () => {
+  assert.match(
+    getControlledPersonalAuditNotice({ calculation_status: 'partial', calculation_details: { missing_personal_metrics: ['attendance_compliance_rate'] } }),
+    /未完成个人运营目标/
+  )
+  assert.match(
+    getControlledPersonalAuditNotice({ calculation_status: 'partial', calculation_details: { missing_shop_scores: ['shopee/shop-1'] } }),
+    /店铺基础分/
+  )
+  assert.equal(
+    getControlledPersonalAuditNotice({ calculation_status: 'not_participating', calculation_details: { status: 'not_participating' } }),
+    '本月未参与个人绩效：不产生个人绩效工资或排名，基础工资与独立店铺提成不受影响。'
+  )
+  assert.equal(getControlledPersonalAuditNotice({ calculation_status: 'complete', calculation_details: { status: 'complete' } }), '')
 })
 
 test('personal workbench exposes the three-step UI and the dedicated API methods', async () => {

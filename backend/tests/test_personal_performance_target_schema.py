@@ -79,6 +79,30 @@ def test_personal_workbench_response_exposes_legacy_read_only_state():
     assert response.has_legacy_records is False
 
 
+def test_personal_workbench_response_preserves_catalog_order_for_score_preview():
+    from backend.schemas.hr import PersonalPerformanceWorkbenchResponse
+
+    response = PersonalPerformanceWorkbenchResponse.model_validate(
+        {
+            "year_month": "2026-09",
+            "calculation_mode": "controlled_targets_v1",
+            "metrics": [
+                {
+                    "metric_code": "attendance_compliance_rate",
+                    "metric_name": "考勤达标率",
+                    "metric_direction": "higher_better",
+                    "input_kind": "percentage",
+                    "sort_key": 10,
+                    "max_score": 7,
+                }
+            ],
+        }
+    )
+
+    assert response.model_dump()["metrics"][0]["sort_key"] == 10
+    assert response.model_dump()["metrics"][0]["max_score"] == 7
+
+
 def test_personal_target_plan_restricts_the_controlled_mode_and_immutable_mode_contract():
     from modules.core.db import PersonalPerformancePlan
 

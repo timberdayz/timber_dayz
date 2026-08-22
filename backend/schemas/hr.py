@@ -1068,10 +1068,12 @@ class PersonalPerformanceMetricResponse(BaseModel):
     metric_name: str
     metric_direction: str
     input_kind: str
+    sort_key: int = 0
     default_target_value: Optional[float] = None
     unit: Optional[str] = None
     max_score: int = 0
     guidance: Optional[str] = None
+    scoring_rule_version: Optional[str] = None
 
 
 class PersonalPerformanceWorkbenchResponse(BaseModel):

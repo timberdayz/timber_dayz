@@ -70,6 +70,7 @@
     <el-card v-if="audit" shadow="never" class="section-card">
       <template #header>{{ isControlledMonth ? '个人运营目标与结果' : '个人绩效输入与结果' }}</template>
       <el-alert v-if="isControlledMonth" type="info" :closable="false" show-icon title="当前个人绩效使用受控个人运营目标" description="店铺继承基础分折算为 80 分贡献，个人运营目标自动计分为 0 至 20 分；未显示旧输入项是正常行为。" style="margin-bottom: 16px;" />
+      <el-alert v-if="controlledAuditNotice" :type="isPartialControlledMonth ? 'warning' : 'info'" :closable="false" show-icon :title="controlledAuditNotice" style="margin-bottom: 16px;" />
       <el-table :data="audit.performance_inputs || []" border stripe>
         <el-table-column prop="metric_name" label="指标" min-width="160" />
         <el-table-column prop="metric_direction" label="方向" width="100" />
@@ -108,6 +109,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { getControlledPersonalAuditNotice } from './incomeAuditStatus'
 
 const loading = ref(false)
 const audit = ref(null)
@@ -135,6 +137,8 @@ function formatInputValue(row) {
 
 const isControlledMonth = computed(() => audit.value?.employee_performance?.performance_source_type === 'controlled_targets_v1')
 const calculationDetails = computed(() => audit.value?.employee_performance?.calculation_details || {})
+const controlledAuditNotice = computed(() => isControlledMonth.value ? getControlledPersonalAuditNotice(audit.value?.employee_performance) : '')
+const isPartialControlledMonth = computed(() => isControlledMonth.value && (calculationDetails.value.status || audit.value?.employee_performance?.calculation_status) === 'partial')
 
 async function loadEmployees() {
   const response = await api.getHrEmployees({ page: 1, page_size: 500 })
