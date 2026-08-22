@@ -60,3 +60,15 @@ def test_personal_target_migration_seeds_only_the_approved_controlled_catalog():
     assert source.count("attendance_compliance_rate") == 1
     assert "management_evaluation" not in source
     assert "manual_score" not in source
+
+
+def test_personal_target_migration_seeds_chinese_user_facing_metric_names():
+    source = MIGRATION.read_text(encoding="utf-8")
+
+    for metric_name in (
+        r"\u8003\u52e4\u8fbe\u6807\u7387",
+        r"\u57f9\u8bad\u5b8c\u6210\u7387",
+        r"\u4e2a\u4eba\u76ee\u6807\u5b8c\u6210\u7387",
+        r"\u4e13\u9879\u4efb\u52a1\u5b8c\u6210\u60c5\u51b5",
+    ):
+        assert metric_name in source

@@ -318,7 +318,7 @@ def upgrade() -> None:
     metric_rows = (
         (
             "attendance_compliance_rate",
-            "Attendance compliance rate",
+            "\u8003\u52e4\u8fbe\u6807\u7387",
             "higher_better",
             "percentage",
             100,
@@ -328,7 +328,7 @@ def upgrade() -> None:
         ),
         (
             "training_completion_rate",
-            "Training completion rate",
+            "\u57f9\u8bad\u5b8c\u6210\u7387",
             "higher_better",
             "training_counts",
             100,
@@ -338,7 +338,7 @@ def upgrade() -> None:
         ),
         (
             "personal_goal_completion_rate",
-            "Personal goal completion rate",
+            "\u4e2a\u4eba\u76ee\u6807\u5b8c\u6210\u7387",
             "higher_better",
             "percentage",
             100,
@@ -348,7 +348,7 @@ def upgrade() -> None:
         ),
         (
             "personal_special_task",
-            "Personal special task",
+            "\u4e13\u9879\u4efb\u52a1\u5b8c\u6210\u60c5\u51b5",
             "manual_result",
             "special_task",
             None,
