@@ -21,6 +21,9 @@ class _LockedPayrollPeriodLockService:
     def __init__(self, _db):
         pass
 
+    async def acquire_month_transaction_lock(self, **_kwargs):
+        return None
+
     async def assert_employee_month_mutable(self, **_kwargs):
         raise PayrollPeriodLockedError("2025-07 工资单已确认，请在下一工资月份补录。")
 
