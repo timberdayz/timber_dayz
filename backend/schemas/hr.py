@@ -1079,6 +1079,8 @@ class PersonalPerformanceWorkbenchResponse(BaseModel):
     calculation_mode: str = "legacy_inputs"
     plan_version: Optional[int] = None
     scope_confirmed: bool = False
+    legacy_read_only: bool = False
+    has_legacy_records: bool = False
     metrics: List[PersonalPerformanceMetricResponse] = Field(default_factory=list)
 
 

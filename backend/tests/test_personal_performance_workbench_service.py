@@ -1,10 +1,109 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from backend.services.personal_performance_workbench_service import (
     PersonalPerformanceWorkbenchService,
 )
+
+
+class _ScalarOneResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class _CatalogRowsResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self.rows
+
+
+def _catalog_metric():
+    return SimpleNamespace(
+        metric_code="attendance_compliance_rate",
+        metric_name="Attendance",
+        metric_direction="higher_better",
+        input_kind="percentage",
+        default_target_value=100,
+        unit="%",
+        sort_key=1,
+        guidance="Enter actual attendance rate.",
+        scoring_rule_version="controlled_targets_v1",
+        catalog_version=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_workbench_marks_an_empty_month_as_creatable_not_legacy_read_only():
+    db = SimpleNamespace()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarOneResult(None),
+            _ScalarOneResult(1),
+            _CatalogRowsResult([_catalog_metric()]),
+            _ScalarOneResult(None),
+            _ScalarOneResult(None),
+        ]
+    )
+
+    payload = await PersonalPerformanceWorkbenchService(db).get_workbench("2026-09")
+
+    assert payload["calculation_mode"] == "legacy_inputs"
+    assert payload["legacy_read_only"] is False
+    assert payload["has_legacy_records"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_workbench_marks_active_legacy_records_as_read_only():
+    db = SimpleNamespace()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarOneResult(None),
+            _ScalarOneResult(1),
+            _CatalogRowsResult([_catalog_metric()]),
+            _ScalarOneResult(None),
+            _ScalarOneResult(99),
+        ]
+    )
+
+    payload = await PersonalPerformanceWorkbenchService(db).get_workbench("2026-07")
+
+    assert payload["calculation_mode"] == "legacy_inputs"
+    assert payload["legacy_read_only"] is True
+    assert payload["has_legacy_records"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_workbench_keeps_a_controlled_plan_writable_contract():
+    service = PersonalPerformanceWorkbenchService(SimpleNamespace())
+    service._plan = AsyncMock(
+        return_value=SimpleNamespace(
+            version=3,
+            scope_confirmed_at=None,
+            rule_snapshot={"metrics": [{"metric_code": "attendance_compliance_rate"}]},
+        )
+    )
+
+    payload = await service.get_workbench("2026-09")
+
+    assert payload == {
+        "year_month": "2026-09",
+        "calculation_mode": "controlled_targets_v1",
+        "plan_version": 3,
+        "scope_confirmed": False,
+        "metrics": [{"metric_code": "attendance_compliance_rate"}],
+        "legacy_read_only": False,
+        "has_legacy_records": False,
+    }
 
 
 def test_scope_eligibility_requires_positive_assignment_ratio_and_sales_target():

@@ -207,6 +207,31 @@ class PersonalPerformanceWorkbenchService:
         if legacy_input is not None or legacy_adjustment is not None:
             raise ValueError("本月存在有效旧个人绩效输入或调整，不能切换为受控个人目标模式")
 
+    async def _has_active_legacy_records(self, year_month: str) -> bool:
+        legacy_input = (
+            await self.db.execute(
+                select(EmployeePerformanceInput.id)
+                .where(
+                    EmployeePerformanceInput.year_month == year_month,
+                    EmployeePerformanceInput.status == "active",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if legacy_input is not None:
+            return True
+        legacy_adjustment = (
+            await self.db.execute(
+                select(EmployeePerformanceAdjustment.id)
+                .where(
+                    EmployeePerformanceAdjustment.year_month == year_month,
+                    EmployeePerformanceAdjustment.status == "active",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return legacy_adjustment is not None
+
     @staticmethod
     def _assert_version(plan: Any, expected: int | None) -> None:
         if expected is not None and int(getattr(plan, "version", 0)) != int(expected):
@@ -216,9 +241,26 @@ class PersonalPerformanceWorkbenchService:
         plan = await self._plan(year_month)
         if plan is None:
             catalog = await self._catalog()
-            return {"year_month": year_month, "calculation_mode": "legacy_inputs", "plan_version": None, "scope_confirmed": False, "metrics": [self._rule_metric(item, 0) for item in catalog]}
+            has_legacy_records = await self._has_active_legacy_records(year_month)
+            return {
+                "year_month": year_month,
+                "calculation_mode": "legacy_inputs",
+                "plan_version": None,
+                "scope_confirmed": False,
+                "metrics": [self._rule_metric(item, 0) for item in catalog],
+                "legacy_read_only": has_legacy_records,
+                "has_legacy_records": has_legacy_records,
+            }
         metrics = list((getattr(plan, "rule_snapshot", {}) or {}).get("metrics", []))
-        return {"year_month": year_month, "calculation_mode": self.CALCULATION_MODE, "plan_version": plan.version, "scope_confirmed": plan.scope_confirmed_at is not None, "metrics": metrics}
+        return {
+            "year_month": year_month,
+            "calculation_mode": self.CALCULATION_MODE,
+            "plan_version": plan.version,
+            "scope_confirmed": plan.scope_confirmed_at is not None,
+            "metrics": metrics,
+            "legacy_read_only": False,
+            "has_legacy_records": False,
+        }
 
     async def apply(self, request: Any, username: str | None = None) -> dict[str, Any]:
         await self._begin_month_mutation(request.year_month)

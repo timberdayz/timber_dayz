@@ -123,6 +123,29 @@ async def _run_personal_workbench_mutation(operation):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _controlled_person_calculation_details_for_display(
+    employee_performance: Any,
+) -> Dict[str, Any] | None:
+    if (
+        getattr(employee_performance, "performance_source_type", None)
+        != "controlled_targets_v1"
+    ):
+        return None
+    details = getattr(employee_performance, "calculation_details", None)
+    if not isinstance(details, dict):
+        return None
+    display_details = dict(details)
+    for field in (
+        "store_base_score",
+        "store_weighted_contribution",
+        "personal_target_score",
+        "final_score",
+    ):
+        if display_details.get(field) is not None:
+            display_details[field] = round(float(display_details[field]), 1)
+    return display_details
+
+
 @router.get(
     "/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse
 )
@@ -1924,7 +1947,7 @@ async def list_performance_scores(
             for ep in ep_list:
                 ec = getattr(ep, "employee_code", "")
                 raw_score = getattr(ep, "performance_score", None)
-                scr = float(raw_score) if raw_score is not None else None
+                scr = round(float(raw_score), 1) if raw_score is not None else None
                 ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
                 raw_sales_achieved = getattr(ep, "actual_sales", None)
                 sales_achieved = (
@@ -1962,6 +1985,7 @@ async def list_performance_scores(
                         ),
                         "calculation_status": getattr(ep, "calculation_status", None)
                         or "historical_unknown",
+                        "calculation_details": _controlled_person_calculation_details_for_display(ep),
                         "personal_adjustment_total": adjustment_total_by_code.get(ec),
                         "total_score": scr,
                         "rank": rank_by_code.get(ec),

@@ -66,6 +66,19 @@ def test_personal_target_models_have_monthly_identity_and_historical_snapshots()
     )
 
 
+def test_personal_workbench_response_exposes_legacy_read_only_state():
+    from backend.schemas.hr import PersonalPerformanceWorkbenchResponse
+
+    response = PersonalPerformanceWorkbenchResponse(
+        year_month="2026-09",
+        legacy_read_only=False,
+        has_legacy_records=False,
+    )
+
+    assert response.legacy_read_only is False
+    assert response.has_legacy_records is False
+
+
 def test_personal_target_plan_restricts_the_controlled_mode_and_immutable_mode_contract():
     from modules.core.db import PersonalPerformancePlan
 
