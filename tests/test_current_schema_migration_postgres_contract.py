@@ -1463,3 +1463,98 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
     finally:
         engine.dispose()
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
+
+
+def test_operation_metric_catalog_v3_round_trips_without_changing_v2_catalog():
+    if not _docker_available():
+        pytest.skip("requires a reachable Docker daemon and PostgreSQL 15 image")
+
+    personal_revision = "current_schema_20260822_personal_performance_target_workbench"
+    v3_revision = "current_schema_20260822_operation_metric_catalog_v3"
+    port = _free_port()
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "-e",
+            "POSTGRES_USER=current_test",
+            "-e",
+            "POSTGRES_PASSWORD=current_test",
+            "-e",
+            "POSTGRES_DB=current_test",
+            "-p",
+            f"127.0.0.1:{port}:5432",
+            "postgres:15",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    container_id = started.stdout.strip()
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
+    alembic_env = {**os.environ, "DATABASE_URL": database_url}
+
+    def run_alembic(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "alembic", "-c", "alembic-current.ini", *args],
+            cwd=ROOT,
+            env=alembic_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    engine = create_engine(database_url)
+    try:
+        _wait_for_postgres(container_id)
+        previous_upgrade = run_alembic("upgrade", personal_revision)
+        assert previous_upgrade.returncode == 0, previous_upgrade.stderr
+
+        v3_upgrade = run_alembic("upgrade", v3_revision)
+        assert v3_upgrade.returncode == 0, v3_upgrade.stderr
+
+        with engine.connect() as connection:
+            v3_codes = connection.execute(
+                text(
+                    "SELECT metric_code FROM a_class.operation_metric_catalog "
+                    "WHERE catalog_version = 3 ORDER BY sort_key"
+                )
+            ).scalars().all()
+            assert v3_codes == [
+                "customer_satisfaction",
+                "complaint_count",
+                "reply_timeliness",
+                "operation_special_check",
+            ]
+            assert connection.execute(
+                text(
+                    "SELECT count(*) FROM a_class.operation_metric_catalog "
+                    "WHERE catalog_version = 2 "
+                    "AND metric_code = 'training_completion_rate'"
+                )
+            ).scalar_one() == 1
+
+        v3_downgrade = run_alembic("downgrade", personal_revision)
+        assert v3_downgrade.returncode == 0, v3_downgrade.stderr
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT count(*) FROM a_class.operation_metric_catalog "
+                    "WHERE catalog_version = 3"
+                )
+            ).scalar_one() == 0
+            assert connection.execute(
+                text(
+                    "SELECT count(*) FROM a_class.operation_metric_catalog "
+                    "WHERE catalog_version = 2 "
+                    "AND metric_code = 'training_completion_rate'"
+                )
+            ).scalar_one() == 1
+    finally:
+        engine.dispose()
+        subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)

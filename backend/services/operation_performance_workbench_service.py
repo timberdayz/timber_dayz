@@ -743,8 +743,15 @@ class OperationPerformanceWorkbenchService:
     async def get_workbench(self, year_month: str) -> dict[str, Any]:
         month_start, month_end = self.month_range(year_month)
         config = await self._config(year_month)
-        catalog = await self._catalog()
         targets = await self._targets(year_month)
+        catalog_versions = {
+            int(target.metric_catalog_version)
+            for target in targets
+            if getattr(target, "metric_catalog_version", None) is not None
+        }
+        catalog = await self._catalog(
+            next(iter(catalog_versions)) if len(catalog_versions) == 1 else None
+        )
         legacy_targets = [
             target
             for target in targets

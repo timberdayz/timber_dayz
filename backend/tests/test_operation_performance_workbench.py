@@ -35,6 +35,125 @@ def test_operation_workbench_model_contract_keeps_pending_values_nullable():
     assert hasattr(EmployeePerformance, "calculation_status")
 
 
+@pytest.mark.asyncio
+async def test_existing_v2_operation_month_reads_its_original_catalog_including_training():
+    service = OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    v2_catalog = [
+        SimpleNamespace(
+            metric_code="customer_satisfaction",
+            metric_name="Customer satisfaction",
+            metric_direction="higher_better",
+            catalog_version=2,
+            sort_key=10,
+            input_kind="percentage",
+            unit="%",
+            guidance="",
+            default_target_value=100,
+            default_max_score=0,
+            default_penalty_enabled=False,
+            default_penalty_threshold=None,
+            default_penalty_per_unit=None,
+            default_penalty_max=None,
+            manual_score_enabled=False,
+        ),
+        SimpleNamespace(
+            metric_code="training_completion_rate",
+            metric_name="Training completion rate",
+            metric_direction="higher_better",
+            catalog_version=2,
+            sort_key=40,
+            input_kind="training_counts",
+            unit="%",
+            guidance="",
+            default_target_value=100,
+            default_max_score=0,
+            default_penalty_enabled=False,
+            default_penalty_threshold=None,
+            default_penalty_per_unit=None,
+            default_penalty_max=None,
+            manual_score_enabled=False,
+        ),
+    ]
+    v3_catalog = [
+        SimpleNamespace(
+            metric_code="customer_satisfaction",
+            metric_name="Customer satisfaction",
+            metric_direction="higher_better",
+            catalog_version=3,
+            sort_key=10,
+            input_kind="percentage",
+            unit="%",
+            guidance="",
+            default_target_value=100,
+            default_max_score=0,
+            default_penalty_enabled=False,
+            default_penalty_threshold=None,
+            default_penalty_per_unit=None,
+            default_penalty_max=None,
+            manual_score_enabled=False,
+        )
+    ]
+    service._targets = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                metric_code="training_completion_rate",
+                metric_catalog_version=2,
+                scoring_model_version="auto_integer_v1",
+                is_enabled=True,
+                max_score=20,
+            )
+        ]
+    )
+    service._config = AsyncMock(return_value=None)
+
+    async def catalog_for_version(catalog_version=None, **_kwargs):
+        return v2_catalog if catalog_version == 2 else v3_catalog
+
+    service._catalog = AsyncMock(side_effect=catalog_for_version)
+
+    result = await service.get_workbench("2026-07")
+
+    assert result["catalog_version"] == 2
+    assert [metric["metric_code"] for metric in result["metrics"]] == [
+        "customer_satisfaction",
+        "training_completion_rate",
+    ]
+    service._catalog.assert_awaited_once_with(2)
+
+
+@pytest.mark.asyncio
+async def test_empty_operation_month_uses_the_latest_v3_catalog():
+    service = OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    v3_catalog = [
+        SimpleNamespace(
+            metric_code="customer_satisfaction",
+            metric_name="Customer satisfaction",
+            metric_direction="higher_better",
+            catalog_version=3,
+            sort_key=10,
+            input_kind="percentage",
+            unit="%",
+            guidance="",
+            default_target_value=100,
+            default_max_score=0,
+            default_penalty_enabled=False,
+            default_penalty_threshold=None,
+            default_penalty_per_unit=None,
+            default_penalty_max=None,
+            manual_score_enabled=False,
+        )
+    ]
+    service._targets = AsyncMock(return_value=[])
+    service._config = AsyncMock(return_value=None)
+    service._catalog = AsyncMock(return_value=v3_catalog)
+
+    result = await service.get_workbench("2026-09")
+
+    assert result["catalog_version"] == 3
+    assert result["metrics"][0]["metric_code"] == "customer_satisfaction"
+    service._catalog.assert_awaited_once_with(None)
+
+
 def test_runtime_operation_paths_are_isolated_from_legacy_targets():
     from pathlib import Path
 
