@@ -2274,7 +2274,9 @@ async def calculate_performance_scores(
                 month=period_start.month + 1, day=1
             ) - timedelta(days=1)
 
-        await PayrollPeriodLockService(db).assert_month_mutable(year_month=period)
+        period_lock = PayrollPeriodLockService(db)
+        await period_lock.acquire_month_transaction_lock(year_month=period)
+        await period_lock.assert_month_mutable(year_month=period)
         # 按考核周期校验配置是否存在(契约: 无配置时返回 404 + PERF_CONFIG_NOT_FOUND)
 
         if config_id:
@@ -2768,6 +2770,7 @@ async def calculate_performance_scores(
             payroll_service = PayrollGenerationService(db=db)
             payroll_result = await payroll_service.generate_month(period)
 
+        await period_lock.assert_month_mutable(year_month=period)
         await db.commit()
         try:
             employee_rows = (

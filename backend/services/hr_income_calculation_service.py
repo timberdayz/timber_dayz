@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
-from sqlalchemy import and_, or_, select, text, func
+from sqlalchemy import and_, delete, or_, select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -149,6 +149,18 @@ class HRIncomeCalculationService:
                 },
             }
         return results
+
+    @staticmethod
+    def partition_controlled_commission_codes(
+        results: dict[str, dict[str, Any]]
+    ) -> tuple[set[str], set[str]]:
+        """Personal partial rows block commission; excluded rows retain independent commission."""
+        blocked = {
+            employee_code
+            for employee_code, result in results.items()
+            if result.get("calculation_status") == "partial"
+        }
+        return set(results) - blocked, blocked
 
     @staticmethod
     def _to_float(value: Any, default: float = 0.0) -> float:
@@ -690,9 +702,9 @@ class HRIncomeCalculationService:
         except ValueError as exc:
             raise ValueError("year_month format must be YYYY-MM") from exc
 
-        await PayrollPeriodLockService(self.db).assert_month_mutable(
-            year_month=year_month,
-        )
+        period_lock = PayrollPeriodLockService(self.db)
+        await period_lock.acquire_month_transaction_lock(year_month=year_month)
+        await period_lock.assert_month_mutable(year_month=year_month)
         controlled_context = await self._load_controlled_personal_context(year_month)
 
         assignment_rows = (
@@ -934,8 +946,30 @@ class HRIncomeCalculationService:
         performance_upserts = 0
         commission_allocations: list[dict[str, Any]] = []
         formal_employee_codes: set[str] = set()
+        controlled_results: dict[str, dict[str, Any]] = {}
+        blocked_commission_codes: set[str] = set()
+        if controlled_context is not None and controlled_context["scope_confirmed"]:
+            controlled_results = self.build_controlled_personal_results(
+                scopes=controlled_context["scopes"],
+                assignments_by_employee=controlled_context["assignments_by_employee"],
+                metrics=controlled_context["metrics"],
+                entry_scores_by_employee=controlled_context["entry_scores_by_employee"],
+                shop_scores=controlled_context["shop_scores"],
+            )
+            _, blocked_commission_codes = self.partition_controlled_commission_codes(
+                controlled_results
+            )
+            if blocked_commission_codes:
+                await self.db.execute(
+                    delete(EmployeeCommission).where(
+                        EmployeeCommission.year_month == year_month,
+                        EmployeeCommission.employee_code.in_(blocked_commission_codes),
+                    )
+                )
 
         for employee_code, rec in commission_agg.items():
+            if employee_code in blocked_commission_codes:
+                continue
             sales_amount = rec["sales_amount"]
             raw_commission_amount = rec["commission_amount"]
             if sales_amount > 0:
@@ -1102,13 +1136,6 @@ class HRIncomeCalculationService:
             performance_upserts += 1
 
         if controlled_context is not None:
-            controlled_results = self.build_controlled_personal_results(
-                scopes=controlled_context["scopes"],
-                assignments_by_employee=controlled_context["assignments_by_employee"],
-                metrics=controlled_context["metrics"],
-                entry_scores_by_employee=controlled_context["entry_scores_by_employee"],
-                shop_scores=controlled_context["shop_scores"],
-            ) if controlled_context["scope_confirmed"] else {}
             formal_employee_codes.clear()
             for employee_code, result in controlled_results.items():
                 inherited = performance_agg.get(employee_code, {})
@@ -1153,6 +1180,7 @@ class HRIncomeCalculationService:
                 performance_upserts += 1
 
         if commit:
+            await period_lock.assert_month_mutable(year_month=year_month)
             await self.db.commit()
         return {
             "year_month": year_month,
