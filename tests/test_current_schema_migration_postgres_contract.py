@@ -1276,3 +1276,190 @@ def test_20260808_preflight_rejects_invalid_current_override_when_contract_colum
             }
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
+
+
+def test_personal_performance_target_migration_round_trips_from_the_previous_head():
+    if not _docker_available():
+        pytest.skip("requires a reachable Docker daemon and PostgreSQL 15 image")
+
+    previous_revision = "current_schema_20260817_operation_performance_auto_integer_v1"
+    personal_revision = "current_schema_20260822_personal_performance_target_workbench"
+    personal_tables = (
+        "personal_performance_metric_catalog",
+        "personal_performance_plans",
+        "personal_performance_employee_scopes",
+        "personal_performance_assignment_snapshots",
+        "personal_performance_entries",
+    )
+    port = _free_port()
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "-e",
+            "POSTGRES_USER=current_test",
+            "-e",
+            "POSTGRES_PASSWORD=current_test",
+            "-e",
+            "POSTGRES_DB=current_test",
+            "-p",
+            f"127.0.0.1:{port}:5432",
+            "postgres:15",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    container_id = started.stdout.strip()
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
+    alembic_env = {**os.environ, "DATABASE_URL": database_url}
+
+    def run_alembic(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "alembic", "-c", "alembic-current.ini", *args],
+            cwd=ROOT,
+            env=alembic_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    try:
+        _wait_for_postgres(container_id)
+        previous_upgrade = run_alembic("upgrade", previous_revision)
+        assert previous_upgrade.returncode == 0, previous_upgrade.stderr
+
+        engine = create_engine(database_url)
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                ).scalar_one()
+                == previous_revision
+            )
+            inspector = inspect(connection)
+            assert all(
+                not inspector.has_table(table, schema="a_class")
+                for table in personal_tables
+            )
+
+        personal_upgrade = run_alembic("upgrade", personal_revision)
+        assert personal_upgrade.returncode == 0, personal_upgrade.stderr
+
+        with engine.begin() as connection:
+            inspector = inspect(connection)
+            assert all(
+                inspector.has_table(table, schema="a_class")
+                for table in personal_tables
+            )
+            assert "calculation_details" in {
+                column["name"]
+                for column in inspector.get_columns(
+                    "employee_performance", schema="c_class"
+                )
+            }
+            seeded_metrics = connection.execute(
+                text(
+                    "SELECT metric_code, metric_name "
+                    "FROM a_class.personal_performance_metric_catalog "
+                    "WHERE catalog_version = 1 ORDER BY sort_key"
+                )
+            ).all()
+            assert seeded_metrics == [
+                ("attendance_compliance_rate", "\u8003\u52e4\u8fbe\u6807\u7387"),
+                ("training_completion_rate", "\u57f9\u8bad\u5b8c\u6210\u7387"),
+                (
+                    "personal_goal_completion_rate",
+                    "\u4e2a\u4eba\u76ee\u6807\u5b8c\u6210\u7387",
+                ),
+                (
+                    "personal_special_task",
+                    "\u4e13\u9879\u4efb\u52a1\u5b8c\u6210\u60c5\u51b5",
+                ),
+            ]
+            connection.execute(
+                text(
+                    "INSERT INTO a_class.personal_performance_plans "
+                    "(year_month, calculation_mode, catalog_version, scoring_model_version, rule_snapshot) "
+                    "VALUES ('2026-10', 'controlled_targets_v1', 1, "
+                    "'controlled_targets_v1', '{}'::json)"
+                )
+            )
+            immutable_mode = connection.begin_nested()
+            with pytest.raises(Exception, match="calculation mode is immutable"):
+                connection.execute(
+                    text(
+                        "UPDATE a_class.personal_performance_plans "
+                        "SET calculation_mode = 'legacy_inputs' "
+                        "WHERE year_month = '2026-10'"
+                    )
+                )
+            immutable_mode.rollback()
+
+        personal_downgrade = run_alembic("downgrade", previous_revision)
+        assert personal_downgrade.returncode == 0, personal_downgrade.stderr
+
+        with engine.connect() as connection:
+            inspector = inspect(connection)
+            assert all(
+                not inspector.has_table(table, schema="a_class")
+                for table in personal_tables
+            )
+            assert "calculation_details" not in {
+                column["name"]
+                for column in inspector.get_columns(
+                    "employee_performance", schema="c_class"
+                )
+            }
+
+        personal_reupgrade = run_alembic("upgrade", personal_revision)
+        assert personal_reupgrade.returncode == 0, personal_reupgrade.stderr
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                ).scalar_one()
+                == personal_revision
+            )
+            inspector = inspect(connection)
+            assert all(
+                inspector.has_table(table, schema="a_class")
+                for table in personal_tables
+            )
+            assert "calculation_details" in {
+                column["name"]
+                for column in inspector.get_columns(
+                    "employee_performance", schema="c_class"
+                )
+            }
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM a_class.personal_performance_metric_catalog "
+                        "WHERE catalog_version = 1"
+                    )
+                ).scalar_one()
+                == 4
+            )
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM pg_trigger AS trigger "
+                        "JOIN pg_class AS relation ON relation.oid = trigger.tgrelid "
+                        "JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace "
+                        "WHERE namespace.nspname = 'a_class' "
+                        "AND relation.relname = 'personal_performance_plans' "
+                        "AND trigger.tgname = 'trg_prevent_personal_performance_plan_mode_change' "
+                        "AND NOT trigger.tgisinternal"
+                    )
+                ).scalar_one()
+                == 1
+            )
+    finally:
+        engine.dispose()
+        subprocess.run(["docker", "stop", "-t", "1", container_id], check=False)
