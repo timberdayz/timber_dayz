@@ -9,6 +9,10 @@ import {
   formatPerformanceScore,
   isControlledPersonalMonth
 } from '../src/domains/business/views/target/personalPerformanceWorkbench.js'
+import {
+  formatWorkbenchDirection,
+  formatWorkbenchGuidance
+} from '../src/domains/business/views/target/workbenchDisplay.js'
 import { getControlledPersonalAuditNotice } from '../src/domains/business/views/hr/incomeAuditStatus.js'
 
 test('personal metrics allocate the fixed twenty point budget by catalog order', () => {
@@ -67,6 +71,13 @@ test('controlled month detection and score display use the audited one decimal c
   assert.equal(formatPerformanceScore(71.95418558631921), '72.0')
 })
 
+test('workbench directions and catalog guidance are displayed in Chinese', () => {
+  assert.equal(formatWorkbenchDirection('higher_better'), '越高越好')
+  assert.equal(formatWorkbenchDirection('lower_better'), '越低越好')
+  assert.equal(formatWorkbenchGuidance({ metric_code: 'attendance_compliance_rate' }), '填写当月考勤达标率，例如 95 表示 95%。')
+  assert.equal(formatWorkbenchGuidance({ metric_code: 'training_completion_rate' }), '填写已完成人数和应完成人数，系统自动计算完成率。')
+})
+
 test('controlled income audit distinguishes partial completion from a non-participating employee', () => {
   assert.match(
     getControlledPersonalAuditNotice({ calculation_status: 'partial', calculation_details: { missing_personal_metrics: ['attendance_compliance_rate'] } }),
@@ -102,6 +113,8 @@ test('personal workbench exposes the three-step UI and the dedicated API methods
   assert.match(component, /确认参与员工/)
   assert.match(component, /专项任务/)
   assert.match(component, /revokePersonalPerformanceScope/)
+  assert.match(component, /规则草稿，可继续修改/)
+  assert.match(component, /撤销范围后修改规则/)
   assert.match(api, /getPersonalPerformanceWorkbench/)
   assert.match(api, /applyPersonalPerformanceEntries/)
   assert.match(management, /isControlledPersonalMonth/)
