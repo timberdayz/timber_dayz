@@ -89,6 +89,21 @@ def test_revoke_scope_requires_expected_plan_version():
     assert "expected_plan_version" in signature.parameters
 
 
+def test_zero_amount_authoritative_target_does_not_fall_back_to_older_positive_target():
+    current_zero = SimpleNamespace(
+        platform_code="shopee", shop_id="S001", target_amount=0, target_id=20
+    )
+    old_positive = SimpleNamespace(
+        platform_code="shopee", shop_id="S001", target_amount=100, target_id=10
+    )
+
+    selected = PersonalPerformanceWorkbenchService._select_authoritative_sales_targets(
+        [current_zero, old_positive]
+    )
+
+    assert selected == {}
+
+
 @pytest.mark.asyncio
 async def test_month_transaction_lock_is_acquired_before_mutability_check(monkeypatch):
     import backend.services.personal_performance_workbench_service as module

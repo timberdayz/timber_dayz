@@ -143,6 +143,13 @@ class OperationPerformanceWorkbenchService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _lock_month_mutation(self, year_month: str) -> None:
+        period_lock = PayrollPeriodLockService(self.db)
+        acquire_lock = getattr(period_lock, "acquire_month_transaction_lock", None)
+        if acquire_lock is not None:
+            await acquire_lock(year_month=year_month)
+        await period_lock.assert_month_mutable(year_month=year_month)
+
     @staticmethod
     def month_range(year_month: str) -> tuple[date, date]:
         start = datetime.strptime(year_month, "%Y-%m").date().replace(day=1)
@@ -389,9 +396,7 @@ class OperationPerformanceWorkbenchService:
             raise ValueError("启用运营指标的自动满分合计必须为 20")
 
     async def apply_scope(self, request: Any, username: str | None = None):
-        await PayrollPeriodLockService(self.db).assert_month_mutable(
-            year_month=request.year_month
-        )
+        await self._lock_month_mutation(request.year_month)
         await self._assert_scope_rule_ready(request.year_month)
         expected_rule_updated_at = getattr(request, "expected_rule_updated_at", None)
         current_rule_updated_at = await self._scope_rule_updated_at(request.year_month)
@@ -477,7 +482,7 @@ class OperationPerformanceWorkbenchService:
         return await self.get_scope(request.year_month)
 
     async def revoke_scope(self, year_month: str):
-        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=year_month)
+        await self._lock_month_mutation(year_month)
         target_ids = [target.id for target in await self._targets(year_month) if target.id]
         if target_ids:
             await self.db.execute(
@@ -637,9 +642,7 @@ class OperationPerformanceWorkbenchService:
         return f"得分 = 四舍五入({max_score} × min(实际值 / 目标值 {target}, 100%))。"
 
     async def apply_entries(self, request: Any, username: str | None = None):
-        await PayrollPeriodLockService(self.db).assert_month_mutable(
-            year_month=request.year_month
-        )
+        await self._lock_month_mutation(request.year_month)
         scope_rows = await self._scope_rows(request.year_month)
         if not scope_rows:
             raise ValueError("请先确认本月运营绩效店铺范围")
@@ -841,9 +844,7 @@ class OperationPerformanceWorkbenchService:
         self, request: OperationWorkbenchApplyRequest, username: str | None = None
     ) -> dict[str, Any]:
         month_start, month_end = self.month_range(request.year_month)
-        await PayrollPeriodLockService(self.db).assert_month_mutable(
-            year_month=request.year_month
-        )
+        await self._lock_month_mutation(request.year_month)
         catalog = await self._catalog(request.catalog_version)
         catalog_by_code = {item.metric_code: item for item in catalog}
         config = await self._config(request.year_month)
@@ -965,9 +966,7 @@ class OperationPerformanceWorkbenchService:
     async def copy_prev_month(
         self, year_month: str, username: str | None = None
     ) -> dict[str, Any]:
-        await PayrollPeriodLockService(self.db).assert_month_mutable(
-            year_month=year_month
-        )
+        await self._lock_month_mutation(year_month)
         month_start, _ = self.month_range(year_month)
         previous_month = (
             f"{month_start.year - 1:04d}-12"
@@ -1034,7 +1033,7 @@ class OperationPerformanceWorkbenchService:
         self, year_month: str, username: str | None = None
     ) -> dict[str, Any]:
         """Explicitly convert an untouched legacy month to the controlled V1 model."""
-        await PayrollPeriodLockService(self.db).assert_month_mutable(year_month=year_month)
+        await self._lock_month_mutation(year_month)
         scope_rows = await self._scope_rows(year_month)
         if any(getattr(row, "snapshot_version", None) == 1 for row in scope_rows):
             raise ValueError("本月店铺范围已确认，不能迁移旧模式")

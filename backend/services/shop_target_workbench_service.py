@@ -14,6 +14,7 @@ from backend.schemas.target import (
     ShopTargetWorkbenchShopResponse,
 )
 from backend.services.target_sync_service import TargetSyncService
+from backend.services.payroll_period_lock_service import PayrollPeriodLockService
 from backend.services.target_breakdown_selection import select_effective_shop_breakdowns
 from modules.core.db import (
     DimShop,
@@ -100,6 +101,9 @@ class ShopTargetWorkbenchService:
         username: str | None = None,
     ) -> ShopTargetWorkbenchApplyResponse:
         self._validate_request(request)
+        period_lock = PayrollPeriodLockService(self.db)
+        await period_lock.acquire_month_transaction_lock(year_month=request.year_month)
+        await period_lock.assert_month_mutable(year_month=request.year_month)
         month_start, month_end = self._month_range(request.year_month)
         month_targets = await self._list_month_targets(month_start, month_end)
         target = month_targets[0] if month_targets else None
@@ -150,6 +154,7 @@ class ShopTargetWorkbenchService:
         if sync_result.get("errors"):
             raise RuntimeError("; ".join(sync_result["errors"]))
 
+        await period_lock.assert_month_mutable(year_month=request.year_month)
         await self.db.commit()
         return ShopTargetWorkbenchApplyResponse(
             year_month=request.year_month,

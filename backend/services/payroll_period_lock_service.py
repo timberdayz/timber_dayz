@@ -23,6 +23,10 @@ class PayrollPeriodLockService:
 
     async def acquire_month_transaction_lock(self, *, year_month: str) -> None:
         """Serialize monthly performance mutations on PostgreSQL until commit/rollback."""
+        bind = getattr(self.db, "bind", None)
+        dialect = getattr(bind, "dialect", None)
+        if getattr(dialect, "name", None) != "postgresql":
+            return
         await self.db.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
             {"lock_key": f"payroll-period:{year_month}"},

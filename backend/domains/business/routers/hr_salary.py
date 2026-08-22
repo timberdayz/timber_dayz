@@ -611,6 +611,11 @@ async def confirm_payroll_record(
             return error_response(ErrorCode.PARAMETER_INVALID, "已发放工资单不可再次确认", status_code=409)
         if record.status != "draft":
             return error_response(ErrorCode.PARAMETER_INVALID, "仅草稿工资单可以确认", status_code=409)
+        period_lock = PayrollPeriodLockService(db)
+        await period_lock.acquire_month_transaction_lock(year_month=record.year_month)
+        await db.refresh(record)
+        if record.status != "draft":
+            return error_response(ErrorCode.PARAMETER_INVALID, "工资单状态已变更，请刷新后重试", status_code=409)
         allocations = (
             await db.execute(
                 select(EmployeeLaborCostAllocation).where(
@@ -690,6 +695,8 @@ async def confirm_payroll_record(
             allocation.source_payroll_status = "confirmed"
             allocation.calculation_status = "confirmed"
             allocation.pre_commission_locked_at = locked_at
+        if getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", None) == "postgresql":
+            await period_lock.assert_month_mutable(year_month=record.year_month)
         await db.commit()
         await db.refresh(record)
         return _payroll_success(record)

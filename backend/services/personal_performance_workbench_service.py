@@ -131,6 +131,19 @@ class PersonalPerformanceWorkbenchService:
             [SalesTarget.period_start.desc(), SalesTarget.created_at.desc(), SalesTarget.id.desc(), TargetBreakdown.id.desc()],
         )
 
+    @staticmethod
+    def _select_authoritative_sales_targets(rows: list[Any]) -> dict[tuple[str, str], Any]:
+        """Rows are already priority-ordered: never skip a current zero target."""
+        authoritative: dict[tuple[str, str], Any] = {}
+        for row in rows:
+            key = (str(row.platform_code).lower(), str(row.shop_id))
+            authoritative.setdefault(key, row)
+        return {
+            key: row
+            for key, row in authoritative.items()
+            if float(getattr(row, "target_amount", 0) or 0) > 0
+        }
+
     async def _catalog(self, catalog_version: int | None = None) -> list[Any]:
         if catalog_version is None:
             result = await self.db.execute(
@@ -246,12 +259,7 @@ class PersonalPerformanceWorkbenchService:
             select(TargetBreakdown).join(SalesTarget, SalesTarget.id == TargetBreakdown.target_id)
             .where(*conditions).order_by(*ordering)
         )).scalars().all()
-        targets = {}
-        for row in rows:
-            key = (str(row.platform_code).lower(), str(row.shop_id))
-            if key not in targets and float(getattr(row, "target_amount", 0) or 0) > 0:
-                targets[key] = row
-        return targets
+        return self._select_authoritative_sales_targets(rows)
 
     async def get_scope(self, year_month: str) -> dict[str, Any]:
         plan = await self._plan(year_month)
