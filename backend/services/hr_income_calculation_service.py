@@ -32,6 +32,7 @@ from modules.core.db import (
     PersonalPerformanceEntry,
     PersonalPerformancePlan,
     PerformanceScore,
+    PayrollRecord,
     SalaryStructure,
     ShopCommissionConfig,
     ShopProfitBasis,
@@ -40,6 +41,7 @@ from modules.core.db import (
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.payroll_period_lock_service import PayrollPeriodLockService
+from backend.services.payroll_generation_service import PayrollGenerationService
 
 logger = get_logger(__name__)
 
@@ -185,6 +187,26 @@ class HRIncomeCalculationService:
             if result.get("calculation_status") in {"partial", "pending_scope"}
         }
         return set(results) - blocked, blocked
+
+    async def _refresh_draft_payroll_variable_income(
+        self, *, year_month: str, employee_codes: set[str]
+    ) -> None:
+        """Remove stale controlled variable pay before applicable commission is rebuilt."""
+        if not employee_codes:
+            return
+        records = (
+            await self.db.execute(
+                select(PayrollRecord).where(
+                    PayrollRecord.year_month == year_month,
+                    PayrollRecord.status == "draft",
+                    PayrollRecord.employee_code.in_(employee_codes),
+                )
+            )
+        ).scalars().all()
+        for record in records:
+            record.performance_salary = 0
+            record.commission = 0
+            PayrollGenerationService.recalculate_record_totals(record)
 
     @staticmethod
     def _to_float(value: Any, default: float = 0.0) -> float:
@@ -1007,6 +1029,15 @@ class HRIncomeCalculationService:
             _, blocked_commission_codes = self.partition_controlled_commission_codes(
                 controlled_results
             )
+            await self._refresh_draft_payroll_variable_income(
+                year_month=year_month,
+                employee_codes={
+                    employee_code
+                    for employee_code, result in controlled_results.items()
+                    if result.get("calculation_status")
+                    in {"partial", "pending_scope", "not_participating"}
+                },
+            )
             if blocked_commission_codes:
                 await self.db.execute(
                     delete(EmployeeCommission).where(
@@ -1114,6 +1145,11 @@ class HRIncomeCalculationService:
                 )
             commission_upserts += 1
 
+        if controlled_context is not None:
+            # A controlled month has one authoritative personal population: its scope.
+            # Live assignments may still feed independent commission, never personal scores.
+            performance_agg = {}
+
         for employee_code, rec in performance_agg.items():
             sales_amount = rec["sales_amount"]
             if rec["weighted_rate_den"] > 0:
@@ -1185,6 +1221,18 @@ class HRIncomeCalculationService:
 
         if controlled_context is not None:
             formal_employee_codes.clear()
+            if controlled_context["scope_confirmed"]:
+                scope_codes = {
+                    str(getattr(scope, "employee_code", "") or "").strip()
+                    for scope in controlled_context["scopes"]
+                    if str(getattr(scope, "employee_code", "") or "").strip()
+                }
+                await self.db.execute(
+                    delete(EmployeePerformance).where(
+                        EmployeePerformance.year_month == year_month,
+                        EmployeePerformance.employee_code.not_in(scope_codes),
+                    )
+                )
             for employee_code, result in controlled_results.items():
                 inherited = performance_agg.get(employee_code, {})
                 sales_amount = self._to_float(inherited.get("sales_amount"), 0.0)

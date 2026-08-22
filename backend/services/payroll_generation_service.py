@@ -14,6 +14,8 @@ from modules.core.db import (
     EmployeeCommission,
     EmployeePerformance,
     PayrollRecord,
+    PersonalPerformanceEmployeeScope,
+    PersonalPerformancePlan,
     SalaryStructure,
 )
 from modules.core.logger import get_logger
@@ -53,6 +55,36 @@ class PayrollGenerationService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _controlled_scope_membership(
+        self, year_month: str
+    ) -> dict[str, bool] | None:
+        """Return the frozen population for a confirmed controlled month."""
+        plan = (
+            await self.db.execute(
+                select(PersonalPerformancePlan).where(
+                    PersonalPerformancePlan.year_month == year_month
+                )
+            )
+        ).scalar_one_or_none()
+        if (
+            plan is None
+            or getattr(plan, "calculation_mode", None) != "controlled_targets_v1"
+            or getattr(plan, "scope_confirmed_at", None) is None
+        ):
+            return None
+        scopes = (
+            await self.db.execute(
+                select(PersonalPerformanceEmployeeScope).where(
+                    PersonalPerformanceEmployeeScope.plan_id == plan.id
+                )
+            )
+        ).scalars().all()
+        return {
+            str(scope.employee_code).strip(): bool(getattr(scope, "is_included", False))
+            for scope in scopes
+            if str(getattr(scope, "employee_code", "") or "").strip()
+        }
 
     @staticmethod
     def _coerce_date(value: Any) -> date | None:
@@ -507,6 +539,9 @@ class PayrollGenerationService:
         salary = self._pick_salary_structure_for_month(salary_rows, year_month)
         commission = await self._load_employee_commission(employee_code, year_month)
         performance = await self._load_employee_performance(employee_code, year_month)
+        controlled_scope = await self._controlled_scope_membership(year_month)
+        if controlled_scope is not None and not controlled_scope.get(employee_code, False):
+            performance = None
         existing = (
             await self.db.execute(
                 select(PayrollRecord).where(
@@ -606,6 +641,7 @@ class PayrollGenerationService:
         )
         commission_rows = await self._load_employee_commission_rows(year_month)
         performance_rows = await self._load_employee_performance_rows(year_month)
+        controlled_scope = await self._controlled_scope_membership(year_month)
         existing_rows = (
             (
                 await self.db.execute(
@@ -632,6 +668,12 @@ class PayrollGenerationService:
             for row in performance_rows
             if getattr(row, "employee_code", None)
         }
+        if controlled_scope is not None:
+            performance_by_employee = {
+                employee_code: row
+                for employee_code, row in performance_by_employee.items()
+                if controlled_scope.get(str(employee_code).strip(), False)
+            }
         payroll_by_employee = {
             row.employee_code: row
             for row in existing_rows

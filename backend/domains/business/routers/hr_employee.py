@@ -9,6 +9,7 @@ from sqlalchemy import select, func, and_, or_
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 from backend.models.database import get_async_db
 from backend.dependencies.auth import get_current_user, is_admin_user
@@ -28,6 +29,7 @@ from modules.core.db import (
     Employee, DimUser, MonthlyProfitPayrollSnapshot, MonthlyProfitSettlement, PayrollRecord,
     EmployeeCommission, EmployeePerformance, EmployeePerformanceInput, EmployeePerformanceAdjustment,
     EmployeeShopAssignment, ShopCommissionConfig, PerformanceScore, ShopProfitBasis, Position,
+    PersonalPerformanceAssignmentSnapshot, PersonalPerformanceEmployeeScope, PersonalPerformancePlan,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
@@ -350,15 +352,57 @@ async def _build_employee_income_audit(
         )
     ).scalar_one_or_none()
 
-    assignments = (
+    plan = (
         await db.execute(
-            select(EmployeeShopAssignment).where(
-                EmployeeShopAssignment.employee_code == employee_code,
-                EmployeeShopAssignment.year_month == year_month,
-                EmployeeShopAssignment.status == "active",
+            select(PersonalPerformancePlan).where(
+                PersonalPerformancePlan.year_month == year_month
             )
         )
-    ).scalars().all()
+    ).scalar_one_or_none()
+    if (
+        plan is not None
+        and getattr(plan, "calculation_mode", None) == "controlled_targets_v1"
+        and getattr(plan, "scope_confirmed_at", None) is not None
+    ):
+        scope = (
+            await db.execute(
+                select(PersonalPerformanceEmployeeScope).where(
+                    PersonalPerformanceEmployeeScope.plan_id == plan.id,
+                    PersonalPerformanceEmployeeScope.employee_code == employee_code,
+                )
+            )
+        ).scalar_one_or_none()
+        snapshots = (
+            (
+                await db.execute(
+                    select(PersonalPerformanceAssignmentSnapshot).where(
+                        PersonalPerformanceAssignmentSnapshot.scope_id == scope.id
+                    )
+                )
+            ).scalars().all()
+            if scope is not None and bool(getattr(scope, "is_included", False))
+            else []
+        )
+        assignments = [
+            SimpleNamespace(
+                platform_code=snapshot.platform_code,
+                shop_id=snapshot.shop_id,
+                commission_ratio=snapshot.assignment_ratio_snapshot,
+                role=snapshot.role_snapshot,
+                sales_target_amount=snapshot.sales_target_amount_snapshot,
+            )
+            for snapshot in snapshots
+        ]
+    else:
+        assignments = (
+            await db.execute(
+                select(EmployeeShopAssignment).where(
+                    EmployeeShopAssignment.employee_code == employee_code,
+                    EmployeeShopAssignment.year_month == year_month,
+                    EmployeeShopAssignment.status == "active",
+                )
+            )
+        ).scalars().all()
 
     shop_rows = []
     for assignment in assignments:
@@ -398,6 +442,7 @@ async def _build_employee_income_audit(
                 "shop_id": shop_id,
                 "commission_ratio": float(getattr(assignment, "commission_ratio", 0) or 0),
                 "role": getattr(assignment, "role", None),
+                "sales_target_amount": float(getattr(assignment, "sales_target_amount", 0) or 0) if getattr(assignment, "sales_target_amount", None) is not None else None,
                 "allocatable_profit_rate": float(getattr(alloc_cfg, "allocatable_profit_rate", 0) or 0) if alloc_cfg else None,
                 "profit_basis_amount": float(getattr(profit_basis, "profit_basis_amount", 0) or 0) if profit_basis else None,
                 "shop_performance_score": float(getattr(perf, "total_score", 0) or 0) if perf else None,
