@@ -20,12 +20,13 @@
           <h2>评分规则</h2>
           <p>只选择本月启用指标；系统按目录规则自动分配 20 分并统一计算。</p>
         </div>
-        <el-button type="primary" :icon="Check" :disabled="!canSaveRules" :loading="savingRules" @click="saveRules">保存规则</el-button>
+        <div class="panel-actions"><el-button v-if="scopeConfirmed" @click="startRuleChange">撤销范围后修改规则</el-button><el-button type="primary" :icon="Check" :disabled="!canSaveRules || scopeConfirmed" :loading="savingRules" @click="saveRules">{{ scopeConfirmed ? '规则已冻结' : '保存规则' }}</el-button></div>
       </div>
 
       <section class="score-summary" :class="{ invalid: !scoreBudgetMatches }">
         <span>已分配满分 {{ assignedMaxScore }}</span>
         <span>运营满分 {{ operationMaxScore }}</span>
+        <el-tag :type="scopeConfirmed ? 'warning' : 'success'">{{ scopeConfirmed ? '参与范围已确认，规则已冻结' : '规则草稿，可继续修改' }}</el-tag>
         <span v-if="!scoreBudgetMatches">启用指标满分之和必须等于运营满分</span>
       </section>
       <el-alert v-if="legacyMigration.required" type="warning" :closable="false" show-icon class="legacy-migration-alert">
@@ -37,12 +38,12 @@
       </el-alert>
 
       <el-table v-loading="loading" :data="metrics" border stripe class="erp-table">
-        <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch v-model="row.is_enabled" /></template></el-table-column>
+        <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch v-model="row.is_enabled" :disabled="scopeConfirmed" /></template></el-table-column>
         <el-table-column prop="metric_name" label="运营指标" min-width="180"><template #default="{ row }"><span>{{ row.metric_name }}</span><small>{{ row.metric_code }}</small></template></el-table-column>
-        <el-table-column prop="metric_direction" label="评分方向" width="128" />
+        <el-table-column label="评分方向" width="128"><template #default="{ row }">{{ formatWorkbenchDirection(row.metric_direction) }}</template></el-table-column>
         <el-table-column label="固定目标" width="165"><template #default="{ row }"><span>{{ row.target_value ?? '专项检查' }} {{ row.unit || '' }}</span></template></el-table-column>
         <el-table-column label="自动满分" width="110"><template #default="{ row }"><strong>{{ metricPreviewMaxScore(row) }}</strong></template></el-table-column>
-        <el-table-column prop="guidance" label="评分说明" min-width="240" />
+        <el-table-column label="评分说明" min-width="240"><template #default="{ row }">{{ formatWorkbenchGuidance(row) }}</template></el-table-column>
       </el-table>
     </section>
 
@@ -52,7 +53,7 @@
           <h2>店铺范围确认</h2>
           <p>系统载入当月有效经营店铺。标准名与别名用于识别；不参与备注可选。</p>
         </div>
-        <div class="panel-actions"><el-button @click="includeAllShops">全部参与</el-button><el-button @click="excludeAllShops">全部不参与</el-button><el-button v-if="scopeConfirmed" @click="revokeScope">撤销范围</el-button><el-button type="primary" :icon="Check" :loading="savingScope" @click="saveScope">确认范围</el-button></div>
+        <div class="panel-actions"><el-button v-if="!scopeConfirmed" @click="includeAllShops">全部参与</el-button><el-button v-if="!scopeConfirmed" @click="excludeAllShops">全部不参与</el-button><el-button v-if="scopeConfirmed" @click="revokeScope">撤销范围</el-button><el-button v-if="!scopeConfirmed" type="primary" :icon="Check" :loading="savingScope" @click="saveScope">确认范围</el-button></div>
       </div>
 
       <section class="scope-summary">
@@ -133,6 +134,7 @@ import PageHeader from '@/components/common/PageHeader.vue'
 import api from '@/api'
 import { buildEntryPayload, buildScopePayload } from './operationPerformanceWorkbench'
 import { allocateOperationMetricScores, buildOperationEntryPreview } from './operationTargetFormula'
+import { formatWorkbenchDirection, formatWorkbenchGuidance } from './workbenchDisplay'
 
 const yearMonth = ref(new Date().toISOString().slice(0, 7))
 const activeStep = ref(0)
@@ -269,6 +271,11 @@ async function revokeScope() {
     activeStep.value = 1
     ElMessage.success('本月店铺范围已撤销')
   } catch (error) { if (error !== 'cancel') ElMessage.error(errorMessage(error, '撤销范围失败')) }
+}
+
+async function startRuleChange() {
+  await revokeScope()
+  if (!scopeConfirmed.value) activeStep.value = 0
 }
 
 async function migrateLegacyMonth() {

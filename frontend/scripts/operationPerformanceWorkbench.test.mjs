@@ -7,6 +7,10 @@ import {
   buildScopePayload,
   getStoreEntryStatus
 } from '../src/domains/business/views/target/operationPerformanceWorkbench.js'
+import {
+  formatWorkbenchDirection,
+  formatWorkbenchGuidance
+} from '../src/domains/business/views/target/workbenchDisplay.js'
 
 test('buildScopePayload sends the complete monthly shop scope without mutable shop identity fields', () => {
   const payload = buildScopePayload('2026-08', [
@@ -61,6 +65,12 @@ test('getStoreEntryStatus reports pending until every metric is complete', () =>
   assert.equal(getStoreEntryStatus({ metrics: [{ status: 'completed' }] }), 'completed')
 })
 
+test('store workbench uses Chinese display labels for directions and guidance', () => {
+  assert.equal(formatWorkbenchDirection('manual_score'), '按检查结论')
+  assert.equal(formatWorkbenchGuidance({ metric_code: 'customer_satisfaction' }), '填写当月客户满意度百分比，例如 95 表示 95%。')
+  assert.equal(formatWorkbenchGuidance({ metric_code: 'operation_special_check' }), '选择通过、部分完成或未通过；后两种必须填写说明。')
+})
+
 test('operation workbench exposes the three monthly steps and dedicated API methods', async () => {
   const [component, api] = await Promise.all([
     readFile(new URL('../src/domains/business/views/target/TargetOperationWorkbench.vue', import.meta.url), 'utf8'),
@@ -78,6 +88,8 @@ test('operation workbench exposes the three monthly steps and dedicated API meth
   assert.match(component, /aliases/)
   assert.match(component, /备注（可选）/)
   assert.match(component, /revokeScope/)
+  assert.match(component, /规则草稿，可继续修改/)
+  assert.match(component, /撤销范围后修改规则/)
   assert.match(component, /training_counts/)
   assert.match(component, /special_check/)
   assert.match(component, /isNumericInput\(metric\)/)
