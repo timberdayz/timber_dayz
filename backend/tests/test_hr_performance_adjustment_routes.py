@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 
 
 def _load_module():
-    return importlib.import_module("backend.routers.hr_commission")
+    return importlib.import_module(
+        "backend.domains.business.routers.hr_commission"
+    )
 
 
 def test_performance_adjustment_create_and_list_routes(monkeypatch):

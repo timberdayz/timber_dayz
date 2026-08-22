@@ -9,6 +9,7 @@ from sqlalchemy import select, func, and_, or_
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 from backend.models.database import get_async_db
 from backend.dependencies.auth import get_current_user, is_admin_user
@@ -28,6 +29,7 @@ from modules.core.db import (
     Employee, DimUser, MonthlyProfitPayrollSnapshot, MonthlyProfitSettlement, PayrollRecord,
     EmployeeCommission, EmployeePerformance, EmployeePerformanceInput, EmployeePerformanceAdjustment,
     EmployeeShopAssignment, ShopCommissionConfig, PerformanceScore, ShopProfitBasis, Position,
+    PersonalPerformanceAssignmentSnapshot, PersonalPerformanceEmployeeScope, PersonalPerformancePlan,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
@@ -35,6 +37,79 @@ router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
 # ============================================================================
 # 员工管理API
 # ============================================================================
+
+def _audit_performance_inputs(
+    *, legacy_rows: list[Any], employee_performance: Any | None
+) -> list[dict[str, Any]]:
+    if getattr(employee_performance, "performance_source_type", None) == "controlled_targets_v1":
+        details = getattr(employee_performance, "calculation_details", None) or {}
+        entries = details.get("personal_target_entries", []) if isinstance(details, dict) else []
+        result = []
+        for entry in entries:
+            payload = dict(entry.get("input_payload") or {})
+            actual = payload.get("actual_value")
+            result.append(
+                {
+                    "metric_code": entry.get("metric_code"),
+                    "metric_name": entry.get("metric_name"),
+                    "metric_direction": entry.get("metric_direction"),
+                    "target_value": float(entry["target_value"]) if entry.get("target_value") is not None else None,
+                    "achieved_value": float(actual) if actual is not None else None,
+                    "max_score": float(entry["max_score"]) if entry.get("max_score") is not None else None,
+                    "manual_score_enabled": False,
+                    "manual_score_value": None,
+                    "auto_score": float(entry["auto_score"]) if entry.get("auto_score") is not None else None,
+                    "completion_status": entry.get("completion_status"),
+                    "input_payload": payload,
+                    "source": "controlled_targets_v1",
+                    "reason": entry.get("formula"),
+                }
+            )
+        return result
+    return [
+        {
+            "metric_code": row.metric_code,
+            "metric_name": row.metric_name,
+            "metric_direction": row.metric_direction,
+            "target_value": float(row.target_value or 0),
+            "achieved_value": float(row.achieved_value or 0),
+            "max_score": float(row.max_score or 0),
+            "manual_score_enabled": bool(row.manual_score_enabled),
+            "manual_score_value": float(row.manual_score_value) if row.manual_score_value is not None else None,
+            "source": row.source,
+            "reason": row.reason,
+        }
+        for row in legacy_rows
+    ]
+
+
+def _display_employee_performance(employee_performance: Any) -> dict[str, Any]:
+    details = getattr(employee_performance, "calculation_details", None) or {}
+    display_details = dict(details) if isinstance(details, dict) else {}
+    for field in (
+        "store_base_score",
+        "store_weighted_contribution",
+        "personal_target_score",
+        "final_score",
+    ):
+        if display_details.get(field) is not None:
+            display_details[field] = round(float(display_details[field]), 1)
+    if isinstance(display_details.get("personal_metric_scores"), dict):
+        display_details["personal_metric_scores"] = {
+            code: round(float(score), 1)
+            for code, score in display_details["personal_metric_scores"].items()
+        }
+    score = getattr(employee_performance, "performance_score", None)
+    return {
+        "actual_sales": round(float(getattr(employee_performance, "actual_sales", 0) or 0), 2),
+        "achievement_rate": round(float(getattr(employee_performance, "achievement_rate", 0) or 0), 4),
+        "performance_score": round(float(score), 1) if score is not None else None,
+        "calculation_status": getattr(employee_performance, "calculation_status", None),
+        "performance_source_type": getattr(employee_performance, "performance_source_type", None),
+        "calculation_details": display_details,
+        "calculated_at": getattr(employee_performance, "calculated_at", None).isoformat() if getattr(employee_performance, "calculated_at", None) else None,
+    }
+
 
 async def _username_for_user_id(db: AsyncSession, user_id: Optional[int]) -> Optional[str]:
     """根据 dim_users.user_id 查询 username，用于 EmployeeResponse.username"""
@@ -277,15 +352,57 @@ async def _build_employee_income_audit(
         )
     ).scalar_one_or_none()
 
-    assignments = (
+    plan = (
         await db.execute(
-            select(EmployeeShopAssignment).where(
-                EmployeeShopAssignment.employee_code == employee_code,
-                EmployeeShopAssignment.year_month == year_month,
-                EmployeeShopAssignment.status == "active",
+            select(PersonalPerformancePlan).where(
+                PersonalPerformancePlan.year_month == year_month
             )
         )
-    ).scalars().all()
+    ).scalar_one_or_none()
+    if (
+        plan is not None
+        and getattr(plan, "calculation_mode", None) == "controlled_targets_v1"
+        and getattr(plan, "scope_confirmed_at", None) is not None
+    ):
+        scope = (
+            await db.execute(
+                select(PersonalPerformanceEmployeeScope).where(
+                    PersonalPerformanceEmployeeScope.plan_id == plan.id,
+                    PersonalPerformanceEmployeeScope.employee_code == employee_code,
+                )
+            )
+        ).scalar_one_or_none()
+        snapshots = (
+            (
+                await db.execute(
+                    select(PersonalPerformanceAssignmentSnapshot).where(
+                        PersonalPerformanceAssignmentSnapshot.scope_id == scope.id
+                    )
+                )
+            ).scalars().all()
+            if scope is not None and bool(getattr(scope, "is_included", False))
+            else []
+        )
+        assignments = [
+            SimpleNamespace(
+                platform_code=snapshot.platform_code,
+                shop_id=snapshot.shop_id,
+                commission_ratio=snapshot.assignment_ratio_snapshot,
+                role=snapshot.role_snapshot,
+                sales_target_amount=snapshot.sales_target_amount_snapshot,
+            )
+            for snapshot in snapshots
+        ]
+    else:
+        assignments = (
+            await db.execute(
+                select(EmployeeShopAssignment).where(
+                    EmployeeShopAssignment.employee_code == employee_code,
+                    EmployeeShopAssignment.year_month == year_month,
+                    EmployeeShopAssignment.status == "active",
+                )
+            )
+        ).scalars().all()
 
     shop_rows = []
     for assignment in assignments:
@@ -325,6 +442,7 @@ async def _build_employee_income_audit(
                 "shop_id": shop_id,
                 "commission_ratio": float(getattr(assignment, "commission_ratio", 0) or 0),
                 "role": getattr(assignment, "role", None),
+                "sales_target_amount": float(getattr(assignment, "sales_target_amount", 0) or 0) if getattr(assignment, "sales_target_amount", None) is not None else None,
                 "allocatable_profit_rate": float(getattr(alloc_cfg, "allocatable_profit_rate", 0) or 0) if alloc_cfg else None,
                 "profit_basis_amount": float(getattr(profit_basis, "profit_basis_amount", 0) or 0) if profit_basis else None,
                 "shop_performance_score": float(getattr(perf, "total_score", 0) or 0) if perf else None,
@@ -417,21 +535,10 @@ async def _build_employee_income_audit(
             "settlement_status": getattr(settlement, "status", None) if settlement else None,
             "my_income_projection": my_income_like,
             "shop_assignments": shop_rows,
-            "performance_inputs": [
-                {
-                    "metric_code": row.metric_code,
-                    "metric_name": row.metric_name,
-                    "metric_direction": row.metric_direction,
-                    "target_value": float(row.target_value or 0),
-                    "achieved_value": float(row.achieved_value or 0),
-                    "max_score": float(row.max_score or 0),
-                    "manual_score_enabled": bool(row.manual_score_enabled),
-                    "manual_score_value": float(row.manual_score_value) if row.manual_score_value is not None else None,
-                    "source": row.source,
-                    "reason": row.reason,
-                }
-                for row in perf_inputs
-            ],
+            "performance_inputs": _audit_performance_inputs(
+                legacy_rows=perf_inputs,
+                employee_performance=employee_performance,
+            ),
             "performance_adjustments": [
                 {
                     "adjustment_type": row.adjustment_type,
@@ -442,12 +549,7 @@ async def _build_employee_income_audit(
                 for row in adjustments
             ],
             "employee_performance": (
-                {
-                    "actual_sales": float(getattr(employee_performance, "actual_sales", 0) or 0),
-                    "achievement_rate": float(getattr(employee_performance, "achievement_rate", 0) or 0),
-                    "performance_score": float(getattr(employee_performance, "performance_score", 0) or 0),
-                    "calculated_at": getattr(employee_performance, "calculated_at", None).isoformat() if getattr(employee_performance, "calculated_at", None) else None,
-                }
+                _display_employee_performance(employee_performance)
                 if employee_performance
                 else None
             ),

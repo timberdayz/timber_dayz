@@ -6,7 +6,7 @@ const routerSource = readFileSync(new URL('../src/router/index.js', import.meta.
 const menuSource = readFileSync(new URL('../src/config/menuGroups.js', import.meta.url), 'utf8')
 const operationPageSource = readFileSync(new URL('../src/domains/business/views/target/TargetOperationManagement.vue', import.meta.url), 'utf8')
 const operationEditorSource = readFileSync(new URL('../src/domains/business/views/target/TargetOperationEditor.vue', import.meta.url), 'utf8')
-const personPageSource = readFileSync(new URL('../src/domains/business/views/target/TargetPersonManagement.vue', import.meta.url), 'utf8')
+const personPageSource = readFileSync(new URL('../src/domains/business/views/target/TargetPersonalManagement.vue', import.meta.url), 'utf8')
 const shopWorkbenchSource = readFileSync(new URL('../src/domains/business/views/target/TargetShopWorkbench.vue', import.meta.url), 'utf8')
 
 test('router exposes split target management routes', () => {
@@ -26,8 +26,8 @@ test('menu keeps target management entry but points to split shop route', () => 
 test('shop target route uses the workbench instead of the legacy entry page', () => {
   assert.equal(routerSource.includes("TargetShopWorkbench.vue"), true)
   assert.equal(routerSource.includes("title: '店铺目标管理'"), true)
-  assert.equal(routerSource.includes("title: '个人目标管理'"), true)
-  assert.equal(routerSource.includes("title: '运营目标管理'"), true)
+  assert.equal(routerSource.includes("title: '个人运营目标管理'"), true)
+  assert.equal(routerSource.includes("title: '店铺绩效目标管理'"), true)
 })
 
 test('operation target page is separated and uses the dedicated editor/formula helper', () => {
@@ -37,11 +37,11 @@ test('operation target page is separated and uses the dedicated editor/formula h
   assert.equal(operationEditorSource.includes('defineEmits'), true)
 })
 
-test('person target page is no longer a placeholder and uses employee target APIs', () => {
-  assert.equal(personPageSource.includes('getHrEmployeeTargets'), true)
-  assert.equal(personPageSource.includes('createHrEmployeeTarget'), true)
-  assert.equal(personPageSource.includes('updateHrEmployeeTarget'), true)
-  assert.equal(personPageSource.includes('saveBatchTargets'), true)
+test('person target page is the dedicated controlled personal workbench', () => {
+  assert.equal(personPageSource.includes('个人运营目标管理'), true)
+  assert.equal(personPageSource.includes('getPersonalPerformanceWorkbench'), true)
+  assert.equal(personPageSource.includes('applyPersonalPerformanceScope'), true)
+  assert.equal(personPageSource.includes('applyPersonalPerformanceEntries'), true)
 })
 
 test('shop target workbench supports month copy, ratio split, aliases, and daily targets', () => {

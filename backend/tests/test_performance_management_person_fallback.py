@@ -36,6 +36,7 @@ def test_list_performance_scores_person_reads_english_columns():
         actual_sales=123.45,
         achievement_rate=0.88,
         performance_score=88.0,
+        calculation_status="complete",
     )
 
     async def _execute(stmt, params=None):
@@ -85,6 +86,7 @@ def test_list_performance_scores_person_reads_english_columns():
     assert row["rank"] == 1
     assert row["total_score"] == 88.0
     assert row["performance_coefficient"] is None
+    assert row["calculation_details"] is None
     assert isinstance(row["sales_achieved"], float)
     assert db.rollback.await_count == 0
 
@@ -97,6 +99,7 @@ def test_list_performance_scores_person_serializes_decimal_fields():
         actual_sales=Decimal("123.45"),
         achievement_rate=Decimal("0.88"),
         performance_score=Decimal("88.0"),
+        calculation_status="complete",
     )
 
     async def _execute(stmt, params=None):
@@ -143,3 +146,69 @@ def test_list_performance_scores_person_serializes_decimal_fields():
     assert row["sales_achieved"] == 123.45
     assert row["sales_rate"] == 88.0
     assert row["total_score"] == 88.0
+
+
+def test_list_performance_scores_person_exposes_controlled_display_calculation_details():
+    db = AsyncMock()
+    calls = {"n": 0}
+    perf_row = SimpleNamespace(
+        employee_code="E003",
+        actual_sales=Decimal("123.45"),
+        achievement_rate=Decimal("0.88"),
+        performance_score=Decimal("71.95418558631921"),
+        performance_source_type="controlled_targets_v1",
+        calculation_details={
+            "store_base_score": Decimal("70.756"),
+            "store_weighted_contribution": Decimal("56.6048"),
+            "personal_target_score": Decimal("15"),
+            "final_score": Decimal("71.95418558631921"),
+            "personal_target_entries": [{"metric_code": "attendance"}],
+        },
+    )
+
+    async def _execute(stmt, params=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _ScalarResult(1)
+        if calls["n"] in {2, 3}:
+            return _RowsResult([perf_row])
+        if calls["n"] == 4:
+            return _RowsResult([("E003", "Cara")])
+        return _RowsResult([])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.rollback = AsyncMock()
+    app = SimpleNamespace(state=SimpleNamespace())
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/performance/scores",
+            "headers": [],
+            "client": ("127.0.0.1", 8001),
+            "app": app,
+        }
+    )
+
+    response = asyncio.run(
+        list_performance_scores(
+            request=request,
+            period="2026-09",
+            platform_code=None,
+            shop_id=None,
+            group_by="person",
+            page=1,
+            page_size=20,
+            db=db,
+        )
+    )
+    row = json.loads(response.body.decode("utf-8"))["data"][0]
+
+    assert row["calculation_details"] == {
+        "store_base_score": 70.8,
+        "store_weighted_contribution": 56.6,
+        "personal_target_score": 15.0,
+        "final_score": 72.0,
+        "personal_target_entries": [{"metric_code": "attendance"}],
+    }
+    assert row["total_score"] == 72.0

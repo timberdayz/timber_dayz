@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from datetime import date
 
 import pytest
@@ -33,6 +33,244 @@ def test_operation_workbench_model_contract_keeps_pending_values_nullable():
     assert EmployeePerformanceInput.__table__.c.achieved_value.nullable is True
     assert EmployeePerformance.__table__.c.performance_score.nullable is True
     assert hasattr(EmployeePerformance, "calculation_status")
+
+
+@pytest.mark.asyncio
+async def test_existing_v2_operation_month_reads_its_original_catalog_including_training():
+    service = OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    v2_catalog = [
+        SimpleNamespace(
+            metric_code="customer_satisfaction",
+            metric_name="Customer satisfaction",
+            metric_direction="higher_better",
+            catalog_version=2,
+            sort_key=10,
+            input_kind="percentage",
+            unit="%",
+            guidance="",
+            default_target_value=100,
+            default_max_score=0,
+            default_penalty_enabled=False,
+            default_penalty_threshold=None,
+            default_penalty_per_unit=None,
+            default_penalty_max=None,
+            manual_score_enabled=False,
+        ),
+        SimpleNamespace(
+            metric_code="training_completion_rate",
+            metric_name="Training completion rate",
+            metric_direction="higher_better",
+            catalog_version=2,
+            sort_key=40,
+            input_kind="training_counts",
+            unit="%",
+            guidance="",
+            default_target_value=100,
+            default_max_score=0,
+            default_penalty_enabled=False,
+            default_penalty_threshold=None,
+            default_penalty_per_unit=None,
+            default_penalty_max=None,
+            manual_score_enabled=False,
+        ),
+    ]
+    v3_catalog = [
+        SimpleNamespace(
+            metric_code="customer_satisfaction",
+            metric_name="Customer satisfaction",
+            metric_direction="higher_better",
+            catalog_version=3,
+            sort_key=10,
+            input_kind="percentage",
+            unit="%",
+            guidance="",
+            default_target_value=100,
+            default_max_score=0,
+            default_penalty_enabled=False,
+            default_penalty_threshold=None,
+            default_penalty_per_unit=None,
+            default_penalty_max=None,
+            manual_score_enabled=False,
+        )
+    ]
+    service._targets = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                metric_code="training_completion_rate",
+                metric_catalog_version=2,
+                scoring_model_version="auto_integer_v1",
+                is_enabled=True,
+                max_score=20,
+            )
+        ]
+    )
+    service._config = AsyncMock(return_value=None)
+
+    async def catalog_for_version(catalog_version=None, **_kwargs):
+        return v2_catalog if catalog_version == 2 else v3_catalog
+
+    service._catalog = AsyncMock(side_effect=catalog_for_version)
+
+    result = await service.get_workbench("2026-07")
+
+    assert result["catalog_version"] == 2
+    assert [metric["metric_code"] for metric in result["metrics"]] == [
+        "customer_satisfaction",
+        "training_completion_rate",
+    ]
+    service._catalog.assert_awaited_once_with(2)
+
+
+@pytest.mark.asyncio
+async def test_empty_operation_month_uses_the_latest_v3_catalog():
+    service = OperationPerformanceWorkbenchService(db=SimpleNamespace())
+    v3_catalog = [
+        SimpleNamespace(
+            metric_code="customer_satisfaction",
+            metric_name="Customer satisfaction",
+            metric_direction="higher_better",
+            catalog_version=3,
+            sort_key=10,
+            input_kind="percentage",
+            unit="%",
+            guidance="",
+            default_target_value=100,
+            default_max_score=0,
+            default_penalty_enabled=False,
+            default_penalty_threshold=None,
+            default_penalty_per_unit=None,
+            default_penalty_max=None,
+            manual_score_enabled=False,
+        )
+    ]
+    service._targets = AsyncMock(return_value=[])
+    service._config = AsyncMock(return_value=None)
+    service._catalog = AsyncMock(return_value=v3_catalog)
+
+    result = await service.get_workbench("2026-09")
+
+    assert result["catalog_version"] == 3
+    assert result["metrics"][0]["metric_code"] == "customer_satisfaction"
+    service._catalog.assert_awaited_once_with(None)
+
+
+@pytest.mark.asyncio
+async def test_apply_rejects_mixed_existing_controlled_catalog_versions_before_write():
+    from backend.schemas.target import OperationWorkbenchApplyRequest
+
+    first_target = SimpleNamespace(metric_catalog_version=2, metric_code="customer_satisfaction")
+    second_target = SimpleNamespace(metric_catalog_version=3, metric_code="reply_timeliness")
+    db = SimpleNamespace(add=Mock(), commit=AsyncMock())
+    service = OperationPerformanceWorkbenchService(db=db)
+    service._lock_month_mutation = AsyncMock()
+    service._targets = AsyncMock(return_value=[first_target, second_target])
+    service._catalog = AsyncMock(return_value=[])
+    service._config = AsyncMock(return_value=SimpleNamespace(id=1, operation_max_score=20))
+    service._scope_rows = AsyncMock(return_value=[])
+
+    with pytest.raises(ValueError, match="controlled operation targets"):
+        await service.apply(
+            OperationWorkbenchApplyRequest(
+                year_month="2026-08",
+                catalog_version=3,
+                metrics=[{"metric_code": "customer_satisfaction", "is_enabled": True}],
+            )
+        )
+
+    assert first_target.metric_catalog_version == 2
+    assert second_target.metric_catalog_version == 3
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_apply_rejects_v3_request_for_existing_v2_controlled_rules_before_write():
+    from backend.schemas.target import OperationWorkbenchApplyRequest
+
+    target = SimpleNamespace(metric_catalog_version=2, metric_code="customer_satisfaction")
+    db = SimpleNamespace(add=Mock(), commit=AsyncMock())
+    service = OperationPerformanceWorkbenchService(db=db)
+    service._lock_month_mutation = AsyncMock()
+    service._targets = AsyncMock(return_value=[target])
+    service._scope_rows = AsyncMock(return_value=[])
+    service._catalog = AsyncMock()
+    service._config = AsyncMock()
+
+    with pytest.raises(ValueError, match="controlled operation targets"):
+        await service.apply(
+            OperationWorkbenchApplyRequest(
+                year_month="2026-08",
+                catalog_version=3,
+                metrics=[{"metric_code": "customer_satisfaction", "is_enabled": True}],
+            )
+        )
+
+    assert target.metric_catalog_version == 2
+    service._catalog.assert_not_awaited()
+    service._config.assert_not_awaited()
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_apply_rejects_confirmed_v2_scope_before_v3_can_rewrite_rules():
+    from backend.schemas.target import OperationWorkbenchApplyRequest
+
+    target = SimpleNamespace(
+        id=11,
+        metric_catalog_version=2,
+        metric_code="customer_satisfaction",
+        metric_name="Legacy customer satisfaction",
+        metric_direction="higher_better",
+        target_value=100,
+        achieved_value=None,
+        max_score=20,
+        penalty_enabled=False,
+        penalty_threshold=None,
+        penalty_per_unit=None,
+        penalty_max=None,
+        manual_score_enabled=False,
+        manual_score_value=None,
+        is_enabled=True,
+        updated_at=None,
+    )
+    catalog_item = SimpleNamespace(
+        metric_code="customer_satisfaction",
+        metric_name="Customer satisfaction",
+        metric_direction="higher_better",
+        default_target_value=100,
+        sort_key=10,
+        input_kind="percentage",
+        unit="%",
+        guidance="",
+        scoring_rule_version="auto_integer_v1",
+    )
+    db = SimpleNamespace(add=Mock(), commit=AsyncMock())
+    service = OperationPerformanceWorkbenchService(db=db)
+    service._lock_month_mutation = AsyncMock()
+    service._targets = AsyncMock(return_value=[target])
+    service._catalog = AsyncMock(return_value=[catalog_item])
+    service._config = AsyncMock(
+        return_value=SimpleNamespace(id=1, operation_max_score=20, updated_at=None)
+    )
+    service._scope_rows = AsyncMock(
+        return_value=[SimpleNamespace(snapshot_version=1, confirmed_at=object())]
+    )
+
+    with pytest.raises(ValueError, match="confirmed operation scope"):
+        await service.apply(
+            OperationWorkbenchApplyRequest(
+                year_month="2026-08",
+                catalog_version=3,
+                metrics=[{"metric_code": "customer_satisfaction", "is_enabled": True}],
+            )
+        )
+
+    assert target.metric_catalog_version == 2
+    assert target.metric_name == "Legacy customer satisfaction"
+    assert target.max_score == 20
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
 
 
 def test_runtime_operation_paths_are_isolated_from_legacy_targets():
@@ -163,6 +401,9 @@ async def test_copy_previous_month_does_not_copy_store_scope_or_entries(
         def __init__(self, _db):
             pass
 
+        async def acquire_month_transaction_lock(self, **_kwargs):
+            return None
+
         async def assert_month_mutable(self, **_kwargs):
             return None
 
@@ -232,6 +473,12 @@ async def test_workbench_save_preserves_store_entries(monkeypatch):
         metric_name="Reply",
         metric_direction="higher_better",
         manual_score_enabled=False,
+        sort_key=10,
+        input_kind="percentage",
+        default_target_value=95,
+        unit="%",
+        guidance="Fill the rate",
+        scoring_rule_version="auto_integer_v1",
     )
     config = SimpleNamespace(id=1, operation_max_score=20, updated_at=None)
     db = _Db()
@@ -246,7 +493,7 @@ async def test_workbench_save_preserves_store_entries(monkeypatch):
         OperationWorkbenchApplyRequest(
             year_month="2026-08",
             catalog_version=3,
-            metrics=[{"metric_code": "reply", "max_score": 20}],
+            metrics=[{"metric_code": "reply", "is_enabled": True}],
         )
     )
 

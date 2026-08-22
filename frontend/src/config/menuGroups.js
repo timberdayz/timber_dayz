@@ -56,8 +56,8 @@ export const menuGroups = [
       '/sales-dashboard-v3',        // 销售看板（v3版本）
       '/sales-campaign-management',  // 销售战役管理（A类数据）
       '/target-management/shop',     // 目标管理（店铺目标）
-      '/target-management/person',   // 目标管理（个人目标）
-      '/target-management/operation', // 目标管理（运营目标）
+      '/target-management/person',   // 个人运营目标管理
+      '/target-management/operation', // 店铺绩效目标管理
       '/customer-management',        // 客户管理
       '/sales/order-management'      // 订单管理
       // 废弃路由（功能已合并到销售看板）：
@@ -219,8 +219,8 @@ export const routeDisplayNames = {
   '/hr-shop-assignment': '人员店铺归属和提成比',
   '/target-management': '目标管理',
   '/target-management/shop': '店铺目标管理',
-  '/target-management/person': '个人目标管理',
-  '/target-management/operation': '运营目标管理',
+  '/target-management/person': '个人运营目标管理',
+  '/target-management/operation': '店铺绩效目标管理',
   '/inventory-overview': '库存总览',
   '/inventory/opening-balances': '期初余额',
   '/inventory/aging': '库存库龄',

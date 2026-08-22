@@ -1,6 +1,6 @@
 <template>
   <div class="operation-workbench erp-page-container erp-page--admin">
-    <PageHeader title="运营绩效" subtitle="按月配置评分规则、确认参与店铺，并完成店铺运营数据录入。" family="admin" />
+    <PageHeader title="店铺绩效目标管理" subtitle="按月配置店铺运营评分规则、确认参与店铺，并完成店铺运营数据录入。" family="admin" />
 
     <section class="toolbar">
       <el-date-picker v-model="yearMonth" type="month" value-format="YYYY-MM" format="YYYY-MM" class="month-picker" @change="loadAll" />

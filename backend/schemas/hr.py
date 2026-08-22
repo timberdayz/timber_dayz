@@ -14,7 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ================================================================
@@ -975,6 +975,164 @@ class EmployeePerformanceInputResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PersonalPerformanceWorkbenchMetricInput(BaseModel):
+    metric_code: str = Field(..., min_length=1, max_length=64)
+    is_enabled: bool = True
+
+
+class PersonalPerformanceWorkbenchApplyRequest(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    expected_plan_version: Optional[int] = Field(default=None, ge=1)
+    metrics: List[PersonalPerformanceWorkbenchMetricInput] = Field(
+        default_factory=list
+    )
+
+    @model_validator(mode="after")
+    def validate_unique_metric_codes(self):
+        metric_codes = [item.metric_code.strip() for item in self.metrics]
+        if len(metric_codes) != len(set(metric_codes)):
+            raise ValueError("personal metrics cannot repeat")
+        return self
+
+
+class PersonalPerformanceScopeEmployeeInput(BaseModel):
+    employee_code: str = Field(..., min_length=1, max_length=64)
+    is_included: bool = True
+    exclusion_note: Optional[str] = Field(default=None, max_length=512)
+
+
+class PersonalPerformanceScopeApplyRequest(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    expected_plan_version: int = Field(..., ge=1)
+    expected_updated_at: Optional[datetime] = None
+    employees: List[PersonalPerformanceScopeEmployeeInput] = Field(
+        default_factory=list
+    )
+
+    @model_validator(mode="after")
+    def validate_unique_employee_codes(self):
+        employee_codes = [item.employee_code.strip() for item in self.employees]
+        if len(employee_codes) != len(set(employee_codes)):
+            raise ValueError("employees cannot repeat")
+        return self
+
+
+class PersonalPerformanceEntryInput(BaseModel):
+    employee_code: str = Field(..., min_length=1, max_length=64)
+    metric_code: str = Field(..., min_length=1, max_length=64)
+    actual_value: Optional[float] = Field(default=None, ge=0, le=100)
+    completed_count: Optional[int] = Field(default=None, ge=0)
+    required_count: Optional[int] = Field(default=None, ge=0)
+    result: Optional[str] = Field(default=None, pattern=r"^(passed|partial|failed)$")
+    note: Optional[str] = Field(default=None, max_length=512)
+
+    @model_validator(mode="after")
+    def validate_controlled_input_kind(self):
+        has_numeric = self.actual_value is not None
+        has_training = self.completed_count is not None or self.required_count is not None
+        has_special_task = self.result is not None or self.note is not None
+        if sum((has_numeric, has_training, has_special_task)) != 1:
+            raise ValueError("exactly one controlled input is required")
+        if has_training and (
+            self.completed_count is None or self.required_count is None
+        ):
+            raise ValueError("training counts require both values")
+        if has_special_task:
+            if self.result is None:
+                raise ValueError("special task result is required")
+            if self.result in {"partial", "failed"} and not (self.note or "").strip():
+                raise ValueError("partial or failed special task requires a note")
+        return self
+
+
+class PersonalPerformanceEntryApplyRequest(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    expected_plan_version: int = Field(..., ge=1)
+    entries: List[PersonalPerformanceEntryInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_entry_keys(self):
+        keys = [
+            (item.employee_code.strip(), item.metric_code.strip())
+            for item in self.entries
+        ]
+        if len(keys) != len(set(keys)):
+            raise ValueError("employee metric entries cannot repeat")
+        return self
+
+
+class PersonalPerformanceMetricResponse(BaseModel):
+    metric_code: str
+    metric_name: str
+    metric_direction: str
+    input_kind: str
+    sort_key: int = 0
+    default_target_value: Optional[float] = None
+    unit: Optional[str] = None
+    max_score: int = 0
+    guidance: Optional[str] = None
+    scoring_rule_version: Optional[str] = None
+
+
+class PersonalPerformanceWorkbenchResponse(BaseModel):
+    year_month: str
+    calculation_mode: str = "legacy_inputs"
+    plan_version: Optional[int] = None
+    scope_confirmed: bool = False
+    legacy_read_only: bool = False
+    has_legacy_records: bool = False
+    metrics: List[PersonalPerformanceMetricResponse] = Field(default_factory=list)
+
+
+class PersonalPerformanceScopeEmployeeResponse(BaseModel):
+    employee_code: str
+    employee_name: str
+    department_name: Optional[str] = None
+    position_name: Optional[str] = None
+    is_included: bool = True
+    exclusion_note: Optional[str] = None
+    eligibility_status: str
+    blocking_reasons: List[str] = Field(default_factory=list)
+
+
+class PersonalPerformanceScopeResponse(BaseModel):
+    year_month: str
+    plan_version: Optional[int] = None
+    scope_confirmed: bool = False
+    employees: List[PersonalPerformanceScopeEmployeeResponse] = Field(
+        default_factory=list
+    )
+
+
+class PersonalPerformanceEntryMetricResponse(BaseModel):
+    metric_code: str
+    metric_name: str
+    input_kind: str
+    input_payload: Dict[str, Any] = Field(default_factory=dict)
+    target_value: Optional[float] = None
+    max_score: int = 0
+    auto_score: Optional[int] = None
+    status: str
+    guidance: Optional[str] = None
+    formula: Optional[str] = None
+
+
+class PersonalPerformanceEntryEmployeeResponse(BaseModel):
+    employee_code: str
+    employee_name: str
+    status: str
+    metrics: List[PersonalPerformanceEntryMetricResponse] = Field(default_factory=list)
+
+
+class PersonalPerformanceEntriesResponse(BaseModel):
+    year_month: str
+    scope_confirmed: bool
+    employees: List[PersonalPerformanceEntryEmployeeResponse] = Field(
+        default_factory=list
+    )
+    completion: Dict[str, int] = Field(default_factory=dict)
 
 
 class EmployeePerformanceTemplateMetric(BaseModel):

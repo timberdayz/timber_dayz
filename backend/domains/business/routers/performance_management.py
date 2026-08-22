@@ -49,6 +49,7 @@ from modules.core.db import (
     EmployeePerformance,
     EmployeePerformanceAdjustment,
     EmployeePerformanceInput,
+    DimUser,
     # [DELETED] v4.19.0: FactOrder 已删除
     FactProductMetric,
     DimShop,
@@ -87,10 +88,172 @@ from backend.services.operation_performance_workbench_service import (
 from backend.services.operation_performance_scoring_service import (
     OperationPerformanceScoringService,
 )
+from backend.services.personal_performance_workbench_service import (
+    PersonalPerformanceWorkbenchConflictError,
+    PersonalPerformanceWorkbenchService,
+)
 from backend.services.performance_readiness_service import PerformanceReadinessError
+from backend.schemas.hr import (
+    PersonalPerformanceEntriesResponse,
+    PersonalPerformanceEntryApplyRequest,
+    PersonalPerformanceScopeApplyRequest,
+    PersonalPerformanceScopeResponse,
+    PersonalPerformanceWorkbenchApplyRequest,
+    PersonalPerformanceWorkbenchResponse,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
+
+
+def _personal_workbench_username(current_user: DimUser) -> str:
+    return str(
+        getattr(current_user, "username", None)
+        or getattr(current_user, "user_id", None)
+        or "system"
+    )
+
+
+async def _run_personal_workbench_mutation(operation):
+    try:
+        return await operation()
+    except (PersonalPerformanceWorkbenchConflictError, PayrollPeriodLockedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _controlled_person_calculation_details_for_display(
+    employee_performance: Any,
+) -> Dict[str, Any] | None:
+    if (
+        getattr(employee_performance, "performance_source_type", None)
+        != "controlled_targets_v1"
+    ):
+        return None
+    details = getattr(employee_performance, "calculation_details", None)
+    if not isinstance(details, dict):
+        return None
+    display_details = dict(details)
+    for field in (
+        "store_base_score",
+        "store_weighted_contribution",
+        "personal_target_score",
+        "final_score",
+    ):
+        if display_details.get(field) is not None:
+            display_details[field] = round(float(display_details[field]), 1)
+    return display_details
+
+
+@router.get(
+    "/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse
+)
+async def get_personal_performance_workbench(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
+):
+    return await PersonalPerformanceWorkbenchService(db).get_workbench(year_month)
+
+
+@router.put(
+    "/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse
+)
+async def apply_personal_performance_workbench(
+    request: PersonalPerformanceWorkbenchApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin),
+):
+    try:
+        return await _run_personal_workbench_mutation(
+            lambda: PersonalPerformanceWorkbenchService(db).apply(
+                request, _personal_workbench_username(current_user)
+            )
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+
+
+@router.get(
+    "/personal-workbench/scope", response_model=PersonalPerformanceScopeResponse
+)
+async def get_personal_performance_workbench_scope(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
+):
+    return await PersonalPerformanceWorkbenchService(db).get_scope(year_month)
+
+
+@router.put(
+    "/personal-workbench/scope", response_model=PersonalPerformanceScopeResponse
+)
+async def apply_personal_performance_workbench_scope(
+    request: PersonalPerformanceScopeApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin),
+):
+    try:
+        return await _run_personal_workbench_mutation(
+            lambda: PersonalPerformanceWorkbenchService(db).apply_scope(
+                request, _personal_workbench_username(current_user)
+            )
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+
+
+@router.post(
+    "/personal-workbench/scope/revoke", response_model=PersonalPerformanceScopeResponse
+)
+async def revoke_personal_performance_workbench_scope(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    expected_plan_version: int = Query(..., ge=1),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
+):
+    try:
+        return await _run_personal_workbench_mutation(
+            lambda: PersonalPerformanceWorkbenchService(db).revoke_scope(
+                year_month, expected_plan_version
+            )
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+
+
+@router.get(
+    "/personal-workbench/entries", response_model=PersonalPerformanceEntriesResponse
+)
+async def get_personal_performance_workbench_entries(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
+):
+    return await PersonalPerformanceWorkbenchService(db).get_entries(year_month)
+
+
+@router.put(
+    "/personal-workbench/entries", response_model=PersonalPerformanceEntriesResponse
+)
+async def apply_personal_performance_workbench_entries(
+    request: PersonalPerformanceEntryApplyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin),
+):
+    try:
+        return await _run_personal_workbench_mutation(
+            lambda: PersonalPerformanceWorkbenchService(db).apply_entries(
+                request, _personal_workbench_username(current_user)
+            )
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
 
 
 async def _load_profit_basis_for_performance(
@@ -1784,7 +1947,7 @@ async def list_performance_scores(
             for ep in ep_list:
                 ec = getattr(ep, "employee_code", "")
                 raw_score = getattr(ep, "performance_score", None)
-                scr = float(raw_score) if raw_score is not None else None
+                scr = round(float(raw_score), 1) if raw_score is not None else None
                 ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
                 raw_sales_achieved = getattr(ep, "actual_sales", None)
                 sales_achieved = (
@@ -1822,6 +1985,7 @@ async def list_performance_scores(
                         ),
                         "calculation_status": getattr(ep, "calculation_status", None)
                         or "historical_unknown",
+                        "calculation_details": _controlled_person_calculation_details_for_display(ep),
                         "personal_adjustment_total": adjustment_total_by_code.get(ec),
                         "total_score": scr,
                         "rank": rank_by_code.get(ec),
@@ -2134,7 +2298,9 @@ async def calculate_performance_scores(
                 month=period_start.month + 1, day=1
             ) - timedelta(days=1)
 
-        await PayrollPeriodLockService(db).assert_month_mutable(year_month=period)
+        period_lock = PayrollPeriodLockService(db)
+        await period_lock.acquire_month_transaction_lock(year_month=period)
+        await period_lock.assert_month_mutable(year_month=period)
         # 按考核周期校验配置是否存在(契约: 无配置时返回 404 + PERF_CONFIG_NOT_FOUND)
 
         if config_id:
@@ -2616,11 +2782,14 @@ async def calculate_performance_scores(
                 eligible_shop_keys=formal_shop_keys,
             )
             formal_employee_codes = income_result.get("formal_employee_codes", [])
-            if formal_employee_codes:
+            payroll_refresh_employee_codes = income_result.get(
+                "payroll_refresh_employee_codes", formal_employee_codes
+            )
+            if payroll_refresh_employee_codes:
                 payroll_service = PayrollGenerationService(db=db)
                 payroll_result = await payroll_service.generate_month(
                     period,
-                    employee_codes=formal_employee_codes,
+                    employee_codes=payroll_refresh_employee_codes,
                 )
         elif all_rows_formal:
             income_service = HRIncomeCalculationService(db=db)
@@ -2628,6 +2797,7 @@ async def calculate_performance_scores(
             payroll_service = PayrollGenerationService(db=db)
             payroll_result = await payroll_service.generate_month(period)
 
+        await period_lock.assert_month_mutable(year_month=period)
         await db.commit()
         try:
             employee_rows = (
