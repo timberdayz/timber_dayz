@@ -83,6 +83,43 @@ async def test_get_workbench_marks_active_legacy_records_as_read_only():
 
 
 @pytest.mark.asyncio
+async def test_get_workbench_marks_an_inactive_only_legacy_month_as_read_only():
+    calls = {"count": 0}
+
+    async def execute(statement):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return _ScalarOneResult(None)
+        if calls["count"] == 2:
+            return _ScalarOneResult(1)
+        if calls["count"] == 3:
+            return _CatalogRowsResult([_catalog_metric()])
+        status_values = statement.compile().params.values()
+        return _ScalarOneResult(99 if "active" not in status_values else None)
+
+    db = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+
+    payload = await PersonalPerformanceWorkbenchService(db).get_workbench("2026-07")
+
+    assert payload["legacy_read_only"] is True
+    assert payload["has_legacy_records"] is True
+
+
+@pytest.mark.asyncio
+async def test_inactive_legacy_records_block_controlled_plan_creation():
+    async def execute(statement):
+        status_values = statement.compile().params.values()
+        return _ScalarOneResult(99 if "active" not in status_values else None)
+
+    service = PersonalPerformanceWorkbenchService(
+        SimpleNamespace(execute=AsyncMock(side_effect=execute))
+    )
+
+    with pytest.raises(ValueError, match="旧个人绩效输入或调整"):
+        await service._assert_no_legacy_data("2026-07")
+
+
+@pytest.mark.asyncio
 async def test_get_workbench_keeps_a_controlled_plan_writable_contract():
     service = PersonalPerformanceWorkbenchService(SimpleNamespace())
     service._plan = AsyncMock(
