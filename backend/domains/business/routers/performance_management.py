@@ -129,7 +129,7 @@ async def _run_personal_workbench_mutation(operation):
 async def get_personal_performance_workbench(
     year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db),
-    _current_user: DimUser = Depends(get_current_user),
+    _current_user: DimUser = Depends(require_admin),
 ):
     return await PersonalPerformanceWorkbenchService(db).get_workbench(year_month)
 
@@ -159,7 +159,7 @@ async def apply_personal_performance_workbench(
 async def get_personal_performance_workbench_scope(
     year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db),
-    _current_user: DimUser = Depends(get_current_user),
+    _current_user: DimUser = Depends(require_admin),
 ):
     return await PersonalPerformanceWorkbenchService(db).get_scope(year_month)
 
@@ -209,7 +209,7 @@ async def revoke_personal_performance_workbench_scope(
 async def get_personal_performance_workbench_entries(
     year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db),
-    _current_user: DimUser = Depends(get_current_user),
+    _current_user: DimUser = Depends(require_admin),
 ):
     return await PersonalPerformanceWorkbenchService(db).get_entries(year_month)
 

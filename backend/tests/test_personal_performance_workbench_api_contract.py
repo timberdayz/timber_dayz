@@ -10,19 +10,18 @@ def test_personal_workbench_routes_are_typed_and_admin_protected():
         if isinstance(route, APIRoute)
     }
 
-    for path, methods in {
-        "/performance/personal-workbench": ("GET",),
-        "/performance/personal-workbench": ("PUT",),
-        "/performance/personal-workbench/scope": ("GET",),
-        "/performance/personal-workbench/scope": ("PUT",),
-        "/performance/personal-workbench/entries": ("GET",),
-        "/performance/personal-workbench/entries": ("PUT",),
-        "/performance/personal-workbench/scope/revoke": ("POST",),
-    }.items():
+    for path, methods in [
+        ("/performance/personal-workbench", ("GET",)),
+        ("/performance/personal-workbench", ("PUT",)),
+        ("/performance/personal-workbench/scope", ("GET",)),
+        ("/performance/personal-workbench/scope", ("PUT",)),
+        ("/performance/personal-workbench/entries", ("GET",)),
+        ("/performance/personal-workbench/entries", ("PUT",)),
+        ("/performance/personal-workbench/scope/revoke", ("POST",)),
+    ]:
         route = routes[(path, methods)]
         assert route.response_model is not None
-        if "GET" not in methods:
-            assert any(
-                getattr(dependency.call, "__name__", "") == "require_admin"
-                for dependency in route.dependant.dependencies
-            )
+        assert any(
+            getattr(dependency.call, "__name__", "") == "require_admin"
+            for dependency in route.dependant.dependencies
+        )
