@@ -915,7 +915,7 @@ async def list_employee_performance_adjustments(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _list_employee_performance_adjustments(
@@ -993,7 +993,7 @@ async def list_employee_performance_inputs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
+    current_user: DimUser = Depends(require_admin),
 ):
     try:
         return await _list_employee_performance_inputs(

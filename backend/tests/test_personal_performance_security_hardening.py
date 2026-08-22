@@ -25,9 +25,11 @@ def _requires_admin(route: APIRoute) -> bool:
 
 def test_legacy_personal_performance_write_routes_require_admin():
     for path, method in (
+        ("/api/hr/performance-adjustments", "GET"),
         ("/api/hr/performance-adjustments", "POST"),
         ("/api/hr/performance-adjustments/{adjustment_id}", "PUT"),
         ("/api/hr/performance-adjustments/{adjustment_id}", "DELETE"),
+        ("/api/hr/performance-inputs", "GET"),
         ("/api/hr/performance-inputs", "POST"),
         ("/api/hr/performance-inputs/{input_id}", "PUT"),
         ("/api/hr/performance-inputs/{input_id}", "DELETE"),
