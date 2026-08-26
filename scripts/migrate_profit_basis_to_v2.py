@@ -82,7 +82,14 @@ def _protected_statuses(report: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-def validate_apply_report(report: Mapping[str, Any]) -> None:
+def validate_apply_report(
+    report: Mapping[str, Any],
+    *,
+    allow_protected: bool = False,
+    migration_batch_id: str | None = None,
+    actor_user_id: int | None = None,
+    reason: str | None = None,
+) -> None:
     """Fail closed unless every month has complete, mutable source data."""
     protected = _protected_statuses(report)
     missing = [
@@ -95,8 +102,15 @@ def validate_apply_report(report: Mapping[str, Any]) -> None:
         for month in report.get("months", [])
         if int(month.get("locked_basis_rows") or 0) > 0
     ]
-    if protected:
+    if protected and not allow_protected:
         raise MigrationSafetyError("protected payroll/settlement data: " + "; ".join(protected))
+    if allow_protected and protected:
+        if not str(migration_batch_id or "").strip():
+            raise MigrationSafetyError("migration batch id is required for protected history")
+        if actor_user_id is None or int(actor_user_id) <= 0:
+            raise MigrationSafetyError("actor user id is required for protected history")
+        if not str(reason or "").strip():
+            raise MigrationSafetyError("reason is required for protected history")
     if locked_basis:
         raise MigrationSafetyError("locked profit-basis snapshots for: " + ", ".join(locked_basis))
     if missing:
@@ -339,14 +353,179 @@ def _apply_sql(connection: Any, report: Mapping[str, Any]) -> int:
     return int(result.rowcount or 0)
 
 
-def apply_migration(database_url: str, report: Mapping[str, Any]) -> dict[str, Any]:
-    validate_apply_report(report)
+def _reopen_protected_history(
+    connection: Any,
+    *,
+    migration_batch_id: str,
+    actor_user_id: int,
+    reason: str,
+) -> None:
+    """Reopen protected history only inside an explicit, audited migration batch."""
+    username = connection.execute(
+        text("SELECT username FROM core.dim_users WHERE user_id = :user_id"),
+        {"user_id": actor_user_id},
+    ).scalar_one_or_none()
+    if not username:
+        raise MigrationSafetyError("actor user id does not resolve to an active audit identity")
+
+    months = connection.execute(
+        text(
+            """
+            SELECT DISTINCT period_month FROM finance.shop_profit_basis
+            UNION SELECT DISTINCT year_month FROM a_class.payroll_records
+            UNION SELECT DISTINCT period_month FROM finance.monthly_profit_settlements
+            """
+        )
+    ).scalars().all()
+    for period_month in months:
+        payroll_before = connection.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM a_class.payroll_records
+                WHERE year_month = :period_month AND status IN ('confirmed', 'paid', 'approved')
+                """
+            ),
+            {"period_month": period_month},
+        ).scalar_one()
+        settlement_before = connection.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM finance.monthly_profit_settlements
+                WHERE period_month = :period_month
+                  AND status IN ('submitted', 'approved', 'locked', 'completed', 'paid')
+                """
+            ),
+            {"period_month": period_month},
+        ).scalar_one()
+        if not int(payroll_before or 0) and not int(settlement_before or 0):
+            continue
+
+        connection.execute(
+            text(
+                """
+                UPDATE a_class.payroll_records
+                   SET status = 'draft', pay_date = NULL, updated_at = CURRENT_TIMESTAMP
+                 WHERE year_month = :period_month
+                   AND status IN ('confirmed', 'paid', 'approved')
+                """
+            ),
+            {"period_month": period_month},
+        )
+        settlement_ids = connection.execute(
+            text(
+                """
+                SELECT id FROM finance.monthly_profit_settlements
+                WHERE period_month = :period_month
+                  AND status IN ('submitted', 'approved', 'locked', 'completed', 'paid')
+                """
+            ),
+            {"period_month": period_month},
+        ).scalars().all()
+        if settlement_ids:
+            for table_name in (
+                "monthly_profit_shop_basis_snapshots",
+                "monthly_profit_employee_commission_snapshots",
+                "monthly_profit_employee_performance_snapshots",
+                "monthly_profit_payroll_snapshots",
+            ):
+                connection.execute(
+                    text(
+                        f"UPDATE finance.{table_name} SET snapshot_status = 'superseded' "
+                        "WHERE settlement_id = ANY(:settlement_ids) AND snapshot_status = 'active'"
+                    ),
+                    {"settlement_ids": settlement_ids},
+                )
+            connection.execute(
+                text(
+                    """
+                    UPDATE finance.monthly_profit_settlements
+                       SET status = 'draft', locked_at = NULL, approved_by = NULL,
+                           approved_at = NULL, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ANY(:settlement_ids)
+                    """
+                ),
+                {"settlement_ids": settlement_ids},
+            )
+        connection.execute(
+            text(
+                """
+                UPDATE finance.shop_profit_basis
+                   SET is_locked = FALSE, updated_at = CURRENT_TIMESTAMP
+                 WHERE period_month = :period_month
+                """
+            ),
+            {"period_month": period_month},
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE finance.employee_labor_cost_allocations
+                   SET source_payroll_status = 'draft', calculation_status = 'projected',
+                       pre_commission_locked_at = NULL, updated_at = CURRENT_TIMESTAMP
+                 WHERE period_month = :period_month
+                """
+            ),
+            {"period_month": period_month},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO public.fact_audit_logs (
+                    user_id, username, action_type, resource_type, resource_id,
+                    action_description, changes_json, ip_address, user_agent, is_success
+                ) VALUES (
+                    :user_id, :username, 'v2_history_reopen', 'profit_basis_migration',
+                    :resource_id, :description, :details, 'migration-script', 'migration-script', TRUE
+                )
+                """
+            ),
+            {
+                "user_id": actor_user_id,
+                "username": username,
+                "resource_id": str(period_month),
+                "description": "reopened protected history for V2 profit-basis migration",
+                "details": json.dumps(
+                    {
+                        "migration_batch_id": migration_batch_id,
+                        "reason": reason,
+                        "payroll_records_reopened": int(payroll_before or 0),
+                        "settlements_reopened": int(settlement_before or 0),
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+
+
+def apply_migration(
+    database_url: str,
+    report: Mapping[str, Any],
+    *,
+    allow_protected: bool = False,
+    migration_batch_id: str | None = None,
+    actor_user_id: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    validate_apply_report(
+        report,
+        allow_protected=allow_protected,
+        migration_batch_id=migration_batch_id,
+        actor_user_id=actor_user_id,
+        reason=reason,
+    )
     backup_dir = Path(os.getenv("PROFIT_BASIS_BACKUP_DIR", "backups"))
     backup_path = export_backup(database_url, backup_dir, str(report["batch_fingerprint"]))
     manifest_path = write_backup_manifest(backup_path, report)
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         with engine.begin() as connection:
+            if allow_protected:
+                _reopen_protected_history(
+                    connection,
+                    migration_batch_id=str(migration_batch_id),
+                    actor_user_id=int(actor_user_id),
+                    reason=str(reason),
+                )
             updated_rows = _apply_sql(connection, report)
     finally:
         engine.dispose()
@@ -358,14 +537,63 @@ def apply_migration(database_url: str, report: Mapping[str, Any]) -> dict[str, A
     }
 
 
-def run(*, report: Mapping[str, Any], apply: bool, backup_dir: Path | None = None, database_url: str | None = None) -> dict[str, Any]:
+def reopen_protected_history(
+    database_url: str,
+    report: Mapping[str, Any],
+    *,
+    migration_batch_id: str | None,
+    actor_user_id: int | None,
+    reason: str | None,
+) -> dict[str, Any]:
+    """Explicit first stage for histories that must refresh allocations before apply."""
+    validate_apply_report(
+        report,
+        allow_protected=True,
+        migration_batch_id=migration_batch_id,
+        actor_user_id=actor_user_id,
+        reason=reason,
+    ) if not any(month.get("missing_labor_allocation") for month in report.get("months", [])) else None
+    # The first-stage command is allowed to run before allocations exist, but it
+    # still requires the same audited administrator context as --allow-protected.
+    if not str(migration_batch_id or "").strip() or actor_user_id is None or not str(reason or "").strip():
+        raise MigrationSafetyError("migration batch id, actor user id, and reason are required for protected history")
+    backup_dir = Path(os.getenv("PROFIT_BASIS_BACKUP_DIR", "backups"))
+    backup_path = export_backup(database_url, backup_dir, str(report["batch_fingerprint"]))
+    manifest_path = write_backup_manifest(backup_path, report)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.begin() as connection:
+            _reopen_protected_history(
+                connection,
+                migration_batch_id=str(migration_batch_id),
+                actor_user_id=int(actor_user_id),
+                reason=str(reason),
+            )
+    finally:
+        engine.dispose()
+    return {
+        "mode": "reopen-protected",
+        "backup_path": str(backup_path),
+        "manifest_path": str(manifest_path),
+        "next_step": "run the normal monthly payroll refresh, then rerun --apply",
+    }
+
+
+def run(*, report: Mapping[str, Any], apply: bool, backup_dir: Path | None = None, database_url: str | None = None, allow_protected: bool = False, migration_batch_id: str | None = None, actor_user_id: int | None = None, reason: str | None = None) -> dict[str, Any]:
     """Run a supplied report; useful for tests and operational wrappers."""
     if not apply:
         return {"mode": "dry-run", "report": report}
     if backup_dir is not None:
         os.environ["PROFIT_BASIS_BACKUP_DIR"] = str(backup_dir)
     resolved_url = resolve_database_url(database_url)
-    return apply_migration(resolved_url, report)
+    return apply_migration(
+        resolved_url,
+        report,
+        allow_protected=allow_protected,
+        migration_batch_id=migration_batch_id,
+        actor_user_id=actor_user_id,
+        reason=reason,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -373,8 +601,13 @@ def build_parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="read and report only (default)")
     mode.add_argument("--apply", action="store_true", help="backup then apply; protected data aborts")
+    mode.add_argument("--reopen-protected", action="store_true", help="audited first stage: reopen protected history before payroll allocation refresh")
     parser.add_argument("--database-url", help="PostgreSQL URL; defaults to CLOUD_DATABASE_URL")
     parser.add_argument("--backup-dir", type=Path, default=Path("backups"))
+    parser.add_argument("--allow-protected", action="store_true", help="reopen protected history only with the required audited migration context")
+    parser.add_argument("--migration-batch-id", help="required with --allow-protected")
+    parser.add_argument("--actor-user-id", type=int, help="required with --allow-protected")
+    parser.add_argument("--reason", help="required with --allow-protected")
     return parser
 
 
@@ -384,9 +617,25 @@ def main(argv: list[str] | None = None) -> int:
     try:
         database_url = resolve_database_url(args.database_url)
         report = collect_report(database_url)
-        if is_apply:
+        if args.reopen_protected:
             os.environ["PROFIT_BASIS_BACKUP_DIR"] = str(args.backup_dir)
-            result = apply_migration(database_url, report)
+            result = reopen_protected_history(
+                database_url,
+                report,
+                migration_batch_id=args.migration_batch_id,
+                actor_user_id=args.actor_user_id,
+                reason=args.reason,
+            )
+        elif is_apply:
+            os.environ["PROFIT_BASIS_BACKUP_DIR"] = str(args.backup_dir)
+            result = apply_migration(
+                database_url,
+                report,
+                allow_protected=bool(args.allow_protected),
+                migration_batch_id=args.migration_batch_id,
+                actor_user_id=args.actor_user_id,
+                reason=args.reason,
+            )
         else:
             result = {"mode": "dry-run", "report": report}
         print(json.dumps(result, ensure_ascii=False, indent=2, default=_jsonable))

@@ -49,6 +49,33 @@ def test_apply_fails_closed_for_paid_payroll_or_approved_settlement():
         script.validate_apply_report(report)
 
 
+def test_protected_history_requires_explicit_admin_migration_context():
+    script = load_script()
+    report = {
+        "months": [
+            {
+                "period_month": "2026-07",
+                "payroll_locked": True,
+                "payroll_statuses": ["paid"],
+                "settlement_status": "approved",
+                "missing_labor_allocation": False,
+                "locked_basis_rows": 0,
+            }
+        ]
+    }
+
+    script.validate_apply_report(
+        report,
+        allow_protected=True,
+        migration_batch_id="V2-20260826-001",
+        actor_user_id=1,
+        reason="统一V2口径历史重算",
+    )
+
+    with pytest.raises(script.MigrationSafetyError, match="migration batch"):
+        script.validate_apply_report(report, allow_protected=True)
+
+
 def test_apply_fails_closed_when_labor_allocation_is_missing():
     script = load_script()
     report = {
@@ -127,3 +154,6 @@ def test_sql_contract_contains_expected_sources_and_v2_marker():
     assert "source.id AS basis_id" in source
     assert "IS NOT DISTINCT FROM" in source
     assert "pg_dump" in source
+    assert "--allow-protected" in source
+    assert "--reopen-protected" in source
+    assert "fact_audit_logs" in source
