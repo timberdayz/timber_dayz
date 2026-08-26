@@ -1115,10 +1115,13 @@ class ShopProfitBasis(Base):
 
     orders_profit_amount = Column(Float, default=0.0, nullable=False)
     a_class_cost_amount = Column(Float, default=0.0, nullable=False)
+    other_a_class_cost_amount = Column(Float, default=0.0, nullable=False)
+    pre_commission_labor_cost_amount = Column(Float, default=0.0, nullable=False)
     b_class_cost_amount = Column(Float, default=0.0, nullable=False)
     profit_basis_amount = Column(Float, default=0.0, nullable=False)
 
     basis_version = Column(String(64), default="A_ONLY_V1", nullable=False)
+    cost_status = Column(String(32), default="projected", nullable=False)
     is_locked = Column(Boolean, default=False, nullable=False)
 
     created_by = Column(String(64), default="system")

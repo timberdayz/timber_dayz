@@ -702,9 +702,18 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
             calls.append(("labor", year_month, commission_by_employee_shop, commit))
             return {"year_month": year_month, "allocation_upserts": 4}
 
+    class _FakeProfitBasisService:
+        def __init__(self, db):
+            self.db = db
+
+        async def rebuild_month_v2(self, year_month, *, commit=True):
+            calls.append(("basis", year_month, commit))
+            return {"year_month": year_month, "shop_count": 2}
+
     module.HRIncomeCalculationService = _FakeIncomeService
     module.PayrollGenerationService = _FakePayrollService
     module.LaborCostProjectionService = _FakeLaborCostService
+    module.ProfitBasisService = _FakeProfitBasisService
     monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
     db.commit = AsyncMock()
 
@@ -718,8 +727,14 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
     assert resp["payroll_upserts"] == 3
     assert resp["locked_conflicts"] == 1
     assert resp["labor_cost_allocation_upserts"] == 4
+    assert resp["profit_basis_shop_count"] == 2
+    assert resp["calculation_passes"] == 2
     assert resp["locked_conflict_details"] == [{"employee_code": "EMP900", "payroll_status": "confirmed"}]
     assert calls == [
+        ("income", "2025-04", False),
+        ("payroll", "2025-04"),
+        ("labor", "2025-04", {"EMP001": {("shopee", "shop-1"): 120.0}}, False),
+        ("basis", "2025-04", False),
         ("income", "2025-04", False),
         ("payroll", "2025-04"),
         ("labor", "2025-04", {"EMP001": {("shopee", "shop-1"): 120.0}}, False),

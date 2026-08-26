@@ -40,6 +40,7 @@ from modules.core.db import (
 )
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.payroll_period_lock_service import PayrollPeriodLockService
 from backend.services.payroll_generation_service import PayrollGenerationService
 
@@ -426,7 +427,7 @@ class HRIncomeCalculationService:
                 await self.db.execute(
                     select(ShopProfitBasis).where(
                         ShopProfitBasis.period_month == year_month,
-                        ShopProfitBasis.basis_version == "A_ONLY_V1",
+                        ShopProfitBasis.basis_version == LaborCostPolicyService.V2,
                     )
                 )
             )
@@ -434,13 +435,13 @@ class HRIncomeCalculationService:
             .all()
         )
         for row in snapshot_rows:
+            if getattr(row, "basis_version", None) != LaborCostPolicyService.V2:
+                continue
             key = self._shop_key(
                 getattr(row, "platform_code", None),
                 getattr(row, "shop_id", None),
             )
             if key not in shop_keys:
-                continue
-            if not bool(getattr(row, "is_locked", False)):
                 continue
             basis_by_shop[key] = {
                 "profit_basis_amount": self._to_float(

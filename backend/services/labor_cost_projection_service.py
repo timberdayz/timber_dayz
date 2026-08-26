@@ -15,6 +15,7 @@ from modules.core.db import (
 
 MONEY_QUANT = Decimal("0.01")
 RATIO_QUANT = Decimal("0.000001")
+LABOR_COST_CALCULATION_VERSION = "LABOR_COST_V2"
 
 
 class LaborCostProjectionService:
@@ -144,7 +145,7 @@ class LaborCostProjectionService:
             await self.db.execute(
                 select(EmployeeLaborCostAllocation).where(
                     EmployeeLaborCostAllocation.period_month == year_month,
-                    EmployeeLaborCostAllocation.calculation_version == "LABOR_COST_V1",
+                    EmployeeLaborCostAllocation.calculation_version == LABOR_COST_CALCULATION_VERSION,
                 )
             )
         ).scalars().all()
@@ -202,7 +203,7 @@ class LaborCostProjectionService:
                     "period_month": year_month,
                     "source_payroll_record_id": getattr(payroll, "id", None),
                     "calculation_status": status,
-                    "calculation_version": "LABOR_COST_V1",
+                    "calculation_version": LABOR_COST_CALCULATION_VERSION,
                 }
                 if record is None:
                     record = EmployeeLaborCostAllocation(**values)

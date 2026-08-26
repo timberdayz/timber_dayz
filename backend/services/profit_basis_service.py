@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
-from modules.core.db import DimFiscalCalendar, EmployeeLaborCostAllocation, ShopProfitBasis
+from modules.core.db import (
+    DimFiscalCalendar,
+    EmployeeLaborCostAllocation,
+    EmployeeShopAssignment,
+    ShopProfitBasis,
+)
 
 
 def _shop_key(platform_code: Any, shop_id: Any) -> str:
@@ -252,12 +257,16 @@ class ProfitBasisService:
                 locked_values = (
                     record.orders_profit_amount,
                     record.a_class_cost_amount,
+                    getattr(record, "other_a_class_cost_amount", 0.0),
+                    getattr(record, "pre_commission_labor_cost_amount", 0.0),
                     record.b_class_cost_amount,
                     record.profit_basis_amount,
                 )
                 requested_values = (
                     payload["orders_profit_amount"],
                     payload["a_class_cost_amount"],
+                    payload.get("other_a_class_cost_amount", 0.0),
+                    payload.get("pre_commission_labor_cost_amount", 0.0),
                     payload["b_class_cost_amount"],
                     payload["profit_basis_amount"],
                 )
@@ -269,12 +278,57 @@ class ProfitBasisService:
                 return payload
             record.orders_profit_amount = payload["orders_profit_amount"]
             record.a_class_cost_amount = payload["a_class_cost_amount"]
+            record.other_a_class_cost_amount = payload.get(
+                "other_a_class_cost_amount", 0.0
+            )
+            record.pre_commission_labor_cost_amount = payload.get(
+                "pre_commission_labor_cost_amount", 0.0
+            )
             record.b_class_cost_amount = payload["b_class_cost_amount"]
             record.profit_basis_amount = payload["profit_basis_amount"]
+            record.cost_status = payload.get("cost_status", "projected")
 
         if commit:
             await self.db.commit()
         return payload
+
+    async def rebuild_month_v2(
+        self,
+        year_month: str,
+        *,
+        commit: bool = True,
+    ) -> dict[str, Any]:
+        """Rebuild one V2 snapshot for every active assigned shop in a month."""
+        assignments = (
+            await self.db.execute(
+                select(EmployeeShopAssignment).where(
+                    EmployeeShopAssignment.year_month == year_month,
+                    EmployeeShopAssignment.status == "active",
+                )
+            )
+        ).scalars().all()
+        shops = sorted(
+            {
+                (
+                    str(getattr(row, "platform_code", "") or "").lower(),
+                    str(getattr(row, "shop_id", "") or ""),
+                )
+                for row in assignments
+                if str(getattr(row, "platform_code", "") or "").strip()
+                and str(getattr(row, "shop_id", "") or "").strip()
+            }
+        )
+        for platform_code, shop_id in shops:
+            payload = await self.build_profit_basis(
+                year_month,
+                platform_code,
+                shop_id,
+                basis_version=LaborCostPolicyService.V2,
+            )
+            await self.upsert_profit_basis_snapshot(payload, commit=False)
+        if commit:
+            await self.db.commit()
+        return {"year_month": year_month, "shop_count": len(shops)}
 
     async def lock_profit_basis_snapshot(
         self,

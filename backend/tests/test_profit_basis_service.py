@@ -188,6 +188,58 @@ async def test_build_profit_basis_uses_effective_month_policy_when_version_not_e
 
 
 @pytest.mark.asyncio
+async def test_rebuild_month_v2_builds_one_unlocked_snapshot_per_assigned_shop(monkeypatch):
+    from backend.services.profit_basis_service import ProfitBasisService
+
+    class _RowsResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [
+                SimpleNamespace(platform_code="shopee", shop_id="shop-1"),
+                SimpleNamespace(platform_code="Shopee", shop_id="shop-1"),
+                SimpleNamespace(platform_code="shopee", shop_id="shop-2"),
+            ]
+
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_RowsResult())
+    service = ProfitBasisService(db)
+    calls = []
+
+    async def fake_build(year_month, platform_code, shop_id, basis_version=None):
+        calls.append((year_month, platform_code, shop_id, basis_version))
+        return {
+            "period_month": year_month,
+            "platform_code": platform_code,
+            "shop_id": shop_id,
+            "basis_version": basis_version,
+            "orders_profit_amount": 100.0,
+            "a_class_cost_amount": 20.0,
+            "b_class_cost_amount": 0.0,
+            "profit_basis_amount": 80.0,
+        }
+
+    upserts = []
+
+    async def fake_upsert(payload, *, commit=True):
+        upserts.append((payload, commit))
+        return payload
+
+    monkeypatch.setattr(service, "build_profit_basis", fake_build)
+    monkeypatch.setattr(service, "upsert_profit_basis_snapshot", fake_upsert)
+
+    result = await service.rebuild_month_v2("2026-08", commit=False)
+
+    assert result == {"year_month": "2026-08", "shop_count": 2}
+    assert calls == [
+        ("2026-08", "shopee", "shop-1", "A_PRE_COMMISSION_LABOR_V2"),
+        ("2026-08", "shopee", "shop-2", "A_PRE_COMMISSION_LABOR_V2"),
+    ]
+    assert all(commit is False for _, commit in upserts)
+
+
+@pytest.mark.asyncio
 async def test_lock_v2_profit_basis_locks_pre_commission_labor_allocations():
     class _ScalarRows:
         def __init__(self, rows):

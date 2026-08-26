@@ -665,7 +665,7 @@ def test_calculate_month_falls_back_to_salary_structure_commission_ratio_when_as
     assert commission.commission_rate == pytest.approx(0.5)
 
 
-def test_load_profit_basis_by_shop_prefers_locked_shop_profit_basis_snapshot(
+def test_load_profit_basis_by_shop_reads_v2_snapshot_during_draft_recalculation(
     monkeypatch,
 ):
     db = AsyncMock()
@@ -675,7 +675,8 @@ def test_load_profit_basis_by_shop_prefers_locked_shop_profit_basis_snapshot(
         platform_code="shopee",
         shop_id="S1",
         profit_basis_amount=1800.0,
-        is_locked=True,
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        is_locked=False,
     )
     assignment = SimpleNamespace(
         employee_code="E001",
@@ -709,7 +710,7 @@ def test_load_profit_basis_by_shop_prefers_locked_shop_profit_basis_snapshot(
     assert result == {"shopee|s1": {"profit_basis_amount": 1800.0}}
 
 
-def test_load_profit_basis_by_shop_excludes_unlocked_shop_profit_basis_snapshot(
+def test_load_profit_basis_by_shop_excludes_non_v2_snapshots(
     monkeypatch,
 ):
     db = AsyncMock()
@@ -719,6 +720,7 @@ def test_load_profit_basis_by_shop_excludes_unlocked_shop_profit_basis_snapshot(
         platform_code="shopee",
         shop_id="S1",
         profit_basis_amount=0.0,
+        basis_version="A_ONLY_V1",
         is_locked=False,
     )
     assignment = SimpleNamespace(
@@ -739,14 +741,6 @@ def test_load_profit_basis_by_shop_excludes_unlocked_shop_profit_basis_snapshot(
 
     db.execute = AsyncMock(side_effect=_execute)
     service = HRIncomeCalculationService(db=db)
-
-    async def _unexpected_build(*args, **kwargs):
-        raise AssertionError("formal income must not rebuild an unlocked profit basis")
-
-    monkeypatch.setattr(
-        "backend.services.profit_basis_service.ProfitBasisService.build_profit_basis",
-        _unexpected_build,
-    )
 
     result = asyncio.run(service._load_profit_basis_by_shop("2026-03", [assignment]))
 

@@ -8,13 +8,13 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def use_legacy_profit_basis_policy(monkeypatch):
-    async def resolve_legacy_version(*_args, **_kwargs):
-        return "A_ONLY_V1"
+def use_v2_profit_basis_policy(monkeypatch):
+    async def resolve_v2_version(*_args, **_kwargs):
+        return "A_PRE_COMMISSION_LABOR_V2"
 
     monkeypatch.setattr(
         "backend.services.labor_cost_policy_service.LaborCostPolicyService.get_profit_basis_version",
-        resolve_legacy_version,
+        resolve_v2_version,
     )
 
 
@@ -101,8 +101,11 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
                 "shop_id": shop_id,
                 "orders_profit_amount": 2000.0,
                 "a_class_cost_amount": 500.0,
+                "other_a_class_cost_amount": 350.0,
+                "pre_commission_labor_cost_amount": 150.0,
                 "profit_basis_amount": 1500.0,
                 "basis_version": basis_version,
+                "cost_status": "projected",
             }
 
     domain_module.ProfitBasisService = _FakeProfitBasisService
@@ -121,6 +124,10 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     assert row["monthly_profit"] == 2000.0
     assert row["profit_basis_amount"] == 1500.0
     assert row["a_class_cost_amount"] == 500.0
+    assert row["other_a_class_cost_amount"] == 350.0
+    assert row["pre_commission_labor_cost_amount"] == 150.0
+    assert row["basis_version"] == "A_PRE_COMMISSION_LABOR_V2"
+    assert row["cost_status"] == "projected"
     assert row["allocatable_profit_amount"] == 1200.0
     assert row["estimated_total_commission"] == 120.0
     assert row["supervisor_profit"] == 120.0
@@ -246,8 +253,11 @@ def test_load_profit_basis_map_rebuilds_unlocked_snapshot_for_statistics():
                 "shop_id": shop_id,
                 "orders_profit_amount": 2000.0,
                 "a_class_cost_amount": 500.0,
+                "other_a_class_cost_amount": 350.0,
+                "pre_commission_labor_cost_amount": 150.0,
                 "profit_basis_amount": 1500.0,
                 "basis_version": basis_version,
+                "cost_status": "projected",
             }
 
     domain_module.ProfitBasisService = _FakeProfitBasisService
@@ -262,6 +272,9 @@ def test_load_profit_basis_map_rebuilds_unlocked_snapshot_for_statistics():
 
     assert result["shopee|s1"]["orders_profit_amount"] == 2000.0
     assert result["shopee|s1"]["a_class_cost_amount"] == 500.0
+    assert result["shopee|s1"]["other_a_class_cost_amount"] == 350.0
+    assert result["shopee|s1"]["pre_commission_labor_cost_amount"] == 150.0
+    assert result["shopee|s1"]["cost_status"] == "projected"
     assert result["shopee|s1"]["profit_basis_amount"] == 1500.0
 
 

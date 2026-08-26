@@ -849,6 +849,12 @@ async def _load_profit_basis_map(
             "profit_basis_amount": float(row.profit_basis_amount or 0),
             "orders_profit_amount": float(row.orders_profit_amount or 0),
             "a_class_cost_amount": float(row.a_class_cost_amount or 0),
+            "other_a_class_cost_amount": float(getattr(row, "other_a_class_cost_amount", 0) or 0),
+            "pre_commission_labor_cost_amount": float(
+                getattr(row, "pre_commission_labor_cost_amount", 0) or 0
+            ),
+            "basis_version": str(getattr(row, "basis_version", "") or "A_PRE_COMMISSION_LABOR_V2"),
+            "cost_status": str(getattr(row, "cost_status", "") or "locked"),
         }
 
     service = ProfitBasisService(db)
@@ -866,6 +872,10 @@ async def _load_profit_basis_map(
             "profit_basis_amount": float(basis.get("profit_basis_amount") or 0),
             "orders_profit_amount": float(basis.get("orders_profit_amount") or 0),
             "a_class_cost_amount": float(basis.get("a_class_cost_amount") or 0),
+            "other_a_class_cost_amount": float(basis.get("other_a_class_cost_amount") or 0),
+            "pre_commission_labor_cost_amount": float(basis.get("pre_commission_labor_cost_amount") or 0),
+            "basis_version": str(basis.get("basis_version") or "A_PRE_COMMISSION_LABOR_V2"),
+            "cost_status": str(basis.get("cost_status") or "missing_labor_allocation"),
         }
     return basis_by_shop
 
@@ -1685,6 +1695,8 @@ async def get_shop_profit_statistics(
             profit_basis_amount = float(basis.get("profit_basis_amount", 0))
             a_class_cost_amount = float(basis.get("a_class_cost_amount", 0))
             orders_profit_amount = float(basis.get("orders_profit_amount", monthly_profit))
+            other_a_class_cost_amount = float(basis.get("other_a_class_cost_amount", 0))
+            pre_commission_labor_cost_amount = float(basis.get("pre_commission_labor_cost_amount", 0))
             achievement_rate = m.get("achievement_rate")
             allocatable_rate = allocatable_by_shop.get(key, 1.0)  # 无配置时默认 100% 可分配
             allocatable_profit = max(profit_basis_amount, 0.0) * allocatable_rate
@@ -1702,6 +1714,10 @@ async def get_shop_profit_statistics(
                 "monthly_profit": monthly_profit,
                 "orders_profit_amount": orders_profit_amount,
                 "a_class_cost_amount": a_class_cost_amount,
+                "other_a_class_cost_amount": other_a_class_cost_amount,
+                "pre_commission_labor_cost_amount": pre_commission_labor_cost_amount,
+                "basis_version": basis.get("basis_version") or "A_PRE_COMMISSION_LABOR_V2",
+                "cost_status": basis.get("cost_status") or "missing_labor_allocation",
                 "profit_basis_amount": profit_basis_amount,
                 "allocatable_profit_amount": allocatable_profit,
                 "achievement_rate": achievement_rate,

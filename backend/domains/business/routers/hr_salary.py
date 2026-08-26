@@ -432,25 +432,39 @@ async def refresh_payroll_records_for_month(
 ):
     try:
         await PayrollPeriodLockService(db).assert_month_mutable(year_month=year_month)
-        income_result = await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
-        payroll_result = await PayrollGenerationService(db).generate_month(year_month)
-        commission_by_employee_shop: Dict[str, Dict[tuple[str, str], float]] = {}
-        for item in income_result.get("commission_allocations", []):
-            employee_code = str(item.get("employee_code") or "").strip()
-            if not employee_code:
-                continue
-            shop_key = (
-                str(item.get("platform_code") or "").lower(),
-                str(item.get("shop_id") or ""),
+        async def refresh_labor_cost_allocations(income_result: Dict[str, Any]) -> Dict[str, Any]:
+            commission_by_employee_shop: Dict[str, Dict[tuple[str, str], float]] = {}
+            for item in income_result.get("commission_allocations", []):
+                employee_code = str(item.get("employee_code") or "").strip()
+                if not employee_code:
+                    continue
+                shop_key = (
+                    str(item.get("platform_code") or "").lower(),
+                    str(item.get("shop_id") or ""),
+                )
+                commission_by_employee_shop.setdefault(employee_code, {})[shop_key] = float(
+                    item.get("commission_amount") or 0
+                )
+            return await LaborCostProjectionService(db).refresh_month(
+                year_month,
+                commission_by_employee_shop=commission_by_employee_shop,
+                commit=False,
             )
-            commission_by_employee_shop.setdefault(employee_code, {})[shop_key] = float(
-                item.get("commission_amount") or 0
-            )
-        labor_result = await LaborCostProjectionService(db).refresh_month(
+
+        # First pass materializes pre-commission payroll allocations. The second
+        # pass reads those allocations into the V2 profit basis and converges
+        # commission plus payroll totals without feeding commission into the basis.
+        first_income_result = await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
+        await PayrollGenerationService(db).generate_month(year_month)
+        await refresh_labor_cost_allocations(first_income_result)
+        basis_result = await ProfitBasisService(db).rebuild_month_v2(
             year_month,
-            commission_by_employee_shop=commission_by_employee_shop,
             commit=False,
         )
+
+        income_result = await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
+        payroll_result = await PayrollGenerationService(db).generate_month(year_month)
+        labor_result = await refresh_labor_cost_allocations(income_result)
         await db.commit()
 
         return {
@@ -463,6 +477,8 @@ async def refresh_payroll_records_for_month(
             "locked_conflicts": payroll_result.get("locked_conflicts", 0),
             "locked_conflict_details": payroll_result.get("locked_conflict_details", []),
             "labor_cost_allocation_upserts": labor_result.get("allocation_upserts", 0),
+            "profit_basis_shop_count": basis_result.get("shop_count", 0),
+            "calculation_passes": 2,
         }
     except PayrollPeriodLockedError as exc:
         return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
