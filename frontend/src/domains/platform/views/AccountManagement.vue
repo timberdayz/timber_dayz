@@ -317,7 +317,7 @@
                 <div class="workspace-card-subtitle">仅显示当前主账号下的店铺账号，保留高密度编辑能力</div>
               </div>
               <div class="current-shop-table-toolbar">
-                <el-radio-group v-model="shopQuickFilter" size="small">
+                <el-radio-group v-model="shopQuickFilter" size="small" @change="handleShopQuickFilterChange">
                   <el-radio-button label="all">全部</el-radio-button>
                   <el-radio-button label="anomalies">异常</el-radio-button>
                   <el-radio-button label="missing_shop_id">缺少店铺ID</el-radio-button>
@@ -350,7 +350,7 @@
             </el-table-column>
             <el-table-column prop="shop_id" label="平台店铺ID" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
-                <span v-if="row.shop_id">{{ row.shop_id }}</span>
+                <span v-if="String(row.shop_id || '').trim()">{{ row.shop_id }}</span>
                 <el-tag v-else type="danger" size="small">缺少平台店铺ID</el-tag>
               </template>
             </el-table-column>
@@ -857,6 +857,18 @@ onMounted(async () => {
 function handleFilterChange() {
   accountsStore.setFilters(filters)
   accountsStore.loadAccounts()
+}
+
+async function handleShopQuickFilterChange(value) {
+  if (!['disabled', 'anomalies'].includes(value) || filters.include_disabled) {
+    return
+  }
+
+  // The quick filter operates on the currently loaded collection. Load the
+  // historical rows first so selecting "停用" never produces a false empty state.
+  filters.include_disabled = true
+  accountsStore.setFilters(filters)
+  await accountsStore.loadAccounts({}, true)
 }
 
 /**

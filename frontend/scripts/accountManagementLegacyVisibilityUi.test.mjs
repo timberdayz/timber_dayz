@@ -63,6 +63,11 @@ test('disabled quick filter is backed by a loaded disabled-record path', () => {
     'disabled quick filter should filter the loaded shop collection'
   )
   assert.equal(
+    viewSource.includes('@change="handleShopQuickFilterChange"'),
+    true,
+    'disabled quick filter should load historical records when needed'
+  )
+  assert.equal(
     viewSource.includes('显示历史记录'),
     true,
     'account management should keep a visible recovery path for disabled shops'
@@ -71,5 +76,10 @@ test('disabled quick filter is backed by a loaded disabled-record path', () => {
     viewSource.includes('缺少平台店铺ID'),
     true,
     'disabled shop rows with no platform id should expose an explicit anomaly label'
+  )
+  assert.equal(
+    viewSource.includes("String(row.shop_id || '').trim()"),
+    true,
+    'platform shop id display should treat whitespace-only values as missing'
   )
 })
