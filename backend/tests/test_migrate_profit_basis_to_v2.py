@@ -105,6 +105,26 @@ def test_apply_fails_closed_when_labor_allocation_is_missing():
         script.validate_apply_report(report)
 
 
+def test_apply_fails_closed_when_one_v1_shop_lacks_labor_allocation():
+    script = load_script()
+    report = {
+        "months": [
+            {
+                "period_month": "2026-08",
+                "payroll_locked": False,
+                "payroll_statuses": ["draft"],
+                "settlement_status": "draft",
+                "locked_basis_rows": 0,
+                "missing_labor_allocation": False,
+                "missing_labor_shop_ids": ["shopee|shop-missing"],
+            }
+        ]
+    }
+
+    with pytest.raises(script.MigrationSafetyError, match="shop-missing"):
+        script.validate_apply_report(report)
+
+
 def test_apply_fails_closed_when_profit_basis_snapshot_is_locked():
     script = load_script()
     report = {
@@ -164,6 +184,8 @@ def test_sql_contract_contains_expected_sources_and_v2_marker():
     assert "estimated_profit_basis_impact_amount" in source
     assert "source.id AS basis_id" in source
     assert "IS NOT DISTINCT FROM" in source
+    assert "other_a_class_cost_amount" in source
+    assert "pre_commission_labor_cost_amount" in source
     assert "pg_dump" in source
     assert "--allow-protected" in source
     assert "--reopen-protected" in source

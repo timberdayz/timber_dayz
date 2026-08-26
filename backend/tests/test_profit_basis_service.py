@@ -118,6 +118,38 @@ async def test_build_profit_basis_v2_adds_only_pre_commission_labor_cost(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_build_profit_basis_v2_marks_missing_labor_allocation_without_reading_v1_rows(monkeypatch):
+    db = AsyncMock()
+    service = ProfitBasisService(db)
+
+    async def fake_load_shop_metrics(_db_arg, _year_month):
+        return {"shopee|shop-1": {"monthly_profit": 4000}}
+
+    async def fake_load_other_cost(*_args, **_kwargs):
+        return 1500.0
+
+    async def fake_load_labor(*_args, **_kwargs):
+        return (0.0, False)
+
+    monkeypatch.setattr(
+        "backend.services.profit_basis_service.load_shop_monthly_metrics",
+        fake_load_shop_metrics,
+    )
+    monkeypatch.setattr(service, "_load_other_a_class_cost_amount", fake_load_other_cost)
+    monkeypatch.setattr(service, "_load_pre_commission_labor_amount", fake_load_labor)
+
+    basis = await service.build_profit_basis(
+        year_month="2026-08",
+        platform_code="Shopee",
+        shop_id="shop-1",
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+    )
+
+    assert basis["pre_commission_labor_cost_amount"] == 0.0
+    assert basis["cost_status"] == "missing_labor_allocation"
+
+
+@pytest.mark.asyncio
 async def test_v2_other_a_cost_excludes_legacy_manual_labor_cost(monkeypatch):
     db = AsyncMock()
     service = ProfitBasisService(db)

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
+from backend.services.labor_cost_projection_service import LABOR_COST_CALCULATION_VERSION
 from modules.core.db import (
     DimFiscalCalendar,
     EmployeeLaborCostAllocation,
@@ -166,14 +167,16 @@ class ProfitBasisService:
         year_month: str,
         platform_code: str,
         shop_id: str,
-    ) -> float:
+    ) -> tuple[float, bool]:
         result = await self.db.execute(
             text(
                 """
-                SELECT COALESCE(SUM(pre_commission_amount), 0) AS labor_cost_amount
+                SELECT COUNT(*) AS allocation_row_count,
+                       COALESCE(SUM(pre_commission_amount), 0) AS labor_cost_amount
                 FROM finance.employee_labor_cost_allocations
                 WHERE period_month = :year_month
                   AND allocation_scope = 'shop'
+                  AND calculation_version = :calculation_version
                   AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform_code)
                   AND shop_id = :shop_id
                 """
@@ -182,10 +185,14 @@ class ProfitBasisService:
                 "year_month": year_month,
                 "platform_code": platform_code,
                 "shop_id": shop_id,
+                "calculation_version": LABOR_COST_CALCULATION_VERSION,
             },
         )
         row = result.mappings().first()
-        return _to_float(row.get("labor_cost_amount") if row else 0.0)
+        return (
+            _to_float(row.get("labor_cost_amount") if row else 0.0),
+            bool(int(row.get("allocation_row_count") or 0)) if row else False,
+        )
 
     async def build_profit_basis(
         self,
@@ -208,10 +215,15 @@ class ProfitBasisService:
         pre_commission_labor_cost_amount = 0.0
         cost_status = "legacy"
         if basis_version == "A_PRE_COMMISSION_LABOR_V2":
-            pre_commission_labor_cost_amount = await self._load_pre_commission_labor_amount(
+            labor_cost_result = await self._load_pre_commission_labor_amount(
                 year_month, platform_code, shop_id
             )
-            cost_status = "projected"
+            if isinstance(labor_cost_result, tuple):
+                pre_commission_labor_cost_amount, has_labor_allocation = labor_cost_result
+            else:
+                pre_commission_labor_cost_amount = _to_float(labor_cost_result)
+                has_labor_allocation = True
+            cost_status = "projected" if has_labor_allocation else "missing_labor_allocation"
         a_class_cost_amount = other_a_class_cost_amount + pre_commission_labor_cost_amount
         b_class_cost_amount = 0.0
         profit_basis_amount = orders_profit_amount - a_class_cost_amount

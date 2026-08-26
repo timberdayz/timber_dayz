@@ -106,6 +106,11 @@ def validate_apply_report(
         for month in report.get("months", [])
         if month.get("missing_labor_allocation")
     ]
+    missing_shops = [
+        f"{month.get('period_month', 'unknown')}: {shop_id}"
+        for month in report.get("months", [])
+        for shop_id in month.get("missing_labor_shop_ids", [])
+    ]
     locked_basis = [
         str(month.get("period_month", "unknown"))
         for month in report.get("months", [])
@@ -124,6 +129,10 @@ def validate_apply_report(
         raise MigrationSafetyError("locked profit-basis snapshots for: " + ", ".join(locked_basis))
     if missing:
         raise MigrationSafetyError("missing labor allocation for: " + ", ".join(missing))
+    if missing_shops:
+        raise MigrationSafetyError(
+            "missing labor allocation for shops: " + "; ".join(missing_shops)
+        )
     if not report.get("months"):
         raise MigrationSafetyError("no migration source rows found")
 
@@ -151,11 +160,31 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
                        ARRAY_AGG(DISTINCT LOWER(status)) FILTER (WHERE status IS NOT NULL) AS payroll_statuses,
                        BOOL_OR(status IN ('confirmed', 'paid', 'approved')) AS payroll_locked
                 FROM a_class.payroll_records GROUP BY year_month
+            ), basis_shops AS (
+                SELECT period_month, LOWER(platform_code) AS platform_code, shop_id
+                FROM finance.shop_profit_basis
+                WHERE basis_version = 'A_ONLY_V1'
             ), allocations AS (
                 SELECT period_month, COUNT(*) AS allocation_rows,
                        COALESCE(SUM(pre_commission_amount), 0) AS pre_commission_amount
                 FROM finance.employee_labor_cost_allocations
-                WHERE allocation_scope = 'shop' GROUP BY period_month
+                WHERE allocation_scope = 'shop'
+                  AND calculation_version = 'LABOR_COST_V2'
+                GROUP BY period_month
+            ), missing_labor_shops AS (
+                SELECT basis_shops.period_month,
+                       ARRAY_AGG(basis_shops.platform_code || '|' || basis_shops.shop_id
+                                 ORDER BY basis_shops.platform_code, basis_shops.shop_id)
+                           AS missing_labor_shop_ids
+                FROM basis_shops
+                LEFT JOIN finance.employee_labor_cost_allocations allocation
+                  ON allocation.period_month = basis_shops.period_month
+                 AND LOWER(COALESCE(allocation.platform_code, '')) = basis_shops.platform_code
+                 AND allocation.shop_id = basis_shops.shop_id
+                 AND allocation.allocation_scope = 'shop'
+                 AND allocation.calculation_version = 'LABOR_COST_V2'
+                WHERE allocation.id IS NULL
+                GROUP BY basis_shops.period_month
             ), costs AS (
                 SELECT "年月" AS period_month,
                        COALESCE(SUM(COALESCE("成本合计", 0) - COALESCE("人力费用", 0)), 0)
@@ -179,6 +208,8 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
                    COALESCE(payroll.payroll_locked, FALSE) AS payroll_locked,
                    COALESCE(allocations.allocation_rows, 0) AS allocation_rows,
                    COALESCE(allocations.pre_commission_amount, 0) AS pre_commission_amount,
+                   COALESCE(missing_labor_shops.missing_labor_shop_ids, ARRAY[]::text[])
+                       AS missing_labor_shop_ids,
                    COALESCE(costs.other_a_class_cost_amount, 0) AS other_a_class_cost_amount,
                    COALESCE(basis.orders_profit_amount, 0)
                      - COALESCE(costs.other_a_class_cost_amount, 0)
@@ -194,6 +225,7 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
             LEFT JOIN basis USING (period_month)
             LEFT JOIN payroll USING (period_month)
             LEFT JOIN allocations USING (period_month)
+            LEFT JOIN missing_labor_shops USING (period_month)
             LEFT JOIN costs USING (period_month)
             LEFT JOIN settlements USING (period_month)
             ORDER BY months.period_month
@@ -204,6 +236,7 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
     for row in rows:
         item = _row_dict(row)
         item["payroll_statuses"] = list(item.get("payroll_statuses") or [])
+        item["missing_labor_shop_ids"] = list(item.get("missing_labor_shop_ids") or [])
         item["missing_labor_allocation"] = bool(item["payroll_rows"] and not item["allocation_rows"])
         months.append(item)
     report: dict[str, Any] = {"months": months}
@@ -332,8 +365,11 @@ def _apply_sql(connection: Any, report: Mapping[str, Any]) -> int:
             """
             UPDATE finance.shop_profit_basis basis
                SET basis_version = :v2,
+                   other_a_class_cost_amount = costs.other_cost,
+                   pre_commission_labor_cost_amount = costs.labor_cost,
                    a_class_cost_amount = costs.other_cost + costs.labor_cost,
                    profit_basis_amount = basis.orders_profit_amount - costs.other_cost - costs.labor_cost,
+                   cost_status = 'projected',
                    updated_at = CURRENT_TIMESTAMP
               FROM (
                     SELECT source.id AS basis_id,
@@ -348,8 +384,8 @@ def _apply_sql(connection: Any, report: Mapping[str, Any]) -> int:
                                      WHERE alloc.period_month = source.period_month
                                        AND alloc.platform_code = source.platform_code
                                        AND alloc.shop_id = source.shop_id
-                                       AND alloc.allocation_scope = 'shop'
-                                       AND alloc.calculation_version = :labor_version), 0) AS labor_cost
+                                     AND alloc.allocation_scope = 'shop'
+                                     AND alloc.calculation_version = :labor_version), 0) AS labor_cost
                       FROM finance.shop_profit_basis source
                      WHERE source.basis_version = 'A_ONLY_V1'
                ) costs
