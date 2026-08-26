@@ -533,18 +533,20 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          # [FIX] 浣跨敤 bash -c 杩滅▼鎵ц锛岄伩鍏?heredoc 璇硶闂
           ssh \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-              "bash -c 'set -e; \
-              cd \"${PRODUCTION_PATH}\"; \
-              BACKUP_DIR=\"backups/pre_deploy_\$(date +%Y%m%d_%H%M%S)\"; \
-              mkdir -p \"\${BACKUP_DIR}\"; \
-              docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production config > \"\${BACKUP_DIR}/docker-compose.config.yaml\" 2>&1 || echo \"[WARN] Docker Compose config validation failed, but continuing backup...\"; \
-              docker ps --format \"{{.Names}} {{.Image}}\" > \"\${BACKUP_DIR}/running_containers.txt\" || true; \
-              echo \"[OK] Pre-deployment backup completed: \${BACKUP_DIR}\"'"
+              "bash -s -- \"${PRODUCTION_PATH}\"" <<'REMOTE_BACKUP'
+          set -e
+          production_path="$1"
+          cd "$production_path"
+          backup_dir="backups/pre_deploy_$(date +%Y%m%d_%H%M%S)"
+          mkdir -p "$backup_dir"
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production config > "$backup_dir/docker-compose.config.yaml" 2>&1 || echo "[WARN] Docker Compose config validation failed, but continuing backup..."
+          docker ps --format "{{.Names}} {{.Image}}" > "$backup_dir/running_containers.txt" || true
+          echo "[OK] Pre-deployment backup completed: $backup_dir"
+          REMOTE_BACKUP
 
       - name: Deploy to production server
         env:
@@ -707,13 +709,16 @@ jobs:
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-              "bash -c 'set -e; \
-              cd \"${PRODUCTION_PATH}\"; \
-              BACKUP_DIR=\"backups/pre_deploy_$(date +%Y%m%d_%H%M%S)\"; \
-              mkdir -p \"${BACKUP_DIR}\"; \
-              docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production config > \"${BACKUP_DIR}/docker-compose.config.yaml\" 2>&1 || echo \"[WARN] Docker Compose config validation failed, but continuing backup...\"; \
-              docker ps --format \"{{.Names}} {{.Image}}\" > \"${BACKUP_DIR}/running_containers.txt\" || true; \
-              echo \"[OK] Pre-deployment backup completed: ${BACKUP_DIR}\"'"
+              "bash -s -- \"${PRODUCTION_PATH}\"" <<'REMOTE_BACKUP'
+          set -e
+          production_path="$1"
+          cd "$production_path"
+          backup_dir="backups/pre_deploy_$(date +%Y%m%d_%H%M%S)"
+          mkdir -p "$backup_dir"
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production config > "$backup_dir/docker-compose.config.yaml" 2>&1 || echo "[WARN] Docker Compose config validation failed, but continuing backup..."
+          docker ps --format "{{.Names}} {{.Image}}" > "$backup_dir/running_containers.txt" || true
+          echo "[OK] Pre-deployment backup completed: $backup_dir"
+          REMOTE_BACKUP
 
       - name: Deploy to production server
         env:

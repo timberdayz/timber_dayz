@@ -24,3 +24,12 @@ def test_deploy_workflow_runs_backend_container_smoke_before_remote_deploy():
     assert "gunicorn backend.main:app" in workflow
     assert "xihong_erp_backend_smoke_postgres" in workflow
     assert "xihong_erp_backend_smoke_redis" in workflow
+
+
+def test_deploy_workflow_executes_backup_variables_only_on_remote_shell():
+    workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+
+    assert workflow.count("<<'REMOTE_BACKUP'") == 2
+    assert workflow.count('production_path="$1"') == 2
+    assert workflow.count('backup_dir="backups/pre_deploy_$(date +%Y%m%d_%H%M%S)"') == 2
+    assert 'mkdir -p "${BACKUP_DIR}"' not in workflow
