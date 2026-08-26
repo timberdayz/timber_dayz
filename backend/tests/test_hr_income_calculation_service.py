@@ -676,6 +676,7 @@ def test_load_profit_basis_by_shop_reads_v2_snapshot_during_draft_recalculation(
         shop_id="S1",
         profit_basis_amount=1800.0,
         basis_version="A_PRE_COMMISSION_LABOR_V2",
+        cost_status="projected",
         is_locked=False,
     )
     assignment = SimpleNamespace(
@@ -707,7 +708,12 @@ def test_load_profit_basis_by_shop_reads_v2_snapshot_during_draft_recalculation(
 
     result = asyncio.run(service._load_profit_basis_by_shop("2026-03", [assignment]))
 
-    assert result == {"shopee|s1": {"profit_basis_amount": 1800.0}}
+    assert result == {
+        "shopee|s1": {
+            "profit_basis_amount": 1800.0,
+            "cost_status": "projected",
+        }
+    }
 
 
 def test_load_profit_basis_by_shop_excludes_non_v2_snapshots(
@@ -721,6 +727,7 @@ def test_load_profit_basis_by_shop_excludes_non_v2_snapshots(
         shop_id="S1",
         profit_basis_amount=0.0,
         basis_version="A_ONLY_V1",
+        cost_status="missing_labor_allocation",
         is_locked=False,
     )
     assignment = SimpleNamespace(
@@ -756,6 +763,30 @@ def test_profit_basis_guard_rejects_missing_labor_allocation():
                 "cost_status": "missing_labor_allocation",
             },
         )
+
+
+def test_loaded_v2_snapshot_preserves_missing_labor_status_for_income_guard():
+    db = AsyncMock()
+    snapshot_row = SimpleNamespace(
+        period_month="2026-08",
+        platform_code="shopee",
+        shop_id="s1",
+        profit_basis_amount=1000.0,
+        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        cost_status="missing_labor_allocation",
+    )
+    assignment = SimpleNamespace(platform_code="shopee", shop_id="s1")
+
+    async def _execute(stmt, params=None):
+        return _MockResult(rows=[snapshot_row])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    service = HRIncomeCalculationService(db=db)
+
+    basis = asyncio.run(service._load_profit_basis_by_shop("2026-08", [assignment]))
+
+    with pytest.raises(ValueError, match="missing labor allocation"):
+        service._require_complete_profit_basis("shopee|s1", basis["shopee|s1"])
 
 
 def test_calculate_month_employee_performance_uses_store_total_score():

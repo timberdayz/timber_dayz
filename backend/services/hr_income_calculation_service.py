@@ -456,7 +456,11 @@ class HRIncomeCalculationService:
                 "profit_basis_amount": self._to_float(
                     getattr(row, "profit_basis_amount", 0.0),
                     0.0,
-                )
+                ),
+                "cost_status": str(
+                    getattr(row, "cost_status", "missing_labor_allocation")
+                    or "missing_labor_allocation"
+                ),
             }
 
         return basis_by_shop
