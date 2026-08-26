@@ -13,7 +13,7 @@ class _ScalarResult:
 
 
 @pytest.mark.asyncio
-async def test_effective_month_selects_v2_only_from_configured_month():
+async def test_profit_basis_version_is_always_v2_regardless_of_configured_month():
     from backend.services.labor_cost_policy_service import LaborCostPolicyService
 
     db = AsyncMock()
@@ -24,22 +24,22 @@ async def test_effective_month_selects_v2_only_from_configured_month():
     )
     service = LaborCostPolicyService(db)
 
-    assert await service.get_profit_basis_version("2026-07") == "A_ONLY_V1"
+    assert await service.get_profit_basis_version("2026-07") == "A_PRE_COMMISSION_LABOR_V2"
     assert await service.get_profit_basis_version("2026-08") == "A_PRE_COMMISSION_LABOR_V2"
-    assert await service.is_manual_labor_cost_allowed("2026-07") is True
+    assert await service.is_manual_labor_cost_allowed("2026-07") is False
     assert await service.is_manual_labor_cost_allowed("2026-08") is False
 
 
 @pytest.mark.asyncio
-async def test_missing_effective_month_preserves_legacy_behavior():
+async def test_missing_effective_month_still_uses_v2():
     from backend.services.labor_cost_policy_service import LaborCostPolicyService
 
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_ScalarResult(None))
     service = LaborCostPolicyService(db)
 
-    assert await service.get_profit_basis_version("2026-08") == "A_ONLY_V1"
-    assert await service.is_manual_labor_cost_allowed("2026-08") is True
+    assert await service.get_profit_basis_version("2026-08") == "A_PRE_COMMISSION_LABOR_V2"
+    assert await service.is_manual_labor_cost_allowed("2026-08") is False
 
 
 @pytest.mark.asyncio

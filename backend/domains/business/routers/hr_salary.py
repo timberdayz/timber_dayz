@@ -10,7 +10,6 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +20,9 @@ from backend.schemas.hr import (
     EmployeeTargetResponse,
     EmployeeTargetSummaryResponse,
     EmployeeTargetUpdate,
+    LaborCostPolicyEnvelopeResponse,
+    LaborCostPolicyResponse,
+    LaborCostPolicyUpdateRequest,
     PayrollRecordManualUpdate,
     PayrollRecordResponse,
     SalaryStructureCreate,
@@ -59,13 +61,14 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-class LaborCostPolicyUpdateRequest(BaseModel):
-    effective_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
-
 router = APIRouter(prefix="/api/hr", tags=["HR-薪资目标"])
 
 
-@router.get("/labor-cost-policy")
+def _fixed_labor_cost_policy_payload() -> Dict[str, Any]:
+    return LaborCostPolicyResponse().model_dump()
+
+
+@router.get("/labor-cost-policy", response_model=LaborCostPolicyEnvelopeResponse)
 async def get_labor_cost_policy(
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
@@ -76,17 +79,13 @@ async def get_labor_cost_policy(
             "Administrator permission is required",
             status_code=403,
         )
-    service = LaborCostPolicyService(db)
     return {
         "success": True,
-        "data": {
-            "effective_month": await service.get_effective_month(),
-            "v2_basis_version": LaborCostPolicyService.V2,
-        },
+        "data": _fixed_labor_cost_policy_payload(),
     }
 
 
-@router.put("/labor-cost-policy")
+@router.put("/labor-cost-policy", response_model=LaborCostPolicyEnvelopeResponse)
 async def update_labor_cost_policy(
     body: LaborCostPolicyUpdateRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -98,11 +97,21 @@ async def update_labor_cost_policy(
             "Administrator permission is required",
             status_code=403,
         )
-    effective_month = await LaborCostPolicyService(db).set_effective_month(
-        body.effective_month,
-        updated_by_user_id=getattr(current_user, "user_id", None),
+    await audit_service.log_action(
+        user_id=getattr(current_user, "user_id", getattr(current_user, "id", None)),
+        action="legacy_policy_update_ignored",
+        resource="labor_cost_policy",
+        resource_id=LaborCostPolicyService.CONFIG_KEY,
+        ip_address="system",
+        user_agent="hr_salary_router",
+        details={
+            "requested_effective_month": body.effective_month,
+            "basis_version": LaborCostPolicyService.V2,
+            "policy_mode": "single_runtime_basis",
+        },
+        db=db,
     )
-    return {"success": True, "data": {"effective_month": effective_month}}
+    return {"success": True, "data": _fixed_labor_cost_policy_payload()}
 
 
 def _payroll_success(record: PayrollRecord) -> Dict[str, Any]:

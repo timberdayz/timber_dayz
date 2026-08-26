@@ -10,7 +10,7 @@ from modules.core.db import SystemConfig
 
 
 class LaborCostPolicyService:
-    """Resolves the month from which system-projected labor cost is authoritative."""
+    """Resolves the system-wide, fixed V2 labor cost policy."""
 
     CONFIG_KEY = "labor_cost_auto_effective_month"
     V1 = "A_ONLY_V1"
@@ -39,14 +39,12 @@ class LaborCostPolicyService:
         return self._validate_month(record.config_value)
 
     async def get_profit_basis_version(self, year_month: str) -> str:
-        requested_month = self._validate_month(year_month)
-        effective_month = await self.get_effective_month()
-        if effective_month is not None and requested_month >= effective_month:
-            return self.V2
-        return self.V1
+        self._validate_month(year_month)
+        return self.V2
 
     async def is_manual_labor_cost_allowed(self, year_month: str) -> bool:
-        return await self.get_profit_basis_version(year_month) == self.V1
+        await self.get_profit_basis_version(year_month)
+        return False
 
     async def set_effective_month(
         self,

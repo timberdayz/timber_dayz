@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from backend.schemas.common import SuccessResponse
+
 
 # ================================================================
 # 我的收入 / 收入重算（add-performance-and-personal-income）
@@ -79,6 +81,24 @@ class IncomeCalculationResponse(BaseModel):
         ..., description="employee_performance 写入/更新条数"
     )
     source: str = Field(..., description="数据来源说明")
+
+
+class LaborCostPolicyUpdateRequest(BaseModel):
+    """Legacy compatibility payload; the runtime policy is fixed to V2."""
+
+    effective_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+
+
+class LaborCostPolicyResponse(BaseModel):
+    """Fixed profit-basis policy returned to HR administration clients."""
+
+    basis_version: str = Field("A_PRE_COMMISSION_LABOR_V2")
+    policy_mode: str = Field("single_runtime_basis")
+    effective_month: Optional[str] = Field(None)
+    v2_basis_version: str = Field("A_PRE_COMMISSION_LABOR_V2")
+
+
+LaborCostPolicyEnvelopeResponse = SuccessResponse[LaborCostPolicyResponse]
 
 
 # ================================================================
