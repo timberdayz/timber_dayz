@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -36,11 +37,19 @@ class MigrationSafetyError(RuntimeError):
 
 def compute_batch_fingerprint(payload: Mapping[str, Any]) -> str:
     """Return a deterministic SHA-256 fingerprint for a migration report."""
-    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=_jsonable,
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _jsonable(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
     if hasattr(value, "isoformat"):
         return value.isoformat()
     if isinstance(value, (set, frozenset)):

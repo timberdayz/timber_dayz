@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,16 @@ def test_batch_fingerprint_is_stable_and_changes_with_payload():
     assert first == second
     assert len(first) == 64
     assert first != script.compute_batch_fingerprint({"2026-07": {"basis_rows": 3}})
+
+
+def test_batch_fingerprint_supports_database_decimal_amounts():
+    script = load_script()
+
+    fingerprint = script.compute_batch_fingerprint(
+        {"months": [{"period_month": "2026-07", "profit": Decimal("12.34")}]} 
+    )
+
+    assert len(fingerprint) == 64
 
 
 def test_apply_fails_closed_for_paid_payroll_or_approved_settlement():
