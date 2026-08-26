@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Safely migrate profit-basis and labor allocation records to V2.
 
-The command is deliberately read-only by default.  ``--apply`` requires a
+The command is deliberately read-only by default. ``--apply`` requires a
 complete source-data report and refuses to operate on protected payroll or
-settlement records.  No production database is contacted by ``--dry-run``.
+settlement records. ``--dry-run`` may query production data but never writes.
 """
 
 from __future__ import annotations

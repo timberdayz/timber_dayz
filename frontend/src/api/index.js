@@ -2010,6 +2010,9 @@ export default {
   async getHrLaborCostAllocations(params = {}) {
     return await this._get('/hr/labor-cost-allocations', { params })
   },
+  async getHrLaborCostPolicy() {
+    return await this._get('/hr/labor-cost-policy')
+  },
   async getHrIncomeAudit(employeeCode, yearMonth) {
     return await this._get(`/hr/income-audit/${employeeCode}/${yearMonth}`)
   },

@@ -10,6 +10,17 @@
       </el-button>
     </div>
 
+    <el-alert
+      v-if="laborCostPolicy"
+      class="labor-cost-policy-alert"
+      :title="`当前系统利润基数口径：${laborCostPolicy.basis_version}`"
+      :description="laborCostPolicyDescription"
+      type="info"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px;"
+    />
+
     <div class="page-layout">
       <el-card class="employee-list-card" shadow="hover">
         <template #header>
@@ -440,6 +451,17 @@ const salaryHistory = ref([])
 const payrollRecord = ref(null)
 const lockedConflicts = ref([])
 const laborAllocations = ref([])
+const laborCostPolicy = ref({
+  basis_version: 'A_PRE_COMMISSION_LABOR_V2',
+  policy_mode: 'single_runtime_basis',
+  loading: true,
+  error: false
+})
+const laborCostPolicyDescription = computed(() => {
+  if (laborCostPolicy.value.error) return '固定 V2 口径状态暂时无法从服务器刷新，当前页面仅显示默认提示。'
+  if (laborCostPolicy.value.loading) return '正在读取统一口径状态...'
+  return '所有月份自动使用 V2：订单利润 - 其他经营成本 - 提成前人力成本。普通流程无需手工选择版本。'
+})
 
 const salaryForm = reactive({
   base_salary: 0,
@@ -649,6 +671,23 @@ const loadBaseData = async () => {
   }
 }
 
+const loadLaborCostPolicy = async () => {
+  laborCostPolicy.value = { ...laborCostPolicy.value, loading: true, error: false }
+  try {
+    const response = await api.getHrLaborCostPolicy()
+    const data = response?.data ?? response ?? {}
+    laborCostPolicy.value = {
+      basis_version: data.basis_version || data.v2_basis_version || 'A_PRE_COMMISSION_LABOR_V2',
+      policy_mode: data.policy_mode || 'single_runtime_basis',
+      loading: false,
+      error: false
+    }
+  } catch (error) {
+    console.warn('加载人力成本口径失败:', error)
+    laborCostPolicy.value = { ...laborCostPolicy.value, loading: false, error: true }
+  }
+}
+
 const loadSalaryStructure = async () => {
   if (!selectedEmployee.value) return
   try {
@@ -696,12 +735,12 @@ const selectEmployee = async (employee) => {
 
 const refreshCurrentView = async () => {
   if (!selectedEmployee.value) {
-    await loadBaseData()
+    await Promise.all([loadBaseData(), loadLaborCostPolicy()])
     return
   }
   pageLoading.value = true
   try {
-    await Promise.all([loadSalaryStructure(), loadSalaryHistory(), loadPayrollRecord()])
+    await Promise.all([loadSalaryStructure(), loadSalaryHistory(), loadPayrollRecord(), loadLaborCostPolicy()])
   } finally {
     pageLoading.value = false
   }
@@ -918,7 +957,7 @@ const markPayrollPaid = async () => {
 
 onMounted(async () => {
   selectedMonth.value = recentMonths.value[0]
-  await loadBaseData()
+  await Promise.all([loadBaseData(), loadLaborCostPolicy()])
 })
 </script>
 

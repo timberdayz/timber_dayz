@@ -95,6 +95,17 @@
               <span v-if="row._isFirst">¥{{ formatNumber(row.profit_basis_amount) }}</span>
             </template>
           </el-table-column>
+          <el-table-column label="V2成本明细" width="220" align="right">
+            <template #default="{ row }">
+              <div v-if="row._isFirst" class="v2-cost-breakdown">
+                <div>其他经营成本 ¥{{ formatNumber(row.other_a_class_cost_amount) }}</div>
+                <div>提成前人力成本 ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }}</div>
+                <div>A类成本 ¥{{ formatNumber(row.a_class_cost_amount) }}</div>
+                <el-tag size="small" type="info">{{ row.basis_version || 'A_PRE_COMMISSION_LABOR_V2' }}</el-tag>
+                <el-tag v-if="isLaborAllocationMissing(row)" size="small" type="danger">缺少人力成本分摊</el-tag>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="当月目标达成率" width="130" align="right">
             <template #default="{ row }">
               <span v-if="row._isFirst">{{ row.achievement_rate != null ? Number(row.achievement_rate).toFixed(1) + '%' : '—' }}</span>
@@ -224,6 +235,17 @@
           </el-table-column>
           <el-table-column prop="profit_basis_amount" label="提成计算基数" width="130" align="right">
             <template #default="{ row }">¥{{ formatNumber(row.profit_basis_amount) }}</template>
+          </el-table-column>
+          <el-table-column label="V2成本明细" width="220" align="right">
+            <template #default="{ row }">
+              <div class="v2-cost-breakdown">
+                <div>其他经营成本 ¥{{ formatNumber(row.other_a_class_cost_amount) }}</div>
+                <div>提成前人力成本 ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }}</div>
+                <div>A类成本 ¥{{ formatNumber(row.a_class_cost_amount) }}</div>
+                <el-tag size="small" type="info">{{ row.basis_version || 'A_PRE_COMMISSION_LABOR_V2' }}</el-tag>
+                <el-tag v-if="isLaborAllocationMissing(row)" size="small" type="danger">缺少人力成本分摊</el-tag>
+              </div>
+            </template>
           </el-table-column>
           <el-table-column prop="achievement_rate" label="当月目标达成率" width="140" align="right">
             <template #default="{ row }">{{ row.achievement_rate != null ? Number(row.achievement_rate).toFixed(1) + '%' : '—' }}</template>
@@ -480,6 +502,25 @@ function formatNumber(v) {
   return Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function isLaborAllocationMissing(row) {
+  return [
+    'missing_labor_allocation',
+    'pending_labor_allocation',
+    'data_incomplete'
+  ].includes(String(row?.cost_status || '').toLowerCase())
+}
+
+function normalizeProfitBasisFields(row = {}) {
+  return {
+    ...row,
+    other_a_class_cost_amount: row.other_a_class_cost_amount ?? 0,
+    pre_commission_labor_cost_amount: row.pre_commission_labor_cost_amount ?? 0,
+    a_class_cost_amount: row.a_class_cost_amount ?? 0,
+    basis_version: row.basis_version || 'A_PRE_COMMISSION_LABOR_V2',
+    cost_status: row.cost_status || 'missing_labor_allocation'
+  }
+}
+
 function getRowAllocatableProfit(row) {
   return calculateAllocatableProfit(row?._shop || row)
 }
@@ -716,6 +757,11 @@ async function loadConfigData() {
         monthly_sales: 0,
         monthly_profit: 0,
         profit_basis_amount: 0,
+        other_a_class_cost_amount: 0,
+        pre_commission_labor_cost_amount: 0,
+        a_class_cost_amount: 0,
+        basis_version: 'A_PRE_COMMISSION_LABOR_V2',
+        cost_status: 'missing_labor_allocation',
         achievement_rate: null
       }
     }
@@ -725,6 +771,11 @@ async function loadConfigData() {
         byShop[key].monthly_sales = st.monthly_sales ?? 0
         byShop[key].monthly_profit = st.monthly_profit ?? 0
         byShop[key].profit_basis_amount = st.profit_basis_amount ?? 0
+        byShop[key].other_a_class_cost_amount = st.other_a_class_cost_amount ?? 0
+        byShop[key].pre_commission_labor_cost_amount = st.pre_commission_labor_cost_amount ?? 0
+        byShop[key].a_class_cost_amount = st.a_class_cost_amount ?? 0
+        byShop[key].basis_version = st.basis_version || 'A_PRE_COMMISSION_LABOR_V2'
+        byShop[key].cost_status = st.cost_status || 'missing_labor_allocation'
         byShop[key].achievement_rate = st.achievement_rate
       }
     }
@@ -747,6 +798,11 @@ async function loadConfigData() {
           monthly_sales: 0,
           monthly_profit: 0,
           profit_basis_amount: 0,
+          other_a_class_cost_amount: 0,
+          pre_commission_labor_cost_amount: 0,
+          a_class_cost_amount: 0,
+          basis_version: 'A_PRE_COMMISSION_LABOR_V2',
+          cost_status: 'missing_labor_allocation',
           achievement_rate: null
         }
       }
@@ -775,7 +831,7 @@ async function loadStatsData() {
     const res = await api.getHrShopProfitStatistics({ month: statsMonth.value })
     const data = res?.data ?? res ?? []
     const items = Array.isArray(data) ? data : (data?.data ?? data ?? [])
-    statsRows.value = items.map((row) => decorateShopEntity(row, shopAccountLookup))
+    statsRows.value = items.map((row) => decorateShopEntity(normalizeProfitBasisFields(row), shopAccountLookup))
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '加载失败')
     statsRows.value = []
@@ -953,6 +1009,15 @@ onMounted(async () => {
 .shop-display-secondary {
   font-size: 12px;
   color: #909399;
+}
+.v2-cost-breakdown {
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.v2-cost-breakdown .el-tag {
+  margin-top: 3px;
+  margin-left: 4px;
 }
 .dialog-shop-secondary {
   margin-top: 4px;
