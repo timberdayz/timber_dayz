@@ -855,12 +855,25 @@ onMounted(async () => {
  * 筛选变更
  */
 function handleFilterChange() {
+  if (
+    !filters.include_disabled &&
+    filters.enabled !== false &&
+    ['disabled', 'anomalies'].includes(shopQuickFilter.value)
+  ) {
+    shopQuickFilter.value = 'all'
+  }
   accountsStore.setFilters(filters)
   accountsStore.loadAccounts()
 }
 
 async function handleShopQuickFilterChange(value) {
-  if (!['disabled', 'anomalies'].includes(value) || filters.include_disabled) {
+  if (!['disabled', 'anomalies'].includes(value)) {
+    return
+  }
+
+  const hadConflictingEnabledFilter = filters.enabled !== null
+  filters.enabled = null
+  if (filters.include_disabled && !hadConflictingEnabledFilter) {
     return
   }
 

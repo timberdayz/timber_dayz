@@ -68,6 +68,11 @@ test('disabled quick filter is backed by a loaded disabled-record path', () => {
     'disabled quick filter should load historical records when needed'
   )
   assert.equal(
+    viewSource.includes('filters.enabled = null'),
+    true,
+    'quick filters should clear a conflicting top-level enabled filter'
+  )
+  assert.equal(
     viewSource.includes('显示历史记录'),
     true,
     'account management should keep a visible recovery path for disabled shops'
@@ -81,5 +86,10 @@ test('disabled quick filter is backed by a loaded disabled-record path', () => {
     viewSource.includes("String(row.shop_id || '').trim()"),
     true,
     'platform shop id display should treat whitespace-only values as missing'
+  )
+  assert.equal(
+    viewSource.includes("shopQuickFilter.value = 'all'"),
+    true,
+    'turning off history should not leave a disabled quick filter selected'
   )
 })
