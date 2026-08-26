@@ -351,7 +351,7 @@
             <el-table-column prop="shop_id" label="平台店铺ID" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
                 <span v-if="row.shop_id">{{ row.shop_id }}</span>
-                <span v-else class="erp-text-muted">-</span>
+                <el-tag v-else type="danger" size="small">缺少平台店铺ID</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="店铺类型" width="100">
@@ -379,8 +379,11 @@
                 </el-tooltip>
               </template>
             </el-table-column>
-            <el-table-column label="状态" width="90">
+            <el-table-column label="状态" width="140">
               <template #default="{ row }">
+                <el-tag :type="row.enabled ? 'success' : 'info'" size="small" class="shop-status-tag">
+                  {{ row.enabled ? '启用' : '停用' }}
+                </el-tag>
                 <el-switch
                   v-model="row.enabled"
                   @change="handleToggleEnabled(row)"
@@ -1503,6 +1506,10 @@ function getCapabilitiesText(capabilities) {
 
 .capability-tag {
   margin: 2px 0;
+}
+
+.shop-status-tag {
+  margin-right: 6px;
 }
 
 .form-tip {

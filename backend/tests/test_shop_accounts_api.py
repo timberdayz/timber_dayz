@@ -231,6 +231,98 @@ async def test_update_shop_account_persists_capabilities(shop_account_client):
 
 
 @pytest.mark.asyncio
+async def test_status_only_updates_preserve_platform_shop_id_and_disabled_filter_returns_shop(
+    shop_account_client,
+):
+    create_main = await shop_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "status-main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    assert create_main.status_code == 200
+
+    create_shop = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_status_shop",
+            "main_account_id": "status-main",
+            "store_name": "Status Shop",
+            "platform_shop_id": "1292370001",
+            "enabled": True,
+        },
+    )
+    assert create_shop.status_code == 200
+
+    disable_response = await shop_account_client.put(
+        "/api/shop-accounts/shopee_status_shop",
+        json={"enabled": False},
+    )
+    assert disable_response.status_code == 200
+    assert disable_response.json()["enabled"] is False
+    assert disable_response.json()["platform_shop_id"] == "1292370001"
+
+    disabled_list = await shop_account_client.get(
+        "/api/shop-accounts",
+        params={"enabled": False},
+    )
+    assert disabled_list.status_code == 200
+    assert [row["shop_account_id"] for row in disabled_list.json()] == [
+        "shopee_status_shop"
+    ]
+
+    enable_response = await shop_account_client.put(
+        "/api/shop-accounts/shopee_status_shop",
+        json={"enabled": True},
+    )
+    assert enable_response.status_code == 200
+    assert enable_response.json()["enabled"] is True
+    assert enable_response.json()["platform_shop_id"] == "1292370001"
+
+
+@pytest.mark.asyncio
+async def test_platform_shop_id_is_cleared_only_when_explicitly_submitted_as_null(
+    shop_account_client,
+):
+    create_main = await shop_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "clear-id-main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    assert create_main.status_code == 200
+
+    create_shop = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_clear_id_shop",
+            "main_account_id": "clear-id-main",
+            "store_name": "Clear ID Shop",
+            "platform_shop_id": "1292370002",
+            "enabled": True,
+        },
+    )
+    assert create_shop.status_code == 200
+
+    update_response = await shop_account_client.put(
+        "/api/shop-accounts/shopee_clear_id_shop",
+        json={"platform_shop_id": None},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["platform_shop_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_update_shop_account_returns_409_when_platform_shop_id_conflicts(shop_account_client):
     create_main = await shop_account_client.post(
         "/api/main-accounts",

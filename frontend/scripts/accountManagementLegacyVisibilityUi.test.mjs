@@ -11,6 +11,7 @@ const apiPath = path.resolve(__dirname, '../src/api/accounts.js')
 const viewSource = fs.readFileSync(viewPath, 'utf8')
 const storeSource = fs.readFileSync(storePath, 'utf8')
 const apiSource = fs.readFileSync(apiPath, 'utf8')
+const updateAccountSource = storeSource.slice(storeSource.indexOf('async updateAccount('))
 
 test('account management exposes legacy visibility switch', () => {
   assert.equal(
@@ -33,5 +34,42 @@ test('accounts api stats include disabled shop accounts in the total dataset', (
     apiSource.includes('await this.listShopAccounts({ include_disabled: true })'),
     true,
     'account statistics should request the full shop-account dataset, including disabled records'
+  )
+})
+
+test('shop status updates do not clear platform shop id when shop id is omitted', () => {
+  assert.equal(
+    updateAccountSource.includes('platform_shop_id: data.shop_id || null'),
+    false,
+    'status-only updates must not turn an omitted shop id into null'
+  )
+  assert.equal(
+    storeSource.includes("Object.prototype.hasOwnProperty.call(source, key)") &&
+      storeSource.includes("hasOwn(data, 'shop_id')"),
+    true,
+    'platform shop id updates must distinguish omitted and explicitly cleared values'
+  )
+})
+
+test('disabled quick filter is backed by a loaded disabled-record path', () => {
+  assert.equal(
+    storeSource.includes('const shouldIncludeDisabled = Boolean(mergedParams.include_disabled)'),
+    true,
+    'store should expose an explicit path for loading disabled records'
+  )
+  assert.equal(
+    viewSource.includes("case 'disabled':\n      return shops.filter((shop) => !shop.enabled)"),
+    true,
+    'disabled quick filter should filter the loaded shop collection'
+  )
+  assert.equal(
+    viewSource.includes('显示历史记录'),
+    true,
+    'account management should keep a visible recovery path for disabled shops'
+  )
+  assert.equal(
+    viewSource.includes('缺少平台店铺ID'),
+    true,
+    'disabled shop rows with no platform id should expose an explicit anomaly label'
   )
 })

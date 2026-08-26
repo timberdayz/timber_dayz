@@ -31,6 +31,39 @@ function normalizeAliasValue(value) {
   return String(value || '').trim()
 }
 
+function hasOwn(source, key) {
+  return Object.prototype.hasOwnProperty.call(source, key)
+}
+
+function buildShopAccountUpdatePayload(data) {
+  const payload = {}
+  const fields = [
+    'store_name',
+    'shop_region',
+    'shop_type',
+    'business_role',
+    'capabilities',
+    'enabled',
+    'notes',
+  ]
+
+  for (const field of fields) {
+    if (hasOwn(data, field)) {
+      payload[field] = data[field]
+    }
+  }
+
+  // Omitted shop_id means a status-only or partial update. Only an explicitly
+  // supplied value may change the persisted platform identity.
+  if (hasOwn(data, 'shop_id')) {
+    const shopId = String(data.shop_id || '').trim()
+    payload.platform_shop_id = shopId || null
+    payload.platform_shop_id_status = shopId ? 'manual_confirmed' : 'missing'
+  }
+
+  return payload
+}
+
 export const useAccountsStore = defineStore('accounts', {
   state: () => ({
     accounts: [],
@@ -223,17 +256,10 @@ export const useAccountsStore = defineStore('accounts', {
         const current = this.accounts.find((account) => account.account_id === accountId)
         if (!current) throw new Error(`店铺账号 ${accountId} 不存在`)
 
-        await accountsApi.updateShopAccount(accountId, {
-          store_name: data.store_name,
-          platform_shop_id: data.shop_id || null,
-          platform_shop_id_status: data.shop_id ? 'manual_confirmed' : current.platform_shop_id_status,
-          shop_region: data.shop_region,
-          shop_type: data.shop_type,
-          business_role: data.business_role,
-          capabilities: data.capabilities,
-          enabled: data.enabled,
-          notes: data.notes,
-        })
+        await accountsApi.updateShopAccount(
+          accountId,
+          buildShopAccountUpdatePayload(data),
+        )
 
         if (current.parent_account) {
           const mainPayload = {}
