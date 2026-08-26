@@ -307,10 +307,11 @@ services:
         [
           "CMD",
           "wget",
+          "--no-check-certificate",
           "--quiet",
           "--tries=1",
           "--output-document=/dev/null",
-          "http://127.0.0.1/",
+          "https://127.0.0.1/",
         ]
       interval: 30s
       timeout: 10s

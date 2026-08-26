@@ -33,3 +33,10 @@ def test_deploy_workflow_executes_backup_variables_only_on_remote_shell():
     assert workflow.count('production_path="$1"') == 2
     assert workflow.count('backup_dir="backups/pre_deploy_$(date +%Y%m%d_%H%M%S)"') == 2
     assert 'mkdir -p "${BACKUP_DIR}"' not in workflow
+
+
+def test_production_nginx_healthcheck_uses_local_tls_without_certificate_verification():
+    compose = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    assert "--no-check-certificate" in compose
+    assert "https://127.0.0.1/" in compose

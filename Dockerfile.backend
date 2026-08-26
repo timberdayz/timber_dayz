@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     libpq-dev \
+    postgresql-client \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -53,6 +54,7 @@ COPY scripts/verify_schema_consistency.py /app/scripts/verify_schema_consistency
 COPY scripts/sync_schema_columns.py /app/scripts/sync_schema_columns.py
 COPY scripts/run_current_schema_migrations.py /app/scripts/run_current_schema_migrations.py
 COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py
+COPY scripts/migrate_profit_basis_to_v2.py /app/scripts/migrate_profit_basis_to_v2.py
 COPY sql/api_modules /app/sql/api_modules
 COPY sql/mart /app/sql/mart
 COPY sql/ops /app/sql/ops

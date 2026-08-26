@@ -72,6 +72,13 @@ def test_backend_image_includes_current_schema_migration_helper_module():
     assert "COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py" in dockerfile
 
 
+def test_backend_image_includes_v2_profit_basis_migration_runner_and_backup_client():
+    dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "postgresql-client" in dockerfile
+    assert "COPY scripts/migrate_profit_basis_to_v2.py /app/scripts/migrate_profit_basis_to_v2.py" in dockerfile
+
+
 def test_current_schema_preflight_only_performs_read_only_adoption_checks(monkeypatch):
     state = migration_runner.MigrationState(
         database_empty=False,
