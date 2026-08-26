@@ -747,6 +747,17 @@ def test_load_profit_basis_by_shop_excludes_non_v2_snapshots(
     assert result == {}
 
 
+def test_profit_basis_guard_rejects_missing_labor_allocation():
+    with pytest.raises(ValueError, match="missing labor allocation"):
+        HRIncomeCalculationService._require_complete_profit_basis(
+            "shopee|s1",
+            {
+                "profit_basis_amount": 1000.0,
+                "cost_status": "missing_labor_allocation",
+            },
+        )
+
+
 def test_calculate_month_employee_performance_uses_store_total_score():
     db = AsyncMock()
     added = []

@@ -61,6 +61,15 @@ class HRIncomeCalculationService:
         self.metabase_service = metabase_service
 
     @staticmethod
+    def _require_complete_profit_basis(shop_key: str, basis: Dict[str, Any]) -> None:
+        if str(basis.get("cost_status") or "").lower() in {
+            "missing_labor_allocation",
+            "pending_labor_allocation",
+            "data_incomplete",
+        }:
+            raise ValueError(f"missing labor allocation for V2 profit basis: {shop_key}")
+
+    @staticmethod
     def _field(record: Any, name: str, default: Any = None) -> Any:
         if isinstance(record, dict):
             return record.get(name, default)
@@ -933,6 +942,7 @@ class HRIncomeCalculationService:
             shop_key = self._shop_key(row.platform_code, row.shop_id)
             metric = metrics_by_shop.get(shop_key, {})
             basis = profit_basis_by_shop.get(shop_key, {})
+            self._require_complete_profit_basis(shop_key, basis)
             score = performance_by_shop.get(shop_key, {})
 
             monthly_sales = self._to_float(metric.get("monthly_sales"), 0.0)

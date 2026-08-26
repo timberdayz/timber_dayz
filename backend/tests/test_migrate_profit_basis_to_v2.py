@@ -125,6 +125,26 @@ def test_apply_fails_closed_when_one_v1_shop_lacks_labor_allocation():
         script.validate_apply_report(report)
 
 
+def test_existing_v1_labor_allocation_is_a_valid_migration_source():
+    script = load_script()
+    report = {
+        "months": [
+            {
+                "period_month": "2026-07",
+                "payroll_locked": False,
+                "payroll_statuses": ["draft"],
+                "settlement_status": "draft",
+                "locked_basis_rows": 0,
+                "missing_labor_allocation": False,
+                "missing_labor_shop_ids": [],
+                "allocation_versions": ["LABOR_COST_V1"],
+            }
+        ]
+    }
+
+    script.validate_apply_report(report)
+
+
 def test_apply_fails_closed_when_profit_basis_snapshot_is_locked():
     script = load_script()
     report = {
@@ -190,3 +210,4 @@ def test_sql_contract_contains_expected_sources_and_v2_marker():
     assert "--allow-protected" in source
     assert "--reopen-protected" in source
     assert "fact_audit_logs" in source
+    assert "'LABOR_COST_V1', 'LABOR_COST_V2'" in source

@@ -166,10 +166,11 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
                 WHERE basis_version = 'A_ONLY_V1'
             ), allocations AS (
                 SELECT period_month, COUNT(*) AS allocation_rows,
+                       ARRAY_AGG(DISTINCT calculation_version) AS allocation_versions,
                        COALESCE(SUM(pre_commission_amount), 0) AS pre_commission_amount
                 FROM finance.employee_labor_cost_allocations
                 WHERE allocation_scope = 'shop'
-                  AND calculation_version = 'LABOR_COST_V2'
+                  AND calculation_version IN ('LABOR_COST_V1', 'LABOR_COST_V2')
                 GROUP BY period_month
             ), missing_labor_shops AS (
                 SELECT basis_shops.period_month,
@@ -182,7 +183,7 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
                  AND LOWER(COALESCE(allocation.platform_code, '')) = basis_shops.platform_code
                  AND allocation.shop_id = basis_shops.shop_id
                  AND allocation.allocation_scope = 'shop'
-                 AND allocation.calculation_version = 'LABOR_COST_V2'
+                 AND allocation.calculation_version IN ('LABOR_COST_V1', 'LABOR_COST_V2')
                 WHERE allocation.id IS NULL
                 GROUP BY basis_shops.period_month
             ), costs AS (
@@ -207,6 +208,7 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
                    COALESCE(payroll.payroll_statuses, ARRAY[]::text[]) AS payroll_statuses,
                    COALESCE(payroll.payroll_locked, FALSE) AS payroll_locked,
                    COALESCE(allocations.allocation_rows, 0) AS allocation_rows,
+                   COALESCE(allocations.allocation_versions, ARRAY[]::text[]) AS allocation_versions,
                    COALESCE(allocations.pre_commission_amount, 0) AS pre_commission_amount,
                    COALESCE(missing_labor_shops.missing_labor_shop_ids, ARRAY[]::text[])
                        AS missing_labor_shop_ids,
@@ -236,6 +238,7 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
     for row in rows:
         item = _row_dict(row)
         item["payroll_statuses"] = list(item.get("payroll_statuses") or [])
+        item["allocation_versions"] = list(item.get("allocation_versions") or [])
         item["missing_labor_shop_ids"] = list(item.get("missing_labor_shop_ids") or [])
         item["missing_labor_allocation"] = bool(item["payroll_rows"] and not item["allocation_rows"])
         months.append(item)
@@ -591,13 +594,6 @@ def reopen_protected_history(
     reason: str | None,
 ) -> dict[str, Any]:
     """Explicit first stage for histories that must refresh allocations before apply."""
-    validate_apply_report(
-        report,
-        allow_protected=True,
-        migration_batch_id=migration_batch_id,
-        actor_user_id=actor_user_id,
-        reason=reason,
-    ) if not any(month.get("missing_labor_allocation") for month in report.get("months", [])) else None
     # The first-stage command is allowed to run before allocations exist, but it
     # still requires the same audited administrator context as --allow-protected.
     if not str(migration_batch_id or "").strip() or actor_user_id is None or not str(reason or "").strip():
