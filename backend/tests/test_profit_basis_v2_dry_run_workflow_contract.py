@@ -19,5 +19,5 @@ def test_profit_basis_dry_run_workflow_is_manual_and_read_only():
     assert "migrate_profit_basis_to_v2.py --dry-run" in source
     assert "--apply" not in source
     assert "--reopen-protected" not in source
-    assert "docker compose" in source or "docker-compose" in source
+    assert "docker exec xihong_erp_backend_api" in source
     assert "actions/upload-artifact" in source
