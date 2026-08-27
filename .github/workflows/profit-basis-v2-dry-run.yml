@@ -1,0 +1,59 @@
+name: Profit Basis V2 Dry Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Production V2 migration report (read-only)
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+
+      - name: Configure SSH known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.PRODUCTION_HOST_KEY }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run production V2 dry run
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          ssh \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o ConnectTimeout=30 \
+            "${PRODUCTION_USER}@${PRODUCTION_HOST}" \
+            "cd \"${PRODUCTION_PATH}\" && docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production run --rm --no-deps backend-api python3 /app/scripts/migrate_profit_basis_to_v2.py --dry-run" \
+            > artifacts/profit_basis_v2_dry_run.json \
+            2> artifacts/profit_basis_v2_dry_run.stderr
+
+          {
+            echo "### V2 dry-run"
+            echo "- Host: ${PRODUCTION_HOST}"
+            echo "- Result artifact: profit_basis_v2_dry_run.json"
+            echo "- Stderr artifact: profit_basis_v2_dry_run.stderr"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload V2 dry-run report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: profit-basis-v2-dry-run-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
