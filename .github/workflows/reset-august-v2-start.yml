@@ -3,13 +3,21 @@ name: Reset August 2026 to V2
 on:
   workflow_dispatch:
     inputs:
-      confirm:
-        description: Type RESET_2026_08_TO_V2 to authorize the one-time derived-data reset
+      mode:
+        description: "Dry-run reports current August safety status; apply performs the one-time reset"
         required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      confirm:
+        description: "Required only for apply: RESET_2026_08_TO_V2"
+        required: false
         type: string
       actor_user_id:
-        description: Active administrator user ID recorded in the audit log
-        required: true
+        description: "Required only for apply: active administrator user ID recorded in the audit log"
+        required: false
         type: string
 
 permissions:
@@ -24,12 +32,19 @@ jobs:
     steps:
       - name: Validate fixed reset authorization
         env:
+          MODE: ${{ inputs.mode }}
           CONFIRM: ${{ inputs.confirm }}
           ACTOR_USER_ID: ${{ inputs.actor_user_id }}
         run: |
           set -euo pipefail
-          test "${CONFIRM}" = "RESET_2026_08_TO_V2"
-          [[ "${ACTOR_USER_ID}" =~ ^[1-9][0-9]*$ ]]
+          case "${MODE}" in
+            dry-run) ;;
+            apply)
+              test "${CONFIRM}" = "RESET_2026_08_TO_V2"
+              [[ "${ACTOR_USER_ID}" =~ ^[1-9][0-9]*$ ]]
+              ;;
+            *) exit 1 ;;
+          esac
 
       - name: Set up SSH agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -48,22 +63,27 @@ jobs:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+          MODE: ${{ inputs.mode }}
           ACTOR_USER_ID: ${{ inputs.actor_user_id }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
+          reset_args="--dry-run"
+          if [ "${MODE}" = "apply" ]; then
+            reset_args="--apply --confirm RESET_2026_08_TO_V2 --actor-user-id ${ACTOR_USER_ID} --workflow-run-id ${WORKFLOW_RUN_ID}"
+          fi
           ssh \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             -o ConnectTimeout=30 \
             "${PRODUCTION_USER}@${PRODUCTION_HOST}" \
-            "cd \"${PRODUCTION_PATH}\" && docker exec -e PROFIT_BASIS_BACKUP_DIR=/app/data/backups/v2 xihong_erp_backend_api python3 /app/scripts/reset_august_v2_start.py --apply --confirm RESET_2026_08_TO_V2 --actor-user-id ${ACTOR_USER_ID} --workflow-run-id ${WORKFLOW_RUN_ID}" \
+            "cd \"${PRODUCTION_PATH}\" && docker exec -e PROFIT_BASIS_BACKUP_DIR=/app/data/backups/v2 xihong_erp_backend_api python3 /app/scripts/reset_august_v2_start.py ${reset_args}" \
             > artifacts/august_v2_reset_result.json \
             2> artifacts/august_v2_reset.stderr
 
           {
-            echo "### August 2026 V2 reset"
+            echo "### August 2026 V2 ${MODE}"
             echo "- Fixed target month: 2026-08"
             echo "- Result artifact: august_v2_reset_result.json"
             echo "- Persistent backup directory: /app/data/backups/v2"
