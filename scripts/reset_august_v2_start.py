@@ -90,13 +90,44 @@ def collect_reset_report(database_url: str) -> dict[str, Any]:
                       (SELECT COUNT(*) FROM a_class.employee_performance_inputs
                         WHERE year_month = :period AND status = 'active') AS performance_input_rows,
                       (SELECT COUNT(*) FROM a_class.employee_performance_adjustments
-                        WHERE year_month = :period AND status = 'active') AS performance_adjustment_rows
+                        WHERE year_month = :period AND status = 'active') AS performance_adjustment_rows,
+                      (
+                        SELECT COALESCE(
+                          JSON_AGG(
+                            JSON_BUILD_OBJECT(
+                              'platform_code', uncovered.platform_code,
+                              'shop_id', uncovered.shop_id,
+                              'employee_codes', uncovered.employee_codes
+                            ) ORDER BY uncovered.platform_code, uncovered.shop_id
+                          ),
+                          '[]'::json
+                        )
+                        FROM (
+                          SELECT
+                            LOWER(assignment.platform_code) AS platform_code,
+                            assignment.shop_id,
+                            ARRAY_AGG(DISTINCT assignment.employee_code ORDER BY assignment.employee_code)
+                              AS employee_codes
+                          FROM a_class.employee_shop_assignments assignment
+                          LEFT JOIN a_class.salary_structures salary
+                            ON salary.employee_code = assignment.employee_code
+                           AND salary.status = 'active'
+                           AND salary.effective_date <= CAST(:period || '-31' AS date)
+                          WHERE assignment.year_month = :period
+                            AND assignment.status = 'active'
+                          GROUP BY LOWER(assignment.platform_code), assignment.shop_id
+                          HAVING COUNT(salary.id) = 0
+                        ) uncovered
+                      ) AS shops_without_salary_coverage
                     """
                 ),
                 {"period": PERIOD_MONTH},
             ).mappings().one()
             report = {"period_month": PERIOD_MONTH, **_as_dict(row)}
             report["payroll_statuses"] = list(report.get("payroll_statuses") or [])
+            report["shops_without_salary_coverage"] = list(
+                report.get("shops_without_salary_coverage") or []
+            )
             report["source_fingerprint"] = compute_batch_fingerprint(report)
             return report
     finally:
@@ -115,6 +146,10 @@ def validate_reset_report(report: Mapping[str, Any]) -> None:
         raise AugustV2ResetSafetyError("non-draft payroll rows prevent reset")
     if int(report.get("settlement_rows") or 0):
         raise AugustV2ResetSafetyError("monthly settlement rows prevent reset")
+    if report.get("shops_without_salary_coverage"):
+        raise AugustV2ResetSafetyError(
+            "salary coverage is missing for one or more assigned shops"
+        )
 
 
 async def _verify_admin_actor(db, actor_user_id: int) -> dict[str, Any]:

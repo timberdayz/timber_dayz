@@ -23,6 +23,7 @@ def test_august_reset_accepts_only_an_unlocked_month_without_settlement():
         "v2_basis_rows": 0,
         "payroll_statuses": [],
         "settlement_rows": 0,
+        "shops_without_salary_coverage": [],
     }
 
     script.validate_reset_report(report)
@@ -35,6 +36,15 @@ def test_august_reset_accepts_only_an_unlocked_month_without_settlement():
         script.validate_reset_report({**report, "settlement_rows": 1})
     with pytest.raises(script.AugustV2ResetSafetyError, match="V2"):
         script.validate_reset_report({**report, "v2_basis_rows": 1})
+    with pytest.raises(script.AugustV2ResetSafetyError, match="salary coverage"):
+        script.validate_reset_report(
+            {
+                **report,
+                "shops_without_salary_coverage": [
+                    {"platform_code": "shopee", "shop_id": "shop-1"}
+                ],
+            }
+        )
 
 
 def test_august_reset_contract_preserves_source_tables_and_uses_shared_v2_flow():
@@ -44,6 +54,8 @@ def test_august_reset_contract_preserves_source_tables_and_uses_shared_v2_flow()
     assert "V2MonthlyRefreshService" in source
     assert "export_backup" in source
     assert "fact_audit_logs" in source
+    assert "shops_without_salary_coverage" in source
+    assert "salary_structure_rows" in source
     assert 'c_class.shop_commissions\n                        WHERE "年月" = :period' in source
     assert 'DELETE FROM c_class.shop_commissions WHERE "年月" = :period' in source
     assert "FROM public.user_roles user_role" in source
