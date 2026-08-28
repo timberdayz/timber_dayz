@@ -684,8 +684,8 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
         def __init__(self, db):
             self.db = db
 
-        async def generate_month(self, year_month):
-            calls.append(("payroll", year_month))
+        async def generate_month(self, year_month, *, allow_pending_performance=False):
+            calls.append(("payroll", year_month, allow_pending_performance))
             return {
                 "year_month": year_month,
                 "employee_count": 4,
@@ -710,11 +710,29 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
             calls.append(("basis", year_month, commit))
             return {"year_month": year_month, "shop_count": 2}
 
-    module.HRIncomeCalculationService = _FakeIncomeService
-    module.PayrollGenerationService = _FakePayrollService
-    module.LaborCostProjectionService = _FakeLaborCostService
-    module.ProfitBasisService = _FakeProfitBasisService
-    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
+    class _FakeV2MonthlyRefreshService:
+        def __init__(self, db):
+            self.db = db
+
+        async def refresh_month(self, year_month):
+            calls.append(("v2_refresh", year_month))
+            return {
+                "success": True,
+                "year_month": year_month,
+                "commission_upserts": 3,
+                "performance_upserts": 3,
+                "employee_count": 4,
+                "payroll_upserts": 3,
+                "locked_conflicts": 1,
+                "locked_conflict_details": [
+                    {"employee_code": "EMP900", "payroll_status": "confirmed"}
+                ],
+                "labor_cost_allocation_upserts": 4,
+                "profit_basis_shop_count": 2,
+                "calculation_passes": 2,
+            }
+
+    module.V2MonthlyRefreshService = _FakeV2MonthlyRefreshService
     db.commit = AsyncMock()
 
     resp = asyncio.run(module.refresh_payroll_records_for_month("2025-04", db=db))
@@ -730,16 +748,7 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
     assert resp["profit_basis_shop_count"] == 2
     assert resp["calculation_passes"] == 2
     assert resp["locked_conflict_details"] == [{"employee_code": "EMP900", "payroll_status": "confirmed"}]
-    assert calls == [
-        ("income", "2025-04", False),
-        ("payroll", "2025-04"),
-        ("labor", "2025-04", {"EMP001": {("shopee", "shop-1"): 120.0}}, False),
-        ("basis", "2025-04", False),
-        ("income", "2025-04", False),
-        ("payroll", "2025-04"),
-        ("labor", "2025-04", {"EMP001": {("shopee", "shop-1"): 120.0}}, False),
-    ]
-    assert db.commit.await_count == 1
+    assert calls == [("v2_refresh", "2025-04")]
 
 
 def test_refresh_payroll_record_persists_new_record_before_serializing(monkeypatch):

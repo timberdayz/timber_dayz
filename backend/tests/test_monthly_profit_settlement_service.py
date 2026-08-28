@@ -36,9 +36,19 @@ class _ScalarResult:
         return self._rows[0] if self._rows else None
 
 
+class _ReadyPerformance:
+    async def assert_month_performance_ready(self, *_args, **_kwargs):
+        return None
+
+
+def _allow_ready_performance(monkeypatch, module):
+    monkeypatch.setattr(module, "PerformanceReadinessService", lambda _db: _ReadyPerformance())
+
+
 @pytest.mark.asyncio
 async def test_rebuild_monthly_profit_settlement_aggregates_company_totals(monkeypatch):
     module = _load_service_module()
+    _allow_ready_performance(monkeypatch, module)
     service = module.MonthlyProfitSettlementService(_make_db())
 
     async def fake_load_net_profit_amount(period_month):
@@ -98,6 +108,7 @@ async def test_rebuild_monthly_profit_settlement_aggregates_company_totals(monke
 @pytest.mark.asyncio
 async def test_rebuild_monthly_profit_settlement_uses_adjustments_in_company_actual(monkeypatch):
     module = _load_service_module()
+    _allow_ready_performance(monkeypatch, module)
     service = module.MonthlyProfitSettlementService(_make_db())
 
     monkeypatch.setattr(service, "_load_net_profit_amount", AsyncMock(return_value=85000.0))
@@ -420,8 +431,9 @@ async def test_reopen_rejects_settlement_when_paid_payroll_exists():
 
 
 @pytest.mark.asyncio
-async def test_approve_rejects_when_difference_exceeds_threshold():
+async def test_approve_rejects_when_difference_exceeds_threshold(monkeypatch):
     module = _load_service_module()
+    _allow_ready_performance(monkeypatch, module)
     db = _make_db()
     service = module.MonthlyProfitSettlementService(db)
     record = SimpleNamespace(
@@ -441,6 +453,7 @@ async def test_approve_rejects_when_difference_exceeds_threshold():
 @pytest.mark.asyncio
 async def test_approve_builds_snapshots_before_marking_settlement_approved(monkeypatch):
     module = _load_service_module()
+    _allow_ready_performance(monkeypatch, module)
     db = _make_db()
     service = module.MonthlyProfitSettlementService(db)
     record = SimpleNamespace(

@@ -621,15 +621,17 @@ class PayrollGenerationService:
         year_month: str,
         *,
         employee_codes: set[str] | list[str] | None = None,
+        allow_pending_performance: bool = False,
     ) -> Dict[str, Any]:
-        await PerformanceReadinessService(self.db).assert_month_performance_ready(
-            year_month,
-            employee_codes=(
-                {str(employee_code).strip() for employee_code in employee_codes}
-                if employee_codes is not None
-                else None
-            ),
-        )
+        if not allow_pending_performance:
+            await PerformanceReadinessService(self.db).assert_month_performance_ready(
+                year_month,
+                employee_codes=(
+                    {str(employee_code).strip() for employee_code in employee_codes}
+                    if employee_codes is not None
+                    else None
+                ),
+            )
         salary_rows = (
             (
                 await self.db.execute(
