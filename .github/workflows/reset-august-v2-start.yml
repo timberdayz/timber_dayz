@@ -69,18 +69,53 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          reset_args="--dry-run"
-          if [ "${MODE}" = "apply" ]; then
-            reset_args="--apply --confirm RESET_2026_08_TO_V2 --actor-user-id ${ACTOR_USER_ID} --workflow-run-id ${WORKFLOW_RUN_ID}"
-          fi
           ssh \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             -o ConnectTimeout=30 \
             "${PRODUCTION_USER}@${PRODUCTION_HOST}" \
-            "cd \"${PRODUCTION_PATH}\" && docker exec -e PROFIT_BASIS_BACKUP_DIR=/app/data/backups/v2 xihong_erp_backend_api python3 /app/scripts/reset_august_v2_start.py ${reset_args}" \
+            "bash -s -- \"${PRODUCTION_PATH}\" \"${MODE}\" \"${ACTOR_USER_ID}\" \"${WORKFLOW_RUN_ID}\"" \
             > artifacts/august_v2_reset_result.json \
-            2> artifacts/august_v2_reset.stderr
+            2> artifacts/august_v2_reset.stderr <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          production_path="$1"
+          mode="$2"
+          actor_user_id="$3"
+          workflow_run_id="$4"
+          stopped_containers=()
+
+          restore_monthly_input_writers() {
+            for container in "${stopped_containers[@]}"; do
+              docker start "${container}" >&2 || true
+            done
+          }
+
+          quiesce_monthly_input_writers() {
+            for container in \
+              xihong_erp_nginx \
+              xihong_erp_frontend \
+              xihong_erp_celery_worker \
+              xihong_erp_celery_beat \
+              xihong_erp_backend_collector; do
+              if [ "$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)" = "true" ]; then
+                docker stop --time 15 "${container}" >&2
+                stopped_containers+=("${container}")
+              fi
+            done
+          }
+
+          cd "${production_path}"
+          reset_args=(--dry-run)
+          if [ "${mode}" = "apply" ]; then
+            quiesce_monthly_input_writers
+            trap restore_monthly_input_writers EXIT
+            reset_args=(--apply --confirm RESET_2026_08_TO_V2 --actor-user-id "${actor_user_id}" --workflow-run-id "${workflow_run_id}")
+          fi
+          docker exec \
+            -e PROFIT_BASIS_BACKUP_DIR=/app/data/backups/v2 \
+            xihong_erp_backend_api \
+            python3 /app/scripts/reset_august_v2_start.py "${reset_args[@]}"
+          REMOTE_SCRIPT
 
           {
             echo "### August 2026 V2 ${MODE}"
