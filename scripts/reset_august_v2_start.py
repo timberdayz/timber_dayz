@@ -70,7 +70,7 @@ def collect_reset_report(database_url: str) -> dict[str, Any]:
                       (SELECT COUNT(*) FROM c_class.employee_performance
                         WHERE year_month = :period) AS employee_performance_rows,
                       (SELECT COUNT(*) FROM c_class.shop_commissions
-                        WHERE year_month = :period) AS shop_commission_rows,
+                        WHERE "年月" = :period) AS shop_commission_rows,
                       (SELECT COUNT(*) FROM a_class.payroll_records
                         WHERE year_month = :period) AS payroll_rows,
                       (SELECT COALESCE(ARRAY_AGG(DISTINCT LOWER(status)), ARRAY[]::text[])
@@ -154,7 +154,7 @@ async def _clear_derived_results(db) -> dict[str, int]:
         "labor_allocations": "DELETE FROM finance.employee_labor_cost_allocations WHERE period_month = :period",
         "employee_commissions": "DELETE FROM c_class.employee_commissions WHERE year_month = :period",
         "employee_performance": "DELETE FROM c_class.employee_performance WHERE year_month = :period",
-        "shop_commissions": "DELETE FROM c_class.shop_commissions WHERE year_month = :period",
+        "shop_commissions": 'DELETE FROM c_class.shop_commissions WHERE "年月" = :period',
         "draft_payroll": "DELETE FROM a_class.payroll_records WHERE year_month = :period AND status = 'draft'",
     }
     deleted: dict[str, int] = {}

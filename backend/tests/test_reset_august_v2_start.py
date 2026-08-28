@@ -44,6 +44,8 @@ def test_august_reset_contract_preserves_source_tables_and_uses_shared_v2_flow()
     assert "V2MonthlyRefreshService" in source
     assert "export_backup" in source
     assert "fact_audit_logs" in source
+    assert 'c_class.shop_commissions\n                        WHERE "年月" = :period' in source
+    assert 'DELETE FROM c_class.shop_commissions WHERE "年月" = :period' in source
     for derived_table in (
         "finance.shop_profit_basis",
         "finance.employee_labor_cost_allocations",
