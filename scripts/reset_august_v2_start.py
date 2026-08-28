@@ -17,7 +17,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.models.database import AsyncSessionLocal
-from backend.services.v2_monthly_refresh_service import V2MonthlyRefreshService
 
 try:
     from scripts.migrate_profit_basis_to_v2 import (
@@ -91,6 +90,16 @@ def collect_reset_report(database_url: str) -> dict[str, Any]:
                         WHERE year_month = :period AND status = 'active') AS performance_input_rows,
                       (SELECT COUNT(*) FROM a_class.employee_performance_adjustments
                         WHERE year_month = :period AND status = 'active') AS performance_adjustment_rows,
+                      (SELECT COUNT(*) FROM a_class.shop_commission_config
+                        WHERE year_month = :period) AS shop_commission_config_rows,
+                      (SELECT COUNT(*) FROM a_class.employee_targets
+                        WHERE "年月" = :period) AS employee_target_rows,
+                      (SELECT COUNT(*) FROM a_class.sales_targets_a
+                        WHERE "年月" = :period) AS sales_target_rows,
+                      (SELECT COUNT(*) FROM a_class.personal_performance_plans
+                        WHERE year_month = :period) AS personal_performance_plan_rows,
+                      (SELECT COUNT(*) FROM c_class.performance_scores
+                        WHERE period = :period) AS performance_score_rows,
                       (
                         SELECT COALESCE(
                           JSON_AGG(
@@ -146,10 +155,6 @@ def validate_reset_report(report: Mapping[str, Any]) -> None:
         raise AugustV2ResetSafetyError("non-draft payroll rows prevent reset")
     if int(report.get("settlement_rows") or 0):
         raise AugustV2ResetSafetyError("monthly settlement rows prevent reset")
-    if report.get("shops_without_salary_coverage"):
-        raise AugustV2ResetSafetyError(
-            "salary coverage is missing for one or more assigned shops"
-        )
 
 
 async def _verify_admin_actor(db, actor_user_id: int) -> dict[str, Any]:
@@ -191,6 +196,20 @@ async def _clear_derived_results(db) -> dict[str, int]:
         "employee_performance": "DELETE FROM c_class.employee_performance WHERE year_month = :period",
         "shop_commissions": 'DELETE FROM c_class.shop_commissions WHERE "年月" = :period',
         "draft_payroll": "DELETE FROM a_class.payroll_records WHERE year_month = :period AND status = 'draft'",
+        "performance_scores": "DELETE FROM c_class.performance_scores WHERE period = :period",
+        "operating_costs": 'DELETE FROM a_class.operating_costs WHERE "年月" = :period',
+        "employee_shop_assignments": "DELETE FROM a_class.employee_shop_assignments WHERE year_month = :period",
+        "shop_commission_config": "DELETE FROM a_class.shop_commission_config WHERE year_month = :period",
+        "employee_performance_inputs": "DELETE FROM a_class.employee_performance_inputs WHERE year_month = :period",
+        "employee_performance_adjustments": "DELETE FROM a_class.employee_performance_adjustments WHERE year_month = :period",
+        "personal_performance_plans": "DELETE FROM a_class.personal_performance_plans WHERE year_month = :period",
+        "employee_targets": 'DELETE FROM a_class.employee_targets WHERE "年月" = :period',
+        "sales_targets": 'DELETE FROM a_class.sales_targets_a WHERE "年月" = :period',
+        "month_bound_sales_targets": """
+            DELETE FROM a_class.sales_targets
+            WHERE period_start >= DATE '2026-08-01'
+              AND period_end <= DATE '2026-08-31'
+        """,
     }
     deleted: dict[str, int] = {}
     for key, statement in targets.items():
@@ -253,10 +272,6 @@ async def apply_reset(
         async with db.begin():
             actor = await _verify_admin_actor(db, actor_user_id)
             deleted = await _clear_derived_results(db)
-            refresh_result = await V2MonthlyRefreshService(db).refresh_month(
-                PERIOD_MONTH,
-                commit=False,
-            )
             await _write_audit_log(
                 db,
                 actor=actor,
@@ -273,7 +288,7 @@ async def apply_reset(
         "backup_path": str(backup_path),
         "manifest_path": str(manifest_path),
         "deleted_derived_rows": deleted,
-        "refresh_result": refresh_result,
+        "refresh_result": None,
     }
 
 
