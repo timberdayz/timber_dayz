@@ -131,7 +131,7 @@ async def _verify_admin_actor(db, actor_user_id: int) -> dict[str, Any]:
                     is_superuser = TRUE
                     OR EXISTS (
                       SELECT 1
-                      FROM core.user_roles user_role
+                      FROM public.user_roles user_role
                       JOIN core.dim_roles role ON role.role_id = user_role.role_id
                       WHERE user_role.user_id = user_account.user_id
                         AND role.is_active = TRUE
