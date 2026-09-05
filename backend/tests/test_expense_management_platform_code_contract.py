@@ -17,6 +17,14 @@ def test_expense_router_reads_and_returns_platform_code():
     assert 'message="无法识别店铺所属平台"' in source
 
 
+def test_expense_router_limits_shop_scope_to_operating_store():
+    source = Path(
+        "backend/domains/business/routers/expense_management.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'ShopAccount.business_role == "operating_store"' in source
+
+
 def test_expense_frontend_delete_copy_and_blank_save_guard_exist():
     source = Path(
         "frontend/src/domains/business/views/finance/ExpenseManagement.vue"

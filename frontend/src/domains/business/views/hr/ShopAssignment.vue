@@ -37,9 +37,6 @@
         <el-button type="warning" @click="handleCopyFromPrevMonth" :loading="copyLoading" :disabled="!configMonth">
           复制上月配置
         </el-button>
-        <el-button type="primary" @click="handleAddAllShops" style="margin-left: 10px;">
-          为所有店铺添加
-        </el-button>
         <el-button type="success" @click="handleBatchSave" :loading="batchSaving" style="margin-left: 10px;">
           批量保存
         </el-button>
@@ -567,13 +564,18 @@ function handleConfigMonthChange() {
   if (configMonth.value) loadConfigData()
 }
 
-function handleAddAllShops() {
-  loadConfigData()
-}
-
 async function handleCopyFromPrevMonth() {
   if (!configMonth.value) {
     ElMessage.warning('请先选择配置月份')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将使用上月配置覆盖 ${configMonth.value} 未锁定店铺的人员、提成比例和可分配净利润率，是否继续？`,
+      '确认复制上月配置',
+      { type: 'warning', confirmButtonText: '继续复制', cancelButtonText: '取消' }
+    )
+  } catch (_) {
     return
   }
   copyLoading.value = true
@@ -581,7 +583,8 @@ async function handleCopyFromPrevMonth() {
     const res = await api.copyHrEmployeeShopAssignmentsFromPrevMonth({ year_month: configMonth.value })
     const data = res?.data ?? res ?? {}
     const copied = data.copied ?? 0
-    ElMessage.success(`已复制上月配置到 ${configMonth.value}，新增 ${copied} 条`)
+    const updated = data.updated ?? 0
+    ElMessage.success(`已复制上月配置到 ${configMonth.value}，新增 ${copied} 条，更新 ${updated} 项`)
     await loadConfigData()
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '复制失败')

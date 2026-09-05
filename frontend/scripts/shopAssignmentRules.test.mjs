@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   calculateAllocatableProfit,
@@ -159,4 +160,10 @@ test('summarizeEmployeeCommissions totals estimated monthly commission by employ
       estimated_commission: 90
     }
   ])
+})
+
+test('shop assignment page does not expose a fake add-all-shops action', () => {
+  const source = readFileSync('src/domains/business/views/hr/ShopAssignment.vue', 'utf8')
+  assert.equal(source.includes('为所有店铺添加'), false)
+  assert.equal(source.includes('handleAddAllShops'), false)
 })

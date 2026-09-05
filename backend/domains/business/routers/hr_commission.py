@@ -1537,7 +1537,7 @@ async def copy_employee_shop_assignments_from_prev_month(
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
 ):
-    """将上一月的归属配置复制到指定月份；若目标月已有配置则跳过（不覆盖）"""
+    """将上一月的人员归属、提成比例和店铺利润率复制到指定月份。"""
     try:
         parts = body.year_month.split("-")
         y, m = int(parts[0]), int(parts[1])
@@ -1552,36 +1552,82 @@ async def copy_employee_shop_assignments_from_prev_month(
             .where(EmployeeShopAssignment.status == "active")
         )
         prev_rows = (await db.execute(prev_query)).scalars().all()
-        if not prev_rows:
-            return {"success": True, "data": {"copied": 0, "message": f"上月 {prev_month} 无配置可复制"}}
-        # 查目标月已有 (employee_code, platform_code, shop_id)
+        prev_config_rows = (
+            await db.execute(
+                select(ShopCommissionConfig).where(
+                    ShopCommissionConfig.year_month == prev_month
+                )
+            )
+        ).scalars().all()
+        # 查目标月已有人员归属和店铺利润率
         target_query = (
             select(EmployeeShopAssignment)
             .where(EmployeeShopAssignment.year_month == body.year_month)
         )
-        target_set = {(r.employee_code, r.platform_code, r.shop_id) for r in (await db.execute(target_query)).scalars().all()}
+        target_rows = (await db.execute(target_query)).scalars().all()
+        target_by_key = {
+            (r.employee_code, r.platform_code, r.shop_id): r for r in target_rows
+        }
+        target_config_rows = (
+            await db.execute(
+                select(ShopCommissionConfig).where(
+                    ShopCommissionConfig.year_month == body.year_month
+                )
+            )
+        ).scalars().all()
+        target_config_by_key = {
+            (r.platform_code, r.shop_id): r for r in target_config_rows
+        }
         copied = 0
+        updated = 0
         for r in prev_rows:
             key = (r.employee_code, r.platform_code, r.shop_id)
-            if key in target_set:
-                continue
-            new_rec = EmployeeShopAssignment(
-                year_month=body.year_month,
-                employee_code=r.employee_code,
+            existing = target_by_key.get(key)
+            await PayrollPeriodLockService(db).assert_shop_month_mutable(
                 platform_code=r.platform_code,
                 shop_id=r.shop_id,
-                commission_ratio=r.commission_ratio,
-                target_allocation_ratio=1.0,
-                target_allocation_ratio_source="manual",
-                role=r.role,
-                effective_from=r.effective_from,
-                effective_to=r.effective_to,
-                status="active",
+                year_month=body.year_month,
             )
-            db.add(new_rec)
-            copied += 1
+            if existing is None:
+                existing = EmployeeShopAssignment(
+                    year_month=body.year_month,
+                    employee_code=r.employee_code,
+                    platform_code=r.platform_code,
+                    shop_id=r.shop_id,
+                    target_allocation_ratio=1.0,
+                    target_allocation_ratio_source="manual",
+                    status="active",
+                )
+                db.add(existing)
+                target_by_key[key] = existing
+                copied += 1
+            else:
+                updated += 1
+            existing.commission_ratio = r.commission_ratio
+            existing.role = r.role
+            existing.effective_from = r.effective_from
+            existing.effective_to = r.effective_to
+
+        for prev_config in prev_config_rows:
+            await PayrollPeriodLockService(db).assert_shop_month_mutable(
+                platform_code=prev_config.platform_code,
+                shop_id=prev_config.shop_id,
+                year_month=body.year_month,
+            )
+            key = (prev_config.platform_code, prev_config.shop_id)
+            target_config = target_config_by_key.get(key)
+            if target_config is None:
+                target_config = ShopCommissionConfig(
+                    year_month=body.year_month,
+                    platform_code=prev_config.platform_code,
+                    shop_id=prev_config.shop_id,
+                )
+                db.add(target_config)
+                target_config_by_key[key] = target_config
+            target_config.allocatable_profit_rate = prev_config.allocatable_profit_rate
+            updated += 1
         await db.commit()
-        return {"success": True, "data": {"copied": copied, "from_month": prev_month, "to_month": body.year_month}}
+        return {"success": True, "data": {"copied": copied, "updated": updated, "from_month": prev_month, "to_month": body.year_month}}
     except Exception as e:
         await db.rollback()
         logger.error(f"复制上月配置失败: {e}", exc_info=True)

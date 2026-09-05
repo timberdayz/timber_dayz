@@ -117,13 +117,11 @@ async def _apply_projected_labor_costs(
     if not items:
         return
 
-    effective_month = await LaborCostPolicyService(db).get_effective_month()
     eligible_months = sorted(
         {
             str(item.get("year_month") or "")
             for item in items
-            if effective_month is not None
-            and str(item.get("year_month") or "") >= effective_month
+            if str(item.get("year_month") or "")
         }
     )
     labor_cost_by_shop: Dict[tuple[str, str, str], float] = {}
@@ -157,10 +155,7 @@ async def _apply_projected_labor_costs(
         }
 
     for item in items:
-        use_system_labor_cost = bool(
-            effective_month is not None
-            and str(item.get("year_month") or "") >= effective_month
-        )
+        use_system_labor_cost = True
         merged = _merge_labor_cost_for_response(
             stored_labor_cost=float(item.get("labor_cost") or 0),
             stored_total_cost=float(item.get("total_cost") or 0),
@@ -182,6 +177,7 @@ async def _resolve_shop_platform_code(db: AsyncSession, shop_id: str) -> Optiona
     result = await db.execute(
         select(ShopAccount).where(
             ShopAccount.enabled == True,
+            ShopAccount.business_role == "operating_store",
             or_(
                 ShopAccount.platform_shop_id == shop_id,
                 ShopAccount.shop_account_id == shop_id,
@@ -225,6 +221,7 @@ async def list_expense_shops(
         query = (
             select(ShopAccount)
             .where(ShopAccount.enabled == True)
+            .where(ShopAccount.business_role == "operating_store")
             .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         

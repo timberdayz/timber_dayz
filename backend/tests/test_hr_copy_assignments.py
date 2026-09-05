@@ -15,8 +15,11 @@ class _ScalarRowsResult:
     def all(self):
         return self._rows
 
+    def scalar_one(self):
+        return False
 
-def test_copy_previous_month_assignments_skips_existing_assignment_keys():
+
+def test_copy_previous_month_assignments_updates_existing_and_adds_missing_keys():
     from backend.domains.business.routers import hr_commission
 
     db = AsyncMock()
@@ -57,7 +60,7 @@ def test_copy_previous_month_assignments_skips_existing_assignment_keys():
         selected_expr = statement.column_descriptions[0]["expr"]
         if selected_expr is EmployeeShopAssignment:
             return _ScalarRowsResult(target_rows)
-        return _ScalarRowsResult(["EMP001"])
+        return _ScalarRowsResult([])
 
     db.execute = execute
     db.add = Mock()
@@ -73,8 +76,18 @@ def test_copy_previous_month_assignments_skips_existing_assignment_keys():
 
     assert result["success"] is True
     assert result["data"]["copied"] == 1
+    assert result["data"]["updated"] == 1
     db.commit.assert_awaited_once()
     assert db.add.call_count == 1
     copied_assignment = db.add.call_args.args[0]
     assert copied_assignment.employee_code == "EMP002"
     assert copied_assignment.shop_id == "shop-2"
+
+
+def test_copy_source_includes_shop_commission_config():
+    from inspect import getsource
+    from backend.domains.business.routers import hr_commission
+
+    source = getsource(hr_commission.copy_employee_shop_assignments_from_prev_month)
+    assert "ShopCommissionConfig" in source
+    assert "allocatable_profit_rate" in source

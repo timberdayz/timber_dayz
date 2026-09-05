@@ -40,7 +40,7 @@ def test_legacy_month_keeps_manually_entered_labor_component():
 
 
 @pytest.mark.asyncio
-async def test_projected_labor_cost_is_applied_only_from_effective_month(monkeypatch):
+async def test_projected_labor_cost_uses_fixed_v2_basis_for_all_months(monkeypatch):
     from backend.domains.business.routers import expense_management as module
 
     class _Mappings:
@@ -61,13 +61,6 @@ async def test_projected_labor_cost_is_applied_only_from_effective_month(monkeyp
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_Result())
 
-    async def get_effective_month(*_args, **_kwargs):
-        return "2026-08"
-
-    monkeypatch.setattr(
-        "backend.services.labor_cost_policy_service.LaborCostPolicyService.get_effective_month",
-        get_effective_month,
-    )
     items = [
         {
             "year_month": "2026-07",
@@ -87,9 +80,9 @@ async def test_projected_labor_cost_is_applied_only_from_effective_month(monkeyp
 
     await module._apply_projected_labor_costs(db, items)
 
-    assert items[0]["labor_cost"] == 200
-    assert items[0]["total_cost"] == 1000
-    assert items[0]["labor_cost_source"] == "manual_legacy"
+    assert items[0]["labor_cost"] == 0
+    assert items[0]["total_cost"] == 800
+    assert items[0]["labor_cost_source"] == "system"
     assert items[1]["labor_cost"] == 350
     assert items[1]["total_cost"] == 1150
     assert items[1]["labor_cost_source"] == "system"
