@@ -239,6 +239,26 @@ class FeishuProjectionService:
                 await self.record_attempt(task, "failed", str(exc)[:1000])
         return completed
 
+    async def record_attempt(
+        self,
+        task: FeishuProjectionTask,
+        status: str,
+        error_message: str | None = None,
+    ) -> None:
+        task.status = status
+        task.attempt_count += 1
+        task.last_error = error_message
+        if status == "completed":
+            task.completed_at = datetime.now(timezone.utc)
+        self.db.add(
+            FeishuProjectionLog(
+                task_id=task.id,
+                status=status,
+                payload_hash=task.payload_hash,
+                error_message=error_message,
+            )
+        )
+
 
 async def trigger_pending_projection_delivery() -> None:
     """Best-effort async dispatch; durable outbox keeps failed work retryable."""
@@ -277,18 +297,3 @@ def _sku_table_fields() -> list[dict[str, Any]]:
         {"name": "采购成本来源", "type": "text"}, {"name": "物流成本来源", "type": "text"}, {"name": "数据完整度", "type": "text"},
         {"name": "更新时间", "type": "datetime", "style": {"format": "yyyy-MM-dd HH:mm"}},
     ]
-
-    async def record_attempt(self, task: FeishuProjectionTask, status: str, error_message: str | None = None) -> None:
-        task.status = status
-        task.attempt_count += 1
-        task.last_error = error_message
-        if status == "completed":
-            task.completed_at = datetime.now(timezone.utc)
-        self.db.add(
-            FeishuProjectionLog(
-                task_id=task.id,
-                status=status,
-                payload_hash=task.payload_hash,
-                error_message=error_message,
-            )
-        )
