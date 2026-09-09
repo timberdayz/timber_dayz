@@ -454,7 +454,6 @@ SELECT
     period_end_date,
     period_start_time,
     period_end_time,
-    file_id,
     product_id,
     product_name,
     platform_sku,
@@ -475,6 +474,7 @@ SELECT
     header_columns,
     data_hash,
     ingest_timestamp,
-    currency_code
+    currency_code,
+    file_id
 FROM deduplicated
 WHERE rn = 1;
