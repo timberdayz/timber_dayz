@@ -23,6 +23,8 @@ test('frontend API exposes employee salary helpers', () => {
   assert.equal(apiSource.includes('async updateHrSalaryStructure(employeeCode, data)'), true)
   assert.equal(apiSource.includes('async refreshHrPayrollRecord(employeeCode, yearMonth)'), true)
   assert.equal(apiSource.includes('async refreshAllHrPayrollRecords(yearMonth)'), true)
+  assert.equal(apiSource.includes('async getHrPayrollManualInput(employeeCode, yearMonth)'), true)
+  assert.equal(apiSource.includes('async updateHrPayrollManualInput(employeeCode, yearMonth, data)'), true)
 })
 
 test('router exposes dedicated employee salary page', () => {

@@ -13,6 +13,7 @@ from modules.core.db import (
     Employee,
     EmployeeCommission,
     EmployeePerformance,
+    PayrollManualInput,
     PayrollRecord,
     PersonalPerformanceEmployeeScope,
     PersonalPerformancePlan,
@@ -407,6 +408,7 @@ class PayrollGenerationService:
         commission: Any | None,
         performance: Any | None,
         existing: Any | None = None,
+        manual_input: Any | None = None,
     ) -> Dict[str, Any]:
         base_salary = cls._to_money(getattr(salary, "base_salary", 0))
         position_salary = cls._to_money(getattr(salary, "position_salary", 0))
@@ -435,11 +437,18 @@ class PayrollGenerationService:
             "commission": commission_amount,
             "allowances": allowances,
             "status": getattr(existing, "status", "draft") or "draft",
-            "pay_date": getattr(existing, "pay_date", None),
-            "remark": getattr(existing, "remark", None),
+            "pay_date": getattr(manual_input, "pay_date", getattr(existing, "pay_date", None)),
+            "remark": getattr(manual_input, "remark", getattr(existing, "remark", None)),
         }
         for field in cls.MANUAL_MONEY_FIELDS:
-            payload[field] = cls._to_money(getattr(existing, field, 0))
+            source = manual_input if manual_input is not None else existing
+            payload[field] = cls._to_money(getattr(source, field, 0))
+        payload["backfill_source_month"] = getattr(
+            manual_input, "backfill_source_month", getattr(existing, "backfill_source_month", None)
+        )
+        payload["backfill_note"] = getattr(
+            manual_input, "backfill_note", getattr(existing, "backfill_note", None)
+        )
 
         gross_salary = cls._sum_money(
             payload["base_salary"],
@@ -509,7 +518,8 @@ class PayrollGenerationService:
         self, employee_code: str, year_month: str
     ) -> Dict[str, Any]:
         await PerformanceReadinessService(self.db).assert_month_performance_ready(
-            year_month
+            year_month,
+            employee_codes={employee_code},
         )
         if not await self._is_salary_eligible_employee(employee_code):
             return {
@@ -539,6 +549,14 @@ class PayrollGenerationService:
         salary = self._pick_salary_structure_for_month(salary_rows, year_month)
         commission = await self._load_employee_commission(employee_code, year_month)
         performance = await self._load_employee_performance(employee_code, year_month)
+        manual_input = (
+            await self.db.execute(
+                select(PayrollManualInput).where(
+                    PayrollManualInput.employee_code == employee_code,
+                    PayrollManualInput.year_month == year_month,
+                )
+            )
+        ).scalar_one_or_none()
         controlled_scope = await self._controlled_scope_membership(year_month)
         if controlled_scope is not None and not controlled_scope.get(employee_code, False):
             performance = None
@@ -573,6 +591,7 @@ class PayrollGenerationService:
             commission=commission,
             performance=performance,
             existing=existing,
+            manual_input=manual_input,
         )
 
         locked_status = getattr(existing, "status", None)
@@ -643,6 +662,13 @@ class PayrollGenerationService:
         )
         commission_rows = await self._load_employee_commission_rows(year_month)
         performance_rows = await self._load_employee_performance_rows(year_month)
+        manual_input_rows = (
+            await self.db.execute(
+                select(PayrollManualInput).where(
+                    PayrollManualInput.year_month == year_month,
+                )
+            )
+        ).scalars().all()
         controlled_scope = await self._controlled_scope_membership(year_month)
         existing_rows = (
             (
@@ -668,6 +694,11 @@ class PayrollGenerationService:
         performance_by_employee = {
             row.employee_code: row
             for row in performance_rows
+            if getattr(row, "employee_code", None)
+        }
+        manual_input_by_employee = {
+            row.employee_code: row
+            for row in manual_input_rows
             if getattr(row, "employee_code", None)
         }
         if controlled_scope is not None:
@@ -717,6 +748,7 @@ class PayrollGenerationService:
                 commission=commission,
                 performance=performance,
                 existing=existing,
+                manual_input=manual_input_by_employee.get(employee_code),
             )
 
             locked_status = getattr(existing, "status", None)

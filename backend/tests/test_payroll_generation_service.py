@@ -12,6 +12,7 @@ from modules.core.db import (
     Employee,
     EmployeeCommission,
     EmployeePerformance,
+    PayrollManualInput,
     PayrollRecord,
     SalaryStructure,
 )
@@ -95,6 +96,72 @@ def test_generate_month_creates_draft_payroll_from_salary_commission_and_perform
     assert float(created.net_salary) == 2140.0
     assert float(created.total_cost) == 2140.0
     assert created.status == "draft"
+
+
+def test_generate_month_prefers_independent_manual_input_values():
+    service_cls = _load_service_cls()
+    db = AsyncMock()
+    added = []
+    salary = SimpleNamespace(
+        employee_code="EMP_MANUAL",
+        base_salary=Decimal("1000"),
+        position_salary=Decimal("0"),
+        performance_package_amount=Decimal("300"),
+        housing_allowance=Decimal("0"),
+        transport_allowance=Decimal("0"),
+        meal_allowance=Decimal("0"),
+        communication_allowance=Decimal("0"),
+        other_allowance=Decimal("0"),
+        performance_ratio=0.0,
+        status="active",
+    )
+    commission = SimpleNamespace(employee_code="EMP_MANUAL", commission_amount=Decimal("0"))
+    performance = SimpleNamespace(
+        employee_code="EMP_MANUAL",
+        performance_score=100.0,
+        calculation_status="complete",
+        performance_source_type="personal_inputs",
+    )
+    manual = SimpleNamespace(
+        employee_code="EMP_MANUAL",
+        year_month="2026-08",
+        bonus=Decimal("80"),
+        overtime_pay=Decimal("20"),
+        social_insurance_personal=Decimal("10"),
+        housing_fund_personal=Decimal("5"),
+        income_tax=Decimal("3"),
+        other_deductions=Decimal("2"),
+        social_insurance_company=Decimal("30"),
+        housing_fund_company=Decimal("40"),
+        pay_date=None,
+        remark="from manual input",
+        backfill_source_month=None,
+        backfill_note=None,
+    )
+
+    async def execute(stmt, *_args, **_kwargs):
+        entity = stmt.column_descriptions[0].get("entity") if hasattr(stmt, "column_descriptions") else None
+        if entity is SalaryStructure:
+            return _MockResult(rows=[salary])
+        if entity is EmployeeCommission:
+            return _MockResult(rows=[commission])
+        if entity is EmployeePerformance:
+            return _MockResult(rows=[performance])
+        if entity is PayrollManualInput:
+            return _MockResult(rows=[manual])
+        if entity is PayrollRecord:
+            return _MockResult(rows=[])
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=execute)
+    db.add = lambda obj: added.append(obj)
+    result = asyncio.run(service_cls(db=db).generate_month("2026-08", allow_pending_performance=True))
+
+    assert result["payroll_upserts"] == 1
+    created = next(x for x in added if isinstance(x, PayrollRecord))
+    assert float(created.bonus) == 80.0
+    assert float(created.overtime_pay) == 20.0
+    assert float(created.net_salary) == 1380.0
 
 
 def test_generate_month_limits_writes_to_formal_employee_codes():

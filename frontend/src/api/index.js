@@ -1989,6 +1989,12 @@ export default {
   async getHrPayrollRecord(employeeCode, yearMonth) {
     return await this._get(`/hr/payroll-records/${employeeCode}/${yearMonth}`)
   },
+  async getHrPayrollManualInput(employeeCode, yearMonth) {
+    return await this._get(`/hr/payroll-manual-inputs/${employeeCode}/${yearMonth}`)
+  },
+  async updateHrPayrollManualInput(employeeCode, yearMonth, data) {
+    return await this._put(`/hr/payroll-manual-inputs/${employeeCode}/${yearMonth}`, data)
+  },
   async updateHrPayrollRecord(recordId, data) {
     return await this._put(`/hr/payroll-records/${recordId}`, data)
   },

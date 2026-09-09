@@ -46,8 +46,12 @@
   - 查询工资单列表
 - `GET /api/hr/payroll-records/{employee_code}/{year_month}`
   - 查询单张工资单
+- `GET /api/hr/payroll-manual-inputs/{employee_code}/{year_month}`
+  - 查询月度人工录入
+- `PUT /api/hr/payroll-manual-inputs/{employee_code}/{year_month}`
+  - 保存月度人工录入，不触发绩效或工资计算
 - `PUT /api/hr/payroll-records/{record_id}`
-  - 编辑草稿工资单中的人工字段
+  - 兼容编辑已有草稿工资单中的人工字段
 - `POST /api/hr/payroll-records/{record_id}/confirm`
   - 将工资单标记为已确认
 - `POST /api/hr/payroll-records/{record_id}/reopen`
@@ -64,7 +68,7 @@
   - 查看个人绩效输入项、模板、调整项
 - `frontend/src/domains/business/views/hr/EmployeeSalary.vue`
   - 维护固定薪资
-  - 录入奖金、扣款等人工字段
+  - 录入并保存奖金、扣款等月度人工字段
   - 刷新、确认、退回、发放工资单
   - 查看工资单 stale / 锁定提示
 - `frontend/src/domains/business/views/hr/MyIncome.vue`
@@ -112,13 +116,18 @@
 
 ### Step 4. 审核草稿工资单
 
+先在“月度录入”区域保存人工项目。该操作只写入月度人工录入，不要求当月绩效已经完成，也不会生成工资单。
+
+完成绩效和提成计算后，再点击“按月份批量刷新全部工资单”生成或更新工资单结果。
+
 在“员工薪资”页中：
 
 - 固定薪资区域维护：
   - 底薪
   - 岗位工资
   - 固定补贴
-  - 绩效比例
+  - 绩效包金额
+  - 绩效比例（兼容字段，不参与当前计算）
   - 默认提成比例
   - 社保/公积金基数
   - 生效日期
@@ -135,7 +144,9 @@
   - 发薪日期
   - 备注
 
-保存后系统会重新计算：
+月度录入保存接口为 `PUT /api/hr/payroll-manual-inputs/{employee_code}/{year_month}`。没有工资单时保存成功不会显示工资单结果；工资单结果区会显示“尚未生成”。
+
+工资单生成或已有 draft 工资单同步人工字段后，系统会重新计算：
 
 - `gross_salary`
 - `total_deductions`
@@ -170,6 +181,7 @@
 
 - 可编辑人工字段
 - 可被重算刷新自动字段
+- 人工字段来源为 `payroll_manual_inputs`，工资单中保留一份结果快照
 
 ### `confirmed`
 
