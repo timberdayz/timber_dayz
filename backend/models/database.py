@@ -39,6 +39,10 @@ from modules.core.db import (
     DimProduct,
     DimProductMaster,
     BridgeProductKeys,
+    DimSpu,
+    DimErpSku,
+    BridgeSpuSku,
+    BridgeErpSkuKey,
     DimCurrencyRate,
     # 事实表
     # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
@@ -769,6 +773,10 @@ __all__ = [
     "DimProduct",
     "DimProductMaster",
     "BridgeProductKeys",
+    "DimSpu",
+    "DimErpSku",
+    "BridgeSpuSku",
+    "BridgeErpSkuKey",
     "DimCurrencyRate",
     # 事实表
     # [DELETED] v4.19.0: "FactOrder", "FactOrderItem" 已删除

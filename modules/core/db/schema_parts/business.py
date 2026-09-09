@@ -725,6 +725,140 @@ class LogisticsAllocationRule(Base):
     )
 
 
+class LogisticsBill(Base):
+    """Imported logistics provider statement header."""
+
+    __tablename__ = "logistics_bills"
+
+    bill_id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_no = Column(String(128), nullable=False)
+    logistics_provider = Column(String(128), nullable=True)
+    bill_date = Column(Date, nullable=False)
+    transport_type = Column(String(64), nullable=True)
+    destination = Column(String(128), nullable=True)
+    currency = Column(String(8), nullable=False, default="CNY")
+    total_amount = Column(Numeric(18, 2), nullable=False, default=0)
+    status = Column(String(32), nullable=False, default="pending")
+    source_file_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("bill_no", name="uq_logistics_bills_bill_no"),
+        Index("ix_logistics_bills_date_status", "bill_date", "status"),
+        {"schema": "finance"},
+    )
+
+
+class LogisticsBillLine(Base):
+    """One chargeable cargo line from a logistics statement."""
+
+    __tablename__ = "logistics_bill_lines"
+
+    line_id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_id = Column(Integer, ForeignKey("finance.logistics_bills.bill_id", ondelete="CASCADE"), nullable=False)
+    line_no = Column(Integer, nullable=False)
+    item_code = Column(String(255), nullable=True)
+    item_description = Column(Text, nullable=True)
+    packages = Column(Numeric(18, 3), nullable=True)
+    volume_cbm = Column(Numeric(18, 6), nullable=True)
+    gross_weight_kg = Column(Numeric(18, 3), nullable=True)
+    freight_unit_price = Column(Numeric(18, 6), nullable=True)
+    freight_amount = Column(Numeric(18, 2), nullable=True)
+    customs_amount = Column(Numeric(18, 2), nullable=True)
+    sensitive_amount = Column(Numeric(18, 2), nullable=True)
+    delivery_amount = Column(Numeric(18, 2), nullable=True)
+    other_amount = Column(Numeric(18, 2), nullable=True)
+    line_total_amount = Column(Numeric(18, 2), nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("bill_id", "line_no", name="uq_logistics_bill_line"),
+        Index("ix_logistics_bill_lines_bill", "bill_id"),
+        {"schema": "finance"},
+    )
+
+
+class LogisticsBillLineAllocation(Base):
+    """Allocation of a logistics cargo line to canonical ERP SKUs."""
+
+    __tablename__ = "logistics_bill_line_allocations"
+
+    allocation_id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_line_id = Column(Integer, ForeignKey("finance.logistics_bill_lines.line_id", ondelete="CASCADE"), nullable=False)
+    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
+    allocated_quantity = Column(Numeric(18, 3), nullable=True)
+    allocation_ratio = Column(Numeric(12, 8), nullable=True)
+    allocated_amount = Column(Numeric(18, 2), nullable=False, default=0)
+    allocation_basis = Column(String(32), nullable=False)
+    mapping_status = Column(String(32), nullable=False, default="confirmed")
+
+    __table_args__ = (
+        UniqueConstraint("bill_line_id", "sku_id", name="uq_logistics_bill_line_sku"),
+        Index("ix_logistics_bill_allocations_sku", "sku_id"),
+        {"schema": "finance"},
+    )
+
+
+class ProductCostAssumptionProfile(Base):
+    """Versioned assumptions used for new-product profit estimates."""
+
+    __tablename__ = "product_cost_assumption_profiles"
+
+    profile_id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(128), nullable=False)
+    destination = Column(String(128), nullable=True)
+    transport_type = Column(String(64), nullable=True)
+    billing_basis = Column(String(32), nullable=False, default="volume")
+    freight_unit_rate = Column(Numeric(18, 6), nullable=True)
+    customs_rate = Column(Numeric(12, 8), nullable=True)
+    storage_unit_rate = Column(Numeric(18, 6), nullable=True)
+    return_rate = Column(Numeric(12, 8), nullable=True)
+    damage_rate = Column(Numeric(12, 8), nullable=True)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    assumption_source = Column(String(128), nullable=True)
+    confidence_level = Column(String(16), nullable=False, default="medium")
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_cost_assumption_scope", "destination", "transport_type", "effective_from"),
+        {"schema": "finance"},
+    )
+
+
+class SkuProfitEstimate(Base):
+    """Immutable versioned estimate; never used as actual settlement profit."""
+
+    __tablename__ = "sku_profit_estimates"
+
+    estimate_id = Column(Integer, primary_key=True, autoincrement=True)
+    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
+    estimate_as_of = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    assumption_version = Column(String(64), nullable=False)
+    scenario = Column(String(32), nullable=False, default="base")
+    selling_price = Column(Numeric(18, 2), nullable=True)
+    coupon_amount = Column(Numeric(18, 2), nullable=True)
+    purchase_cost = Column(Numeric(18, 2), nullable=True)
+    logistics_cost = Column(Numeric(18, 2), nullable=True)
+    storage_cost = Column(Numeric(18, 2), nullable=True)
+    platform_fee = Column(Numeric(18, 2), nullable=True)
+    expected_return_loss = Column(Numeric(18, 2), nullable=True)
+    expected_damage_loss = Column(Numeric(18, 2), nullable=True)
+    estimated_contribution_profit = Column(Numeric(18, 2), nullable=True)
+    estimated_margin_rate = Column(Numeric(12, 8), nullable=True)
+    cost_completeness = Column(String(32), nullable=False, default="incomplete")
+    confidence_level = Column(String(16), nullable=False, default="medium")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("scenario IN ('base', 'conservative', 'optimistic')", name="ck_sku_profit_estimate_scenario"),
+        Index("ix_sku_profit_estimates_sku_time", "sku_id", "estimate_as_of"),
+        {"schema": "finance"},
+    )
+
+
 class TaxVoucher(Base):
     """税务凭证表"""
 

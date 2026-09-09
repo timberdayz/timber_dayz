@@ -78,6 +78,17 @@ const routes = [
     }
   },
   {
+    path: '/product-center',
+    name: 'ProductCenter',
+    component: () => import('@/domains/business/views/ProductCenter.vue'),
+    meta: {
+      title: '商品中心',
+      icon: 'Goods',
+      permission: 'product-center',
+      roles: ['admin', 'manager', 'finance', 'operator']
+    }
+  },
+  {
     path: '/sales/order-management',
     name: 'OrderManagement',
     component: () => import('@/domains/business/views/sales/OrderManagement.vue'),

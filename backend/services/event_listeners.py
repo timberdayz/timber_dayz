@@ -22,6 +22,7 @@ from backend.services.data_pipeline.refresh_runner import (
     extract_refresh_status,
     extract_run_id,
 )
+from backend.services.product_center_service import sync_inventory_skus
 from backend.utils.events import AClassUpdatedEvent, DataIngestedEvent, MVRefreshedEvent
 from modules.core.logger import get_logger
 
@@ -66,10 +67,12 @@ DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
     ],
     "products": [
         "api.clearance_ranking_module",
+        "mart.spu_operating_current",
     ],
     "inventory": [
         "api.business_overview_inventory_backlog_module",
         "api.clearance_ranking_module",
+        "mart.spu_operating_current",
     ],
     "services": [
         "semantic.fact_services_atomic",
@@ -134,6 +137,8 @@ async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent)
             )
 
             if event.data_domain == "inventory":
+                if hasattr(session, "execute"):
+                    await sync_inventory_skus(session, source_file_id=event.file_id)
                 inventory_age_result = await InventoryAgeRefreshService(session).refresh(
                     force_full=False
                 )

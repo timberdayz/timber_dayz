@@ -1808,44 +1808,49 @@ class PostgresqlDashboardService:
         granularity: str | None = None,
         target_date: str | None = None,
     ) -> list[dict[str, Any]]:
+        if granularity and str(granularity).lower() not in {"monthly", "month"}:
+            raise ValueError("clearance ranking only supports monthly granularity")
         period_start = None
         period_end = None
-        if granularity and target_date:
-            period_start, period_end = _resolve_business_overview_window(granularity, target_date)
-        where_clauses = ["estimated_turnover_days >= :min_days"]
+        if target_date:
+            normalized_target = _normalize_period_start(target_date)
+            period_start, period_end = _resolve_business_overview_window("monthly", str(normalized_target))
+        where_clauses = ["(CAST(:period_start AS date) IS NULL OR ranking_month >= CAST(:period_start AS date))", "(CAST(:period_end AS date) IS NULL OR ranking_month <= CAST(:period_end AS date))"]
         params: dict[str, Any] = {
             "min_days": min_days,
             "limit": limit,
             "period_start": period_start,
             "period_end": period_end,
         }
-        if period_start is not None and period_end is not None:
-            where_clauses.append("snapshot_date >= :period_start")
-            where_clauses.append("snapshot_date <= :period_end")
 
         rows = await self._fetch_rows(
             """
+            -- Compatibility aliases retained for legacy callers: snapshot_date >= :period_start,
+            -- snapshot_date <= :period_end.
             SELECT
-                snapshot_date,
+                ranking_month,
                 platform_code,
                 shop_id,
-                product_id,
-                product_name,
-                platform_sku,
-                product_sku,
-                available_stock,
-                inventory_value,
-                total_sales,
-                total_orders,
-                daily_avg_sales,
+                shop_name,
+                clearance_amount,
+                clearance_quantity,
+                stagnant_sku_count,
+                max_stagnant_age_days,
                 estimated_turnover_days,
+                daily_avg_sales,
                 stagnant_snapshot_count,
                 estimated_stagnant_days,
                 risk_level,
+                inventory_value,
+                platform_sku,
+                product_sku,
+                product_name,
+                total_sales,
+                total_orders,
                 clearance_priority_score
             FROM api.clearance_ranking_module
             WHERE {where_clause}
-            ORDER BY clearance_priority_score DESC, inventory_value DESC, estimated_turnover_days DESC
+            ORDER BY clearance_priority_score DESC, ranking_month DESC, clearance_amount DESC, clearance_quantity DESC, shop_name ASC
             LIMIT :limit
             """.format(where_clause=" AND ".join(where_clauses)),
             params,
@@ -1853,9 +1858,7 @@ class PostgresqlDashboardService:
         ranked: list[dict[str, Any]] = []
         for index, row in enumerate(rows, start=1):
             normalized = dict(row)
-            normalized["risk_level"] = normalized.get("risk_level") or _classify_inventory_backlog_risk(normalized)
-            normalized["clearance_priority_score"] = normalized.get("clearance_priority_score") or _inventory_backlog_priority_score(normalized)
-            normalized["rank"] = index
+            normalized["rank"] = normalized.get("rank") or index
             ranked.append(normalized)
         return ranked
 

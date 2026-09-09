@@ -14,6 +14,7 @@ export const ROLE_CONFIG = {
     icon: 'UserFilled',
     permissions: [
       'business-overview',
+      'product-center',
       'collection-config', 'collection-coverage-audit', 'collection-tasks', 'collection-history',
       'component-recorder', 'component-versions',
       'data-sync', 'data-quarantine', 'data-governance', 'field-mapping',
@@ -38,6 +39,7 @@ export const ROLE_CONFIG = {
     icon: 'Briefcase',
     permissions: [
       'business-overview',
+      'product-center',
       'sales-dashboard', 'order-management',
       'financial-management', 'expense-management', 'finance-reports', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
@@ -55,6 +57,7 @@ export const ROLE_CONFIG = {
     icon: 'User',
     permissions: [
       'business-overview',
+      'product-center',
       'sales-dashboard', 'order-management',
       'store-analytics',
       'employee-management', 'my-income', 'my-follow-investment-income', 'performance:read',
@@ -69,6 +72,7 @@ export const ROLE_CONFIG = {
     icon: 'Money',
     permissions: [
       'business-overview',
+      'product-center',
       'sales-dashboard', 'order-management',
       'financial-management', 'expense-management', 'finance-reports', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',

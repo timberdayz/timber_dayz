@@ -65,6 +65,14 @@ export const menuGroups = [
     ]
   },
   {
+    id: 'product-center',
+    title: '商品中心',
+    icon: 'Goods',
+    order: 4,
+    defaultExpanded: true,
+    items: ['/product-center']
+  },
+  {
     id: 'finance',
     title: '财务管理',
     icon: 'Money',
@@ -205,6 +213,7 @@ export const menuGroups = [
  * 路由显示名称映射（用于统一管理）
  */
 export const routeDisplayNames = {
+  '/product-center': '商品中心',
   // 旧路由 → 新显示名称
   '/sales-dashboard': '销售看板',
   '/sales-dashboard-v3': '销售看板',

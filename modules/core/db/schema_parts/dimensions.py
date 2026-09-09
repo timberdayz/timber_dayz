@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.sql import text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -80,6 +81,116 @@ class DimProduct(Base):
 
     __table_args__ = (
         Index("ix_dim_products_platform_shop", "platform_code", "shop_id"),
+        {"schema": "core"},
+    )
+
+
+class DimSpu(Base):
+    """Company-wide SPU master data maintained by business users."""
+
+    __tablename__ = "dim_spu"
+
+    spu = Column(String(128), primary_key=True)
+    spu_name = Column(String(512), nullable=False)
+    category_l1 = Column(String(128), nullable=True)
+    category_l2 = Column(String(128), nullable=True)
+    main_image_url = Column(String(1024), nullable=True)
+    biz_status = Column(String(32), nullable=False, default="candidate")
+    owner_user_id = Column(Integer, nullable=True)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("spu", name="uq_dim_spu_spu"),
+        Index("ix_dim_spu_status_owner", "biz_status", "owner_user_id"),
+        {"schema": "core"},
+    )
+
+
+class DimErpSku(Base):
+    """Canonical ERP SKU identity independent of platform and shop."""
+
+    __tablename__ = "dim_erp_sku"
+
+    sku_id = Column(Integer, primary_key=True, autoincrement=True)
+    sku_key = Column(String(255), nullable=False)
+    erp_record_id = Column(String(255), nullable=True)
+    sku_name = Column(String(512), nullable=True)
+    specification = Column(String(512), nullable=True)
+    weight_kg = Column(Float, nullable=True)
+    package_length_cm = Column(Float, nullable=True)
+    package_width_cm = Column(Float, nullable=True)
+    package_height_cm = Column(Float, nullable=True)
+    units_per_carton = Column(Integer, nullable=True)
+    status = Column(String(32), nullable=False, default="active")
+    source_file_id = Column(Integer, nullable=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("sku_key", name="uq_dim_erp_sku_sku_key"),
+        Index("ix_dim_erp_sku_status", "status"),
+        Index("ix_dim_erp_sku_erp_record", "erp_record_id"),
+        {"schema": "core"},
+    )
+
+
+class BridgeSpuSku(Base):
+    """Effective-dated manual assignment of an ERP SKU to an SPU."""
+
+    __tablename__ = "bridge_spu_sku"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    spu = Column(String(128), ForeignKey("core.dim_spu.spu", ondelete="RESTRICT"), nullable=False)
+    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    binding_status = Column(String(32), nullable=False, default="active")
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_bridge_spu_sku_current",
+            "sku_id",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL AND binding_status = 'active'"),
+        ),
+        Index("ix_bridge_spu_sku_spu", "spu", "effective_to"),
+        {"schema": "core"},
+    )
+
+
+class BridgeErpSkuKey(Base):
+    """Maps source-specific identifiers to the canonical ERP SKU."""
+
+    __tablename__ = "bridge_erp_sku_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_system = Column(String(64), nullable=False)
+    source_platform = Column(String(64), nullable=True)
+    source_shop_id = Column(String(256), nullable=True)
+    source_key_type = Column(String(64), nullable=False)
+    source_key = Column(String(255), nullable=False)
+    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="CASCADE"), nullable=False)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    active = Column(Boolean, nullable=False, default=True)
+    source_file_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_bridge_erp_sku_key_current",
+            "source_system", "source_platform", "source_shop_id", "source_key_type", "source_key",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL AND active = true"),
+        ),
+        Index("ix_bridge_erp_sku_key_sku", "sku_id"),
         {"schema": "core"},
     )
 

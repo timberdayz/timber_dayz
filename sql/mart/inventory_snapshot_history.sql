@@ -23,6 +23,6 @@ SELECT
     inventory_value,
     currency_code,
     data_hash,
-    NULL::integer AS source_file_id,
+    NULLIF(to_jsonb(snapshot)->>'file_id', '')::integer AS source_file_id,
     ingest_timestamp
-FROM semantic.fact_inventory_snapshot;
+FROM semantic.fact_inventory_snapshot AS snapshot;
