@@ -46,6 +46,10 @@ class SkuUpdateRequest(BaseModel):
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
+    default_purchase_cost: Optional[float] = Field(default=None, ge=0)
+    purchase_cost_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
+    purchase_cost_source: Optional[str] = Field(default=None, max_length=64)
+    purchase_cost_confidence: Optional[str] = Field(default=None, pattern=r"^(low|medium|high)$")
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
 
 
@@ -75,6 +79,10 @@ class ProductCenterItem(BaseModel):
     package_height_cm: Optional[float] = None
     units_per_carton: Optional[int] = None
     status: Optional[str] = None
+    default_purchase_cost: Optional[float] = None
+    purchase_cost_currency: Optional[str] = None
+    purchase_cost_source: Optional[str] = None
+    purchase_cost_confidence: Optional[str] = None
     updated_at: Optional[datetime] = None
 
 
@@ -103,12 +111,88 @@ class CostAssumptionCreateRequest(BaseModel):
     freight_unit_rate: Optional[float] = Field(default=None, ge=0)
     customs_rate: Optional[float] = Field(default=None, ge=0)
     storage_unit_rate: Optional[float] = Field(default=None, ge=0)
+    platform_fee_rate: Optional[float] = Field(default=None, ge=0, le=1)
     return_rate: Optional[float] = Field(default=None, ge=0, le=1)
     damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
     effective_from: date
     effective_to: Optional[date] = None
     assumption_source: Optional[str] = None
     confidence_level: str = Field(default="medium", pattern=r"^(low|medium|high)$")
+
+
+class CostAssumptionUpdateRequest(BaseModel):
+    profile_name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    destination: Optional[str] = None
+    transport_type: Optional[str] = None
+    billing_basis: Optional[str] = Field(default=None, pattern=r"^(volume|weight|quantity)$")
+    freight_unit_rate: Optional[float] = Field(default=None, ge=0)
+    customs_rate: Optional[float] = Field(default=None, ge=0)
+    storage_unit_rate: Optional[float] = Field(default=None, ge=0)
+    platform_fee_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    return_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    assumption_source: Optional[str] = None
+    confidence_level: Optional[str] = Field(default=None, pattern=r"^(low|medium|high)$")
+    active: Optional[bool] = None
+
+
+class LogisticsBillCreateRequest(BaseModel):
+    bill_no: str = Field(min_length=1, max_length=128)
+    logistics_provider: Optional[str] = Field(default=None, max_length=128)
+    bill_date: date
+    transport_type: Optional[str] = Field(default=None, max_length=64)
+    destination: Optional[str] = Field(default=None, max_length=128)
+    currency: str = Field(default="CNY", min_length=3, max_length=8)
+    total_amount: float = Field(ge=0)
+    notes: Optional[str] = None
+
+
+class LogisticsBillUpdateRequest(BaseModel):
+    logistics_provider: Optional[str] = Field(default=None, max_length=128)
+    bill_date: Optional[date] = None
+    transport_type: Optional[str] = Field(default=None, max_length=64)
+    destination: Optional[str] = Field(default=None, max_length=128)
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
+    total_amount: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = None
+
+
+class LogisticsBillSkuLineRequest(BaseModel):
+    sku_id: int = Field(gt=0)
+    shipped_qty: float = Field(gt=0)
+    actual_total_weight_kg: Optional[float] = Field(default=None, ge=0)
+    actual_total_volume_cbm: Optional[float] = Field(default=None, ge=0)
+    headhaul_cost: float = Field(default=0, ge=0)
+    handling_cost: float = Field(default=0, ge=0)
+    last_mile_cost: float = Field(default=0, ge=0)
+    notes: Optional[str] = None
+
+
+class LogisticsBillLinesReplaceRequest(BaseModel):
+    lines: list[LogisticsBillSkuLineRequest] = Field(min_length=1)
+
+
+class LogisticsBillVoidRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ProfitPreviewRequest(BaseModel):
+    sku_id: int = Field(gt=0)
+    selling_price: float = Field(ge=0)
+    coupon_amount: float = Field(default=0, ge=0)
+    destination: Optional[str] = None
+    transport_type: Optional[str] = None
+
+
+class ProfitEstimateSaveRequest(ProfitPreviewRequest):
+    assumption_version: str = Field(min_length=1, max_length=64)
+
+
+class FeishuProjectionInitializeRequest(BaseModel):
+    spu_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    sku_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class ProfitEstimateCreateRequest(BaseModel):

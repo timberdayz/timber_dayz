@@ -57,3 +57,33 @@ def test_product_center_router_exposes_spu_and_sku_resources():
     assert "/api/product-profit-estimates" in paths
     assert "/api/spu-operating" in paths
     assert router.dependencies
+
+
+def test_product_center_router_exposes_manual_logistics_profit_and_projection_resources():
+    from backend.domains.business.routers.product_center import router
+
+    paths = {route.path for route in router.routes}
+    assert "/api/logistics-bills" in paths
+    assert "/api/logistics-bills/{bill_id}/lines" in paths
+    assert "/api/logistics-bills/{bill_id}/confirm" in paths
+    assert "/api/logistics-bills/{bill_id}/void" in paths
+    assert "/api/product-profit-estimates/preview" in paths
+    assert "/api/feishu-projection/initialize" in paths
+    assert "/api/feishu-projection/status" in paths
+    assert "/api/feishu-projection/retry-failed" in paths
+
+
+def test_feishu_projection_controls_require_admin_role():
+    from fastapi import HTTPException
+    from backend.domains.business.routers.product_center import _require_projection_admin
+
+    class User:
+        is_superuser = False
+        roles = []
+
+    try:
+        _require_projection_admin(User())
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("non-admin user must not initialize Feishu projection")

@@ -888,6 +888,70 @@ class CloudSyncReceiveLog(Base):
         {"schema": "ops"},
     )
 
+
+class FeishuProjectionConfig(Base):
+    """Non-secret identifiers for the product-center Feishu projection."""
+
+    __tablename__ = "feishu_projection_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider_code = Column(String(32), nullable=False, default="feishu")
+    spu_table_id = Column(String(64), nullable=True)
+    sku_table_id = Column(String(64), nullable=True)
+    initialized_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(32), nullable=False, default="pending")
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("provider_code", name="uq_feishu_projection_config_provider"),
+        {"schema": "ops"},
+    )
+
+
+class FeishuProjectionTask(Base):
+    """Durable ERP-to-Feishu projection outbox task."""
+
+    __tablename__ = "feishu_projection_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    entity_type = Column(String(32), nullable=False)
+    business_key = Column(String(255), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    payload_json = Column(JSON, nullable=False, default=dict)
+    status = Column(String(32), nullable=False, default="pending")
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("entity_type", "business_key", "payload_hash", name="uq_feishu_projection_task_payload"),
+        Index("ix_feishu_projection_task_status", "status", "next_retry_at"),
+        {"schema": "ops"},
+    )
+
+
+class FeishuProjectionLog(Base):
+    """Append-only delivery attempt log for Feishu projection tasks."""
+
+    __tablename__ = "feishu_projection_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("ops.feishu_projection_tasks.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(32), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_feishu_projection_log_task", "task_id", "created_at"),
+        {"schema": "ops"},
+    )
+
 class RefreshQueueTask(Base):
     """Durable global queue row for serial post-ingest refresh work."""
 

@@ -1,0 +1,294 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import func, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from modules.core.db import (
+    BridgeSpuSku,
+    DimErpSku,
+    DimSpu,
+    FeishuProjectionConfig,
+    FeishuProjectionLog,
+    FeishuProjectionTask,
+    LogisticsBill,
+    LogisticsBillLine,
+    SkuProfitEstimate,
+)
+
+from .feishu_projection_client import FeishuProjectionClient
+
+
+def projection_payload_hash(payload: dict[str, Any]) -> str:
+    normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+class FeishuProjectionService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def enqueue(self, entity_type: str, business_key: str, payload: dict[str, Any]) -> FeishuProjectionTask:
+        payload_hash = projection_payload_hash(payload)
+        existing = (
+            await self.db.execute(
+                select(FeishuProjectionTask).where(
+                    FeishuProjectionTask.entity_type == entity_type,
+                    FeishuProjectionTask.business_key == business_key,
+                    FeishuProjectionTask.payload_hash == payload_hash,
+                    FeishuProjectionTask.status.in_(("pending", "running", "completed")),
+                )
+            )
+        ).scalars().first()
+        if existing is not None:
+            return existing
+        task = FeishuProjectionTask(
+            entity_type=entity_type,
+            business_key=business_key,
+            payload_hash=payload_hash,
+            payload_json=payload,
+        )
+        self.db.add(task)
+        await self.db.flush()
+        return task
+
+    async def enqueue_full_refresh(self, reason: str) -> int:
+        count = 0
+        spus = (await self.db.execute(select(DimSpu).where(DimSpu.active.is_(True)))).scalars().all()
+        skus = (await self.db.execute(select(DimErpSku).where(DimErpSku.status == "active"))).scalars().all()
+        for spu in spus:
+            await self.enqueue("spu", spu.spu, {"reason": reason, "spu": spu.spu})
+            count += 1
+        for sku in skus:
+            await self.enqueue("sku", str(sku.sku_id), {"reason": reason, "sku_id": sku.sku_id})
+            count += 1
+        return count
+
+    async def get_config(self) -> FeishuProjectionConfig | None:
+        return (
+            await self.db.execute(
+                select(FeishuProjectionConfig).where(FeishuProjectionConfig.provider_code == "feishu")
+            )
+        ).scalar_one_or_none()
+
+    async def set_initialized(self, spu_table_id: str, sku_table_id: str) -> FeishuProjectionConfig:
+        config = await self.get_config()
+        if config is None:
+            config = FeishuProjectionConfig(provider_code="feishu")
+            self.db.add(config)
+        config.spu_table_id = spu_table_id
+        config.sku_table_id = sku_table_id
+        config.status = "ready"
+        config.last_error = None
+        config.initialized_at = datetime.now(timezone.utc)
+        await self.db.flush()
+        return config
+
+    async def initialize_tables(self, client: FeishuProjectionClient, spu_table_id: str | None = None, sku_table_id: str | None = None) -> FeishuProjectionConfig:
+        if not spu_table_id:
+            spu_table_id = await client.create_table("ERP-SPU经营", _spu_table_fields())
+        if not sku_table_id:
+            sku_table_id = await client.create_table("ERP-SKU经营明细", _sku_table_fields())
+        return await self.set_initialized(spu_table_id, sku_table_id)
+
+    async def status(self) -> dict[str, Any]:
+        config = await self.get_config()
+        counts = (
+            await self.db.execute(
+                select(FeishuProjectionTask.status, func.count())
+                .group_by(FeishuProjectionTask.status)
+            )
+        ).all()
+        return {
+            "configured": bool(config and config.status == "ready"),
+            "spu_table_id": config.spu_table_id if config else None,
+            "sku_table_id": config.sku_table_id if config else None,
+            "status": config.status if config else "pending",
+            "last_error": config.last_error if config else None,
+            "tasks": {status: count for status, count in counts},
+        }
+
+    async def retry_failed(self) -> int:
+        result = await self.db.execute(
+            update(FeishuProjectionTask)
+            .where(FeishuProjectionTask.status == "failed")
+            .values(status="pending", next_retry_at=None, last_error=None)
+        )
+        return int(result.rowcount or 0)
+
+    async def _sku_payload(self, sku_id: int) -> dict[str, Any]:
+        sku = await self.db.get(DimErpSku, sku_id)
+        if sku is None:
+            raise ValueError("SKU not found for projection")
+        binding = (
+            await self.db.execute(
+                select(BridgeSpuSku).where(
+                    BridgeSpuSku.sku_id == sku_id,
+                    BridgeSpuSku.binding_status == "active",
+                    BridgeSpuSku.effective_to.is_(None),
+                )
+            )
+        ).scalars().first()
+        bill_line = (
+            await self.db.execute(
+                select(LogisticsBillLine)
+                .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
+                .where(LogisticsBillLine.sku_id == sku_id, LogisticsBill.status == "confirmed")
+                .order_by(LogisticsBill.confirmed_at.desc())
+            )
+        ).scalars().first()
+        estimate = (
+            await self.db.execute(
+                select(SkuProfitEstimate)
+                .where(SkuProfitEstimate.sku_id == sku_id, SkuProfitEstimate.scenario == "base")
+                .order_by(SkuProfitEstimate.estimate_as_of.desc())
+            )
+        ).scalars().first()
+        volume = None
+        if all(value is not None for value in (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)):
+            volume = sku.package_length_cm * sku.package_width_cm * sku.package_height_cm / 1_000_000
+        return {
+            "ERP SKU": sku.sku_key,
+            "SPU": binding.spu if binding else "",
+            "商品名称": sku.sku_name or "",
+            "规格": sku.specification or "",
+            "重量 kg": sku.weight_kg,
+            "长 cm": sku.package_length_cm,
+            "宽 cm": sku.package_width_cm,
+            "高 cm": sku.package_height_cm,
+            "体积 m³": volume,
+            "箱规": sku.units_per_carton,
+            "默认采购成本 RMB": sku.default_purchase_cost,
+            "头程单位成本 RMB": float(bill_line.unit_headhaul_cost) if bill_line and bill_line.unit_headhaul_cost is not None else None,
+            "操作费单位成本 RMB": float(bill_line.unit_handling_cost) if bill_line and bill_line.unit_handling_cost is not None else None,
+            "尾程单位成本 RMB": float(bill_line.unit_last_mile_cost) if bill_line and bill_line.unit_last_mile_cost is not None else None,
+            "基准预计利润 RMB": float(estimate.estimated_contribution_profit) if estimate and estimate.estimated_contribution_profit is not None else None,
+            "基准预计利润率": float(estimate.estimated_margin_rate) if estimate and estimate.estimated_margin_rate is not None else None,
+            "采购成本来源": sku.purchase_cost_source or "",
+            "物流成本来源": estimate.logistics_cost_source if estimate else "",
+            "数据完整度": estimate.cost_completeness if estimate else "incomplete",
+            "更新时间": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    async def _spu_payload(self, spu: str) -> dict[str, Any]:
+        row = await self.db.get(DimSpu, spu)
+        if row is None:
+            raise ValueError("SPU not found for projection")
+        metrics = (
+            await self.db.execute(
+                text(
+                    """
+                    SELECT sku_count, total_qty, inventory_value_rmb, estimated_profit,
+                           estimated_margin_rate, snapshot_date, calculated_at
+                    FROM mart.spu_operating_current
+                    WHERE spu = :spu
+                    """
+                ),
+                {"spu": spu},
+            )
+        ).mappings().first()
+        sku_count = int(metrics["sku_count"] or 0) if metrics else int((await self.db.execute(select(func.count()).select_from(BridgeSpuSku).where(BridgeSpuSku.spu == spu, BridgeSpuSku.binding_status == "active", BridgeSpuSku.effective_to.is_(None)))).scalar() or 0)
+        return {
+            "SPU": row.spu,
+            "商品名称": row.spu_name,
+            "一级品类": row.category_l1 or "",
+            "二级品类": row.category_l2 or "",
+            "经营状态": row.biz_status,
+            "负责人": str(row.owner_user_id or ""),
+            "SKU数": sku_count,
+            "库存数量": float(metrics["total_qty"] or 0) if metrics else 0,
+            "库存金额 RMB": float(metrics["inventory_value_rmb"] or 0) if metrics else 0,
+            "基准预计利润 RMB": float(metrics["estimated_profit"] or 0) if metrics else 0,
+            "基准预计利润率": float(metrics["estimated_margin_rate"]) if metrics and metrics["estimated_margin_rate"] is not None else None,
+            "数据完整度": "complete" if metrics else "pending_refresh",
+            "计算时间": (metrics["calculated_at"] or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S") if metrics else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    async def process_pending(self, limit: int = 50, client: FeishuProjectionClient | None = None) -> int:
+        config = await self.get_config()
+        if config is None or config.status != "ready" or not config.spu_table_id or not config.sku_table_id:
+            return 0
+        projection_client = client or FeishuProjectionClient()
+        tasks = (
+            await self.db.execute(
+                select(FeishuProjectionTask)
+                .where(FeishuProjectionTask.status == "pending")
+                .order_by(FeishuProjectionTask.created_at)
+                .limit(limit)
+            )
+        ).scalars().all()
+        completed = 0
+        for task in tasks:
+            try:
+                if task.entity_type == "sku":
+                    payload = await self._sku_payload(int(task.business_key))
+                    await projection_client.upsert_record(config.sku_table_id, "ERP SKU", payload["ERP SKU"], payload)
+                elif task.entity_type == "spu":
+                    payload = await self._spu_payload(task.business_key)
+                    await projection_client.upsert_record(config.spu_table_id, "SPU", payload["SPU"], payload)
+                else:
+                    await self.record_attempt(task, "completed")
+                    continue
+                await self.record_attempt(task, "completed")
+                completed += 1
+            except Exception as exc:
+                await self.record_attempt(task, "failed", str(exc)[:1000])
+        return completed
+
+
+async def trigger_pending_projection_delivery() -> None:
+    """Best-effort async dispatch; durable outbox keeps failed work retryable."""
+    from backend.models.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        try:
+            await FeishuProjectionService(db).process_pending()
+            await db.commit()
+        except Exception:
+            await db.rollback()
+
+
+def _number(name: str, precision: int = 2, percentage: bool = False) -> dict[str, Any]:
+    return {"name": name, "type": "number", "style": {"type": "plain", "precision": precision, "percentage": percentage}}
+
+
+def _spu_table_fields() -> list[dict[str, Any]]:
+    return [
+        {"name": "SPU", "type": "text"}, {"name": "商品名称", "type": "text"},
+        {"name": "一级品类", "type": "text"}, {"name": "二级品类", "type": "text"},
+        {"name": "经营状态", "type": "text"}, {"name": "负责人", "type": "text"},
+        _number("SKU数", 0), _number("库存数量", 0), _number("库存金额 RMB"),
+        _number("基准预计利润 RMB"), _number("基准预计利润率", 4, True),
+        {"name": "数据完整度", "type": "text"}, {"name": "计算时间", "type": "datetime", "style": {"format": "yyyy-MM-dd HH:mm"}},
+    ]
+
+
+def _sku_table_fields() -> list[dict[str, Any]]:
+    return [
+        {"name": "ERP SKU", "type": "text"}, {"name": "SPU", "type": "text"},
+        {"name": "商品名称", "type": "text"}, {"name": "规格", "type": "text"},
+        _number("重量 kg", 3), _number("长 cm"), _number("宽 cm"), _number("高 cm"), _number("体积 m³", 4), _number("箱规", 0),
+        _number("默认采购成本 RMB"), _number("头程单位成本 RMB", 4), _number("操作费单位成本 RMB", 4), _number("尾程单位成本 RMB", 4),
+        _number("基准预计利润 RMB"), _number("基准预计利润率", 4, True),
+        {"name": "采购成本来源", "type": "text"}, {"name": "物流成本来源", "type": "text"}, {"name": "数据完整度", "type": "text"},
+        {"name": "更新时间", "type": "datetime", "style": {"format": "yyyy-MM-dd HH:mm"}},
+    ]
+
+    async def record_attempt(self, task: FeishuProjectionTask, status: str, error_message: str | None = None) -> None:
+        task.status = status
+        task.attempt_count += 1
+        task.last_error = error_message
+        if status == "completed":
+            task.completed_at = datetime.now(timezone.utc)
+        self.db.add(
+            FeishuProjectionLog(
+                task_id=task.id,
+                status=status,
+                payload_hash=task.payload_hash,
+                error_message=error_message,
+            )
+        )
