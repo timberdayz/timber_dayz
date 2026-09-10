@@ -162,6 +162,11 @@
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
+                  <el-form-item label="绩效包金额">
+                    <el-input-number v-model="salaryForm.performance_package_amount" :min="0" :step="100" style="width: 100%;" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
                   <el-form-item label="绩效比例(兼容)">
                     <el-input-number v-model="salaryForm.performance_ratio_percent" :min="0" :max="100" :step="1" style="width: 100%;" />
                   </el-form-item>
@@ -221,7 +226,7 @@
               <div class="section-header">
                 <span>月度录入</span>
                 <div class="section-actions">
-                  <el-select v-model="selectedMonth" style="width: 140px;" @change="loadPayrollRecord">
+                  <el-select v-model="selectedMonth" style="width: 140px;" @change="loadPayrollDataForEmployee">
                     <el-option
                       v-for="month in recentMonths"
                       :key="month"
@@ -233,13 +238,13 @@
                     复制上月人工项
                   </el-button>
                   <el-button size="small" @click="refreshPayrollResult" :loading="refreshingPayroll" :disabled="!selectedEmployee">
-                    按当前配置刷新结果
+                    根据已计算结果刷新当前员工
                   </el-button>
                   <el-button size="small" type="warning" @click="handleBatchRefreshPayroll" :loading="batchRefreshingPayroll" :disabled="!selectedMonth">
                     按月份批量刷新全部工资单
                   </el-button>
-                  <el-button size="small" type="primary" @click="saveMonthlyDraft" :loading="savingPayroll" :disabled="!selectedEmployee">
-                    保存月度草稿
+                  <el-button size="small" type="primary" @click="saveMonthlyDraft" :loading="savingPayroll" :disabled="!selectedEmployee || isLockedPayroll">
+                    保存月度人工录入
                   </el-button>
                 </div>
               </div>
@@ -356,7 +361,8 @@
               <div class="section-header">
                 <span>工资单结果</span>
                 <div class="section-actions">
-                  <el-tag :type="payrollStatusTagType">{{ payrollRecord?.status || 'draft' }}</el-tag>
+                  <el-tag v-if="payrollRecord" :type="payrollStatusTagType">{{ payrollRecord.status }}</el-tag>
+                  <el-tag v-else type="info">尚未生成</el-tag>
                   <el-tag v-if="payrollRecord?.status === 'draft'" type="info">提成预览，未锁定</el-tag>
                   <el-tag v-else-if="payrollRecord" type="warning">成本与提成已锁定</el-tag>
                   <el-tag v-if="payrollRecord?.is_stale_against_latest_calc" type="warning">结果已过期</el-tag>
@@ -373,7 +379,13 @@
               </div>
             </template>
 
-            <el-row :gutter="16" class="result-grid">
+            <el-alert
+              v-if="!payrollRecord"
+              title="尚未生成工资单，请先完成月度计算"
+              type="info"
+              :closable="false"
+            />
+            <el-row v-else :gutter="16" class="result-grid">
               <el-col :span="8"><div class="result-item"><span>提成</span><strong>{{ formatMoney(payrollRecord?.commission) }}</strong></div></el-col>
               <el-col :span="8"><div class="result-item"><span>绩效工资</span><strong>{{ formatMoney(payrollRecord?.performance_salary) }}</strong></div></el-col>
               <el-col :span="8"><div class="result-item"><span>津贴合计</span><strong>{{ formatMoney(payrollRecord?.allowances) }}</strong></div></el-col>
@@ -471,6 +483,7 @@ const salaryForm = reactive({
   meal_allowance: 0,
   communication_allowance: 0,
   other_allowance: 0,
+  performance_package_amount: 0,
   performance_ratio_percent: 0,
   commission_ratio_percent: 0,
   social_insurance_base: 0,
@@ -557,6 +570,7 @@ const resetSalaryForm = () => {
     meal_allowance: 0,
     communication_allowance: 0,
     other_allowance: 0,
+    performance_package_amount: 0,
     performance_ratio_percent: 0,
     commission_ratio_percent: 0,
     social_insurance_base: 0,
@@ -597,6 +611,7 @@ const applySalaryStructure = (record) => {
     meal_allowance: Number(record.meal_allowance || 0),
     communication_allowance: Number(record.communication_allowance || 0),
     other_allowance: Number(record.other_allowance || 0),
+    performance_package_amount: Number(record.performance_package_amount || 0),
     performance_ratio_percent: Number(record.performance_ratio || 0) * 100,
     commission_ratio_percent: Number(record.commission_ratio || 0) * 100,
     social_insurance_base: Number(record.social_insurance_base || 0),
@@ -636,6 +651,7 @@ const buildSalaryPayload = () => ({
   meal_allowance: Number(salaryForm.meal_allowance || 0),
   communication_allowance: Number(salaryForm.communication_allowance || 0),
   other_allowance: Number(salaryForm.other_allowance || 0),
+  performance_package_amount: Number(salaryForm.performance_package_amount || 0),
   performance_ratio: Number(salaryForm.performance_ratio_percent || 0) / 100,
   commission_ratio: Number(salaryForm.commission_ratio_percent || 0) / 100,
   social_insurance_base: Number(salaryForm.social_insurance_base || 0),
@@ -728,9 +744,50 @@ const loadPayrollRecord = async () => {
   }
 }
 
+const applyPayrollManualInput = (record) => {
+  if (!record) return
+  Object.assign(payrollForm, {
+    bonus: Number(record.bonus || 0),
+    overtime_pay: Number(record.overtime_pay || 0),
+    social_insurance_personal: Number(record.social_insurance_personal || 0),
+    housing_fund_personal: Number(record.housing_fund_personal || 0),
+    income_tax: Number(record.income_tax || 0),
+    other_deductions: Number(record.other_deductions || 0),
+    social_insurance_company: Number(record.social_insurance_company || 0),
+    housing_fund_company: Number(record.housing_fund_company || 0),
+    pay_date: record.pay_date || '',
+    remark: record.remark || '',
+    backfill_source_month: record.backfill_source_month || '',
+    backfill_note: record.backfill_note || ''
+  })
+}
+
+const loadPayrollManualInput = async () => {
+  if (!selectedEmployee.value || !selectedMonth.value) return
+  try {
+    const response = await api.getHrPayrollManualInput(
+      selectedEmployee.value.employee_code,
+      selectedMonth.value
+    )
+    applyPayrollManualInput(response?.data || response)
+  } catch (error) {
+    if (error?.response?.status === 404) {
+      if (!payrollRecord.value) resetPayrollForm()
+      return
+    }
+    ElMessage.error(error.response?.data?.message || error.message || '加载月度人工录入失败')
+  }
+}
+
+const loadPayrollDataForEmployee = async () => {
+  await loadPayrollRecord()
+  await loadPayrollManualInput()
+}
+
 const selectEmployee = async (employee) => {
   selectedEmployee.value = employee
   await Promise.all([loadSalaryStructure(), loadSalaryHistory(), loadPayrollRecord()])
+  await loadPayrollManualInput()
 }
 
 const refreshCurrentView = async () => {
@@ -741,6 +798,7 @@ const refreshCurrentView = async () => {
   pageLoading.value = true
   try {
     await Promise.all([loadSalaryStructure(), loadSalaryHistory(), loadPayrollRecord(), loadLaborCostPolicy()])
+    await loadPayrollManualInput()
   } finally {
     pageLoading.value = false
   }
@@ -847,24 +905,11 @@ const loadLaborAllocations = async () => {
   laborAllocations.value = response?.data || response || []
 }
 
-const ensurePayrollRecord = async () => {
-  if (payrollRecord.value?.id) return payrollRecord.value
-  const response = await api.refreshHrPayrollRecord(selectedEmployee.value.employee_code, selectedMonth.value)
-  const record = response?.data || response || null
-  lockedConflicts.value = response?.locked_conflict_details || response?.lockedConflicts || []
-  applyPayrollRecord(record)
-  return payrollRecord.value
-}
-
 const saveMonthlyDraft = async () => {
   if (!selectedEmployee.value || !selectedMonth.value) return
   savingPayroll.value = true
   try {
-    const record = await ensurePayrollRecord()
-    if (!record?.id) {
-      throw new Error('当前月份还没有可编辑工资单，请先配置固定薪资后刷新结果')
-    }
-    await api.updateHrPayrollRecord(record.id, {
+    await api.updateHrPayrollManualInput(selectedEmployee.value.employee_code, selectedMonth.value, {
       bonus: payrollForm.bonus,
       overtime_pay: payrollForm.overtime_pay,
       social_insurance_personal: payrollForm.social_insurance_personal,
@@ -878,8 +923,8 @@ const saveMonthlyDraft = async () => {
       backfill_source_month: payrollForm.backfill_source_month || null,
       backfill_note: payrollForm.backfill_note || null
     })
-    ElMessage.success('月度草稿已保存')
-    await loadPayrollRecord()
+    ElMessage.success('月度人工录入已保存')
+    await loadPayrollDataForEmployee()
   } catch (error) {
     console.error('保存月度草稿失败:', error)
     ElMessage.error(error.response?.data?.message || error.message || '保存月度草稿失败')
@@ -891,8 +936,15 @@ const saveMonthlyDraft = async () => {
 const copyPreviousMonthManualFields = async () => {
   if (!selectedEmployee.value || !previousMonth.value) return
   try {
-    const response = await api.getHrPayrollRecord(selectedEmployee.value.employee_code, previousMonth.value)
-    const prev = response?.data || response
+    let prev
+    try {
+      const response = await api.getHrPayrollManualInput(selectedEmployee.value.employee_code, previousMonth.value)
+      prev = response?.data || response
+    } catch (manualError) {
+      if (manualError?.response?.status !== 404) throw manualError
+      const response = await api.getHrPayrollRecord(selectedEmployee.value.employee_code, previousMonth.value)
+      prev = response?.data || response
+    }
     Object.assign(payrollForm, {
       bonus: Number(prev?.bonus || 0),
       overtime_pay: Number(prev?.overtime_pay || 0),

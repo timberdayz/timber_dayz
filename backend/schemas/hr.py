@@ -668,6 +668,32 @@ class PayrollRecordManualUpdate(BaseModel):
     backfill_note: Optional[str] = Field(None, max_length=512)
 
 
+class PayrollManualInputUpdate(BaseModel):
+    overtime_pay: Decimal = Field(0, ge=0)
+    bonus: Decimal = Field(0, ge=0)
+    social_insurance_personal: Decimal = Field(0, ge=0)
+    housing_fund_personal: Decimal = Field(0, ge=0)
+    income_tax: Decimal = Field(0, ge=0)
+    other_deductions: Decimal = Field(0, ge=0)
+    social_insurance_company: Decimal = Field(0, ge=0)
+    housing_fund_company: Decimal = Field(0, ge=0)
+    pay_date: Optional[date] = None
+    remark: Optional[str] = None
+    backfill_source_month: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}$")
+    backfill_note: Optional[str] = Field(None, max_length=512)
+
+
+class PayrollManualInputResponse(PayrollManualInputUpdate):
+    id: int
+    employee_code: str
+    year_month: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ================================================================
 # 员工目标
 # ================================================================

@@ -4209,6 +4209,46 @@ class PayrollRecord(Base):
     )
 
 
+class PayrollManualInput(Base):
+    """A类数据表: monthly payroll inputs entered by HR."""
+
+    __tablename__ = "payroll_manual_inputs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)
+    year_month = Column(String(7), nullable=False)
+    overtime_pay = Column(Numeric(15, 2), nullable=False, default=0.0)
+    bonus = Column(Numeric(15, 2), nullable=False, default=0.0)
+    social_insurance_personal = Column(Numeric(15, 2), nullable=False, default=0.0)
+    housing_fund_personal = Column(Numeric(15, 2), nullable=False, default=0.0)
+    income_tax = Column(Numeric(15, 2), nullable=False, default=0.0)
+    other_deductions = Column(Numeric(15, 2), nullable=False, default=0.0)
+    social_insurance_company = Column(Numeric(15, 2), nullable=False, default=0.0)
+    housing_fund_company = Column(Numeric(15, 2), nullable=False, default=0.0)
+    pay_date = Column(Date, nullable=True)
+    remark = Column(Text, nullable=True)
+    backfill_source_month = Column(String(7), nullable=True)
+    backfill_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_code",
+            "year_month",
+            name="uq_payroll_manual_inputs_employee_month",
+        ),
+        Index("ix_payroll_manual_inputs_employee", "employee_code"),
+        Index("ix_payroll_manual_inputs_month", "year_month"),
+        {"schema": "a_class"},
+    )
+
+
 class SocialInsuranceConfig(Base):
     """
     A类数据表:社保公积金配置

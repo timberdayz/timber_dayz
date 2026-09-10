@@ -44,3 +44,13 @@ test('EmployeeSalary page exposes batch payroll refresh action', () => {
     'EmployeeSalary.vue should contain month-level batch payroll refresh action'
   )
 })
+
+test('EmployeeSalary page keeps manual input separate from payroll generation', () => {
+  assert.equal(source.includes('保存月度人工录入'), true)
+  assert.equal(source.includes('尚未生成工资单，请先完成月度计算'), true)
+  assert.equal(source.includes('performance_package_amount'), true)
+  assert.equal(
+    source.includes('const loadPayrollDataForEmployee = async () => {\n  await loadPayrollRecord()\n  await loadPayrollManualInput()'),
+    true
+  )
+})

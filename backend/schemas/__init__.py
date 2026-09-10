@@ -119,6 +119,8 @@ from backend.schemas.hr import (
     SalaryStructureResponse,
     PayrollRecordResponse,
     PayrollRecordManualUpdate,
+    PayrollManualInputUpdate,
+    PayrollManualInputResponse,
     EmployeeTargetCreate,
     EmployeeTargetUpdate,
     EmployeeTargetResponse,

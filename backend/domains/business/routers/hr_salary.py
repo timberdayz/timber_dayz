@@ -24,6 +24,8 @@ from backend.schemas.hr import (
     LaborCostPolicyResponse,
     LaborCostPolicyUpdateRequest,
     PayrollRecordManualUpdate,
+    PayrollManualInputUpdate,
+    PayrollManualInputResponse,
     PayrollRecordResponse,
     SalaryStructureCreate,
     SalaryStructureUpdate,
@@ -43,6 +45,7 @@ from backend.services.payroll_period_lock_service import (
 )
 from backend.services.profit_basis_service import ProfitBasisService
 from backend.services.v2_monthly_refresh_service import V2MonthlyRefreshService
+from backend.services.performance_readiness_service import PerformanceReadinessService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.db import (
@@ -52,6 +55,7 @@ from modules.core.db import (
     EmployeeShopAssignment,
     EmployeeTarget,
     PayrollRecord,
+    PayrollManualInput,
     SalaryStructure,
     ShopProfitBasis,
 )
@@ -205,6 +209,16 @@ def _extract_optional_employee(result: Any) -> Employee | None:
                     return employee
 
     return None
+
+
+def _extract_optional_record(result: Any) -> Any | None:
+    getter = getattr(result, "scalar_one_or_none", None)
+    if not callable(getter):
+        return None
+    value = getter()
+    if inspect.isawaitable(value):
+        return None
+    return value
 
 
 def _salary_identity_rejection():
@@ -377,6 +391,126 @@ async def update_salary_structure(
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鏇存柊钖祫缁撴瀯澶辫触: {str(e)}", status_code=500)
 
 
+def _manual_input_success(record: PayrollManualInput) -> Dict[str, Any]:
+    return {
+        "success": True,
+        "data": PayrollManualInputResponse.model_validate(record).model_dump(mode="json"),
+    }
+
+
+def _validate_year_month(year_month: str) -> None:
+    try:
+        datetime.strptime(year_month, "%Y-%m")
+    except ValueError as exc:
+        raise ValueError("year_month format must be YYYY-MM") from exc
+
+
+@router.get("/payroll-manual-inputs/{employee_code}/{year_month}", response_model=Dict[str, Any])
+async def get_payroll_manual_input(
+    employee_code: str,
+    year_month: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        if not is_admin_user(current_user):
+            return error_response(ErrorCode.PERMISSION_DENIED, "需要管理员权限才能查看月度人工录入", status_code=403)
+        _validate_year_month(year_month)
+        result = await db.execute(
+            select(PayrollManualInput).where(
+                PayrollManualInput.employee_code == employee_code,
+                PayrollManualInput.year_month == year_month,
+            )
+        )
+        record = result.scalar_one_or_none()
+        if record is None:
+            return error_response(ErrorCode.DATA_NOT_FOUND, "月度人工录入不存在", status_code=404)
+        return _manual_input_success(record)
+    except ValueError as exc:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=400)
+    except Exception as e:
+        logger.error("获取月度人工录入失败: %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取月度人工录入失败: {str(e)}", status_code=500)
+
+
+@router.put("/payroll-manual-inputs/{employee_code}/{year_month}", response_model=Dict[str, Any])
+async def upsert_payroll_manual_input(
+    employee_code: str,
+    year_month: str,
+    body: PayrollManualInputUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    try:
+        if not is_admin_user(current_user):
+            return error_response(ErrorCode.PERMISSION_DENIED, "需要管理员权限才能保存月度人工录入", status_code=403)
+        _validate_year_month(year_month)
+        employee_result = await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
+        employee = _extract_optional_employee(employee_result)
+        if employee is None:
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
+        if not _employee_identity_allows_salary(employee):
+            return _salary_identity_rejection()
+
+        await PayrollPeriodLockService(db).assert_employee_month_mutable(
+            employee_code=employee_code,
+            year_month=year_month,
+        )
+        payroll_result = await db.execute(
+            select(PayrollRecord).where(
+                PayrollRecord.employee_code == employee_code,
+                PayrollRecord.year_month == year_month,
+            )
+        )
+        payroll = payroll_result.scalar_one_or_none()
+        if payroll is not None and getattr(payroll, "status", None) in {"confirmed", "paid"}:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "已确认或已发放工资单不可修改月度人工录入",
+                status_code=409,
+            )
+
+        manual_result = await db.execute(
+            select(PayrollManualInput).where(
+                PayrollManualInput.employee_code == employee_code,
+                PayrollManualInput.year_month == year_month,
+            )
+        )
+        record = manual_result.scalar_one_or_none()
+        values = body.model_dump(exclude_unset=False)
+        if record is None:
+            record = PayrollManualInput(
+                employee_code=employee_code,
+                year_month=year_month,
+                **values,
+            )
+            db.add(record)
+        else:
+            for key, value in values.items():
+                setattr(record, key, value)
+
+        if payroll is not None and getattr(payroll, "status", None) == "draft":
+            for key, value in values.items():
+                setattr(payroll, key, value)
+            PayrollGenerationService.recalculate_record_totals(payroll)
+
+        await db.commit()
+        await db.refresh(record)
+        return _manual_input_success(record)
+    except PayrollPeriodLockedError as exc:
+        await db.rollback()
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
+    except ValueError as exc:
+        await db.rollback()
+        return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=400)
+    except Exception as e:
+        await db.rollback()
+        logger.error("保存月度人工录入失败: %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"保存月度人工录入失败: {str(e)}", status_code=500)
+
+
 @router.post("/payroll-records/{employee_code}/{year_month}/refresh")
 async def refresh_payroll_record(
     employee_code: str,
@@ -399,7 +533,18 @@ async def refresh_payroll_record(
             employee_code=employee_code,
             year_month=year_month,
         )
-        await HRIncomeCalculationService(db).calculate_month(year_month, commit=False)
+        existing_result = await db.execute(
+            select(PayrollRecord).where(
+                PayrollRecord.employee_code == employee_code,
+                PayrollRecord.year_month == year_month,
+            )
+        )
+        if _extract_optional_record(existing_result) is None:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "当前月份尚未初始化工资单，请先按月份刷新全部工资单",
+                status_code=409,
+            )
         result = await PayrollGenerationService(db).generate_employee_month(employee_code, year_month)
         record = result.get("payroll_record")
         if record is not None and result.get("payroll_upserts", 0) > 0:
@@ -547,8 +692,11 @@ async def update_payroll_record(
     record_id: int,
     body: PayrollRecordManualUpdate,
     db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
 ):
     try:
+        if not is_admin_user(current_user):
+            return error_response(ErrorCode.PERMISSION_DENIED, "需要管理员权限才能编辑工资单", status_code=403)
         result = await db.execute(
             select(PayrollRecord).where(PayrollRecord.id == record_id)
         )
@@ -557,9 +705,27 @@ async def update_payroll_record(
             return error_response(ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404)
         if record.status != "draft":
             return error_response(ErrorCode.PARAMETER_INVALID, "非 draft 工资单不允许编辑", status_code=409)
-        for key, value in body.model_dump(exclude_unset=True).items():
+        values = body.model_dump(exclude_unset=True)
+        for key, value in values.items():
             setattr(record, key, value)
         PayrollGenerationService.recalculate_record_totals(record)
+        manual_result = await db.execute(
+            select(PayrollManualInput).where(
+                PayrollManualInput.employee_code == record.employee_code,
+                PayrollManualInput.year_month == record.year_month,
+            )
+        )
+        manual_input = manual_result.scalar_one_or_none()
+        if manual_input is None:
+            manual_input = PayrollManualInput(
+                employee_code=record.employee_code,
+                year_month=record.year_month,
+                **values,
+            )
+            db.add(manual_input)
+        else:
+            for key, value in values.items():
+                setattr(manual_input, key, value)
         await db.commit()
         await db.refresh(record)
         return _payroll_success(record)
@@ -607,6 +773,10 @@ async def confirm_payroll_record(
                 "请先刷新当月工资和人力成本分摊，再确认工资单",
                 status_code=409,
             )
+        await PerformanceReadinessService(db).assert_month_performance_ready(
+            record.year_month,
+            employee_codes={record.employee_code},
+        )
         assignments = (
             await db.execute(
                 select(EmployeeShopAssignment).where(
