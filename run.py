@@ -318,19 +318,25 @@ def ensure_local_schema_ready():
         result = verify_schema_completeness()
     except Exception as exc:
         safe_print(f"  [ERROR] 数据库结构校验失败: {exc}")
-        safe_print("  提示: 请先执行 `alembic upgrade heads` 后重试")
+        safe_print("  提示: 请通过 Local Console 重启以执行受保护的 current-schema 迁移")
         return False
 
     if not result.get("all_tables_exist", True):
         missing_tables = ", ".join((result.get("missing_tables") or [])[:10])
         safe_print(f"  [ERROR] 数据库缺表: {missing_tables}")
-        safe_print("  提示: 请先执行 `alembic upgrade heads`")
+        from backend.models.database import emit_schema_failure_protocol
+
+        protocol = emit_schema_failure_protocol(result)
+        safe_print(f"  提示: {protocol['hint']}")
         return False
 
     if not result.get("all_critical_columns_exist", True):
         missing_columns = ", ".join((result.get("missing_columns") or [])[:10])
         safe_print(f"  [ERROR] 数据库缺关键列: {missing_columns}")
-        safe_print("  提示: 请先执行 `alembic upgrade heads`")
+        from backend.models.database import emit_schema_failure_protocol
+
+        protocol = emit_schema_failure_protocol(result)
+        safe_print(f"  提示: {protocol['hint']}")
         return False
 
     if result.get("migration_status") not in ("up_to_date", "not_initialized"):
@@ -339,7 +345,7 @@ def ensure_local_schema_ready():
             f"current={result.get('current_revision', 'N/A')} "
             f"head={result.get('head_revision', 'N/A')}"
         )
-        safe_print("  提示: 请先执行 `alembic upgrade heads`")
+        safe_print("  提示: 请通过 Local Console 重启以执行受保护的 current-schema 迁移")
         return False
 
     safe_print("  [OK] 本地数据库迁移状态正常")

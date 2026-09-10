@@ -65,6 +65,8 @@ def test_local_run_initializes_opt_in_admin_only_after_schema_is_ready():
     admin_initializer = text.index("ensure_local_dev_admin.py")
 
     assert schema_check < admin_initializer
+    assert "alembic upgrade heads" not in text
+    assert "emit_schema_failure_protocol" in text
 
 
 def test_collection_local_example_uses_remote_localhost_proxy_port():

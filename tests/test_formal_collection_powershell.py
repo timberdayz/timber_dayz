@@ -105,3 +105,55 @@ def test_formal_launcher_uses_process_exit_code_when_stderr_source_exit_code_is_
     assert "XIHONG_FAILURE_CODE=migration_schema_drift" in output
     assert "XIHONG_SOURCE_EXIT_CODE=2" in output
     assert "XIHONG_STAGE=migration_write:failed" in output
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="requires Windows PowerShell")
+def test_formal_launcher_preserves_backend_schema_failure_protocol(tmp_path: Path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python.cmd"
+    fake_python.write_text(
+        "@echo off\n"
+        "echo %* | findstr /c:\"run_current_schema_migrations.py\" >nul\n"
+        "if not errorlevel 1 exit /b 0\n"
+        "echo %* | findstr /c:\"check_local_run_env.py\" >nul\n"
+        "if not errorlevel 1 exit /b 0\n"
+        "echo %* | findstr /c:\"run.py\" >nul\n"
+        "if not errorlevel 1 (\n"
+        "  echo XIHONG_FAILURE_CODE=schema_incomplete 1>&2\n"
+        "  echo XIHONG_FAILURE_SUMMARY=missing a_class.payroll_manual_inputs 1>&2\n"
+        "  echo XIHONG_RECOVERY_HINT=run protected current-schema migration 1>&2\n"
+        "  echo XIHONG_SOURCE_EXIT_CODE=1 1>&2\n"
+        "  exit /b 1\n"
+        ")\n"
+        "exit /b 0\n",
+        encoding="ascii",
+    )
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+    }
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "start_collection_formal.ps1"),
+            "-SkipTunnel",
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert "XIHONG_FAILURE_CODE=schema_incomplete" in output
+    assert "missing a_class.payroll_manual_inputs" in output
+    assert "XIHONG_FAILURE_CODE=backend_start_failed" not in output

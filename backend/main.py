@@ -54,7 +54,7 @@ from typing import List, Optional
 # Legacy cleanup notes for previously removed dashboard APIs.
 # 路由注册已迁移到 `backend.app.runtime.bootstrap_app`（通过各 domain 的 routes.py 统一挂载）。
 # 入口模块不再做大规模 `backend.routers.*` 顶层导入，避免 import side-effect 与循环依赖风险。
-from backend.models.database import init_db, get_db
+from backend.models.database import emit_schema_failure_protocol, init_db, get_db
 from backend.utils.config import get_settings
 from modules.core.logger import get_logger
 from backend.services.cloud_b_class_auto_sync_factory import (
@@ -328,7 +328,7 @@ async def lifespan(app: FastAPI):
                         logger.error(
                             f"[ERROR] ... 还有 {len(result['missing_tables']) - 10} 张表缺失"
                         )
-                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    logger.error("[ERROR] %s", emit_schema_failure_protocol(result)["hint"])
                     raise RuntimeError(
                         f"Schema incompleteness: {len(result['missing_tables'])} tables missing"
                     )
@@ -343,7 +343,7 @@ async def lifespan(app: FastAPI):
                         logger.error(
                             f"[ERROR] ... 还有 {len(result['missing_columns']) - 10} 个关键列缺失"
                         )
-                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    logger.error("[ERROR] %s", emit_schema_failure_protocol(result)["hint"])
                     raise RuntimeError(
                         f"Schema missing critical columns: {len(result.get('missing_columns', []))}"
                     )
@@ -358,7 +358,7 @@ async def lifespan(app: FastAPI):
                     logger.error(
                         f"[ERROR] 最新版本: {result.get('head_revision', 'N/A')}"
                     )
-                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    logger.error("[ERROR] 请通过 Local Console 重启以执行受保护的 current-schema 迁移")
                     raise RuntimeError(
                         f"Migration status invalid: {result['migration_status']}"
                     )
@@ -379,7 +379,7 @@ async def lifespan(app: FastAPI):
                         f"[ERROR] 开发环境表结构不完整, 缺失表 ({len(result['missing_tables'])} 张): "
                         f"{', '.join(missing_tables)}"
                     )
-                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    logger.error("[ERROR] %s", emit_schema_failure_protocol(result)["hint"])
                     raise RuntimeError(
                         f"Development schema incompleteness: {len(result['missing_tables'])} tables missing"
                     )
@@ -390,7 +390,7 @@ async def lifespan(app: FastAPI):
                         f"[ERROR] 开发环境关键列缺失({len(result.get('missing_columns', []))} 列): "
                         f"{', '.join(missing_columns)}"
                     )
-                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    logger.error("[ERROR] %s", emit_schema_failure_protocol(result)["hint"])
                     raise RuntimeError(
                         f"Development schema missing critical columns: {len(result.get('missing_columns', []))}"
                     )
@@ -405,7 +405,7 @@ async def lifespan(app: FastAPI):
                     logger.error(
                         f"[ERROR] 最新版本: {result.get('head_revision', 'N/A')}"
                     )
-                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    logger.error("[ERROR] 请通过 Local Console 重启以执行受保护的 current-schema 迁移")
                     raise RuntimeError(
                         f"Development migration status invalid: {result['migration_status']}"
                     )

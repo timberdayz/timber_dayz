@@ -751,6 +751,37 @@ async def warm_up_async_pool(pool_size: int = 10):
 
 # ==================== 导出接口 ====================
 
+
+def schema_failure_protocol(result: dict) -> dict[str, str]:
+    """Return a bounded, non-sensitive startup protocol for schema failures."""
+
+    missing_tables = list(result.get("missing_tables") or [])[:10]
+    missing_columns = list(result.get("missing_columns") or [])[:10]
+    details: list[str] = []
+    if missing_tables:
+        details.append("missing tables: " + ", ".join(missing_tables))
+    if missing_columns:
+        details.append("missing columns: " + ", ".join(missing_columns))
+    return {
+        "code": "schema_incomplete",
+        "summary": "Schema incomplete; " + "; ".join(details),
+        "hint": (
+            "Restart through Local Console to run the protected current-schema "
+            "migration. Do not run legacy Alembic commands directly."
+        ),
+    }
+
+
+def emit_schema_failure_protocol(result: dict) -> dict[str, str]:
+    """Emit machine-readable startup evidence for Local Console consumers."""
+
+    protocol = schema_failure_protocol(result)
+    print(f"XIHONG_FAILURE_CODE={protocol['code']}", flush=True)
+    print(f"XIHONG_FAILURE_SUMMARY={protocol['summary']}", flush=True)
+    print(f"XIHONG_RECOVERY_HINT={protocol['hint']}", flush=True)
+    print("XIHONG_SOURCE_EXIT_CODE=1", flush=True)
+    return protocol
+
 # 导出给backend/routers使用
 # 注意:所有模型都来自 modules/core/db/schema.py,此处只是重新导出
 __all__ = [

@@ -286,11 +286,27 @@ if (-not $SkipChecks) {
 
 Write-StageResult -Stage "backend" -Status "started"
 try {
-    & python "$repoRoot\run.py" --local
+    $backendFailureCode = $null
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Native stderr becomes an ErrorRecord after 2>&1; keep it observable.
+        $ErrorActionPreference = "Continue"
+        & python "$repoRoot\run.py" --local 2>&1 | ForEach-Object {
+            $line = [string]$_
+            Write-Host $line
+            if ($line -match "^XIHONG_FAILURE_CODE=(.*)$") {
+                $backendFailureCode = $Matches[1].Trim()
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     $backendExitCode = $LASTEXITCODE
     if ($backendExitCode -ne 0) {
         Write-StageResult -Stage "backend" -Status "failed"
-        Write-FailureResult -Code "backend_start_failed" -Summary "Local backend exited before startup completed." -Hint "Review the bounded Local Console logs." -SourceExitCode $backendExitCode
+        if ([string]::IsNullOrWhiteSpace($backendFailureCode)) {
+            Write-FailureResult -Code "backend_start_failed" -Summary "Local backend exited before startup completed." -Hint "Review the bounded Local Console logs." -SourceExitCode $backendExitCode
+        }
     }
     exit $backendExitCode
 } catch {
