@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import delete, select
@@ -36,6 +36,8 @@ class ProductFinanceService:
         if bill.status != "draft":
             raise ValueError("only draft logistics bills can be edited")
         sku_ids = {line["sku_id"] for line in lines}
+        if len(sku_ids) != len(lines):
+            raise ValueError("a logistics bill can contain each SKU only once")
         sku_rows = (
             await self.db.execute(select(DimErpSku).where(DimErpSku.sku_id.in_(sku_ids)))
         ).scalars().all()
@@ -100,6 +102,8 @@ class ProductFinanceService:
         return bill
 
     async def void_bill(self, bill: LogisticsBill, user_id: int | None, reason: str) -> LogisticsBill:
+        if bill.status != "confirmed":
+            raise ValueError("only confirmed logistics bills can be voided")
         if bill.status == "voided":
             raise ValueError("logistics bill is already voided")
         bill.status = "voided"
@@ -109,16 +113,29 @@ class ProductFinanceService:
         return bill
 
     async def find_active_assumption(self, destination: str | None, transport_type: str | None, as_of: date) -> ProductCostAssumptionProfile | None:
-        statement = select(ProductCostAssumptionProfile).where(
+        base_filters = [
             ProductCostAssumptionProfile.active.is_(True),
             ProductCostAssumptionProfile.effective_from <= as_of,
             (ProductCostAssumptionProfile.effective_to.is_(None)) | (ProductCostAssumptionProfile.effective_to >= as_of),
-        )
-        if destination:
-            statement = statement.where(ProductCostAssumptionProfile.destination == destination)
-        if transport_type:
-            statement = statement.where(ProductCostAssumptionProfile.transport_type == transport_type)
-        return (await self.db.execute(statement.order_by(ProductCostAssumptionProfile.effective_from.desc()))).scalars().first()
+        ]
+        scopes = []
+        if destination and transport_type:
+            scopes.extend([
+                (ProductCostAssumptionProfile.destination == destination, ProductCostAssumptionProfile.transport_type == transport_type),
+                (ProductCostAssumptionProfile.destination == destination, ProductCostAssumptionProfile.transport_type.is_(None)),
+                (ProductCostAssumptionProfile.destination.is_(None), ProductCostAssumptionProfile.transport_type == transport_type),
+            ])
+        elif destination:
+            scopes.append((ProductCostAssumptionProfile.destination == destination,))
+        elif transport_type:
+            scopes.append((ProductCostAssumptionProfile.transport_type == transport_type,))
+        scopes.append((ProductCostAssumptionProfile.destination.is_(None), ProductCostAssumptionProfile.transport_type.is_(None)))
+        for scope in scopes:
+            statement = select(ProductCostAssumptionProfile).where(*base_filters, *scope).order_by(ProductCostAssumptionProfile.effective_from.desc())
+            row = (await self.db.execute(statement)).scalars().first()
+            if row is not None:
+                return row
+        return None
 
     async def find_confirmed_logistics_cost(self, sku_id: int, destination: str | None, transport_type: str | None) -> Decimal | None:
         statement = (
@@ -157,7 +174,14 @@ class ProductFinanceService:
             "sku_id": sku.sku_id,
             "assumption_profile_id": assumption.profile_id if assumption else None,
             "assumption_version": f"profile-{assumption.profile_id}" if assumption else "manual-fallback",
-            "cost_completeness": "complete" if sku.default_purchase_cost is not None and assumption is not None else "partial",
+            "cost_completeness": "complete" if all(value is not None for value in (
+                sku.default_purchase_cost,
+                result.get("logistics_cost"),
+                result.get("storage_cost"),
+                result.get("platform_fee"),
+                result.get("expected_return_loss"),
+                result.get("expected_damage_loss"),
+            )) else "partial",
             "confidence_level": assumption.confidence_level if assumption else "low",
         })
         return result

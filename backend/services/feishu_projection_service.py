@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select, text, update
@@ -216,7 +216,13 @@ class FeishuProjectionService:
         tasks = (
             await self.db.execute(
                 select(FeishuProjectionTask)
-                .where(FeishuProjectionTask.status == "pending")
+                .where(
+                    (FeishuProjectionTask.status == "pending")
+                    | (
+                        (FeishuProjectionTask.status == "failed")
+                        & (FeishuProjectionTask.next_retry_at <= datetime.now(timezone.utc))
+                    )
+                )
                 .order_by(FeishuProjectionTask.created_at)
                 .limit(limit)
             )
@@ -248,6 +254,12 @@ class FeishuProjectionService:
         task.status = status
         task.attempt_count += 1
         task.last_error = error_message
+        if status == "failed":
+            task.next_retry_at = datetime.now(timezone.utc) + timedelta(
+                seconds=min(3600, 30 * (2 ** min(task.attempt_count - 1, 6)))
+            )
+        else:
+            task.next_retry_at = None
         if status == "completed":
             task.completed_at = datetime.now(timezone.utc)
         self.db.add(

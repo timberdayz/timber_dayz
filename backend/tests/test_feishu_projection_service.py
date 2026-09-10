@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 from backend.services.feishu_projection_service import (
     FeishuProjectionService,
@@ -46,3 +47,24 @@ def test_projection_attempt_marks_task_and_appends_delivery_log():
     assert isinstance(db.added[0], FeishuProjectionLog)
     assert db.added[0].task_id == 7
     assert db.added[0].payload_hash == "payload-hash"
+
+
+def test_failed_projection_attempt_schedules_automatic_retry():
+    class FakeSession:
+        def add(self, _row):
+            pass
+
+    task = FeishuProjectionTask(
+        id=8,
+        entity_type="sku",
+        business_key="42",
+        payload_hash="payload-hash",
+        payload_json={"sku_id": 42},
+        attempt_count=0,
+    )
+
+    asyncio.run(FeishuProjectionService(FakeSession()).record_attempt(task, "failed", "network"))
+
+    assert task.status == "failed"
+    assert task.next_retry_at is not None
+    assert task.next_retry_at > datetime.now(timezone.utc)

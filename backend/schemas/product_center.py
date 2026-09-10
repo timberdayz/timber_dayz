@@ -36,6 +36,10 @@ class SkuCreateRequest(BaseModel):
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
+    default_purchase_cost: Optional[float] = Field(default=None, ge=0)
+    purchase_cost_currency: str = Field(default="CNY", min_length=3, max_length=8)
+    purchase_cost_source: Optional[str] = Field(default=None, max_length=64)
+    purchase_cost_confidence: str = Field(default="low", pattern=r"^(low|medium|high)$")
 
 
 class SkuUpdateRequest(BaseModel):
@@ -173,6 +177,13 @@ class LogisticsBillSkuLineRequest(BaseModel):
 class LogisticsBillLinesReplaceRequest(BaseModel):
     lines: list[LogisticsBillSkuLineRequest] = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def reject_duplicate_skus(self):
+        sku_ids = [line.sku_id for line in self.lines]
+        if len(sku_ids) != len(set(sku_ids)):
+            raise ValueError("a logistics bill can contain each SKU only once")
+        return self
+
 
 class LogisticsBillVoidRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
@@ -198,7 +209,7 @@ class FeishuProjectionInitializeRequest(BaseModel):
 class ProfitEstimateCreateRequest(BaseModel):
     sku_id: int = Field(gt=0)
     assumption_version: str = Field(min_length=1, max_length=64)
-    scenario: str = Field(default="base", pattern=r"^(base|conservative|optimistic)$")
+    scenario: str = Field(default="base", pattern=r"^base$")
     selling_price: Optional[float] = Field(default=None, ge=0)
     coupon_amount: Optional[float] = Field(default=None, ge=0)
     purchase_cost: Optional[float] = Field(default=None, ge=0)

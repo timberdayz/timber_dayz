@@ -5,6 +5,8 @@ def test_product_profit_finalization_migration_extends_existing_product_center_s
     path = Path("current_migrations/versions/20260910_product_profit_finalization.py")
     source = path.read_text(encoding="utf-8")
     assert 'down_revision = "current_schema_20260909_product_cost_estimates"' in source
+    assert "UPDATE finance.logistics_bills" in source
+    assert "ck_logistics_bills_status" in source
     assert '"dim_erp_sku"' in source
     assert '"default_purchase_cost"' in source
     assert '"logistics_bill_lines"' in source

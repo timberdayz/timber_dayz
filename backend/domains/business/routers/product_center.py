@@ -207,6 +207,17 @@ async def bind_spu_sku(spu: str, body: SpuSkuBindingRequest, db: AsyncSession = 
         raise HTTPException(status_code=404, detail="SPU not found")
     if await db.get(DimErpSku, body.sku_id) is None:
         raise HTTPException(status_code=404, detail="SKU not found")
+    current_binding = (
+        await db.execute(
+            select(BridgeSpuSku).where(
+                BridgeSpuSku.sku_id == body.sku_id,
+                BridgeSpuSku.effective_to.is_(None),
+                BridgeSpuSku.binding_status == "active",
+            )
+        )
+    ).scalars().first()
+    if current_binding is not None and body.effective_from <= current_binding.effective_from:
+        raise HTTPException(status_code=422, detail="effective_from must be later than the current binding")
     await db.execute(
         update(BridgeSpuSku)
         .where(BridgeSpuSku.sku_id == body.sku_id, BridgeSpuSku.effective_to.is_(None), BridgeSpuSku.binding_status == "active")
@@ -398,8 +409,15 @@ async def confirm_logistics_bill(bill_id: int, db: AsyncSession = Depends(get_as
 async def void_logistics_bill(bill_id: int, body: LogisticsBillVoidRequest, db: AsyncSession = Depends(get_async_db), current_user=Depends(_require_editor)):
     service = ProductFinanceService(db)
     try:
-        bill = await service.void_bill(await service.get_bill_or_raise(bill_id), getattr(current_user, "user_id", None), body.reason)
+        bill = await service.get_bill_or_raise(bill_id)
+        sku_ids = [sku_id for sku_id, in (await db.execute(select(LogisticsBillLine.sku_id).where(LogisticsBillLine.bill_id == bill_id, LogisticsBillLine.sku_id.is_not(None)))).all()]
+        bill = await service.void_bill(bill, getattr(current_user, "user_id", None), body.reason)
+        for sku_id in sku_ids:
+            sku = await db.get(DimErpSku, sku_id)
+            if sku is not None:
+                await _enqueue_sku_projection(db, sku)
         await db.commit()
+        asyncio.create_task(trigger_pending_projection_delivery())
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc

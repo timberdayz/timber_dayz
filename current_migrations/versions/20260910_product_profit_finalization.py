@@ -83,6 +83,13 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_logistics_bill_lines_sku", "logistics_bill_lines", ["sku_id"], schema="finance", if_not_exists=True)
+    op.execute("UPDATE finance.logistics_bills SET status = 'draft' WHERE status = 'pending'")
+    op.create_check_constraint(
+        "ck_logistics_bills_status",
+        "logistics_bills",
+        "status IN ('draft', 'confirmed', 'voided')",
+        schema="finance",
+    )
 
     op.create_table(
         "feishu_projection_configs",

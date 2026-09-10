@@ -8,6 +8,7 @@ from backend.services.product_profit_service import (
     build_logistics_sku_line,
     validate_bill_total,
 )
+from backend.schemas.product_center import LogisticsBillLinesReplaceRequest, SkuCreateRequest
 
 
 def test_logistics_sku_line_uses_sku_defaults_and_calculates_three_unit_costs():
@@ -66,3 +67,28 @@ def test_baseline_profit_prefers_confirmed_logistics_cost_over_assumption():
     assert result["logistics_cost_source"] == "confirmed_logistics_bill"
     assert result["purchase_cost_source"] == "sku_default_purchase_cost"
     assert result["estimated_contribution_profit"] == Decimal("34.70")
+
+
+def test_sku_create_accepts_default_purchase_cost_fields():
+    request = SkuCreateRequest(
+        sku_key="SKU-NEW",
+        default_purchase_cost=12.5,
+        purchase_cost_currency="CNY",
+        purchase_cost_source="factory_quote",
+        purchase_cost_confidence="medium",
+    )
+    assert request.default_purchase_cost == 12.5
+    assert request.purchase_cost_source == "factory_quote"
+
+
+def test_logistics_bill_lines_reject_duplicate_skus():
+    try:
+        LogisticsBillLinesReplaceRequest(
+            lines=[
+                {"sku_id": 1, "shipped_qty": 1},
+                {"sku_id": 1, "shipped_qty": 2},
+            ]
+        )
+    except ValueError:
+        return
+    raise AssertionError("duplicate SKU lines must be rejected")
