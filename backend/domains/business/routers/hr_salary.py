@@ -896,7 +896,7 @@ async def reopen_payroll_record(
                 await db.execute(
                     select(ShopProfitBasis).where(
                         ShopProfitBasis.period_month == record.year_month,
-                        ShopProfitBasis.is_locked == True,
+                        ShopProfitBasis.is_locked.is_(True),
                     )
                 )
             ).scalars().all()
