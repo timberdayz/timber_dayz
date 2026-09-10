@@ -1,5 +1,9 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
+-- The previous view exposed a different leading-column contract. PostgreSQL
+-- cannot rename view columns through CREATE OR REPLACE VIEW, so rebuild it.
+DROP VIEW IF EXISTS api.clearance_ranking_module;
+
 CREATE OR REPLACE VIEW api.clearance_ranking_module AS
 -- The previous implementation selected mart.inventory_backlog_base rows.
 -- This view keeps compatibility fields while exposing monthly shop rankings.
