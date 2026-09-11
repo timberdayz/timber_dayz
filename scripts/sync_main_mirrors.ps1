@@ -1,7 +1,7 @@
 param(
     [switch]$Configure,
     [switch]$Sync,
-    [string]$GitHubUrl = "https://github.com/timberdayz/timber_dayz.git",
+    [string]$GitHubUrl = "git@github.com:timberdayz/timber_dayz.git",
     [string]$CnbUrl = "https://cnb.cool/timberdayz/xihong_erp"
 )
 

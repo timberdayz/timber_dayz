@@ -32,7 +32,7 @@ git push origin vX.Y.Z
 Configure once per workstation:
 
 ```bash
-git remote set-url --push origin https://github.com/timberdayz/timber_dayz.git
+git remote set-url --push origin git@github.com:timberdayz/timber_dayz.git
 git remote set-url --add --push origin https://cnb.cool/timberdayz/xihong_erp
 git remote -v
 ```
