@@ -5,7 +5,7 @@
 - Production release is triggered by `git push origin vX.Y.Z`
 - Deployment truth comes from the release tag, not `origin/main`
 - Push `main` to `origin` only when you intentionally want GitHub branch history to match local history
-- Local `origin` should have two push URLs: GitHub and CNB Git. This keeps VS Code "commit and sync" aligned with the historical workflow without making CNB Git a deployment source.
+- Local `origin` has two push URLs: GitHub and CNB Git. `main` tracks `cnb/main`; mirror normal branch updates through `powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync`, not VS Code/Cursor Sync or a single-remote push.
 - CNB registry is used as the preferred production image pull source in China; CNB Git is only a code mirror.
 
 ## Before Tagging
@@ -37,7 +37,13 @@ git remote set-url --add --push origin https://cnb.cool/timberdayz/xihong_erp
 git remote -v
 ```
 
-Expected result: `origin` has two push URLs, while `main` still tracks `origin/main`.
+Then initialize the current computer and verify both mirrors before its first push:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Configure
+```
+
+Expected result: `origin` has two push URLs while `main` tracks `cnb/main`. The script refuses dirty worktrees, non-main branches, in-progress merges/rebases, remote divergence, and non-fast-forward local history.
 
 ## Watch GitHub Actions
 
