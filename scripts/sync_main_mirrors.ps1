@@ -1,7 +1,7 @@
 param(
     [switch]$Configure,
     [switch]$Sync,
-    [string]$GitHubUrl = "git@github.com:timberdayz/timber_dayz.git",
+    [string]$GitHubUrl = "https://github.com/timberdayz/timber_dayz.git",
     [string]$CnbUrl = "https://cnb.cool/timberdayz/xihong_erp"
 )
 
@@ -71,8 +71,8 @@ function Configure-MirrorRemotes {
     $null = Invoke-Git @("remote", "set-url", "--push", "origin", $GitHubUrl)
     $null = Invoke-Git @("remote", "set-url", "--add", "--push", "origin", $CnbUrl)
     $null = Invoke-Git @("fetch", "--prune", "cnb")
-    $null = Invoke-Git @("branch", "--set-upstream-to=cnb/main", "main")
-    $null = Invoke-Git @("config", "branch.main.vscode-merge-base", "cnb/main")
+    $null = Invoke-Git @("branch", "--set-upstream-to=origin/main", "main")
+    $null = Invoke-Git @("config", "branch.main.vscode-merge-base", "origin/main")
 
     Write-Host "XIHONG_GIT_MIRROR_CONFIGURED=cnb/main"
 }

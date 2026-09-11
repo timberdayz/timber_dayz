@@ -92,8 +92,8 @@ Detailed rules: `docs/architecture/DASHBOARD.md`.
 
 - GitHub deployment is tag-driven, not `origin/main` driven.
 - Release tags such as `vX.Y.Z` are the deployment source of truth.
-- Local `main` tracks `cnb/main`; `origin/main` is the GitHub remote-tracking branch.
-- GitHub and CNB `main` must resolve to the same commit before a mirror sync proceeds. Use `scripts/sync_main_mirrors.ps1`; do not use Cursor Sync, single-remote pushes, web commits, or force pushes for `main`.
+- Local `main` tracks `origin/main` (GitHub); `cnb/main` is the CNB mirror reference.
+- GitHub and CNB `main` must resolve to the same commit before a mirror sync proceeds. Use `scripts/sync_main_mirrors.ps1` for divergence checks and controlled mirror writes; do not use single-remote pushes, web commits, or force pushes for `main`.
 
 Detailed workflow: `docs/guides/RELEASE_CHECKLIST.md`.
 

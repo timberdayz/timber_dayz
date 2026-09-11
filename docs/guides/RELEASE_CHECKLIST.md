@@ -5,7 +5,7 @@
 - Production release is triggered by `git push origin vX.Y.Z`
 - Deployment truth comes from the release tag, not `origin/main`
 - Push `main` to `origin` only when you intentionally want GitHub branch history to match local history
-- Local `origin` has two push URLs: GitHub and CNB Git. `main` tracks `cnb/main`; mirror normal branch updates through `powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync`, not VS Code/Cursor Sync or a single-remote push.
+- Local `origin` has two push URLs: GitHub and CNB Git. `main` keeps the existing GitHub `origin/main` upstream so normal Cursor/VS Code pull behavior remains unchanged. Use `powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync` before publishing a completed `main` change; it checks the CNB mirror before writing either remote.
 - CNB registry is used as the preferred production image pull source in China; CNB Git is only a code mirror.
 
 ## Before Tagging
@@ -32,7 +32,7 @@ git push origin vX.Y.Z
 Configure once per workstation:
 
 ```bash
-git remote set-url --push origin git@github.com:timberdayz/timber_dayz.git
+git remote set-url --push origin https://github.com/timberdayz/timber_dayz.git
 git remote set-url --add --push origin https://cnb.cool/timberdayz/xihong_erp
 git remote -v
 ```
@@ -43,7 +43,7 @@ Then initialize the current computer and verify both mirrors before its first pu
 powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Configure
 ```
 
-Expected result: `origin` has two push URLs while `main` tracks `cnb/main`. The script refuses dirty worktrees, non-main branches, in-progress merges/rebases, remote divergence, and non-fast-forward local history.
+Expected result: `origin` has two push URLs while `main` tracks `origin/main`; `cnb/main` is checked as the required mirror reference. The script refuses dirty worktrees, non-main branches, in-progress merges/rebases, remote divergence, and non-fast-forward local history.
 
 ## Watch GitHub Actions
 
