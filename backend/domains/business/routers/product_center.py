@@ -17,13 +17,21 @@ from backend.schemas.product_center import (
     FeishuProjectionInitializeRequest,
     LogisticsBillCreateRequest,
     LogisticsBillLinesReplaceRequest,
+    LogisticsBillPurchaseOrdersReplaceRequest,
+    LogisticsProviderRuleCreateRequest,
+    LogisticsProviderRuleUpdateRequest,
     LogisticsBillUpdateRequest,
     LogisticsBillVoidRequest,
     ProductCenterBindingResponse,
+    ProductCategoryCreateRequest,
+    ProductCategoryResponse,
+    ProductCategoryUpdateRequest,
     ProductCenterItem,
     ProductCenterListResponse,
     SkuCreateRequest,
     SkuUpdateRequest,
+    SpuBulkRequest,
+    SkuBulkRequest,
     ProfitEstimateCreateRequest,
     ProfitEstimateSaveRequest,
     ProfitPreviewRequest,
@@ -39,6 +47,12 @@ from modules.core.db import (
     SkuProfitEstimate,
     LogisticsBill,
     LogisticsBillLine,
+    LogisticsBillPurchaseOrder,
+    LogisticsProviderRule,
+    POHeader,
+    POLine,
+    GRNHeader,
+    DimProductCategory,
 )
 from backend.services.product_finance_service import BillTotalMismatchError, ProductFinanceService
 from backend.services.feishu_projection_client import FeishuProjectionClient
@@ -60,6 +74,53 @@ def _require_projection_admin(current_user=Depends(get_current_user)):
     if getattr(current_user, "is_superuser", False) or "admin" in extract_role_codes(current_user):
         return current_user
     raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+@router.get("/api/product-categories", response_model=list[ProductCategoryResponse])
+async def list_product_categories(
+    level: int | None = Query(None, ge=1, le=2),
+    parent_category_code: str | None = Query(None),
+    include_inactive: bool = Query(False),
+    db: AsyncSession = Depends(get_async_db),
+):
+    filters = []
+    if level is not None:
+        filters.append(DimProductCategory.level == level)
+    if parent_category_code is not None:
+        filters.append(DimProductCategory.parent_category_code == parent_category_code)
+    if not include_inactive:
+        filters.append(DimProductCategory.status == "active")
+    rows = (await db.execute(select(DimProductCategory).where(*filters).order_by(DimProductCategory.level, DimProductCategory.category_code))).scalars().all()
+    return [ProductCategoryResponse.model_validate(row) for row in rows]
+
+
+@router.post("/api/product-categories", response_model=ProductCategoryResponse, status_code=201)
+async def create_product_category(body: ProductCategoryCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    if body.level == 2:
+        parent = await db.get(DimProductCategory, body.parent_category_code)
+        if parent is None or parent.level != 1 or parent.status != "active":
+            raise HTTPException(status_code=422, detail="level 2 category must reference an active level 1 category")
+    row = DimProductCategory(**body.model_dump())
+    db.add(row)
+    try:
+        await db.commit()
+        await db.refresh(row)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="category code already exists") from exc
+    return ProductCategoryResponse.model_validate(row)
+
+
+@router.patch("/api/product-categories/{category_code}", response_model=ProductCategoryResponse)
+async def update_product_category(category_code: str, body: ProductCategoryUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    row = await db.get(DimProductCategory, category_code)
+    if row is None:
+        raise HTTPException(status_code=404, detail="category not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    await db.commit()
+    await db.refresh(row)
+    return ProductCategoryResponse.model_validate(row)
 
 
 async def _enqueue_spu_projection(db: AsyncSession, row: DimSpu) -> None:
@@ -237,6 +298,66 @@ async def bind_spu_sku(spu: str, body: SpuSkuBindingRequest, db: AsyncSession = 
     return ProductCenterBindingResponse.model_validate(row)
 
 
+@router.get("/api/purchase-orders")
+async def list_purchase_orders(status: str | None = Query(None), keyword: str | None = Query(None), db: AsyncSession = Depends(get_async_db)):
+    statement = select(POHeader).order_by(POHeader.po_date.desc(), POHeader.po_id.desc())
+    if status:
+        statement = statement.where(POHeader.status == status)
+    if keyword:
+        statement = statement.where(POHeader.po_id.ilike(f"%{keyword}%"))
+    rows = (await db.execute(statement.limit(500))).scalars().all()
+    return [{"po_id": row.po_id, "vendor_code": row.vendor_code, "po_date": row.po_date, "expected_date": row.expected_date, "currency": row.currency, "total_amt": row.total_amt, "status": row.status} for row in rows]
+
+
+@router.get("/api/purchase-orders/{po_id}/lines")
+async def list_purchase_order_lines(po_id: str, db: AsyncSession = Depends(get_async_db)):
+    rows = (await db.execute(select(POLine).where(POLine.po_id == po_id).order_by(POLine.line_number))).scalars().all()
+    return [{"po_line_id": row.po_line_id, "po_id": row.po_id, "line_number": row.line_number, "platform_sku": row.platform_sku, "product_title": row.product_title, "qty_ordered": row.qty_ordered, "qty_received": row.qty_received, "unit_price": row.unit_price, "currency": row.currency, "line_amt": row.line_amt} for row in rows]
+
+
+@router.get("/api/purchase-orders/{po_id}")
+async def get_purchase_order(po_id: str, db: AsyncSession = Depends(get_async_db)):
+    row = await db.get(POHeader, po_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="purchase order not found")
+    return {"po_id": row.po_id, "vendor_code": row.vendor_code, "po_date": row.po_date, "expected_date": row.expected_date, "currency": row.currency, "total_amt": row.total_amt, "status": row.status}
+
+
+def _serialize_provider_rule(row: LogisticsProviderRule) -> dict:
+    return {"rule_id": row.rule_id, "logistics_provider": row.logistics_provider, "destination": row.destination, "transport_type": row.transport_type, "cargo_class": row.cargo_class, "is_sensitive": row.is_sensitive, "billing_basis": row.billing_basis, "billing_unit": row.billing_unit, "freight_unit_rate": float(row.freight_unit_rate) if row.freight_unit_rate is not None else None, "sensitive_surcharge_mode": row.sensitive_surcharge_mode, "sensitive_surcharge_rate": float(row.sensitive_surcharge_rate) if row.sensitive_surcharge_rate is not None else None, "currency": row.currency, "effective_from": row.effective_from, "effective_to": row.effective_to, "status": row.status, "source": row.source, "version": row.version, "notes": row.notes}
+
+
+@router.get("/api/logistics-provider-rules")
+async def list_logistics_provider_rules(provider: str | None = Query(None), destination: str | None = Query(None), transport_type: str | None = Query(None), as_of: date | None = Query(None), db: AsyncSession = Depends(get_async_db)):
+    filters = [LogisticsProviderRule.status == "active"]
+    if provider: filters.append(LogisticsProviderRule.logistics_provider == provider)
+    if destination: filters.append((LogisticsProviderRule.destination == destination) | LogisticsProviderRule.destination.is_(None))
+    if transport_type: filters.append((LogisticsProviderRule.transport_type == transport_type) | LogisticsProviderRule.transport_type.is_(None))
+    when = as_of or date.today()
+    filters.extend([LogisticsProviderRule.effective_from <= when, (LogisticsProviderRule.effective_to.is_(None)) | (LogisticsProviderRule.effective_to >= when)])
+    rows = (await db.execute(select(LogisticsProviderRule).where(*filters).order_by(LogisticsProviderRule.effective_from.desc()))).scalars().all()
+    return [_serialize_provider_rule(row) for row in rows]
+
+
+@router.post("/api/logistics-provider-rules", status_code=201)
+async def create_logistics_provider_rule(body: LogisticsProviderRuleCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    row = LogisticsProviderRule(**body.model_dump())
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _serialize_provider_rule(row)
+
+
+@router.patch("/api/logistics-provider-rules/{rule_id}")
+async def update_logistics_provider_rule(rule_id: int, body: LogisticsProviderRuleUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    row = await db.get(LogisticsProviderRule, rule_id)
+    if row is None: raise HTTPException(status_code=404, detail="logistics provider rule not found")
+    for key, value in body.model_dump(exclude_unset=True).items(): setattr(row, key, value)
+    await db.commit()
+    await db.refresh(row)
+    return _serialize_provider_rule(row)
+
+
 @router.get("/api/cost-assumption-profiles")
 async def list_cost_assumptions(db: AsyncSession = Depends(get_async_db)):
     rows = (await db.execute(select(ProductCostAssumptionProfile).where(ProductCostAssumptionProfile.active.is_(True)).order_by(ProductCostAssumptionProfile.effective_from.desc()))).scalars().all()
@@ -286,7 +407,7 @@ async def update_cost_assumption(profile_id: int, body: CostAssumptionUpdateRequ
     return {"profile_id": row.profile_id, "active": row.active, "updated_at": row.updated_at}
 
 
-def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None = None) -> dict:
+def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None = None, purchase_orders: list[LogisticsBillPurchaseOrder] | None = None) -> dict:
     payload = {
         "bill_id": bill.bill_id,
         "bill_no": bill.bill_no,
@@ -306,6 +427,12 @@ def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None =
             {
                 "line_id": line.line_id,
                 "sku_id": line.sku_id,
+                "po_id": line.po_id,
+                "billing_basis": line.billing_basis,
+                "billing_unit": line.billing_unit,
+                "billing_unit_rate": float(line.billing_unit_rate) if line.billing_unit_rate is not None else None,
+                "is_sensitive": line.is_sensitive,
+                "sensitive_surcharge": float(line.sensitive_surcharge or 0),
                 "shipped_qty": float(line.shipped_qty or 0),
                 "calculated_total_weight_kg": float(line.calculated_total_weight_kg or 0),
                 "calculated_total_volume_cbm": float(line.calculated_total_volume_cbm or 0),
@@ -322,6 +449,8 @@ def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None =
             }
             for line in lines
         ]
+    if purchase_orders is not None:
+        payload["purchase_orders"] = [row.po_id for row in purchase_orders]
     return payload
 
 
@@ -356,7 +485,21 @@ async def get_logistics_bill(bill_id: int, db: AsyncSession = Depends(get_async_
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     lines = (await db.execute(select(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill_id).order_by(LogisticsBillLine.line_no))).scalars().all()
-    return _serialize_bill(bill, lines)
+    purchase_orders = (await db.execute(select(LogisticsBillPurchaseOrder).where(LogisticsBillPurchaseOrder.bill_id == bill_id))).scalars().all()
+    return _serialize_bill(bill, lines, purchase_orders)
+
+
+@router.put("/api/logistics-bills/{bill_id}/purchase-orders")
+async def replace_logistics_bill_purchase_orders(bill_id: int, body: LogisticsBillPurchaseOrdersReplaceRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    service = ProductFinanceService(db)
+    try:
+        bill = await service.get_bill_or_raise(bill_id)
+        rows = await service.replace_bill_purchase_orders(bill, body.po_ids)
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return [{"id": row.id, "bill_id": row.bill_id, "po_id": row.po_id} for row in rows]
 
 
 @router.patch("/api/logistics-bills/{bill_id}")

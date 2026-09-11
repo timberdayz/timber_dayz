@@ -756,6 +756,55 @@ class LogisticsBill(Base):
     )
 
 
+class LogisticsProviderRule(Base):
+    """Versioned provider tariff defaults used to prefill logistics batches."""
+
+    __tablename__ = "logistics_provider_rules"
+
+    rule_id = Column(Integer, primary_key=True, autoincrement=True)
+    logistics_provider = Column(String(128), nullable=False)
+    destination = Column(String(128), nullable=True)
+    transport_type = Column(String(64), nullable=True)
+    cargo_class = Column(String(64), nullable=True)
+    is_sensitive = Column(Boolean, nullable=False, default=False)
+    billing_basis = Column(String(32), nullable=False, default="volume")
+    billing_unit = Column(String(32), nullable=False, default="RMB/CBM")
+    freight_unit_rate = Column(Numeric(18, 6), nullable=True)
+    sensitive_surcharge_mode = Column(String(32), nullable=False, default="manual")
+    sensitive_surcharge_rate = Column(Numeric(18, 6), nullable=True)
+    currency = Column(String(8), nullable=False, default="CNY")
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    status = Column(String(16), nullable=False, default="active")
+    source = Column(String(128), nullable=True)
+    version = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_logistics_provider_rules_scope", "logistics_provider", "destination", "transport_type", "effective_from"),
+        {"schema": "finance"},
+    )
+
+
+class LogisticsBillPurchaseOrder(Base):
+    """Many-to-many association between a logistics batch and purchase orders."""
+
+    __tablename__ = "logistics_bill_purchase_orders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_id = Column(Integer, ForeignKey("finance.logistics_bills.bill_id", ondelete="CASCADE"), nullable=False)
+    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("bill_id", "po_id", name="uq_logistics_bill_purchase_order"),
+        Index("ix_logistics_bill_po_po", "po_id"),
+        {"schema": "finance"},
+    )
+
+
 class LogisticsBillLine(Base):
     """One chargeable cargo line from a logistics statement."""
 
@@ -765,6 +814,12 @@ class LogisticsBillLine(Base):
     bill_id = Column(Integer, ForeignKey("finance.logistics_bills.bill_id", ondelete="CASCADE"), nullable=False)
     line_no = Column(Integer, nullable=False)
     sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=True)
+    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"), nullable=True)
+    billing_basis = Column(String(32), nullable=False, default="volume")
+    billing_unit = Column(String(32), nullable=True)
+    billing_unit_rate = Column(Numeric(18, 6), nullable=True)
+    is_sensitive = Column(Boolean, nullable=False, default=False)
+    sensitive_surcharge = Column(Numeric(18, 2), nullable=False, default=0)
     shipped_qty = Column(Numeric(18, 3), nullable=True)
     calculated_total_weight_kg = Column(Numeric(18, 3), nullable=True)
     calculated_total_volume_cbm = Column(Numeric(18, 6), nullable=True)

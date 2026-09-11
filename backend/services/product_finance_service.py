@@ -10,6 +10,8 @@ from modules.core.db import (
     DimErpSku,
     LogisticsBill,
     LogisticsBillLine,
+    LogisticsBillLineAllocation,
+    LogisticsBillPurchaseOrder,
     ProductCostAssumptionProfile,
     SkuProfitEstimate,
 )
@@ -20,6 +22,7 @@ from .product_profit_service import (
     build_logistics_sku_line,
     validate_bill_total,
 )
+from .product_logistics_service import allocate_bill_line
 
 
 class ProductFinanceService:
@@ -35,8 +38,9 @@ class ProductFinanceService:
     async def replace_bill_lines(self, bill: LogisticsBill, lines: list[dict]) -> list[LogisticsBillLine]:
         if bill.status != "draft":
             raise ValueError("only draft logistics bills can be edited")
-        sku_ids = {line["sku_id"] for line in lines}
-        if len(sku_ids) != len(lines):
+        sku_ids = {sku_id for line in lines for sku_id in (line.get("sku_ids") or [line.get("sku_id")]) if sku_id is not None}
+        legacy_ids = [line.get("sku_id") for line in lines if line.get("sku_ids") is None]
+        if len(legacy_ids) != len(set(legacy_ids)):
             raise ValueError("a logistics bill can contain each SKU only once")
         sku_rows = (
             await self.db.execute(select(DimErpSku).where(DimErpSku.sku_id.in_(sku_ids)))
@@ -48,12 +52,16 @@ class ProductFinanceService:
         await self.db.execute(delete(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill.bill_id))
         rows: list[LogisticsBillLine] = []
         for index, line in enumerate(lines, start=1):
-            sku = skus[line["sku_id"]]
+            line_sku_ids = line.get("sku_ids") or [line["sku_id"]]
+            sku = skus[line_sku_ids[0]]
             volume = None
             if all(value is not None for value in (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)):
                 volume = Decimal(str(sku.package_length_cm * sku.package_width_cm * sku.package_height_cm)) / Decimal("1000000")
+            shipped_qty = line.get("shipped_qty") or 0
+            if line.get("billing_basis") == "fixed" and not shipped_qty:
+                shipped_qty = 1
             calculated = build_logistics_sku_line(
-                shipped_qty=line["shipped_qty"],
+                shipped_qty=shipped_qty,
                 unit_weight_kg=sku.weight_kg,
                 unit_volume_cbm=volume,
                 actual_total_weight_kg=line.get("actual_total_weight_kg"),
@@ -66,6 +74,12 @@ class ProductFinanceService:
                 bill_id=bill.bill_id,
                 line_no=index,
                 sku_id=sku.sku_id,
+                po_id=line.get("po_id"),
+                billing_basis=line.get("billing_basis", "volume"),
+                billing_unit=line.get("billing_unit"),
+                billing_unit_rate=line.get("billing_unit_rate"),
+                is_sensitive=bool(line.get("is_sensitive", False)),
+                sensitive_surcharge=line.get("sensitive_surcharge", 0),
                 shipped_qty=calculated["shipped_qty"],
                 calculated_total_weight_kg=calculated["calculated_total_weight_kg"],
                 calculated_total_volume_cbm=calculated["calculated_total_volume_cbm"],
@@ -77,11 +91,47 @@ class ProductFinanceService:
                 unit_headhaul_cost=calculated["unit_headhaul_cost"],
                 unit_handling_cost=calculated["unit_handling_cost"],
                 unit_last_mile_cost=calculated["unit_last_mile_cost"],
-                line_total_amount=calculated["line_total_amount"],
+                line_total_amount=line.get("line_total_amount", calculated["line_total_amount"]),
                 notes=line.get("notes"),
             )
             self.db.add(row)
             rows.append(row)
+        await self.db.flush()
+        # Preserve multi-SKU lineage in the allocation table. The first SKU remains
+        # in the legacy direct column for backwards compatibility.
+        for row, line in zip(rows, lines):
+            line_sku_ids = line.get("sku_ids") or [line["sku_id"]]
+            if len(line_sku_ids) <= 1:
+                continue
+            amount = Decimal(str(row.line_total_amount or 0))
+            basis = line.get("billing_basis", "volume")
+            allocation_items = []
+            for sku_id in line_sku_ids:
+                item_sku = skus[sku_id]
+                unit_volume = Decimal("0")
+                if all(value is not None for value in (item_sku.package_length_cm, item_sku.package_width_cm, item_sku.package_height_cm)):
+                    unit_volume = Decimal(str(item_sku.package_length_cm * item_sku.package_width_cm * item_sku.package_height_cm)) / Decimal("1000000")
+                allocation_items.append({"sku_id": sku_id, "quantity": Decimal(str(line.get("shipped_qty") or 1)) / Decimal(len(line_sku_ids)), "volume_cbm": unit_volume * (Decimal(str(line.get("shipped_qty") or 1)) / Decimal(len(line_sku_ids))), "weight_kg": Decimal(str(item_sku.weight_kg or 0)) * (Decimal(str(line.get("shipped_qty") or 1)) / Decimal(len(line_sku_ids)))})
+            allocations = allocate_bill_line(line_amount=amount, basis=(basis if basis in {"volume", "weight", "quantity"} else "quantity"), items=allocation_items)
+            for allocation in allocations:
+                sku_id = allocation["sku_id"]
+                self.db.add(LogisticsBillLineAllocation(
+                    bill_line_id=row.line_id,
+                    sku_id=sku_id,
+                    allocated_quantity=next(item["quantity"] for item in allocation_items if item["sku_id"] == sku_id),
+                    allocation_ratio=allocation["allocation_ratio"],
+                    allocated_amount=allocation["allocated_amount"],
+                    allocation_basis=basis,
+                    mapping_status="confirmed",
+                ))
+        return rows
+
+    async def replace_bill_purchase_orders(self, bill: LogisticsBill, po_ids: list[str]) -> list[LogisticsBillPurchaseOrder]:
+        if bill.status != "draft":
+            raise ValueError("only draft logistics bills can be edited")
+        await self.db.execute(delete(LogisticsBillPurchaseOrder).where(LogisticsBillPurchaseOrder.bill_id == bill.bill_id))
+        rows = [LogisticsBillPurchaseOrder(bill_id=bill.bill_id, po_id=po_id) for po_id in dict.fromkeys(po_ids)]
+        self.db.add_all(rows)
         await self.db.flush()
         return rows
 
