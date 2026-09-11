@@ -7,6 +7,7 @@ SCRIPT = Path("scripts/sync_main_mirrors.ps1")
 def test_git_mirror_sync_script_enforces_cnb_upstream_and_two_remote_mirror_checks():
     source = SCRIPT.read_text(encoding="utf-8")
 
+    assert "$PSNativeCommandUseErrorActionPreference = $false" in source
     assert 'Get-GitValue @("branch", "--show-current")' in source
     assert 'Get-GitValue @("status", "--porcelain")' in source
     assert "MERGE_HEAD" in source

@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 function Invoke-Git {
     param([string[]]$Arguments)
