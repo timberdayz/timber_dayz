@@ -23,10 +23,16 @@ def test_git_mirror_sync_script_enforces_cnb_upstream_and_two_remote_mirror_chec
 def test_git_mirror_sync_script_configures_origin_dual_push_urls_idempotently():
     source = SCRIPT.read_text(encoding="utf-8")
 
-    assert 'https://github.com/timberdayz/timber_dayz.git' in source
+    assert "https://github.com/timberdayz/timber_dayz.git" in source
     assert "git config --unset-all remote.origin.pushurl" in source
     assert 'Invoke-Git @("remote", "set-url", "--push", "origin", $GitHubUrl)' in source
-    assert 'Invoke-Git @("remote", "set-url", "--add", "--push", "origin", $CnbUrl)' in source
+    assert (
+        'Invoke-Git @("remote", "set-url", "--add", "--push", "origin", $CnbUrl)'
+        in source
+    )
     assert 'Invoke-Git @("branch", "--set-upstream-to=origin/main", "main")' in source
-    assert 'Invoke-Git @("config", "branch.main.vscode-merge-base", "origin/main")' in source
+    assert (
+        'Invoke-Git @("config", "branch.main.vscode-merge-base", "origin/main")'
+        in source
+    )
     assert "$LASTEXITCODE -notin @(0, 5)" in source
