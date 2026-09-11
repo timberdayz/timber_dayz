@@ -12,6 +12,7 @@ from modules.core.db import (
     LogisticsBillLine,
     LogisticsBillLineAllocation,
     LogisticsBillPurchaseOrder,
+    POHeader,
     ProductCostAssumptionProfile,
     SkuProfitEstimate,
 )
@@ -23,6 +24,13 @@ from .product_profit_service import (
     validate_bill_total,
 )
 from .product_logistics_service import allocate_bill_line
+
+
+def _unit_volume_cbm(sku: DimErpSku) -> Decimal:
+    dimensions = (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)
+    if any(value is None for value in dimensions):
+        return Decimal("0")
+    return Decimal(str(dimensions[0] * dimensions[1] * dimensions[2])) / Decimal("1000000")
 
 
 class ProductFinanceService:
@@ -38,7 +46,16 @@ class ProductFinanceService:
     async def replace_bill_lines(self, bill: LogisticsBill, lines: list[dict]) -> list[LogisticsBillLine]:
         if bill.status != "draft":
             raise ValueError("only draft logistics bills can be edited")
-        sku_ids = {sku_id for line in lines for sku_id in (line.get("sku_ids") or [line.get("sku_id")]) if sku_id is not None}
+        sku_ids = {
+            sku_id
+            for line in lines
+            for sku_id in (
+                [item["sku_id"] for item in line.get("allocations", [])]
+                or line.get("sku_ids")
+                or [line.get("sku_id")]
+            )
+            if sku_id is not None
+        }
         legacy_ids = [line.get("sku_id") for line in lines if line.get("sku_ids") is None]
         if len(legacy_ids) != len(set(legacy_ids)):
             raise ValueError("a logistics bill can contain each SKU only once")
@@ -51,35 +68,75 @@ class ProductFinanceService:
 
         await self.db.execute(delete(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill.bill_id))
         rows: list[LogisticsBillLine] = []
+        allocation_specs_by_line: list[list[dict]] = []
         for index, line in enumerate(lines, start=1):
             line_sku_ids = line.get("sku_ids") or [line["sku_id"]]
+            allocation_specs = line.get("allocations") or []
+            if not allocation_specs:
+                legacy_quantity = Decimal(str(line.get("shipped_qty") or 0))
+                if line.get("billing_basis") == "fixed" and not legacy_quantity:
+                    legacy_quantity = Decimal("1")
+                allocation_specs = [
+                    {
+                        "sku_id": sku_id,
+                        "po_id": line.get("po_id"),
+                        "shipped_qty": legacy_quantity / Decimal(len(line_sku_ids)),
+                    }
+                    for sku_id in line_sku_ids
+                ]
+            shipped_qty = sum((Decimal(str(item["shipped_qty"])) for item in allocation_specs), Decimal("0"))
+            calculated_weight = sum(
+                (Decimal(str(skus[item["sku_id"]].weight_kg or 0)) * Decimal(str(item["shipped_qty"])) for item in allocation_specs),
+                Decimal("0"),
+            )
+            calculated_volume = sum(
+                (_unit_volume_cbm(skus[item["sku_id"]]) * Decimal(str(item["shipped_qty"])) for item in allocation_specs),
+                Decimal("0"),
+            )
+            basis = line.get("billing_basis", "volume")
+            chargeable_quantity = {
+                "volume": Decimal(str(line.get("actual_total_volume_cbm"))) if line.get("actual_total_volume_cbm") is not None else calculated_volume,
+                "weight": Decimal(str(line.get("actual_total_weight_kg"))) if line.get("actual_total_weight_kg") is not None else calculated_weight,
+                "quantity": shipped_qty,
+            }.get(basis, Decimal("1"))
+            headhaul_cost = Decimal(str(line.get("headhaul_cost") or 0))
+            if line.get("billing_unit_rate") is not None and not headhaul_cost and basis != "fixed":
+                headhaul_cost = (chargeable_quantity * Decimal(str(line["billing_unit_rate"]))).quantize(Decimal("0.01"))
+            handling_cost = Decimal(str(line.get("handling_cost") or 0))
+            last_mile_cost = Decimal(str(line.get("last_mile_cost") or 0))
+            sensitive_surcharge = Decimal(str(line.get("sensitive_surcharge") or 0))
+            component_total = headhaul_cost + handling_cost + last_mile_cost + sensitive_surcharge
+            supplied_total = line.get("line_total_amount")
+            if supplied_total is None or (Decimal(str(supplied_total)) == 0 and component_total):
+                line_total = component_total
+            elif basis == "fixed" and component_total == 0:
+                headhaul_cost = Decimal(str(supplied_total))
+                line_total = headhaul_cost
+            elif Decimal(str(supplied_total)) != component_total:
+                raise ValueError("line total does not match billed components")
+            else:
+                line_total = Decimal(str(supplied_total))
             sku = skus[line_sku_ids[0]]
-            volume = None
-            if all(value is not None for value in (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)):
-                volume = Decimal(str(sku.package_length_cm * sku.package_width_cm * sku.package_height_cm)) / Decimal("1000000")
-            shipped_qty = line.get("shipped_qty") or 0
-            if line.get("billing_basis") == "fixed" and not shipped_qty:
-                shipped_qty = 1
             calculated = build_logistics_sku_line(
                 shipped_qty=shipped_qty,
-                unit_weight_kg=sku.weight_kg,
-                unit_volume_cbm=volume,
+                unit_weight_kg=calculated_weight / shipped_qty if shipped_qty else 0,
+                unit_volume_cbm=calculated_volume / shipped_qty if shipped_qty else 0,
                 actual_total_weight_kg=line.get("actual_total_weight_kg"),
                 actual_total_volume_cbm=line.get("actual_total_volume_cbm"),
-                headhaul_cost=line.get("headhaul_cost"),
-                handling_cost=line.get("handling_cost"),
-                last_mile_cost=line.get("last_mile_cost"),
+                headhaul_cost=headhaul_cost,
+                handling_cost=handling_cost,
+                last_mile_cost=last_mile_cost,
             )
             row = LogisticsBillLine(
                 bill_id=bill.bill_id,
                 line_no=index,
                 sku_id=sku.sku_id,
                 po_id=line.get("po_id"),
-                billing_basis=line.get("billing_basis", "volume"),
+                billing_basis=basis,
                 billing_unit=line.get("billing_unit"),
                 billing_unit_rate=line.get("billing_unit_rate"),
                 is_sensitive=bool(line.get("is_sensitive", False)),
-                sensitive_surcharge=line.get("sensitive_surcharge", 0),
+                sensitive_surcharge=sensitive_surcharge,
                 shipped_qty=calculated["shipped_qty"],
                 calculated_total_weight_kg=calculated["calculated_total_weight_kg"],
                 calculated_total_volume_cbm=calculated["calculated_total_volume_cbm"],
@@ -91,33 +148,30 @@ class ProductFinanceService:
                 unit_headhaul_cost=calculated["unit_headhaul_cost"],
                 unit_handling_cost=calculated["unit_handling_cost"],
                 unit_last_mile_cost=calculated["unit_last_mile_cost"],
-                line_total_amount=line.get("line_total_amount", calculated["line_total_amount"]),
+                line_total_amount=line_total,
                 notes=line.get("notes"),
             )
             self.db.add(row)
             rows.append(row)
+            allocation_specs_by_line.append(allocation_specs)
         await self.db.flush()
         # Preserve multi-SKU lineage in the allocation table. The first SKU remains
         # in the legacy direct column for backwards compatibility.
-        for row, line in zip(rows, lines):
-            line_sku_ids = line.get("sku_ids") or [line["sku_id"]]
-            if len(line_sku_ids) <= 1:
-                continue
+        for row, line, allocation_specs in zip(rows, lines, allocation_specs_by_line):
             amount = Decimal(str(row.line_total_amount or 0))
             basis = line.get("billing_basis", "volume")
             allocation_items = []
-            for sku_id in line_sku_ids:
-                item_sku = skus[sku_id]
-                unit_volume = Decimal("0")
-                if all(value is not None for value in (item_sku.package_length_cm, item_sku.package_width_cm, item_sku.package_height_cm)):
-                    unit_volume = Decimal(str(item_sku.package_length_cm * item_sku.package_width_cm * item_sku.package_height_cm)) / Decimal("1000000")
-                allocation_items.append({"sku_id": sku_id, "quantity": Decimal(str(line.get("shipped_qty") or 1)) / Decimal(len(line_sku_ids)), "volume_cbm": unit_volume * (Decimal(str(line.get("shipped_qty") or 1)) / Decimal(len(line_sku_ids))), "weight_kg": Decimal(str(item_sku.weight_kg or 0)) * (Decimal(str(line.get("shipped_qty") or 1)) / Decimal(len(line_sku_ids)))})
+            for spec in allocation_specs:
+                item_sku = skus[spec["sku_id"]]
+                quantity = Decimal(str(spec["shipped_qty"]))
+                allocation_items.append({"sku_id": item_sku.sku_id, "po_id": spec.get("po_id"), "quantity": quantity, "volume_cbm": _unit_volume_cbm(item_sku) * quantity, "weight_kg": Decimal(str(item_sku.weight_kg or 0)) * quantity})
             allocations = allocate_bill_line(line_amount=amount, basis=(basis if basis in {"volume", "weight", "quantity"} else "quantity"), items=allocation_items)
             for allocation in allocations:
                 sku_id = allocation["sku_id"]
                 self.db.add(LogisticsBillLineAllocation(
                     bill_line_id=row.line_id,
                     sku_id=sku_id,
+                    po_id=next(item["po_id"] for item in allocation_items if item["sku_id"] == sku_id),
                     allocated_quantity=next(item["quantity"] for item in allocation_items if item["sku_id"] == sku_id),
                     allocation_ratio=allocation["allocation_ratio"],
                     allocated_amount=allocation["allocated_amount"],
@@ -129,8 +183,12 @@ class ProductFinanceService:
     async def replace_bill_purchase_orders(self, bill: LogisticsBill, po_ids: list[str]) -> list[LogisticsBillPurchaseOrder]:
         if bill.status != "draft":
             raise ValueError("only draft logistics bills can be edited")
+        unique_po_ids = list(dict.fromkeys(po_ids))
+        existing_po_ids = set((await self.db.execute(select(POHeader.po_id).where(POHeader.po_id.in_(unique_po_ids)))).scalars())
+        if existing_po_ids != set(unique_po_ids):
+            raise ValueError("one or more purchase orders do not exist")
         await self.db.execute(delete(LogisticsBillPurchaseOrder).where(LogisticsBillPurchaseOrder.bill_id == bill.bill_id))
-        rows = [LogisticsBillPurchaseOrder(bill_id=bill.bill_id, po_id=po_id) for po_id in dict.fromkeys(po_ids)]
+        rows = [LogisticsBillPurchaseOrder(bill_id=bill.bill_id, po_id=po_id) for po_id in unique_po_ids]
         self.db.add_all(rows)
         await self.db.flush()
         return rows
@@ -188,6 +246,19 @@ class ProductFinanceService:
         return None
 
     async def find_confirmed_logistics_cost(self, sku_id: int, destination: str | None, transport_type: str | None) -> Decimal | None:
+        allocated = (
+            select(LogisticsBillLineAllocation)
+            .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
+            .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
+            .where(LogisticsBillLineAllocation.sku_id == sku_id, LogisticsBill.status == "confirmed")
+        )
+        if destination:
+            allocated = allocated.where(LogisticsBill.destination == destination)
+        if transport_type:
+            allocated = allocated.where(LogisticsBill.transport_type == transport_type)
+        allocation = (await self.db.execute(allocated.order_by(LogisticsBill.confirmed_at.desc()))).scalars().first()
+        if allocation is not None and allocation.allocated_quantity:
+            return Decimal(str(allocation.allocated_amount)) / Decimal(str(allocation.allocated_quantity))
         statement = (
             select(LogisticsBillLine)
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)

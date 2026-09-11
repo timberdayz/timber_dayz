@@ -17,6 +17,7 @@ from modules.core.db import (
     FeishuProjectionTask,
     LogisticsBill,
     LogisticsBillLine,
+    LogisticsBillLineAllocation,
     SkuProfitEstimate,
 )
 
@@ -133,6 +134,15 @@ class FeishuProjectionService:
                 )
             )
         ).scalars().first()
+        allocated_line = (
+            await self.db.execute(
+                select(LogisticsBillLineAllocation, LogisticsBillLine)
+                .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
+                .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
+                .where(LogisticsBillLineAllocation.sku_id == sku_id, LogisticsBill.status == "confirmed")
+                .order_by(LogisticsBill.confirmed_at.desc())
+            )
+        ).first()
         bill_line = (
             await self.db.execute(
                 select(LogisticsBillLine)
@@ -151,6 +161,17 @@ class FeishuProjectionService:
         volume = None
         if all(value is not None for value in (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)):
             volume = sku.package_length_cm * sku.package_width_cm * sku.package_height_cm / 1_000_000
+        if allocated_line is not None:
+            allocation, allocation_source = allocated_line
+            quantity = float(allocation.allocated_quantity or 0)
+            ratio = float(allocation.allocation_ratio or 0)
+            headhaul_cost = float(allocation_source.headhaul_cost or 0) * ratio / quantity if quantity else None
+            handling_cost = float(allocation_source.handling_cost or 0) * ratio / quantity if quantity else None
+            last_mile_cost = float(allocation_source.last_mile_cost or 0) * ratio / quantity if quantity else None
+        else:
+            headhaul_cost = float(bill_line.unit_headhaul_cost) if bill_line and bill_line.unit_headhaul_cost is not None else None
+            handling_cost = float(bill_line.unit_handling_cost) if bill_line and bill_line.unit_handling_cost is not None else None
+            last_mile_cost = float(bill_line.unit_last_mile_cost) if bill_line and bill_line.unit_last_mile_cost is not None else None
         return {
             "ERP SKU": sku.sku_key,
             "SPU": binding.spu if binding else "",
@@ -163,9 +184,9 @@ class FeishuProjectionService:
             "体积 m³": volume,
             "箱规": sku.units_per_carton,
             "默认采购成本 RMB": sku.default_purchase_cost,
-            "头程单位成本 RMB": float(bill_line.unit_headhaul_cost) if bill_line and bill_line.unit_headhaul_cost is not None else None,
-            "操作费单位成本 RMB": float(bill_line.unit_handling_cost) if bill_line and bill_line.unit_handling_cost is not None else None,
-            "尾程单位成本 RMB": float(bill_line.unit_last_mile_cost) if bill_line and bill_line.unit_last_mile_cost is not None else None,
+            "头程单位成本 RMB": headhaul_cost,
+            "操作费单位成本 RMB": handling_cost,
+            "尾程单位成本 RMB": last_mile_cost,
             "基准预计利润 RMB": float(estimate.estimated_contribution_profit) if estimate and estimate.estimated_contribution_profit is not None else None,
             "基准预计利润率": float(estimate.estimated_margin_rate) if estimate and estimate.estimated_margin_rate is not None else None,
             "采购成本来源": sku.purchase_cost_source or "",

@@ -12,6 +12,7 @@ def match_logistics_rule(
     destination: str | None,
     transport_type: str | None,
     cargo_class: str | None = None,
+    is_sensitive: bool | None = None,
     as_of: date | None = None,
 ) -> Mapping | None:
     """Select the most specific active rule for a shipment context."""
@@ -32,6 +33,8 @@ def match_logistics_rule(
             continue
         if rule.get("cargo_class") not in (None, cargo_class):
             continue
+        if is_sensitive is not None and rule.get("is_sensitive") not in (None, is_sensitive):
+            continue
         specificity = sum(
             value not in (None, "")
             for value in (
@@ -39,6 +42,7 @@ def match_logistics_rule(
                 rule.get("destination"),
                 rule.get("transport_type"),
                 rule.get("cargo_class"),
+                rule.get("is_sensitive") if is_sensitive is not None else None,
             )
         )
         effective_from = rule.get("effective_from") or date.min

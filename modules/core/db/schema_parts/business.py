@@ -250,6 +250,8 @@ class POLine(Base):
     currency = Column(String(8), nullable=False)
     line_amt = Column(Float, default=0.0)
     base_amt = Column(Float, default=0.0)  # CNY
+    purchase_cost_source = Column(String(64), nullable=True)
+    purchase_cost_confirmed_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -861,6 +863,7 @@ class LogisticsBillLineAllocation(Base):
     allocation_id = Column(Integer, primary_key=True, autoincrement=True)
     bill_line_id = Column(Integer, ForeignKey("finance.logistics_bill_lines.line_id", ondelete="CASCADE"), nullable=False)
     sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
+    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"), nullable=True)
     allocated_quantity = Column(Numeric(18, 3), nullable=True)
     allocation_ratio = Column(Numeric(12, 8), nullable=True)
     allocated_amount = Column(Numeric(18, 2), nullable=False, default=0)
