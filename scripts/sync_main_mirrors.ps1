@@ -6,16 +6,22 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$PSNativeCommandUseErrorActionPreference = $false
 
 function Invoke-Git {
     param([string[]]$Arguments)
 
-    $output = & git @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "git $($Arguments -join ' ') failed: $($output -join [Environment]::NewLine)"
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $output = & git @Arguments 2>$stderrPath
+        $exitCode = $LASTEXITCODE
+        $stderr = [System.IO.File]::ReadAllText($stderrPath)
+        if ($exitCode -ne 0) {
+            throw "git $($Arguments -join ' ') failed: $stderr"
+        }
+        return ($output -join [Environment]::NewLine).Trim()
+    } finally {
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
     }
-    return ($output -join [Environment]::NewLine).Trim()
 }
 
 function Get-GitValue {
