@@ -52,16 +52,38 @@ class SpuBulkItem(BaseModel):
     category_l2_code: Optional[str] = Field(default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
     biz_status: Optional[str] = Field(default=None, pattern=r"^(candidate|testing|promoted|retired)$")
     owner_user_id: Optional[int] = None
+    logistics_damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    return_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
     active: Optional[bool] = None
 
 
 class SpuBulkRequest(BaseModel):
     items: list[SpuBulkItem] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_single_spu_request_models(cls, value):
+        if not isinstance(value, dict):
+            return value
+        items = value.get("items")
+        if items is None:
+            return value
+        return {
+            **value,
+            "items": [
+                item.model_dump(exclude_unset=True)
+                if isinstance(item, BaseModel)
+                else item
+                for item in items
+            ],
+        }
+
 
 class SkuBulkItem(BaseModel):
     sku_id: Optional[int] = Field(default=None, gt=0)
     sku_key: str = Field(min_length=1, max_length=255)
+    spu: Optional[str] = Field(default=None, max_length=128, pattern=_CODE_PATTERN)
+    effective_from: Optional[date] = None
     erp_record_id: Optional[str] = None
     sku_name: Optional[str] = None
     specification: Optional[str] = None
@@ -74,10 +96,30 @@ class SkuBulkItem(BaseModel):
     purchase_cost_currency: Optional[str] = Field(default="CNY", min_length=3, max_length=8)
     purchase_cost_source: Optional[str] = Field(default=None, max_length=64)
     purchase_cost_confidence: Optional[str] = Field(default="low", pattern=r"^(low|medium|high)$")
+    expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
+    expected_storage_cost: Optional[float] = Field(default=None, ge=0)
 
 
 class SkuBulkRequest(BaseModel):
     items: list[SkuBulkItem] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_single_sku_request_models(cls, value):
+        if not isinstance(value, dict):
+            return value
+        items = value.get("items")
+        if items is None:
+            return value
+        return {
+            **value,
+            "items": [
+                item.model_dump(exclude_unset=True)
+                if isinstance(item, BaseModel)
+                else item
+                for item in items
+            ],
+        }
 
 
 class SpuCreateRequest(BaseModel):
@@ -90,6 +132,8 @@ class SpuCreateRequest(BaseModel):
     main_image_url: Optional[str] = None
     biz_status: str = Field(default="candidate", pattern=r"^(candidate|testing|promoted|retired)$")
     owner_user_id: Optional[int] = None
+    logistics_damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    return_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
 
 
 class SpuUpdateRequest(BaseModel):
@@ -101,6 +145,8 @@ class SpuUpdateRequest(BaseModel):
     main_image_url: Optional[str] = None
     biz_status: Optional[str] = Field(default=None, pattern=r"^(candidate|testing|promoted|retired)$")
     owner_user_id: Optional[int] = None
+    logistics_damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    return_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
     active: Optional[bool] = None
 
 
@@ -118,6 +164,8 @@ class SkuCreateRequest(BaseModel):
     purchase_cost_currency: str = Field(default="CNY", min_length=3, max_length=8)
     purchase_cost_source: Optional[str] = Field(default=None, max_length=64)
     purchase_cost_confidence: str = Field(default="low", pattern=r"^(low|medium|high)$")
+    expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
+    expected_storage_cost: Optional[float] = Field(default=None, ge=0)
 
 
 class SkuUpdateRequest(BaseModel):
@@ -132,6 +180,8 @@ class SkuUpdateRequest(BaseModel):
     purchase_cost_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
     purchase_cost_source: Optional[str] = Field(default=None, max_length=64)
     purchase_cost_confidence: Optional[str] = Field(default=None, pattern=r"^(low|medium|high)$")
+    expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
+    expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
 
 
@@ -167,6 +217,13 @@ class ProductCenterItem(BaseModel):
     purchase_cost_currency: Optional[str] = None
     purchase_cost_source: Optional[str] = None
     purchase_cost_confidence: Optional[str] = None
+    expected_logistics_cost: Optional[float] = None
+    expected_storage_cost: Optional[float] = None
+    logistics_damage_rate: Optional[float] = None
+    return_loss_rate: Optional[float] = None
+    actual_logistics_cost: Optional[float] = None
+    actual_storage_cost: Optional[float] = None
+    data_completeness: Optional[str] = None
     updated_at: Optional[datetime] = None
 
 
@@ -176,6 +233,12 @@ class ProductCenterListResponse(BaseModel):
     page_size: int
     total: int
     total_pages: int
+
+
+class BulkMutationResponse(BaseModel):
+    created: int
+    updated: int
+    items: list[ProductCenterItem]
 
 
 class ProductCenterBindingResponse(BaseModel):
@@ -254,10 +317,19 @@ class LogisticsBillSkuLineRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class LogisticsBillLineAllocationRequest(BaseModel):
+    """A single purchase-order SKU share of a provider statement row."""
+
+    sku_id: int = Field(gt=0)
+    po_id: Optional[str] = Field(default=None, max_length=64)
+    shipped_qty: float = Field(gt=0)
+
+
 class LogisticsBillLineRequest(BaseModel):
     """Provider statement row; supports one or many SKU allocations."""
 
     sku_ids: list[int] = Field(min_length=1)
+    allocations: list[LogisticsBillLineAllocationRequest] = Field(default_factory=list)
     po_id: Optional[str] = Field(default=None, max_length=64)
     shipped_qty: float = Field(default=0, ge=0)
     actual_total_weight_kg: Optional[float] = Field(default=None, ge=0)
@@ -265,6 +337,7 @@ class LogisticsBillLineRequest(BaseModel):
     billing_basis: str = Field(default="volume", pattern=r"^(volume|weight|quantity|fixed)$")
     billing_unit: Optional[str] = Field(default=None, max_length=32)
     billing_unit_rate: Optional[float] = Field(default=None, ge=0)
+    freight_unit_rate: Optional[float] = Field(default=None, ge=0)
     line_total_amount: float = Field(default=0, ge=0)
     is_sensitive: bool = False
     sensitive_surcharge: float = Field(default=0, ge=0)
@@ -272,6 +345,23 @@ class LogisticsBillLineRequest(BaseModel):
     handling_cost: float = Field(default=0, ge=0)
     last_mile_cost: float = Field(default=0, ge=0)
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def normalize_legacy_rate(self):
+        if self.billing_unit_rate is None and self.freight_unit_rate is not None:
+            self.billing_unit_rate = self.freight_unit_rate
+        return self
+
+    @model_validator(mode="after")
+    def validate_allocation_skus(self):
+        if not self.allocations:
+            return self
+        allocation_sku_ids = [item.sku_id for item in self.allocations]
+        if len(allocation_sku_ids) != len(set(allocation_sku_ids)):
+            raise ValueError("a statement row can contain a SKU only once")
+        if set(allocation_sku_ids) != set(self.sku_ids):
+            raise ValueError("allocation SKU IDs must match sku_ids")
+        return self
 
 
 class LogisticsBillLinesReplaceRequest(BaseModel):
@@ -288,6 +378,14 @@ class LogisticsBillLinesReplaceRequest(BaseModel):
 
 class LogisticsBillPurchaseOrdersReplaceRequest(BaseModel):
     po_ids: list[str] = Field(min_length=1)
+
+
+class PurchaseOrderLineCostSupplementRequest(BaseModel):
+    """Manual cost completion when an imported purchase order has no amount."""
+
+    unit_price: float = Field(ge=0)
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
+    purchase_cost_source: str = Field(default="manual", min_length=1, max_length=64)
 
 
 class LogisticsProviderRuleCreateRequest(BaseModel):
@@ -328,7 +426,7 @@ class ProfitPreviewRequest(BaseModel):
 
 
 class ProfitEstimateSaveRequest(ProfitPreviewRequest):
-    assumption_version: str = Field(min_length=1, max_length=64)
+    assumption_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class FeishuProjectionInitializeRequest(BaseModel):

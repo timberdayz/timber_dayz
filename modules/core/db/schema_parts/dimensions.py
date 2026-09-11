@@ -85,6 +85,32 @@ class DimProduct(Base):
     )
 
 
+class DimProductCategory(Base):
+    """Company-owned two-level product category contract."""
+
+    __tablename__ = "dim_product_categories"
+
+    category_code = Column(String(64), primary_key=True)
+    parent_category_code = Column(String(64), ForeignKey("core.dim_product_categories.category_code", ondelete="RESTRICT"), nullable=True)
+    level = Column(Integer, nullable=False)
+    name_zh = Column(String(128), nullable=False)
+    name_en = Column(String(128), nullable=True)
+    category_path = Column(String(512), nullable=True)
+    status = Column(String(16), nullable=False, default="active")
+    version = Column(String(32), nullable=False, default="v1")
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_dim_product_categories_parent_status", "parent_category_code", "status"),
+        Index("ix_dim_product_categories_level_status", "level", "status"),
+        {"schema": "core"},
+    )
+
+
 class DimSpu(Base):
     """Company-wide SPU master data maintained by business users."""
 
@@ -94,6 +120,11 @@ class DimSpu(Base):
     spu_name = Column(String(512), nullable=False)
     category_l1 = Column(String(128), nullable=True)
     category_l2 = Column(String(128), nullable=True)
+    # Stable company category codes. Legacy text columns remain for compatibility.
+    category_l1_code = Column(String(64), ForeignKey("core.dim_product_categories.category_code", ondelete="RESTRICT"), nullable=True)
+    category_l2_code = Column(String(64), ForeignKey("core.dim_product_categories.category_code", ondelete="RESTRICT"), nullable=True)
+    logistics_damage_rate = Column(Float, nullable=True)
+    return_loss_rate = Column(Float, nullable=True)
     main_image_url = Column(String(1024), nullable=True)
     biz_status = Column(String(32), nullable=False, default="candidate")
     owner_user_id = Column(Integer, nullable=True)
@@ -128,6 +159,8 @@ class DimErpSku(Base):
     purchase_cost_source = Column(String(64), nullable=True)
     purchase_cost_confidence = Column(String(16), nullable=False, default="low")
     purchase_cost_confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    expected_logistics_cost = Column(Float, nullable=True)
+    expected_storage_cost = Column(Float, nullable=True)
     status = Column(String(32), nullable=False, default="active")
     source_file_id = Column(Integer, nullable=True)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)

@@ -59,13 +59,14 @@ class FeishuProjectionService:
 
     async def enqueue_full_refresh(self, reason: str) -> int:
         count = 0
+        refresh_nonce = datetime.now(timezone.utc).isoformat()
         spus = (await self.db.execute(select(DimSpu).where(DimSpu.active.is_(True)))).scalars().all()
         skus = (await self.db.execute(select(DimErpSku).where(DimErpSku.status == "active"))).scalars().all()
         for spu in spus:
-            await self.enqueue("spu", spu.spu, {"reason": reason, "spu": spu.spu})
+            await self.enqueue("spu", spu.spu, {"reason": reason, "spu": spu.spu, "refresh_nonce": refresh_nonce})
             count += 1
         for sku in skus:
-            await self.enqueue("sku", str(sku.sku_id), {"reason": reason, "sku_id": sku.sku_id})
+            await self.enqueue("sku", str(sku.sku_id), {"reason": reason, "sku_id": sku.sku_id, "refresh_nonce": refresh_nonce})
             count += 1
         return count
 
@@ -134,6 +135,7 @@ class FeishuProjectionService:
                 )
             )
         ).scalars().first()
+        spu = await self.db.get(DimSpu, binding.spu) if binding else None
         allocated_line = (
             await self.db.execute(
                 select(LogisticsBillLineAllocation, LogisticsBillLine)
@@ -165,10 +167,12 @@ class FeishuProjectionService:
             allocation, allocation_source = allocated_line
             quantity = float(allocation.allocated_quantity or 0)
             ratio = float(allocation.allocation_ratio or 0)
+            actual_logistics_cost = float(allocation.allocated_amount or 0) / quantity if quantity else None
             headhaul_cost = float(allocation_source.headhaul_cost or 0) * ratio / quantity if quantity else None
             handling_cost = float(allocation_source.handling_cost or 0) * ratio / quantity if quantity else None
             last_mile_cost = float(allocation_source.last_mile_cost or 0) * ratio / quantity if quantity else None
         else:
+            actual_logistics_cost = float(bill_line.line_total_amount or 0) / float(bill_line.shipped_qty) if bill_line and bill_line.shipped_qty else None
             headhaul_cost = float(bill_line.unit_headhaul_cost) if bill_line and bill_line.unit_headhaul_cost is not None else None
             handling_cost = float(bill_line.unit_handling_cost) if bill_line and bill_line.unit_handling_cost is not None else None
             last_mile_cost = float(bill_line.unit_last_mile_cost) if bill_line and bill_line.unit_last_mile_cost is not None else None
@@ -184,6 +188,9 @@ class FeishuProjectionService:
             "体积 m³": volume,
             "箱规": sku.units_per_carton,
             "默认采购成本 RMB": sku.default_purchase_cost,
+            "预计物流成本 RMB": sku.expected_logistics_cost,
+            "预计仓储成本 RMB": sku.expected_storage_cost,
+            "实际物流成本 RMB": actual_logistics_cost,
             "头程单位成本 RMB": headhaul_cost,
             "操作费单位成本 RMB": handling_cost,
             "尾程单位成本 RMB": last_mile_cost,
@@ -191,6 +198,8 @@ class FeishuProjectionService:
             "基准预计利润率": float(estimate.estimated_margin_rate) if estimate and estimate.estimated_margin_rate is not None else None,
             "采购成本来源": sku.purchase_cost_source or "",
             "物流成本来源": estimate.logistics_cost_source if estimate else "",
+            "物流货损率": spu.logistics_damage_rate if spu else None,
+            "退货损失率": spu.return_loss_rate if spu else None,
             "数据完整度": estimate.cost_completeness if estimate else "incomplete",
             "更新时间": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -325,8 +334,10 @@ def _sku_table_fields() -> list[dict[str, Any]]:
         {"name": "ERP SKU", "type": "text"}, {"name": "SPU", "type": "text"},
         {"name": "商品名称", "type": "text"}, {"name": "规格", "type": "text"},
         _number("重量 kg", 3), _number("长 cm"), _number("宽 cm"), _number("高 cm"), _number("体积 m³", 4), _number("箱规", 0),
-        _number("默认采购成本 RMB"), _number("头程单位成本 RMB", 4), _number("操作费单位成本 RMB", 4), _number("尾程单位成本 RMB", 4),
+        _number("默认采购成本 RMB"), _number("预计物流成本 RMB", 4), _number("预计仓储成本 RMB", 4), _number("实际物流成本 RMB", 4),
+        _number("头程单位成本 RMB", 4), _number("操作费单位成本 RMB", 4), _number("尾程单位成本 RMB", 4),
         _number("基准预计利润 RMB"), _number("基准预计利润率", 4, True),
+        _number("物流货损率", 4, True), _number("退货损失率", 4, True),
         {"name": "采购成本来源", "type": "text"}, {"name": "物流成本来源", "type": "text"}, {"name": "数据完整度", "type": "text"},
         {"name": "更新时间", "type": "datetime", "style": {"format": "yyyy-MM-dd HH:mm"}},
     ]

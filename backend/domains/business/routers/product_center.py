@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 import os
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, text, update
@@ -18,11 +19,13 @@ from backend.schemas.product_center import (
     LogisticsBillCreateRequest,
     LogisticsBillLinesReplaceRequest,
     LogisticsBillPurchaseOrdersReplaceRequest,
+    PurchaseOrderLineCostSupplementRequest,
     LogisticsProviderRuleCreateRequest,
     LogisticsProviderRuleUpdateRequest,
     LogisticsBillUpdateRequest,
     LogisticsBillVoidRequest,
     ProductCenterBindingResponse,
+    BulkMutationResponse,
     ProductCategoryCreateRequest,
     ProductCategoryResponse,
     ProductCategoryUpdateRequest,
@@ -41,12 +44,14 @@ from backend.schemas.product_center import (
 )
 from modules.core.db import (
     BridgeSpuSku,
+    BridgeErpSkuKey,
     DimErpSku,
     DimSpu,
     ProductCostAssumptionProfile,
     SkuProfitEstimate,
     LogisticsBill,
     LogisticsBillLine,
+    LogisticsBillLineAllocation,
     LogisticsBillPurchaseOrder,
     LogisticsProviderRule,
     POHeader,
@@ -123,6 +128,35 @@ async def update_product_category(category_code: str, body: ProductCategoryUpdat
     return ProductCategoryResponse.model_validate(row)
 
 
+async def _apply_spu_category(db: AsyncSession, values: dict) -> dict:
+    """Resolve a selected secondary category into its stable parent and display names."""
+    category_l2_code = values.get("category_l2_code")
+    legacy_category_value = values.get("category_l2")
+    if not category_l2_code and isinstance(legacy_category_value, str):
+        if re.fullmatch(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*", legacy_category_value):
+            category_l2_code = legacy_category_value
+    if not category_l2_code:
+        return values
+
+    category_l2 = await db.get(DimProductCategory, category_l2_code)
+    if category_l2 is None or category_l2.level != 2 or category_l2.status != "active":
+        raise HTTPException(status_code=422, detail="category_l2_code must reference an active level 2 category")
+    category_l1 = await db.get(DimProductCategory, category_l2.parent_category_code)
+    if category_l1 is None or category_l1.level != 1 or category_l1.status != "active":
+        raise HTTPException(status_code=422, detail="category_l2_code must have an active level 1 parent")
+    requested_l1_code = values.get("category_l1_code")
+    if requested_l1_code and requested_l1_code != category_l1.category_code:
+        raise HTTPException(status_code=422, detail="category_l1_code must match the selected level 2 category")
+
+    return {
+        **values,
+        "category_l1_code": category_l1.category_code,
+        "category_l2_code": category_l2.category_code,
+        "category_l1": category_l1.name_zh,
+        "category_l2": category_l2.name_zh,
+    }
+
+
 async def _enqueue_spu_projection(db: AsyncSession, row: DimSpu) -> None:
     await FeishuProjectionService(db).enqueue(
         "spu",
@@ -181,7 +215,7 @@ async def list_spus(
 
 @router.post("/api/spus", response_model=ProductCenterItem, status_code=201)
 async def create_spu(body: SpuCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
-    row = DimSpu(**body.model_dump())
+    row = DimSpu(**(await _apply_spu_category(db, body.model_dump())))
     db.add(row)
     try:
         await db.flush()
@@ -200,7 +234,8 @@ async def update_spu(spu: str, body: SpuUpdateRequest, db: AsyncSession = Depend
     row = await db.get(DimSpu, spu)
     if row is None:
         raise HTTPException(status_code=404, detail="SPU not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    values = await _apply_spu_category(db, body.model_dump(exclude_unset=True))
+    for key, value in values.items():
         setattr(row, key, value)
     await _enqueue_spu_projection(db, row)
     await db.commit()
@@ -209,9 +244,50 @@ async def update_spu(spu: str, body: SpuUpdateRequest, db: AsyncSession = Depend
     return ProductCenterItem.model_validate(row)
 
 
+@router.post("/api/spus/bulk", response_model=BulkMutationResponse)
+async def bulk_save_spus(body: SpuBulkRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    requested_spus = [item.spu for item in body.items]
+    if len(requested_spus) != len(set(requested_spus)):
+        raise HTTPException(status_code=422, detail="bulk request cannot contain duplicate SPUs")
+
+    created = 0
+    updated = 0
+    rows: list[DimSpu] = []
+    try:
+        for item in body.items:
+            values = await _apply_spu_category(db, item.model_dump(exclude_unset=True))
+            row = await db.get(DimSpu, item.spu)
+            if row is None:
+                if not values.get("spu_name"):
+                    raise HTTPException(status_code=422, detail=f"spu_name is required when creating {item.spu}")
+                row = DimSpu(**values)
+                db.add(row)
+                created += 1
+            else:
+                for key, value in values.items():
+                    setattr(row, key, value)
+                updated += 1
+            rows.append(row)
+        await db.flush()
+        for row in rows:
+            await _enqueue_spu_projection(db, row)
+        await db.commit()
+        for row in rows:
+            await db.refresh(row)
+    except HTTPException:
+        await db.rollback()
+        raise
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="bulk SPU save conflicts with existing data") from exc
+    asyncio.create_task(trigger_pending_projection_delivery())
+    return BulkMutationResponse(created=created, updated=updated, items=[ProductCenterItem.model_validate(row) for row in rows])
+
+
 @router.get("/api/skus", response_model=ProductCenterListResponse)
 async def list_skus(
     keyword: str | None = Query(None),
+    spu: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
@@ -220,9 +296,49 @@ async def list_skus(
     if keyword:
         pattern = f"%{keyword}%"
         filters.append((DimErpSku.sku_key.ilike(pattern)) | (DimErpSku.sku_name.ilike(pattern)))
+    if spu:
+        filters.append(
+            DimErpSku.sku_id.in_(
+                select(BridgeSpuSku.sku_id).where(
+                    BridgeSpuSku.spu == spu,
+                    BridgeSpuSku.binding_status == "active",
+                    BridgeSpuSku.effective_to.is_(None),
+                )
+            )
+        )
     total = int((await db.execute(select(func.count()).select_from(DimErpSku).where(*filters))).scalar() or 0)
     rows = (await db.execute(select(DimErpSku).where(*filters).order_by(DimErpSku.sku_key).offset((page - 1) * page_size).limit(page_size))).scalars().all()
-    items = [ProductCenterItem.model_validate(row) for row in rows]
+    sku_ids = [row.sku_id for row in rows]
+    bindings = (await db.execute(select(BridgeSpuSku).where(BridgeSpuSku.sku_id.in_(sku_ids), BridgeSpuSku.binding_status == "active", BridgeSpuSku.effective_to.is_(None)))).scalars().all() if sku_ids else []
+    binding_by_sku = {row.sku_id: row for row in bindings}
+    spu_codes = [row.spu for row in bindings]
+    spu_rows = (await db.execute(select(DimSpu).where(DimSpu.spu.in_(spu_codes)))).scalars().all() if spu_codes else []
+    spu_by_code = {row.spu: row for row in spu_rows}
+    allocations = (await db.execute(
+        select(LogisticsBillLineAllocation, LogisticsBill.confirmed_at)
+        .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
+        .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
+        .where(LogisticsBillLineAllocation.sku_id.in_(sku_ids), LogisticsBill.status == "confirmed")
+        .order_by(LogisticsBill.confirmed_at.desc())
+    )).all() if sku_ids else []
+    actual_logistics: dict[int, float] = {}
+    for allocation, _confirmed_at in allocations:
+        if allocation.sku_id not in actual_logistics and allocation.allocated_quantity:
+            actual_logistics[allocation.sku_id] = float(allocation.allocated_amount / allocation.allocated_quantity)
+    items = []
+    for row in rows:
+        payload = ProductCenterItem.model_validate(row).model_dump()
+        binding = binding_by_sku.get(row.sku_id)
+        linked_spu = spu_by_code.get(binding.spu) if binding else None
+        payload.update({
+            "spu": binding.spu if binding else None,
+            "logistics_damage_rate": linked_spu.logistics_damage_rate if linked_spu else None,
+            "return_loss_rate": linked_spu.return_loss_rate if linked_spu else None,
+            "actual_logistics_cost": actual_logistics.get(row.sku_id),
+            "actual_storage_cost": None,
+            "data_completeness": "complete" if all(value is not None for value in (row.default_purchase_cost, row.expected_logistics_cost, row.expected_storage_cost, linked_spu.logistics_damage_rate if linked_spu else None, linked_spu.return_loss_rate if linked_spu else None)) else "partial",
+        })
+        items.append(ProductCenterItem(**payload))
     return ProductCenterListResponse(data=items, page=page, page_size=page_size, total=total, total_pages=(total + page_size - 1) // page_size)
 
 
@@ -254,6 +370,85 @@ async def update_sku(sku_id: int, body: SkuUpdateRequest, db: AsyncSession = Dep
     await db.refresh(row)
     asyncio.create_task(trigger_pending_projection_delivery())
     return ProductCenterItem.model_validate(row)
+
+
+async def _apply_bulk_sku_spu_binding(
+    db: AsyncSession, sku: DimErpSku, spu: str | None, effective_from: date | None
+) -> None:
+    if not spu:
+        return
+    if await db.get(DimSpu, spu) is None:
+        raise HTTPException(status_code=422, detail=f"SPU {spu} does not exist")
+
+    binding = (
+        await db.execute(
+            select(BridgeSpuSku).where(
+                BridgeSpuSku.sku_id == sku.sku_id,
+                BridgeSpuSku.effective_to.is_(None),
+                BridgeSpuSku.binding_status == "active",
+            )
+        )
+    ).scalars().first()
+    if binding is not None and binding.spu == spu:
+        return
+
+    starts_on = effective_from or date.today()
+    if binding is not None:
+        if starts_on <= binding.effective_from:
+            raise HTTPException(status_code=422, detail="effective_from must be later than the current SPU binding")
+        binding.effective_to = starts_on
+        binding.binding_status = "historical"
+    db.add(BridgeSpuSku(spu=spu, sku_id=sku.sku_id, effective_from=starts_on))
+
+
+@router.post("/api/skus/bulk", response_model=BulkMutationResponse)
+async def bulk_save_skus(body: SkuBulkRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    supplied_ids = [item.sku_id for item in body.items if item.sku_id is not None]
+    supplied_keys = [item.sku_key for item in body.items]
+    if len(supplied_ids) != len(set(supplied_ids)) or len(supplied_keys) != len(set(supplied_keys)):
+        raise HTTPException(status_code=422, detail="bulk request cannot contain duplicate SKU identifiers")
+
+    created = 0
+    updated = 0
+    rows: list[DimErpSku] = []
+    try:
+        for item in body.items:
+            values = item.model_dump(exclude_unset=True)
+            sku_id = values.pop("sku_id", None)
+            spu = values.pop("spu", None)
+            effective_from = values.pop("effective_from", None)
+            row = await db.get(DimErpSku, sku_id) if sku_id is not None else None
+            if sku_id is not None and row is None:
+                raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found")
+            if row is None and sku_id is None:
+                row = (
+                    await db.execute(select(DimErpSku).where(DimErpSku.sku_key == item.sku_key))
+                ).scalars().first()
+            if row is None:
+                row = DimErpSku(**values)
+                db.add(row)
+                await db.flush()
+                created += 1
+            else:
+                for key, value in values.items():
+                    setattr(row, key, value)
+                updated += 1
+            await _apply_bulk_sku_spu_binding(db, row, spu, effective_from)
+            rows.append(row)
+        await db.flush()
+        for row in rows:
+            await _enqueue_sku_projection(db, row)
+        await db.commit()
+        for row in rows:
+            await db.refresh(row)
+    except HTTPException:
+        await db.rollback()
+        raise
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="bulk SKU save conflicts with existing data") from exc
+    asyncio.create_task(trigger_pending_projection_delivery())
+    return BulkMutationResponse(created=created, updated=updated, items=[ProductCenterItem.model_validate(row) for row in rows])
 
 
 @router.get("/api/spus/{spu}/skus", response_model=list[ProductCenterBindingResponse])
@@ -306,13 +501,132 @@ async def list_purchase_orders(status: str | None = Query(None), keyword: str | 
     if keyword:
         statement = statement.where(POHeader.po_id.ilike(f"%{keyword}%"))
     rows = (await db.execute(statement.limit(500))).scalars().all()
-    return [{"po_id": row.po_id, "vendor_code": row.vendor_code, "po_date": row.po_date, "expected_date": row.expected_date, "currency": row.currency, "total_amt": row.total_amt, "status": row.status} for row in rows]
+    po_ids = [row.po_id for row in rows]
+    if not po_ids:
+        return []
+    warehouse_rows = (await db.execute(
+        select(GRNHeader.po_id, GRNHeader.warehouse)
+        .where(GRNHeader.po_id.in_(po_ids), GRNHeader.warehouse.is_not(None))
+        .distinct()
+    )).all()
+    warehouses_by_po: dict[str, list[str]] = {}
+    for related_po_id, warehouse in warehouse_rows:
+        warehouses_by_po.setdefault(related_po_id, []).append(warehouse)
+    line_rows = (await db.execute(
+        select(
+            POLine.po_id,
+            func.count(POLine.po_line_id),
+            func.coalesce(func.sum(POLine.qty_ordered), 0),
+            func.coalesce(func.sum(POLine.qty_received), 0),
+        )
+        .where(POLine.po_id.in_(po_ids))
+        .group_by(POLine.po_id)
+    )).all()
+    line_totals = {po_id: (count, ordered, received) for po_id, count, ordered, received in line_rows}
+    return [
+        {
+            "po_id": row.po_id,
+            "vendor_code": row.vendor_code,
+            "po_date": row.po_date,
+            "expected_date": row.expected_date,
+            "currency": row.currency,
+            "total_amt": row.total_amt,
+            "status": row.status,
+            "warehouses": warehouses_by_po.get(row.po_id, []),
+            "warehouse": ", ".join(warehouses_by_po.get(row.po_id, [])),
+            "sku_count": int(line_totals.get(row.po_id, (0, 0, 0))[0] or 0),
+            "qty_ordered": float(line_totals.get(row.po_id, (0, 0, 0))[1] or 0),
+            "qty_received": float(line_totals.get(row.po_id, (0, 0, 0))[2] or 0),
+            "po_no": row.po_id,
+            "received_qty": float(line_totals.get(row.po_id, (0, 0, 0))[2] or 0),
+        }
+        for row in rows
+    ]
 
 
 @router.get("/api/purchase-orders/{po_id}/lines")
 async def list_purchase_order_lines(po_id: str, db: AsyncSession = Depends(get_async_db)):
     rows = (await db.execute(select(POLine).where(POLine.po_id == po_id).order_by(POLine.line_number))).scalars().all()
-    return [{"po_line_id": row.po_line_id, "po_id": row.po_id, "line_number": row.line_number, "platform_sku": row.platform_sku, "product_title": row.product_title, "qty_ordered": row.qty_ordered, "qty_received": row.qty_received, "unit_price": row.unit_price, "currency": row.currency, "line_amt": row.line_amt} for row in rows]
+    source_keys = {row.platform_sku for row in rows if row.platform_sku}
+    canonical_sku_ids: dict[str, int] = {}
+    if source_keys:
+        direct_rows = (
+            await db.execute(
+                select(DimErpSku.sku_key, DimErpSku.sku_id).where(
+                    DimErpSku.sku_key.in_(source_keys)
+                )
+            )
+        ).all()
+        canonical_sku_ids.update({sku_key: sku_id for sku_key, sku_id in direct_rows})
+        alias_rows = (
+            await db.execute(
+                select(BridgeErpSkuKey.source_key, BridgeErpSkuKey.sku_id).where(
+                    BridgeErpSkuKey.source_key.in_(source_keys),
+                    BridgeErpSkuKey.active.is_(True),
+                    BridgeErpSkuKey.effective_to.is_(None),
+                )
+            )
+        ).all()
+        alias_candidates: dict[str, set[int]] = {}
+        for source_key, sku_id in alias_rows:
+            alias_candidates.setdefault(source_key, set()).add(sku_id)
+        for source_key, sku_ids in alias_candidates.items():
+            if source_key not in canonical_sku_ids and len(sku_ids) == 1:
+                canonical_sku_ids[source_key] = next(iter(sku_ids))
+    return [
+        {
+            "po_line_id": row.po_line_id,
+            "po_id": row.po_id,
+            "line_number": row.line_number,
+            "platform_sku": row.platform_sku,
+            "sku_id": canonical_sku_ids.get(row.platform_sku),
+            "product_title": row.product_title,
+            "qty_ordered": row.qty_ordered,
+            "qty_received": row.qty_received,
+            "unit_price": row.unit_price,
+            "currency": row.currency,
+            "line_amt": row.line_amt,
+            "purchase_cost_source": row.purchase_cost_source,
+            "purchase_cost_confirmed_at": row.purchase_cost_confirmed_at,
+        }
+        for row in rows
+    ]
+
+
+@router.patch("/api/purchase-orders/{po_id}/lines/{po_line_id}/purchase-cost")
+async def supplement_purchase_order_line_cost(po_id: str, po_line_id: int, body: PurchaseOrderLineCostSupplementRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    row = (await db.execute(select(POLine).where(POLine.po_id == po_id, POLine.po_line_id == po_line_id))).scalars().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="purchase order line not found")
+    row.unit_price = body.unit_price
+    row.line_amt = float(body.unit_price) * float(row.qty_ordered or 0)
+    if body.currency is not None:
+        row.currency = body.currency
+    row.purchase_cost_source = body.purchase_cost_source
+    row.purchase_cost_confirmed_at = datetime.now(timezone.utc)
+    canonical_sku = (
+        await db.execute(
+            select(DimErpSku)
+            .outerjoin(BridgeErpSkuKey, BridgeErpSkuKey.sku_id == DimErpSku.sku_id)
+            .where(
+                (DimErpSku.sku_key == row.platform_sku)
+                | (
+                    (BridgeErpSkuKey.source_key == row.platform_sku)
+                    & BridgeErpSkuKey.active.is_(True)
+                    & BridgeErpSkuKey.effective_to.is_(None)
+                )
+            )
+        )
+    ).scalars().first()
+    if canonical_sku is not None:
+        canonical_sku.default_purchase_cost = body.unit_price
+        canonical_sku.purchase_cost_currency = row.currency or canonical_sku.purchase_cost_currency
+        canonical_sku.purchase_cost_source = "purchase_order"
+        canonical_sku.purchase_cost_confirmed_at = row.purchase_cost_confirmed_at
+        await _enqueue_sku_projection(db, canonical_sku)
+    await db.commit()
+    await db.refresh(row)
+    return {"po_line_id": row.po_line_id, "unit_price": row.unit_price, "currency": row.currency, "line_amt": row.line_amt, "purchase_cost_source": row.purchase_cost_source, "purchase_cost_confirmed_at": row.purchase_cost_confirmed_at}
 
 
 @router.get("/api/purchase-orders/{po_id}")
@@ -330,9 +644,18 @@ def _serialize_provider_rule(row: LogisticsProviderRule) -> dict:
 @router.get("/api/logistics-provider-rules")
 async def list_logistics_provider_rules(provider: str | None = Query(None), destination: str | None = Query(None), transport_type: str | None = Query(None), as_of: date | None = Query(None), db: AsyncSession = Depends(get_async_db)):
     filters = [LogisticsProviderRule.status == "active"]
-    if provider: filters.append(LogisticsProviderRule.logistics_provider == provider)
-    if destination: filters.append((LogisticsProviderRule.destination == destination) | LogisticsProviderRule.destination.is_(None))
-    if transport_type: filters.append((LogisticsProviderRule.transport_type == transport_type) | LogisticsProviderRule.transport_type.is_(None))
+    if provider:
+        filters.append(LogisticsProviderRule.logistics_provider == provider)
+    if destination:
+        filters.append(
+            (LogisticsProviderRule.destination == destination)
+            | LogisticsProviderRule.destination.is_(None)
+        )
+    if transport_type:
+        filters.append(
+            (LogisticsProviderRule.transport_type == transport_type)
+            | LogisticsProviderRule.transport_type.is_(None)
+        )
     when = as_of or date.today()
     filters.extend([LogisticsProviderRule.effective_from <= when, (LogisticsProviderRule.effective_to.is_(None)) | (LogisticsProviderRule.effective_to >= when)])
     rows = (await db.execute(select(LogisticsProviderRule).where(*filters).order_by(LogisticsProviderRule.effective_from.desc()))).scalars().all()
@@ -351,8 +674,10 @@ async def create_logistics_provider_rule(body: LogisticsProviderRuleCreateReques
 @router.patch("/api/logistics-provider-rules/{rule_id}")
 async def update_logistics_provider_rule(rule_id: int, body: LogisticsProviderRuleUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     row = await db.get(LogisticsProviderRule, rule_id)
-    if row is None: raise HTTPException(status_code=404, detail="logistics provider rule not found")
-    for key, value in body.model_dump(exclude_unset=True).items(): setattr(row, key, value)
+    if row is None:
+        raise HTTPException(status_code=404, detail="logistics provider rule not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
     await db.commit()
     await db.refresh(row)
     return _serialize_provider_rule(row)
@@ -407,7 +732,7 @@ async def update_cost_assumption(profile_id: int, body: CostAssumptionUpdateRequ
     return {"profile_id": row.profile_id, "active": row.active, "updated_at": row.updated_at}
 
 
-def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None = None, purchase_orders: list[LogisticsBillPurchaseOrder] | None = None) -> dict:
+def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None = None, purchase_orders: list[LogisticsBillPurchaseOrder] | None = None, allocations_by_line: dict[int, list[LogisticsBillLineAllocation]] | None = None) -> dict:
     payload = {
         "bill_id": bill.bill_id,
         "bill_no": bill.bill_no,
@@ -446,6 +771,17 @@ def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None =
                 "unit_handling_cost": float(line.unit_handling_cost or 0),
                 "unit_last_mile_cost": float(line.unit_last_mile_cost or 0),
                 "notes": line.notes,
+                "allocations": [
+                    {
+                        "sku_id": allocation.sku_id,
+                        "po_id": allocation.po_id,
+                        "shipped_qty": float(allocation.allocated_quantity or 0),
+                        "allocation_ratio": float(allocation.allocation_ratio or 0),
+                        "allocated_amount": float(allocation.allocated_amount or 0),
+                        "allocation_basis": allocation.allocation_basis,
+                    }
+                    for allocation in (allocations_by_line or {}).get(line.line_id, [])
+                ],
             }
             for line in lines
         ]
@@ -463,6 +799,12 @@ async def list_logistics_bills(status: str | None = Query(None), db: AsyncSessio
     return [_serialize_bill(row) for row in rows]
 
 
+@router.get("/api/logistics-batches")
+async def list_logistics_batches(status: str | None = Query(None), db: AsyncSession = Depends(get_async_db)):
+    """Current product-center name for logistics bill batches."""
+    return await list_logistics_bills(status=status, db=db)
+
+
 @router.post("/api/logistics-bills", status_code=201)
 async def create_logistics_bill(body: LogisticsBillCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     row = LogisticsBill(**body.model_dump(), status="draft")
@@ -477,6 +819,11 @@ async def create_logistics_bill(body: LogisticsBillCreateRequest, db: AsyncSessi
     return _serialize_bill(row, [])
 
 
+@router.post("/api/logistics-batches", status_code=201)
+async def create_logistics_batch(body: LogisticsBillCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    return await create_logistics_bill(body=body, db=db, _user=_user)
+
+
 @router.get("/api/logistics-bills/{bill_id}")
 async def get_logistics_bill(bill_id: int, db: AsyncSession = Depends(get_async_db)):
     service = ProductFinanceService(db)
@@ -486,7 +833,16 @@ async def get_logistics_bill(bill_id: int, db: AsyncSession = Depends(get_async_
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     lines = (await db.execute(select(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill_id).order_by(LogisticsBillLine.line_no))).scalars().all()
     purchase_orders = (await db.execute(select(LogisticsBillPurchaseOrder).where(LogisticsBillPurchaseOrder.bill_id == bill_id))).scalars().all()
-    return _serialize_bill(bill, lines, purchase_orders)
+    allocations = (await db.execute(select(LogisticsBillLineAllocation).where(LogisticsBillLineAllocation.bill_line_id.in_([line.line_id for line in lines])))).scalars().all() if lines else []
+    allocations_by_line: dict[int, list[LogisticsBillLineAllocation]] = {}
+    for allocation in allocations:
+        allocations_by_line.setdefault(allocation.bill_line_id, []).append(allocation)
+    return _serialize_bill(bill, lines, purchase_orders, allocations_by_line)
+
+
+@router.get("/api/logistics-batches/{bill_id}")
+async def get_logistics_batch(bill_id: int, db: AsyncSession = Depends(get_async_db)):
+    return await get_logistics_bill(bill_id=bill_id, db=db)
 
 
 @router.put("/api/logistics-bills/{bill_id}/purchase-orders")
@@ -500,6 +856,11 @@ async def replace_logistics_bill_purchase_orders(bill_id: int, body: LogisticsBi
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return [{"id": row.id, "bill_id": row.bill_id, "po_id": row.po_id} for row in rows]
+
+
+@router.put("/api/logistics-batches/{bill_id}/purchase-orders")
+async def replace_logistics_batch_purchase_orders(bill_id: int, body: LogisticsBillPurchaseOrdersReplaceRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    return await replace_logistics_bill_purchase_orders(bill_id=bill_id, body=body, db=db, _user=_user)
 
 
 @router.patch("/api/logistics-bills/{bill_id}")
@@ -517,18 +878,32 @@ async def update_logistics_bill(bill_id: int, body: LogisticsBillUpdateRequest, 
     return _serialize_bill(bill)
 
 
+@router.patch("/api/logistics-batches/{bill_id}")
+async def update_logistics_batch(bill_id: int, body: LogisticsBillUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    return await update_logistics_bill(bill_id=bill_id, body=body, db=db, _user=_user)
+
+
 @router.put("/api/logistics-bills/{bill_id}/lines")
 async def replace_logistics_bill_lines(bill_id: int, body: LogisticsBillLinesReplaceRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     service = ProductFinanceService(db)
     try:
         bill = await service.get_bill_or_raise(bill_id)
-        lines = await service.replace_bill_lines(bill, [line.model_dump() for line in body.lines])
+        lines = await service.replace_bill_lines(bill, [line.model_dump(exclude_unset=True) for line in body.lines])
         await db.commit()
         asyncio.create_task(trigger_pending_projection_delivery())
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _serialize_bill(bill, lines)
+    allocations = (await db.execute(select(LogisticsBillLineAllocation).where(LogisticsBillLineAllocation.bill_line_id.in_([line.line_id for line in lines])))).scalars().all()
+    allocations_by_line: dict[int, list[LogisticsBillLineAllocation]] = {}
+    for allocation in allocations:
+        allocations_by_line.setdefault(allocation.bill_line_id, []).append(allocation)
+    return _serialize_bill(bill, lines, allocations_by_line=allocations_by_line)
+
+
+@router.put("/api/logistics-batches/{bill_id}/lines")
+async def replace_logistics_batch_lines(bill_id: int, body: LogisticsBillLinesReplaceRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    return await replace_logistics_bill_lines(bill_id=bill_id, body=body, db=db, _user=_user)
 
 
 @router.post("/api/logistics-bills/{bill_id}/confirm")
@@ -548,12 +923,18 @@ async def confirm_logistics_bill(bill_id: int, db: AsyncSession = Depends(get_as
     return _serialize_bill(bill)
 
 
+@router.post("/api/logistics-batches/{bill_id}/confirm")
+async def confirm_logistics_batch(bill_id: int, db: AsyncSession = Depends(get_async_db), current_user=Depends(_require_editor)):
+    return await confirm_logistics_bill(bill_id=bill_id, db=db, current_user=current_user)
+
+
 @router.post("/api/logistics-bills/{bill_id}/void")
 async def void_logistics_bill(bill_id: int, body: LogisticsBillVoidRequest, db: AsyncSession = Depends(get_async_db), current_user=Depends(_require_editor)):
     service = ProductFinanceService(db)
     try:
         bill = await service.get_bill_or_raise(bill_id)
         sku_ids = [sku_id for sku_id, in (await db.execute(select(LogisticsBillLine.sku_id).where(LogisticsBillLine.bill_id == bill_id, LogisticsBillLine.sku_id.is_not(None)))).all()]
+        sku_ids.extend(sku_id for sku_id, in (await db.execute(select(LogisticsBillLineAllocation.sku_id).join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id).where(LogisticsBillLine.bill_id == bill_id))).all())
         bill = await service.void_bill(bill, getattr(current_user, "user_id", None), body.reason)
         for sku_id in sku_ids:
             sku = await db.get(DimErpSku, sku_id)
@@ -565,6 +946,11 @@ async def void_logistics_bill(bill_id: int, body: LogisticsBillVoidRequest, db: 
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _serialize_bill(bill)
+
+
+@router.post("/api/logistics-batches/{bill_id}/void")
+async def void_logistics_batch(bill_id: int, body: LogisticsBillVoidRequest, db: AsyncSession = Depends(get_async_db), current_user=Depends(_require_editor)):
+    return await void_logistics_bill(bill_id=bill_id, body=body, db=db, current_user=current_user)
 
 
 @router.get("/api/product-profit-estimates")

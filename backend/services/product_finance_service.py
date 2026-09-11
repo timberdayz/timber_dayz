@@ -7,12 +7,16 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
+    BridgeSpuSku,
+    BridgeErpSkuKey,
     DimErpSku,
+    DimSpu,
     LogisticsBill,
     LogisticsBillLine,
     LogisticsBillLineAllocation,
     LogisticsBillPurchaseOrder,
     POHeader,
+    POLine,
     ProductCostAssumptionProfile,
     SkuProfitEstimate,
 )
@@ -46,6 +50,26 @@ class ProductFinanceService:
     async def replace_bill_lines(self, bill: LogisticsBill, lines: list[dict]) -> list[LogisticsBillLine]:
         if bill.status != "draft":
             raise ValueError("only draft logistics bills can be edited")
+        allowed_po_ids = set(
+            (
+                await self.db.execute(
+                    select(LogisticsBillPurchaseOrder.po_id).where(
+                        LogisticsBillPurchaseOrder.bill_id == bill.bill_id
+                    )
+                )
+            ).scalars()
+        )
+        referenced_po_ids = {
+            po_id
+            for line in lines
+            for po_id in [
+                line.get("po_id"),
+                *(item.get("po_id") for item in line.get("allocations", [])),
+            ]
+            if po_id
+        }
+        if referenced_po_ids - allowed_po_ids:
+            raise ValueError("all logistics line purchase orders must be linked to the batch")
         sku_ids = {
             sku_id
             for line in lines
@@ -273,45 +297,99 @@ class ProductFinanceService:
             return None
         return Decimal(str(line.line_total_amount)) / Decimal(str(line.shipped_qty))
 
+    async def find_latest_purchase_cost(self, sku: DimErpSku) -> Decimal | None:
+        row = (
+            await self.db.execute(
+                select(POLine.unit_price)
+                .join(POHeader, POHeader.po_id == POLine.po_id)
+                .where(
+                    POLine.platform_sku.in_(
+                        select(BridgeErpSkuKey.source_key).where(
+                            BridgeErpSkuKey.sku_id == sku.sku_id,
+                            BridgeErpSkuKey.active.is_(True),
+                            BridgeErpSkuKey.effective_to.is_(None),
+                        )
+                    )
+                    | (POLine.platform_sku == sku.sku_key),
+                    POLine.unit_price.is_not(None),
+                )
+                .order_by(POHeader.po_date.desc(), POLine.po_line_id.desc())
+            )
+        ).scalars().first()
+        return Decimal(str(row)) if row is not None else None
+
     async def preview_profit(self, data: dict) -> dict:
         sku = await self.db.get(DimErpSku, data["sku_id"])
         if sku is None:
             raise ValueError("SKU not found")
-        assumption = await self.find_active_assumption(data.get("destination"), data.get("transport_type"), date.today())
+        purchase_cost = await self.find_latest_purchase_cost(sku)
         confirmed_logistics = await self.find_confirmed_logistics_cost(sku.sku_id, data.get("destination"), data.get("transport_type"))
-        assumption_logistics = assumption.freight_unit_rate if assumption is not None else None
+        # Historical profiles are no longer a logistics or storage entry point,
+        # but remain the controlled source for platform fee rates.
+        assumption = await self.find_active_assumption(
+            data.get("destination"), data.get("transport_type"), date.today()
+        )
+        binding = (
+            await self.db.execute(
+                select(BridgeSpuSku).where(
+                    BridgeSpuSku.sku_id == sku.sku_id,
+                    BridgeSpuSku.binding_status == "active",
+                    BridgeSpuSku.effective_to.is_(None),
+                )
+            )
+        ).scalars().first()
+        spu = await self.db.get(DimSpu, binding.spu) if binding is not None else None
         result = build_baseline_profit(
             selling_price=data["selling_price"],
             coupon_amount=data.get("coupon_amount"),
-            default_purchase_cost=sku.default_purchase_cost,
+            default_purchase_cost=purchase_cost if purchase_cost is not None else sku.default_purchase_cost,
             confirmed_logistics_cost=confirmed_logistics,
-            assumption_logistics_cost=assumption_logistics,
-            storage_cost=assumption.storage_unit_rate if assumption is not None else None,
-            platform_fee_rate=assumption.platform_fee_rate if assumption is not None else None,
-            return_rate=assumption.return_rate if assumption is not None else None,
-            damage_rate=assumption.damage_rate if assumption is not None else None,
+            assumption_logistics_cost=sku.expected_logistics_cost,
+            storage_cost=sku.expected_storage_cost,
+            platform_fee_rate=assumption.platform_fee_rate if assumption else None,
+            return_rate=spu.return_loss_rate if spu is not None else None,
+            damage_rate=spu.logistics_damage_rate if spu is not None else None,
         )
         result.update({
             "sku_id": sku.sku_id,
             "assumption_profile_id": assumption.profile_id if assumption else None,
-            "assumption_version": f"profile-{assumption.profile_id}" if assumption else "manual-fallback",
+            "assumption_version": (
+                f"sku-master-{sku.updated_at.date().isoformat()}"
+                f";platform-profile-{assumption.profile_id}"
+                if sku.updated_at and assumption
+                else f"sku-master-{sku.updated_at.date().isoformat()}"
+                if sku.updated_at
+                else f"platform-profile-{assumption.profile_id}"
+                if assumption
+                else "sku-master"
+            ),
+            "spu_rate_version": f"spu-{spu.spu}-{spu.updated_at.date().isoformat()}" if spu is not None and spu.updated_at else None,
             "cost_completeness": "complete" if all(value is not None for value in (
-                sku.default_purchase_cost,
+                result.get("purchase_cost"),
                 result.get("logistics_cost"),
                 result.get("storage_cost"),
-                result.get("platform_fee"),
-                result.get("expected_return_loss"),
-                result.get("expected_damage_loss"),
+                assumption.platform_fee_rate if assumption is not None else None,
+                spu.logistics_damage_rate if spu is not None else None,
+                spu.return_loss_rate if spu is not None else None,
             )) else "partial",
-            "confidence_level": assumption.confidence_level if assumption else "low",
+            "confidence_level": sku.purchase_cost_confidence or "low",
         })
+        if purchase_cost is not None:
+            result["purchase_cost_source"] = "purchase_order"
+        if confirmed_logistics is None:
+            result["logistics_cost_source"] = (
+                "sku_expected_logistics" if sku.expected_logistics_cost is not None else "missing"
+            )
+        result["storage_cost_source"] = (
+            "sku_expected_storage" if sku.expected_storage_cost is not None else "missing"
+        )
         return result
 
     async def save_profit_estimate(self, data: dict) -> SkuProfitEstimate:
         preview = await self.preview_profit(data)
         row = SkuProfitEstimate(
             sku_id=preview["sku_id"],
-            assumption_version=data["assumption_version"],
+            assumption_version=data.get("assumption_version") or preview["assumption_version"],
             scenario="base",
             selling_price=data["selling_price"],
             coupon_amount=data.get("coupon_amount", 0),

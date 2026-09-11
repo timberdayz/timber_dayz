@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 
 from backend.services.feishu_projection_service import (
     FeishuProjectionService,
@@ -18,6 +19,16 @@ def test_projection_table_field_definitions_use_storage_keys():
     assert _spu_table_fields()[0] == {"name": "SPU", "type": "text"}
     assert _sku_table_fields()[0] == {"name": "ERP SKU", "type": "text"}
     assert all(field["type"] != "formula" for field in _spu_table_fields() + _sku_table_fields())
+
+
+def test_sku_projection_contract_carries_expected_and_actual_costs_and_spu_loss_rates():
+    source = Path("backend/services/feishu_projection_service.py").read_text(encoding="utf-8")
+
+    assert '"预计物流成本 RMB"' in source
+    assert '"预计仓储成本 RMB"' in source
+    assert '"实际物流成本 RMB"' in source
+    assert '"物流货损率"' in source
+    assert '"退货损失率"' in source
 
 
 def test_projection_attempt_marks_task_and_appends_delivery_log():
