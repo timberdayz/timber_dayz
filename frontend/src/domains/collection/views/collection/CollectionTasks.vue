@@ -40,6 +40,7 @@
           <el-checkbox label="inventory">库存</el-checkbox>
           <el-checkbox label="finance">财务</el-checkbox>
           <el-checkbox label="services">服务</el-checkbox>
+          <el-checkbox label="purchase">采购</el-checkbox>
         </el-checkbox-group>
 
         <div
@@ -1007,7 +1008,8 @@ const getPlatformTagType = (platform) => {
 const getDomainLabel = (domain) => {
   const labels = {
     orders: '订单', products: '产品', analytics: '流量',
-    finance: '财务', services: '服务', inventory: '库存'
+    finance: '财务', services: '服务', inventory: '库存',
+    purchase: '采购'
   }
   return labels[domain] || domain
 }

@@ -15,7 +15,8 @@ export const DEFAULT_DOMAIN_OPTIONS = [
   { label: '流量分析', value: 'analytics' },
   { label: '财务', value: 'finance' },
   { label: '服务', value: 'services' },
-  { label: '库存', value: 'inventory' }
+  { label: '库存', value: 'inventory' },
+  { label: '采购', value: 'purchase' }
 ]
 
 export const getSubtypeOptions = (domain) => DOMAIN_SUBTYPE_OPTIONS[domain] || []
