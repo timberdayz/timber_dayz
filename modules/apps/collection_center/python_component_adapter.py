@@ -53,6 +53,7 @@ DATA_DOMAIN_EXPORT_MAP = {
         "products": "MiaoshouExport",
         "warehouse": "MiaoshouExport",
         "inventory": "MiaoshouInventoryExport",
+        "purchase": "MiaoshouPurchaseExport",
         "analytics": "MiaoshouExport",
     },
 }
