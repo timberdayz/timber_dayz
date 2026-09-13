@@ -23,15 +23,15 @@ def test_purchase_export_searches_before_triggering_async_export():
 
 
 def test_purchase_export_triggers_export_via_expect_download_pattern():
-    """Mirrors orders/inventory: page.expect_download wraps the export-button click.
+    """Strict mirror of orders/inventory: page.expect_download wraps the export-button click.
 
     Regression test for production failures efd6f74e / 188176b7 / 9575d546 where
     navigating to /purchase/export_record and polling the table failed with
     ``get_by_text("导出记录") 15000ms timeout``.
 
-    New design asserts the call sequence:
+    New design asserts the strict call sequence (NO close_progress_dialog inside
+    expect_download context, matching orders_export_base / inventory_export):
       open_dropdown → click_export_all_results → expect_download → click_export_button_in_dialog
-      → close_progress_dialog (best-effort, inside expect_download context)
     """
     source = _source()
 
@@ -39,11 +39,20 @@ def test_purchase_export_triggers_export_via_expect_download_pattern():
     select_all_results = source.index("await self._click_export_all_results(page)")
     expect_download = source.index("async with page.expect_download(")
     click_export = source.index("await self._click_export_button_in_dialog(page)")
-    close_progress = source.index("await self._close_progress_dialog(page)")
 
-    # expect_download wraps both click_export_button_in_dialog AND close_progress_dialog
-    # (the close is best-effort inside the wait context, doesn't block the download).
-    assert open_dropdown < select_all_results < expect_download < click_export < close_progress
+    # Strict mirror of orders/inventory: expect_download wraps ONLY the click that
+    # triggers the export; no _close_progress_dialog or any other page interaction
+    # inside the context (download event is independent of UI state).
+    assert open_dropdown < select_all_results < expect_download < click_export
+
+    # _close_progress_dialog must not be called inside the expect_download block.
+    expect_block = source[expect_download:]
+    expect_end = expect_block.index("download = await dl_info.value")
+    inside_expect = expect_block[:expect_end]
+    assert "_close_progress_dialog" not in inside_expect, (
+        "_close_progress_dialog must NOT be called inside expect_download context "
+        "(mirror orders/inventory: download event fires independently of UI state)"
+    )
 
 
 def test_purchase_export_uses_miaoshou_date_picker_for_create_date():
