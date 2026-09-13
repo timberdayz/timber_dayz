@@ -28,6 +28,7 @@ class MiaoshouDatePicker(DatePickerComponent):
 
     async def _open(self, page: Any) -> None:
         trigger = None
+        # 第一优先：标准 combobox（"开始时间" / "结束时间"）—— orders 页面
         for name in ("开始时间", "结束时间"):
             try:
                 candidate = page.get_by_role("combobox", name=name).first
@@ -37,8 +38,22 @@ class MiaoshouDatePicker(DatePickerComponent):
             except Exception:
                 continue
         if trigger is None:
-            trigger = page.get_by_text("下单时间", exact=False).first
-            await trigger.click(timeout=1500)
+            # 第二优先：文本标签 —— 覆盖所有妙手已知数据域
+            # - "下单时间"：orders
+            # - "创建日期" / "创建时间"：purchase（采购单创建日期）
+            for name in ("下单时间", "创建日期", "创建时间"):
+                try:
+                    candidate = page.get_by_text(name, exact=False).first
+                    await candidate.click(timeout=1500)
+                    trigger = candidate
+                    break
+                except Exception:
+                    continue
+        if trigger is None:
+            raise RuntimeError(
+                "日期控件 trigger 不可用：未找到 '开始时间' / '结束时间' combobox "
+                "或 '下单时间' / '创建日期' / '创建时间' 文本标签"
+            )
         await self._wait_ready(page)
 
     async def _wait_ready(self, page: Any) -> None:
@@ -169,18 +184,37 @@ class MiaoshouDatePicker(DatePickerComponent):
         return any(part and part in normalized for part in variants)
 
     async def _wait_custom_range_applied(self, page: Any, date_range: MiaoshouCustomDateRange) -> None:
+        # 兼容妙手所有已知日期控件标签：
+        # - "开始时间" / "结束时间"：orders
+        # - "创建日期" / "创建时间"：purchase
+        start_names = ("开始时间", "创建日期")
+        end_names = ("结束时间", "创建时间")
         for _ in range(10):
-            start_value = await self._read_combobox_value(page, "开始时间")
-            end_value = await self._read_combobox_value(page, "结束时间")
-            if self._matches_expected_display(start_value, date_range.start_date, date_range.start_time) and self._matches_expected_display(
-                end_value, date_range.end_date, date_range.end_time
+            start_value = ""
+            end_value = ""
+            for name in start_names:
+                try:
+                    start_value = await self._read_combobox_value(page, name)
+                    if start_value:
+                        break
+                except Exception:
+                    continue
+            for name in end_names:
+                try:
+                    end_value = await self._read_combobox_value(page, name)
+                    if end_value:
+                        break
+                except Exception:
+                    continue
+            if (
+                self._matches_expected_display(start_value, date_range.start_date, date_range.start_time)
+                and self._matches_expected_display(end_value, date_range.end_date, date_range.end_time)
             ):
                 return
             try:
                 await page.wait_for_timeout(200)
             except Exception:
                 continue
-
         raise RuntimeError("自定义时间范围未正确应用")
 
     async def _click_confirm_if_visible(self, page: Any) -> None:
@@ -195,10 +229,16 @@ class MiaoshouDatePicker(DatePickerComponent):
         used_range_inputs = await self._type_range_inputs(page, date_range)
         if not used_range_inputs:
             await self._open(page)
-            await self._fill_input_by_name(page, "开始日期", date_range.start_date)
-            await self._fill_input_by_name(page, "开始时间", date_range.start_time)
-            await self._fill_input_by_name(page, "结束日期", date_range.end_date)
-            await self._fill_input_by_name(page, "结束时间", date_range.end_time)
+            # 兼容妙手所有已知日期标签：开始/结束 或 创建日期/创建时间
+            for start_name, end_name in (("开始日期", "结束日期"), ("创建日期", "结束日期")):
+                try:
+                    await self._fill_input_by_name(page, start_name, date_range.start_date)
+                    await self._fill_input_by_name(page, "开始时间", date_range.start_time)
+                    await self._fill_input_by_name(page, end_name, date_range.end_date)
+                    await self._fill_input_by_name(page, "结束时间", date_range.end_time)
+                    break
+                except Exception:
+                    continue
         await self._click_confirm_if_visible(page)
         await self._wait_custom_range_applied(page, date_range)
         return DatePickResult(success=True, message="ok", option=DateOption.YESTERDAY)

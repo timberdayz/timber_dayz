@@ -46,8 +46,8 @@ DATE_SHORTCUTS: Final[Tuple[str, ...]] = (
 )
 
 CUSTOM_DATE_INPUT_NAMES: Final[Tuple[str, ...]] = (
-    "开始时间",
-    "结束时间",
+    "创建日期",
+    "创建时间",
 )
 
 IMPORT_EXPORT_BUTTON_TEXT: Final[str] = "导入/导出"
