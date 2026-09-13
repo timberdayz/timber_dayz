@@ -60,10 +60,13 @@
 | `miaoshou/navigation` | 可测试 | 当前可作为轻量前置组件 |
 | `miaoshou/date_picker` | 可测试 | 可作为前置组件，但后续仍需真实页面收敛 |
 | `miaoshou/export` | 继续修 | 已修数据域口径、download await、count 判断、context download 清理，但 dropdown/dialog/iframe 复合链路仍最复杂 |
+| `miaoshou/inventory_export` | 可测试 | V2 canonical 独立精细类；warehouse_filters + 字段对话框；同步下载 |
+| `miaoshou/purchase_export` | 可测试 | V2 canonical 独立精细类；异步导出 + 字段对话框 + 导出记录轮询 |
 
 ### 不应作为默认维护对象
 - `modules/platforms/miaoshou/components/miaoshou_login.py`
-- `modules/platforms/miaoshou/components/*_config.py`
+- `modules/platforms/miaoshou/components/inventory_snapshot_export.py`
+- `modules/platforms/miaoshou/components/warehouse_config.py`
 - `modules/platforms/miaoshou/components/overlay_guard.py`
 
 ---

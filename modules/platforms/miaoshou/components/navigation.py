@@ -1,11 +1,33 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from modules.components.base import ExecutionContext
 from modules.components.navigation.base import NavigationComponent, NavigationResult, TargetPage
+from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
 from modules.platforms.miaoshou.components.orders_config import OrdersSelectors
-from modules.platforms.miaoshou.components.warehouse_config import WarehouseSelectors
+from modules.platforms.miaoshou.components.purchase_config import PurchaseSelectors
+
+DEFAULT_BASE_URL: str = "https://erp.91miaoshou.com"
+DEFAULT_DEEP_LINK_TEMPLATE: str = "/stat/profit_statistics/detail?platform={platform}"
+DEFAULT_WAREHOUSE_CHECKLIST_PATH: str = "/warehouse/checklist"
+DEFAULT_PURCHASE_PATH: str = "/purchase/goods"
+
+
+@dataclass(frozen=True)
+class _DefaultNavSelectors:
+    """Lightweight selectors used as the default for ``MiaoshouNavigation``.
+
+    This avoids a hard import on the legacy ``warehouse_config`` module while
+    preserving the navigation URL helpers needed by ``TargetPage.ORDERS``,
+    ``TargetPage.WAREHOUSE_CHECKLIST`` and ``TargetPage.PURCHASE``.
+    """
+
+    base_url: str = DEFAULT_BASE_URL
+    deep_link_template: str = DEFAULT_DEEP_LINK_TEMPLATE
+    checklist_path: str = DEFAULT_WAREHOUSE_CHECKLIST_PATH
+    purchase_path: str = DEFAULT_PURCHASE_PATH
 
 
 class MiaoshouNavigation(NavigationComponent):
@@ -16,10 +38,12 @@ class MiaoshouNavigation(NavigationComponent):
     def __init__(
         self,
         ctx: ExecutionContext,
-        selectors: OrdersSelectors | WarehouseSelectors | None = None,
+        selectors: (
+            OrdersSelectors | _DefaultNavSelectors | InventorySelectors | PurchaseSelectors | None
+        ) = None,
     ) -> None:
         super().__init__(ctx)
-        self.sel = selectors or WarehouseSelectors()
+        self.sel: Any = selectors or _DefaultNavSelectors()
 
     def _orders_detail_url(self, subtype: str) -> str:
         subtype_norm = (subtype or "shopee").strip().lower()
@@ -27,6 +51,11 @@ class MiaoshouNavigation(NavigationComponent):
 
     def _warehouse_checklist_url(self) -> str:
         return f"{self.sel.base_url}{self.sel.checklist_path}"
+
+    def _purchase_goods_url(self) -> str:
+        purchase_path = getattr(self.sel, "purchase_path", DEFAULT_PURCHASE_PATH)
+        base_url = getattr(self.sel, "base_url", DEFAULT_BASE_URL)
+        return f"{base_url}{purchase_path}"
 
     async def run(self, page: Any, target: TargetPage) -> NavigationResult:  # type: ignore[override]
         if target is TargetPage.ORDERS:
@@ -48,6 +77,16 @@ class MiaoshouNavigation(NavigationComponent):
                 timeout=60000,
             )
             await page.get_by_text("仓库清单", exact=False).first.wait_for(state="visible", timeout=15000)
+            await self.stabilize_safe_notices(page, label="post-navigation cleanup")
+            return NavigationResult(success=True, message="ok", url=str(getattr(page, "url", "") or ""))
+
+        if target is TargetPage.PURCHASE:
+            await page.goto(
+                self._purchase_goods_url(),
+                wait_until="domcontentloaded",
+                timeout=60000,
+            )
+            await page.get_by_text("采购单", exact=False).first.wait_for(state="visible", timeout=15000)
             await self.stabilize_safe_notices(page, label="post-navigation cleanup")
             return NavigationResult(success=True, message="ok", url=str(getattr(page, "url", "") or ""))
 

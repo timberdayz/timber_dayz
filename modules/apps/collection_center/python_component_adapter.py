@@ -52,7 +52,8 @@ DATA_DOMAIN_EXPORT_MAP = {
         "orders": "MiaoshouOrdersShopeeExport",
         "products": "MiaoshouExport",
         "warehouse": "MiaoshouExport",
-        "inventory": "MiaoshouInventorySnapshotExport",
+        "inventory": "MiaoshouInventoryExport",
+        "purchase": "MiaoshouPurchaseExport",
         "analytics": "MiaoshouExport",
     },
 }
@@ -281,10 +282,7 @@ class PythonComponentAdapter:
                 else:
                     export_class_name = "MiaoshouOrdersShopeeExport"
                     module_name = "orders_shopee_export"
-            elif self.platform == "miaoshou" and data_domain == "inventory":
-                export_class_name = "MiaoshouInventorySnapshotExport"
-                module_name = "inventory_snapshot_export"
-              
+
             if not export_class_name:
                 return AdapterResult(
                     success=False,

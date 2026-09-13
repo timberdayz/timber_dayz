@@ -14,6 +14,7 @@ class TargetPage(str, Enum):
     ORDERS = "orders"
     FINANCE = "finance"
     WAREHOUSE_CHECKLIST = "warehouse_checklist"
+    PURCHASE = "purchase"
 
 
 @dataclass
