@@ -55,6 +55,7 @@ def _default_capabilities_for(shop_type: str | None) -> dict[str, bool]:
         "analytics": True,
         "finance": True,
         "inventory": True,
+        "purchase": True,
     }
     if shop_type == "global":
         defaults["services"] = False

@@ -31,6 +31,7 @@ DEFAULT_CONFIG_DATA_DOMAINS: List[str] = [
     "finance",
     "services",
     "inventory",
+    "purchase",
 ]
 
 DEFAULT_GRANULARITY_DATE_RANGE_TYPE: Dict[str, str] = {
@@ -48,6 +49,7 @@ def get_default_shop_capabilities(shop_type: str | None) -> Dict[str, bool]:
         "analytics": True,
         "finance": True,
         "inventory": True,
+        "purchase": True,
     }
     if str(shop_type or "").strip().lower() == "global":
         defaults["services"] = False
