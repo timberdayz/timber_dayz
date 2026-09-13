@@ -427,6 +427,139 @@ class ProfitPreviewRequest(BaseModel):
     transport_type: Optional[str] = None
 
 
+class SkuOperatingProfileCreateRequest(BaseModel):
+    sku_id: int = Field(gt=0)
+    platform_code: str = Field(min_length=1, max_length=32)
+    shop_id: str = Field(min_length=1, max_length=256)
+    site_code: str = Field(min_length=1, max_length=64)
+    site_name: Optional[str] = Field(default=None, max_length=128)
+    warehouse_code: str = Field(min_length=1, max_length=128)
+    warehouse_name: Optional[str] = Field(default=None, max_length=256)
+    transport_type: Optional[str] = Field(default=None, max_length=64)
+    selling_price: Optional[float] = Field(default=None, ge=0)
+    default_coupon_amount: Optional[float] = Field(default=None, ge=0)
+    platform_fee_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
+    expected_storage_cost: Optional[float] = Field(default=None, ge=0)
+    status: str = Field(default="active", pattern=r"^(active|inactive)$")
+    effective_from: date = Field(default_factory=date.today)
+    effective_to: Optional[date] = None
+
+
+class SkuOperatingProfileUpdateRequest(BaseModel):
+    site_name: Optional[str] = Field(default=None, max_length=128)
+    warehouse_name: Optional[str] = Field(default=None, max_length=256)
+    transport_type: Optional[str] = Field(default=None, max_length=64)
+    selling_price: Optional[float] = Field(default=None, ge=0)
+    default_coupon_amount: Optional[float] = Field(default=None, ge=0)
+    platform_fee_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
+    expected_storage_cost: Optional[float] = Field(default=None, ge=0)
+    status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+
+
+class SkuOperatingProfileBulkRequest(BaseModel):
+    items: list[SkuOperatingProfileCreateRequest] = Field(default_factory=list)
+
+
+class SkuOperatingProfileResponse(SkuOperatingProfileCreateRequest):
+    profile_id: int
+    sku_key: Optional[str] = None
+    sku_name: Optional[str] = None
+    spu: Optional[str] = None
+    estimated_contribution_profit: Optional[float] = None
+    estimated_margin_rate: Optional[float] = None
+    purchase_cost: Optional[float] = None
+    actual_logistics_cost: Optional[float] = None
+    actual_storage_cost: Optional[float] = None
+    cost_completeness: Optional[str] = None
+    confidence_level: Optional[str] = None
+    latest_estimate_as_of: Optional[datetime] = None
+    latest_estimate_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SkuOperatingProfitRequest(BaseModel):
+    selling_price: Optional[float] = Field(default=None, ge=0)
+    coupon_amount: Optional[float] = Field(default=None, ge=0)
+    destination: Optional[str] = None
+    transport_type: Optional[str] = None
+    assumption_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
+
+class SkuOperatingPlatformOption(BaseModel):
+    platform_code: str
+    name: Optional[str] = None
+
+
+class SkuOperatingShopOption(BaseModel):
+    platform_code: str
+    shop_id: str
+    shop_name: Optional[str] = None
+
+
+class SkuOperatingSiteOption(BaseModel):
+    site_code: str
+    site_name: Optional[str] = None
+
+
+class SkuOperatingDimensionsResponse(BaseModel):
+    platforms: list[SkuOperatingPlatformOption]
+    shops: list[SkuOperatingShopOption]
+    sites: list[SkuOperatingSiteOption]
+    warehouses: list[str]
+
+
+class SkuOperatingProfitResponse(BaseModel):
+    sku_id: int
+    profile_id: int
+    platform_code: str
+    shop_id: str
+    site_code: str
+    warehouse_code: str
+    net_revenue: Optional[float] = None
+    purchase_cost: Optional[float] = None
+    logistics_cost: Optional[float] = None
+    storage_cost: Optional[float] = None
+    platform_fee: Optional[float] = None
+    expected_return_loss: Optional[float] = None
+    expected_damage_loss: Optional[float] = None
+    estimated_contribution_profit: Optional[float] = None
+    estimated_margin_rate: Optional[float] = None
+    logistics_cost_source: Optional[str] = None
+    storage_cost_source: Optional[str] = None
+    cost_completeness: Optional[str] = None
+    confidence_level: Optional[str] = None
+
+
+class SkuOperatingProfitSaveResponse(BaseModel):
+    estimate_id: int
+    profile_id: int
+    sku_id: int
+    estimated_contribution_profit: Optional[float] = None
+    estimated_margin_rate: Optional[float] = None
+
+
+class SkuOperatingProfitHistoryResponse(BaseModel):
+    estimate_id: int
+    profile_id: int
+    sku_id: int
+    platform_code: Optional[str] = None
+    shop_id: Optional[str] = None
+    site_code: Optional[str] = None
+    warehouse_code: Optional[str] = None
+    estimate_as_of: Optional[datetime] = None
+    estimated_contribution_profit: Optional[float] = None
+    estimated_margin_rate: Optional[float] = None
+    cost_completeness: str
+    confidence_level: str
+
+
 class ProfitEstimateSaveRequest(ProfitPreviewRequest):
     assumption_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
@@ -434,6 +567,7 @@ class ProfitEstimateSaveRequest(ProfitPreviewRequest):
 class FeishuProjectionInitializeRequest(BaseModel):
     spu_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
     sku_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    site_sku_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class ProfitEstimateCreateRequest(BaseModel):
