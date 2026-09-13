@@ -15,7 +15,7 @@ from backend.services.component_name_utils import build_component_name
 from backend.services.component_version_service import ComponentVersionService
 
 EXPORT_COMPONENT_ALIASES: dict[tuple[str, str, Optional[str]], tuple[str, ...]] = {
-    ("miaoshou", "inventory", None): ("miaoshou/inventory_snapshot_export",),
+    ("miaoshou", "inventory", None): ("miaoshou/inventory_export",),
 }
 
 

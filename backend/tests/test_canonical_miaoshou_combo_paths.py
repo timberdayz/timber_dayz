@@ -57,11 +57,12 @@ async def test_miaoshou_login_export_combo_uses_shared_context():
     assert export_result.file_path == "downloads/miaoshou/acc/shop/analytics/monthly/export.xlsx"
 
 
-def test_miaoshou_inventory_domain_routes_to_inventory_snapshot_export_component():
+def test_miaoshou_inventory_domain_routes_to_inventory_export_component():
     source = Path("modules/apps/collection_center/python_component_adapter.py").read_text(encoding="utf-8")
 
-    assert '"inventory": "MiaoshouInventorySnapshotExport"' in source
-    assert 'module_name = "inventory_snapshot_export"' in source
+    assert '"inventory": "MiaoshouInventoryExport"' in source
+    assert 'f"{data_domain}_export"' in source
+    assert Path("modules/platforms/miaoshou/components/inventory_export.py").exists()
 
 
 class _FakeInventoryExportResult:

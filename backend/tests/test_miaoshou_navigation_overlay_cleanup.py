@@ -2,9 +2,11 @@ import pytest
 
 from modules.components.base import ExecutionContext
 from modules.components.navigation.base import TargetPage
-from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
+from modules.platforms.miaoshou.components.navigation import (
+    MiaoshouNavigation,
+    _DefaultNavSelectors,
+)
 from modules.platforms.miaoshou.components.orders_config import OrdersSelectors
-from modules.platforms.miaoshou.components.warehouse_config import WarehouseSelectors
 
 
 class _WaitLocator:
@@ -42,7 +44,7 @@ def _ctx() -> ExecutionContext:
     ("target", "selectors"),
     [
         (TargetPage.ORDERS, OrdersSelectors()),
-        (TargetPage.WAREHOUSE_CHECKLIST, WarehouseSelectors()),
+        (TargetPage.WAREHOUSE_CHECKLIST, _DefaultNavSelectors()),
     ],
 )
 async def test_miaoshou_navigation_runs_post_navigation_stabilization(

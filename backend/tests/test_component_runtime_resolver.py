@@ -401,7 +401,7 @@ async def test_runtime_resolver_supports_miaoshou_inventory_snapshot_alias(compo
 
     relative_files = {
         "miaoshou/login": "modules/platforms/miaoshou/components/login.py",
-        "miaoshou/inventory_snapshot_export": "modules/platforms/miaoshou/components/inventory_snapshot_export.py",
+        "miaoshou/inventory_export": "modules/platforms/miaoshou/components/inventory_export.py",
     }
 
     for relative_path in relative_files.values():
@@ -430,8 +430,8 @@ async def test_runtime_resolver_supports_miaoshou_inventory_snapshot_alias(compo
         sub_domain=None,
     )
 
-    assert manifest.component_name == "miaoshou/inventory_snapshot_export"
-    assert manifest.file_path == relative_files["miaoshou/inventory_snapshot_export"]
+    assert manifest.component_name == "miaoshou/inventory_export"
+    assert manifest.file_path == relative_files["miaoshou/inventory_export"]
 
 
 @pytest.mark.asyncio

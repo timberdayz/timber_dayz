@@ -4,10 +4,12 @@
 
 ## 当前活跃组件
 
-当前已确认进入 V2 主链路的组件只有：
+当前已确认进入 V2 主链路的组件有：
 
 - `miaoshou/login`
 - `miaoshou/orders_export`
+- `miaoshou/inventory_export`
+- `miaoshou/purchase_export`
 
 这些组件具备以下特征：
 
@@ -41,6 +43,11 @@
 - `export.py`
 - `navigation.py`
 - `date_picker.py`
+
+当前已进入 `modules/platforms/miaoshou/archive/` 的第三批文件：
+
+- `inventory_snapshot_export.py`
+- `warehouse_config.py`
 
 当前已进入 `modules/platforms/shopee/archive/` 的第一批文件：
 

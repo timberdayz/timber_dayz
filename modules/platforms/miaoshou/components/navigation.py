@@ -1,11 +1,29 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Optional
 
 from modules.components.base import ExecutionContext
 from modules.components.navigation.base import NavigationComponent, NavigationResult, TargetPage
 from modules.platforms.miaoshou.components.orders_config import OrdersSelectors
-from modules.platforms.miaoshou.components.warehouse_config import WarehouseSelectors
+
+DEFAULT_BASE_URL: str = "https://erp.91miaoshou.com"
+DEFAULT_DEEP_LINK_TEMPLATE: str = "/stat/profit_statistics/detail?platform={platform}"
+DEFAULT_WAREHOUSE_CHECKLIST_PATH: str = "/warehouse/checklist"
+
+
+@dataclass(frozen=True)
+class _DefaultNavSelectors:
+    """Lightweight selectors used as the default for ``MiaoshouNavigation``.
+
+    This avoids a hard import on the legacy ``warehouse_config`` module while
+    preserving the navigation URL helpers needed by ``TargetPage.ORDERS`` and
+    ``TargetPage.WAREHOUSE_CHECKLIST``.
+    """
+
+    base_url: str = DEFAULT_BASE_URL
+    deep_link_template: str = DEFAULT_DEEP_LINK_TEMPLATE
+    checklist_path: str = DEFAULT_WAREHOUSE_CHECKLIST_PATH
 
 
 class MiaoshouNavigation(NavigationComponent):
@@ -16,10 +34,10 @@ class MiaoshouNavigation(NavigationComponent):
     def __init__(
         self,
         ctx: ExecutionContext,
-        selectors: OrdersSelectors | WarehouseSelectors | None = None,
+        selectors: OrdersSelectors | _DefaultNavSelectors | None = None,
     ) -> None:
         super().__init__(ctx)
-        self.sel = selectors or WarehouseSelectors()
+        self.sel: Any = selectors or _DefaultNavSelectors()
 
     def _orders_detail_url(self, subtype: str) -> str:
         subtype_norm = (subtype or "shopee").strip().lower()
