@@ -64,9 +64,12 @@ def resolve_shop_capabilities(
     if capabilities is None:
         return get_default_shop_capabilities(shop_type)
 
+    # DB capability 行可能缺少新增域（如 purchase），未知域回退到默认值
+    # 而非强制 False，避免下游 capability 过滤误杀新增域
+    defaults = get_default_shop_capabilities(shop_type)
     normalized: Dict[str, bool] = {}
     for domain in DEFAULT_CONFIG_DATA_DOMAINS:
-        normalized[domain] = bool(capabilities.get(domain, False))
+        normalized[domain] = bool(capabilities.get(domain, defaults[domain]))
     return normalized
 
 

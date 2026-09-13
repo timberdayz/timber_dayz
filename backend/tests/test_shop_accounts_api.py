@@ -161,6 +161,7 @@ async def test_create_shop_account_assigns_default_capabilities(shop_account_cli
         "analytics": True,
         "finance": True,
         "inventory": True,
+        "purchase": True,
     }
 
 
@@ -215,6 +216,7 @@ async def test_update_shop_account_persists_capabilities(shop_account_client):
         "analytics": True,
         "finance": False,
         "inventory": True,
+        "purchase": True,
     }
 
     list_response = await shop_account_client.get("/api/shop-accounts")
@@ -227,6 +229,7 @@ async def test_update_shop_account_persists_capabilities(shop_account_client):
         "analytics": True,
         "finance": False,
         "inventory": True,
+        "purchase": True,
     }
 
 
