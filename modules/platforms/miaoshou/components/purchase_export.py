@@ -64,8 +64,13 @@ class MiaoshouPurchaseExport(ExportComponent):
         await button.click(timeout=1500)
 
     async def _wait_search_results_ready(self, page: Any) -> None:
-        await page.get_by_text("采购单信息", exact=False).first.wait_for(state="visible", timeout=15000)
+        # 等搜索结果表格渲染（"商品信息" 是 row group header，miaoshou 改版后唯一
+        # 稳定的列标题信号；早期版本的"采购单信息"已被 miaoshou 移除）。
+        # 实测截图（purchase-04-results-ready.png）确认"商品信息"视觉存在。
         await page.get_by_text("商品信息", exact=False).first.wait_for(state="visible", timeout=15000)
+        # 等"导入/导出"按钮（与 inventory_export._wait_search_results_ready 设计一致，
+        # 确认搜索完成后后续 export 流程可点击）。
+        await page.get_by_role("button", name="导入/导出").first.wait_for(state="visible", timeout=15000)
 
     async def _open_import_export_dropdown(self, page: Any) -> None:
         button = page.get_by_role("button", name="导入/导出").first
