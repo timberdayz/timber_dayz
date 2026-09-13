@@ -25,7 +25,6 @@ from modules.components.export.base import ExportComponent, ExportMode, ExportRe
 from modules.components.navigation.base import TargetPage
 from modules.platforms.miaoshou.components.date_picker import MiaoshouCustomDateRange, MiaoshouDatePicker
 from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
-from modules.platforms.miaoshou.components.orders_config import OrdersSelectors
 from modules.platforms.miaoshou.components.purchase_config import PurchaseSelectors
 from modules.utils.path_sanitizer import build_filename
 
@@ -39,7 +38,7 @@ class MiaoshouPurchaseExport(ExportComponent):
         super().__init__(ctx)
         self.sel = selectors or PurchaseSelectors()
         self.navigation_component = MiaoshouNavigation(ctx, self.sel)
-        self.date_picker_component = MiaoshouDatePicker(ctx, OrdersSelectors())
+        self.date_picker_component = MiaoshouDatePicker(ctx, self.sel)
 
     async def _ensure_popup_closed(self, page: Any) -> None:
         for _ in range(self.sel.close_poll_max_rounds):

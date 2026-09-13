@@ -7,6 +7,7 @@ from typing import Any
 from modules.components.base import ExecutionContext
 from modules.components.date_picker.base import DateOption, DatePickResult, DatePickerComponent
 from modules.platforms.miaoshou.components.orders_config import OrdersSelectors
+from modules.platforms.miaoshou.components.purchase_config import PurchaseSelectors
 
 
 @dataclass(frozen=True)
@@ -22,9 +23,13 @@ class MiaoshouDatePicker(DatePickerComponent):
     component_type = "date_picker"
     data_domain = None
 
-    def __init__(self, ctx: ExecutionContext, selectors: OrdersSelectors | None = None) -> None:
+    def __init__(
+        self,
+        ctx: ExecutionContext,
+        selectors: OrdersSelectors | PurchaseSelectors | None = None,
+    ) -> None:
         super().__init__(ctx)
-        self.sel = selectors or OrdersSelectors()
+        self.sel: OrdersSelectors | PurchaseSelectors = selectors or OrdersSelectors()
 
     async def _open(self, page: Any) -> None:
         trigger = None
@@ -68,7 +73,10 @@ class MiaoshouDatePicker(DatePickerComponent):
                 continue
         if not shortcut_found:
             raise RuntimeError("日期快捷按钮不可见")
-        await page.get_by_role("button", name="确定").first.wait_for(state="visible", timeout=5000)
+        try:
+            await page.get_by_role("button", name="确定").first.wait_for(state="visible", timeout=3000)
+        except Exception:
+            pass
 
     async def _fill_input_by_name(self, page: Any, name: str, value: str) -> None:
         locator = page.get_by_role("textbox", name=name).first

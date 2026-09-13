@@ -117,3 +117,57 @@ async def test_date_picker_open_raises_when_no_known_trigger():
     dp = MiaoshouDatePicker(ctx=MagicMock(), selectors=OrdersSelectors())
     with pytest.raises(RuntimeError):
         await dp._open(page)
+
+
+@pytest.mark.asyncio
+async def test_date_picker_wait_ready_with_purchase_selectors_looks_for_90_day_not_60_day():
+    """_wait_ready() must iterate PurchaseSelectors.date_shortcuts, which include 近90天 (not 近60天).
+
+    Regression test for the bug at purchase_export.py:42 where OrdersSelectors was injected.
+    """
+    from modules.platforms.miaoshou.components.purchase_config import PurchaseSelectors
+    shortcut_calls: list[str] = []
+
+    def _resolve(role, name=None):
+        if role == "button":
+            shortcut_calls.append(name or "")
+            # _wait_ready() breaks on the first clickable shortcut. To force the
+            # loop to iterate through every candidate before matching, make every
+            # earlier shortcut raise and only the last one (近90天) succeed.
+            if name == "近90天":
+                return _clickable_locator()
+            return _missing_locator()
+        return _missing_locator()
+
+    page = MagicMock()
+    page.get_by_role = MagicMock(side_effect=_resolve)
+    page.wait_for_timeout = AsyncMock()
+    dp = MiaoshouDatePicker(ctx=MagicMock(), selectors=PurchaseSelectors())
+    await dp._wait_ready(page)
+    # Purchase shortcuts are 今天/昨天/近7天/近30天/近90天 — the loop must attempt 近90天, not 近60天.
+    assert "近90天" in shortcut_calls
+    assert "近60天" not in shortcut_calls
+
+
+@pytest.mark.asyncio
+async def test_date_picker_wait_ready_does_not_raise_when_confirm_button_missing():
+    """_wait_ready() must NOT raise if the date panel has no '确定' button.
+
+    Some miaoshou panels apply the selected range automatically when the
+    custom textboxes are filled, without an explicit confirm button.
+    """
+    page = MagicMock()
+
+    def _resolve(role, name=None):
+        if role == "button":
+            # Shortcuts return a clickable locator; the confirm button returns missing.
+            if name in ("今天", "昨天", "近7天", "近30天", "近90天"):
+                return _clickable_locator()
+            return _missing_locator()
+        return _missing_locator()
+
+    page.get_by_role = MagicMock(side_effect=_resolve)
+    page.wait_for_timeout = AsyncMock()
+    dp = MiaoshouDatePicker(ctx=MagicMock(), selectors=OrdersSelectors())
+    # Must not raise even though the "确定" button is missing.
+    await dp._wait_ready(page)
