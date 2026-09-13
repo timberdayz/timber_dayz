@@ -110,3 +110,56 @@ def test_miaoshou_purchase_export_injects_purchase_selectors_into_date_picker():
 
     component = MiaoshouPurchaseExport(_ctx())
     assert isinstance(component.date_picker_component.sel, PurchaseSelectors)
+
+
+def test_miaoshou_purchase_config_declares_default_tab_param_all():
+    """PurchaseSelectors.purchase_tab_param defaults to "all" — drives navigation URL.
+
+    miaoshou /purchase/goods 状态 tab 通过 ?tab={value} 切换（与 orders 用
+    ?platform= 表达 subtype 的哲学一致）。默认 "all" 对应"全部" tab，避免
+    依赖 UI click（purchase 状态 tab 用 role="label" 渲染，Playwright
+    actionability 检查会超时）。
+    """
+    selectors = PurchaseSelectors()
+    assert selectors.purchase_tab_param == "all"
+
+
+def test_miaoshou_purchase_navigation_url_includes_default_tab_param():
+    """MiaoshouNavigation._purchase_goods_url must include ?tab=all by default.
+
+    Regression test for the bug at purchase_export.py:_select_status_tab — it was
+    trying to click a label-role element which timed out. Replacing it with URL
+    parameter eliminates the click failure.
+    """
+    from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
+
+    nav = MiaoshouNavigation(_ctx())
+    url = nav._purchase_goods_url()
+    assert url == "https://erp.91miaoshou.com/purchase/goods?tab=all"
+    assert "tab=all" in url
+
+
+def test_miaoshou_purchase_navigation_url_respects_custom_tab_param():
+    """MiaoshouNavigation._purchase_goods_url respects selectors.purchase_tab_param."""
+    from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
+
+    selectors = PurchaseSelectors(purchase_tab_param="draft")
+    nav = MiaoshouNavigation(_ctx(), selectors)
+    url = nav._purchase_goods_url()
+    assert url == "https://erp.91miaoshou.com/purchase/goods?tab=draft"
+
+
+def test_miaoshou_purchase_export_source_does_not_call_select_status_tab():
+    """MiaoshouPurchaseExport.run must NOT call _select_status_tab.
+
+    Status tab is now controlled by navigation URL (?tab=...). Removing the
+    click-based _select_status_tab eliminates the role="label" click timeout.
+    """
+    import inspect
+
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    source = inspect.getsource(MiaoshouPurchaseExport.run)
+    # check for actual invocation (not just mention in comments/docstring)
+    assert "self._select_status_tab(" not in source
+    assert 'get_by_role("tab"' not in source

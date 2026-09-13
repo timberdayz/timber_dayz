@@ -136,6 +136,10 @@ class PurchaseSelectors:
     base_url: str = BASE_URL
     purchase_path: str = PURCHASE_GOODS_PATH
     export_record_path: str = PURCHASE_EXPORT_RECORD_PATH
+    # miaoshou /purchase/goods 状态 tab 通过 URL 参数切换（默认 "全部"）。
+    # 与 orders 的 subtype 用 URL 参数表达的哲学一致 —— 避免依赖 UI click
+    # （purchase 状态 tab 用 role="label" 渲染，Playwright actionability 检查会超时）。
+    purchase_tab_param: str = "all"
     status_tabs: Tuple[str, ...] = STATUS_TABS
     filter_field_names: Tuple[str, ...] = FILTER_FIELD_NAMES
     date_shortcuts: Tuple[str, ...] = DATE_SHORTCUTS

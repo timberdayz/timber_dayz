@@ -55,7 +55,10 @@ class MiaoshouNavigation(NavigationComponent):
     def _purchase_goods_url(self) -> str:
         purchase_path = getattr(self.sel, "purchase_path", DEFAULT_PURCHASE_PATH)
         base_url = getattr(self.sel, "base_url", DEFAULT_BASE_URL)
-        return f"{base_url}{purchase_path}"
+        # 默认用 URL 参数显式表达 "全部" tab，避免依赖 UI click。
+        # 对应 orders 用 ?platform=shopee 表达 subtype 的设计哲学。
+        tab_param = getattr(self.sel, "purchase_tab_param", "all")
+        return f"{base_url}{purchase_path}?tab={tab_param}"
 
     async def run(self, page: Any, target: TargetPage) -> NavigationResult:  # type: ignore[override]
         if target is TargetPage.ORDERS:
