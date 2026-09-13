@@ -138,4 +138,30 @@ export default {
   listSpuOperating(params = {}) {
     return api._get("/spu-operating", { params });
   },
+  listSkuOperatingDimensions() {
+    return api._get("/sku-operating-dimensions");
+  },
+  listSkuOperatingProfiles(params = {}) {
+    return api._get("/sku-operating-profiles", { params });
+  },
+  createSkuOperatingProfile(payload) {
+    return api._post("/sku-operating-profiles", payload);
+  },
+  updateSkuOperatingProfile(id, payload) {
+    return api._patch(`/sku-operating-profiles/${id}`, payload);
+  },
+  bulkSaveSkuOperatingProfiles(payload) {
+    return api._post("/sku-operating-profiles/bulk", payload);
+  },
+  previewSkuOperatingProfit(id, payload) {
+    return api._post(`/sku-operating-profiles/${id}/profit-preview`, payload);
+  },
+  saveSkuOperatingProfit(id, payload) {
+    return api._post(`/sku-operating-profiles/${id}/profit-estimates`, payload);
+  },
+  listSkuOperatingProfitHistory(id, params = {}) {
+    return api._get(`/sku-operating-profiles/${id}/profit-estimates`, {
+      params,
+    });
+  },
 };

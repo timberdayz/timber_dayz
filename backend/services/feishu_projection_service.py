@@ -19,6 +19,7 @@ from modules.core.db import (
     LogisticsBillLine,
     LogisticsBillLineAllocation,
     SkuProfitEstimate,
+    SkuOperatingProfile,
 )
 
 from .feishu_projection_client import FeishuProjectionClient
@@ -77,25 +78,32 @@ class FeishuProjectionService:
             )
         ).scalar_one_or_none()
 
-    async def set_initialized(self, spu_table_id: str, sku_table_id: str) -> FeishuProjectionConfig:
+    async def set_initialized(self, spu_table_id: str, sku_table_id: str, site_sku_table_id: str) -> FeishuProjectionConfig:
         config = await self.get_config()
         if config is None:
             config = FeishuProjectionConfig(provider_code="feishu")
             self.db.add(config)
         config.spu_table_id = spu_table_id
         config.sku_table_id = sku_table_id
+        config.site_sku_table_id = site_sku_table_id
         config.status = "ready"
         config.last_error = None
         config.initialized_at = datetime.now(timezone.utc)
         await self.db.flush()
         return config
 
-    async def initialize_tables(self, client: FeishuProjectionClient, spu_table_id: str | None = None, sku_table_id: str | None = None) -> FeishuProjectionConfig:
+    async def initialize_tables(self, client: FeishuProjectionClient, spu_table_id: str | None = None, sku_table_id: str | None = None, site_sku_table_id: str | None = None) -> FeishuProjectionConfig:
+        existing = await self.get_config()
+        spu_table_id = spu_table_id or (existing.spu_table_id if existing else None)
+        sku_table_id = sku_table_id or (existing.sku_table_id if existing else None)
+        site_sku_table_id = site_sku_table_id or (existing.site_sku_table_id if existing else None)
         if not spu_table_id:
             spu_table_id = await client.create_table("ERP-SPU经营", _spu_table_fields())
         if not sku_table_id:
             sku_table_id = await client.create_table("ERP-SKU经营明细", _sku_table_fields())
-        return await self.set_initialized(spu_table_id, sku_table_id)
+        if not site_sku_table_id:
+            site_sku_table_id = await client.create_table("ERP-站点SKU经营", _site_sku_table_fields())
+        return await self.set_initialized(spu_table_id, sku_table_id, site_sku_table_id)
 
     async def status(self) -> dict[str, Any]:
         config = await self.get_config()
@@ -109,6 +117,7 @@ class FeishuProjectionService:
             "configured": bool(config and config.status == "ready"),
             "spu_table_id": config.spu_table_id if config else None,
             "sku_table_id": config.sku_table_id if config else None,
+            "site_sku_table_id": config.site_sku_table_id if config else None,
             "status": config.status if config else "pending",
             "last_error": config.last_error if config else None,
             "tasks": {status: count for status, count in counts},
@@ -238,6 +247,57 @@ class FeishuProjectionService:
             "计算时间": (metrics["calculated_at"] or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S") if metrics else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
 
+    async def _site_sku_payload(self, profile_id: int) -> dict[str, Any]:
+        profile = await self.db.get(SkuOperatingProfile, profile_id)
+        if profile is None:
+            raise ValueError("SKU operating profile not found for projection")
+        sku = await self.db.get(DimErpSku, profile.sku_id)
+        estimate = (
+            await self.db.execute(
+                select(SkuProfitEstimate)
+                .where(SkuProfitEstimate.operating_profile_id == profile_id)
+                .order_by(SkuProfitEstimate.estimate_as_of.desc())
+            )
+        ).scalars().first()
+        binding = (
+            await self.db.execute(
+                select(BridgeSpuSku).where(
+                    BridgeSpuSku.sku_id == profile.sku_id,
+                    BridgeSpuSku.binding_status == "active",
+                    BridgeSpuSku.effective_to.is_(None),
+                )
+            )
+        ).scalars().first()
+        spu = await self.db.get(DimSpu, binding.spu) if binding else None
+        return {
+            "经营范围键": f"{profile.platform_code}+{profile.shop_id}+{profile.site_code}+{profile.warehouse_code}+{profile.sku_id}",
+            "幂等键说明": "platform_code + shop_id + site_code + warehouse_code + sku_id",
+            "平台": profile.platform_code,
+            "店铺": profile.shop_id,
+            "站点": profile.site_name or profile.site_code,
+            "收货仓库": profile.warehouse_name or profile.warehouse_code,
+            "ERP SKU": sku.sku_key if sku else str(profile.sku_id),
+            "SPU": binding.spu if binding else "",
+            "商品名称": sku.sku_name if sku else "",
+            "售价": profile.selling_price,
+            "优惠券": profile.default_coupon_amount,
+            "采购成本": estimate.purchase_cost if estimate else None,
+            "预计物流成本": profile.expected_logistics_cost,
+            "预计仓储成本": profile.expected_storage_cost,
+            "实际物流成本": estimate.logistics_cost if estimate and estimate.logistics_cost_source == "confirmed_logistics_bill" else None,
+            "实际仓储成本": None,
+            "预计贡献利润": estimate.estimated_contribution_profit if estimate else None,
+            "预计利润率": estimate.estimated_margin_rate if estimate else None,
+            "货损率": spu.logistics_damage_rate if spu else None,
+            "退货损失率": spu.return_loss_rate if spu else None,
+            "成本来源": estimate.logistics_cost_source if estimate else "",
+            "数据完整度": estimate.cost_completeness if estimate else "incomplete",
+            "置信度": estimate.confidence_level if estimate else "low",
+            "版本": estimate.assumption_version if estimate else "",
+            "估算时间": estimate.estimate_as_of if estimate else None,
+            "更新时间": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
     async def process_pending(self, limit: int = 50, client: FeishuProjectionClient | None = None) -> int:
         config = await self.get_config()
         if config is None or config.status != "ready" or not config.spu_table_id or not config.sku_table_id:
@@ -266,6 +326,11 @@ class FeishuProjectionService:
                 elif task.entity_type == "spu":
                     payload = await self._spu_payload(task.business_key)
                     await projection_client.upsert_record(config.spu_table_id, "SPU", payload["SPU"], payload)
+                elif task.entity_type == "site_sku":
+                    if not config.site_sku_table_id:
+                        raise RuntimeError("site_sku_table_id is not configured")
+                    payload = await self._site_sku_payload(int(task.business_key))
+                    await projection_client.upsert_record(config.site_sku_table_id, "经营范围键", payload["经营范围键"], payload)
                 else:
                     await self.record_attempt(task, "completed")
                     continue
@@ -340,4 +405,12 @@ def _sku_table_fields() -> list[dict[str, Any]]:
         _number("物流货损率", 4, True), _number("退货损失率", 4, True),
         {"name": "采购成本来源", "type": "text"}, {"name": "物流成本来源", "type": "text"}, {"name": "数据完整度", "type": "text"},
         {"name": "更新时间", "type": "datetime", "style": {"format": "yyyy-MM-dd HH:mm"}},
+    ]
+
+
+def _site_sku_table_fields() -> list[dict[str, Any]]:
+    return [
+        {"name": "经营范围键", "type": "text"}, {"name": "平台", "type": "text"}, {"name": "店铺", "type": "text"}, {"name": "站点", "type": "text"}, {"name": "收货仓库", "type": "text"}, {"name": "ERP SKU", "type": "text"}, {"name": "SPU", "type": "text"}, {"name": "商品名称", "type": "text"},
+        _number("售价"), _number("优惠券"), _number("采购成本"), _number("预计物流成本", 4), _number("预计仓储成本", 4), _number("实际物流成本", 4), _number("实际仓储成本", 4), _number("预计贡献利润"), _number("预计利润率", 4, True),
+        _number("货损率", 4, True), _number("退货损失率", 4, True), {"name": "成本来源", "type": "text"}, {"name": "数据完整度", "type": "text"}, {"name": "置信度", "type": "text"}, {"name": "版本", "type": "text"}, {"name": "估算时间", "type": "datetime", "style": {"format": "yyyy-MM-dd HH:mm"}}, {"name": "更新时间", "type": "datetime", "style": {"format": "yyyy-MM-dd HH:mm"}},
     ]

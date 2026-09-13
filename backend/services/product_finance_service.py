@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -17,7 +17,9 @@ from modules.core.db import (
     LogisticsBillPurchaseOrder,
     POHeader,
     POLine,
+    GRNHeader,
     ProductCostAssumptionProfile,
+    SkuOperatingProfile,
     SkuProfitEstimate,
 )
 
@@ -269,9 +271,12 @@ class ProductFinanceService:
                 return row
         return None
 
-    async def find_confirmed_logistics_cost(self, sku_id: int, destination: str | None, transport_type: str | None) -> Decimal | None:
+    async def find_confirmed_logistics_cost(self, sku_id: int, destination: str | None, transport_type: str | None, warehouse_code: str | None = None) -> Decimal | None:
         allocated = (
-            select(LogisticsBillLineAllocation)
+            select(
+                func.sum(LogisticsBillLineAllocation.allocated_amount),
+                func.sum(LogisticsBillLineAllocation.allocated_quantity),
+            )
             .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
             .where(LogisticsBillLineAllocation.sku_id == sku_id, LogisticsBill.status == "confirmed")
@@ -280,11 +285,13 @@ class ProductFinanceService:
             allocated = allocated.where(LogisticsBill.destination == destination)
         if transport_type:
             allocated = allocated.where(LogisticsBill.transport_type == transport_type)
-        allocation = (await self.db.execute(allocated.order_by(LogisticsBill.confirmed_at.desc()))).scalars().first()
-        if allocation is not None and allocation.allocated_quantity:
-            return Decimal(str(allocation.allocated_amount)) / Decimal(str(allocation.allocated_quantity))
+        if warehouse_code:
+            allocated = allocated.join(GRNHeader, GRNHeader.po_id == LogisticsBillLineAllocation.po_id).where(GRNHeader.warehouse == warehouse_code)
+        allocated_amount, allocated_quantity = (await self.db.execute(allocated)).one()
+        if allocated_quantity:
+            return Decimal(str(allocated_amount)) / Decimal(str(allocated_quantity))
         statement = (
-            select(LogisticsBillLine)
+            select(func.sum(LogisticsBillLine.line_total_amount), func.sum(LogisticsBillLine.shipped_qty))
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
             .where(LogisticsBillLine.sku_id == sku_id, LogisticsBill.status == "confirmed")
         )
@@ -292,10 +299,12 @@ class ProductFinanceService:
             statement = statement.where(LogisticsBill.destination == destination)
         if transport_type:
             statement = statement.where(LogisticsBill.transport_type == transport_type)
-        line = (await self.db.execute(statement.order_by(LogisticsBill.confirmed_at.desc()))).scalars().first()
-        if line is None or not line.shipped_qty:
+        if warehouse_code:
+            statement = statement.join(GRNHeader, GRNHeader.po_id == LogisticsBillLine.po_id).where(GRNHeader.warehouse == warehouse_code)
+        total_amount, total_quantity = (await self.db.execute(statement)).one()
+        if total_quantity is None or not total_quantity:
             return None
-        return Decimal(str(line.line_total_amount)) / Decimal(str(line.shipped_qty))
+        return Decimal(str(total_amount or 0)) / Decimal(str(total_quantity))
 
     async def find_latest_purchase_cost(self, sku: DimErpSku) -> Decimal | None:
         row = (
@@ -323,12 +332,13 @@ class ProductFinanceService:
         if sku is None:
             raise ValueError("SKU not found")
         purchase_cost = await self.find_latest_purchase_cost(sku)
-        confirmed_logistics = await self.find_confirmed_logistics_cost(sku.sku_id, data.get("destination"), data.get("transport_type"))
+        confirmed_logistics = await self.find_confirmed_logistics_cost(sku.sku_id, data.get("destination"), data.get("transport_type"), data.get("warehouse_code"))
         # Historical profiles are no longer a logistics or storage entry point,
         # but remain the controlled source for platform fee rates.
         assumption = await self.find_active_assumption(
             data.get("destination"), data.get("transport_type"), date.today()
         )
+        platform_fee_rate=assumption.platform_fee_rate if assumption else None
         binding = (
             await self.db.execute(
                 select(BridgeSpuSku).where(
@@ -344,9 +354,17 @@ class ProductFinanceService:
             coupon_amount=data.get("coupon_amount"),
             default_purchase_cost=purchase_cost if purchase_cost is not None else sku.default_purchase_cost,
             confirmed_logistics_cost=confirmed_logistics,
-            assumption_logistics_cost=sku.expected_logistics_cost,
-            storage_cost=sku.expected_storage_cost,
-            platform_fee_rate=assumption.platform_fee_rate if assumption else None,
+            assumption_logistics_cost=(
+                data.get("expected_logistics_cost")
+                if data.get("expected_logistics_cost") is not None
+                else sku.expected_logistics_cost
+            ),
+            storage_cost=(
+                data.get("expected_storage_cost")
+                if data.get("expected_storage_cost") is not None
+                else sku.expected_storage_cost
+            ),
+            platform_fee_rate=(data.get("platform_fee_rate") if data.get("platform_fee_rate") is not None else platform_fee_rate),
             return_rate=spu.return_loss_rate if spu is not None else None,
             damage_rate=spu.logistics_damage_rate if spu is not None else None,
         )
@@ -368,7 +386,7 @@ class ProductFinanceService:
                 result.get("purchase_cost"),
                 result.get("logistics_cost"),
                 result.get("storage_cost"),
-                assumption.platform_fee_rate if assumption is not None else None,
+                (data.get("platform_fee_rate") if data.get("platform_fee_rate") is not None else platform_fee_rate),
                 spu.logistics_damage_rate if spu is not None else None,
                 spu.return_loss_rate if spu is not None else None,
             )) else "partial",
@@ -378,12 +396,76 @@ class ProductFinanceService:
             result["purchase_cost_source"] = "purchase_order"
         if confirmed_logistics is None:
             result["logistics_cost_source"] = (
-                "sku_expected_logistics" if sku.expected_logistics_cost is not None else "missing"
+                "sku_operating_expected_logistics" if data.get("expected_logistics_cost") is not None else "sku_expected_logistics" if sku.expected_logistics_cost is not None else "missing"
             )
         result["storage_cost_source"] = (
-            "sku_expected_storage" if sku.expected_storage_cost is not None else "missing"
+            "sku_operating_expected_storage" if data.get("expected_storage_cost") is not None else "sku_expected_storage" if sku.expected_storage_cost is not None else "missing"
         )
         return result
+
+    async def get_operating_profile(self, profile_id: int) -> SkuOperatingProfile:
+        profile = await self.db.get(SkuOperatingProfile, profile_id)
+        if profile is None:
+            raise ValueError("SKU operating profile not found")
+        return profile
+
+    async def preview_operating_profit(self, profile_id: int, data: dict) -> dict:
+        profile = await self.get_operating_profile(profile_id)
+        sku_data = {
+            "sku_id": profile.sku_id,
+            "selling_price": data.get("selling_price") if data.get("selling_price") is not None else profile.selling_price,
+            "coupon_amount": data.get("coupon_amount") if data.get("coupon_amount") is not None else profile.default_coupon_amount,
+            "destination": data.get("destination") or profile.site_code,
+            "transport_type": data.get("transport_type") or profile.transport_type,
+            "warehouse_code": profile.warehouse_code,
+            "expected_logistics_cost": profile.expected_logistics_cost,
+            "expected_storage_cost": profile.expected_storage_cost,
+            "platform_fee_rate": profile.platform_fee_rate,
+        }
+        if sku_data["selling_price"] is None:
+            raise ValueError("selling_price is required for operating profile")
+        result = await self.preview_profit(sku_data)
+        result.update({
+            "profile_id": profile.profile_id,
+            "platform_code": profile.platform_code,
+            "shop_id": profile.shop_id,
+            "site_code": profile.site_code,
+            "warehouse_code": profile.warehouse_code,
+        })
+        return result
+
+    async def save_operating_profit(self, profile_id: int, data: dict) -> SkuProfitEstimate:
+        profile = await self.get_operating_profile(profile_id)
+        preview = await self.preview_operating_profit(profile_id, data)
+        row = SkuProfitEstimate(
+            sku_id=profile.sku_id,
+            operating_profile_id=profile.profile_id,
+            platform_code=profile.platform_code,
+            shop_id=profile.shop_id,
+            site_code=profile.site_code,
+            warehouse_code=profile.warehouse_code,
+            assumption_version=data.get("assumption_version") or preview["assumption_version"],
+            scenario="base",
+            selling_price=preview["net_revenue"] + Decimal(str(data.get("coupon_amount") or profile.default_coupon_amount or 0)),
+            coupon_amount=data.get("coupon_amount") if data.get("coupon_amount") is not None else profile.default_coupon_amount or 0,
+            purchase_cost=preview["purchase_cost"],
+            purchase_cost_source=preview["purchase_cost_source"],
+            logistics_cost=preview["logistics_cost"],
+            logistics_cost_source=preview["logistics_cost_source"],
+            storage_cost=preview["storage_cost"],
+            storage_cost_source=preview["storage_cost_source"],
+            platform_fee=preview["platform_fee"],
+            expected_return_loss=preview["expected_return_loss"],
+            expected_damage_loss=preview["expected_damage_loss"],
+            estimated_contribution_profit=preview["estimated_contribution_profit"],
+            estimated_margin_rate=preview["estimated_margin_rate"],
+            assumption_profile_id=preview["assumption_profile_id"],
+            cost_completeness=preview["cost_completeness"],
+            confidence_level=preview["confidence_level"],
+        )
+        self.db.add(row)
+        await self.db.flush()
+        return row
 
     async def save_profit_estimate(self, data: dict) -> SkuProfitEstimate:
         preview = await self.preview_profit(data)

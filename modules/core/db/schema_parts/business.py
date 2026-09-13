@@ -914,6 +914,11 @@ class SkuProfitEstimate(Base):
 
     estimate_id = Column(Integer, primary_key=True, autoincrement=True)
     sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
+    operating_profile_id = Column(Integer, ForeignKey("finance.sku_operating_profiles.profile_id", ondelete="SET NULL"), nullable=True)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(256), nullable=True)
+    site_code = Column(String(64), nullable=True)
+    warehouse_code = Column(String(128), nullable=True)
     estimate_as_of = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     assumption_version = Column(String(64), nullable=False)
     scenario = Column(String(32), nullable=False, default="base")
@@ -938,6 +943,50 @@ class SkuProfitEstimate(Base):
     __table_args__ = (
         CheckConstraint("scenario IN ('base', 'conservative', 'optimistic')", name="ck_sku_profit_estimate_scenario"),
         Index("ix_sku_profit_estimates_sku_time", "sku_id", "estimate_as_of"),
+        {"schema": "finance"},
+    )
+
+
+class SkuOperatingProfile(Base):
+    """Site/shop/warehouse-specific commercial settings for an ERP SKU."""
+
+    __tablename__ = "sku_operating_profiles"
+
+    profile_id = Column(Integer, primary_key=True, autoincrement=True)
+    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
+    platform_code = Column(String(32), ForeignKey("core.dim_platforms.platform_code", ondelete="RESTRICT"), nullable=False)
+    shop_id = Column(String(256), nullable=False)
+    site_code = Column(String(64), nullable=False)
+    site_name = Column(String(128), nullable=True)
+    warehouse_code = Column(String(128), nullable=False)
+    warehouse_name = Column(String(256), nullable=True)
+    transport_type = Column(String(64), nullable=True)
+    selling_price = Column(Numeric(18, 2), nullable=True)
+    default_coupon_amount = Column(Numeric(18, 2), nullable=True)
+    platform_fee_rate = Column(Numeric(12, 8), nullable=True)
+    expected_logistics_cost = Column(Numeric(18, 6), nullable=True)
+    expected_storage_cost = Column(Numeric(18, 6), nullable=True)
+    status = Column(String(16), nullable=False, default="active")
+    effective_from = Column(Date, nullable=False, server_default=func.current_date())
+    effective_to = Column(Date, nullable=True)
+    created_by = Column(Integer, nullable=True)
+    updated_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_sku_operating_profile_current",
+            "sku_id",
+            "platform_code",
+            "shop_id",
+            "site_code",
+            "warehouse_code",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL AND status = 'active'"),
+        ),
+        Index("ix_sku_operating_profile_scope", "platform_code", "shop_id", "site_code", "warehouse_code"),
+        Index("ix_sku_operating_profile_sku", "sku_id", "status"),
         {"schema": "finance"},
     )
 

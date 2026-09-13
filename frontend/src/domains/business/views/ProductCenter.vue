@@ -235,48 +235,11 @@
                 :min="1"
                 :controls="false"
                 size="small" /></template></el-table-column
-          ><el-table-column label="采购成本" width="110"
-            ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.default_purchase_cost"
-                :min="0"
-                :precision="2"
-                :controls="false"
-                size="small" /></template></el-table-column
-          ><el-table-column label="预计物流/件" width="120"
-            ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.expected_logistics_cost"
-                :min="0"
-                :precision="2"
-                :controls="false"
-                size="small" /></template></el-table-column
-          ><el-table-column label="预计仓储/件" width="120"
-            ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.expected_storage_cost"
-                :min="0"
-                :precision="2"
-                :controls="false"
-                size="small" /></template></el-table-column
-          ><el-table-column label="实际物流/件" width="110"
-            ><template #default="{ row }">{{
-              money(row.actual_logistics_cost)
-            }}</template></el-table-column
-          ><el-table-column label="实际仓储/件" width="110"
-            ><template #default="{ row }"
-              ><span class="muted">{{
-                row.actual_storage_cost == null
-                  ? "未录入"
-                  : money(row.actual_storage_cost)
-              }}</span></template
-            ></el-table-column
-          ><el-table-column label="货损/退货" width="120"
-            ><template #default="{ row }"
-              >{{ percent(row.logistics_damage_rate) }} /
-              {{ percent(row.return_loss_rate) }}</template
-            ></el-table-column
-          ><el-table-column label="完整度" width="90"
+          ><el-table-column
+            label="来源文件"
+            prop="source_file_id"
+            width="100"
+          /><el-table-column label="资料完整度" width="110"
             ><template #default="{ row }"
               ><el-tag
                 :type="
@@ -297,27 +260,227 @@
           @size-change="loadSkus"
         />
       </el-tab-pane>
-      <el-tab-pane label="成本与预计利润" name="cost"
+      <el-tab-pane label="站点 SKU 经营" name="operating">
+        <div class="toolbar">
+          <el-select
+            v-model="operatingQuery.platform_code"
+            clearable
+            filterable
+            placeholder="平台"
+            @change="loadOperatingProfiles"
+            ><el-option
+              v-for="item in operatingDimensions.platforms"
+              :key="item.platform_code"
+              :label="item.name || item.platform_code"
+              :value="item.platform_code"
+          /></el-select>
+          <el-select
+            v-model="operatingQuery.shop_id"
+            clearable
+            filterable
+            placeholder="店铺"
+            @change="loadOperatingProfiles"
+            ><el-option
+              v-for="item in operatingDimensions.shops.filter(
+                (shop) =>
+                  !operatingQuery.platform_code ||
+                  shop.platform_code === operatingQuery.platform_code,
+              )"
+              :key="`${item.platform_code}-${item.shop_id}`"
+              :label="item.shop_name || item.shop_id"
+              :value="item.shop_id"
+          /></el-select>
+          <el-select
+            v-model="operatingQuery.site_code"
+            clearable
+            filterable
+            placeholder="站点/国家"
+            @change="loadOperatingProfiles"
+            ><el-option
+              v-for="item in operatingDimensions.sites || []"
+              :key="item.site_code"
+              :label="item.site_name || item.site_code"
+              :value="item.site_code"
+          /></el-select>
+          <el-select
+            v-model="operatingQuery.warehouse_code"
+            clearable
+            filterable
+            placeholder="收货仓库"
+            @change="loadOperatingProfiles"
+            ><el-option
+              v-for="item in operatingDimensions.warehouses"
+              :key="item.warehouse_code || item"
+              :label="item.warehouse_name || item.warehouse_code || item"
+              :value="item.warehouse_code || item"
+          /></el-select>
+          <el-button type="primary" :icon="Plus" @click="addOperatingRow"
+            >新增行</el-button
+          >
+          <el-button
+            :icon="Check"
+            :disabled="!operatingDirty.length"
+            :loading="saving"
+            @click="saveOperatingRows"
+            >保存变更</el-button
+          >
+        </div>
+        <el-table
+          :data="operatingProfiles"
+          v-loading="loadingOperating"
+          stripe
+          border
+          class="flat-table operating-table"
+        >
+          <el-table-column label="平台" width="120"
+            ><template #default="{ row }"
+              ><el-select
+                v-model="row.platform_code"
+                filterable
+                size="small"
+                @change="markOperatingDirty(row)"
+                ><el-option
+                  v-for="item in operatingDimensions.platforms"
+                  :key="item.platform_code"
+                  :label="item.name || item.platform_code"
+                  :value="item.platform_code" /></el-select></template
+          ></el-table-column>
+          <el-table-column label="店铺" width="150"
+            ><template #default="{ row }"
+              ><el-select
+                v-model="row.shop_id"
+                filterable
+                size="small"
+                @change="markOperatingDirty(row)"
+                ><el-option
+                  v-for="item in operatingDimensions.shops.filter(
+                    (shop) =>
+                      !row.platform_code ||
+                      shop.platform_code === row.platform_code,
+                  )"
+                  :key="`${item.platform_code}-${item.shop_id}`"
+                  :label="item.shop_name || item.shop_id"
+                  :value="item.shop_id" /></el-select></template
+          ></el-table-column>
+          <el-table-column label="站点" width="130"
+            ><template #default="{ row }"
+              ><el-select
+                v-model="row.site_code"
+                filterable
+                size="small"
+                @change="markOperatingDirty(row)"
+                ><el-option
+                  v-for="item in operatingDimensions.sites || []"
+                  :key="item.site_code"
+                  :label="item.site_name || item.site_code"
+                  :value="item.site_code" /></el-select></template
+          ></el-table-column>
+          <el-table-column label="收货仓库" width="150"
+            ><template #default="{ row }"
+              ><el-select
+                v-model="row.warehouse_code"
+                filterable
+                size="small"
+                @change="markOperatingDirty(row)"
+                ><el-option
+                  v-for="item in operatingDimensions.warehouses"
+                  :key="item.warehouse_code || item"
+                  :label="item.warehouse_name || item.warehouse_code || item"
+                  :value="item.warehouse_code || item" /></el-select></template
+          ></el-table-column>
+          <el-table-column label="运输方式" width="110"><template #default="{ row }"><el-input v-model="row.transport_type" size="small" @change="markOperatingDirty(row)" /></template></el-table-column>
+          <el-table-column label="ERP SKU" width="150"
+            ><template #default="{ row }"
+              ><el-select
+                v-model="row.sku_id"
+                filterable
+                size="small"
+                @change="markOperatingDirty(row)"
+                ><el-option
+                  v-for="item in skus"
+                  :key="item.sku_id"
+                  :label="item.sku_key"
+                  :value="item.sku_id" /></el-select></template
+          ></el-table-column>
+          <el-table-column label="售价" width="110"
+            ><template #default="{ row }"
+              ><el-input-number
+                v-model="row.selling_price"
+                :min="0"
+                :controls="false"
+                size="small"
+                @change="markOperatingDirty(row)" /></template
+          ></el-table-column>
+          <el-table-column label="优惠券" width="110"
+            ><template #default="{ row }"
+              ><el-input-number
+                v-model="row.default_coupon_amount"
+                :min="0"
+                :controls="false"
+                size="small"
+                @change="markOperatingDirty(row)" /></template
+          ></el-table-column>
+          <el-table-column label="采购成本" width="110"
+            ><template #default="{ row }">{{
+              money(row.purchase_cost)
+            }}</template></el-table-column
+          >
+          <el-table-column label="预计物流" width="120"
+            ><template #default="{ row }"
+              ><el-input-number
+                v-model="row.expected_logistics_cost"
+                :min="0"
+                :precision="2"
+                :controls="false"
+                size="small"
+                @change="markOperatingDirty(row)" /></template
+          ></el-table-column>
+          <el-table-column label="预计仓储" width="120"
+            ><template #default="{ row }"
+              ><el-input-number
+                v-model="row.expected_storage_cost"
+                :min="0"
+                :precision="2"
+                :controls="false"
+                size="small"
+                @change="markOperatingDirty(row)" /></template
+          ></el-table-column>
+          <el-table-column label="实际物流" width="110"
+            ><template #default="{ row }">{{
+              money(row.actual_logistics_cost)
+            }}</template></el-table-column
+          >
+          <el-table-column label="实际仓储" width="110"
+            ><template #default="{ row }">{{
+              row.actual_storage_cost == null
+                ? "未录入"
+                : money(row.actual_storage_cost)
+            }}</template></el-table-column
+          >
+          <el-table-column label="预计利润" width="120"
+            ><template #default="{ row }">{{
+              money(row.estimated_contribution_profit)
+            }}</template></el-table-column
+          >
+          <el-table-column label="利润率" width="100"
+            ><template #default="{ row }">{{
+              percent(row.estimated_margin_rate)
+            }}</template></el-table-column
+          >
+          <el-table-column prop="cost_completeness" label="完整度" width="90" />
+          <el-table-column label="操作" width="180" fixed="right"
+            ><template #default="{ row }"
+              ><el-button link type="primary" @click="openOperatingProfit(row)"
+                >计算利润</el-button
+              ><el-button link @click="showOperatingHistory(row)"
+                >历史版本</el-button
+              ></template
+            ></el-table-column
+          >
+        </el-table>
+      </el-tab-pane>
+      <el-tab-pane label="物流仓储管理" name="logistics"
         ><el-tabs v-model="costTab" class="cost-tabs"
-          ><el-tab-pane label="SKU 成本资料" name="sku-cost"
-            ><el-table :data="skus" stripe border
-              ><el-table-column prop="sku_key" label="SKU" /><el-table-column
-                prop="default_purchase_cost"
-                label="采购成本" /><el-table-column
-                prop="expected_logistics_cost"
-                label="预计物流/件" /><el-table-column
-                prop="expected_storage_cost"
-                label="预计仓储/件" /><el-table-column
-                prop="actual_logistics_cost"
-                label="实际物流/件" /><el-table-column label="实际仓储/件"
-                ><template #default="{ row }">{{
-                  row.actual_storage_cost == null
-                    ? "未录入"
-                    : money(row.actual_storage_cost)
-                }}</template></el-table-column
-              ><el-table-column
-                prop="purchase_cost_source"
-                label="采购成本来源" /></el-table></el-tab-pane
           ><el-tab-pane label="物流服务商规则" name="rules"
             ><div class="toolbar">
               <el-button type="primary" :icon="Plus" @click="addRuleRow"
@@ -425,27 +588,9 @@
                 ></el-table-column
               ></el-table
             ></el-tab-pane
-          ><el-tab-pane label="基准预计利润" name="profit"
-            ><div class="toolbar">
-              <el-button type="primary" :icon="Plus" @click="openProfitDialog"
-                >新建基准估算</el-button
-              >
-            </div>
-            <el-table :data="profitEstimates" stripe border
-              ><el-table-column prop="sku_id" label="SKU" /><el-table-column
-                prop="selling_price"
-                label="售价" /><el-table-column
-                prop="estimated_contribution_profit"
-                label="预计贡献利润" /><el-table-column label="预计利润率"
-                ><template #default="{ row }">{{
-                  percent(row.estimated_margin_rate)
-                }}</template></el-table-column
-              ><el-table-column
-                prop="cost_completeness"
-                label="完整度" /><el-table-column
-                prop="assumption_version"
-                label="版本" /></el-table></el-tab-pane></el-tabs
-      ></el-tab-pane>
+          ></el-tabs
+        ></el-tab-pane
+      >
     </el-tabs>
     <el-drawer
       v-model="batchDrawer.visible"
@@ -637,49 +782,91 @@
           prop="binding_status"
           label="状态" /></el-table
     ></el-drawer>
-    <el-dialog v-model="profitDialog.visible" title="基准预计利润" width="560px"
-      ><el-form :model="profitDialog.form" label-width="110px"
-        ><el-form-item label="SKU ID"
+    <el-drawer
+      v-model="operatingProfitDrawer.visible"
+      title="站点 SKU 利润试算"
+      size="560px"
+    >
+      <el-form :model="operatingProfitDrawer.form" label-width="110px">
+        <el-form-item label="SKU / 经营范围"
+          ><span>{{ operatingProfitDrawer.label }}</span></el-form-item
+        >
+        <el-form-item label="售价"
           ><el-input-number
-            v-model="profitDialog.form.sku_id"
-            :min="1" /></el-form-item
-        ><el-form-item label="售价"
-          ><el-input-number
-            v-model="profitDialog.form.selling_price"
+            v-model="operatingProfitDrawer.form.selling_price"
             :min="0"
-            :precision="2" /></el-form-item
-        ><el-form-item label="优惠券"
+            :precision="2"
+            :controls="false"
+        /></el-form-item>
+        <el-form-item label="优惠券"
           ><el-input-number
-            v-model="profitDialog.form.coupon_amount"
+            v-model="operatingProfitDrawer.form.coupon_amount"
             :min="0"
-            :precision="2" /></el-form-item
-        ><el-form-item label="目的地"
-          ><el-input v-model="profitDialog.form.destination" /></el-form-item
-        ><el-form-item label="运输方式"
-          ><el-input
-            v-model="
-              profitDialog.form.transport_type
-            " /></el-form-item></el-form
-      ><el-descriptions v-if="profitDialog.preview" :column="2" border
-        ><el-descriptions-item label="采购成本">{{
-          money(profitDialog.preview.purchase_cost)
-        }}</el-descriptions-item
-        ><el-descriptions-item label="物流成本">{{
-          money(profitDialog.preview.logistics_cost)
-        }}</el-descriptions-item
-        ><el-descriptions-item label="预计贡献利润">{{
-          money(profitDialog.preview.estimated_contribution_profit)
-        }}</el-descriptions-item
-        ><el-descriptions-item label="预计利润率">{{
-          percent(profitDialog.preview.estimated_margin_rate)
-        }}</el-descriptions-item></el-descriptions
-      ><template #footer
-        ><el-button @click="previewProfit">预览</el-button
-        ><el-button type="primary" @click="saveProfit"
+            :precision="2"
+            :controls="false"
+        /></el-form-item>
+        <el-form-item label="运输方式"
+          ><el-input v-model="operatingProfitDrawer.form.transport_type"
+        /></el-form-item>
+      </el-form>
+      <el-descriptions v-if="operatingProfitDrawer.preview" :column="2" border>
+        <el-descriptions-item label="净收入">{{
+          money(operatingProfitDrawer.preview.net_revenue)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="采购成本">{{
+          money(operatingProfitDrawer.preview.purchase_cost)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="物流成本">{{
+          money(operatingProfitDrawer.preview.logistics_cost)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="仓储成本">{{
+          money(operatingProfitDrawer.preview.storage_cost)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="预计货损">{{
+          money(operatingProfitDrawer.preview.expected_damage_loss)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="预计退货损失">{{
+          money(operatingProfitDrawer.preview.expected_return_loss)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="预计贡献利润">{{
+          money(operatingProfitDrawer.preview.estimated_contribution_profit)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="预计利润率">{{
+          percent(operatingProfitDrawer.preview.estimated_margin_rate)
+        }}</el-descriptions-item>
+        <el-descriptions-item label="完整度">{{
+          operatingProfitDrawer.preview.cost_completeness
+        }}</el-descriptions-item>
+      </el-descriptions>
+      <template #footer
+        ><el-button @click="previewOperatingProfit">计算</el-button
+        ><el-button
+          type="primary"
+          :disabled="!operatingProfitDrawer.preview"
+          @click="saveOperatingProfit"
           >保存版本</el-button
         ></template
-      ></el-dialog
+      >
+    </el-drawer>
+    <el-drawer
+      v-model="operatingHistoryDrawer.visible"
+      title="利润版本历史"
+      size="620px"
     >
+      <el-table :data="operatingHistoryDrawer.rows" stripe border>
+        <el-table-column prop="estimate_as_of" label="估算时间" />
+        <el-table-column
+          prop="estimated_contribution_profit"
+          label="预计利润"
+        />
+        <el-table-column prop="estimated_margin_rate" label="利润率"
+          ><template #default="{ row }">{{
+            percent(row.estimated_margin_rate)
+          }}</template></el-table-column
+        >
+        <el-table-column prop="cost_completeness" label="完整度" />
+      </el-table>
+    </el-drawer>
   </div>
 </template>
 
@@ -690,7 +877,7 @@ import { Check, Plus } from "@element-plus/icons-vue";
 import productCenterApi from "@/api/productCenter";
 
 const activeTab = ref("spu");
-const costTab = ref("sku-cost");
+const costTab = ref("rules");
 const saving = ref(false);
 const loadingSpus = ref(false);
 const loadingSkus = ref(false);
@@ -701,10 +888,31 @@ const categories = ref([]);
 const rules = ref([]);
 const purchaseOrders = ref([]);
 const logisticsBatches = ref([]);
-const profitEstimates = ref([]);
+const operatingProfiles = ref([]);
+const operatingDimensions = reactive({
+  platforms: [],
+  shops: [],
+  sites: [],
+  warehouses: [],
+});
+const operatingHistoryDrawer = reactive({ visible: false, rows: [] });
+const operatingProfitDrawer = reactive({
+  visible: false,
+  label: "",
+  profileId: null,
+  form: {},
+  preview: null,
+});
+const loadingOperating = ref(false);
 const spuTotal = ref(0);
 const skuTotal = ref(0);
 const skuSpuFilter = ref("");
+const operatingQuery = reactive({
+  platform_code: "",
+  shop_id: "",
+  site_code: "",
+  warehouse_code: "",
+});
 const billStatus = ref("");
 const selectedPurchaseOrders = ref([]);
 const unmappedPurchaseSkus = ref([]);
@@ -733,17 +941,6 @@ const batchDrawer = reactive({
   lines: [],
 });
 const bindingDrawer = reactive({ visible: false, spu: "", rows: [] });
-const profitDialog = reactive({
-  visible: false,
-  form: {
-    sku_id: null,
-    selling_price: 0,
-    coupon_amount: 0,
-    destination: "",
-    transport_type: "海运",
-  },
-  preview: null,
-});
 const categoryCode = (item) => item.category_code || item.code;
 const parentCode = (item) => item.parent_category_code || item.parent_code;
 const l1Categories = computed(() =>
@@ -889,13 +1086,77 @@ const loadBatches = async () => {
     loadingBills.value = false;
   }
 };
-const loadProfits = async () => {
+const loadOperatingDimensions = async () => {
   try {
-    profitEstimates.value = await productCenterApi.listProfitEstimates({
-      limit: 100,
-    });
+    Object.assign(
+      operatingDimensions,
+      await productCenterApi.listSkuOperatingDimensions(),
+    );
   } catch {
-    profitEstimates.value = [];
+    operatingDimensions.platforms = [];
+    operatingDimensions.shops = [];
+    operatingDimensions.sites = [];
+    operatingDimensions.warehouses = [];
+  }
+};
+const loadOperatingProfiles = async () => {
+  loadingOperating.value = true;
+  try {
+    operatingProfiles.value = await productCenterApi.listSkuOperatingProfiles({
+      platform_code: operatingQuery.platform_code || undefined,
+      shop_id: operatingQuery.shop_id || undefined,
+      site_code: operatingQuery.site_code || undefined,
+      warehouse_code: operatingQuery.warehouse_code || undefined,
+      status: "active",
+    });
+  } catch (error) {
+    operatingProfiles.value = [];
+    ElMessage.error(error.message || "加载站点 SKU 经营失败");
+  } finally {
+    loadingOperating.value = false;
+  }
+};
+const operatingDirty = computed(() =>
+  operatingProfiles.value.filter((row) => row.__new || row.__dirty),
+);
+const markOperatingDirty = (row) => {
+  row.__dirty = true;
+};
+const addOperatingRow = () => {
+  const sku = skus.value[0];
+  operatingProfiles.value.unshift({
+    __new: true,
+    sku_id: sku?.sku_id || null,
+    platform_code:
+      operatingQuery.platform_code ||
+      operatingDimensions.platforms[0]?.platform_code ||
+      "",
+    shop_id: operatingQuery.shop_id || "",
+    site_code: operatingQuery.site_code || "",
+    site_name: "",
+    warehouse_code:
+      operatingQuery.warehouse_code || operatingDimensions.warehouses[0] || "",
+    warehouse_name: "",
+    transport_type: "海运",
+    selling_price: null,
+    default_coupon_amount: 0,
+    platform_fee_rate: null,
+    expected_logistics_cost: null,
+    expected_storage_cost: null,
+    cost_completeness: "incomplete",
+  });
+};
+const saveOperatingRows = async () => {
+  saving.value = true;
+  try {
+    const items = operatingDirty.value.map(({ __new, __dirty, ...row }) => row);
+    await productCenterApi.bulkSaveSkuOperatingProfiles({ items });
+    await loadOperatingProfiles();
+    ElMessage.success("站点 SKU 经营配置已保存");
+  } catch (error) {
+    ElMessage.error(error.message || "保存站点 SKU 经营配置失败");
+  } finally {
+    saving.value = false;
   }
 };
 const payloadSpu = (row) => {
@@ -1081,34 +1342,48 @@ const confirmBatch = async (row) => {
     if (error !== "cancel") ElMessage.error(error.message || "确认失败");
   }
 };
-const openProfitDialog = () => {
-  profitDialog.visible = true;
-  profitDialog.preview = null;
-  profitDialog.form = {
-    sku_id: null,
-    selling_price: 0,
-    coupon_amount: 0,
-    destination: "",
+const openOperatingProfit = (row) => {
+  operatingProfitDrawer.visible = true;
+  operatingProfitDrawer.profileId = row.profile_id;
+  operatingProfitDrawer.label = `${row.sku_id} / ${row.platform_code} / ${row.shop_id} / ${row.site_code} / ${row.warehouse_code}`;
+  operatingProfitDrawer.form = {
+    selling_price: row.selling_price,
+    coupon_amount: row.default_coupon_amount || 0,
     transport_type: "海运",
   };
+  operatingProfitDrawer.preview = null;
 };
-const previewProfit = async () => {
+const previewOperatingProfit = async () => {
   try {
-    profitDialog.preview = await productCenterApi.previewProfit(
-      profitDialog.form,
-    );
+    operatingProfitDrawer.preview =
+      await productCenterApi.previewSkuOperatingProfit(
+        operatingProfitDrawer.profileId,
+        operatingProfitDrawer.form,
+      );
   } catch (error) {
     ElMessage.error(error.message || "利润预览失败");
   }
 };
-const saveProfit = async () => {
+const saveOperatingProfit = async () => {
   try {
-    await productCenterApi.saveBaselineProfit(profitDialog.form);
-    profitDialog.visible = false;
-    await loadProfits();
-    ElMessage.success("基准预计利润已保存");
+    await productCenterApi.saveSkuOperatingProfit(
+      operatingProfitDrawer.profileId,
+      operatingProfitDrawer.form,
+    );
+    operatingProfitDrawer.visible = false;
+    await loadOperatingProfiles();
+    ElMessage.success("站点 SKU 利润版本已保存");
   } catch (error) {
-    ElMessage.error(error.message || "保存利润失败");
+    ElMessage.error(error.message || "保存利润版本失败");
+  }
+};
+const showOperatingHistory = async (row) => {
+  try {
+    operatingHistoryDrawer.rows =
+      await productCenterApi.listSkuOperatingProfitHistory(row.profile_id);
+    operatingHistoryDrawer.visible = true;
+  } catch (error) {
+    ElMessage.error(error.message || "加载利润历史失败");
   }
 };
 const billingUnitFor = (basis) =>
@@ -1231,7 +1506,8 @@ onMounted(async () => {
     loadRules(),
     loadPurchaseOrders(),
     loadBatches(),
-    loadProfits(),
+    loadOperatingDimensions(),
+    loadOperatingProfiles(),
   ]);
 });
 </script>

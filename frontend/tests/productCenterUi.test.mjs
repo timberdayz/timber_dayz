@@ -57,3 +57,21 @@ test("编辑已有物流批次时保留 API 返回的采购单号关联", () => 
   assert.match(source, /typeof item === "string" \? item : item.po_id/);
   assert.doesNotMatch(source, /status: "completed"/);
 });
+
+test("商品中心将站点 SKU 经营作为利润唯一工作入口", () => {
+  assert.match(source, /站点 SKU 经营/);
+  assert.match(source, /物流仓储管理/);
+  assert.doesNotMatch(source, /SKU 成本资料/);
+  assert.doesNotMatch(source, /基准预计利润/);
+  assert.match(source, /operatingProfiles/);
+  assert.match(api, /profit-preview/);
+});
+
+test("站点 SKU 经营使用平台店铺站点仓库完整筛选粒度", () => {
+  assert.match(source, /platform_code/);
+  assert.match(source, /shop_id/);
+  assert.match(source, /site_code/);
+  assert.match(source, /warehouse_code/);
+  assert.match(api, /sku-operating-profiles/);
+  assert.match(api, /sku-operating-dimensions/);
+});

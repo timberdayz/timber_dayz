@@ -33,11 +33,20 @@ from backend.schemas.product_center import (
     ProductCenterListResponse,
     SkuCreateRequest,
     SkuUpdateRequest,
+    SkuOperatingDimensionsResponse,
+    SkuOperatingProfitResponse,
+    SkuOperatingProfitSaveResponse,
+    SkuOperatingProfitHistoryResponse,
     SpuBulkRequest,
     SkuBulkRequest,
     ProfitEstimateCreateRequest,
     ProfitEstimateSaveRequest,
     ProfitPreviewRequest,
+    SkuOperatingProfileBulkRequest,
+    SkuOperatingProfileCreateRequest,
+    SkuOperatingProfileResponse,
+    SkuOperatingProfileUpdateRequest,
+    SkuOperatingProfitRequest,
     SpuCreateRequest,
     SpuSkuBindingRequest,
     SpuUpdateRequest,
@@ -58,6 +67,10 @@ from modules.core.db import (
     POLine,
     GRNHeader,
     DimProductCategory,
+    DimPlatform,
+    DimShop,
+    AccountAlias,
+    SkuOperatingProfile,
 )
 from backend.services.product_finance_service import BillTotalMismatchError, ProductFinanceService
 from backend.services.feishu_projection_client import FeishuProjectionClient
@@ -108,6 +121,7 @@ async def create_product_category(body: ProductCategoryCreateRequest, db: AsyncS
     row = DimProductCategory(**body.model_dump())
     db.add(row)
     try:
+        await db.flush()
         await db.commit()
         await db.refresh(row)
     except IntegrityError as exc:
@@ -189,6 +203,21 @@ async def _enqueue_sku_projection(db: AsyncSession, row: DimErpSku) -> None:
             "default_purchase_cost": row.default_purchase_cost,
             "purchase_cost_source": row.purchase_cost_source,
             "purchase_cost_confidence": row.purchase_cost_confidence,
+        },
+    )
+
+
+async def _enqueue_site_sku_projection(db: AsyncSession, row: SkuOperatingProfile) -> None:
+    await FeishuProjectionService(db).enqueue(
+        "site_sku",
+        str(row.profile_id),
+        {
+            "profile_id": row.profile_id,
+            "reason": "site_sku_operating_changed",
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            "selling_price": row.selling_price,
+            "expected_logistics_cost": row.expected_logistics_cost,
+            "expected_storage_cost": row.expected_storage_cost,
         },
     )
 
@@ -953,6 +982,229 @@ async def void_logistics_batch(bill_id: int, body: LogisticsBillVoidRequest, db:
     return await void_logistics_bill(bill_id=bill_id, body=body, db=db, current_user=current_user)
 
 
+def _serialize_operating_profile(row: SkuOperatingProfile, *, sku=None, spu=None, estimate=None) -> dict:
+    payload = {
+        "profile_id": row.profile_id,
+        "sku_id": row.sku_id,
+        "platform_code": row.platform_code,
+        "shop_id": row.shop_id,
+        "site_code": row.site_code,
+        "site_name": row.site_name,
+        "warehouse_code": row.warehouse_code,
+        "transport_type": row.transport_type,
+        "warehouse_name": row.warehouse_name,
+        "selling_price": row.selling_price,
+        "default_coupon_amount": row.default_coupon_amount,
+        "platform_fee_rate": row.platform_fee_rate,
+        "expected_logistics_cost": row.expected_logistics_cost,
+        "expected_storage_cost": row.expected_storage_cost,
+        "status": row.status,
+        "effective_from": row.effective_from,
+        "effective_to": row.effective_to,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "sku_key": sku.sku_key if sku else None,
+        "sku_name": sku.sku_name if sku else None,
+        "spu": spu.spu if spu else None,
+        "estimated_contribution_profit": estimate.estimated_contribution_profit if estimate else None,
+        "estimated_margin_rate": estimate.estimated_margin_rate if estimate else None,
+        "purchase_cost": estimate.purchase_cost if estimate else None,
+        "actual_logistics_cost": estimate.logistics_cost if estimate and estimate.logistics_cost_source == "confirmed_logistics_bill" else None,
+        "actual_storage_cost": None,
+        "cost_completeness": estimate.cost_completeness if estimate else None,
+        "confidence_level": estimate.confidence_level if estimate else None,
+        "latest_estimate_as_of": estimate.estimate_as_of if estimate else None,
+        "latest_estimate_id": estimate.estimate_id if estimate else None,
+    }
+    return {key: (float(value) if hasattr(value, "as_tuple") else value) for key, value in payload.items()}
+
+
+@router.get("/api/sku-operating-dimensions", response_model=SkuOperatingDimensionsResponse)
+async def list_sku_operating_dimensions(db: AsyncSession = Depends(get_async_db)):
+    platforms = (await db.execute(select(DimPlatform).where(DimPlatform.is_active.is_(True)).order_by(DimPlatform.platform_code))).scalars().all()
+    shops = (await db.execute(select(DimShop).where(DimShop.is_active.is_(True)).order_by(DimShop.platform_code, DimShop.shop_id))).scalars().all()
+    warehouses = (await db.execute(select(GRNHeader.warehouse).where(GRNHeader.warehouse.is_not(None)).distinct().order_by(GRNHeader.warehouse))).scalars().all()
+    sites = (await db.execute(select(AccountAlias.site).where(AccountAlias.active.is_(True), AccountAlias.site.is_not(None)).distinct().order_by(AccountAlias.site))).scalars().all()
+    return {
+        "platforms": [{"platform_code": row.platform_code, "name": row.name} for row in platforms],
+        "shops": [{"platform_code": row.platform_code, "shop_id": row.shop_id, "shop_name": row.shop_name} for row in shops],
+        "sites": [{"site_code": site, "site_name": site} for site in sites if site],
+        "warehouses": [warehouse for warehouse in warehouses if warehouse],
+    }
+
+
+@router.get("/api/sku-operating-profiles", response_model=list[SkuOperatingProfileResponse])
+async def list_sku_operating_profiles(
+    sku_id: int | None = Query(None, gt=0),
+    platform_code: str | None = Query(None),
+    shop_id: str | None = Query(None),
+    site_code: str | None = Query(None),
+    warehouse_code: str | None = Query(None),
+    status: str | None = Query(None),
+    db: AsyncSession = Depends(get_async_db),
+):
+    filters = []
+    for field, value in ((SkuOperatingProfile.sku_id, sku_id), (SkuOperatingProfile.platform_code, platform_code), (SkuOperatingProfile.shop_id, shop_id), (SkuOperatingProfile.site_code, site_code), (SkuOperatingProfile.warehouse_code, warehouse_code), (SkuOperatingProfile.status, status)):
+        if value is not None:
+            filters.append(field == value)
+    rows = (await db.execute(select(SkuOperatingProfile).where(*filters).order_by(SkuOperatingProfile.platform_code, SkuOperatingProfile.shop_id, SkuOperatingProfile.site_code, SkuOperatingProfile.warehouse_code, SkuOperatingProfile.sku_id))).scalars().all()
+    sku_ids = {row.sku_id for row in rows}
+    profile_ids = {row.profile_id for row in rows}
+    sku_rows = (await db.execute(select(DimErpSku).where(DimErpSku.sku_id.in_(sku_ids)))).scalars().all() if sku_ids else []
+    sku_by_id = {row.sku_id: row for row in sku_rows}
+    bindings = (await db.execute(select(BridgeSpuSku).where(BridgeSpuSku.sku_id.in_(sku_ids), BridgeSpuSku.binding_status == "active", BridgeSpuSku.effective_to.is_(None)))).scalars().all() if sku_ids else []
+    spu_codes = {row.spu for row in bindings}
+    spu_rows = (await db.execute(select(DimSpu).where(DimSpu.spu.in_(spu_codes)))).scalars().all() if spu_codes else []
+    spu_by_code = {row.spu: row for row in spu_rows}
+    binding_by_sku = {row.sku_id: row for row in bindings}
+    estimates = (await db.execute(select(SkuProfitEstimate).where(SkuProfitEstimate.operating_profile_id.in_(profile_ids)).order_by(SkuProfitEstimate.estimate_as_of.desc()))).scalars().all() if profile_ids else []
+    estimate_by_profile = {}
+    for estimate in estimates:
+        estimate_by_profile.setdefault(estimate.operating_profile_id, estimate)
+    payloads = []
+    finance_service = ProductFinanceService(db)
+    for row in rows:
+        payload = _serialize_operating_profile(
+            row,
+            sku=sku_by_id.get(row.sku_id),
+            spu=spu_by_code.get(binding_by_sku[row.sku_id].spu) if row.sku_id in binding_by_sku else None,
+            estimate=estimate_by_profile.get(row.profile_id),
+        )
+        payload["actual_logistics_cost"] = await finance_service.find_confirmed_logistics_cost(
+            row.sku_id, row.site_code, row.transport_type, row.warehouse_code
+        )
+        payloads.append(payload)
+    return payloads
+
+
+async def _validate_operating_dimensions(db: AsyncSession, values: dict) -> None:
+    if await db.get(DimErpSku, values["sku_id"]) is None:
+        raise HTTPException(status_code=404, detail="SKU not found")
+    if await db.get(DimPlatform, values["platform_code"]) is None:
+        raise HTTPException(status_code=422, detail="platform not found")
+    if await db.get(DimShop, {"platform_code": values["platform_code"], "shop_id": values["shop_id"]}) is None:
+        raise HTTPException(status_code=422, detail="shop not found for platform")
+    site_exists = await db.execute(
+        select(AccountAlias.id).where(
+            AccountAlias.active.is_(True),
+            AccountAlias.site == values["site_code"],
+        ).limit(1)
+    )
+    if site_exists.scalar_one_or_none() is None:
+        raise HTTPException(status_code=422, detail="site not found in standardized source dimensions")
+    warehouse_exists = await db.execute(
+        select(GRNHeader.grn_id).where(GRNHeader.warehouse == values["warehouse_code"]).limit(1)
+    )
+    if warehouse_exists.scalar_one_or_none() is None:
+        raise HTTPException(status_code=422, detail="warehouse not found in standardized source dimensions")
+
+
+@router.post("/api/sku-operating-profiles", response_model=SkuOperatingProfileResponse, status_code=201)
+async def create_sku_operating_profile(body: SkuOperatingProfileCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    values = body.model_dump()
+    await _validate_operating_dimensions(db, values)
+    row = SkuOperatingProfile(**values, created_by=getattr(_user, "user_id", None), updated_by=getattr(_user, "user_id", None))
+    db.add(row)
+    try:
+        await db.flush()
+        await _enqueue_site_sku_projection(db, row)
+        await db.commit()
+        await db.refresh(row)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="active SKU operating profile already exists") from exc
+    return _serialize_operating_profile(row)
+
+
+@router.patch("/api/sku-operating-profiles/{profile_id}", response_model=SkuOperatingProfileResponse)
+async def update_sku_operating_profile(profile_id: int, body: SkuOperatingProfileUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    row = await db.get(SkuOperatingProfile, profile_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="SKU operating profile not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_by = getattr(_user, "user_id", None)
+    try:
+        await _enqueue_site_sku_projection(db, row)
+        await db.commit()
+        await db.refresh(row)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="active SKU operating profile already exists") from exc
+    return _serialize_operating_profile(row)
+
+
+@router.post("/api/sku-operating-profiles/bulk")
+async def bulk_save_sku_operating_profiles(body: SkuOperatingProfileBulkRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    created = 0
+    updated = 0
+    rows = []
+    try:
+        for item in body.items:
+            values = item.model_dump()
+            await _validate_operating_dimensions(db, values)
+            filters = [SkuOperatingProfile.sku_id == values["sku_id"], SkuOperatingProfile.platform_code == values["platform_code"], SkuOperatingProfile.shop_id == values["shop_id"], SkuOperatingProfile.site_code == values["site_code"], SkuOperatingProfile.warehouse_code == values["warehouse_code"], SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)]
+            row = (await db.execute(select(SkuOperatingProfile).where(*filters))).scalars().first()
+            if row is None:
+                row = SkuOperatingProfile(**values, created_by=getattr(_user, "user_id", None), updated_by=getattr(_user, "user_id", None))
+                db.add(row)
+                created += 1
+            else:
+                for key, value in values.items():
+                    setattr(row, key, value)
+                row.updated_by = getattr(_user, "user_id", None)
+                updated += 1
+            rows.append(row)
+        for row in rows:
+            await _enqueue_site_sku_projection(db, row)
+        await db.commit()
+        for row in rows:
+            await db.refresh(row)
+    except HTTPException:
+        await db.rollback()
+        raise
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="bulk operating profile save conflicts with existing data") from exc
+    return {"created": created, "updated": updated, "items": [_serialize_operating_profile(row) for row in rows]}
+
+
+@router.get("/api/sku-operating-profiles/{profile_id}", response_model=SkuOperatingProfileResponse)
+async def get_sku_operating_profile(profile_id: int, db: AsyncSession = Depends(get_async_db)):
+    row = await db.get(SkuOperatingProfile, profile_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="SKU operating profile not found")
+    return _serialize_operating_profile(row)
+
+
+@router.post("/api/sku-operating-profiles/{profile_id}/profit-preview", response_model=SkuOperatingProfitResponse)
+async def preview_sku_operating_profit(profile_id: int, body: SkuOperatingProfitRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    try:
+        result = await ProductFinanceService(db).preview_operating_profit(profile_id, body.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {key: float(value) if hasattr(value, "as_tuple") else value for key, value in result.items()}
+
+
+@router.post("/api/sku-operating-profiles/{profile_id}/profit-estimates", response_model=SkuOperatingProfitSaveResponse, status_code=201)
+async def save_sku_operating_profit(profile_id: int, body: SkuOperatingProfitRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    try:
+        row = await ProductFinanceService(db).save_operating_profit(profile_id, body.model_dump(exclude_unset=True))
+        await _enqueue_site_sku_projection(db, await db.get(SkuOperatingProfile, profile_id))
+        await db.commit()
+        await db.refresh(row)
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"estimate_id": row.estimate_id, "profile_id": row.operating_profile_id, "sku_id": row.sku_id, "estimated_contribution_profit": float(row.estimated_contribution_profit) if row.estimated_contribution_profit is not None else None, "estimated_margin_rate": float(row.estimated_margin_rate) if row.estimated_margin_rate is not None else None}
+
+
+@router.get("/api/sku-operating-profiles/{profile_id}/profit-estimates", response_model=list[SkuOperatingProfitHistoryResponse])
+async def list_sku_operating_profit_history(profile_id: int, limit: int = Query(100, ge=1, le=500), db: AsyncSession = Depends(get_async_db)):
+    rows = (await db.execute(select(SkuProfitEstimate).where(SkuProfitEstimate.operating_profile_id == profile_id).order_by(SkuProfitEstimate.estimate_as_of.desc()).limit(limit))).scalars().all()
+    return [{"estimate_id": row.estimate_id, "profile_id": row.operating_profile_id, "sku_id": row.sku_id, "platform_code": row.platform_code, "shop_id": row.shop_id, "site_code": row.site_code, "warehouse_code": row.warehouse_code, "estimate_as_of": row.estimate_as_of, "estimated_contribution_profit": float(row.estimated_contribution_profit) if row.estimated_contribution_profit is not None else None, "estimated_margin_rate": float(row.estimated_margin_rate) if row.estimated_margin_rate is not None else None, "cost_completeness": row.cost_completeness, "confidence_level": row.confidence_level} for row in rows]
+
+
 @router.get("/api/product-profit-estimates")
 async def list_profit_estimates(
     sku_id: int | None = Query(None, gt=0),
@@ -1026,14 +1278,15 @@ async def save_baseline_product_profit(body: ProfitEstimateSaveRequest, db: Asyn
 async def initialize_feishu_projection(body: FeishuProjectionInitializeRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_projection_admin)):
     spu_table_id = body.spu_table_id or os.getenv("FEISHU_PRODUCT_SPU_TABLE_ID")
     sku_table_id = body.sku_table_id or os.getenv("FEISHU_PRODUCT_SKU_TABLE_ID")
+    site_sku_table_id = body.site_sku_table_id or os.getenv("FEISHU_PRODUCT_SITE_SKU_TABLE_ID")
     client = FeishuProjectionClient()
     try:
-        config = await FeishuProjectionService(db).initialize_tables(client, spu_table_id, sku_table_id)
+        config = await FeishuProjectionService(db).initialize_tables(client, spu_table_id, sku_table_id, site_sku_table_id)
         await db.commit()
     except RuntimeError as exc:
         await db.rollback()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"status": config.status, "spu_table_id": config.spu_table_id, "sku_table_id": config.sku_table_id}
+    return {"status": config.status, "spu_table_id": config.spu_table_id, "sku_table_id": config.sku_table_id, "site_sku_table_id": config.site_sku_table_id}
 
 
 @router.get("/api/feishu-projection/status")
