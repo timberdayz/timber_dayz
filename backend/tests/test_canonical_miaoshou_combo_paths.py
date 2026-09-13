@@ -63,6 +63,7 @@ def test_miaoshou_inventory_domain_routes_to_inventory_export_component():
     assert '"inventory": "MiaoshouInventoryExport"' in source
     assert 'f"{data_domain}_export"' in source
     assert Path("modules/platforms/miaoshou/components/inventory_export.py").exists()
+    assert not Path("modules/platforms/miaoshou/components/inventory_snapshot_export.py").exists()
 
 
 class _FakeInventoryExportResult:
