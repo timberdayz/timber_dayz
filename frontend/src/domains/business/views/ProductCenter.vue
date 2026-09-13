@@ -66,6 +66,7 @@
                   v-for="cat in l1Categories"
                   :key="categoryCode(cat)"
                   :label="cat.name_zh"
+                  :disabled="cat.status !== 'active' || !cat.is_selectable || legacyUnselectableCodes.has(categoryCode(cat))"
                   :value="
                     categoryCode(cat)
                   " /></el-select></template></el-table-column
@@ -79,6 +80,7 @@
                   v-for="cat in childCategories(row.category_l1_code)"
                   :key="categoryCode(cat)"
                   :label="cat.name_zh"
+                  :disabled="cat.status !== 'active' || !cat.is_selectable || legacyUnselectableCodes.has(categoryCode(cat))"
                   :value="
                     categoryCode(cat)
                   " /></el-select></template></el-table-column
@@ -746,6 +748,7 @@ const profitDialog = reactive({
 });
 const categoryCode = (item) => item.category_code || item.code;
 const parentCode = (item) => item.parent_category_code || item.parent_code;
+const legacyUnselectableCodes = new Set(["PET_DAILY"]);
 const l1Categories = computed(() =>
   categories.value.filter((item) => item.level === 1 || !parentCode(item)),
 );
@@ -853,7 +856,7 @@ const loadSkus = async () => {
 const loadCategories = async () => {
   try {
     categories.value = await productCenterApi.listCategories({
-      status: "active",
+      include_inactive: true,
     });
   } catch {
     categories.value = [];

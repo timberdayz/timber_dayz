@@ -18,6 +18,7 @@ class ProductCategoryCreateRequest(BaseModel):
     name_en: Optional[str] = Field(default=None, max_length=128)
     category_path: Optional[str] = Field(default=None, max_length=512)
     status: str = Field(default="active", pattern=r"^(active|inactive)$")
+    is_selectable: bool = True
     version: str = Field(default="v1", min_length=1, max_length=32)
     effective_from: date = Field(default_factory=date.today)
     effective_to: Optional[date] = None
@@ -37,6 +38,7 @@ class ProductCategoryUpdateRequest(BaseModel):
     name_en: Optional[str] = Field(default=None, max_length=128)
     category_path: Optional[str] = Field(default=None, max_length=512)
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    is_selectable: Optional[bool] = None
     effective_to: Optional[date] = None
     description: Optional[str] = None
 

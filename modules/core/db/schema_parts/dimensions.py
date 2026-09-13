@@ -97,6 +97,12 @@ class DimProductCategory(Base):
     name_en = Column(String(128), nullable=True)
     category_path = Column(String(512), nullable=True)
     status = Column(String(16), nullable=False, default="active")
+    is_selectable = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
     version = Column(String(32), nullable=False, default="v1")
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date, nullable=True)

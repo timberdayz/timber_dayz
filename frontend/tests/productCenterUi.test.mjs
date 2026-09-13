@@ -57,3 +57,11 @@ test("编辑已有物流批次时保留 API 返回的采购单号关联", () => 
   assert.match(source, /typeof item === "string" \? item : item.po_id/);
   assert.doesNotMatch(source, /status: "completed"/);
 });
+
+test("历史不可选品类在商品中心可读但不能用于新的 SPU 分配", () => {
+  assert.match(source, /is_selectable/);
+  assert.match(source, /PET_DAILY/);
+  assert.match(source, /disabled.*!cat\.is_selectable|:disabled="!cat\.is_selectable"/);
+  assert.match(source, /cat\.status !== 'active'/);
+  assert.match(source, /include_inactive/);
+});

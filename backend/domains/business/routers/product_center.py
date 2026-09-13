@@ -95,6 +95,7 @@ async def list_product_categories(
         filters.append(DimProductCategory.parent_category_code == parent_category_code)
     if not include_inactive:
         filters.append(DimProductCategory.status == "active")
+        filters.append(DimProductCategory.is_selectable.is_(True))
     rows = (await db.execute(select(DimProductCategory).where(*filters).order_by(DimProductCategory.level, DimProductCategory.category_code))).scalars().all()
     return [ProductCategoryResponse.model_validate(row) for row in rows]
 
@@ -102,9 +103,15 @@ async def list_product_categories(
 @router.post("/api/product-categories", response_model=ProductCategoryResponse, status_code=201)
 async def create_product_category(body: ProductCategoryCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     if body.level == 2:
-        parent = await db.get(DimProductCategory, body.parent_category_code)
-        if parent is None or parent.level != 1 or parent.status != "active":
-            raise HTTPException(status_code=422, detail="level 2 category must reference an active level 1 category")
+        parent = (
+            await db.execute(
+                select(DimProductCategory)
+                .where(DimProductCategory.category_code == body.parent_category_code)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if parent is None or parent.level != 1 or (body.status == "active" and parent.status != "active"):
+            raise HTTPException(status_code=422, detail="level 2 category must reference an active level 1 category when active")
     row = DimProductCategory(**body.model_dump())
     db.add(row)
     try:
@@ -118,29 +125,92 @@ async def create_product_category(body: ProductCategoryCreateRequest, db: AsyncS
 
 @router.patch("/api/product-categories/{category_code}", response_model=ProductCategoryResponse)
 async def update_product_category(category_code: str, body: ProductCategoryUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
-    row = await db.get(DimProductCategory, category_code)
+    row = (
+        await db.execute(
+            select(DimProductCategory)
+            .where(DimProductCategory.category_code == category_code)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="category not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    values = body.model_dump(exclude_unset=True)
+    if values.get("status") == "inactive" and row.level == 1:
+        active_children = (
+            await db.execute(
+                select(DimProductCategory.category_code)
+                .where(
+                    DimProductCategory.parent_category_code == row.category_code,
+                    DimProductCategory.status == "active",
+                )
+                .with_for_update()
+            )
+        ).scalars().all()
+        if active_children:
+            raise HTTPException(status_code=409, detail="cannot deactivate level 1 category with active children")
+    if values.get("status") == "active" and row.level == 2:
+        parent = (
+            await db.execute(
+                select(DimProductCategory)
+                .where(
+                    DimProductCategory.category_code == row.parent_category_code
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if parent is None or parent.status != "active":
+            raise HTTPException(status_code=422, detail="cannot activate level 2 category under inactive level 1 parent")
+    for key, value in values.items():
         setattr(row, key, value)
     await db.commit()
     await db.refresh(row)
     return ProductCategoryResponse.model_validate(row)
 
 
-async def _apply_spu_category(db: AsyncSession, values: dict) -> dict:
+async def _apply_spu_category(
+    db: AsyncSession,
+    values: dict,
+    *,
+    existing_category_l2_code: str | None = None,
+) -> dict:
     """Resolve a selected secondary category into its stable parent and display names."""
     category_l2_code = values.get("category_l2_code")
     legacy_category_value = values.get("category_l2")
     if not category_l2_code and isinstance(legacy_category_value, str):
         if re.fullmatch(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*", legacy_category_value):
             category_l2_code = legacy_category_value
+    category_fields_provided = any(
+        key in values
+        for key in ("category_l1_code", "category_l1", "category_l2_code", "category_l2")
+    )
+    if not category_l2_code and category_fields_provided:
+        if legacy_category_value == existing_category_l2_code:
+            for key in ("category_l1_code", "category_l1", "category_l2_code", "category_l2"):
+                values.pop(key, None)
+            return values
+        if "category_l1_code" in values and "category_l2_code" not in values and "category_l2" not in values:
+            raise HTTPException(
+                status_code=422,
+                detail="category_l1_code cannot be set without category_l2_code",
+            )
+        raise HTTPException(
+            status_code=422,
+            detail="category_l2_code must reference a category code",
+        )
     if not category_l2_code:
         return values
 
     category_l2 = await db.get(DimProductCategory, category_l2_code)
-    if category_l2 is None or category_l2.level != 2 or category_l2.status != "active":
-        raise HTTPException(status_code=422, detail="category_l2_code must reference an active level 2 category")
+    if (
+        category_l2 is None
+        or category_l2.level != 2
+        or category_l2.status != "active"
+        or (
+            not category_l2.is_selectable
+            and category_l2_code != existing_category_l2_code
+        )
+    ):
+        raise HTTPException(status_code=422, detail="category_l2_code must reference an active selectable level 2 category")
     category_l1 = await db.get(DimProductCategory, category_l2.parent_category_code)
     if category_l1 is None or category_l1.level != 1 or category_l1.status != "active":
         raise HTTPException(status_code=422, detail="category_l2_code must have an active level 1 parent")
@@ -215,7 +285,10 @@ async def list_spus(
 
 @router.post("/api/spus", response_model=ProductCenterItem, status_code=201)
 async def create_spu(body: SpuCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
-    row = DimSpu(**(await _apply_spu_category(db, body.model_dump())))
+    values = body.model_dump()
+    if not values.get("category_l2_code") and not values.get("category_l2"):
+        raise HTTPException(status_code=422, detail="category_l2_code is required when creating an SPU")
+    row = DimSpu(**(await _apply_spu_category(db, values)))
     db.add(row)
     try:
         await db.flush()
@@ -234,7 +307,11 @@ async def update_spu(spu: str, body: SpuUpdateRequest, db: AsyncSession = Depend
     row = await db.get(DimSpu, spu)
     if row is None:
         raise HTTPException(status_code=404, detail="SPU not found")
-    values = await _apply_spu_category(db, body.model_dump(exclude_unset=True))
+    values = await _apply_spu_category(
+        db,
+        body.model_dump(exclude_unset=True),
+        existing_category_l2_code=row.category_l2_code or row.category_l2,
+    )
     for key, value in values.items():
         setattr(row, key, value)
     await _enqueue_spu_projection(db, row)
@@ -255,11 +332,17 @@ async def bulk_save_spus(body: SpuBulkRequest, db: AsyncSession = Depends(get_as
     rows: list[DimSpu] = []
     try:
         for item in body.items:
-            values = await _apply_spu_category(db, item.model_dump(exclude_unset=True))
             row = await db.get(DimSpu, item.spu)
+            values = await _apply_spu_category(
+                db,
+                item.model_dump(exclude_unset=True),
+                existing_category_l2_code=(row.category_l2_code or row.category_l2) if row else None,
+            )
             if row is None:
                 if not values.get("spu_name"):
                     raise HTTPException(status_code=422, detail=f"spu_name is required when creating {item.spu}")
+                if not values.get("category_l2_code") and not values.get("category_l2"):
+                    raise HTTPException(status_code=422, detail=f"category_l2_code is required when creating {item.spu}")
                 row = DimSpu(**values)
                 db.add(row)
                 created += 1
