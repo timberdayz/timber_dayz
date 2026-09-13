@@ -58,8 +58,14 @@ def test_miaoshou_purchase_export_source_uses_async_export_subroutine():
     source = Path("modules/platforms/miaoshou/components/purchase_export.py").read_text(encoding="utf-8")
 
     assert "async def _trigger_async_export_and_download(" in source
-    assert "_poll_export_record_until_ready" in source or "_poll_export_record" in source
+    # page.expect_download 包裹 _click_export_button_in_dialog 是核心等待原语
     assert "async with page.expect_download(" in source
+    # expect_download 的 context 内必须包含触发点击（否则 download 永不触发）
+    expect_download_idx = source.index("async with page.expect_download(")
+    click_export_idx = source.index("await self._click_export_button_in_dialog(page)")
+    assert expect_download_idx < click_export_idx, (
+        "expect_download 必须包裹 _click_export_button_in_dialog 才能捕获 download 事件"
+    )
 
 
 def test_miaoshou_purchase_export_does_not_use_keyboard_escape_for_popups():
@@ -189,4 +195,86 @@ def test_miaoshou_purchase_export_wait_search_results_uses_existing_text():
     )
     assert 'name="导入/导出"' in source, (
         "'导入/导出' button must be a wait target (matches inventory design)"
+    )
+
+
+def test_miaoshou_purchase_export_trigger_uses_expect_download_no_nav_poll():
+    """_trigger_async_export_and_download must use page.expect_download (mirrors orders/inventory).
+
+    Regression test for production failures efd6f74e (Sep 13 23:33:34) and
+    188176b7 / 9575d546 (Sep 14 01:10:44 / 01:12:15). The previous design navigated
+    to /purchase/export_record and polled for "可下载"/"导出成功" text in the table,
+    but miaoshou's /purchase/export_record page either redirects, hasn't loaded the
+    expected text within 15s, or doesn't render the table content at all — every
+    poll iteration after the first hit ``get_by_text("导出记录").first to be visible``
+    15000ms timeout.
+
+    The orders (MiaoshouOrdersExportBase.run) and inventory (MiaoshouInventoryExport.run)
+    components solved the same problem by wrapping the export-button click in
+    ``page.expect_download(...)``: the browser fires a download event when the file
+    is ready on the server, regardless of UI state.
+
+    This contract test enforces:
+      1. _trigger_async_export_and_download uses ``page.expect_download`` (not nav+poll)
+      2. Removed helpers (_navigate_to_export_record, _poll_export_record_until_ready,
+         _click_download_in_export_record) are GONE
+      3. expect_download wraps _click_export_button_in_dialog (download fires on click)
+    """
+    import inspect
+
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    source = inspect.getsource(MiaoshouPurchaseExport._trigger_async_export_and_download)
+    # expect_download is the wait primitive (mirror orders/inventory).
+    assert "async with page.expect_download(" in source, (
+        "purchase export must use page.expect_download to wait for the file download event"
+    )
+    # expect_download wraps the click that triggers the backend export.
+    expect_idx = source.index("async with page.expect_download(")
+    click_idx = source.index("await self._click_export_button_in_dialog(page)")
+    assert expect_idx < click_idx, (
+        "expect_download must wrap _click_export_button_in_dialog (download fires on click)"
+    )
+
+    full_source = Path("modules/platforms/miaoshou/components/purchase_export.py").read_text(encoding="utf-8")
+    # Removed helpers MUST NOT exist (they were the source of the bug).
+    assert "async def _navigate_to_export_record(" not in full_source, (
+        "_navigate_to_export_record removed — navigation to /purchase/export_record timed out"
+    )
+    assert "async def _poll_export_record_until_ready(" not in full_source, (
+        "_poll_export_record_until_ready removed — polling /purchase/export_record timed out"
+    )
+    assert "async def _click_download_in_export_record(" not in full_source, (
+        "_click_download_in_export_record removed — replaced by expect_download pattern"
+    )
+
+
+def test_miaoshou_purchase_export_close_progress_dialog_is_best_effort():
+    """_close_progress_dialog must never raise — it's a UI nicety, not a precondition.
+
+    Inside the ``page.expect_download`` context, the "正在导出包裹" progress dialog
+    may or may not appear (depends on export size). The download event fires
+    independently of the dialog lifecycle. So closing it must be best-effort:
+    short waits (2s/1.5s) and try/except per close button, never raising out of
+    the method.
+
+    Regression test: production failures showed the OLD _close_progress_dialog
+    waited 10s for "正在导出" heading — if the heading didn't render in time,
+    the method silently returned but consumed 10s of budget. New design: 2s
+    max wait, never raises.
+    """
+    import inspect
+
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    source = inspect.getsource(MiaoshouPurchaseExport._close_progress_dialog)
+    # Best-effort: title wait must use a SHORT timeout (≤ 3s, not the old 10s).
+    title_wait = source.index("timeout=")
+    timeout_value = int(source[title_wait:title_wait + 30].split("=")[1].split(",")[0].split(")")[0])
+    assert timeout_value <= 3000, (
+        f"_close_progress_dialog title wait should be ≤3s (best-effort), got {timeout_value}ms"
+    )
+    # Body wrapped in try/except so it never raises.
+    assert "except Exception" in source, (
+        "_close_progress_dialog must catch all exceptions (best-effort UI nicety)"
     )

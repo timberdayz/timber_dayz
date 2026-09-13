@@ -1,20 +1,22 @@
 """Miaoshou ERP 采购单 purchase 数据域导出组件（V2 canonical 独立精细类）
 
-异步导出流程:
+异步导出流程（参考 orders / inventory 模式）:
   1. 导航到 /purchase/goods
   2. 选择状态 Tab（默认"全部"）+ 设置创建日期（MiaoshouDatePicker）
   3. 搜索 + 等待结果就绪
   4. 点击"导入/导出" → 下拉菜单 → "导出全部搜索结果"
   5. 字段选择对话框：三组字段全选
-  6. 点击"导出" → 关闭"正在导出"进度弹窗
-  7. 导航到 /purchase/export_record
-  8. 轮询最新记录直到状态变为"可下载/导出成功"
-  9. 点击"下载"链接 → page.expect_download → 落盘
+  6. page.expect_download 包裹点击"导出" → 等待浏览器下载事件触发
+     → best-effort 关闭"正在导出"进度弹窗（不阻塞）
+  7. download.save_as 落盘 + build_filename 重命名为标准路径
+
+NOTE: 历史实现曾 navigate 到 /purchase/export_record → poll 表格 → click 下载链接，
+连续 2 次生产失败（efd6f74e / 188176b7 在 ``get_by_text("导出记录")`` 15s 超时）。
+改为 orders/inventory 已验证的 ``page.expect_download`` 模式：浏览器在异步导出
+完成时直接触发下载事件，不需要导航到 /export_record 也不需要轮询表格。
 """
 from __future__ import annotations
 
-import asyncio
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -115,76 +117,55 @@ class MiaoshouPurchaseExport(ExportComponent):
         await button.click(timeout=1500)
 
     async def _close_progress_dialog(self, page: Any) -> None:
+        """Best-effort close of the "正在导出包裹" progress dialog.
+
+        Closes the dialog if visible (clicking a "关闭"-named button), otherwise
+        returns silently. Never raises — this is a UI nicety, not a precondition
+        for the download event that ``_trigger_async_export_and_download`` waits on.
+        """
         try:
             title = page.get_by_role("heading", name=self.sel.progress_dialog_title).first
-            await title.wait_for(state="visible", timeout=10000)
+            await title.wait_for(state="visible", timeout=2000)
         except Exception:
             return
 
         for close_text in self.sel.close_btn_texts:
             try:
                 close_button = page.get_by_role("button", name=close_text).first
-                await close_button.wait_for(state="visible", timeout=2000)
+                await close_button.wait_for(state="visible", timeout=1500)
                 await close_button.click(timeout=1000)
                 return
             except Exception:
                 continue
 
-    async def _navigate_to_export_record(self, page: Any) -> None:
-        await page.goto(
-            f"{self.sel.base_url}{self.sel.export_record_path}",
-            wait_until="domcontentloaded",
-            timeout=60000,
-        )
-        await page.get_by_text("导出记录", exact=False).first.wait_for(state="visible", timeout=15000)
-        await self.stabilize_safe_notices(page, label="export-record nav cleanup")
-
-    async def _poll_export_record_until_ready(self, page: Any) -> None:
-        deadline_s = self.sel.export_record_poll_timeout_s
-        interval_s = self.sel.export_record_poll_interval_s
-        elapsed = 0
-        while elapsed < deadline_s:
-            try:
-                first_row = page.locator("table tbody tr").first
-                if await first_row.count() > 0 and await first_row.is_visible():
-                    row_text = " ".join(((await first_row.text_content()) or "").split())
-                    if any(token in row_text for token in self.sel.export_record_row_ready_texts):
-                        return
-            except Exception:
-                pass
-
-            try:
-                await page.reload(wait_until="domcontentloaded", timeout=30000)
-            except Exception:
-                pass
-
-            await asyncio.sleep(interval_s)
-            elapsed += interval_s
-
-        raise RuntimeError(
-            f"导出记录轮询超时（{deadline_s}s），未检测到可下载状态"
-        )
-
-    async def _click_download_in_export_record(self, page: Any) -> None:
-        first_row = page.locator("table tbody tr").first
-        download_link = first_row.get_by_role("link", name=re.compile(r"下载")).first
-        try:
-            await download_link.wait_for(state="visible", timeout=5000)
-        except Exception:
-            download_link = first_row.get_by_role("button", name=re.compile(r"下载")).first
-            await download_link.wait_for(state="visible", timeout=5000)
-
     async def _trigger_async_export_and_download(self, page: Any) -> Path:
+        """触发异步采购导出并捕获下载（参考 orders/inventory 模式）。
+
+        流程：
+          1. 打开"导入/导出"下拉 → 点击"导出全部搜索结果" → 字段全选
+          2. 在 dialog 内点击"导出"按钮触发后端导出
+          3. ``page.expect_download`` 等待浏览器下载事件（异步导出+文件生成完成时触发）
+
+        之前的设计是 navigate 到 /purchase/export_record → poll 轮询 → click 下载链接。
+        该方案在 miaoshou 实际页面失败（连续 2 次 efd6f74e / 188176b7 任务在
+        ``get_by_text("导出记录")`` 15s 超时）。改用 orders/inventory 已验证的
+        ``page.expect_download`` 模式：浏览器在异步导出完成时直接触发下载事件，
+        不需要导航到 /export_record 页也不需要轮询表格。
+
+        "正在导出包裹" 进度对话框会被异步触发，可选择在 ``expect_download`` 上下文
+        内 best-effort 关闭，但**不能阻塞**——download 事件与对话框生命周期独立。
+        """
         await self._open_import_export_dropdown(page)
         await self._click_export_all_results(page)
         await self._select_all_export_fields(page)
-        await self._click_export_button_in_dialog(page)
-        await self._close_progress_dialog(page)
-        await self._navigate_to_export_record(page)
-        await self._poll_export_record_until_ready(page)
 
-        async with page.expect_download(timeout=180000) as dl_info:
-            await self._click_download_in_export_record(page)
+        # 复用 export_record_poll_timeout_s 作为 expect_download 超时（300s），
+        # 语义对齐：等待异步导出完成并触发下载事件的最长等待时间。
+        download_timeout_ms = self.sel.export_record_poll_timeout_s * 1000
+        async with page.expect_download(timeout=download_timeout_ms) as dl_info:
+            await self._click_export_button_in_dialog(page)
+            # best-effort 关闭"正在导出"进度对话框（不要阻塞）
+            await self._close_progress_dialog(page)
         download = await dl_info.value
 
         out_root = build_standard_output_root(self.ctx, data_type="purchase", granularity="manual")
