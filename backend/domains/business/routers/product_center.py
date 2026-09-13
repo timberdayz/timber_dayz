@@ -31,6 +31,9 @@ from backend.schemas.product_center import (
     ProductCategoryUpdateRequest,
     ProductCenterItem,
     ProductCenterListResponse,
+    ProductWarehouseCreateRequest,
+    ProductWarehouseUpdateRequest,
+    PlatformFeeRateUpdateRequest,
     SkuCreateRequest,
     SkuUpdateRequest,
     SkuOperatingDimensionsResponse,
@@ -68,8 +71,7 @@ from modules.core.db import (
     GRNHeader,
     DimProductCategory,
     DimPlatform,
-    DimShop,
-    AccountAlias,
+    DimWarehouse,
     SkuOperatingProfile,
 )
 from backend.services.product_finance_service import BillTotalMismatchError, ProductFinanceService
@@ -77,7 +79,7 @@ from backend.services.feishu_projection_client import FeishuProjectionClient
 from backend.services.feishu_projection_service import FeishuProjectionService, trigger_pending_projection_delivery
 
 router = APIRouter(tags=["商品中心"], dependencies=[Depends(get_current_user)])
-_EDITOR_ROLES = {"admin", "manager", "finance"}
+_EDITOR_ROLES = {"admin", "manager", "finance", "operator"}
 
 
 def _require_editor(current_user=Depends(get_current_user)):
@@ -90,6 +92,12 @@ def _require_editor(current_user=Depends(get_current_user)):
 
 def _require_projection_admin(current_user=Depends(get_current_user)):
     if getattr(current_user, "is_superuser", False) or "admin" in extract_role_codes(current_user):
+        return current_user
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+def _require_platform_fee_editor(current_user=Depends(get_current_user)):
+    if getattr(current_user, "is_superuser", False) or extract_role_codes(current_user) & {"admin", "manager", "finance"}:
         return current_user
     raise HTTPException(status_code=403, detail="Insufficient permissions")
 
@@ -277,13 +285,13 @@ async def _enqueue_sku_projection(db: AsyncSession, row: DimErpSku) -> None:
     )
 
 
-async def _enqueue_site_sku_projection(db: AsyncSession, row: SkuOperatingProfile) -> None:
+async def _enqueue_platform_sku_profit_projection(db: AsyncSession, row: SkuOperatingProfile) -> None:
     await FeishuProjectionService(db).enqueue(
-        "site_sku",
+        "platform_sku_profit",
         str(row.profile_id),
         {
             "profile_id": row.profile_id,
-            "reason": "site_sku_operating_changed",
+            "reason": "platform_sku_profit_changed",
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             "selling_price": float(row.selling_price) if row.selling_price is not None else None,
             "expected_logistics_cost": float(row.expected_logistics_cost) if row.expected_logistics_cost is not None else None,
@@ -750,18 +758,18 @@ async def get_purchase_order(po_id: str, db: AsyncSession = Depends(get_async_db
 
 
 def _serialize_provider_rule(row: LogisticsProviderRule) -> dict:
-    return {"rule_id": row.rule_id, "logistics_provider": row.logistics_provider, "destination": row.destination, "transport_type": row.transport_type, "cargo_class": row.cargo_class, "is_sensitive": row.is_sensitive, "billing_basis": row.billing_basis, "billing_unit": row.billing_unit, "freight_unit_rate": float(row.freight_unit_rate) if row.freight_unit_rate is not None else None, "sensitive_surcharge_mode": row.sensitive_surcharge_mode, "sensitive_surcharge_rate": float(row.sensitive_surcharge_rate) if row.sensitive_surcharge_rate is not None else None, "currency": row.currency, "effective_from": row.effective_from, "effective_to": row.effective_to, "status": row.status, "source": row.source, "version": row.version, "notes": row.notes}
+    return {"rule_id": row.rule_id, "logistics_provider": row.logistics_provider, "warehouse_code": row.warehouse_code, "transport_type": row.transport_type, "cargo_class": row.cargo_class, "is_sensitive": row.is_sensitive, "billing_basis": row.billing_basis, "billing_unit": row.billing_unit, "freight_unit_rate": float(row.freight_unit_rate) if row.freight_unit_rate is not None else None, "sensitive_surcharge_mode": row.sensitive_surcharge_mode, "sensitive_surcharge_rate": float(row.sensitive_surcharge_rate) if row.sensitive_surcharge_rate is not None else None, "currency": row.currency, "effective_from": row.effective_from, "effective_to": row.effective_to, "status": row.status, "source": row.source, "version": row.version, "notes": row.notes}
 
 
 @router.get("/api/logistics-provider-rules")
-async def list_logistics_provider_rules(provider: str | None = Query(None), destination: str | None = Query(None), transport_type: str | None = Query(None), as_of: date | None = Query(None), db: AsyncSession = Depends(get_async_db)):
+async def list_logistics_provider_rules(provider: str | None = Query(None), warehouse_code: str | None = Query(None), transport_type: str | None = Query(None), as_of: date | None = Query(None), db: AsyncSession = Depends(get_async_db)):
     filters = [LogisticsProviderRule.status == "active"]
     if provider:
         filters.append(LogisticsProviderRule.logistics_provider == provider)
-    if destination:
+    if warehouse_code:
         filters.append(
-            (LogisticsProviderRule.destination == destination)
-            | LogisticsProviderRule.destination.is_(None)
+            (LogisticsProviderRule.warehouse_code == warehouse_code)
+            | LogisticsProviderRule.warehouse_code.is_(None)
         )
     if transport_type:
         filters.append(
@@ -776,6 +784,8 @@ async def list_logistics_provider_rules(provider: str | None = Query(None), dest
 
 @router.post("/api/logistics-provider-rules", status_code=201)
 async def create_logistics_provider_rule(body: LogisticsProviderRuleCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    if body.warehouse_code and await db.get(DimWarehouse, body.warehouse_code) is None:
+        raise HTTPException(status_code=422, detail="warehouse not found")
     row = LogisticsProviderRule(**body.model_dump())
     db.add(row)
     await db.commit()
@@ -788,7 +798,10 @@ async def update_logistics_provider_rule(rule_id: int, body: LogisticsProviderRu
     row = await db.get(LogisticsProviderRule, rule_id)
     if row is None:
         raise HTTPException(status_code=404, detail="logistics provider rule not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    values = body.model_dump(exclude_unset=True)
+    if values.get("warehouse_code") and await db.get(DimWarehouse, values["warehouse_code"]) is None:
+        raise HTTPException(status_code=422, detail="warehouse not found")
+    for key, value in values.items():
         setattr(row, key, value)
     await db.commit()
     await db.refresh(row)
@@ -851,7 +864,6 @@ def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None =
         "logistics_provider": bill.logistics_provider,
         "bill_date": bill.bill_date,
         "transport_type": bill.transport_type,
-        "destination": bill.destination,
         "currency": bill.currency,
         "total_amount": float(bill.total_amount or 0),
         "status": bill.status,
@@ -865,6 +877,7 @@ def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None =
                 "line_id": line.line_id,
                 "sku_id": line.sku_id,
                 "po_id": line.po_id,
+                "warehouse_code": line.warehouse_code,
                 "billing_basis": line.billing_basis,
                 "billing_unit": line.billing_unit,
                 "billing_unit_rate": float(line.billing_unit_rate) if line.billing_unit_rate is not None else None,
@@ -900,6 +913,51 @@ def _serialize_bill(bill: LogisticsBill, lines: list[LogisticsBillLine] | None =
     if purchase_orders is not None:
         payload["purchase_orders"] = [row.po_id for row in purchase_orders]
     return payload
+
+
+@router.get("/api/product-warehouses")
+async def list_product_warehouses(include_inactive: bool = Query(False), db: AsyncSession = Depends(get_async_db)):
+    statement = select(DimWarehouse).order_by(DimWarehouse.country_code, DimWarehouse.warehouse_code)
+    if not include_inactive:
+        statement = statement.where(DimWarehouse.status == "active")
+    rows = (await db.execute(statement)).scalars().all()
+    return [{"warehouse_code": row.warehouse_code, "warehouse_name": row.warehouse_name, "country_code": row.country_code, "country_name": row.country_name, "region": row.region, "status": row.status} for row in rows]
+
+
+@router.post("/api/product-warehouses", status_code=201)
+async def create_product_warehouse(body: ProductWarehouseCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    row = DimWarehouse(**body.model_dump())
+    db.add(row)
+    try:
+        await db.commit()
+        await db.refresh(row)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="warehouse code already exists") from exc
+    return {"warehouse_code": row.warehouse_code, "warehouse_name": row.warehouse_name, "country_code": row.country_code, "country_name": row.country_name, "region": row.region, "status": row.status}
+
+
+@router.patch("/api/product-warehouses/{warehouse_code}")
+async def update_product_warehouse(warehouse_code: str, body: ProductWarehouseUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    row = await db.get(DimWarehouse, warehouse_code)
+    if row is None:
+        raise HTTPException(status_code=404, detail="warehouse not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    await db.commit()
+    await db.refresh(row)
+    return {"warehouse_code": row.warehouse_code, "warehouse_name": row.warehouse_name, "country_code": row.country_code, "country_name": row.country_name, "region": row.region, "status": row.status}
+
+
+@router.patch("/api/platforms/{platform_code}/fee-rate")
+async def update_platform_fee_rate(platform_code: str, body: PlatformFeeRateUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_platform_fee_editor)):
+    row = await db.get(DimPlatform, platform_code)
+    if row is None:
+        raise HTTPException(status_code=404, detail="platform not found")
+    row.default_fee_rate = body.default_fee_rate
+    row.fee_rate_effective_from = body.fee_rate_effective_from
+    await db.commit()
+    return {"platform_code": row.platform_code, "default_fee_rate": row.default_fee_rate, "fee_rate_effective_from": row.fee_rate_effective_from}
 
 
 @router.get("/api/logistics-bills")
@@ -1025,13 +1083,13 @@ async def confirm_logistics_bill(bill_id: int, db: AsyncSession = Depends(get_as
         bill = await service.confirm_bill(bill=await service.get_bill_or_raise(bill_id), user_id=getattr(current_user, "user_id", None))
         await FeishuProjectionService(db).enqueue_full_refresh("logistics_bill_confirmed")
         line_rows = (await db.execute(select(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill_id))).scalars().all()
-        site_sku_ids = {line.sku_id for line in line_rows if line.sku_id is not None}
+        platform_sku_ids = {line.sku_id for line in line_rows if line.sku_id is not None}
         allocation_rows = (await db.execute(select(LogisticsBillLineAllocation).where(LogisticsBillLineAllocation.bill_line_id.in_([line.line_id for line in line_rows])))).scalars().all() if line_rows else []
-        site_sku_ids.update(row.sku_id for row in allocation_rows)
-        if site_sku_ids:
-            site_profiles = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id.in_(site_sku_ids), SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().all()
+        platform_sku_ids.update(row.sku_id for row in allocation_rows)
+        if platform_sku_ids:
+            site_profiles = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id.in_(platform_sku_ids), SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().all()
             for profile in site_profiles:
-                await _enqueue_site_sku_projection(db, profile)
+                await _enqueue_platform_sku_profit_projection(db, profile)
         await db.commit()
         asyncio.create_task(trigger_pending_projection_delivery())
     except BillTotalMismatchError as exc:
@@ -1078,9 +1136,6 @@ def _serialize_operating_profile(row: SkuOperatingProfile, *, sku=None, spu=None
         "profile_id": row.profile_id,
         "sku_id": row.sku_id,
         "platform_code": row.platform_code,
-        "shop_id": row.shop_id,
-        "site_code": row.site_code,
-        "site_name": row.site_name,
         "warehouse_code": row.warehouse_code,
         "transport_type": row.transport_type,
         "warehouse_name": row.warehouse_name,
@@ -1097,6 +1152,8 @@ def _serialize_operating_profile(row: SkuOperatingProfile, *, sku=None, spu=None
         "sku_key": sku.sku_key if sku else None,
         "sku_name": sku.sku_name if sku else None,
         "spu": spu.spu if spu else None,
+        "logistics_damage_rate": spu.logistics_damage_rate if spu else None,
+        "return_loss_rate": spu.return_loss_rate if spu else None,
         "estimated_contribution_profit": estimate.estimated_contribution_profit if estimate else None,
         "estimated_margin_rate": estimate.estimated_margin_rate if estimate else None,
         "purchase_cost": estimate.purchase_cost if estimate else None,
@@ -1113,14 +1170,14 @@ def _serialize_operating_profile(row: SkuOperatingProfile, *, sku=None, spu=None
 @router.get("/api/sku-operating-dimensions", response_model=SkuOperatingDimensionsResponse)
 async def list_sku_operating_dimensions(db: AsyncSession = Depends(get_async_db)):
     platforms = (await db.execute(select(DimPlatform).where(DimPlatform.is_active.is_(True)).order_by(DimPlatform.platform_code))).scalars().all()
-    shops = (await db.execute(select(DimShop).where(DimShop.is_active.is_(True)).order_by(DimShop.platform_code, DimShop.shop_id))).scalars().all()
-    warehouses = (await db.execute(select(GRNHeader.warehouse).where(GRNHeader.warehouse.is_not(None)).distinct().order_by(GRNHeader.warehouse))).scalars().all()
-    sites = (await db.execute(select(AccountAlias.site).where(AccountAlias.active.is_(True), AccountAlias.site.is_not(None)).distinct().order_by(AccountAlias.site))).scalars().all()
+    warehouses = (await db.execute(select(DimWarehouse).where(DimWarehouse.status == "active").order_by(DimWarehouse.country_code, DimWarehouse.warehouse_code))).scalars().all()
+    spus = (await db.execute(select(DimSpu.spu).where(DimSpu.active.is_(True)).order_by(DimSpu.spu))).scalars().all()
+    skus = (await db.execute(select(DimErpSku.sku_id, DimErpSku.sku_key, DimErpSku.sku_name).where(DimErpSku.status == "active").order_by(DimErpSku.sku_key))).all()
     return {
         "platforms": [{"platform_code": row.platform_code, "name": row.name} for row in platforms],
-        "shops": [{"platform_code": row.platform_code, "shop_id": row.shop_id, "shop_name": row.shop_name} for row in shops],
-        "sites": [{"site_code": site, "site_name": site} for site in sites if site],
-        "warehouses": [warehouse for warehouse in warehouses if warehouse],
+        "spus": list(spus),
+        "skus": [{"sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name} for row in skus],
+        "warehouses": [{"warehouse_code": row.warehouse_code, "warehouse_name": row.warehouse_name, "country_code": row.country_code, "country_name": row.country_name} for row in warehouses],
     }
 
 
@@ -1128,17 +1185,17 @@ async def list_sku_operating_dimensions(db: AsyncSession = Depends(get_async_db)
 async def list_sku_operating_profiles(
     sku_id: int | None = Query(None, gt=0),
     platform_code: str | None = Query(None),
-    shop_id: str | None = Query(None),
-    site_code: str | None = Query(None),
+    spu: str | None = Query(None),
     warehouse_code: str | None = Query(None),
     status: str | None = Query(None),
+    include_unconfigured: bool = Query(True),
     db: AsyncSession = Depends(get_async_db),
 ):
     filters = []
-    for field, value in ((SkuOperatingProfile.sku_id, sku_id), (SkuOperatingProfile.platform_code, platform_code), (SkuOperatingProfile.shop_id, shop_id), (SkuOperatingProfile.site_code, site_code), (SkuOperatingProfile.warehouse_code, warehouse_code), (SkuOperatingProfile.status, status)):
+    for field, value in ((SkuOperatingProfile.sku_id, sku_id), (SkuOperatingProfile.platform_code, platform_code), (SkuOperatingProfile.warehouse_code, warehouse_code), (SkuOperatingProfile.status, status)):
         if value is not None:
             filters.append(field == value)
-    rows = (await db.execute(select(SkuOperatingProfile).where(*filters).order_by(SkuOperatingProfile.platform_code, SkuOperatingProfile.shop_id, SkuOperatingProfile.site_code, SkuOperatingProfile.warehouse_code, SkuOperatingProfile.sku_id))).scalars().all()
+    rows = (await db.execute(select(SkuOperatingProfile).where(*filters).order_by(SkuOperatingProfile.platform_code, SkuOperatingProfile.warehouse_code, SkuOperatingProfile.sku_id))).scalars().all()
     sku_ids = {row.sku_id for row in rows}
     profile_ids = {row.profile_id for row in rows}
     sku_rows = (await db.execute(select(DimErpSku).where(DimErpSku.sku_id.in_(sku_ids)))).scalars().all() if sku_ids else []
@@ -1162,9 +1219,66 @@ async def list_sku_operating_profiles(
             estimate=estimate_by_profile.get(row.profile_id),
         )
         payload["actual_logistics_cost"] = await finance_service.find_confirmed_logistics_cost(
-            row.sku_id, row.site_code, row.transport_type, row.warehouse_code
+            row.sku_id, row.warehouse_code, row.transport_type
         )
         payloads.append(payload)
+    if spu:
+        payloads = [payload for payload in payloads if payload.get("spu") == spu]
+    if include_unconfigured and status in (None, "active"):
+        active_skus = (await db.execute(select(DimErpSku).where(DimErpSku.status == "active"))).scalars().all()
+        active_platforms = (await db.execute(select(DimPlatform).where(DimPlatform.is_active.is_(True)))).scalars().all()
+        active_warehouses = (await db.execute(select(DimWarehouse).where(DimWarehouse.status == "active"))).scalars().all()
+        sku_ids_for_bindings = {sku.sku_id for sku in active_skus}
+        binding_rows = (await db.execute(select(BridgeSpuSku).where(BridgeSpuSku.sku_id.in_(sku_ids_for_bindings), BridgeSpuSku.binding_status == "active", BridgeSpuSku.effective_to.is_(None)))).scalars().all() if sku_ids_for_bindings else []
+        binding_by_sku = {row.sku_id: row.spu for row in binding_rows}
+        bound_spu_rows = (await db.execute(select(DimSpu).where(DimSpu.spu.in_(set(binding_by_sku.values()))))).scalars().all() if binding_by_sku else []
+        bound_spu_by_code = {row.spu: row for row in bound_spu_rows}
+        mapped_platform_rows = (await db.execute(select(BridgeErpSkuKey.sku_id, BridgeErpSkuKey.source_platform).where(BridgeErpSkuKey.sku_id.in_(sku_ids_for_bindings), BridgeErpSkuKey.active.is_(True), BridgeErpSkuKey.effective_to.is_(None), BridgeErpSkuKey.source_platform.is_not(None)))).all() if sku_ids_for_bindings else []
+        mapped_platforms = {}
+        for mapped_sku_id, mapped_platform in mapped_platform_rows:
+            mapped_platforms.setdefault(mapped_sku_id, set()).add(mapped_platform)
+        existing_keys = {(row.sku_id, row.platform_code, row.warehouse_code) for row in rows}
+        for sku in active_skus:
+            bound_spu = binding_by_sku.get(sku.sku_id)
+            bound_spu_row = bound_spu_by_code.get(bound_spu)
+            if spu and bound_spu != spu:
+                continue
+            if sku_id is not None and sku.sku_id != sku_id:
+                continue
+            for platform in active_platforms:
+                if platform_code and platform.platform_code != platform_code:
+                    continue
+                if mapped_platforms and platform.platform_code not in mapped_platforms.get(sku.sku_id, set()):
+                    continue
+                for warehouse in active_warehouses:
+                    if warehouse_code and warehouse.warehouse_code != warehouse_code:
+                        continue
+                    key = (sku.sku_id, platform.platform_code, warehouse.warehouse_code)
+                    if key in existing_keys:
+                        continue
+                    payloads.append({
+                        "profile_id": None,
+                        "sku_id": sku.sku_id,
+                        "platform_code": platform.platform_code,
+                        "warehouse_code": warehouse.warehouse_code,
+                        "warehouse_name": warehouse.warehouse_name,
+                        "transport_type": "sea",
+                        "selling_price": None,
+                        "default_coupon_amount": 0,
+                        "platform_fee_rate": platform.default_fee_rate,
+                        "expected_logistics_cost": None,
+                        "expected_storage_cost": None,
+                        "status": "active",
+                        "effective_from": date.today(),
+                        "effective_to": None,
+                        "sku_key": sku.sku_key,
+                        "sku_name": sku.sku_name,
+                        "spu": bound_spu,
+                        "logistics_damage_rate": bound_spu_row.logistics_damage_rate if bound_spu_row else None,
+                        "return_loss_rate": bound_spu_row.return_loss_rate if bound_spu_row else None,
+                        "cost_completeness": "incomplete",
+                        "unconfigured": True,
+                    })
     return payloads
 
 
@@ -1173,21 +1287,10 @@ async def _validate_operating_dimensions(db: AsyncSession, values: dict) -> None
         raise HTTPException(status_code=404, detail="SKU not found")
     if await db.get(DimPlatform, values["platform_code"]) is None:
         raise HTTPException(status_code=422, detail="platform not found")
-    if await db.get(DimShop, {"platform_code": values["platform_code"], "shop_id": values["shop_id"]}) is None:
-        raise HTTPException(status_code=422, detail="shop not found for platform")
-    site_exists = await db.execute(
-        select(AccountAlias.id).where(
-            AccountAlias.active.is_(True),
-            AccountAlias.site == values["site_code"],
-        ).limit(1)
-    )
-    if site_exists.scalar_one_or_none() is None:
-        raise HTTPException(status_code=422, detail="site not found in standardized source dimensions")
-    warehouse_exists = await db.execute(
-        select(GRNHeader.grn_id).where(GRNHeader.warehouse == values["warehouse_code"]).limit(1)
-    )
-    if warehouse_exists.scalar_one_or_none() is None:
-        raise HTTPException(status_code=422, detail="warehouse not found in standardized source dimensions")
+    warehouse = await db.get(DimWarehouse, values["warehouse_code"])
+    if warehouse is None or warehouse.status != "active":
+        raise HTTPException(status_code=422, detail="warehouse not found or inactive")
+    values["platform_fee_rate"] = (await db.get(DimPlatform, values["platform_code"])).default_fee_rate
 
 
 @router.post("/api/sku-operating-profiles", response_model=SkuOperatingProfileResponse, status_code=201)
@@ -1198,7 +1301,7 @@ async def create_sku_operating_profile(body: SkuOperatingProfileCreateRequest, d
     db.add(row)
     try:
         await db.flush()
-        await _enqueue_site_sku_projection(db, row)
+        await _enqueue_platform_sku_profit_projection(db, row)
         await db.commit()
         await db.refresh(row)
     except IntegrityError as exc:
@@ -1214,9 +1317,11 @@ async def update_sku_operating_profile(profile_id: int, body: SkuOperatingProfil
         raise HTTPException(status_code=404, detail="SKU operating profile not found")
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
+    platform = await db.get(DimPlatform, row.platform_code)
+    row.platform_fee_rate = platform.default_fee_rate if platform is not None else None
     row.updated_by = getattr(_user, "user_id", None)
     try:
-        await _enqueue_site_sku_projection(db, row)
+        await _enqueue_platform_sku_profit_projection(db, row)
         await db.commit()
         await db.refresh(row)
     except IntegrityError as exc:
@@ -1234,7 +1339,7 @@ async def bulk_save_sku_operating_profiles(body: SkuOperatingProfileBulkRequest,
         for item in body.items:
             values = item.model_dump()
             await _validate_operating_dimensions(db, values)
-            filters = [SkuOperatingProfile.sku_id == values["sku_id"], SkuOperatingProfile.platform_code == values["platform_code"], SkuOperatingProfile.shop_id == values["shop_id"], SkuOperatingProfile.site_code == values["site_code"], SkuOperatingProfile.warehouse_code == values["warehouse_code"], SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)]
+            filters = [SkuOperatingProfile.sku_id == values["sku_id"], SkuOperatingProfile.platform_code == values["platform_code"], SkuOperatingProfile.warehouse_code == values["warehouse_code"], SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)]
             row = (await db.execute(select(SkuOperatingProfile).where(*filters))).scalars().first()
             if row is None:
                 row = SkuOperatingProfile(**values, created_by=getattr(_user, "user_id", None), updated_by=getattr(_user, "user_id", None))
@@ -1247,7 +1352,7 @@ async def bulk_save_sku_operating_profiles(body: SkuOperatingProfileBulkRequest,
                 updated += 1
             rows.append(row)
         for row in rows:
-            await _enqueue_site_sku_projection(db, row)
+            await _enqueue_platform_sku_profit_projection(db, row)
         await db.commit()
         for row in rows:
             await db.refresh(row)
@@ -1281,7 +1386,7 @@ async def preview_sku_operating_profit(profile_id: int, body: SkuOperatingProfit
 async def save_sku_operating_profit(profile_id: int, body: SkuOperatingProfitRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     try:
         row = await ProductFinanceService(db).save_operating_profit(profile_id, body.model_dump(exclude_unset=True))
-        await _enqueue_site_sku_projection(db, await db.get(SkuOperatingProfile, profile_id))
+        await _enqueue_platform_sku_profit_projection(db, await db.get(SkuOperatingProfile, profile_id))
         await db.commit()
         await db.refresh(row)
     except ValueError as exc:
@@ -1293,7 +1398,7 @@ async def save_sku_operating_profit(profile_id: int, body: SkuOperatingProfitReq
 @router.get("/api/sku-operating-profiles/{profile_id}/profit-estimates", response_model=list[SkuOperatingProfitHistoryResponse])
 async def list_sku_operating_profit_history(profile_id: int, limit: int = Query(100, ge=1, le=500), db: AsyncSession = Depends(get_async_db)):
     rows = (await db.execute(select(SkuProfitEstimate).where(SkuProfitEstimate.operating_profile_id == profile_id).order_by(SkuProfitEstimate.estimate_as_of.desc()).limit(limit))).scalars().all()
-    return [{"estimate_id": row.estimate_id, "profile_id": row.operating_profile_id, "sku_id": row.sku_id, "platform_code": row.platform_code, "shop_id": row.shop_id, "site_code": row.site_code, "warehouse_code": row.warehouse_code, "estimate_as_of": row.estimate_as_of, "estimated_contribution_profit": float(row.estimated_contribution_profit) if row.estimated_contribution_profit is not None else None, "estimated_margin_rate": float(row.estimated_margin_rate) if row.estimated_margin_rate is not None else None, "cost_completeness": row.cost_completeness, "confidence_level": row.confidence_level} for row in rows]
+    return [{"estimate_id": row.estimate_id, "profile_id": row.operating_profile_id, "sku_id": row.sku_id, "platform_code": row.platform_code, "warehouse_code": row.warehouse_code, "estimate_as_of": row.estimate_as_of, "estimated_contribution_profit": float(row.estimated_contribution_profit) if row.estimated_contribution_profit is not None else None, "estimated_margin_rate": float(row.estimated_margin_rate) if row.estimated_margin_rate is not None else None, "cost_completeness": row.cost_completeness, "confidence_level": row.confidence_level} for row in rows]
 
 
 @router.get("/api/product-profit-estimates")
@@ -1369,15 +1474,15 @@ async def save_baseline_product_profit(body: ProfitEstimateSaveRequest, db: Asyn
 async def initialize_feishu_projection(body: FeishuProjectionInitializeRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_projection_admin)):
     spu_table_id = body.spu_table_id or os.getenv("FEISHU_PRODUCT_SPU_TABLE_ID")
     sku_table_id = body.sku_table_id or os.getenv("FEISHU_PRODUCT_SKU_TABLE_ID")
-    site_sku_table_id = body.site_sku_table_id or os.getenv("FEISHU_PRODUCT_SITE_SKU_TABLE_ID")
+    platform_sku_profit_table_id = body.platform_sku_profit_table_id or os.getenv("FEISHU_PRODUCT_PLATFORM_SKU_PROFIT_TABLE_ID")
     client = FeishuProjectionClient()
     try:
-        config = await FeishuProjectionService(db).initialize_tables(client, spu_table_id, sku_table_id, site_sku_table_id)
+        config = await FeishuProjectionService(db).initialize_tables(client, spu_table_id, sku_table_id, platform_sku_profit_table_id)
         await db.commit()
     except RuntimeError as exc:
         await db.rollback()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"status": config.status, "spu_table_id": config.spu_table_id, "sku_table_id": config.sku_table_id, "site_sku_table_id": config.site_sku_table_id}
+    return {"status": config.status, "spu_table_id": config.spu_table_id, "sku_table_id": config.sku_table_id, "platform_sku_profit_table_id": config.platform_sku_profit_table_id}
 
 
 @router.get("/api/feishu-projection/status")

@@ -8,10 +8,10 @@ def test_logistics_rule_defaults_to_volume_and_matches_specific_scope():
     from backend.services.product_logistics_service import match_logistics_rule
 
     rules = [
-        {"provider": "Ocean", "destination": None, "transport_type": "sea", "cargo_class": None, "billing_basis": "volume", "freight_unit_rate": Decimal("700"), "effective_from": date(2026, 1, 1)},
-        {"provider": "Ocean", "destination": "MANILA", "transport_type": "sea", "cargo_class": "sensitive", "billing_basis": "volume", "freight_unit_rate": Decimal("930"), "effective_from": date(2026, 1, 1)},
+        {"provider": "Ocean", "warehouse_code": None, "transport_type": "sea", "cargo_class": None, "billing_basis": "volume", "freight_unit_rate": Decimal("700"), "effective_from": date(2026, 1, 1)},
+        {"provider": "Ocean", "warehouse_code": "US-WH-1", "transport_type": "sea", "cargo_class": "sensitive", "billing_basis": "volume", "freight_unit_rate": Decimal("930"), "effective_from": date(2026, 1, 1)},
     ]
-    selected = match_logistics_rule(rules, provider="Ocean", destination="MANILA", transport_type="sea", cargo_class="sensitive", as_of=date(2026, 9, 11))
+    selected = match_logistics_rule(rules, provider="Ocean", warehouse_code="US-WH-1", transport_type="sea", cargo_class="sensitive", as_of=date(2026, 9, 11))
     assert selected["freight_unit_rate"] == Decimal("930")
     assert selected["billing_basis"] == "volume"
 
@@ -22,7 +22,7 @@ def test_logistics_rule_distinguishes_sensitive_goods_without_cargo_class():
     rules = [
         {
             "logistics_provider": "Ocean",
-            "destination": "MANILA",
+            "warehouse_code": "US-WH-1",
             "transport_type": "sea",
             "is_sensitive": False,
             "freight_unit_rate": Decimal("850"),
@@ -30,7 +30,7 @@ def test_logistics_rule_distinguishes_sensitive_goods_without_cargo_class():
         },
         {
             "logistics_provider": "Ocean",
-            "destination": "MANILA",
+            "warehouse_code": "US-WH-1",
             "transport_type": "sea",
             "is_sensitive": True,
             "freight_unit_rate": Decimal("930"),
@@ -41,7 +41,7 @@ def test_logistics_rule_distinguishes_sensitive_goods_without_cargo_class():
     selected = match_logistics_rule(
         rules,
         provider="Ocean",
-        destination="MANILA",
+        warehouse_code="US-WH-1",
         transport_type="sea",
         is_sensitive=True,
         as_of=date(2026, 9, 11),
@@ -77,7 +77,7 @@ def test_bill_batch_models_support_many_purchase_orders_and_billing_basis():
 def test_new_logistics_requests_allow_fixed_basis_and_multiple_skus():
     from backend.schemas.product_center import LogisticsBillLineRequest, LogisticsBillLinesReplaceRequest
 
-    request = LogisticsBillLinesReplaceRequest(lines=[LogisticsBillLineRequest(sku_ids=[1, 2], billing_basis="fixed", line_total_amount=100)])
+    request = LogisticsBillLinesReplaceRequest(lines=[LogisticsBillLineRequest(sku_ids=[1, 2], warehouse_code="US-WH-1", billing_basis="fixed", line_total_amount=100)])
     assert request.lines[0].billing_basis == "fixed"
     assert request.lines[0].sku_ids == [1, 2]
 
@@ -91,6 +91,7 @@ def test_new_logistics_request_preserves_each_purchase_order_sku_quantity():
             {"sku_id": 1, "po_id": "PO-001", "shipped_qty": 10},
             {"sku_id": 2, "po_id": "PO-002", "shipped_qty": 20},
         ],
+        warehouse_code="US-WH-1",
         billing_basis="volume",
         line_total_amount=1200,
     )
