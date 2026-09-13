@@ -163,3 +163,30 @@ def test_miaoshou_purchase_export_source_does_not_call_select_status_tab():
     # check for actual invocation (not just mention in comments/docstring)
     assert "self._select_status_tab(" not in source
     assert 'get_by_role("tab"' not in source
+
+
+def test_miaoshou_purchase_export_wait_search_results_uses_existing_text():
+    """_wait_search_results_ready must wait for texts that exist on current miaoshou page.
+
+    Regression test: miaoshou removed the "采购单信息" row-group header label during a
+    site refactor. The previous `_wait_search_results_ready` still waited on it and
+    timed out 15s after every successful search click. Replaced with "商品信息"
+    (row-group header that remains visible) and the "导入/导出" button (matches
+    inventory_export._wait_search_results_ready design).
+    """
+    import inspect
+
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    source = inspect.getsource(MiaoshouPurchaseExport._wait_search_results_ready)
+    # Removed text must NOT be queried (miaoshou no longer renders it).
+    assert 'get_by_text("采购单信息"' not in source, (
+        "miaoshou no longer renders '采购单信息' — must not be queried"
+    )
+    # Replacement wait targets MUST be present (verified via screenshot inspection).
+    assert 'get_by_text("商品信息"' in source, (
+        "'商品信息' (row-group header) must be a wait target"
+    )
+    assert 'name="导入/导出"' in source, (
+        "'导入/导出' button must be a wait target (matches inventory design)"
+    )
