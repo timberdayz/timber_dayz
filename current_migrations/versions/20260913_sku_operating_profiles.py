@@ -44,6 +44,7 @@ def upgrade() -> None:
             sa.Column("site_name", sa.String(128), nullable=True),
             sa.Column("warehouse_code", sa.String(128), nullable=False),
             sa.Column("warehouse_name", sa.String(256), nullable=True),
+            sa.Column("transport_type", sa.String(64), nullable=True),
             sa.Column("selling_price", sa.Numeric(18, 2), nullable=True),
             sa.Column("default_coupon_amount", sa.Numeric(18, 2), nullable=True),
             sa.Column("platform_fee_rate", sa.Numeric(12, 8), nullable=True),
@@ -109,7 +110,7 @@ def downgrade() -> None:
         op.drop_index("ix_sku_profit_estimates_operating_scope", table_name="sku_profit_estimates", schema="finance")
     if _has_fk("sku_profit_estimates", "finance", "fk_sku_profit_estimate_operating_profile"):
         op.drop_constraint("fk_sku_profit_estimate_operating_profile", "sku_profit_estimates", schema="finance", type_="foreignkey")
-    for name in ("warehouse_code", "site_code", "shop_id", "platform_code", "operating_profile_id"):
+    for name in ("warehouse_code", "site_code", "shop_id", "platform_code", "operating_profile_id", "transport_type"):
         if _has_column("sku_profit_estimates", "finance", name):
             op.drop_column("sku_profit_estimates", name, schema="finance")
     for index_name in ("ix_sku_operating_profile_sku", "ix_sku_operating_profile_scope", "uq_sku_operating_profile_current"):

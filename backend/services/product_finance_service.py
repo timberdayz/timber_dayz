@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -286,7 +286,12 @@ class ProductFinanceService:
         if transport_type:
             allocated = allocated.where(LogisticsBill.transport_type == transport_type)
         if warehouse_code:
-            allocated = allocated.join(GRNHeader, GRNHeader.po_id == LogisticsBillLineAllocation.po_id).where(GRNHeader.warehouse == warehouse_code)
+            allocated = allocated.where(
+                exists().where(
+                    GRNHeader.po_id == LogisticsBillLineAllocation.po_id,
+                    GRNHeader.warehouse == warehouse_code,
+                )
+            )
         allocated_amount, allocated_quantity = (await self.db.execute(allocated)).one()
         if allocated_quantity:
             return Decimal(str(allocated_amount)) / Decimal(str(allocated_quantity))
@@ -300,7 +305,12 @@ class ProductFinanceService:
         if transport_type:
             statement = statement.where(LogisticsBill.transport_type == transport_type)
         if warehouse_code:
-            statement = statement.join(GRNHeader, GRNHeader.po_id == LogisticsBillLine.po_id).where(GRNHeader.warehouse == warehouse_code)
+            statement = statement.where(
+                exists().where(
+                    GRNHeader.po_id == LogisticsBillLine.po_id,
+                    GRNHeader.warehouse == warehouse_code,
+                )
+            )
         total_amount, total_quantity = (await self.db.execute(statement)).one()
         if total_quantity is None or not total_quantity:
             return None
@@ -437,6 +447,12 @@ class ProductFinanceService:
     async def save_operating_profit(self, profile_id: int, data: dict) -> SkuProfitEstimate:
         profile = await self.get_operating_profile(profile_id)
         preview = await self.preview_operating_profit(profile_id, data)
+        if data.get("selling_price") is not None:
+            profile.selling_price = data["selling_price"]
+        if data.get("coupon_amount") is not None:
+            profile.default_coupon_amount = data["coupon_amount"]
+        if data.get("transport_type") is not None:
+            profile.transport_type = data["transport_type"]
         row = SkuProfitEstimate(
             sku_id=profile.sku_id,
             operating_profile_id=profile.profile_id,

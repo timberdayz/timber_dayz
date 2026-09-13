@@ -215,9 +215,9 @@ async def _enqueue_site_sku_projection(db: AsyncSession, row: SkuOperatingProfil
             "profile_id": row.profile_id,
             "reason": "site_sku_operating_changed",
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-            "selling_price": row.selling_price,
-            "expected_logistics_cost": row.expected_logistics_cost,
-            "expected_storage_cost": row.expected_storage_cost,
+            "selling_price": float(row.selling_price) if row.selling_price is not None else None,
+            "expected_logistics_cost": float(row.expected_logistics_cost) if row.expected_logistics_cost is not None else None,
+            "expected_storage_cost": float(row.expected_storage_cost) if row.expected_storage_cost is not None else None,
         },
     )
 
@@ -941,6 +941,14 @@ async def confirm_logistics_bill(bill_id: int, db: AsyncSession = Depends(get_as
     try:
         bill = await service.confirm_bill(bill=await service.get_bill_or_raise(bill_id), user_id=getattr(current_user, "user_id", None))
         await FeishuProjectionService(db).enqueue_full_refresh("logistics_bill_confirmed")
+        line_rows = (await db.execute(select(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill_id))).scalars().all()
+        site_sku_ids = {line.sku_id for line in line_rows if line.sku_id is not None}
+        allocation_rows = (await db.execute(select(LogisticsBillLineAllocation).where(LogisticsBillLineAllocation.bill_line_id.in_([line.line_id for line in line_rows])))).scalars().all() if line_rows else []
+        site_sku_ids.update(row.sku_id for row in allocation_rows)
+        if site_sku_ids:
+            site_profiles = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id.in_(site_sku_ids), SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().all()
+            for profile in site_profiles:
+                await _enqueue_site_sku_projection(db, profile)
         await db.commit()
         asyncio.create_task(trigger_pending_projection_delivery())
     except BillTotalMismatchError as exc:

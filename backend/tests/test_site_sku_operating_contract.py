@@ -122,3 +122,28 @@ def test_site_projection_enqueue_is_limited_to_site_sku_mutations():
 
     assert "_enqueue_site_sku_projection" not in category_block
     assert "_enqueue_site_sku_projection" not in bill_block
+
+
+def test_site_operating_migration_and_projection_are_safe_for_transport_and_decimal_payloads():
+    migration = Path("current_migrations/versions/20260913_sku_operating_profiles.py").read_text(encoding="utf-8")
+    router = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+
+    assert 'sa.Column("transport_type", sa.String(64)' in migration
+    assert '"selling_price": float(row.selling_price)' in router
+
+
+def test_confirmed_logistics_cost_uses_exists_for_warehouse_filter_without_grn_multiplication():
+    source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
+
+    assert "exists().where(" in source
+    assert "GRNHeader.po_id" in source
+
+
+def test_saving_site_profit_persists_current_price_and_coupon_and_refreshes_projection():
+    finance_source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
+    router_source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+
+    assert "profile.selling_price = data[\"selling_price\"]" in finance_source
+    assert "profile.default_coupon_amount = data[\"coupon_amount\"]" in finance_source
+    assert "site_profiles =" in router_source
+    assert "await _enqueue_site_sku_projection(db, profile)" in router_source
