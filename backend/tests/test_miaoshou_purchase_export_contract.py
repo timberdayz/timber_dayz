@@ -219,6 +219,7 @@ def test_miaoshou_purchase_export_trigger_uses_expect_download_no_nav_poll():
       2. Removed helpers (_navigate_to_export_record, _poll_export_record_until_ready,
          _click_download_in_export_record) are GONE
       3. expect_download wraps _click_export_button_in_dialog (download fires on click)
+      4. NO _close_progress_dialog call inside expect_download context (mirror orders/inventory)
     """
     import inspect
 
@@ -247,34 +248,17 @@ def test_miaoshou_purchase_export_trigger_uses_expect_download_no_nav_poll():
     assert "async def _click_download_in_export_record(" not in full_source, (
         "_click_download_in_export_record removed — replaced by expect_download pattern"
     )
-
-
-def test_miaoshou_purchase_export_close_progress_dialog_is_best_effort():
-    """_close_progress_dialog must never raise — it's a UI nicety, not a precondition.
-
-    Inside the ``page.expect_download`` context, the "正在导出包裹" progress dialog
-    may or may not appear (depends on export size). The download event fires
-    independently of the dialog lifecycle. So closing it must be best-effort:
-    short waits (2s/1.5s) and try/except per close button, never raising out of
-    the method.
-
-    Regression test: production failures showed the OLD _close_progress_dialog
-    waited 10s for "正在导出" heading — if the heading didn't render in time,
-    the method silently returned but consumed 10s of budget. New design: 2s
-    max wait, never raises.
-    """
-    import inspect
-
-    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
-
-    source = inspect.getsource(MiaoshouPurchaseExport._close_progress_dialog)
-    # Best-effort: title wait must use a SHORT timeout (≤ 3s, not the old 10s).
-    title_wait = source.index("timeout=")
-    timeout_value = int(source[title_wait:title_wait + 30].split("=")[1].split(",")[0].split(")")[0])
-    assert timeout_value <= 3000, (
-        f"_close_progress_dialog title wait should be ≤3s (best-effort), got {timeout_value}ms"
+    # _close_progress_dialog must NOT exist (mirrors orders/inventory: download fires
+    # independently of UI dialog state, no need to close "正在导出包裹" overlay).
+    assert "async def _close_progress_dialog(" not in full_source, (
+        "_close_progress_dialog removed — orders/inventory don't close progress dialog; "
+        "download event is independent of UI overlay state"
     )
-    # Body wrapped in try/except so it never raises.
-    assert "except Exception" in source, (
-        "_close_progress_dialog must catch all exceptions (best-effort UI nicety)"
+    # _close_progress_dialog must NOT be called inside _trigger_async_export_and_download.
+    expect_block = source[source.index("async with page.expect_download("):]
+    expect_end = expect_block.index("download = await dl_info.value")
+    inside_expect = expect_block[:expect_end]
+    assert "_close_progress_dialog" not in inside_expect, (
+        "_close_progress_dialog must NOT be called inside expect_download context "
+        "(mirror orders/inventory: download fires independently of UI state)"
     )
