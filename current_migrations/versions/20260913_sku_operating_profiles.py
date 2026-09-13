@@ -5,7 +5,7 @@ import sqlalchemy as sa
 
 
 revision = "current_schema_20260913_sku_operating_profiles"
-down_revision = "current_schema_20260911_company_product_categories"
+down_revision = "current_schema_20260911_internal_product_category_taxonomy_v1"
 branch_labels = None
 depends_on = None
 
