@@ -9,7 +9,7 @@ def match_logistics_rule(
     rules: Iterable[Mapping],
     *,
     provider: str | None,
-    destination: str | None,
+    warehouse_code: str | None,
     transport_type: str | None,
     cargo_class: str | None = None,
     is_sensitive: bool | None = None,
@@ -27,7 +27,7 @@ def match_logistics_rule(
             continue
         if rule.get("provider") not in (None, provider) and rule.get("logistics_provider") not in (None, provider):
             continue
-        if rule.get("destination") not in (None, destination):
+        if rule.get("warehouse_code") not in (None, warehouse_code):
             continue
         if rule.get("transport_type") not in (None, transport_type):
             continue
@@ -39,7 +39,7 @@ def match_logistics_rule(
             value not in (None, "")
             for value in (
                 rule.get("provider", rule.get("logistics_provider")),
-                rule.get("destination"),
+                rule.get("warehouse_code"),
                 rule.get("transport_type"),
                 rule.get("cargo_class"),
                 rule.get("is_sensitive") if is_sensitive is not None else None,

@@ -737,7 +737,6 @@ class LogisticsBill(Base):
     logistics_provider = Column(String(128), nullable=True)
     bill_date = Column(Date, nullable=False)
     transport_type = Column(String(64), nullable=True)
-    destination = Column(String(128), nullable=True)
     currency = Column(String(8), nullable=False, default="CNY")
     total_amount = Column(Numeric(18, 2), nullable=False, default=0)
     status = Column(String(32), nullable=False, default="draft")
@@ -753,6 +752,7 @@ class LogisticsBill(Base):
 
     __table_args__ = (
         UniqueConstraint("bill_no", name="uq_logistics_bills_bill_no"),
+        CheckConstraint("transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')", name="ck_logistics_bills_transport_type"),
         Index("ix_logistics_bills_date_status", "bill_date", "status"),
         {"schema": "finance"},
     )
@@ -765,7 +765,7 @@ class LogisticsProviderRule(Base):
 
     rule_id = Column(Integer, primary_key=True, autoincrement=True)
     logistics_provider = Column(String(128), nullable=False)
-    destination = Column(String(128), nullable=True)
+    warehouse_code = Column(String(128), ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"), nullable=True)
     transport_type = Column(String(64), nullable=True)
     cargo_class = Column(String(64), nullable=True)
     is_sensitive = Column(Boolean, nullable=False, default=False)
@@ -785,7 +785,8 @@ class LogisticsProviderRule(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
-        Index("ix_logistics_provider_rules_scope", "logistics_provider", "destination", "transport_type", "effective_from"),
+        CheckConstraint("transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')", name="ck_logistics_provider_rules_transport_type"),
+        Index("ix_logistics_provider_rules_scope", "logistics_provider", "warehouse_code", "transport_type", "effective_from"),
         {"schema": "finance"},
     )
 
@@ -817,6 +818,7 @@ class LogisticsBillLine(Base):
     line_no = Column(Integer, nullable=False)
     sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=True)
     po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"), nullable=True)
+    warehouse_code = Column(String(128), ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"), nullable=False)
     billing_basis = Column(String(32), nullable=False, default="volume")
     billing_unit = Column(String(32), nullable=True)
     billing_unit_rate = Column(Numeric(18, 6), nullable=True)
@@ -916,8 +918,6 @@ class SkuProfitEstimate(Base):
     sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
     operating_profile_id = Column(Integer, ForeignKey("finance.sku_operating_profiles.profile_id", ondelete="SET NULL"), nullable=True)
     platform_code = Column(String(32), nullable=True)
-    shop_id = Column(String(256), nullable=True)
-    site_code = Column(String(64), nullable=True)
     warehouse_code = Column(String(128), nullable=True)
     estimate_as_of = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     assumption_version = Column(String(64), nullable=False)
@@ -948,16 +948,13 @@ class SkuProfitEstimate(Base):
 
 
 class SkuOperatingProfile(Base):
-    """Site/shop/warehouse-specific commercial settings for an ERP SKU."""
+    """Platform/warehouse-specific commercial settings for an ERP SKU."""
 
     __tablename__ = "sku_operating_profiles"
 
     profile_id = Column(Integer, primary_key=True, autoincrement=True)
     sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
     platform_code = Column(String(32), ForeignKey("core.dim_platforms.platform_code", ondelete="RESTRICT"), nullable=False)
-    shop_id = Column(String(256), nullable=False)
-    site_code = Column(String(64), nullable=False)
-    site_name = Column(String(128), nullable=True)
     warehouse_code = Column(String(128), nullable=False)
     warehouse_name = Column(String(256), nullable=True)
     transport_type = Column(String(64), nullable=True)
@@ -979,13 +976,11 @@ class SkuOperatingProfile(Base):
             "uq_sku_operating_profile_current",
             "sku_id",
             "platform_code",
-            "shop_id",
-            "site_code",
             "warehouse_code",
             unique=True,
             postgresql_where=text("effective_to IS NULL AND status = 'active'"),
         ),
-        Index("ix_sku_operating_profile_scope", "platform_code", "shop_id", "site_code", "warehouse_code"),
+        Index("ix_sku_operating_profile_scope", "platform_code", "warehouse_code"),
         Index("ix_sku_operating_profile_sku", "sku_id", "status"),
         {"schema": "finance"},
     )

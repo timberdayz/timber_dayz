@@ -898,7 +898,7 @@ class FeishuProjectionConfig(Base):
     provider_code = Column(String(32), nullable=False, default="feishu")
     spu_table_id = Column(String(64), nullable=True)
     sku_table_id = Column(String(64), nullable=True)
-    site_sku_table_id = Column(String(64), nullable=True)
+    platform_sku_profit_table_id = Column(String(64), nullable=True)
     initialized_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(32), nullable=False, default="pending")
     last_error = Column(Text, nullable=True)

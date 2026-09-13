@@ -269,12 +269,12 @@ def test_purchase_order_lines_expose_the_canonical_sku_mapping_when_available():
     assert '"sku_id": canonical_sku_ids.get(row.platform_sku)' in source
 
 
-def test_baseline_profit_keeps_platform_fee_from_the_legacy_read_only_profile():
+def test_baseline_profit_reads_platform_fee_from_platform_master():
     source = Path("backend/services/product_finance_service.py").read_text(
         encoding="utf-8"
     )
 
-    assert "platform_fee_rate=assumption.platform_fee_rate if assumption else None" in source
+    assert "platform.default_fee_rate" in source
 
 
 def test_profit_save_uses_the_preview_version_when_the_client_does_not_supply_one():

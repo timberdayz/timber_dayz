@@ -252,6 +252,34 @@ class ProductCenterBindingResponse(BaseModel):
     binding_status: str
 
 
+class ProductWarehouseCreateRequest(BaseModel):
+    warehouse_code: str = Field(min_length=1, max_length=128)
+    warehouse_name: str = Field(min_length=1, max_length=256)
+    country_code: str = Field(min_length=2, max_length=16)
+    country_name: str = Field(min_length=1, max_length=64)
+    region: Optional[str] = Field(default=None, max_length=64)
+    status: str = Field(default="active", pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    effective_from: date = Field(default_factory=date.today)
+    effective_to: Optional[date] = None
+
+
+class ProductWarehouseUpdateRequest(BaseModel):
+    warehouse_name: Optional[str] = Field(default=None, min_length=1, max_length=256)
+    country_code: Optional[str] = Field(default=None, min_length=2, max_length=16)
+    country_name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    region: Optional[str] = Field(default=None, max_length=64)
+    status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+
+
+class PlatformFeeRateUpdateRequest(BaseModel):
+    default_fee_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    fee_rate_effective_from: date = Field(default_factory=date.today)
+
+
 class CostAssumptionCreateRequest(BaseModel):
     profile_name: str = Field(min_length=1, max_length=128)
     destination: Optional[str] = None
@@ -291,8 +319,7 @@ class LogisticsBillCreateRequest(BaseModel):
     bill_no: str = Field(min_length=1, max_length=128)
     logistics_provider: Optional[str] = Field(default=None, max_length=128)
     bill_date: date
-    transport_type: Optional[str] = Field(default=None, max_length=64)
-    destination: Optional[str] = Field(default=None, max_length=128)
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     currency: str = Field(default="CNY", min_length=3, max_length=8)
     total_amount: float = Field(ge=0)
     notes: Optional[str] = None
@@ -301,8 +328,7 @@ class LogisticsBillCreateRequest(BaseModel):
 class LogisticsBillUpdateRequest(BaseModel):
     logistics_provider: Optional[str] = Field(default=None, max_length=128)
     bill_date: Optional[date] = None
-    transport_type: Optional[str] = Field(default=None, max_length=64)
-    destination: Optional[str] = Field(default=None, max_length=128)
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
     total_amount: Optional[float] = Field(default=None, ge=0)
     notes: Optional[str] = None
@@ -310,6 +336,7 @@ class LogisticsBillUpdateRequest(BaseModel):
 
 class LogisticsBillSkuLineRequest(BaseModel):
     sku_id: int = Field(gt=0)
+    warehouse_code: str = Field(min_length=1, max_length=128)
     shipped_qty: float = Field(gt=0)
     actual_total_weight_kg: Optional[float] = Field(default=None, ge=0)
     actual_total_volume_cbm: Optional[float] = Field(default=None, ge=0)
@@ -333,6 +360,7 @@ class LogisticsBillLineRequest(BaseModel):
     sku_ids: list[int] = Field(min_length=1)
     allocations: list[LogisticsBillLineAllocationRequest] = Field(default_factory=list)
     po_id: Optional[str] = Field(default=None, max_length=64)
+    warehouse_code: str = Field(min_length=1, max_length=128)
     shipped_qty: float = Field(default=0, ge=0)
     actual_total_weight_kg: Optional[float] = Field(default=None, ge=0)
     actual_total_volume_cbm: Optional[float] = Field(default=None, ge=0)
@@ -392,8 +420,8 @@ class PurchaseOrderLineCostSupplementRequest(BaseModel):
 
 class LogisticsProviderRuleCreateRequest(BaseModel):
     logistics_provider: str = Field(min_length=1, max_length=128)
-    destination: Optional[str] = Field(default=None, max_length=128)
-    transport_type: Optional[str] = Field(default=None, max_length=64)
+    warehouse_code: Optional[str] = Field(default=None, max_length=128)
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     cargo_class: Optional[str] = Field(default=None, max_length=64)
     is_sensitive: bool = False
     billing_basis: str = Field(default="volume", pattern=r"^(volume|weight|quantity|fixed)$")
@@ -421,24 +449,21 @@ class LogisticsBillVoidRequest(BaseModel):
 
 class ProfitPreviewRequest(BaseModel):
     sku_id: int = Field(gt=0)
+    platform_code: Optional[str] = Field(default=None, max_length=32)
     selling_price: float = Field(ge=0)
     coupon_amount: float = Field(default=0, ge=0)
-    destination: Optional[str] = None
-    transport_type: Optional[str] = None
+    warehouse_code: Optional[str] = None
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
 
 
 class SkuOperatingProfileCreateRequest(BaseModel):
     sku_id: int = Field(gt=0)
     platform_code: str = Field(min_length=1, max_length=32)
-    shop_id: str = Field(min_length=1, max_length=256)
-    site_code: str = Field(min_length=1, max_length=64)
-    site_name: Optional[str] = Field(default=None, max_length=128)
     warehouse_code: str = Field(min_length=1, max_length=128)
     warehouse_name: Optional[str] = Field(default=None, max_length=256)
-    transport_type: Optional[str] = Field(default=None, max_length=64)
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     selling_price: Optional[float] = Field(default=None, ge=0)
     default_coupon_amount: Optional[float] = Field(default=None, ge=0)
-    platform_fee_rate: Optional[float] = Field(default=None, ge=0, le=1)
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     status: str = Field(default="active", pattern=r"^(active|inactive)$")
@@ -447,12 +472,10 @@ class SkuOperatingProfileCreateRequest(BaseModel):
 
 
 class SkuOperatingProfileUpdateRequest(BaseModel):
-    site_name: Optional[str] = Field(default=None, max_length=128)
     warehouse_name: Optional[str] = Field(default=None, max_length=256)
-    transport_type: Optional[str] = Field(default=None, max_length=64)
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     selling_price: Optional[float] = Field(default=None, ge=0)
     default_coupon_amount: Optional[float] = Field(default=None, ge=0)
-    platform_fee_rate: Optional[float] = Field(default=None, ge=0, le=1)
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
@@ -465,7 +488,10 @@ class SkuOperatingProfileBulkRequest(BaseModel):
 
 
 class SkuOperatingProfileResponse(SkuOperatingProfileCreateRequest):
-    profile_id: int
+    profile_id: Optional[int] = None
+    platform_fee_rate: Optional[float] = None
+    logistics_damage_rate: Optional[float] = None
+    return_loss_rate: Optional[float] = None
     sku_key: Optional[str] = None
     sku_name: Optional[str] = None
     spu: Optional[str] = None
@@ -487,8 +513,8 @@ class SkuOperatingProfileResponse(SkuOperatingProfileCreateRequest):
 class SkuOperatingProfitRequest(BaseModel):
     selling_price: Optional[float] = Field(default=None, ge=0)
     coupon_amount: Optional[float] = Field(default=None, ge=0)
-    destination: Optional[str] = None
-    transport_type: Optional[str] = None
+    warehouse_code: Optional[str] = None
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     assumption_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
@@ -497,30 +523,17 @@ class SkuOperatingPlatformOption(BaseModel):
     name: Optional[str] = None
 
 
-class SkuOperatingShopOption(BaseModel):
-    platform_code: str
-    shop_id: str
-    shop_name: Optional[str] = None
-
-
-class SkuOperatingSiteOption(BaseModel):
-    site_code: str
-    site_name: Optional[str] = None
-
-
 class SkuOperatingDimensionsResponse(BaseModel):
     platforms: list[SkuOperatingPlatformOption]
-    shops: list[SkuOperatingShopOption]
-    sites: list[SkuOperatingSiteOption]
-    warehouses: list[str]
+    spus: list[str] = []
+    skus: list[dict] = []
+    warehouses: list[dict]
 
 
 class SkuOperatingProfitResponse(BaseModel):
     sku_id: int
     profile_id: int
     platform_code: str
-    shop_id: str
-    site_code: str
     warehouse_code: str
     net_revenue: Optional[float] = None
     purchase_cost: Optional[float] = None
@@ -550,8 +563,6 @@ class SkuOperatingProfitHistoryResponse(BaseModel):
     profile_id: int
     sku_id: int
     platform_code: Optional[str] = None
-    shop_id: Optional[str] = None
-    site_code: Optional[str] = None
     warehouse_code: Optional[str] = None
     estimate_as_of: Optional[datetime] = None
     estimated_contribution_profit: Optional[float] = None
@@ -567,7 +578,7 @@ class ProfitEstimateSaveRequest(ProfitPreviewRequest):
 class FeishuProjectionInitializeRequest(BaseModel):
     spu_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
     sku_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
-    site_sku_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    platform_sku_profit_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class ProfitEstimateCreateRequest(BaseModel):

@@ -141,6 +141,12 @@ export default {
   listSkuOperatingDimensions() {
     return api._get("/sku-operating-dimensions");
   },
+  listProductWarehouses(params = {}) {
+    return api._get("/product-warehouses", { params });
+  },
+  updatePlatformFeeRate(platformCode, payload) {
+    return api._patch(`/platforms/${encodeURIComponent(platformCode)}/fee-rate`, payload);
+  },
   listSkuOperatingProfiles(params = {}) {
     return api._get("/sku-operating-profiles", { params });
   },

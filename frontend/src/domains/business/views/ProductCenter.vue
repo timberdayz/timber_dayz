@@ -262,7 +262,7 @@
           @size-change="loadSkus"
         />
       </el-tab-pane>
-      <el-tab-pane label="站点 SKU 经营" name="operating">
+      <el-tab-pane label="平台 SKU 利润" name="operating">
         <div class="toolbar">
           <el-select
             v-model="operatingQuery.platform_code"
@@ -276,34 +276,12 @@
               :label="item.name || item.platform_code"
               :value="item.platform_code"
           /></el-select>
-          <el-select
-            v-model="operatingQuery.shop_id"
-            clearable
-            filterable
-            placeholder="店铺"
-            @change="loadOperatingProfiles"
-            ><el-option
-              v-for="item in operatingDimensions.shops.filter(
-                (shop) =>
-                  !operatingQuery.platform_code ||
-                  shop.platform_code === operatingQuery.platform_code,
-              )"
-              :key="`${item.platform_code}-${item.shop_id}`"
-              :label="item.shop_name || item.shop_id"
-              :value="item.shop_id"
-          /></el-select>
-          <el-select
-            v-model="operatingQuery.site_code"
-            clearable
-            filterable
-            placeholder="站点/国家"
-            @change="loadOperatingProfiles"
-            ><el-option
-              v-for="item in operatingDimensions.sites || []"
-              :key="item.site_code"
-              :label="item.site_name || item.site_code"
-              :value="item.site_code"
-          /></el-select>
+          <el-select v-model="operatingQuery.spu" clearable filterable placeholder="SPU" @change="loadOperatingProfiles">
+            <el-option v-for="item in operatingDimensions.spus || []" :key="item" :label="item" :value="item" />
+          </el-select>
+          <el-select v-model="operatingQuery.sku_id" clearable filterable placeholder="ERP SKU" @change="loadOperatingProfiles">
+            <el-option v-for="item in operatingDimensions.skus || []" :key="item.sku_id" :label="item.sku_key" :value="item.sku_id" />
+          </el-select>
           <el-select
             v-model="operatingQuery.warehouse_code"
             clearable
@@ -347,36 +325,6 @@
                   :label="item.name || item.platform_code"
                   :value="item.platform_code" /></el-select></template
           ></el-table-column>
-          <el-table-column label="店铺" width="150"
-            ><template #default="{ row }"
-              ><el-select
-                v-model="row.shop_id"
-                filterable
-                size="small"
-                @change="markOperatingDirty(row)"
-                ><el-option
-                  v-for="item in operatingDimensions.shops.filter(
-                    (shop) =>
-                      !row.platform_code ||
-                      shop.platform_code === row.platform_code,
-                  )"
-                  :key="`${item.platform_code}-${item.shop_id}`"
-                  :label="item.shop_name || item.shop_id"
-                  :value="item.shop_id" /></el-select></template
-          ></el-table-column>
-          <el-table-column label="站点" width="130"
-            ><template #default="{ row }"
-              ><el-select
-                v-model="row.site_code"
-                filterable
-                size="small"
-                @change="markOperatingDirty(row)"
-                ><el-option
-                  v-for="item in operatingDimensions.sites || []"
-                  :key="item.site_code"
-                  :label="item.site_name || item.site_code"
-                  :value="item.site_code" /></el-select></template
-          ></el-table-column>
           <el-table-column label="收货仓库" width="150"
             ><template #default="{ row }"
               ><el-select
@@ -390,7 +338,7 @@
                   :label="item.warehouse_name || item.warehouse_code || item"
                   :value="item.warehouse_code || item" /></el-select></template
           ></el-table-column>
-          <el-table-column label="运输方式" width="110"><template #default="{ row }"><el-input v-model="row.transport_type" size="small" @change="markOperatingDirty(row)" /></template></el-table-column>
+          <el-table-column label="运输方式" width="120"><template #default="{ row }"><el-select v-model="row.transport_type" size="small" @change="markOperatingDirty(row)"><el-option label="海运" value="sea" /><el-option label="空运" value="air" /><el-option label="铁路运输" value="rail" /></el-select></template></el-table-column>
           <el-table-column label="ERP SKU" width="150"
             ><template #default="{ row }"
               ><el-select
@@ -447,6 +395,9 @@
                 size="small"
                 @change="markOperatingDirty(row)" /></template
           ></el-table-column>
+          <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
+          <el-table-column label="继承货损率" width="110"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
+          <el-table-column label="继承退货损失率" width="130"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
           <el-table-column label="实际物流" width="110"
             ><template #default="{ row }">{{
               money(row.actual_logistics_cost)
@@ -472,9 +423,9 @@
           <el-table-column prop="cost_completeness" label="完整度" width="90" />
           <el-table-column label="操作" width="180" fixed="right"
             ><template #default="{ row }"
-              ><el-button link type="primary" @click="openOperatingProfit(row)"
+              ><el-tag v-if="!row.profile_id" type="warning" size="small">待配置</el-tag><el-button v-else link type="primary" @click="openOperatingProfit(row)"
                 >计算利润</el-button
-              ><el-button link @click="showOperatingHistory(row)"
+              ><el-button v-if="row.profile_id" link @click="showOperatingHistory(row)"
                 >历史版本</el-button
               ></template
             ></el-table-column
@@ -500,16 +451,14 @@
                   ><el-input
                     v-model="row.logistics_provider"
                     size="small" /></template></el-table-column
-              ><el-table-column label="目的地"
+              ><el-table-column label="收货仓库"
                 ><template #default="{ row }"
-                  ><el-input
-                    v-model="row.destination"
-                    size="small" /></template></el-table-column
+                  ><el-select v-model="row.warehouse_code" size="small" filterable>
+                    <el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" />
+                  </el-select></template></el-table-column
               ><el-table-column label="运输方式"
                 ><template #default="{ row }"
-                  ><el-input
-                    v-model="row.transport_type"
-                    size="small" /></template></el-table-column
+                  ><el-select v-model="row.transport_type" size="small"><el-option label="海运" value="sea" /><el-option label="空运" value="air" /><el-option label="铁路运输" value="rail" /></el-select></template></el-table-column
               ><el-table-column label="货物类型"
                 ><template #default="{ row }"
                   ><el-select v-model="row.cargo_class" size="small"
@@ -568,8 +517,8 @@
                 prop="bill_date"
                 label="账单日期"
               /><el-table-column
-                prop="destination"
-                label="目的地"
+                prop="warehouse_code"
+                label="收货仓库"
               /><el-table-column prop="total_amount" label="账单总额"
                 ><template #default="{ row }">{{
                   money(row.total_amount)
@@ -614,10 +563,10 @@
             v-model="batchDrawer.form.bill_date"
             type="date"
             value-format="YYYY-MM-DD" /></el-form-item
-        ><el-form-item label="目的地"
-          ><el-input v-model="batchDrawer.form.destination" /></el-form-item
+        ><el-form-item label="收货仓库"
+          ><el-select v-model="batchDrawer.form.warehouse_code" filterable clearable><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></el-form-item
         ><el-form-item label="运输方式"
-          ><el-input v-model="batchDrawer.form.transport_type" /></el-form-item
+          ><el-select v-model="batchDrawer.form.transport_type"><el-option label="海运" value="sea" /><el-option label="空运" value="air" /><el-option label="铁路运输" value="rail" /></el-select></el-form-item
         ><el-form-item label="账单总额"
           ><el-input-number
             v-model="batchDrawer.form.total_amount"
@@ -643,6 +592,9 @@
       ><el-divider content-position="left"
         >账单明细（默认按体积计费，M 为敏感货）</el-divider
       ><el-table :data="batchDrawer.lines" border stripe class="bill-lines"
+        ><el-table-column label="收货仓库" width="150"
+          ><template #default="{ row }"
+            ><el-select v-model="row.warehouse_code" size="small" filterable><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="item.warehouse_name" :value="item.warehouse_code" /></el-select></template></el-table-column
         ><el-table-column label="采购单" width="150"
           ><template #default="{ row }"
             ><el-select v-model="row.po_id" size="small"
@@ -786,7 +738,7 @@
     ></el-drawer>
     <el-drawer
       v-model="operatingProfitDrawer.visible"
-      title="站点 SKU 利润试算"
+      title="平台 SKU 利润试算"
       size="560px"
     >
       <el-form :model="operatingProfitDrawer.form" label-width="110px">
@@ -893,8 +845,8 @@ const logisticsBatches = ref([]);
 const operatingProfiles = ref([]);
 const operatingDimensions = reactive({
   platforms: [],
-  shops: [],
-  sites: [],
+  spus: [],
+  skus: [],
   warehouses: [],
 });
 const operatingHistoryDrawer = reactive({ visible: false, rows: [] });
@@ -911,8 +863,8 @@ const skuTotal = ref(0);
 const skuSpuFilter = ref("");
 const operatingQuery = reactive({
   platform_code: "",
-  shop_id: "",
-  site_code: "",
+  spu: "",
+  sku_id: "",
   warehouse_code: "",
 });
 const billStatus = ref("");
@@ -935,8 +887,8 @@ const batchDrawer = reactive({
     bill_no: "",
     logistics_provider: "",
     bill_date: "",
-    destination: "",
-    transport_type: "海运",
+    warehouse_code: "",
+    transport_type: "sea",
     total_amount: 0,
     currency: "CNY",
   },
@@ -1009,8 +961,8 @@ const addRuleRow = () =>
   rules.value.unshift({
     __new: true,
     logistics_provider: "",
-    destination: "",
-    transport_type: "海运",
+    warehouse_code: "",
+    transport_type: "sea",
     cargo_class: "normal",
     billing_basis: "volume",
     freight_unit_rate: null,
@@ -1097,8 +1049,8 @@ const loadOperatingDimensions = async () => {
     );
   } catch {
     operatingDimensions.platforms = [];
-    operatingDimensions.shops = [];
-    operatingDimensions.sites = [];
+    operatingDimensions.spus = [];
+    operatingDimensions.skus = [];
     operatingDimensions.warehouses = [];
   }
 };
@@ -1107,14 +1059,14 @@ const loadOperatingProfiles = async () => {
   try {
     operatingProfiles.value = await productCenterApi.listSkuOperatingProfiles({
       platform_code: operatingQuery.platform_code || undefined,
-      shop_id: operatingQuery.shop_id || undefined,
-      site_code: operatingQuery.site_code || undefined,
+      spu: operatingQuery.spu || undefined,
+      sku_id: operatingQuery.sku_id || undefined,
       warehouse_code: operatingQuery.warehouse_code || undefined,
       status: "active",
     });
   } catch (error) {
     operatingProfiles.value = [];
-    ElMessage.error(error.message || "加载站点 SKU 经营失败");
+    ElMessage.error(error.message || "加载平台 SKU 利润失败");
   } finally {
     loadingOperating.value = false;
   }
@@ -1134,13 +1086,10 @@ const addOperatingRow = () => {
       operatingQuery.platform_code ||
       operatingDimensions.platforms[0]?.platform_code ||
       "",
-    shop_id: operatingQuery.shop_id || "",
-    site_code: operatingQuery.site_code || "",
-    site_name: "",
     warehouse_code:
-      operatingQuery.warehouse_code || operatingDimensions.warehouses[0] || "",
+      operatingQuery.warehouse_code || operatingDimensions.warehouses[0]?.warehouse_code || "",
     warehouse_name: "",
-    transport_type: "海运",
+    transport_type: "sea",
     selling_price: null,
     default_coupon_amount: 0,
     platform_fee_rate: null,
@@ -1155,9 +1104,9 @@ const saveOperatingRows = async () => {
     const items = operatingDirty.value.map(({ __new, __dirty, ...row }) => row);
     await productCenterApi.bulkSaveSkuOperatingProfiles({ items });
     await loadOperatingProfiles();
-    ElMessage.success("站点 SKU 经营配置已保存");
+    ElMessage.success("平台 SKU 利润配置已保存");
   } catch (error) {
-    ElMessage.error(error.message || "保存站点 SKU 经营配置失败");
+    ElMessage.error(error.message || "保存平台 SKU 利润配置失败");
   } finally {
     saving.value = false;
   }
@@ -1253,8 +1202,8 @@ const openBatchCreate = () => {
     bill_no: "",
     logistics_provider: "",
     bill_date: "",
-    destination: "",
-    transport_type: "海运",
+    warehouse_code: "",
+    transport_type: "sea",
     total_amount: 0,
     currency: "CNY",
   });
@@ -1348,11 +1297,11 @@ const confirmBatch = async (row) => {
 const openOperatingProfit = (row) => {
   operatingProfitDrawer.visible = true;
   operatingProfitDrawer.profileId = row.profile_id;
-  operatingProfitDrawer.label = `${row.sku_id} / ${row.platform_code} / ${row.shop_id} / ${row.site_code} / ${row.warehouse_code}`;
+  operatingProfitDrawer.label = `${row.sku_id} / ${row.platform_code} / ${row.warehouse_code}`;
   operatingProfitDrawer.form = {
     selling_price: row.selling_price,
     coupon_amount: row.default_coupon_amount || 0,
-    transport_type: "海运",
+    transport_type: row.transport_type || "sea",
   };
   operatingProfitDrawer.preview = null;
 };
@@ -1375,7 +1324,7 @@ const saveOperatingProfit = async () => {
     );
     operatingProfitDrawer.visible = false;
     await loadOperatingProfiles();
-    ElMessage.success("站点 SKU 利润版本已保存");
+    ElMessage.success("平台 SKU 利润版本已保存");
   } catch (error) {
     ElMessage.error(error.message || "保存利润版本失败");
   }
@@ -1396,7 +1345,7 @@ const billingUnitFor = (basis) =>
     quantity: "RMB/件",
     fixed: "RMB/票",
   })[basis] || "RMB/CBM";
-const matchProviderRule = (isSensitive) => {
+const matchProviderRule = (isSensitive, warehouseCode = batchDrawer.form.warehouse_code) => {
   const form = batchDrawer.form;
   if (!form.logistics_provider) return null;
   const cargoClass = isSensitive ? "sensitive" : "normal";
@@ -1405,13 +1354,13 @@ const matchProviderRule = (isSensitive) => {
       rule.logistics_provider === form.logistics_provider &&
       (rule.cargo_class === cargoClass ||
         Boolean(rule.is_sensitive) === isSensitive) &&
-      (!rule.destination || rule.destination === form.destination) &&
+       (!rule.warehouse_code || rule.warehouse_code === warehouseCode) &&
       (!rule.transport_type || rule.transport_type === form.transport_type),
   );
   return (
     candidates.sort((left, right) => {
       const score = (rule) =>
-        Number(rule.destination === form.destination) * 2 +
+         Number(rule.warehouse_code === warehouseCode) * 2 +
         Number(rule.transport_type === form.transport_type);
       return score(right) - score(left);
     })[0] || null
@@ -1419,7 +1368,7 @@ const matchProviderRule = (isSensitive) => {
 };
 const applyRuleToLine = (line, { force = false } = {}) => {
   if (!force && line.rate_source === "manual") return;
-  const rule = matchProviderRule(Boolean(line.is_sensitive));
+  const rule = matchProviderRule(Boolean(line.is_sensitive), line.warehouse_code);
   if (!rule) return;
   line.rule_id = rule.rule_id;
   line.billing_basis = rule.billing_basis || "volume";
@@ -1444,6 +1393,7 @@ const generateBatchLinesFromPurchaseOrders = async (orders) => {
         const unitVolume = Number(formatVolume(sku)) || 0;
         lines.push({
           po_id: order.po_id,
+          warehouse_code: poLine.warehouse || order.warehouse || batchDrawer.form.warehouse_code,
           sku_id: sku.sku_id,
           sku_ids: [sku.sku_id],
           allocations: [
@@ -1484,7 +1434,7 @@ watch(selectedPurchaseOrders, (orders) => {
 watch(
   () => [
     batchDrawer.form.logistics_provider,
-    batchDrawer.form.destination,
+     batchDrawer.form.warehouse_code,
     batchDrawer.form.transport_type,
   ],
   applyRuleToBatchLines,

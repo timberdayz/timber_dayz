@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -25,12 +26,38 @@ class DimPlatform(Base):
 
     platform_code = Column(String(32), primary_key=True)  # e.g., 'shopee','miaoshou','tiktok'
     name = Column(String(64), nullable=False)             # display name
+    default_fee_rate = Column(Float, nullable=True)
+    fee_rate_effective_from = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("name", name="uq_dim_platforms_name"),
+        {"schema": "core"},
+    )
+
+
+class DimWarehouse(Base):
+    """Canonical receiving warehouse and its single-country destination."""
+
+    __tablename__ = "dim_warehouses"
+
+    warehouse_code = Column(String(128), primary_key=True)
+    warehouse_name = Column(String(256), nullable=False)
+    country_code = Column(String(16), nullable=False)
+    country_name = Column(String(64), nullable=False)
+    region = Column(String(64), nullable=True)
+    status = Column(String(16), nullable=False, default="active")
+    source = Column(String(128), nullable=True)
+    effective_from = Column(Date, nullable=False, server_default=func.current_date())
+    effective_to = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('active', 'inactive')", name="ck_dim_warehouses_status"),
+        Index("ix_dim_warehouses_country_status", "country_code", "status"),
         {"schema": "core"},
     )
 

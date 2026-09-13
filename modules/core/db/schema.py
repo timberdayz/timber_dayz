@@ -36,6 +36,7 @@ JSON_COMPAT = _JSON().with_variant(_JSONB, "postgresql")
 
 from .schema_parts.dimensions import (
     DimPlatform,
+    DimWarehouse,
     DimShop,
     DimProduct,
     DimProductCategory,
@@ -238,6 +239,7 @@ from .schema_parts.business import (
 
 _DIMENSION_EXPORTS = (
     "DimPlatform",
+    "DimWarehouse",
     "DimShop",
     "DimProduct",
     "DimProductCategory",
