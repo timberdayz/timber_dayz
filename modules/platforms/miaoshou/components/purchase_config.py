@@ -46,8 +46,13 @@ DATE_SHORTCUTS: Final[Tuple[str, ...]] = (
 )
 
 CUSTOM_DATE_INPUT_NAMES: Final[Tuple[str, ...]] = (
-    "创建日期",
-    "创建时间",
+    "开始日期",
+    "结束日期",
+)
+
+CUSTOM_TIME_INPUT_NAMES: Final[Tuple[str, ...]] = (
+    "开始时间",
+    "结束时间",
 )
 
 IMPORT_EXPORT_BUTTON_TEXT: Final[str] = "导入/导出"
@@ -135,6 +140,7 @@ class PurchaseSelectors:
     filter_field_names: Tuple[str, ...] = FILTER_FIELD_NAMES
     date_shortcuts: Tuple[str, ...] = DATE_SHORTCUTS
     custom_date_input_names: Tuple[str, ...] = CUSTOM_DATE_INPUT_NAMES
+    custom_time_input_names: Tuple[str, ...] = CUSTOM_TIME_INPUT_NAMES
     import_export_button_text: str = IMPORT_EXPORT_BUTTON_TEXT
     export_menu_items: Tuple[str, ...] = EXPORT_MENU_ITEMS
     export_field_groups: Tuple[str, ...] = EXPORT_FIELD_GROUPS

@@ -86,3 +86,27 @@ def test_miaoshou_purchase_export_uses_role_based_trigger_for_export_dropdown():
 
     assert 'page.get_by_role("button", name="导入/导出")' in source
     assert 'page.get_by_role("menuitem", name="导出全部搜索结果")' in source
+
+
+def test_miaoshou_purchase_config_input_names_align_with_panel_textboxes():
+    """Real /purchase/goods panel textboxes are labeled 开始日期/结束日期/开始时间/结束时间 — not 创建日期/创建时间.
+
+    Regression test for commit f28e871b which set CUSTOM_DATE_INPUT_NAMES to the
+    wrong labels based on the external filter label rather than the panel internals.
+    """
+    from modules.platforms.miaoshou.components.purchase_config import PurchaseSelectors
+    selectors = PurchaseSelectors()
+    assert selectors.custom_date_input_names == ("开始日期", "结束日期")
+    assert selectors.custom_time_input_names == ("开始时间", "结束时间")
+
+
+def test_miaoshou_purchase_export_injects_purchase_selectors_into_date_picker():
+    """MiaoshouPurchaseExport must inject PurchaseSelectors (not OrdersSelectors) into MiaoshouDatePicker.
+
+    Regression test for the bug at purchase_export.py:42.
+    """
+    from modules.platforms.miaoshou.components.purchase_config import PurchaseSelectors
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    component = MiaoshouPurchaseExport(_ctx())
+    assert isinstance(component.date_picker_component.sel, PurchaseSelectors)
