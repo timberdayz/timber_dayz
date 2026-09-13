@@ -67,14 +67,6 @@ class MiaoshouPurchaseExport(ExportComponent):
         await page.get_by_text("采购单信息", exact=False).first.wait_for(state="visible", timeout=15000)
         await page.get_by_text("商品信息", exact=False).first.wait_for(state="visible", timeout=15000)
 
-    async def _select_status_tab(self, page: Any, tab_name: str = "全部") -> None:
-        try:
-            tab = page.get_by_role("tab", name=tab_name).first
-            await tab.click(timeout=2000)
-        except Exception:
-            label = page.get_by_text(re.compile(rf"^{re.escape(tab_name)}\s*\(\d+\)$")).first
-            await label.click(timeout=2000)
-
     async def _open_import_export_dropdown(self, page: Any) -> None:
         button = page.get_by_role("button", name="导入/导出").first
         await button.wait_for(state="visible", timeout=10000)
@@ -237,7 +229,9 @@ class MiaoshouPurchaseExport(ExportComponent):
             await self.stabilize_safe_notices(page, label="before-first-action cleanup")
             await self._ensure_popup_closed(page)
 
-            await self._select_status_tab(page, "全部")
+            # 状态 tab 由 navigation URL 的 ?tab= 参数控制（默认 "all"），
+            # 不再依赖 _select_status_tab click —— purchase 状态 tab 用 role="label"
+            # 渲染，Playwright actionability 检查会超时。
 
             if custom_range:
                 date_result = await self.date_picker_component.apply_custom_range(
