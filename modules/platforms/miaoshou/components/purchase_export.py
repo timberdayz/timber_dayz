@@ -228,7 +228,6 @@ class MiaoshouPurchaseExport(ExportComponent):
         try:
             cfg = self.ctx.config or {}
             time_selection = cfg.get("time_selection") or {}
-            time_mode = str(time_selection.get("mode") or "").strip().lower()
             date_preset = str(time_selection.get("preset") or "").strip()
             custom_range = cfg.get("custom_date_range")
 

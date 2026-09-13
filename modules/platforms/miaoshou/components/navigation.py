@@ -5,7 +5,9 @@ from typing import Any
 
 from modules.components.base import ExecutionContext
 from modules.components.navigation.base import NavigationComponent, NavigationResult, TargetPage
+from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
 from modules.platforms.miaoshou.components.orders_config import OrdersSelectors
+from modules.platforms.miaoshou.components.purchase_config import PurchaseSelectors
 
 DEFAULT_BASE_URL: str = "https://erp.91miaoshou.com"
 DEFAULT_DEEP_LINK_TEMPLATE: str = "/stat/profit_statistics/detail?platform={platform}"
@@ -36,7 +38,9 @@ class MiaoshouNavigation(NavigationComponent):
     def __init__(
         self,
         ctx: ExecutionContext,
-        selectors: OrdersSelectors | _DefaultNavSelectors | None = None,
+        selectors: (
+            OrdersSelectors | _DefaultNavSelectors | InventorySelectors | PurchaseSelectors | None
+        ) = None,
     ) -> None:
         super().__init__(ctx)
         self.sel: Any = selectors or _DefaultNavSelectors()
