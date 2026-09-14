@@ -34,7 +34,7 @@ class StandardFileName:
     } | {'ai', 'assistant'}
     
     # 已知的数据域
-    KNOWN_DATA_DOMAINS = {'orders', 'products', 'services', 'traffic', 'finance', 'analytics', 'inventory'}  # v4.10.0更新:traffic域已废弃(兼容性保留),统一使用analytics域
+    KNOWN_DATA_DOMAINS = {'orders', 'products', 'services', 'traffic', 'finance', 'analytics', 'inventory', 'purchase'}  # v4.10.0更新:traffic域已废弃(兼容性保留),统一使用analytics域;v4.20.0+新增:purchase采购单数据域(Sep 14 partial_success修复)
     
     # 已知的粒度
     KNOWN_GRANULARITIES = {'daily', 'weekly', 'monthly', 'snapshot', 'hourly'}
