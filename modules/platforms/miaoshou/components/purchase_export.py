@@ -117,6 +117,26 @@ class MiaoshouPurchaseExport(ExportComponent):
         await button.wait_for(state="visible", timeout=5000)
         await button.click(timeout=1500)
 
+    async def _wait_export_progress_ready(self, page: Any) -> None:
+        """等待 "正在导出包裹" / "正在导出" / "生成中" 等进度提示任意一个变为可见。
+
+        严格 mirror ``MiaoshouInventoryExport._wait_export_progress_ready``
+        (inventory_export.py:179-186)：遍历 ``self.sel.progress_text_variants``，
+        任一变体在 3s 内 wait_for(visible) 成功就 return，否则抛 RuntimeError。
+
+        NOTE: 必须使用 ``PurchaseSelectors.progress_text_variants`` 而不是 orders 的
+        heading "正在导出" —— purchase 页面渲染的实际文本是 "正在导出包裹"
+        （见 PurchaseSelectors.PROGRESS_TEXT_VARIANTS 第 0 项）。截图（Sep 14 任务）
+        确认 "正在导出包裹" 真实存在。
+        """
+        for text in self.sel.progress_text_variants:
+            try:
+                await page.get_by_text(text, exact=False).first.wait_for(state="visible", timeout=3000)
+                return
+            except Exception:
+                continue
+        raise RuntimeError("未检测到导出进度提示")
+
     async def _trigger_async_export_and_download(self, page: Any) -> Path:
         """触发异步采购导出并捕获下载（严格 mirror orders / inventory 模式）。
 
@@ -127,6 +147,11 @@ class MiaoshouPurchaseExport(ExportComponent):
              - 浏览器在异步导出完成、文件就绪时 fire download 事件
              - Playwright ``expect_download`` context 捕获该事件
           3. context 退出时 dl_info.value 即下载文件（xlsx）
+          4. **新**：下载事件触发后，先 wait "正在导出包裹" 进度对话框可见，
+             确认 server-side export pipeline 仍在 running，再 save_as 落盘
+             （mirror inventory_export._wait_download_complete:188-192）。
+             缺失这一步会导致 73s partial_success —— download event 已 fire
+             但 server 端文件尚未 commit，save_as 落盘到磁盘的不完整文件。
 
         之前的旧设计是 click 导出 → close "正在导出包裹" 进度弹窗 → navigate 到
         /purchase/export_record → poll 表格 → click 下载链接 → expect_download。
@@ -150,6 +175,16 @@ class MiaoshouPurchaseExport(ExportComponent):
         async with page.expect_download(timeout=download_timeout_ms) as dl_info:
             await self._click_export_button_in_dialog(page)
         download = await dl_info.value
+
+        # 等待 "正在导出包裹" 进度对话框可见（best-effort），确认 server-side
+        # export pipeline 仍在 running 后再 save_as。Mirror inventory 的
+        # _wait_download_complete 模式。如果对话框未渲染（导出速度快于 wait 启动），
+        # try/except 静默跳过 —— progress 是 intermediate visual feedback，
+        # 不是 terminal state。
+        try:
+            await self._wait_export_progress_ready(page)
+        except Exception:
+            pass
 
         out_root = build_standard_output_root(self.ctx, data_type="purchase", granularity="manual")
         out_root.mkdir(parents=True, exist_ok=True)
