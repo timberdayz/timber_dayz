@@ -317,3 +317,102 @@ def test_miaoshou_purchase_export_trigger_uses_expect_download_no_nav_poll():
         "_close_progress_dialog must NOT be called inside expect_download context "
         "(mirror orders/inventory: download fires independently of UI state)"
     )
+
+
+def test_miaoshou_purchase_export_waits_for_progress_dialog_before_saving_download():
+    """_trigger_async_export_and_download MUST call _wait_export_progress_ready BEFORE save_as.
+
+    Regression test for production task (Sep 14, 73s, partial_success):
+    The purchase export triggered the download event correctly via ``page.expect_download``,
+    but immediately called ``download.save_as`` without waiting for the "正在导出包裹"
+    progress dialog to render. orders (MiaoshouOrdersExportBase._wait_export_complete)
+    and inventory (MiaoshouInventoryExport._wait_download_complete) both explicitly
+    call ``_wait_export_progress_ready(page)`` AFTER receiving the download and BEFORE
+    save_as — the progress dialog is intermediate visual feedback (not the terminal
+    state), but it confirms the server-side export pipeline is still running before
+    the file is fully written to disk.
+
+    Without this wait, the race condition is:
+        - expect_download fires (browser receives Content-Disposition header)
+        - save_as immediately writes empty/partial file
+        - server-side export pipeline still writing rows → file truncated
+        - 73s later, task ends with "部分成功" because saved file is incomplete
+
+    Mirrors inventory contract test
+    ``test_inventory_export_treats_progress_as_intermediate_and_download_as_final_signal``.
+    """
+    import inspect
+
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    source = inspect.getsource(MiaoshouPurchaseExport._trigger_async_export_and_download)
+    # The wait helper MUST exist on the class (mirror inventory_export._wait_export_progress_ready).
+    full_source = Path("modules/platforms/miaoshou/components/purchase_export.py").read_text(encoding="utf-8")
+    assert "async def _wait_export_progress_ready(" in full_source, (
+        "MiaoshouPurchaseExport MUST define _wait_export_progress_ready (mirror inventory)"
+    )
+    # The wait helper MUST be called inside _trigger_async_export_and_download.
+    assert "await self._wait_export_progress_ready(page)" in source, (
+        "_trigger_async_export_and_download MUST call _wait_export_progress_ready(page) "
+        "before save_as (mirror orders/inventory pattern). "
+        "Without it, the '正在导出包裹' dialog race condition causes 73s partial_success."
+    )
+    # The wait helper MUST be called BEFORE save_as (wait position matters).
+    wait_idx = source.index("await self._wait_export_progress_ready(page)")
+    save_idx = source.index("await download.save_as(")
+    assert wait_idx < save_idx, (
+        "_wait_export_progress_ready(page) MUST be called BEFORE download.save_as(…). "
+        "Ordering matters: progress dialog is intermediate visual feedback, save_as "
+        "must follow after the server-side export pipeline has committed the file."
+    )
+
+
+def test_miaoshou_purchase_export_progress_ready_uses_progress_text_variants():
+    """_wait_export_progress_ready MUST iterate selectors.progress_text_variants.
+
+    The purchase page renders "正在导出包裹" as the progress dialog text (visible in
+    production screenshot Sep 14). PurchaseSelectors.progress_text_variants lists:
+        ("正在导出包裹", "正在导出", "生成中", "处理中", "排队中")
+
+    orders uses heading "正在导出" (strict), inventory uses progress_texts. purchase
+    must use its own PROGRESS_TEXT_VARIANTS (which already includes "正在导出包裹")
+    so the dialog text the user sees is exactly what the helper waits on.
+    """
+    import inspect
+
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    source = inspect.getsource(MiaoshouPurchaseExport)
+    assert "self.sel.progress_text_variants" in source, (
+        "_wait_export_progress_ready MUST iterate self.sel.progress_text_variants "
+        "(includes '正在导出包裹' from PurchaseSelectors.PROGRESS_TEXT_VARIANTS)"
+    )
+
+
+def test_miaoshou_purchase_export_progress_ready_wrapped_in_try_except_best_effort():
+    """_wait_export_progress_ready MUST be best-effort (try/except pass on failure).
+
+    Mirror orders/inventory: progress dialog is INTERMEDIATE visual feedback, not
+    the terminal state. If the dialog doesn't render within timeout (e.g., export
+    finished before wait starts), we still want to save the file. Failing hard on
+    missing progress text would regress the working inventory/orders flow.
+
+    Wrapped at the caller level (_trigger_async_export_and_download), not inside
+    _wait_export_progress_ready itself (inventory pattern).
+    """
+    import inspect
+
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    trigger_source = inspect.getsource(MiaoshouPurchaseExport._trigger_async_export_and_download)
+    # Find the wait block (between "try:" and the next "out_root" assignment).
+    # The pattern: try: await self._wait_export_progress_ready(page); except Exception: pass
+    assert "try:" in trigger_source, "_trigger_async_export_and_download must wrap wait in try/except"
+    try_idx = trigger_source.index("try:")
+    wait_idx = trigger_source.index("await self._wait_export_progress_ready(page)", try_idx)
+    except_idx = trigger_source.index("except Exception:", wait_idx)
+    pass_idx = trigger_source.index("pass", except_idx)
+    assert wait_idx < except_idx < pass_idx, (
+        "_wait_export_progress_ready must be wrapped in try/except/pass "
+        "(best-effort — progress dialog is intermediate, not terminal)"
+    )
