@@ -84,6 +84,16 @@ test("平台 SKU 利润使用平台仓库 SKU 粒度", () => {
   assert.match(api, /sku-operating-dimensions/);
 });
 
+test("平台 SKU 利润测算通过候选 SKU 自动加载而不是新增经营行", () => {
+  assert.match(source, /平台 SKU 利润测算/);
+  assert.match(source, /listPlatformSkuProfitCandidates/);
+  assert.match(source, /previewOperatingRow/);
+  assert.match(source, /预计广告费用/);
+  assert.match(source, /重估利润/);
+  assert.match(api, /platform-sku-profit\/candidates/);
+  assert.match(api, /platform-sku-profit\/preview/);
+});
+
 test("物流规则和批次使用收货仓库及固定运输方式", () => {
   assert.match(source, /收货仓库/);
   assert.match(source, /海运/);

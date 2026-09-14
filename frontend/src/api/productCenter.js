@@ -170,4 +170,16 @@ export default {
       params,
     });
   },
+  listPlatformSkuProfitCandidates(params = {}) {
+    return api._get("/platform-sku-profit/candidates", { params });
+  },
+  previewPlatformSkuProfit(payload) {
+    return api._post("/platform-sku-profit/preview", payload);
+  },
+  savePlatformSkuProfitEstimates(payload) {
+    return api._post("/platform-sku-profit/estimates", payload);
+  },
+  listPlatformSkuProfitEstimates(params = {}) {
+    return api._get("/platform-sku-profit/estimates", { params });
+  },
 };

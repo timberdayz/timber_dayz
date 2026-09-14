@@ -237,6 +237,9 @@
                 :min="1"
                 :controls="false"
                 size="small" /></template></el-table-column
+          ><el-table-column label="参考售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
+          ><el-table-column label="币种" width="75"><template #default="{ row }"><el-select v-model="row.selling_price_currency" size="small" @change="markDirty('sku', row)"><el-option label="CNY" value="CNY" /><el-option label="USD" value="USD" /></el-select></template></el-table-column
+          ><el-table-column label="售价来源" width="120"><template #default="{ row }"><el-input v-model="row.selling_price_source" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column
             label="来源文件"
             prop="source_file_id"
@@ -262,7 +265,7 @@
           @size-change="loadSkus"
         />
       </el-tab-pane>
-      <el-tab-pane label="平台 SKU 利润" name="operating">
+      <el-tab-pane label="平台 SKU 利润测算" name="operating">
         <div class="toolbar">
           <el-select
             v-model="operatingQuery.platform_code"
@@ -276,35 +279,17 @@
               :label="item.name || item.platform_code"
               :value="item.platform_code"
           /></el-select>
+          <el-select v-model="operatingQuery.warehouse_code" clearable filterable placeholder="收货仓库" @change="loadOperatingProfiles">
+            <el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="item.warehouse_name || item.warehouse_code" :value="item.warehouse_code" />
+          </el-select>
           <el-select v-model="operatingQuery.spu" clearable filterable placeholder="SPU" @change="loadOperatingProfiles">
             <el-option v-for="item in operatingDimensions.spus || []" :key="item" :label="item" :value="item" />
           </el-select>
           <el-select v-model="operatingQuery.sku_id" clearable filterable placeholder="ERP SKU" @change="loadOperatingProfiles">
             <el-option v-for="item in operatingDimensions.skus || []" :key="item.sku_id" :label="item.sku_key" :value="item.sku_id" />
           </el-select>
-          <el-select
-            v-model="operatingQuery.warehouse_code"
-            clearable
-            filterable
-            placeholder="收货仓库"
-            @change="loadOperatingProfiles"
-            ><el-option
-              v-for="item in operatingDimensions.warehouses"
-              :key="item.warehouse_code || item"
-              :label="item.warehouse_name || item.warehouse_code || item"
-              :value="item.warehouse_code || item"
-          /></el-select>
-          <el-button type="primary" :icon="Plus" @click="addOperatingRow"
-            >新增行</el-button
-          >
-          <el-button
-            :icon="Check"
-            :disabled="!operatingDirty.length"
-            :loading="saving"
-            @click="saveOperatingRows"
-            >保存变更</el-button
-          >
         </div>
+        <el-alert v-if="!operatingQuery.platform_code || !operatingQuery.warehouse_code" type="info" :closable="false" title="请选择平台和收货仓库后加载 SKU 测算数据" />
         <el-table
           :data="operatingProfiles"
           v-loading="loadingOperating"
@@ -312,63 +297,28 @@
           border
           class="flat-table operating-table"
         >
-          <el-table-column label="平台" width="120"
-            ><template #default="{ row }"
-              ><el-select
-                v-model="row.platform_code"
-                filterable
-                size="small"
-                @change="markOperatingDirty(row)"
-                ><el-option
-                  v-for="item in operatingDimensions.platforms"
-                  :key="item.platform_code"
-                  :label="item.name || item.platform_code"
-                  :value="item.platform_code" /></el-select></template
-          ></el-table-column>
-          <el-table-column label="收货仓库" width="150"
-            ><template #default="{ row }"
-              ><el-select
-                v-model="row.warehouse_code"
-                filterable
-                size="small"
-                @change="markOperatingDirty(row)"
-                ><el-option
-                  v-for="item in operatingDimensions.warehouses"
-                  :key="item.warehouse_code || item"
-                  :label="item.warehouse_name || item.warehouse_code || item"
-                  :value="item.warehouse_code || item" /></el-select></template
-          ></el-table-column>
-          <el-table-column label="运输方式" width="120"><template #default="{ row }"><el-select v-model="row.transport_type" size="small" @change="markOperatingDirty(row)"><el-option label="海运" value="sea" /><el-option label="空运" value="air" /><el-option label="铁路运输" value="rail" /></el-select></template></el-table-column>
-          <el-table-column label="ERP SKU" width="150"
-            ><template #default="{ row }"
-              ><el-select
-                v-model="row.sku_id"
-                filterable
-                size="small"
-                @change="markOperatingDirty(row)"
-                ><el-option
-                  v-for="item in skus"
-                  :key="item.sku_id"
-                  :label="item.sku_key"
-                  :value="item.sku_id" /></el-select></template
-          ></el-table-column>
-          <el-table-column label="售价" width="110"
+          <el-table-column prop="spu" label="SPU" width="160" />
+          <el-table-column prop="sku_key" label="ERP SKU" width="155" />
+          <el-table-column prop="sku_name" label="商品名称" min-width="200" show-overflow-tooltip />
+          <el-table-column label="参考售价" width="105"><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column>
+          <el-table-column label="竞品价格" width="110"><template #default="{ row }"><el-input-number v-model="row.competitor_price" :min="0" :controls="false" size="small" /></template></el-table-column>
+          <el-table-column label="预计售价" width="110"
             ><template #default="{ row }"
               ><el-input-number
-                v-model="row.selling_price"
+                v-model="row.expected_selling_price"
                 :min="0"
                 :controls="false"
                 size="small"
-                @change="markOperatingDirty(row)" /></template
+                @change="previewOperatingRow(row)" /></template
           ></el-table-column>
           <el-table-column label="优惠券" width="110"
             ><template #default="{ row }"
               ><el-input-number
-                v-model="row.default_coupon_amount"
+                v-model="row.seller_coupon_amount"
                 :min="0"
                 :controls="false"
                 size="small"
-                @change="markOperatingDirty(row)" /></template
+                @change="previewOperatingRow(row)" /></template
           ></el-table-column>
           <el-table-column label="采购成本" width="110"
             ><template #default="{ row }">{{
@@ -383,7 +333,7 @@
                 :precision="2"
                 :controls="false"
                 size="small"
-                @change="markOperatingDirty(row)" /></template
+                @change="previewOperatingRow(row)" /></template
           ></el-table-column>
           <el-table-column label="预计仓储" width="120"
             ><template #default="{ row }"
@@ -393,9 +343,12 @@
                 :precision="2"
                 :controls="false"
                 size="small"
-                @change="markOperatingDirty(row)" /></template
+                @change="previewOperatingRow(row)" /></template
           ></el-table-column>
+          <el-table-column label="广告费率" width="105"><template #default="{ row }"><el-input-number v-model="row.expected_ad_rate" :min="0" :max="1" :step="0.01" :controls="false" size="small" @change="previewOperatingRow(row)" /></template></el-table-column>
           <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
+          <el-table-column label="平台费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
+          <el-table-column label="预计广告费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
           <el-table-column label="继承货损率" width="110"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
           <el-table-column label="继承退货损失率" width="130"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
           <el-table-column label="实际物流" width="110"
@@ -412,21 +365,20 @@
           >
           <el-table-column label="预计利润" width="120"
             ><template #default="{ row }">{{
-              money(row.estimated_contribution_profit)
+              money(row.preview?.expected?.profit)
             }}</template></el-table-column
           >
           <el-table-column label="利润率" width="100"
             ><template #default="{ row }">{{
-              percent(row.estimated_margin_rate)
+              percent(row.preview?.expected?.margin_rate)
             }}</template></el-table-column
           >
-          <el-table-column prop="cost_completeness" label="完整度" width="90" />
+          <el-table-column label="重估利润" width="120"><template #default="{ row }">{{ money(row.preview?.actual_recost?.profit) }}</template></el-table-column>
+          <el-table-column label="重估完整度" width="105"><template #default="{ row }">{{ row.preview?.actual_recost?.completeness || row.configuration_status }}</template></el-table-column>
           <el-table-column label="操作" width="180" fixed="right"
             ><template #default="{ row }"
-              ><el-tag v-if="!row.profile_id" type="warning" size="small">待配置</el-tag><el-button v-else link type="primary" @click="openOperatingProfit(row)"
-                >计算利润</el-button
-              ><el-button v-if="row.profile_id" link @click="showOperatingHistory(row)"
-                >历史版本</el-button
+              ><el-button link type="primary" @click="previewOperatingRow(row)">试算</el-button
+              ><el-button link type="success" @click="saveOperatingEstimate(row)">保存版本</el-button
               ></template
             ></el-table-column
           >
@@ -952,6 +904,9 @@ const blankSku = () => ({
   default_purchase_cost: null,
   expected_logistics_cost: null,
   expected_storage_cost: null,
+  reference_selling_price: null,
+  selling_price_currency: "CNY",
+  selling_price_source: "manual",
   purchase_cost_source: "manual",
   purchase_cost_confidence: "low",
 });
@@ -1055,15 +1010,27 @@ const loadOperatingDimensions = async () => {
   }
 };
 const loadOperatingProfiles = async () => {
+  if (!operatingQuery.platform_code || !operatingQuery.warehouse_code) {
+    operatingProfiles.value = [];
+    return;
+  }
   loadingOperating.value = true;
   try {
-    operatingProfiles.value = await productCenterApi.listSkuOperatingProfiles({
-      platform_code: operatingQuery.platform_code || undefined,
+    const response = await productCenterApi.listPlatformSkuProfitCandidates({
+      platform_code: operatingQuery.platform_code,
+      warehouse_code: operatingQuery.warehouse_code,
       spu: operatingQuery.spu || undefined,
       sku_id: operatingQuery.sku_id || undefined,
-      warehouse_code: operatingQuery.warehouse_code || undefined,
-      status: "active",
+      page: 1,
+      page_size: 100,
     });
+    operatingProfiles.value = (response.data || []).map((row) => ({
+      ...row,
+      expected_selling_price: row.expected_selling_price ?? row.reference_selling_price,
+      seller_coupon_amount: row.seller_coupon_amount ?? 0,
+      expected_ad_rate: row.expected_ad_rate ?? 0,
+      preview: null,
+    }));
   } catch (error) {
     operatingProfiles.value = [];
     ElMessage.error(error.message || "加载平台 SKU 利润失败");
@@ -1071,42 +1038,33 @@ const loadOperatingProfiles = async () => {
     loadingOperating.value = false;
   }
 };
-const operatingDirty = computed(() =>
-  operatingProfiles.value.filter((row) => row.__new || row.__dirty),
-);
-const markOperatingDirty = (row) => {
-  row.__dirty = true;
+const operatingPayload = (row) => ({
+  sku_id: row.sku_id,
+  platform_code: operatingQuery.platform_code,
+  warehouse_code: operatingQuery.warehouse_code,
+  transport_type: row.transport_type || "sea",
+  competitor_price: row.competitor_price ?? null,
+  expected_selling_price: row.expected_selling_price ?? null,
+  seller_coupon_amount: row.seller_coupon_amount ?? 0,
+  expected_ad_rate: row.expected_ad_rate ?? 0,
+  expected_logistics_cost: row.expected_logistics_cost ?? null,
+  expected_storage_cost: row.expected_storage_cost ?? null,
+});
+const previewOperatingRow = async (row) => {
+  try {
+    row.preview = await productCenterApi.previewPlatformSkuProfit(operatingPayload(row));
+  } catch (error) {
+    ElMessage.error(error.message || "利润试算失败");
+  }
 };
-const addOperatingRow = () => {
-  const sku = skus.value[0];
-  operatingProfiles.value.unshift({
-    __new: true,
-    sku_id: sku?.sku_id || null,
-    platform_code:
-      operatingQuery.platform_code ||
-      operatingDimensions.platforms[0]?.platform_code ||
-      "",
-    warehouse_code:
-      operatingQuery.warehouse_code || operatingDimensions.warehouses[0]?.warehouse_code || "",
-    warehouse_name: "",
-    transport_type: "sea",
-    selling_price: null,
-    default_coupon_amount: 0,
-    platform_fee_rate: null,
-    expected_logistics_cost: null,
-    expected_storage_cost: null,
-    cost_completeness: "incomplete",
-  });
-};
-const saveOperatingRows = async () => {
+const saveOperatingEstimate = async (row) => {
   saving.value = true;
   try {
-    const items = operatingDirty.value.map(({ __new, __dirty, ...row }) => row);
-    await productCenterApi.bulkSaveSkuOperatingProfiles({ items });
-    await loadOperatingProfiles();
-    ElMessage.success("平台 SKU 利润配置已保存");
+    await productCenterApi.savePlatformSkuProfitEstimates(operatingPayload(row));
+    await previewOperatingRow(row);
+    ElMessage.success("利润版本已保存");
   } catch (error) {
-    ElMessage.error(error.message || "保存平台 SKU 利润配置失败");
+    ElMessage.error(error.message || "保存利润版本失败");
   } finally {
     saving.value = false;
   }
