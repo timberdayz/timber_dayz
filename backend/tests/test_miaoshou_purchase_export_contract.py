@@ -198,6 +198,61 @@ def test_miaoshou_purchase_export_wait_search_results_uses_existing_text():
     )
 
 
+def test_miaoshou_purchase_export_preset_map_supports_both_chinese_and_english_keys():
+    """MiaoshouPurchaseExport.run preset_map MUST support both Chinese and English keys.
+
+    Regression test for production task (Sep 14 12:27:22, 73s, partial_success):
+    The user selected "昨天" (yesterday) on the Quick Collection frontend. Frontend sends
+    ``time_selection.preset = "yesterday"`` (English key) via buildTimeSelectionPayload.
+    The previous preset_map only had Chinese keys ("今天"/"昨天"/"近7天"/"近30天"/"近90天")
+    so the map lookup fell back to ``DateOption.LAST_30_DAYS`` and the date picker clicked
+    the "近30天" button regardless of user selection — silently exporting the WRONG date
+    range.
+
+    Mirrors orders_export_base._resolve_preset_option pattern which supports both keys.
+    """
+    import inspect
+
+    from modules.platforms.miaoshou.components.purchase_export import MiaoshouPurchaseExport
+
+    source = inspect.getsource(MiaoshouPurchaseExport.run)
+    # preset_map MUST define entries for the 4 English keys the frontend sends.
+    # Frontend CollectionTasks.vue quickForm sends one of:
+    #   "today" / "yesterday" / "last_7_days" / "last_30_days"
+    # (buildTimeSelectionPayload in frontend/src/constants/collection.js)
+    for english_key, chinese_key in (
+        ('"today"', '"今天"'),
+        ('"yesterday"', '"昨天"'),
+        ('"last_7_days"', '"近7天"'),
+        ('"last_30_days"', '"近30天"'),
+    ):
+        assert english_key in source, (
+            f"preset_map MUST include English key {english_key} (frontend sends this). "
+            f"Without it, English-key lookup falls back to DateOption.LAST_30_DAYS and "
+            f"the date picker clicks the WRONG shortcut button (regression: Sep 14 "
+            f"task ended partial_success with wrong date range after selecting '昨天')."
+        )
+        assert chinese_key in source, (
+            f"preset_map MUST also keep the existing Chinese key {chinese_key} "
+            f"for backwards compatibility (legacy callers send Chinese)."
+        )
+
+    # The English key "yesterday" must map to DateOption.YESTERDAY, NOT LAST_30_DAYS.
+    # Search the preset_map block: each entry is on its own line.
+    # Find the line with '"yesterday"' and confirm it maps to YESTERDAY on the same line.
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('"yesterday":') or stripped.startswith('"yesterday" :'):
+            assert "YESTERDAY" in line and "LAST_30_DAYS" not in line, (
+                f"'yesterday' MUST map to DateOption.YESTERDAY, not LAST_30_DAYS. "
+                f"Wrong line: {line!r}"
+            )
+        if stripped.startswith('"last_30_days":') or stripped.startswith('"last_30_days" :'):
+            assert "LAST_30_DAYS" in line, (
+                f"'last_30_days' MUST map to DateOption.LAST_30_DAYS. Wrong line: {line!r}"
+            )
+
+
 def test_miaoshou_purchase_export_trigger_uses_expect_download_no_nav_poll():
     """_trigger_async_export_and_download must use page.expect_download (mirrors orders/inventory).
 

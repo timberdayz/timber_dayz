@@ -214,14 +214,27 @@ class MiaoshouPurchaseExport(ExportComponent):
                 )
             elif date_preset:
                 # NOTE: DateOption 没有 LAST_90_DAYS；只有 LAST_28_DAYS / LAST_30_DAYS。
-                # 因此 "近90天" 临时 fallback 到 LAST_30_DAYS，避免 KeyError。
+                # 因此 "近90天" / "last_90_days" 临时 fallback 到 LAST_30_DAYS，避免 KeyError。
                 # 如需真正"近90天"语义，应在 DateOption 枚举中新增 LAST_90_DAYS 值。
+                #
+                # Bilingual keys (mirror orders_export_base._resolve_preset_option):
+                # 前端 CollectionTasks.vue quickForm 通过 buildTimeSelectionPayload
+                # 发送 English keys (today/yesterday/last_7_days/last_30_days),
+                # 但历史调用方可能发送 Chinese keys (今天/昨天/近7天/近30天)。
+                # 没有 English keys 时，前端选择"昨天"会被 fallback 到 LAST_30_DAYS,
+                # 导致 date_picker 点击"近30天"按钮，采集错误的日期范围
+                # (regression: 2026-09-14 任务 73s partial_success)。
                 preset_map = {
                     "今天": DateOption.TODAY_REALTIME,
+                    "today": DateOption.TODAY_REALTIME,
                     "昨天": DateOption.YESTERDAY,
+                    "yesterday": DateOption.YESTERDAY,
                     "近7天": DateOption.LAST_7_DAYS,
+                    "last_7_days": DateOption.LAST_7_DAYS,
                     "近30天": DateOption.LAST_30_DAYS,
+                    "last_30_days": DateOption.LAST_30_DAYS,
                     "近90天": DateOption.LAST_30_DAYS,
+                    "last_90_days": DateOption.LAST_30_DAYS,
                 }
                 option = preset_map.get(date_preset, DateOption.LAST_30_DAYS)
                 date_result = await self.date_picker_component.run(page, option)
