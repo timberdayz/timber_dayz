@@ -21,7 +21,7 @@ from openpyxl import load_workbook
 from sqlalchemy import select
 
 from backend.models.database import AsyncSessionLocal
-from modules.core.db import BridgeErpSkuKey, BridgeSpuSku, DimErpSku, DimSpu
+from modules.core.db import BridgeErpSkuKey, BridgeSpuSku, DimErpSku, DimSpu, DimWarehouse
 
 
 EXPECTED_HEADERS = {
@@ -33,6 +33,14 @@ EXPECTED_HEADERS = {
     "二级中文",
     "中文商品名",
 }
+TBD_CATEGORY = "待评估"
+WAREHOUSE_SEED = (
+    {"warehouse_code": "SG-01", "warehouse_name": "新加坡仓", "country_code": "SG", "country_name": "新加坡", "region": "东南亚"},
+    {"warehouse_code": "MY-01", "warehouse_name": "马来仓", "country_code": "MY", "country_name": "马来西亚", "region": "东南亚"},
+    {"warehouse_code": "PH-01-CHILD", "warehouse_name": "菲律宾1店-儿童书包仓", "country_code": "PH", "country_name": "菲律宾", "region": "东南亚"},
+    {"warehouse_code": "PH-REPAIR", "warehouse_name": "菲律宾仓（维修工具）", "country_code": "PH", "country_name": "菲律宾", "region": "东南亚"},
+    {"warehouse_code": "PH-03-FASHION", "warehouse_name": "菲律宾3店-时尚箱包仓", "country_code": "PH", "country_name": "菲律宾", "region": "东南亚"},
+)
 
 
 def load_lookup(path: Path) -> tuple[list[dict], list[str]]:
@@ -78,12 +86,31 @@ def validate_rows(rows: list[dict]) -> list[str]:
     return errors
 
 
+def rows_ready_for_apply(rows: list[dict]) -> tuple[list[dict], list[str]]:
+    ready = []
+    deferred = []
+    for row in rows:
+        if row["category_l1_code"] == TBD_CATEGORY or row["category_l2_code"] == TBD_CATEGORY or row["spu"].startswith("XH-TBD-"):
+            deferred.append(row["sku_key"])
+        else:
+            ready.append(row)
+    return ready, deferred
+
+
 async def apply_rows(rows: list[dict]) -> tuple[int, int, int]:
     grouped: OrderedDict[str, dict] = OrderedDict()
     for row in rows:
         grouped.setdefault(row["spu"], row)
     created_spu = created_sku = created_bindings = 0
     async with AsyncSessionLocal() as db:
+        for values in WAREHOUSE_SEED:
+            warehouse = await db.get(DimWarehouse, values["warehouse_code"])
+            if warehouse is None:
+                db.add(DimWarehouse(**values, status="active", source="导出仓库清单-20260907205055.xls", effective_from=date.today()))
+            else:
+                for key, value in values.items():
+                    setattr(warehouse, key, value)
+                warehouse.status = "active"
         for spu_code, source in grouped.items():
             spu = await db.get(DimSpu, spu_code)
             if spu is None:
@@ -121,7 +148,8 @@ def main() -> int:
     args = parser.parse_args()
     rows, duplicates = load_lookup(args.lookup)
     errors = validate_rows(rows)
-    print(f"validated rows={len(rows)} duplicate_rows={len(duplicates)} errors={len(errors)}")
+    ready_rows, deferred = rows_ready_for_apply(rows)
+    print(f"validated rows={len(rows)} ready_rows={len(ready_rows)} duplicate_rows={len(duplicates)} deferred_tbd={len(deferred)} errors={len(errors)}")
     if duplicates:
         print(f"duplicate SKU examples: {', '.join(duplicates[:10])}")
     if errors:
@@ -131,7 +159,9 @@ def main() -> int:
     if not args.apply:
         print("dry-run only; pass --apply after review")
         return 0
-    created_spu, created_sku, created_bindings = asyncio.run(apply_rows(rows))
+    created_spu, created_sku, created_bindings = asyncio.run(apply_rows(ready_rows))
+    if deferred:
+        print(f"deferred TBD SKU examples: {', '.join(deferred[:10])}")
     print(f"applied spus={created_spu} skus={created_sku} bindings={created_bindings}")
     return 0
 
