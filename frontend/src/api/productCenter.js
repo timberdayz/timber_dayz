@@ -144,6 +144,15 @@ export default {
   listProductWarehouses(params = {}) {
     return api._get("/product-warehouses", { params });
   },
+  listWarehouseStorageRules(params = {}) {
+    return api._get("/warehouse-storage-rules", { params });
+  },
+  createWarehouseStorageRule(payload) {
+    return api._post("/warehouse-storage-rules", payload);
+  },
+  updateWarehouseStorageRule(ruleId, payload) {
+    return api._patch(`/warehouse-storage-rules/${ruleId}`, payload);
+  },
   updatePlatformFeeRate(platformCode, payload) {
     return api._patch(`/platforms/${encodeURIComponent(platformCode)}/fee-rate`, payload);
   },

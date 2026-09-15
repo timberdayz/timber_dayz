@@ -101,3 +101,52 @@ test("物流规则和批次使用收货仓库及固定运输方式", () => {
   assert.match(source, /铁路运输/);
   assert.doesNotMatch(source, /目的地.*el-input/);
 });
+
+test("SKU 资料按 CNY 维护采购成本、周转类型和参考仓储天数", () => {
+  assert.match(source, /采购成本来源/);
+  assert.match(source, /采购成本确认时间/);
+  assert.match(source, /周转类型/);
+  assert.match(source, /参考仓储天数/);
+  assert.match(source, /fast.*30|30.*fast/);
+  assert.match(source, /normal.*60|60.*normal/);
+  assert.match(source, /slow.*90|90.*slow/);
+  assert.doesNotMatch(source, /label="币种"/);
+});
+
+test("平台 SKU 利润测算按平台、仓库和运输方式自动计算参考成本", () => {
+  assert.match(source, /v-model="operatingQuery\.transport_type"/);
+  assert.match(source, /参考物流/);
+  assert.match(source, /参考仓储/);
+  assert.match(source, /未录入\/参考回退/);
+  assert.doesNotMatch(source, /v-model="row\.expected_logistics_cost"/);
+  assert.doesNotMatch(source, /v-model="row\.expected_storage_cost"/);
+  assert.match(source, /transport_type: operatingQuery\.transport_type/);
+  assert.doesNotMatch(source, /transport_type: row\.transport_type \|\| "sea"/);
+});
+
+test("平台 SKU 利润测算按 SPU 级联 SKU，并提供平台费率与仓储规则入口", () => {
+  assert.match(source, /filteredOperatingSkus/);
+  assert.match(source, /clearOperatingSkuOutsideSpu/);
+  assert.match(source, /平台费率管理/);
+  assert.match(source, /仓储规则/);
+  assert.match(api, /listWarehouseStorageRules/);
+  assert.match(api, /createWarehouseStorageRule/);
+  assert.match(api, /updateWarehouseStorageRule/);
+});
+
+test("平台 SKU 利润测算保留候选接口预览并支持分页", () => {
+  assert.doesNotMatch(source, /preview:\s*null/);
+  assert.match(source, /page:\s*1/);
+  assert.match(source, /page_size:\s*20/);
+  assert.match(source, /const operatingTotal = ref\(0\)/);
+  assert.match(source, /page:\s*operatingQuery\.page/);
+  assert.match(source, /page_size:\s*operatingQuery\.page_size/);
+  assert.match(source, /:total="operatingTotal"/);
+  assert.match(source, /v-model:current-page="operatingQuery\.page"/);
+  assert.match(source, /v-model:page-size="operatingQuery\.page_size"/);
+});
+
+test("仓储规则历史行锁定费率和生效日期，新行才可编辑", () => {
+  assert.match(source, /v-model="row\.unit_rate_cny"[^>]*:disabled="!row\.__new"/);
+  assert.match(source, /v-model="row\.effective_from"[^>]*:disabled="!row\.__new"/);
+});
