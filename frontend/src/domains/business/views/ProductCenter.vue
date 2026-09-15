@@ -1070,7 +1070,7 @@ const savePlatformFeeRate = async () => {
     const { default_fee_rate_pct, ...feePayload } = platformFeeDrawer.form;
     await productCenterApi.updatePlatformFeeRate(platformCode, {
       ...feePayload,
-      default_fee_rate: fromPercent(default_fee_rate_pct),
+      default_fee_rate: fromPercent(default_fee_rate_pct, null),
     });
     platformFeeDrawer.visible = false;
     await loadOperatingDimensions();
@@ -1126,7 +1126,7 @@ const operatingPayload = (row) => ({
   competitor_price: row.competitor_price ?? null,
   expected_selling_price: row.expected_selling_price ?? null,
   seller_coupon_amount: row.seller_coupon_amount ?? 0,
-  expected_ad_rate: fromPercent(row.expected_ad_rate_pct),
+  expected_ad_rate: fromPercent(row.expected_ad_rate_pct, 0),
 });
 const clearOperatingSkuOutsideSpu = () => {
   if (operatingQuery.sku_id && !filteredOperatingSkus.value.some((item) => item.sku_id === operatingQuery.sku_id)) {
@@ -1462,8 +1462,8 @@ watch(
 );
 const toPercent = (value) =>
   value == null ? null : Number((Number(value) * 100).toFixed(4));
-const fromPercent = (value) =>
-  value == null || value === "" ? 0 : Number(value) / 100;
+const fromPercent = (value, fallback = 0) =>
+  value == null || value === "" ? fallback : Number(value) / 100;
 const money = (value) => (value == null ? "-" : `¥${Number(value).toFixed(2)}`);
 const percent = (value) =>
   value == null ? "-" : `${(Number(value) * 100).toFixed(1)}%`;

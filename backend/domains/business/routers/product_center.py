@@ -1628,7 +1628,10 @@ async def list_platform_sku_profit_candidates(
         if reference_logistics is None:
             if cost_inputs["reference_logistics_ambiguous"]:
                 missing_reasons.append("ambiguous_logistics_rule")
-            elif cost_inputs["reference_logistics_rule"] is None:
+            elif (
+                cost_inputs["reference_logistics_rule"] is None
+                or cost_inputs["reference_logistics_rule"].freight_unit_rate is None
+            ):
                 missing_reasons.append("missing_logistics_rule")
             elif cost_inputs["reference_logistics_rule"].billing_basis == "weight" and row.weight_kg is None:
                 missing_reasons.append("missing_sku_weight")
@@ -1713,7 +1716,11 @@ async def _platform_profit_missing_fields(
     if reference_logistics is None:
         if logistics_rule is not None and logistics_rule.billing_basis == "weight" and sku.weight_kg is None:
             missing.append("重量 kg")
-        elif logistics_rule is not None and logistics_rule.billing_basis == "volume":
+        elif (
+            logistics_rule is not None
+            and logistics_rule.billing_basis == "volume"
+            and logistics_rule.freight_unit_rate is not None
+        ):
             missing.append("单件体积 m³")
         else:
             missing.append(f"{values['transport_type']}参考物流规则")

@@ -544,3 +544,12 @@ def test_platform_profit_draft_reuses_operating_scope_validation():
     ]
     assert "await _validate_operating_dimensions(db, values)" in section
     assert "except IntegrityError" in section
+
+
+def test_missing_logistics_rate_is_reported_as_rule_configuration_not_sku_volume():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    candidates = source[
+        source.index("async def list_platform_sku_profit_candidates"):
+        source.index('@router.post("/api/platform-sku-profit/preview")')
+    ]
+    assert 'cost_inputs["reference_logistics_rule"].freight_unit_rate is None' in candidates
