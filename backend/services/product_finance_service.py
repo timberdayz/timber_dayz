@@ -38,6 +38,14 @@ from .product_profit_service import (
 from .product_logistics_service import allocate_bill_line
 
 
+_CNY_BILLING_UNITS = {
+    "volume": "CNY/CBM",
+    "weight": "CNY/KG",
+    "quantity": "CNY/unit",
+    "fixed": "CNY",
+}
+
+
 def _unit_volume_cbm(sku: DimErpSku) -> Decimal:
     dimensions = (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)
     if any(value is None for value in dimensions):
@@ -125,7 +133,13 @@ class ProductFinanceService:
                 (_unit_volume_cbm(skus[item["sku_id"]]) * Decimal(str(item["shipped_qty"])) for item in allocation_specs),
                 Decimal("0"),
             )
-            basis = line.get("billing_basis", "volume")
+            basis = line.get("billing_basis") or "volume"
+            if basis not in _CNY_BILLING_UNITS:
+                raise ValueError("unsupported logistics billing basis")
+            billing_unit = _CNY_BILLING_UNITS[basis]
+            supplied_billing_unit = line.get("billing_unit")
+            if supplied_billing_unit not in (None, billing_unit):
+                raise ValueError(f"billing unit must be {billing_unit}")
             chargeable_quantity = {
                 "volume": Decimal(str(line.get("actual_total_volume_cbm"))) if line.get("actual_total_volume_cbm") is not None else calculated_volume,
                 "weight": Decimal(str(line.get("actual_total_weight_kg"))) if line.get("actual_total_weight_kg") is not None else calculated_weight,
@@ -169,7 +183,7 @@ class ProductFinanceService:
                 po_id=line.get("po_id"),
                 warehouse_code=warehouse_code,
                 billing_basis=basis,
-                billing_unit=line.get("billing_unit"),
+                billing_unit=billing_unit,
                 billing_unit_rate=line.get("billing_unit_rate"),
                 is_sensitive=bool(line.get("is_sensitive", False)),
                 sensitive_surcharge=sensitive_surcharge,
@@ -195,7 +209,7 @@ class ProductFinanceService:
         # in the legacy direct column for backwards compatibility.
         for row, line, allocation_specs in zip(rows, lines, allocation_specs_by_line):
             amount = Decimal(str(row.line_total_amount or 0))
-            basis = line.get("billing_basis", "volume")
+            basis = line.get("billing_basis") or "volume"
             allocation_items = []
             for spec in allocation_specs:
                 item_sku = skus[spec["sku_id"]]

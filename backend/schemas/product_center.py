@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -420,9 +420,17 @@ class LogisticsBillUpdateRequest(BaseModel):
 
 
 class LogisticsBillSkuLineRequest(BaseModel):
+    """Compatibility request for legacy one-SKU bill rows.
+
+    Legacy rows were always volume-billed.  Keep that contract explicit so a
+    request cannot reach persistence without a canonical CNY billing unit.
+    """
+
     sku_id: int = Field(gt=0)
     warehouse_code: str = Field(min_length=1, max_length=128)
     shipped_qty: float = Field(gt=0)
+    billing_basis: Literal["volume"] = "volume"
+    billing_unit: Literal["CNY/CBM"] = "CNY/CBM"
     actual_total_weight_kg: Optional[float] = Field(default=None, ge=0)
     actual_total_volume_cbm: Optional[float] = Field(default=None, ge=0)
     headhaul_cost: float = Field(default=0, ge=0)

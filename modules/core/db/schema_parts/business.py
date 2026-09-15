@@ -850,7 +850,7 @@ class LogisticsBillLine(Base):
     po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"), nullable=True)
     warehouse_code = Column(String(128), ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"), nullable=False)
     billing_basis = Column(String(32), nullable=False, default="volume")
-    billing_unit = Column(String(32), nullable=True)
+    billing_unit = Column(String(32), nullable=False, default="CNY/CBM")
     billing_unit_rate = Column(Numeric(18, 6), nullable=True)
     is_sensitive = Column(Boolean, nullable=False, default=False)
     sensitive_surcharge = Column(Numeric(18, 2), nullable=False, default=0)
@@ -881,6 +881,13 @@ class LogisticsBillLine(Base):
 
     __table_args__ = (
         UniqueConstraint("bill_id", "line_no", name="uq_logistics_bill_line"),
+        CheckConstraint(
+            "(billing_basis = 'volume' AND billing_unit = 'CNY/CBM') OR "
+            "(billing_basis = 'weight' AND billing_unit = 'CNY/KG') OR "
+            "(billing_basis = 'quantity' AND billing_unit = 'CNY/unit') OR "
+            "(billing_basis = 'fixed' AND billing_unit = 'CNY')",
+            name="ck_logistics_bill_lines_cny_billing_unit",
+        ),
         Index("ix_logistics_bill_lines_bill", "bill_id"),
         Index("ix_logistics_bill_lines_sku", "sku_id"),
         {"schema": "finance"},

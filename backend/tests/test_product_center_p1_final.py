@@ -7,8 +7,11 @@ from pydantic import ValidationError
 from backend.schemas.product_center import (
     LogisticsBillCreateRequest,
     LogisticsBillLineRequest,
+    LogisticsBillLinesReplaceRequest,
+    LogisticsBillSkuLineRequest,
     LogisticsBillUpdateRequest,
     LogisticsProviderRuleUpdateRequest,
+    WarehouseStorageRuleUpdateRequest,
 )
 
 
@@ -102,3 +105,88 @@ def test_product_center_sensitive_writes_emit_audit_logs_and_restrict_sales_fee_
     assert source.count("await _write_product_center_audit(") >= 4
     fee_section = source[source.index("async def update_platform_fee_rate"):source.index('@router.get("/api/logistics-bills")')]
     assert 'row.platform_role != "sales"' in fee_section
+
+
+def test_storage_rule_patch_never_reactivates_historical_or_stopped_rule():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    section = source[
+        source.index("async def update_warehouse_storage_rule"):
+        source.index('@router.post("/api/product-warehouses"')
+    ]
+
+    assert 'values.get("status") == "active"' in section
+    assert 'row.status != "active"' in section
+    assert "create a new storage rule version" in section
+
+
+def test_legacy_single_sku_bill_line_normalizes_to_cny_volume_contract():
+    request = LogisticsBillLinesReplaceRequest(
+        lines=[LogisticsBillSkuLineRequest(sku_id=1, warehouse_code="WH-1", shipped_qty=2)]
+    )
+    line = request.lines[0]
+
+    assert line.billing_basis == "volume"
+    assert line.billing_unit == "CNY/CBM"
+
+
+def test_bill_line_service_defensively_normalizes_legacy_cny_unit():
+    source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
+    section = source[
+        source.index("async def replace_bill_lines"):
+        source.index("async def replace_bill_purchase_orders")
+    ]
+
+    assert 'basis = line.get("billing_basis") or "volume"' in section
+    assert 'billing_unit = _CNY_BILLING_UNITS[basis]' in section
+    assert "billing_unit=billing_unit" in section
+
+
+def test_logistics_bill_line_persistence_rejects_null_or_non_cny_units():
+    from sqlalchemy import CheckConstraint
+
+    from modules.core.db import LogisticsBillLine
+
+    assert LogisticsBillLine.__table__.c.billing_unit.nullable is False
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in LogisticsBillLine.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert "ck_logistics_bill_lines_cny_billing_unit" in constraints
+    assert "CNY/CBM" in constraints["ck_logistics_bill_lines_cny_billing_unit"]
+
+    migration = Path(
+        "current_migrations/versions/20260917_logistics_bill_line_cny_units.py"
+    ).read_text(encoding="utf-8")
+    assert "billing_unit IS NULL" in migration
+    assert "nullable=False" in migration
+
+
+def test_logistics_bill_writes_are_audited_once_by_canonical_endpoints():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    endpoint_bounds = [
+        ("async def supplement_purchase_order_line_cost", '@router.get("/api/purchase-orders/{po_id}")'),
+        ("async def create_logistics_provider_rule", '@router.patch("/api/logistics-provider-rules/{rule_id}")'),
+        ("async def update_logistics_provider_rule", '@router.get("/api/cost-assumption-profiles")'),
+        ("async def create_logistics_bill", '@router.post("/api/logistics-batches", status_code=201)'),
+        ("async def replace_logistics_bill_purchase_orders", '@router.put("/api/logistics-batches/{bill_id}/purchase-orders")'),
+        ("async def update_logistics_bill", '@router.patch("/api/logistics-batches/{bill_id}")'),
+        ("async def replace_logistics_bill_lines", '@router.put("/api/logistics-batches/{bill_id}/lines")'),
+        ("async def confirm_logistics_bill", '@router.post("/api/logistics-batches/{bill_id}/confirm")'),
+        ("async def void_logistics_bill", '@router.post("/api/logistics-batches/{bill_id}/void")'),
+    ]
+
+    for start, end in endpoint_bounds:
+        section = source[source.index(start):source.index(end)]
+        assert "await _write_product_center_audit(" in section, start
+
+    for alias in (
+        "async def create_logistics_batch",
+        "async def replace_logistics_batch_purchase_orders",
+        "async def update_logistics_batch",
+        "async def replace_logistics_batch_lines",
+        "async def confirm_logistics_batch",
+        "async def void_logistics_batch",
+    ):
+        section = source[source.index(alias):source.find("\n@router", source.index(alias) + 1)]
+        assert "_write_product_center_audit" not in section, alias

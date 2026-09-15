@@ -797,6 +797,15 @@ async def supplement_purchase_order_line_cost(po_id: str, po_line_id: int, body:
         canonical_sku.purchase_cost_source = "purchase_order"
         canonical_sku.purchase_cost_confirmed_at = row.purchase_cost_confirmed_at
         await _enqueue_sku_projection(db, canonical_sku)
+    await _write_product_center_audit(
+        db, _user, action_type="supplement_purchase_cost", resource_type="purchase_order_line",
+        resource_id=f"{po_id}:{po_line_id}", changes={
+            "po_id": po_id,
+            "po_line_id": po_line_id,
+            "purchase_cost_source": body.purchase_cost_source,
+            "currency": "CNY",
+        },
+    )
     await db.commit()
     await db.refresh(row)
     return {"po_line_id": row.po_line_id, "unit_price": row.unit_price, "currency": row.currency, "line_amt": row.line_amt, "purchase_cost_source": row.purchase_cost_source, "purchase_cost_confirmed_at": row.purchase_cost_confirmed_at}
@@ -841,8 +850,17 @@ async def create_logistics_provider_rule(body: LogisticsProviderRuleCreateReques
         raise HTTPException(status_code=422, detail="warehouse not found")
     row = LogisticsProviderRule(**body.model_dump(), currency="CNY")
     db.add(row)
-    await db.commit()
-    await db.refresh(row)
+    try:
+        await db.flush()
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="logistics_provider_rule",
+            resource_id=str(row.rule_id), changes=body.model_dump(mode="json"),
+        )
+        await db.commit()
+        await db.refresh(row)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="logistics provider rule already exists") from exc
     return _serialize_provider_rule(row)
 
 
@@ -856,6 +874,10 @@ async def update_logistics_provider_rule(rule_id: int, body: LogisticsProviderRu
         raise HTTPException(status_code=422, detail="warehouse not found")
     for key, value in values.items():
         setattr(row, key, value)
+    await _write_product_center_audit(
+        db, _user, action_type="update", resource_type="logistics_provider_rule",
+        resource_id=str(row.rule_id), changes=values,
+    )
     await db.commit()
     await db.refresh(row)
     return _serialize_provider_rule(row)
@@ -1054,7 +1076,13 @@ async def update_warehouse_storage_rule(rule_id: int, body: WarehouseStorageRule
     row = await db.get(WarehouseStorageRule, rule_id)
     if row is None:
         raise HTTPException(status_code=404, detail="warehouse storage rule not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    values = body.model_dump(exclude_unset=True)
+    if values.get("status") == "active" and row.status != "active":
+        raise HTTPException(
+            status_code=409,
+            detail="inactive storage rules cannot be reactivated; create a new storage rule version",
+        )
+    for key, value in values.items():
         setattr(row, key, value)
     try:
         await _write_product_center_audit(
@@ -1134,6 +1162,11 @@ async def create_logistics_bill(body: LogisticsBillCreateRequest, db: AsyncSessi
     row = LogisticsBill(**body.model_dump(), status="draft")
     db.add(row)
     try:
+        await db.flush()
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="logistics_bill",
+            resource_id=str(row.bill_id), changes={"bill_no": row.bill_no, "status": row.status},
+        )
         await db.commit()
         asyncio.create_task(trigger_pending_projection_delivery())
         await db.refresh(row)
@@ -1175,6 +1208,10 @@ async def replace_logistics_bill_purchase_orders(bill_id: int, body: LogisticsBi
     try:
         bill = await service.get_bill_or_raise(bill_id)
         rows = await service.replace_bill_purchase_orders(bill, body.po_ids)
+        await _write_product_center_audit(
+            db, _user, action_type="replace_purchase_orders", resource_type="logistics_bill",
+            resource_id=str(bill_id), changes={"purchase_order_ids": body.po_ids},
+        )
         await db.commit()
     except ValueError as exc:
         await db.rollback()
@@ -1196,8 +1233,13 @@ async def update_logistics_bill(bill_id: int, body: LogisticsBillUpdateRequest, 
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if bill.status != "draft":
         raise HTTPException(status_code=409, detail="only draft logistics bills can be edited")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    values = body.model_dump(exclude_unset=True)
+    for key, value in values.items():
         setattr(bill, key, value)
+    await _write_product_center_audit(
+        db, _user, action_type="update", resource_type="logistics_bill",
+        resource_id=str(bill_id), changes=values,
+    )
     await db.commit()
     return _serialize_bill(bill)
 
@@ -1213,6 +1255,10 @@ async def replace_logistics_bill_lines(bill_id: int, body: LogisticsBillLinesRep
     try:
         bill = await service.get_bill_or_raise(bill_id)
         lines = await service.replace_bill_lines(bill, [line.model_dump(exclude_unset=True) for line in body.lines])
+        await _write_product_center_audit(
+            db, _user, action_type="replace_lines", resource_type="logistics_bill",
+            resource_id=str(bill_id), changes={"line_count": len(lines), "line_ids": [line.line_id for line in lines]},
+        )
         await db.commit()
         asyncio.create_task(trigger_pending_projection_delivery())
     except ValueError as exc:
@@ -1244,6 +1290,10 @@ async def confirm_logistics_bill(bill_id: int, db: AsyncSession = Depends(get_as
             site_profiles = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id.in_(platform_sku_ids), SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().all()
             for profile in site_profiles:
                 await _enqueue_platform_sku_profit_projection(db, profile)
+        await _write_product_center_audit(
+            db, current_user, action_type="confirm", resource_type="logistics_bill",
+            resource_id=str(bill_id), changes={"bill_no": bill.bill_no, "status": bill.status},
+        )
         await db.commit()
         asyncio.create_task(trigger_pending_projection_delivery())
     except BillTotalMismatchError as exc:
@@ -1272,6 +1322,10 @@ async def void_logistics_bill(bill_id: int, body: LogisticsBillVoidRequest, db: 
             sku = await db.get(DimErpSku, sku_id)
             if sku is not None:
                 await _enqueue_sku_projection(db, sku)
+        await _write_product_center_audit(
+            db, current_user, action_type="void", resource_type="logistics_bill",
+            resource_id=str(bill_id), changes={"bill_no": bill.bill_no, "status": bill.status},
+        )
         await db.commit()
         asyncio.create_task(trigger_pending_projection_delivery())
     except ValueError as exc:
