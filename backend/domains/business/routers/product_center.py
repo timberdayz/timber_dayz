@@ -191,6 +191,14 @@ async def create_product_category(body: ProductCategoryCreateRequest, db: AsyncS
     db.add(row)
     try:
         await db.flush()
+        await _write_product_center_audit(
+            db,
+            _user,
+            action_type="create",
+            resource_type="product_category",
+            resource_id=row.category_code,
+            changes=body.model_dump(mode="json"),
+        )
         await db.commit()
         await db.refresh(row)
     except IntegrityError as exc:
@@ -238,6 +246,14 @@ async def update_product_category(category_code: str, body: ProductCategoryUpdat
             raise HTTPException(status_code=422, detail="cannot activate level 2 category under inactive level 1 parent")
     for key, value in values.items():
         setattr(row, key, value)
+    await _write_product_center_audit(
+        db,
+        _user,
+        action_type="update",
+        resource_type="product_category",
+        resource_id=row.category_code,
+        changes=values,
+    )
     await db.commit()
     await db.refresh(row)
     return ProductCategoryResponse.model_validate(row)
@@ -1644,7 +1660,10 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
     await db.flush()
     estimates = []
     versions = [("estimated", preview["expected"])]
-    if preview["actual_recost"].get("completeness") != "estimated":
+    if (
+        preview.get("actual_logistics_cost") is not None
+        or preview.get("actual_storage_cost") is not None
+    ):
         versions.append(("actual_recost", preview["actual_recost"]))
     for basis, section in versions:
         row = SkuProfitEstimate(

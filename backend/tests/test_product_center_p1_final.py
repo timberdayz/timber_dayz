@@ -393,6 +393,39 @@ def test_product_master_and_legacy_profit_writes_are_audited_before_commit():
         ), start
 
 
+def test_product_category_writes_are_audited_atomically_with_category_identity_and_changes():
+    """Category mutations must leave an auditable record in their committing transaction."""
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    endpoint_bounds = [
+        ("async def create_product_category", '@router.patch("/api/product-categories/{category_code}"'),
+        ("async def update_product_category", "async def _apply_spu_category"),
+    ]
+    for start, end in endpoint_bounds:
+        section = source[source.index(start):source.index(end)]
+        audit_index = section.index("await _write_product_center_audit(")
+        assert audit_index < section.index("await db.commit()"), start
+        assert 'resource_type="product_category"' in section
+        assert "resource_id=row.category_code" in section
+        assert "changes=" in section
+
+
+def test_platform_profit_save_only_persists_actual_recost_when_actual_cost_exists():
+    """Missing reference data must not manufacture an actual-cost estimate version."""
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    section = source[
+        source.index("async def save_platform_sku_profit_estimates"):
+        source.index('@router.get("/api/platform-sku-profit/estimates")')
+    ]
+    assert "preview.get(\"actual_logistics_cost\") is not None" in section
+    assert "preview.get(\"actual_storage_cost\") is not None" in section
+    assert 'versions.append(("actual_recost", preview["actual_recost"]))' in section
+    assert 'preview["actual_recost"].get("completeness") != "estimated"' not in section
+
+
 def test_spu_sku_binding_audits_both_historical_and_new_effective_bindings_before_commit():
     """A rebinding must preserve effective-dated lineage in the audit transaction."""
     source = Path("backend/domains/business/routers/product_center.py").read_text(
