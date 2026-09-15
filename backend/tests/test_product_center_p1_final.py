@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -187,7 +188,7 @@ def test_candidate_purchase_cost_falls_back_only_when_foreign_base_cost_is_missi
 
     # The prefetch map contains only valid CNY-derived costs. A missing foreign
     # conversion must therefore use the SKU default, or remain incomplete.
-    assert 'purchase_cost = cost_inputs["purchase_cost"] or row.default_purchase_cost' in candidate_section
+    assert 'purchase_cost = cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost' in candidate_section
     assert 'purchase_cost=purchase_cost' in candidate_section
 
 
@@ -477,3 +478,104 @@ def test_product_center_audit_helper_records_identity_fields_without_secrets():
         assert field in helper
     assert "password" not in helper.lower()
     assert "secret" not in helper.lower()
+
+
+def test_direct_sku_volume_is_the_primary_reference_cost_measurement():
+    from modules.core.db import DimErpSku
+    from backend.services.product_finance_service import _reference_unit_volume_cbm
+
+    sku = DimErpSku(unit_volume_cbm=0.0125)
+    assert _reference_unit_volume_cbm(sku).as_tuple() == Decimal("0.0125").as_tuple()
+
+    legacy = DimErpSku(package_length_cm=20, package_width_cm=10, package_height_cm=5)
+    assert _reference_unit_volume_cbm(legacy).as_tuple() == Decimal("0.001").as_tuple()
+
+    from backend.services.product_finance_service import _unit_volume_cbm
+
+    assert _unit_volume_cbm(sku).as_tuple() == Decimal("0.0125").as_tuple()
+
+
+def test_platform_profit_version_refuses_incomplete_inputs_with_structured_missing_fields():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    section = source[
+        source.index("async def save_platform_sku_profit_estimates"):
+        source.index('@router.get("/api/platform-sku-profit/estimates")')
+    ]
+    assert "cannot_save_profit_version" in section
+    assert "missing_fields" in section
+    assert "status_code=422" in section
+
+
+def test_platform_profit_draft_is_distinct_from_immutable_profit_versions():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    schema = Path("backend/schemas/product_center.py").read_text(encoding="utf-8")
+    assert '"/api/platform-sku-profit/drafts"' in source
+    assert "PlatformSkuProfitDraftRequest" in schema
+    assert "PlatformSkuProfitDraft" in source
+
+
+def test_storage_rule_patch_accepts_material_changes_as_a_new_version():
+    schema = Path("backend/schemas/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    assert "unit_rate_cny: Optional[float]" in schema
+    assert "effective_from: Optional[date]" in schema
+    section = source[
+        source.index("async def update_warehouse_storage_rule"):
+        source.index("async def create_product_warehouse")
+    ]
+    assert "WarehouseStorageRule(" in section
+    assert "storage_rule_versioned" in section
+
+
+def test_storage_rule_version_window_is_validated_by_request_and_database_contract():
+    with pytest.raises(ValidationError, match="effective_to"):
+        WarehouseStorageRuleUpdateRequest(
+            unit_rate_cny=100,
+            effective_from=date(2026, 9, 20),
+            effective_to=date(2026, 9, 19),
+        )
+    source = Path("modules/core/db/schema_parts/business.py").read_text(encoding="utf-8")
+    migration = Path("current_migrations/versions/20260920_sku_direct_volume_and_profit_drafts.py").read_text(encoding="utf-8")
+    assert "ck_warehouse_storage_rules_window" in source
+    assert "ck_warehouse_storage_rules_window" in migration
+    router = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    assert 'values["effective_to"] < next_effective_from' in router
+
+
+def test_platform_profit_draft_reuses_operating_scope_validation():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    section = source[
+        source.index("async def save_platform_sku_profit_draft"):
+        source.index("async def save_platform_sku_profit_estimates")
+    ]
+    assert "await _validate_operating_dimensions(db, values)" in section
+    assert "except IntegrityError" in section
+
+
+def test_missing_logistics_rate_is_reported_as_rule_configuration_not_sku_volume():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    candidates = source[
+        source.index("async def list_platform_sku_profit_candidates"):
+        source.index('@router.post("/api/platform-sku-profit/preview")')
+    ]
+    assert 'cost_inputs["reference_logistics_rule"].freight_unit_rate is None' in candidates
+
+
+def test_candidate_preserves_valid_zero_purchase_cost_before_sku_fallback():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    candidates = source[
+        source.index("async def list_platform_sku_profit_candidates"):
+        source.index('@router.post("/api/platform-sku-profit/preview")')
+    ]
+    assert 'cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost' in candidates
+
+
+def test_platform_profit_projection_prefers_immutable_estimate_reference_costs():
+    source = Path("backend/services/feishu_projection_service.py").read_text(encoding="utf-8")
+    payload = source[
+        source.index("async def _platform_sku_profit_payload"):
+        source.index("async def process_pending")
+    ]
+    assert 'SkuProfitEstimate.calculation_basis == "estimated"' in payload
+    assert 'estimate.expected_logistics_cost' in payload
+    assert 'estimate.expected_storage_cost' in payload

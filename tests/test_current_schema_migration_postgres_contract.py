@@ -20,7 +20,7 @@ import scripts.run_current_schema_migrations as migration_runner
 
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_BASELINE_REVISION = "current_schema_20260805"
-CURRENT_HEAD_REVISION = "current_schema_20260919_logistics_rule_default"
+CURRENT_HEAD_REVISION = "current_schema_20260920_sku_direct_volume_and_profit_drafts"
 LEGACY_REVISION = "20260805_payroll_backfill_audit"
 
 

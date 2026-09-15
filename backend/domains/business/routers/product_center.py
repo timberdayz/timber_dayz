@@ -38,6 +38,7 @@ from backend.schemas.product_center import (
     PlatformSkuProfitCandidateResponse,
     PlatformSkuProfitCandidatePageResponse,
     PlatformSkuProfitEstimateRequest,
+    PlatformSkuProfitDraftRequest,
     PlatformSkuProfitPreviewRequest,
     WarehouseStorageRuleCreateRequest,
     WarehouseStorageRuleUpdateRequest,
@@ -1214,6 +1215,39 @@ async def update_warehouse_storage_rule(rule_id: int, body: WarehouseStorageRule
             status_code=409,
             detail="inactive storage rules cannot be reactivated; create a new storage rule version",
         )
+    material_fields = {"unit_rate_cny", "effective_from", "effective_to"}
+    if material_fields & values.keys():
+        if row.status != "active":
+            raise HTTPException(status_code=409, detail="inactive storage rules cannot be versioned; create a new storage rule")
+        next_effective_from = values.get("effective_from") or date.today()
+        if next_effective_from <= row.effective_from:
+            next_effective_from = date.today()
+        if next_effective_from <= row.effective_from:
+            raise HTTPException(status_code=409, detail="new storage rule effective_from must be later than the current rule")
+        if values.get("effective_to") is not None and values["effective_to"] < next_effective_from:
+            raise HTTPException(status_code=422, detail="effective_to must not be earlier than effective_from")
+        row.effective_to = next_effective_from - timedelta(days=1)
+        next_rule = WarehouseStorageRule(
+            warehouse_code=row.warehouse_code,
+            billing_basis="volume",
+            billing_unit="CNY/CBM/month",
+            unit_rate_cny=values.get("unit_rate_cny", row.unit_rate_cny),
+            effective_from=next_effective_from,
+            effective_to=values.get("effective_to"),
+            status="active",
+            source=values.get("source", row.source),
+            version=values.get("version") or f"{row.version or 'v1'}-next",
+            notes=values.get("notes", row.notes),
+        )
+        db.add(next_rule)
+        await db.flush()
+        await _write_product_center_audit(
+            db, _user, action_type="storage_rule_versioned", resource_type="warehouse_storage_rule",
+            resource_id=str(next_rule.rule_id), changes={"previous_rule_id": row.rule_id, **values},
+        )
+        await db.commit()
+        await db.refresh(next_rule)
+        return _serialize_storage_rule(next_rule)
     for key, value in values.items():
         setattr(row, key, value)
     try:
@@ -1585,13 +1619,33 @@ async def list_platform_sku_profit_candidates(
         assigned_spu = binding_by_sku.get(row.sku_id)
         assigned = spu_by_code.get(assigned_spu) if assigned_spu else None
         cost_inputs = cost_inputs_by_sku[row.sku_id]
-        purchase_cost = cost_inputs["purchase_cost"] or row.default_purchase_cost
+        purchase_cost = cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost
         reference_logistics = cost_inputs["reference_logistics_cost"]
         reference_storage = cost_inputs["reference_storage_cost"]
         actual_logistics = cost_inputs["actual_logistics_cost"]
         expected_selling_price = profile.expected_selling_price if profile else row.reference_selling_price
         seller_coupon_amount = profile.seller_coupon_amount if profile else 0
         expected_ad_rate = profile.expected_ad_rate if profile else 0
+        missing_reasons: list[str] = []
+        if reference_logistics is None:
+            if cost_inputs["reference_logistics_ambiguous"]:
+                missing_reasons.append("ambiguous_logistics_rule")
+            elif (
+                cost_inputs["reference_logistics_rule"] is None
+                or cost_inputs["reference_logistics_rule"].freight_unit_rate is None
+            ):
+                missing_reasons.append("missing_logistics_rule")
+            elif cost_inputs["reference_logistics_rule"].billing_basis == "weight" and row.weight_kg is None:
+                missing_reasons.append("missing_sku_weight")
+            else:
+                missing_reasons.append("missing_sku_volume")
+        if reference_storage is None:
+            if cost_inputs["reference_storage_rule"] is None:
+                missing_reasons.append("missing_storage_rule")
+            elif row.turnover_class is None:
+                missing_reasons.append("missing_turnover_class")
+            else:
+                missing_reasons.append("missing_sku_volume")
         preview = build_platform_profit_preview(
             expected_selling_price=expected_selling_price,
             competitor_price=profile.competitor_price if profile else None,
@@ -1626,6 +1680,10 @@ async def list_platform_sku_profit_candidates(
             "reference_storage_days": reference_storage_days(row.turnover_class),
             "reference_logistics_cost": reference_logistics,
             "reference_storage_cost": reference_storage,
+            "reference_cost_status": "ready" if not missing_reasons else "incomplete",
+            "reference_cost_missing_reasons": list(dict.fromkeys(missing_reasons)),
+            "reference_logistics_missing_reasons": [reason for reason in missing_reasons if reason in {"missing_logistics_rule", "missing_sku_weight", "ambiguous_logistics_rule"} or (reason == "missing_sku_volume" and reference_logistics is None)],
+            "reference_storage_missing_reasons": [reason for reason in missing_reasons if reason in {"missing_storage_rule", "missing_turnover_class"} or (reason == "missing_sku_volume" and reference_storage is None)],
             "preview": _decimal_payload(preview),
         })
     return {"data": items, "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
@@ -1640,13 +1698,108 @@ async def preview_platform_sku_profit(body: PlatformSkuProfitPreviewRequest, db:
     return _decimal_payload(result)
 
 
+async def _platform_profit_missing_fields(
+    db: AsyncSession, values: dict, preview: dict | None = None
+) -> list[str]:
+    """Return user-actionable blockers; zero-valued rates remain valid values."""
+    sku = await db.get(DimErpSku, values["sku_id"])
+    if sku is None:
+        return ["ERP SKU"]
+    finance = ProductFinanceService(db)
+    missing: list[str] = []
+    if values.get("expected_selling_price") is None and sku.reference_selling_price is None:
+        missing.append("预计售价")
+    purchase_cost = await finance.find_latest_purchase_cost(sku)
+    if purchase_cost is None and sku.default_purchase_cost is None:
+        missing.append("采购成本")
+    reference_logistics, logistics_rule = await finance.find_reference_logistics_cost(
+        sku, values["warehouse_code"], values["transport_type"]
+    )
+    if reference_logistics is None:
+        if logistics_rule is not None and logistics_rule.billing_basis == "weight" and sku.weight_kg is None:
+            missing.append("重量 kg")
+        elif (
+            logistics_rule is not None
+            and logistics_rule.billing_basis == "volume"
+            and logistics_rule.freight_unit_rate is not None
+        ):
+            missing.append("单件体积 m³")
+        else:
+            missing.append(f"{values['transport_type']}参考物流规则")
+    reference_storage, storage_rule = await finance.find_reference_storage_cost(sku, values["warehouse_code"])
+    if reference_storage is None:
+        if storage_rule is None:
+            missing.append("仓储规则")
+        elif sku.turnover_class is None:
+            missing.append("周转类型")
+        else:
+            missing.append("单件体积 m³")
+    platform = await db.get(DimPlatform, values["platform_code"])
+    if platform is None or platform.default_fee_rate is None:
+        missing.append("平台费率")
+    binding = (await db.execute(select(BridgeSpuSku).where(
+        BridgeSpuSku.sku_id == sku.sku_id,
+        BridgeSpuSku.binding_status == "active",
+        BridgeSpuSku.effective_to.is_(None),
+    ))).scalars().first()
+    spu = await db.get(DimSpu, binding.spu) if binding else None
+    if spu is None or spu.logistics_damage_rate is None or spu.return_loss_rate is None:
+        missing.append("SPU货损率和退货损失率")
+    if preview is not None and preview.get("expected", {}).get("profit") is None and not missing:
+        missing.append("完整预计利润口径")
+    return list(dict.fromkeys(missing))
+
+
+@router.post("/api/platform-sku-profit/drafts", status_code=201)
+async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    values = body.model_dump()
+    await _validate_operating_dimensions(db, values)
+    profile = (await db.execute(select(SkuOperatingProfile).where(
+        SkuOperatingProfile.sku_id == values["sku_id"],
+        SkuOperatingProfile.platform_code == values["platform_code"],
+        SkuOperatingProfile.warehouse_code == values["warehouse_code"],
+        SkuOperatingProfile.status == "active",
+        SkuOperatingProfile.effective_to.is_(None),
+    ))).scalars().first()
+    if profile is None:
+        profile = SkuOperatingProfile(
+            sku_id=values["sku_id"], platform_code=values["platform_code"],
+            warehouse_code=values["warehouse_code"], status="active",
+            created_by=getattr(_user, "user_id", None),
+        )
+        db.add(profile)
+    for key in ("transport_type", "competitor_price", "expected_selling_price", "seller_coupon_amount", "expected_ad_rate"):
+        setattr(profile, key, values.get(key))
+    sku = await db.get(DimErpSku, values["sku_id"])
+    platform = await db.get(DimPlatform, values["platform_code"])
+    profile.reference_selling_price = sku.reference_selling_price if sku else None
+    profile.platform_fee_rate = platform.default_fee_rate if platform else None
+    try:
+        await db.flush()
+        await _write_product_center_audit(
+            db, _user, action_type="save_draft", resource_type="platform_sku_profit_draft",
+            resource_id=f"{values['platform_code']}:{values['warehouse_code']}:{values['sku_id']}",
+            changes=values,
+        )
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="platform SKU profit draft conflicts with existing configuration") from exc
+    return {"profile_id": profile.profile_id, "status": "draft_saved"}
+
+
 @router.post("/api/platform-sku-profit/estimates", status_code=201)
 async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     values = body.model_dump()
+    await _validate_operating_dimensions(db, values)
     try:
         preview = await ProductFinanceService(db).preview_platform_sku_profit(values)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        missing_fields = await _platform_profit_missing_fields(db, values)
+        raise HTTPException(status_code=422, detail={"code": "cannot_save_profit_version", "missing_fields": missing_fields or [str(exc)]}) from exc
+    missing_fields = await _platform_profit_missing_fields(db, values, preview)
+    if missing_fields:
+        raise HTTPException(status_code=422, detail={"code": "cannot_save_profit_version", "missing_fields": missing_fields})
     profile = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id == values["sku_id"], SkuOperatingProfile.platform_code == values["platform_code"], SkuOperatingProfile.warehouse_code == values["warehouse_code"], SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().first()
     if profile is None:
         profile = SkuOperatingProfile(sku_id=values["sku_id"], platform_code=values["platform_code"], warehouse_code=values["warehouse_code"], status="active", created_by=getattr(_user, "user_id", None))
@@ -1669,8 +1822,8 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
         row = SkuProfitEstimate(
             sku_id=values["sku_id"], operating_profile_id=profile.profile_id, platform_code=values["platform_code"], warehouse_code=values["warehouse_code"],
             assumption_version=values.get("assumption_version") or "platform-profit-workbench", scenario="base", calculation_basis=basis,
-            selling_price=values.get("expected_selling_price") or profile.reference_selling_price, coupon_amount=values.get("seller_coupon_amount", 0),
-            expected_selling_price=values.get("expected_selling_price") or profile.reference_selling_price, competitor_price=values.get("competitor_price"), expected_ad_rate=values.get("expected_ad_rate", 0),
+            selling_price=values["expected_selling_price"] if values.get("expected_selling_price") is not None else profile.reference_selling_price, coupon_amount=values.get("seller_coupon_amount", 0),
+            expected_selling_price=values["expected_selling_price"] if values.get("expected_selling_price") is not None else profile.reference_selling_price, competitor_price=values.get("competitor_price"), expected_ad_rate=values.get("expected_ad_rate", 0),
             platform_fee=section.get("platform_fee", preview["expected"].get("platform_fee")), expected_ad_cost=preview["expected"].get("ad_cost"),
             expected_logistics_cost=preview["expected"].get("logistics_cost"), actual_logistics_cost=preview.get("actual_logistics_cost"),
             expected_storage_cost=preview["expected"].get("storage_cost"), actual_storage_cost=None,
@@ -1819,8 +1972,9 @@ async def list_sku_operating_profiles(
 
 
 async def _validate_operating_dimensions(db: AsyncSession, values: dict) -> None:
-    if await db.get(DimErpSku, values["sku_id"]) is None:
-        raise HTTPException(status_code=404, detail="SKU not found")
+    sku = await db.get(DimErpSku, values["sku_id"])
+    if sku is None or sku.status != "active":
+        raise HTTPException(status_code=422, detail="SKU not found or inactive")
     platform = await db.get(DimPlatform, values["platform_code"])
     if platform is None or not platform.is_active or platform.platform_role != "sales":
         raise HTTPException(status_code=422, detail="active sales platform not found")

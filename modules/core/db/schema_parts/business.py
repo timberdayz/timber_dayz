@@ -825,6 +825,7 @@ class WarehouseStorageRule(Base):
         CheckConstraint("billing_basis = 'volume'", name="ck_warehouse_storage_rules_basis"),
         CheckConstraint("billing_unit = 'CNY/CBM/month'", name="ck_warehouse_storage_rules_unit"),
         CheckConstraint("unit_rate_cny >= 0", name="ck_warehouse_storage_rules_rate"),
+        CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_warehouse_storage_rules_window"),
         CheckConstraint("status IN ('active', 'inactive')", name="ck_warehouse_storage_rules_status"),
         Index("uq_warehouse_storage_rules_current", "warehouse_code", unique=True, postgresql_where=text("status = 'active' AND effective_to IS NULL")),
         Index("ix_warehouse_storage_rules_lookup", "warehouse_code", "effective_from"),

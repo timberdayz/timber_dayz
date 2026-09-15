@@ -58,11 +58,18 @@ def test_logistics_rule_rejects_non_cny_billing_unit():
         )
 
 
-def test_storage_rule_update_cannot_rewrite_a_published_tariff_or_window():
+def test_storage_rule_update_versions_a_published_tariff_or_window():
     fields = WarehouseStorageRuleUpdateRequest.model_fields
-    assert "unit_rate_cny" not in fields
-    assert "effective_from" not in fields
-    assert "effective_to" not in fields
+    assert "unit_rate_cny" in fields
+    assert "effective_from" in fields
+    assert "effective_to" in fields
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    section = source[
+        source.index("async def update_warehouse_storage_rule"):
+        source.index("async def create_product_warehouse")
+    ]
+    assert "storage_rule_versioned" in section
+    assert "WarehouseStorageRule(" in section
 
 
 def test_storage_rule_create_rejects_an_invalid_effective_window():

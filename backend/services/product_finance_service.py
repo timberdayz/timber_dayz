@@ -47,10 +47,23 @@ _CNY_BILLING_UNITS = {
 
 
 def _unit_volume_cbm(sku: DimErpSku) -> Decimal:
+    """Return the canonical bill-allocation volume, defaulting safely to zero."""
+    if sku.unit_volume_cbm is not None:
+        return Decimal(str(sku.unit_volume_cbm))
     dimensions = (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)
     if any(value is None for value in dimensions):
         return Decimal("0")
     return Decimal(str(dimensions[0] * dimensions[1] * dimensions[2])) / Decimal("1000000")
+
+
+def _reference_unit_volume_cbm(sku: DimErpSku) -> Decimal | None:
+    """Return a maintained volume first, then the legacy dimension fallback."""
+    if sku.unit_volume_cbm is not None:
+        return Decimal(str(sku.unit_volume_cbm))
+    dimensions = (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)
+    if any(value is None for value in dimensions):
+        return None
+    return _unit_volume_cbm(sku)
 
 
 class ProductFinanceService:
@@ -388,9 +401,9 @@ class ProductFinanceService:
         if rule.freight_unit_rate is None:
             return None
         if rule.billing_basis == "volume":
-            if any(value is None for value in (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)):
+            measure = _reference_unit_volume_cbm(sku)
+            if measure is None:
                 return None
-            measure = _unit_volume_cbm(sku)
         elif rule.billing_basis == "weight":
             if sku.weight_kg is None:
                 return None
@@ -411,7 +424,7 @@ class ProductFinanceService:
         rule = (await self.db.execute(statement)).scalars().first()
         if rule is None:
             return None, None
-        volume = None if any(value is None for value in (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)) else _unit_volume_cbm(sku)
+        volume = _reference_unit_volume_cbm(sku)
         return build_reference_storage_cost(unit_volume_cbm=volume, unit_rate_cny_per_cbm_month=rule.unit_rate_cny, turnover_class=sku.turnover_class), rule
 
     async def find_latest_purchase_cost(self, sku: DimErpSku) -> Decimal | None:
@@ -589,6 +602,7 @@ class ProductFinanceService:
         logistics_rule = self._select_reference_logistics_rule(
             current_rules, warehouse_code, transport_type
         )
+        logistics_rule_ambiguous = bool(current_rules) and logistics_rule is None
         storage_rule = (
             await self.db.execute(
                 select(WarehouseStorageRule)
@@ -613,18 +627,7 @@ class ProductFinanceService:
                 if logistics_rule is not None
                 else None
             )
-            volume = (
-                None
-                if any(
-                    value is None
-                    for value in (
-                        sku.package_length_cm,
-                        sku.package_width_cm,
-                        sku.package_height_cm,
-                    )
-                )
-                else _unit_volume_cbm(sku)
-            )
+            volume = _reference_unit_volume_cbm(sku)
             reference_storage = (
                 build_reference_storage_cost(
                     unit_volume_cbm=volume,
@@ -639,6 +642,7 @@ class ProductFinanceService:
                 "actual_logistics_cost": actual_logistics.get(item_sku_id),
                 "reference_logistics_cost": reference_logistics,
                 "reference_logistics_rule": logistics_rule,
+                "reference_logistics_ambiguous": logistics_rule_ambiguous,
                 "reference_storage_cost": reference_storage,
                 "reference_storage_rule": storage_rule,
             }

@@ -93,6 +93,7 @@ class SkuBulkItem(BaseModel):
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
+    unit_volume_cbm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
     default_purchase_cost: Optional[float] = Field(default=None, ge=0)
     purchase_cost_currency: Optional[str] = Field(default="CNY", min_length=3, max_length=8)
@@ -172,6 +173,7 @@ class SkuCreateRequest(BaseModel):
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
+    unit_volume_cbm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
     default_purchase_cost: Optional[float] = Field(default=None, ge=0)
     purchase_cost_currency: str = Field(default="CNY", min_length=3, max_length=8)
@@ -199,6 +201,7 @@ class SkuUpdateRequest(BaseModel):
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
+    unit_volume_cbm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
     default_purchase_cost: Optional[float] = Field(default=None, ge=0)
     purchase_cost_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
@@ -246,6 +249,7 @@ class ProductCenterItem(BaseModel):
     package_length_cm: Optional[float] = None
     package_width_cm: Optional[float] = None
     package_height_cm: Optional[float] = None
+    unit_volume_cbm: Optional[float] = None
     units_per_carton: Optional[int] = None
     status: Optional[str] = None
     default_purchase_cost: Optional[float] = None
@@ -339,10 +343,23 @@ class WarehouseStorageRuleCreateRequest(BaseModel):
 
 
 class WarehouseStorageRuleUpdateRequest(BaseModel):
+    unit_rate_cny: Optional[float] = Field(default=None, ge=0)
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
     source: Optional[str] = Field(default=None, max_length=128)
     version: Optional[str] = Field(default=None, max_length=64)
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def effective_window_is_valid(self):
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_to < self.effective_from
+        ):
+            raise ValueError("effective_to must not be earlier than effective_from")
+        return self
 
 
 class CostAssumptionCreateRequest(BaseModel):
@@ -723,13 +740,19 @@ class PlatformSkuProfitPreviewRequest(BaseModel):
     warehouse_code: str = Field(min_length=1, max_length=128)
     transport_type: str = Field(pattern=r"^(sea|air|rail)$")
     competitor_price: Optional[float] = Field(default=None, ge=0)
-    expected_selling_price: Optional[float] = Field(default=None, ge=0)
+    expected_selling_price: Optional[float] = Field(default=None, gt=0)
     seller_coupon_amount: float = Field(default=0, ge=0)
     expected_ad_rate: float = Field(default=0, ge=0, le=1)
 
 
 class PlatformSkuProfitEstimateRequest(PlatformSkuProfitPreviewRequest):
     assumption_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
+
+class PlatformSkuProfitDraftRequest(PlatformSkuProfitPreviewRequest):
+    """Persist editable workbench parameters without creating a profit version."""
+
+    pass
 
 
 class PlatformSkuProfitCandidateResponse(BaseModel):
@@ -757,6 +780,10 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     reference_storage_days: Optional[int] = None
     reference_logistics_cost: Optional[float] = None
     reference_storage_cost: Optional[float] = None
+    reference_cost_status: str = "ready"
+    reference_cost_missing_reasons: list[str] = Field(default_factory=list)
+    reference_logistics_missing_reasons: list[str] = Field(default_factory=list)
+    reference_storage_missing_reasons: list[str] = Field(default_factory=list)
     preview: Optional[dict] = None
     currency: str = "CNY"
 
