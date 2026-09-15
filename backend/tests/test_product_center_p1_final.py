@@ -190,3 +190,73 @@ def test_logistics_bill_writes_are_audited_once_by_canonical_endpoints():
     ):
         section = source[source.index(alias):source.find("\n@router", source.index(alias) + 1)]
         assert "_write_product_center_audit" not in section, alias
+
+
+def test_logistics_bill_header_is_cny_only_in_persistence_and_actual_cost_reads():
+    from sqlalchemy import CheckConstraint
+
+    from modules.core.db import LogisticsBill
+
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in LogisticsBill.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert constraints["ck_logistics_bills_currency"] == "currency = 'CNY'"
+
+    migration = Path(
+        "current_migrations/versions/20260918_logistics_bill_currency_cny.py"
+    ).read_text(encoding="utf-8")
+    assert "currency <> 'CNY'" in migration
+    assert "cannot enforce CNY logistics bill currency" in migration
+    assert "ck_logistics_bills_currency" in migration
+
+    source = Path("backend/services/product_finance_service.py").read_text(
+        encoding="utf-8"
+    )
+    single_lookup = source[
+        source.index("async def find_confirmed_logistics_cost"):
+        source.index("async def find_reference_logistics_cost")
+    ]
+    bulk_lookup = source[
+        source.index("async def prefetch_platform_sku_profit_inputs"):
+        source.index("async def preview_profit")
+    ]
+    assert single_lookup.count('LogisticsBill.currency == "CNY"') == 2
+    assert bulk_lookup.count('LogisticsBill.currency == "CNY"') == 2
+
+
+def test_compatibility_operating_profile_writes_and_preview_reject_non_sales_platforms():
+    router_source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    dimensions = router_source[
+        router_source.index("async def _validate_operating_dimensions"):
+        router_source.index('@router.post("/api/sku-operating-profiles"')
+    ]
+    assert 'platform is None or not platform.is_active or platform.platform_role != "sales"' in dimensions
+
+    service_source = Path("backend/services/product_finance_service.py").read_text(
+        encoding="utf-8"
+    )
+    preview = service_source[
+        service_source.index("async def preview_operating_profit"):
+        service_source.index("async def preview_platform_sku_profit")
+    ]
+    assert 'platform is None or not platform.is_active or platform.platform_role != "sales"' in preview
+
+
+def test_compatibility_operating_profile_writes_are_audited_in_the_committing_transaction():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    endpoint_bounds = [
+        ("async def create_sku_operating_profile", '@router.patch("/api/sku-operating-profiles/{profile_id}"'),
+        ("async def update_sku_operating_profile", '@router.post("/api/sku-operating-profiles/bulk")'),
+        ("async def bulk_save_sku_operating_profiles", '@router.get("/api/sku-operating-profiles/{profile_id}"'),
+        ("async def save_sku_operating_profit", '@router.get("/api/sku-operating-profiles/{profile_id}/profit-estimates"'),
+    ]
+    for start, end in endpoint_bounds:
+        section = source[source.index(start):source.index(end)]
+        audit_index = section.index("await _write_product_center_audit(")
+        assert audit_index < section.index("await db.commit()"), start

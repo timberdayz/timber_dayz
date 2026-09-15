@@ -303,7 +303,11 @@ class ProductFinanceService:
             )
             .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
-            .where(LogisticsBillLineAllocation.sku_id == sku_id, LogisticsBill.status == "confirmed")
+            .where(
+                LogisticsBillLineAllocation.sku_id == sku_id,
+                LogisticsBill.status == "confirmed",
+                LogisticsBill.currency == "CNY",
+            )
         )
         if transport_type:
             allocated = allocated.where(LogisticsBill.transport_type == transport_type)
@@ -315,7 +319,11 @@ class ProductFinanceService:
         statement = (
             select(func.sum(LogisticsBillLine.line_total_amount), func.sum(LogisticsBillLine.shipped_qty))
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
-            .where(LogisticsBillLine.sku_id == sku_id, LogisticsBill.status == "confirmed")
+            .where(
+                LogisticsBillLine.sku_id == sku_id,
+                LogisticsBill.status == "confirmed",
+                LogisticsBill.currency == "CNY",
+            )
         )
         if transport_type:
             statement = statement.where(LogisticsBill.transport_type == transport_type)
@@ -523,6 +531,7 @@ class ProductFinanceService:
                 .where(
                     LogisticsBillLineAllocation.sku_id.in_(sku_ids),
                     LogisticsBill.status == "confirmed",
+                    LogisticsBill.currency == "CNY",
                     LogisticsBill.transport_type == transport_type,
                     LogisticsBillLine.warehouse_code == warehouse_code,
                 )
@@ -545,6 +554,7 @@ class ProductFinanceService:
                     .where(
                         LogisticsBillLine.sku_id.in_(missing_actual_ids),
                         LogisticsBill.status == "confirmed",
+                        LogisticsBill.currency == "CNY",
                         LogisticsBill.transport_type == transport_type,
                         LogisticsBillLine.warehouse_code == warehouse_code,
                     )
@@ -709,6 +719,9 @@ class ProductFinanceService:
 
     async def preview_operating_profit(self, profile_id: int, data: dict) -> dict:
         profile = await self.get_operating_profile(profile_id)
+        platform = await self.db.get(DimPlatform, profile.platform_code)
+        if platform is None or not platform.is_active or platform.platform_role != "sales":
+            raise ValueError("active sales platform not found")
         sku_data = {
             "sku_id": profile.sku_id,
             "selling_price": data.get("selling_price") if data.get("selling_price") is not None else profile.selling_price,

@@ -1677,12 +1677,13 @@ async def list_sku_operating_profiles(
 async def _validate_operating_dimensions(db: AsyncSession, values: dict) -> None:
     if await db.get(DimErpSku, values["sku_id"]) is None:
         raise HTTPException(status_code=404, detail="SKU not found")
-    if await db.get(DimPlatform, values["platform_code"]) is None:
-        raise HTTPException(status_code=422, detail="platform not found")
+    platform = await db.get(DimPlatform, values["platform_code"])
+    if platform is None or not platform.is_active or platform.platform_role != "sales":
+        raise HTTPException(status_code=422, detail="active sales platform not found")
     warehouse = await db.get(DimWarehouse, values["warehouse_code"])
     if warehouse is None or warehouse.status != "active":
         raise HTTPException(status_code=422, detail="warehouse not found or inactive")
-    values["platform_fee_rate"] = (await db.get(DimPlatform, values["platform_code"])).default_fee_rate
+    values["platform_fee_rate"] = platform.default_fee_rate
 
 
 @router.post("/api/sku-operating-profiles", response_model=SkuOperatingProfileResponse, status_code=201)
@@ -1693,6 +1694,10 @@ async def create_sku_operating_profile(body: SkuOperatingProfileCreateRequest, d
     db.add(row)
     try:
         await db.flush()
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="sku_operating_profile",
+            resource_id=str(row.profile_id), changes=values,
+        )
         await _enqueue_platform_sku_profit_projection(db, row)
         await db.commit()
         await db.refresh(row)
@@ -1707,12 +1712,25 @@ async def update_sku_operating_profile(profile_id: int, body: SkuOperatingProfil
     row = await db.get(SkuOperatingProfile, profile_id)
     if row is None:
         raise HTTPException(status_code=404, detail="SKU operating profile not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    values = body.model_dump(exclude_unset=True)
+    await _validate_operating_dimensions(
+        db,
+        {
+            "sku_id": row.sku_id,
+            "platform_code": row.platform_code,
+            "warehouse_code": row.warehouse_code,
+        },
+    )
+    for key, value in values.items():
         setattr(row, key, value)
     platform = await db.get(DimPlatform, row.platform_code)
     row.platform_fee_rate = platform.default_fee_rate if platform is not None else None
     row.updated_by = getattr(_user, "user_id", None)
     try:
+        await _write_product_center_audit(
+            db, _user, action_type="update", resource_type="sku_operating_profile",
+            resource_id=str(row.profile_id), changes=values,
+        )
         await _enqueue_platform_sku_profit_projection(db, row)
         await db.commit()
         await db.refresh(row)
@@ -1727,6 +1745,7 @@ async def bulk_save_sku_operating_profiles(body: SkuOperatingProfileBulkRequest,
     created = 0
     updated = 0
     rows = []
+    changes_by_row = []
     try:
         for item in body.items:
             values = item.model_dump()
@@ -1737,12 +1756,21 @@ async def bulk_save_sku_operating_profiles(body: SkuOperatingProfileBulkRequest,
                 row = SkuOperatingProfile(**values, created_by=getattr(_user, "user_id", None), updated_by=getattr(_user, "user_id", None))
                 db.add(row)
                 created += 1
+                action_type = "create"
             else:
                 for key, value in values.items():
                     setattr(row, key, value)
                 row.updated_by = getattr(_user, "user_id", None)
                 updated += 1
+                action_type = "update"
             rows.append(row)
+            changes_by_row.append((action_type, row, values))
+        await db.flush()
+        for action_type, row, values in changes_by_row:
+            await _write_product_center_audit(
+                db, _user, action_type=action_type, resource_type="sku_operating_profile",
+                resource_id=str(row.profile_id), changes=values,
+            )
         for row in rows:
             await _enqueue_platform_sku_profit_projection(db, row)
         await db.commit()
@@ -1778,6 +1806,10 @@ async def preview_sku_operating_profit(profile_id: int, body: SkuOperatingProfit
 async def save_sku_operating_profit(profile_id: int, body: SkuOperatingProfitRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     try:
         row = await ProductFinanceService(db).save_operating_profit(profile_id, body.model_dump(exclude_unset=True))
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="sku_operating_profit_estimate",
+            resource_id=str(row.estimate_id), changes={"profile_id": profile_id},
+        )
         await _enqueue_platform_sku_profit_projection(db, await db.get(SkuOperatingProfile, profile_id))
         await db.commit()
         await db.refresh(row)

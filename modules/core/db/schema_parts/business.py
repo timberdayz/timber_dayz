@@ -752,6 +752,7 @@ class LogisticsBill(Base):
 
     __table_args__ = (
         UniqueConstraint("bill_no", name="uq_logistics_bills_bill_no"),
+        CheckConstraint("currency = 'CNY'", name="ck_logistics_bills_currency"),
         CheckConstraint("transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')", name="ck_logistics_bills_transport_type"),
         Index("ix_logistics_bills_date_status", "bill_date", "status"),
         {"schema": "finance"},
