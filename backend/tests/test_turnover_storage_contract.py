@@ -1,5 +1,6 @@
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from sqlalchemy import inspect
 
 from backend.schemas.product_center import (
@@ -9,6 +10,7 @@ from backend.schemas.product_center import (
 )
 from modules.core.db import DimErpSku, DimPlatform
 from modules.core.db.schema_parts.business import WarehouseStorageRule
+from backend.services.product_finance_service import ProductFinanceService
 from backend.services.product_profit_service import build_reference_storage_cost
 
 
@@ -69,12 +71,42 @@ def test_platform_profit_preview_rejects_manual_reference_costs():
         raise AssertionError("reference costs must come from rules, not request input")
 
 
-def test_reference_logistics_falls_back_only_when_the_best_rule_is_unambiguous():
-    source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
+def test_reference_logistics_selects_single_default_only_for_tied_best_rules():
+    exact_rule = SimpleNamespace(
+        warehouse_code="US-WH", transport_type="sea", is_default=False
+    )
+    less_specific_rule = SimpleNamespace(
+        warehouse_code=None, transport_type="sea", is_default=True
+    )
+    assert (
+        ProductFinanceService._select_reference_logistics_rule(
+            [exact_rule, less_specific_rule], "US-WH", "sea"
+        )
+        is exact_rule
+    )
 
-    assert "LogisticsProviderRule.warehouse_code.is_(None)" in source
-    assert "LogisticsProviderRule.transport_type.is_(None)" in source
-    assert "if len(best_rules) != 1:" in source
+    default_rule = SimpleNamespace(
+        warehouse_code="US-WH", transport_type="sea", is_default=True
+    )
+    peer_rule = SimpleNamespace(
+        warehouse_code="US-WH", transport_type="sea", is_default=False
+    )
+    assert (
+        ProductFinanceService._select_reference_logistics_rule(
+            [default_rule, peer_rule], "US-WH", "sea"
+        )
+        is default_rule
+    )
+
+    another_default_rule = SimpleNamespace(
+        warehouse_code="US-WH", transport_type="sea", is_default=True
+    )
+    assert (
+        ProductFinanceService._select_reference_logistics_rule(
+            [default_rule, another_default_rule], "US-WH", "sea"
+        )
+        is None
+    )
 
 
 def test_current_schema_migration_adds_cny_storage_and_turnover_contracts():
