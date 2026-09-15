@@ -6,14 +6,28 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# PowerShell 7 otherwise turns ordinary git progress written to stderr (for
+# example, `git fetch`'s "From ...") into a terminating NativeCommandError.
+# Invoke-Git captures stderr and checks the native exit code itself.
+$PSNativeCommandUseErrorActionPreference = $false
 
 function Invoke-Git {
     param([string[]]$Arguments)
 
     $stderrPath = [System.IO.Path]::GetTempFileName()
     try {
-        $output = & git @Arguments 2>$stderrPath
-        $exitCode = $LASTEXITCODE
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            # Windows PowerShell 5 treats any native stderr output as a
+            # terminating error when the caller uses ErrorActionPreference=Stop.
+            # Git writes normal fetch progress to stderr, so let Invoke-Git
+            # decide from the actual native exit code after capturing it.
+            $ErrorActionPreference = "Continue"
+            $output = & git @Arguments 2>$stderrPath
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         $stderr = [System.IO.File]::ReadAllText($stderrPath)
         if ($exitCode -ne 0) {
             throw "git $($Arguments -join ' ') failed: $stderr"

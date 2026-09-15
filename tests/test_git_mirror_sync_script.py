@@ -9,6 +9,9 @@ def test_git_mirror_sync_script_enforces_cnb_upstream_and_two_remote_mirror_chec
 
     assert "$stderrPath = [System.IO.Path]::GetTempFileName()" in source
     assert "2>$stderrPath" in source
+    assert "$PSNativeCommandUseErrorActionPreference = $false" in source
+    assert "$previousErrorActionPreference = $ErrorActionPreference" in source
+    assert '$ErrorActionPreference = "Continue"' in source
     assert 'Get-GitValue @("branch", "--show-current")' in source
     assert 'Get-GitValue @("status", "--porcelain")' in source
     assert "MERGE_HEAD" in source
