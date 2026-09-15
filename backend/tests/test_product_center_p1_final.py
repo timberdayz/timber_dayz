@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -477,3 +478,46 @@ def test_product_center_audit_helper_records_identity_fields_without_secrets():
         assert field in helper
     assert "password" not in helper.lower()
     assert "secret" not in helper.lower()
+
+
+def test_direct_sku_volume_is_the_primary_reference_cost_measurement():
+    from modules.core.db import DimErpSku
+    from backend.services.product_finance_service import _reference_unit_volume_cbm
+
+    sku = DimErpSku(unit_volume_cbm=0.0125)
+    assert _reference_unit_volume_cbm(sku).as_tuple() == Decimal("0.0125").as_tuple()
+
+    legacy = DimErpSku(package_length_cm=20, package_width_cm=10, package_height_cm=5)
+    assert _reference_unit_volume_cbm(legacy).as_tuple() == Decimal("0.001").as_tuple()
+
+
+def test_platform_profit_version_refuses_incomplete_inputs_with_structured_missing_fields():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    section = source[
+        source.index("async def save_platform_sku_profit_estimates"):
+        source.index('@router.get("/api/platform-sku-profit/estimates")')
+    ]
+    assert "cannot_save_profit_version" in section
+    assert "missing_fields" in section
+    assert "status_code=422" in section
+
+
+def test_platform_profit_draft_is_distinct_from_immutable_profit_versions():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    schema = Path("backend/schemas/product_center.py").read_text(encoding="utf-8")
+    assert '"/api/platform-sku-profit/drafts"' in source
+    assert "PlatformSkuProfitDraftRequest" in schema
+    assert "PlatformSkuProfitDraft" in source
+
+
+def test_storage_rule_patch_accepts_material_changes_as_a_new_version():
+    schema = Path("backend/schemas/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    assert "unit_rate_cny: Optional[float]" in schema
+    assert "effective_from: Optional[date]" in schema
+    section = source[
+        source.index("async def update_warehouse_storage_rule"):
+        source.index("async def create_product_warehouse")
+    ]
+    assert "WarehouseStorageRule(" in section
+    assert "storage_rule_versioned" in section

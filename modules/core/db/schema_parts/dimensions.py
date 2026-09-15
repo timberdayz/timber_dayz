@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -190,6 +191,9 @@ class DimErpSku(Base):
     package_length_cm = Column(Float, nullable=True)
     package_width_cm = Column(Float, nullable=True)
     package_height_cm = Column(Float, nullable=True)
+    # Company-maintained per-unit packed volume.  Historical dimensions remain
+    # available as a fallback for imported ERP records.
+    unit_volume_cbm = Column(Numeric(18, 6), nullable=True)
     units_per_carton = Column(Integer, nullable=True)
     default_purchase_cost = Column(Float, nullable=True)
     purchase_cost_currency = Column(String(8), nullable=False, default="CNY")
@@ -214,6 +218,8 @@ class DimErpSku(Base):
         Index("ix_dim_erp_sku_status", "status"),
         Index("ix_dim_erp_sku_erp_record", "erp_record_id"),
         CheckConstraint("turnover_class IS NULL OR turnover_class IN ('fast', 'normal', 'slow')", name="ck_dim_erp_sku_turnover_class"),
+        CheckConstraint("unit_volume_cbm IS NULL OR unit_volume_cbm >= 0", name="ck_dim_erp_sku_unit_volume_cbm"),
+        Index("ix_dim_erp_sku_unit_volume_cbm", "unit_volume_cbm"),
         {"schema": "core"},
     )
 

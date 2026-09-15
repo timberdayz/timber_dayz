@@ -87,21 +87,23 @@
           ><el-table-column label="物流货损率" width="120"
             ><template #default="{ row }"
               ><el-input-number
-                v-model="row.logistics_damage_rate"
+                :model-value="toPercent(row.logistics_damage_rate)"
                 :min="0"
-                :max="1"
-                :step="0.01"
+                :max="100"
+                :step="0.1"
+                @update:model-value="row.logistics_damage_rate = fromPercent($event); markDirty('spu', row)"
                 :controls="false"
-                size="small" /></template></el-table-column
+                size="small" /><span class="rate-suffix">%</span></template></el-table-column
           ><el-table-column label="退货损失率" width="120"
             ><template #default="{ row }"
               ><el-input-number
-                v-model="row.return_loss_rate"
+                :model-value="toPercent(row.return_loss_rate)"
                 :min="0"
-                :max="1"
-                :step="0.01"
+                :max="100"
+                :step="0.1"
+                @update:model-value="row.return_loss_rate = fromPercent($event); markDirty('spu', row)"
                 :controls="false"
-                size="small" /></template></el-table-column
+                size="small" /><span class="rate-suffix">%</span></template></el-table-column
           ><el-table-column label="状态" width="110"
             ><template #default="{ row }"
               ><el-select v-model="row.biz_status" size="small"
@@ -207,30 +209,17 @@
                 :precision="3"
                 :controls="false"
                 size="small" /></template></el-table-column
-          ><el-table-column label="包装 cm" width="175"
+          ><el-table-column label="单件体积 m³" width="125"
             ><template #default="{ row }"
-              ><div class="inline-numbers">
-                <el-input-number
-                  v-model="row.package_length_cm"
-                  :min="0"
-                  :controls="false"
-                  size="small"
-                /><el-input-number
-                  v-model="row.package_width_cm"
-                  :min="0"
-                  :controls="false"
-                  size="small"
-                /><el-input-number
-                  v-model="row.package_height_cm"
-                  :min="0"
-                  :controls="false"
-                  size="small"
-                /></div></template></el-table-column
-          ><el-table-column label="体积 m³" width="100"
-            ><template #default="{ row }">{{
-              formatVolume(row)
-            }}</template></el-table-column
-          ><el-table-column label="箱规" width="80"
+              ><el-input-number
+                v-model="row.unit_volume_cbm"
+                :min="0"
+                :precision="6"
+                :step="0.0001"
+                :controls="false"
+                size="small"
+                @change="markDirty('sku', row)" /></template></el-table-column
+          ><el-table-column label="箱规（件/箱）" width="110"
             ><template #default="{ row }"
               ><el-input-number
                 v-model="row.units_per_carton"
@@ -336,9 +325,9 @@
             }}</template></el-table-column
           >
           <el-table-column label="物流方式" width="100"><template #default="{ row }">{{ transportLabel(row.transport_type) }}</template></el-table-column>
-          <el-table-column label="参考物流" width="120"><template #default="{ row }">{{ money(referenceLogisticsCost(row)) }}</template></el-table-column>
-          <el-table-column label="参考仓储" width="120"><template #default="{ row }">{{ money(referenceStorageCost(row)) }}</template></el-table-column>
-          <el-table-column label="广告费率" width="105"><template #default="{ row }"><el-input-number v-model="row.expected_ad_rate" :min="0" :max="1" :step="0.01" :controls="false" size="small" @change="previewOperatingRow(row)" /></template></el-table-column>
+          <el-table-column label="参考物流" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
+          <el-table-column label="参考仓储" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
+          <el-table-column label="广告费率" width="115"><template #default="{ row }"><el-input-number v-model="row.expected_ad_rate_pct" :min="0" :max="100" :step="0.1" :controls="false" size="small" @change="previewOperatingRow(row)" /><span class="rate-suffix">%</span></template></el-table-column>
           <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
           <el-table-column label="平台费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
           <el-table-column label="预计广告费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
@@ -371,7 +360,8 @@
           <el-table-column label="操作" width="180" fixed="right"
             ><template #default="{ row }"
               ><el-button link type="primary" @click="previewOperatingRow(row)">试算</el-button
-              ><el-button link type="success" @click="saveOperatingEstimate(row)">保存版本</el-button
+              ><el-button link @click="saveOperatingDraft(row)">保存测算草稿</el-button
+              ><el-button link type="success" @click="saveOperatingEstimate(row)">保存利润版本</el-button
               ></template
             ></el-table-column
           >
@@ -457,13 +447,13 @@
               <el-table-column label="收货仓库" min-width="180"><template #default="{ row }"><el-select v-model="row.warehouse_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></template></el-table-column>
               <el-table-column label="计费方式" width="110"><template #default>按体积</template></el-table-column>
               <el-table-column label="计费单位" width="130"><template #default>CNY/CBM/月</template></el-table-column>
-              <el-table-column label="仓储单价" width="120"><template #default="{ row }"><el-input-number v-model="row.unit_rate_cny" :min="0" :precision="4" :controls="false" size="small" :disabled="!row.__new" /></template></el-table-column>
-              <el-table-column label="生效日期" width="145"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" :disabled="!row.__new" /></template></el-table-column>
+              <el-table-column label="仓储单价" width="120"><template #default="{ row }"><el-input-number v-model="row.unit_rate_cny" :min="0" :precision="4" :controls="false" size="small" /></template></el-table-column>
+              <el-table-column label="生效日期" width="145"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" /></template></el-table-column>
               <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '已停用' }}</el-tag></template></el-table-column>
               <el-table-column label="版本" width="120"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
               <el-table-column label="来源" width="130"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
               <el-table-column label="备注" min-width="150"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
-              <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveStorageRule(row)">保存</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="danger" @click="disableStorageRule(row)">停用</el-button></template></el-table-column>
+              <el-table-column label="操作" width="180" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveStorageRule(row)">保存（自动新版本）</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="danger" @click="disableStorageRule(row)">停用</el-button></template></el-table-column>
             </el-table></el-tab-pane
           ><el-tab-pane label="物流批次" name="batches"
             ><div class="toolbar">
@@ -528,7 +518,7 @@
       <el-alert type="info" :closable="false" title="平台综合费率用于预计利润计算，仅管理员、主管和财务可维护。" />
       <el-form :model="platformFeeDrawer.form" label-width="110px" class="drawer-form">
         <el-form-item label="平台"><span>{{ platformFeeDrawer.label }}</span></el-form-item>
-        <el-form-item label="综合费率"><el-input-number v-model="platformFeeDrawer.form.default_fee_rate" :min="0" :max="1" :step="0.01" :precision="4" :controls="false" /></el-form-item>
+        <el-form-item label="综合费率"><el-input-number v-model="platformFeeDrawer.form.default_fee_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></el-form-item>
         <el-form-item label="生效日期"><el-date-picker v-model="platformFeeDrawer.form.fee_rate_effective_from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
         <el-form-item label="来源"><el-input v-model="platformFeeDrawer.form.fee_rate_source" /></el-form-item>
         <el-form-item label="版本"><el-input v-model="platformFeeDrawer.form.fee_rate_version" /></el-form-item>
@@ -778,7 +768,7 @@ const platformFeeDrawer = reactive({
   visible: false,
   label: "",
   form: {
-    default_fee_rate: null,
+    default_fee_rate_pct: null,
     fee_rate_effective_from: "",
     fee_rate_source: "",
     fee_rate_version: "",
@@ -882,6 +872,7 @@ const blankSku = () => ({
   package_length_cm: null,
   package_width_cm: null,
   package_height_cm: null,
+  unit_volume_cbm: null,
   units_per_carton: null,
   default_purchase_cost: null,
   expected_logistics_cost: null,
@@ -960,9 +951,16 @@ const loadRules = async () => {
 const loadStorageRules = async () => {
   loadingStorageRules.value = true;
   try {
-    storageRules.value = await productCenterApi.listWarehouseStorageRules({
+    storageRules.value = (await productCenterApi.listWarehouseStorageRules({
       include_inactive: true,
-    });
+    })).map((row) => ({
+      ...row,
+      __original: {
+        unit_rate_cny: row.unit_rate_cny,
+        effective_from: row.effective_from,
+        effective_to: row.effective_to,
+      },
+    }));
   } catch (error) {
     storageRules.value = [];
     ElMessage.error(error.message || "加载仓储规则失败");
@@ -982,7 +980,12 @@ const addStorageRuleRow = () =>
     notes: "",
   });
 const storageRulePayload = (row) => {
-  const { __new, rule_id, billing_basis, billing_unit, ...payload } = row;
+  const { __new, __original, rule_id, billing_basis, billing_unit, ...payload } = row;
+  if (!__new) {
+    for (const field of ["unit_rate_cny", "effective_from", "effective_to"]) {
+      if (payload[field] === __original?.[field]) delete payload[field];
+    }
+  }
   return payload;
 };
 const saveStorageRule = async (row) => {
@@ -1052,7 +1055,7 @@ const openPlatformFeeDrawer = () => {
   }
   platformFeeDrawer.label = platform.name || platform.platform_code;
   platformFeeDrawer.form = {
-    default_fee_rate: platform.default_fee_rate ?? null,
+    default_fee_rate_pct: toPercent(platform.default_fee_rate),
     fee_rate_effective_from: platform.fee_rate_effective_from || new Date().toISOString().slice(0, 10),
     fee_rate_source: platform.fee_rate_source || "manual",
     fee_rate_version: platform.fee_rate_version || "v1",
@@ -1064,7 +1067,11 @@ const savePlatformFeeRate = async () => {
   if (!platformCode) return;
   saving.value = true;
   try {
-    await productCenterApi.updatePlatformFeeRate(platformCode, platformFeeDrawer.form);
+    const { default_fee_rate_pct, ...feePayload } = platformFeeDrawer.form;
+    await productCenterApi.updatePlatformFeeRate(platformCode, {
+      ...feePayload,
+      default_fee_rate: fromPercent(default_fee_rate_pct),
+    });
     platformFeeDrawer.visible = false;
     await loadOperatingDimensions();
     await loadOperatingProfiles();
@@ -1096,7 +1103,7 @@ const loadOperatingProfiles = async () => {
       ...row,
       expected_selling_price: row.expected_selling_price ?? row.reference_selling_price,
       seller_coupon_amount: row.seller_coupon_amount ?? 0,
-      expected_ad_rate: row.expected_ad_rate ?? 0,
+      expected_ad_rate_pct: toPercent(row.expected_ad_rate ?? 0),
     }));
     operatingTotal.value = response.total ?? 0;
   } catch (error) {
@@ -1119,7 +1126,7 @@ const operatingPayload = (row) => ({
   competitor_price: row.competitor_price ?? null,
   expected_selling_price: row.expected_selling_price ?? null,
   seller_coupon_amount: row.seller_coupon_amount ?? 0,
-  expected_ad_rate: row.expected_ad_rate ?? 0,
+  expected_ad_rate: fromPercent(row.expected_ad_rate_pct),
 });
 const clearOperatingSkuOutsideSpu = () => {
   if (operatingQuery.sku_id && !filteredOperatingSkus.value.some((item) => item.sku_id === operatingQuery.sku_id)) {
@@ -1137,6 +1144,17 @@ const previewOperatingRow = async (row) => {
     ElMessage.error(error.message || "利润试算失败");
   }
 };
+const saveOperatingDraft = async (row) => {
+  saving.value = true;
+  try {
+    await productCenterApi.savePlatformSkuProfitDraft(operatingPayload(row));
+    ElMessage.success("测算草稿已保存");
+  } catch (error) {
+    ElMessage.error(error.message || "保存测算草稿失败");
+  } finally {
+    saving.value = false;
+  }
+};
 const saveOperatingEstimate = async (row) => {
   saving.value = true;
   try {
@@ -1144,7 +1162,13 @@ const saveOperatingEstimate = async (row) => {
     await previewOperatingRow(row);
     ElMessage.success("利润版本已保存");
   } catch (error) {
-    ElMessage.error(error.message || "保存利润版本失败");
+    const detail = error?.response?.data?.detail || error?.detail;
+    const missing = detail?.missing_fields;
+    ElMessage.error(
+      missing?.length
+        ? `资料未完整，不能保存利润版本：${missing.join("、")}`
+        : (error.message || "保存利润版本失败"),
+    );
   } finally {
     saving.value = false;
   }
@@ -1436,18 +1460,26 @@ watch(
   ],
   applyRuleToBatchLines,
 );
-const formatVolume = (row) =>
-  [row.package_length_cm, row.package_width_cm, row.package_height_cm].every(
-    (value) => value != null,
-  )
-    ? (
-        (row.package_length_cm * row.package_width_cm * row.package_height_cm) /
-        1000000
-      ).toFixed(4)
-    : "-";
+const toPercent = (value) =>
+  value == null ? null : Number((Number(value) * 100).toFixed(4));
+const fromPercent = (value) =>
+  value == null || value === "" ? 0 : Number(value) / 100;
 const money = (value) => (value == null ? "-" : `¥${Number(value).toFixed(2)}`);
 const percent = (value) =>
   value == null ? "-" : `${(Number(value) * 100).toFixed(1)}%`;
+const referenceCostDisplay = (row, kind) => {
+  const value = kind === "logistics" ? referenceLogisticsCost(row) : referenceStorageCost(row);
+  if (value != null) return money(value);
+  const reason = row.reference_cost_missing_reasons?.[0];
+  return ({
+    missing_sku_volume: "待补 SKU 体积",
+    missing_sku_weight: "待补 SKU 重量",
+    missing_turnover_class: "待设置周转类型",
+    missing_logistics_rule: "待配置参考物流规则",
+    missing_storage_rule: "待配置仓储规则",
+    ambiguous_logistics_rule: "参考物流规则待指定默认",
+  })[reason] || "待补资料";
+};
 onMounted(async () => {
   await Promise.all([
     loadSpus(),
@@ -1489,6 +1521,10 @@ onMounted(async () => {
 }
 .flat-table :deep(.el-input-number) {
   width: 100%;
+}
+.rate-suffix {
+  margin-left: 4px;
+  color: var(--el-text-color-secondary);
 }
 .sku-table :deep(.el-table__cell) {
   padding: 6px 4px;

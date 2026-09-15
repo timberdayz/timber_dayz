@@ -146,9 +146,10 @@ test("平台 SKU 利润测算保留候选接口预览并支持分页", () => {
   assert.match(source, /v-model:page-size="operatingQuery\.page_size"/);
 });
 
-test("仓储规则历史行锁定费率和生效日期，新行才可编辑", () => {
-  assert.match(source, /v-model="row\.unit_rate_cny"[^>]*:disabled="!row\.__new"/);
-  assert.match(source, /v-model="row\.effective_from"[^>]*:disabled="!row\.__new"/);
+test("仓储规则当前行保存后由服务端自动生成新版本", () => {
+  assert.match(source, /保存（自动新版本）/);
+  assert.doesNotMatch(source, /v-model="row\.unit_rate_cny"[^>]*:disabled="!row\.__new"/);
+  assert.doesNotMatch(source, /v-model="row\.effective_from"[^>]*:disabled="!row\.__new"/);
 });
 
 test("物流服务商规则允许维护默认规则且前端不会任意选择同优先级费率", () => {
@@ -160,4 +161,26 @@ test("物流服务商规则允许维护默认规则且前端不会任意选择�
   );
   assert.match(matcher, /is_default/);
   assert.doesNotMatch(matcher, /\}\)\[0\] \|\| null/);
+});
+
+test("SKU 资料直接维护单件体积，箱规明确为件每箱", () => {
+  assert.match(source, /单件体积 m³/);
+  assert.match(source, /箱规（件\/箱）/);
+  assert.doesNotMatch(source, /label="包装 cm"/);
+  assert.doesNotMatch(source, /v-model="row\.package_length_cm"/);
+});
+
+test("测算页使用百分比输入并支持草稿与不完整提示", () => {
+  assert.match(source, /广告费率/);
+  assert.match(source, /%/);
+  assert.match(source, /toPercent|fromPercent/);
+  assert.match(source, /保存测算草稿/);
+  assert.match(source, /savePlatformSkuProfitDraft/);
+  assert.match(source, /missing_fields/);
+});
+
+test("仓储规则允许当前行保存为自动版本", () => {
+  assert.match(source, /storage_rule_versioned|新版本/);
+  assert.match(source, /__original/);
+  assert.doesNotMatch(source, /v-model="row\.unit_rate_cny"[^\n]*:disabled="!row\.__new"/);
 });

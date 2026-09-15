@@ -93,6 +93,7 @@ class SkuBulkItem(BaseModel):
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
+    unit_volume_cbm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
     default_purchase_cost: Optional[float] = Field(default=None, ge=0)
     purchase_cost_currency: Optional[str] = Field(default="CNY", min_length=3, max_length=8)
@@ -172,6 +173,7 @@ class SkuCreateRequest(BaseModel):
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
+    unit_volume_cbm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
     default_purchase_cost: Optional[float] = Field(default=None, ge=0)
     purchase_cost_currency: str = Field(default="CNY", min_length=3, max_length=8)
@@ -199,6 +201,7 @@ class SkuUpdateRequest(BaseModel):
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
+    unit_volume_cbm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
     default_purchase_cost: Optional[float] = Field(default=None, ge=0)
     purchase_cost_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
@@ -246,6 +249,7 @@ class ProductCenterItem(BaseModel):
     package_length_cm: Optional[float] = None
     package_width_cm: Optional[float] = None
     package_height_cm: Optional[float] = None
+    unit_volume_cbm: Optional[float] = None
     units_per_carton: Optional[int] = None
     status: Optional[str] = None
     default_purchase_cost: Optional[float] = None
@@ -339,6 +343,9 @@ class WarehouseStorageRuleCreateRequest(BaseModel):
 
 
 class WarehouseStorageRuleUpdateRequest(BaseModel):
+    unit_rate_cny: Optional[float] = Field(default=None, ge=0)
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
     source: Optional[str] = Field(default=None, max_length=128)
     version: Optional[str] = Field(default=None, max_length=64)
@@ -732,6 +739,12 @@ class PlatformSkuProfitEstimateRequest(PlatformSkuProfitPreviewRequest):
     assumption_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
+class PlatformSkuProfitDraftRequest(PlatformSkuProfitPreviewRequest):
+    """Persist editable workbench parameters without creating a profit version."""
+
+    pass
+
+
 class PlatformSkuProfitCandidateResponse(BaseModel):
     sku_id: int
     sku_key: str
@@ -757,6 +770,8 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     reference_storage_days: Optional[int] = None
     reference_logistics_cost: Optional[float] = None
     reference_storage_cost: Optional[float] = None
+    reference_cost_status: str = "ready"
+    reference_cost_missing_reasons: list[str] = Field(default_factory=list)
     preview: Optional[dict] = None
     currency: str = "CNY"
 

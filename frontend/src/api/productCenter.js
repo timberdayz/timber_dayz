@@ -185,6 +185,9 @@ export default {
   previewPlatformSkuProfit(payload) {
     return api._post("/platform-sku-profit/preview", payload);
   },
+  savePlatformSkuProfitDraft(payload) {
+    return api._post("/platform-sku-profit/drafts", payload);
+  },
   savePlatformSkuProfitEstimates(payload) {
     return api._post("/platform-sku-profit/estimates", payload);
   },
