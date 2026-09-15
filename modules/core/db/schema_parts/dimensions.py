@@ -30,12 +30,14 @@ class DimPlatform(Base):
     fee_rate_source = Column(String(128), nullable=True)
     fee_rate_effective_from = Column(Date, nullable=True)
     fee_rate_version = Column(String(64), nullable=True)
+    platform_role = Column(String(16), nullable=False, default="source", server_default="source")
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("name", name="uq_dim_platforms_name"),
+        CheckConstraint("platform_role IN ('sales', 'source', 'test')", name="ck_dim_platforms_role"),
         {"schema": "core"},
     )
 
@@ -200,6 +202,7 @@ class DimErpSku(Base):
     selling_price_currency = Column(String(8), nullable=False, default="CNY")
     selling_price_source = Column(String(64), nullable=True)
     selling_price_confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    turnover_class = Column(String(16), nullable=True)
     status = Column(String(32), nullable=False, default="active")
     source_file_id = Column(Integer, nullable=True)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
@@ -210,6 +213,7 @@ class DimErpSku(Base):
         UniqueConstraint("sku_key", name="uq_dim_erp_sku_sku_key"),
         Index("ix_dim_erp_sku_status", "status"),
         Index("ix_dim_erp_sku_erp_record", "erp_record_id"),
+        CheckConstraint("turnover_class IS NULL OR turnover_class IN ('fast', 'normal', 'slow')", name="ck_dim_erp_sku_turnover_class"),
         {"schema": "core"},
     )
 

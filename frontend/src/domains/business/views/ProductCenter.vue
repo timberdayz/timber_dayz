@@ -237,9 +237,13 @@
                 :min="1"
                 :controls="false"
                 size="small" /></template></el-table-column
-          ><el-table-column label="参考售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
-          ><el-table-column label="币种" width="75"><template #default="{ row }"><el-select v-model="row.selling_price_currency" size="small" @change="markDirty('sku', row)"><el-option label="CNY" value="CNY" /><el-option label="USD" value="USD" /></el-select></template></el-table-column
+          ><el-table-column label="采购成本" width="115"><template #default="{ row }"><el-input-number v-model="row.default_purchase_cost" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
+          ><el-table-column label="采购成本来源" width="120"><template #default="{ row }">{{ row.purchase_cost_source || "待补充" }}</template></el-table-column
+          ><el-table-column label="采购成本确认时间" width="145"><template #default="{ row }">{{ row.purchase_cost_confirmed_at || "-" }}</template></el-table-column
+          ><el-table-column label="参考售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="售价来源" width="120"><template #default="{ row }"><el-input v-model="row.selling_price_source" size="small" @change="markDirty('sku', row)" /></template></el-table-column
+          ><el-table-column label="周转类型" width="120"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
+          ><el-table-column label="参考仓储天数" width="120"><template #default="{ row }">{{ referenceStorageDays(row.turnover_class) || "待设置" }}</template></el-table-column
           ><el-table-column
             label="来源文件"
             prop="source_file_id"
@@ -272,24 +276,30 @@
             clearable
             filterable
             placeholder="平台"
-            @change="loadOperatingProfiles"
+            @change="resetOperatingPage"
             ><el-option
               v-for="item in operatingDimensions.platforms"
               :key="item.platform_code"
               :label="item.name || item.platform_code"
               :value="item.platform_code"
           /></el-select>
-          <el-select v-model="operatingQuery.warehouse_code" clearable filterable placeholder="收货仓库" @change="loadOperatingProfiles">
+          <el-select v-model="operatingQuery.warehouse_code" clearable filterable placeholder="收货仓库" @change="resetOperatingPage">
             <el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="item.warehouse_name || item.warehouse_code" :value="item.warehouse_code" />
           </el-select>
-          <el-select v-model="operatingQuery.spu" clearable filterable placeholder="SPU" @change="loadOperatingProfiles">
+          <el-select v-model="operatingQuery.transport_type" clearable placeholder="物流方式" @change="resetOperatingPage">
+            <el-option label="海运" value="sea" />
+            <el-option label="空运" value="air" />
+            <el-option label="铁路运输" value="rail" />
+          </el-select>
+          <el-select v-model="operatingQuery.spu" clearable filterable placeholder="SPU" @change="handleOperatingSpuChange">
             <el-option v-for="item in operatingDimensions.spus || []" :key="item" :label="item" :value="item" />
           </el-select>
-          <el-select v-model="operatingQuery.sku_id" clearable filterable placeholder="ERP SKU" @change="loadOperatingProfiles">
-            <el-option v-for="item in operatingDimensions.skus || []" :key="item.sku_id" :label="item.sku_key" :value="item.sku_id" />
+          <el-select v-model="operatingQuery.sku_id" clearable filterable placeholder="ERP SKU" @change="resetOperatingPage">
+            <el-option v-for="item in filteredOperatingSkus" :key="item.sku_id" :label="item.sku_key" :value="item.sku_id" />
           </el-select>
+          <el-button v-if="canManagePlatformFee" plain @click="openPlatformFeeDrawer">平台费率管理</el-button>
         </div>
-        <el-alert v-if="!operatingQuery.platform_code || !operatingQuery.warehouse_code" type="info" :closable="false" title="请选择平台和收货仓库后加载 SKU 测算数据" />
+        <el-alert v-if="!operatingQuery.platform_code || !operatingQuery.warehouse_code || !operatingQuery.transport_type" type="info" :closable="false" title="请选择平台、收货仓库和物流方式后加载 SKU 测算数据" />
         <el-table
           :data="operatingProfiles"
           v-loading="loadingOperating"
@@ -325,26 +335,9 @@
               money(row.purchase_cost)
             }}</template></el-table-column
           >
-          <el-table-column label="预计物流" width="120"
-            ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.expected_logistics_cost"
-                :min="0"
-                :precision="2"
-                :controls="false"
-                size="small"
-                @change="previewOperatingRow(row)" /></template
-          ></el-table-column>
-          <el-table-column label="预计仓储" width="120"
-            ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.expected_storage_cost"
-                :min="0"
-                :precision="2"
-                :controls="false"
-                size="small"
-                @change="previewOperatingRow(row)" /></template
-          ></el-table-column>
+          <el-table-column label="物流方式" width="100"><template #default="{ row }">{{ transportLabel(row.transport_type) }}</template></el-table-column>
+          <el-table-column label="参考物流" width="120"><template #default="{ row }">{{ money(referenceLogisticsCost(row)) }}</template></el-table-column>
+          <el-table-column label="参考仓储" width="120"><template #default="{ row }">{{ money(referenceStorageCost(row)) }}</template></el-table-column>
           <el-table-column label="广告费率" width="105"><template #default="{ row }"><el-input-number v-model="row.expected_ad_rate" :min="0" :max="1" :step="0.01" :controls="false" size="small" @change="previewOperatingRow(row)" /></template></el-table-column>
           <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
           <el-table-column label="平台费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
@@ -359,7 +352,7 @@
           <el-table-column label="实际仓储" width="110"
             ><template #default="{ row }">{{
               row.actual_storage_cost == null
-                ? "未录入"
+                ? "未录入/参考回退"
                 : money(row.actual_storage_cost)
             }}</template></el-table-column
           >
@@ -383,6 +376,14 @@
             ></el-table-column
           >
         </el-table>
+        <el-pagination
+          v-model:current-page="operatingQuery.page"
+          v-model:page-size="operatingQuery.page_size"
+          :total="operatingTotal"
+          layout="total, sizes, prev, pager, next"
+          @current-change="loadOperatingProfiles"
+          @size-change="loadOperatingProfiles"
+        />
       </el-tab-pane>
       <el-tab-pane label="物流仓储管理" name="logistics"
         ><el-tabs v-model="costTab" class="cost-tabs"
@@ -417,6 +418,12 @@
                     ><el-option label="普通货" value="normal" /><el-option
                       label="敏感货 M"
                       value="sensitive" /></el-select></template></el-table-column
+              ><el-table-column label="默认规则" width="95"
+                ><template #default="{ row }"
+                  ><el-switch
+                    v-model="row.is_default"
+                    @change="markRuleDirty(row)"
+                  /></template></el-table-column
               ><el-table-column label="计费方式"
                 ><template #default="{ row }"
                   ><el-select v-model="row.billing_basis" size="small"
@@ -441,6 +448,23 @@
                     type="date"
                     value-format="YYYY-MM-DD"
                     size="small" /></template></el-table-column></el-table></el-tab-pane
+          ><el-tab-pane label="仓储规则" name="storage-rules"
+            ><div class="toolbar">
+              <el-button type="primary" :icon="Plus" @click="addStorageRuleRow">新增仓储规则</el-button>
+              <span class="muted">固定按体积计费：CNY/CBM/月</span>
+            </div>
+            <el-table :data="storageRules" v-loading="loadingStorageRules" stripe border>
+              <el-table-column label="收货仓库" min-width="180"><template #default="{ row }"><el-select v-model="row.warehouse_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></template></el-table-column>
+              <el-table-column label="计费方式" width="110"><template #default>按体积</template></el-table-column>
+              <el-table-column label="计费单位" width="130"><template #default>CNY/CBM/月</template></el-table-column>
+              <el-table-column label="仓储单价" width="120"><template #default="{ row }"><el-input-number v-model="row.unit_rate_cny" :min="0" :precision="4" :controls="false" size="small" :disabled="!row.__new" /></template></el-table-column>
+              <el-table-column label="生效日期" width="145"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" :disabled="!row.__new" /></template></el-table-column>
+              <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '已停用' }}</el-tag></template></el-table-column>
+              <el-table-column label="版本" width="120"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
+              <el-table-column label="来源" width="130"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
+              <el-table-column label="备注" min-width="150"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
+              <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveStorageRule(row)">保存</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="danger" @click="disableStorageRule(row)">停用</el-button></template></el-table-column>
+            </el-table></el-tab-pane
           ><el-tab-pane label="物流批次" name="batches"
             ><div class="toolbar">
               <el-select
@@ -495,6 +519,22 @@
         ></el-tab-pane
       >
     </el-tabs>
+    <el-drawer
+      v-model="platformFeeDrawer.visible"
+      title="平台费率管理"
+      size="460px"
+      destroy-on-close
+    >
+      <el-alert type="info" :closable="false" title="平台综合费率用于预计利润计算，仅管理员、主管和财务可维护。" />
+      <el-form :model="platformFeeDrawer.form" label-width="110px" class="drawer-form">
+        <el-form-item label="平台"><span>{{ platformFeeDrawer.label }}</span></el-form-item>
+        <el-form-item label="综合费率"><el-input-number v-model="platformFeeDrawer.form.default_fee_rate" :min="0" :max="1" :step="0.01" :precision="4" :controls="false" /></el-form-item>
+        <el-form-item label="生效日期"><el-date-picker v-model="platformFeeDrawer.form.fee_rate_effective_from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+        <el-form-item label="来源"><el-input v-model="platformFeeDrawer.form.fee_rate_source" /></el-form-item>
+        <el-form-item label="版本"><el-input v-model="platformFeeDrawer.form.fee_rate_version" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="platformFeeDrawer.visible = false">取消</el-button><el-button type="primary" :loading="saving" @click="savePlatformFeeRate">保存</el-button></template>
+    </el-drawer>
     <el-drawer
       v-model="batchDrawer.visible"
       title="物流批次"
@@ -688,91 +728,6 @@
           prop="binding_status"
           label="状态" /></el-table
     ></el-drawer>
-    <el-drawer
-      v-model="operatingProfitDrawer.visible"
-      title="平台 SKU 利润试算"
-      size="560px"
-    >
-      <el-form :model="operatingProfitDrawer.form" label-width="110px">
-        <el-form-item label="SKU / 经营范围"
-          ><span>{{ operatingProfitDrawer.label }}</span></el-form-item
-        >
-        <el-form-item label="售价"
-          ><el-input-number
-            v-model="operatingProfitDrawer.form.selling_price"
-            :min="0"
-            :precision="2"
-            :controls="false"
-        /></el-form-item>
-        <el-form-item label="优惠券"
-          ><el-input-number
-            v-model="operatingProfitDrawer.form.coupon_amount"
-            :min="0"
-            :precision="2"
-            :controls="false"
-        /></el-form-item>
-        <el-form-item label="运输方式"
-          ><el-input v-model="operatingProfitDrawer.form.transport_type"
-        /></el-form-item>
-      </el-form>
-      <el-descriptions v-if="operatingProfitDrawer.preview" :column="2" border>
-        <el-descriptions-item label="净收入">{{
-          money(operatingProfitDrawer.preview.net_revenue)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="采购成本">{{
-          money(operatingProfitDrawer.preview.purchase_cost)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="物流成本">{{
-          money(operatingProfitDrawer.preview.logistics_cost)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="仓储成本">{{
-          money(operatingProfitDrawer.preview.storage_cost)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="预计货损">{{
-          money(operatingProfitDrawer.preview.expected_damage_loss)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="预计退货损失">{{
-          money(operatingProfitDrawer.preview.expected_return_loss)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="预计贡献利润">{{
-          money(operatingProfitDrawer.preview.estimated_contribution_profit)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="预计利润率">{{
-          percent(operatingProfitDrawer.preview.estimated_margin_rate)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="完整度">{{
-          operatingProfitDrawer.preview.cost_completeness
-        }}</el-descriptions-item>
-      </el-descriptions>
-      <template #footer
-        ><el-button @click="previewOperatingProfit">计算</el-button
-        ><el-button
-          type="primary"
-          :disabled="!operatingProfitDrawer.preview"
-          @click="saveOperatingProfit"
-          >保存版本</el-button
-        ></template
-      >
-    </el-drawer>
-    <el-drawer
-      v-model="operatingHistoryDrawer.visible"
-      title="利润版本历史"
-      size="620px"
-    >
-      <el-table :data="operatingHistoryDrawer.rows" stripe border>
-        <el-table-column prop="estimate_as_of" label="估算时间" />
-        <el-table-column
-          prop="estimated_contribution_profit"
-          label="预计利润"
-        />
-        <el-table-column prop="estimated_margin_rate" label="利润率"
-          ><template #default="{ row }">{{
-            percent(row.estimated_margin_rate)
-          }}</template></el-table-column
-        >
-        <el-table-column prop="cost_completeness" label="完整度" />
-      </el-table>
-    </el-drawer>
   </div>
 </template>
 
@@ -781,7 +736,9 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Check, Plus } from "@element-plus/icons-vue";
 import productCenterApi from "@/api/productCenter";
+import { useUserStore } from "@/stores/user";
 
+const userStore = useUserStore();
 const activeTab = ref("spu");
 const costTab = ref("rules");
 const saving = ref(false);
@@ -792,6 +749,7 @@ const spus = ref([]);
 const skus = ref([]);
 const categories = ref([]);
 const rules = ref([]);
+const storageRules = ref([]);
 const purchaseOrders = ref([]);
 const logisticsBatches = ref([]);
 const operatingProfiles = ref([]);
@@ -801,23 +759,30 @@ const operatingDimensions = reactive({
   skus: [],
   warehouses: [],
 });
-const operatingHistoryDrawer = reactive({ visible: false, rows: [] });
-const operatingProfitDrawer = reactive({
-  visible: false,
-  label: "",
-  profileId: null,
-  form: {},
-  preview: null,
-});
 const loadingOperating = ref(false);
+const loadingStorageRules = ref(false);
 const spuTotal = ref(0);
 const skuTotal = ref(0);
+const operatingTotal = ref(0);
 const skuSpuFilter = ref("");
 const operatingQuery = reactive({
   platform_code: "",
   spu: "",
   sku_id: "",
   warehouse_code: "",
+  transport_type: "",
+  page: 1,
+  page_size: 20,
+});
+const platformFeeDrawer = reactive({
+  visible: false,
+  label: "",
+  form: {
+    default_fee_rate: null,
+    fee_rate_effective_from: "",
+    fee_rate_source: "",
+    fee_rate_version: "",
+  },
 });
 const billStatus = ref("");
 const selectedPurchaseOrders = ref([]);
@@ -858,6 +823,23 @@ const childCategories = (code) =>
     (item) =>
       (item.level === 2 || parentCode(item)) && parentCode(item) === code,
   );
+const canManagePlatformFee = computed(() =>
+  userStore.hasRole(["admin", "manager", "finance"]),
+);
+const filteredOperatingSkus = computed(() => {
+  if (!operatingQuery.spu) return operatingDimensions.skus || [];
+  return (operatingDimensions.skus || []).filter(
+    (item) => item.spu === operatingQuery.spu || item.spu_code === operatingQuery.spu,
+  );
+});
+const referenceStorageDays = (turnoverClass) =>
+  ({ fast: 30, normal: 60, slow: 90 })[turnoverClass] || null;
+const transportLabel = (value) =>
+  ({ sea: "海运", air: "空运", rail: "铁路运输" })[value] || "待选择";
+const referenceLogisticsCost = (row) =>
+  row.reference_logistics_cost ?? row.expected_logistics_cost ?? null;
+const referenceStorageCost = (row) =>
+  row.reference_storage_cost ?? row.expected_storage_cost ?? null;
 const spuDirty = computed(() =>
   spus.value.filter(
     (row) => row.__new || dirtyRows.value.has(`spu:${row.spu}`),
@@ -905,7 +887,6 @@ const blankSku = () => ({
   expected_logistics_cost: null,
   expected_storage_cost: null,
   reference_selling_price: null,
-  selling_price_currency: "CNY",
   selling_price_source: "manual",
   purchase_cost_source: "manual",
   purchase_cost_confidence: "low",
@@ -919,6 +900,7 @@ const addRuleRow = () =>
     warehouse_code: "",
     transport_type: "sea",
     cargo_class: "normal",
+    is_default: false,
     billing_basis: "volume",
     freight_unit_rate: null,
     effective_from: "",
@@ -975,6 +957,57 @@ const loadRules = async () => {
     rules.value = [];
   }
 };
+const loadStorageRules = async () => {
+  loadingStorageRules.value = true;
+  try {
+    storageRules.value = await productCenterApi.listWarehouseStorageRules({
+      include_inactive: true,
+    });
+  } catch (error) {
+    storageRules.value = [];
+    ElMessage.error(error.message || "加载仓储规则失败");
+  } finally {
+    loadingStorageRules.value = false;
+  }
+};
+const addStorageRuleRow = () =>
+  storageRules.value.unshift({
+    __new: true,
+    warehouse_code: "",
+    unit_rate_cny: null,
+    effective_from: new Date().toISOString().slice(0, 10),
+    status: "active",
+    source: "manual",
+    version: "v1",
+    notes: "",
+  });
+const storageRulePayload = (row) => {
+  const { __new, rule_id, billing_basis, billing_unit, ...payload } = row;
+  return payload;
+};
+const saveStorageRule = async (row) => {
+  try {
+    if (!row.warehouse_code || row.unit_rate_cny == null || !row.effective_from) {
+      throw new Error("请填写收货仓库、仓储单价和生效日期");
+    }
+    if (row.__new) await productCenterApi.createWarehouseStorageRule(storageRulePayload(row));
+    else await productCenterApi.updateWarehouseStorageRule(row.rule_id, storageRulePayload(row));
+    await loadStorageRules();
+    ElMessage.success("仓储规则已保存");
+  } catch (error) {
+    ElMessage.error(error.message || "保存仓储规则失败");
+  }
+};
+const disableStorageRule = async (row) => {
+  try {
+    await ElMessageBox.confirm("停用后该规则不再用于新的利润测算。", "停用仓储规则", { type: "warning" });
+    await productCenterApi.updateWarehouseStorageRule(row.rule_id, { status: "inactive" });
+    await loadStorageRules();
+    ElMessage.success("仓储规则已停用");
+  } catch (error) {
+    if (error !== "cancel") ElMessage.error(error.message || "停用仓储规则失败");
+  }
+};
 const loadPurchaseOrders = async () => {
   try {
     purchaseOrders.value = await productCenterApi.listPurchaseOrders({
@@ -1009,9 +1042,43 @@ const loadOperatingDimensions = async () => {
     operatingDimensions.warehouses = [];
   }
 };
+const openPlatformFeeDrawer = () => {
+  const platform = operatingDimensions.platforms.find(
+    (item) => item.platform_code === operatingQuery.platform_code,
+  );
+  if (!platform) {
+    ElMessage.warning("请先选择销售平台");
+    return;
+  }
+  platformFeeDrawer.label = platform.name || platform.platform_code;
+  platformFeeDrawer.form = {
+    default_fee_rate: platform.default_fee_rate ?? null,
+    fee_rate_effective_from: platform.fee_rate_effective_from || new Date().toISOString().slice(0, 10),
+    fee_rate_source: platform.fee_rate_source || "manual",
+    fee_rate_version: platform.fee_rate_version || "v1",
+  };
+  platformFeeDrawer.visible = true;
+};
+const savePlatformFeeRate = async () => {
+  const platformCode = operatingQuery.platform_code;
+  if (!platformCode) return;
+  saving.value = true;
+  try {
+    await productCenterApi.updatePlatformFeeRate(platformCode, platformFeeDrawer.form);
+    platformFeeDrawer.visible = false;
+    await loadOperatingDimensions();
+    await loadOperatingProfiles();
+    ElMessage.success("平台费率已保存");
+  } catch (error) {
+    ElMessage.error(error.message || "保存平台费率失败");
+  } finally {
+    saving.value = false;
+  }
+};
 const loadOperatingProfiles = async () => {
-  if (!operatingQuery.platform_code || !operatingQuery.warehouse_code) {
+  if (!operatingQuery.platform_code || !operatingQuery.warehouse_code || !operatingQuery.transport_type) {
     operatingProfiles.value = [];
+    operatingTotal.value = 0;
     return;
   }
   loadingOperating.value = true;
@@ -1019,37 +1086,50 @@ const loadOperatingProfiles = async () => {
     const response = await productCenterApi.listPlatformSkuProfitCandidates({
       platform_code: operatingQuery.platform_code,
       warehouse_code: operatingQuery.warehouse_code,
+      transport_type: operatingQuery.transport_type,
       spu: operatingQuery.spu || undefined,
       sku_id: operatingQuery.sku_id || undefined,
-      page: 1,
-      page_size: 100,
+      page: operatingQuery.page,
+      page_size: operatingQuery.page_size,
     });
     operatingProfiles.value = (response.data || []).map((row) => ({
       ...row,
       expected_selling_price: row.expected_selling_price ?? row.reference_selling_price,
       seller_coupon_amount: row.seller_coupon_amount ?? 0,
       expected_ad_rate: row.expected_ad_rate ?? 0,
-      preview: null,
     }));
+    operatingTotal.value = response.total ?? 0;
   } catch (error) {
     operatingProfiles.value = [];
+    operatingTotal.value = 0;
     ElMessage.error(error.message || "加载平台 SKU 利润失败");
   } finally {
     loadingOperating.value = false;
   }
 };
+const resetOperatingPage = () => {
+  operatingQuery.page = 1;
+  loadOperatingProfiles();
+};
 const operatingPayload = (row) => ({
   sku_id: row.sku_id,
   platform_code: operatingQuery.platform_code,
   warehouse_code: operatingQuery.warehouse_code,
-  transport_type: row.transport_type || "sea",
+  transport_type: operatingQuery.transport_type,
   competitor_price: row.competitor_price ?? null,
   expected_selling_price: row.expected_selling_price ?? null,
   seller_coupon_amount: row.seller_coupon_amount ?? 0,
   expected_ad_rate: row.expected_ad_rate ?? 0,
-  expected_logistics_cost: row.expected_logistics_cost ?? null,
-  expected_storage_cost: row.expected_storage_cost ?? null,
 });
+const clearOperatingSkuOutsideSpu = () => {
+  if (operatingQuery.sku_id && !filteredOperatingSkus.value.some((item) => item.sku_id === operatingQuery.sku_id)) {
+    operatingQuery.sku_id = "";
+  }
+};
+const handleOperatingSpuChange = () => {
+  clearOperatingSkuOutsideSpu();
+  resetOperatingPage();
+};
 const previewOperatingRow = async (row) => {
   try {
     row.preview = await productCenterApi.previewPlatformSkuProfit(operatingPayload(row));
@@ -1079,6 +1159,8 @@ const payloadSpu = (row) => {
 };
 const payloadSku = (row) => {
   const { __new, ...payload } = row;
+  payload.purchase_cost_currency = "CNY";
+  payload.selling_price_currency = "CNY";
   return payload;
 };
 const validateSpu = (row) =>
@@ -1252,57 +1334,13 @@ const confirmBatch = async (row) => {
     if (error !== "cancel") ElMessage.error(error.message || "确认失败");
   }
 };
-const openOperatingProfit = (row) => {
-  operatingProfitDrawer.visible = true;
-  operatingProfitDrawer.profileId = row.profile_id;
-  operatingProfitDrawer.label = `${row.sku_id} / ${row.platform_code} / ${row.warehouse_code}`;
-  operatingProfitDrawer.form = {
-    selling_price: row.selling_price,
-    coupon_amount: row.default_coupon_amount || 0,
-    transport_type: row.transport_type || "sea",
-  };
-  operatingProfitDrawer.preview = null;
-};
-const previewOperatingProfit = async () => {
-  try {
-    operatingProfitDrawer.preview =
-      await productCenterApi.previewSkuOperatingProfit(
-        operatingProfitDrawer.profileId,
-        operatingProfitDrawer.form,
-      );
-  } catch (error) {
-    ElMessage.error(error.message || "利润预览失败");
-  }
-};
-const saveOperatingProfit = async () => {
-  try {
-    await productCenterApi.saveSkuOperatingProfit(
-      operatingProfitDrawer.profileId,
-      operatingProfitDrawer.form,
-    );
-    operatingProfitDrawer.visible = false;
-    await loadOperatingProfiles();
-    ElMessage.success("平台 SKU 利润版本已保存");
-  } catch (error) {
-    ElMessage.error(error.message || "保存利润版本失败");
-  }
-};
-const showOperatingHistory = async (row) => {
-  try {
-    operatingHistoryDrawer.rows =
-      await productCenterApi.listSkuOperatingProfitHistory(row.profile_id);
-    operatingHistoryDrawer.visible = true;
-  } catch (error) {
-    ElMessage.error(error.message || "加载利润历史失败");
-  }
-};
 const billingUnitFor = (basis) =>
   ({
-    volume: "RMB/CBM",
-    weight: "RMB/KG",
-    quantity: "RMB/件",
-    fixed: "RMB/票",
-  })[basis] || "RMB/CBM";
+    volume: "CNY/CBM",
+    weight: "CNY/KG",
+    quantity: "CNY/unit",
+    fixed: "CNY",
+  })[basis] || "CNY/CBM";
 const matchProviderRule = (isSensitive, warehouseCode = batchDrawer.form.warehouse_code) => {
   const form = batchDrawer.form;
   if (!form.logistics_provider) return null;
@@ -1315,14 +1353,15 @@ const matchProviderRule = (isSensitive, warehouseCode = batchDrawer.form.warehou
        (!rule.warehouse_code || rule.warehouse_code === warehouseCode) &&
       (!rule.transport_type || rule.transport_type === form.transport_type),
   );
-  return (
-    candidates.sort((left, right) => {
-      const score = (rule) =>
-         Number(rule.warehouse_code === warehouseCode) * 2 +
-        Number(rule.transport_type === form.transport_type);
-      return score(right) - score(left);
-    })[0] || null
-  );
+  if (!candidates.length) return null;
+  const score = (rule) =>
+    Number(rule.warehouse_code === warehouseCode) * 2 +
+    Number(rule.transport_type === form.transport_type);
+  const highestScore = Math.max(...candidates.map(score));
+  const bestRules = candidates.filter((rule) => score(rule) === highestScore);
+  if (bestRules.length === 1) return bestRules[0];
+  const defaultRules = bestRules.filter((rule) => rule.is_default);
+  return defaultRules.length === 1 ? defaultRules[0] : null;
 };
 const applyRuleToLine = (line, { force = false } = {}) => {
   if (!force && line.rate_source === "manual") return;
@@ -1365,7 +1404,7 @@ const generateBatchLinesFromPurchaseOrders = async (orders) => {
           actual_total_volume_cbm: unitVolume * shippedQty,
           actual_total_weight_kg: Number(sku.weight_kg || 0) * shippedQty,
           billing_basis: "volume",
-          billing_unit: "RMB/CBM",
+          billing_unit: "CNY/CBM",
           billing_unit_rate: null,
           rate_source: "rule",
           is_sensitive: false,
@@ -1415,6 +1454,7 @@ onMounted(async () => {
     loadSkus(),
     loadCategories(),
     loadRules(),
+    loadStorageRules(),
     loadPurchaseOrders(),
     loadBatches(),
     loadOperatingDimensions(),

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 _CODE_PATTERN = r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$"
@@ -104,6 +104,13 @@ class SkuBulkItem(BaseModel):
     selling_price_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
     selling_price_source: Optional[str] = Field(default=None, max_length=64)
     selling_price_confirmed_at: Optional[datetime] = None
+    turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
+
+    @model_validator(mode="after")
+    def cny_only(self):
+        if self.purchase_cost_currency != "CNY" or self.selling_price_currency not in (None, "CNY"):
+            raise ValueError("SKU product-center amounts must use CNY")
+        return self
 
 
 class SkuBulkRequest(BaseModel):
@@ -176,6 +183,13 @@ class SkuCreateRequest(BaseModel):
     selling_price_currency: str = Field(default="CNY", min_length=3, max_length=8)
     selling_price_source: Optional[str] = Field(default=None, max_length=64)
     selling_price_confirmed_at: Optional[datetime] = None
+    turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
+
+    @model_validator(mode="after")
+    def cny_only(self):
+        if self.purchase_cost_currency != "CNY" or self.selling_price_currency != "CNY":
+            raise ValueError("SKU product-center amounts must use CNY")
+        return self
 
 
 class SkuUpdateRequest(BaseModel):
@@ -196,6 +210,13 @@ class SkuUpdateRequest(BaseModel):
     selling_price_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
     selling_price_source: Optional[str] = Field(default=None, max_length=64)
     selling_price_confirmed_at: Optional[datetime] = None
+    turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
+
+    @model_validator(mode="after")
+    def cny_only(self):
+        if self.purchase_cost_currency not in (None, "CNY") or self.selling_price_currency not in (None, "CNY"):
+            raise ValueError("SKU product-center amounts must use CNY")
+        return self
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
 
 
@@ -231,12 +252,14 @@ class ProductCenterItem(BaseModel):
     purchase_cost_currency: Optional[str] = None
     purchase_cost_source: Optional[str] = None
     purchase_cost_confidence: Optional[str] = None
+    purchase_cost_confirmed_at: Optional[datetime] = None
     expected_logistics_cost: Optional[float] = None
     expected_storage_cost: Optional[float] = None
     reference_selling_price: Optional[float] = None
     selling_price_currency: Optional[str] = None
     selling_price_source: Optional[str] = None
     selling_price_confirmed_at: Optional[datetime] = None
+    turnover_class: Optional[str] = None
     logistics_damage_rate: Optional[float] = None
     return_loss_rate: Optional[float] = None
     actual_logistics_cost: Optional[float] = None
@@ -294,6 +317,32 @@ class ProductWarehouseUpdateRequest(BaseModel):
 class PlatformFeeRateUpdateRequest(BaseModel):
     default_fee_rate: Optional[float] = Field(default=None, ge=0, le=1)
     fee_rate_effective_from: date = Field(default_factory=date.today)
+    fee_rate_source: Optional[str] = Field(default=None, max_length=128)
+    fee_rate_version: Optional[str] = Field(default=None, max_length=64)
+
+
+class WarehouseStorageRuleCreateRequest(BaseModel):
+    warehouse_code: str = Field(min_length=1, max_length=128)
+    unit_rate_cny: float = Field(ge=0)
+    effective_from: date
+    effective_to: Optional[date] = None
+    status: str = Field(default="active", pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def effective_window_is_valid(self):
+        if self.effective_to is not None and self.effective_to < self.effective_from:
+            raise ValueError("effective_to must not be earlier than effective_from")
+        return self
+
+
+class WarehouseStorageRuleUpdateRequest(BaseModel):
+    status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
 
 
 class CostAssumptionCreateRequest(BaseModel):
@@ -331,6 +380,14 @@ class CostAssumptionUpdateRequest(BaseModel):
     active: Optional[bool] = None
 
 
+_LOGISTICS_BILLING_UNITS = {
+    "volume": "CNY/CBM",
+    "weight": "CNY/KG",
+    "quantity": "CNY/unit",
+    "fixed": "CNY",
+}
+
+
 class LogisticsBillCreateRequest(BaseModel):
     bill_no: str = Field(min_length=1, max_length=128)
     logistics_provider: Optional[str] = Field(default=None, max_length=128)
@@ -339,6 +396,12 @@ class LogisticsBillCreateRequest(BaseModel):
     currency: str = Field(default="CNY", min_length=3, max_length=8)
     total_amount: float = Field(ge=0)
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def cny_only(self):
+        if self.currency != "CNY":
+            raise ValueError("product-center logistics bills must use CNY")
+        return self
 
 
 class LogisticsBillUpdateRequest(BaseModel):
@@ -349,11 +412,25 @@ class LogisticsBillUpdateRequest(BaseModel):
     total_amount: Optional[float] = Field(default=None, ge=0)
     notes: Optional[str] = None
 
+    @model_validator(mode="after")
+    def cny_only(self):
+        if self.currency is not None and self.currency != "CNY":
+            raise ValueError("product-center logistics bills must use CNY")
+        return self
+
 
 class LogisticsBillSkuLineRequest(BaseModel):
+    """Compatibility request for legacy one-SKU bill rows.
+
+    Legacy rows were always volume-billed.  Keep that contract explicit so a
+    request cannot reach persistence without a canonical CNY billing unit.
+    """
+
     sku_id: int = Field(gt=0)
     warehouse_code: str = Field(min_length=1, max_length=128)
     shipped_qty: float = Field(gt=0)
+    billing_basis: Literal["volume"] = "volume"
+    billing_unit: Literal["CNY/CBM"] = "CNY/CBM"
     actual_total_weight_kg: Optional[float] = Field(default=None, ge=0)
     actual_total_volume_cbm: Optional[float] = Field(default=None, ge=0)
     headhaul_cost: float = Field(default=0, ge=0)
@@ -399,6 +476,14 @@ class LogisticsBillLineRequest(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def derive_cny_billing_unit(self):
+        expected_unit = _LOGISTICS_BILLING_UNITS[self.billing_basis]
+        if self.billing_unit is not None and self.billing_unit != expected_unit:
+            raise ValueError(f"billing_unit must be {expected_unit}; product-center logistics costs use CNY")
+        self.billing_unit = expected_unit
+        return self
+
+    @model_validator(mode="after")
     def validate_allocation_skus(self):
         if not self.allocations:
             return self
@@ -433,6 +518,12 @@ class PurchaseOrderLineCostSupplementRequest(BaseModel):
     currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
     purchase_cost_source: str = Field(default="manual", min_length=1, max_length=64)
 
+    @model_validator(mode="after")
+    def cny_only(self):
+        if self.currency not in (None, "CNY"):
+            raise ValueError("purchase-order product-center costs must use CNY")
+        return self
+
 
 class LogisticsProviderRuleCreateRequest(BaseModel):
     logistics_provider: str = Field(min_length=1, max_length=128)
@@ -440,12 +531,12 @@ class LogisticsProviderRuleCreateRequest(BaseModel):
     transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     cargo_class: Optional[str] = Field(default=None, max_length=64)
     is_sensitive: bool = False
+    is_default: bool = False
     billing_basis: str = Field(default="volume", pattern=r"^(volume|weight|quantity|fixed)$")
-    billing_unit: str = Field(default="RMB/CBM", max_length=32)
+    billing_unit: Optional[str] = Field(default=None, max_length=32)
     freight_unit_rate: Optional[float] = Field(default=None, ge=0)
     sensitive_surcharge_mode: str = Field(default="manual", max_length=32)
     sensitive_surcharge_rate: Optional[float] = Field(default=None, ge=0)
-    currency: str = Field(default="CNY", min_length=3, max_length=8)
     effective_from: date
     effective_to: Optional[date] = None
     status: str = Field(default="active", pattern=r"^(active|inactive)$")
@@ -453,10 +544,43 @@ class LogisticsProviderRuleCreateRequest(BaseModel):
     version: Optional[str] = Field(default=None, max_length=64)
     notes: Optional[str] = None
 
+    @model_validator(mode="after")
+    def derive_cny_billing_unit(self):
+        expected_unit = _LOGISTICS_BILLING_UNITS[self.billing_basis]
+        if self.billing_unit is not None and self.billing_unit != expected_unit:
+            raise ValueError(f"billing_unit must be {expected_unit}; product-center logistics costs use CNY")
+        self.billing_unit = expected_unit
+        return self
 
-class LogisticsProviderRuleUpdateRequest(LogisticsProviderRuleCreateRequest):
+
+class LogisticsProviderRuleUpdateRequest(BaseModel):
+    """Partial provider-rule update; never inherit create defaults into PATCHes."""
+
     logistics_provider: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    warehouse_code: Optional[str] = Field(default=None, max_length=128)
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
+    cargo_class: Optional[str] = Field(default=None, max_length=64)
+    is_sensitive: Optional[bool] = None
+    is_default: Optional[bool] = None
+    billing_basis: Optional[str] = Field(default=None, pattern=r"^(volume|weight|quantity|fixed)$")
+    billing_unit: Optional[str] = Field(default=None, max_length=32)
+    freight_unit_rate: Optional[float] = Field(default=None, ge=0)
+    sensitive_surcharge_mode: Optional[str] = Field(default=None, max_length=32)
+    sensitive_surcharge_rate: Optional[float] = Field(default=None, ge=0)
     effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def derive_cny_billing_unit_when_basis_changes(self):
+        if "billing_unit" in self.model_fields_set:
+            raise ValueError("billing_unit is derived from billing_basis")
+        if self.billing_basis is not None:
+            self.billing_unit = _LOGISTICS_BILLING_UNITS[self.billing_basis]
+        return self
 
 
 class LogisticsBillVoidRequest(BaseModel):
@@ -537,6 +661,10 @@ class SkuOperatingProfitRequest(BaseModel):
 class SkuOperatingPlatformOption(BaseModel):
     platform_code: str
     name: Optional[str] = None
+    default_fee_rate: Optional[float] = None
+    fee_rate_effective_from: Optional[date] = None
+    fee_rate_source: Optional[str] = None
+    fee_rate_version: Optional[str] = None
 
 
 class SkuOperatingDimensionsResponse(BaseModel):
@@ -588,16 +716,16 @@ class SkuOperatingProfitHistoryResponse(BaseModel):
 
 
 class PlatformSkuProfitPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sku_id: int = Field(gt=0)
     platform_code: str = Field(min_length=1, max_length=32)
     warehouse_code: str = Field(min_length=1, max_length=128)
-    transport_type: str = Field(default="sea", pattern=r"^(sea|air|rail)$")
+    transport_type: str = Field(pattern=r"^(sea|air|rail)$")
     competitor_price: Optional[float] = Field(default=None, ge=0)
     expected_selling_price: Optional[float] = Field(default=None, ge=0)
     seller_coupon_amount: float = Field(default=0, ge=0)
     expected_ad_rate: float = Field(default=0, ge=0, le=1)
-    expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
-    expected_storage_cost: Optional[float] = Field(default=None, ge=0)
 
 
 class PlatformSkuProfitEstimateRequest(PlatformSkuProfitPreviewRequest):
@@ -611,7 +739,6 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     specification: Optional[str] = None
     spu: Optional[str] = None
     reference_selling_price: Optional[float] = None
-    selling_price_currency: Optional[str] = None
     purchase_cost: Optional[float] = None
     platform_code: str
     warehouse_code: str
@@ -620,14 +747,18 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     competitor_price: Optional[float] = None
     seller_coupon_amount: Optional[float] = None
     expected_ad_rate: Optional[float] = None
-    expected_logistics_cost: Optional[float] = None
-    expected_storage_cost: Optional[float] = None
     actual_logistics_cost: Optional[float] = None
     actual_storage_cost: Optional[float] = None
     platform_fee_rate: Optional[float] = None
     logistics_damage_rate: Optional[float] = None
     return_loss_rate: Optional[float] = None
     configuration_status: str
+    turnover_class: Optional[str] = None
+    reference_storage_days: Optional[int] = None
+    reference_logistics_cost: Optional[float] = None
+    reference_storage_cost: Optional[float] = None
+    preview: Optional[dict] = None
+    currency: str = "CNY"
 
 
 class PlatformSkuProfitCandidatePageResponse(BaseModel):

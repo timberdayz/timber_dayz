@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -20,6 +20,8 @@ from modules.core.db import (
     POHeader,
     POLine,
     ProductCostAssumptionProfile,
+    LogisticsProviderRule,
+    WarehouseStorageRule,
     SkuOperatingProfile,
     SkuProfitEstimate,
 )
@@ -30,8 +32,18 @@ from .product_profit_service import (
     build_platform_profit_preview,
     build_logistics_sku_line,
     validate_bill_total,
+    build_reference_storage_cost,
+    reference_storage_days,
 )
 from .product_logistics_service import allocate_bill_line
+
+
+_CNY_BILLING_UNITS = {
+    "volume": "CNY/CBM",
+    "weight": "CNY/KG",
+    "quantity": "CNY/unit",
+    "fixed": "CNY",
+}
 
 
 def _unit_volume_cbm(sku: DimErpSku) -> Decimal:
@@ -121,7 +133,13 @@ class ProductFinanceService:
                 (_unit_volume_cbm(skus[item["sku_id"]]) * Decimal(str(item["shipped_qty"])) for item in allocation_specs),
                 Decimal("0"),
             )
-            basis = line.get("billing_basis", "volume")
+            basis = line.get("billing_basis") or "volume"
+            if basis not in _CNY_BILLING_UNITS:
+                raise ValueError("unsupported logistics billing basis")
+            billing_unit = _CNY_BILLING_UNITS[basis]
+            supplied_billing_unit = line.get("billing_unit")
+            if supplied_billing_unit not in (None, billing_unit):
+                raise ValueError(f"billing unit must be {billing_unit}")
             chargeable_quantity = {
                 "volume": Decimal(str(line.get("actual_total_volume_cbm"))) if line.get("actual_total_volume_cbm") is not None else calculated_volume,
                 "weight": Decimal(str(line.get("actual_total_weight_kg"))) if line.get("actual_total_weight_kg") is not None else calculated_weight,
@@ -165,7 +183,7 @@ class ProductFinanceService:
                 po_id=line.get("po_id"),
                 warehouse_code=warehouse_code,
                 billing_basis=basis,
-                billing_unit=line.get("billing_unit"),
+                billing_unit=billing_unit,
                 billing_unit_rate=line.get("billing_unit_rate"),
                 is_sensitive=bool(line.get("is_sensitive", False)),
                 sensitive_surcharge=sensitive_surcharge,
@@ -191,7 +209,7 @@ class ProductFinanceService:
         # in the legacy direct column for backwards compatibility.
         for row, line, allocation_specs in zip(rows, lines, allocation_specs_by_line):
             amount = Decimal(str(row.line_total_amount or 0))
-            basis = line.get("billing_basis", "volume")
+            basis = line.get("billing_basis") or "volume"
             allocation_items = []
             for spec in allocation_specs:
                 item_sku = skus[spec["sku_id"]]
@@ -285,7 +303,11 @@ class ProductFinanceService:
             )
             .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
-            .where(LogisticsBillLineAllocation.sku_id == sku_id, LogisticsBill.status == "confirmed")
+            .where(
+                LogisticsBillLineAllocation.sku_id == sku_id,
+                LogisticsBill.status == "confirmed",
+                LogisticsBill.currency == "CNY",
+            )
         )
         if transport_type:
             allocated = allocated.where(LogisticsBill.transport_type == transport_type)
@@ -297,7 +319,11 @@ class ProductFinanceService:
         statement = (
             select(func.sum(LogisticsBillLine.line_total_amount), func.sum(LogisticsBillLine.shipped_qty))
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
-            .where(LogisticsBillLine.sku_id == sku_id, LogisticsBill.status == "confirmed")
+            .where(
+                LogisticsBillLine.sku_id == sku_id,
+                LogisticsBill.status == "confirmed",
+                LogisticsBill.currency == "CNY",
+            )
         )
         if transport_type:
             statement = statement.where(LogisticsBill.transport_type == transport_type)
@@ -308,10 +334,112 @@ class ProductFinanceService:
             return None
         return Decimal(str(total_amount or 0)) / Decimal(str(total_quantity))
 
+    async def find_reference_logistics_cost(self, sku: DimErpSku, warehouse_code: str, transport_type: str) -> tuple[Decimal | None, LogisticsProviderRule | None]:
+        statement = select(LogisticsProviderRule).where(
+            or_(
+                LogisticsProviderRule.warehouse_code == warehouse_code,
+                LogisticsProviderRule.warehouse_code.is_(None),
+            ),
+            or_(
+                LogisticsProviderRule.transport_type == transport_type,
+                LogisticsProviderRule.transport_type.is_(None),
+            ),
+            LogisticsProviderRule.status == "active",
+            LogisticsProviderRule.is_sensitive.is_(False),
+            LogisticsProviderRule.currency == "CNY",
+            LogisticsProviderRule.effective_from <= date.today(),
+            (LogisticsProviderRule.effective_to.is_(None)) | (LogisticsProviderRule.effective_to >= date.today()),
+        )
+        rules = (await self.db.execute(statement)).scalars().all()
+        if not rules:
+            return None, None
+        rule = self._select_reference_logistics_rule(rules, warehouse_code, transport_type)
+        if rule is None:
+            return None, None
+        return self._reference_logistics_from_rule(sku, rule), rule
+
+    @staticmethod
+    def _select_reference_logistics_rule(
+        rules: list[LogisticsProviderRule], warehouse_code: str, transport_type: str
+    ) -> LogisticsProviderRule | None:
+        """Select one unambiguous current rule; never choose a tariff arbitrarily."""
+        if not rules:
+            return None
+        def specificity(rule: LogisticsProviderRule) -> int:
+            return int(rule.warehouse_code == warehouse_code) + int(
+                rule.transport_type == transport_type
+            )
+
+        highest_specificity = max(specificity(rule) for rule in rules)
+        best_rules = [
+            rule
+            for rule in rules
+            if specificity(rule) == highest_specificity
+        ]
+        if len(best_rules) == 1:
+            return best_rules[0]
+        default_rules = [rule for rule in best_rules if rule.is_default]
+        return default_rules[0] if len(default_rules) == 1 else None
+
+    @staticmethod
+    def _reference_logistics_from_rule(
+        sku: DimErpSku, rule: LogisticsProviderRule
+    ) -> Decimal | None:
+        if rule.freight_unit_rate is None:
+            return None
+        if rule.billing_basis == "volume":
+            if any(value is None for value in (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)):
+                return None
+            measure = _unit_volume_cbm(sku)
+        elif rule.billing_basis == "weight":
+            if sku.weight_kg is None:
+                return None
+            measure = Decimal(str(sku.weight_kg))
+        elif rule.billing_basis in {"quantity", "fixed"}:
+            measure = Decimal("1")
+        else:
+            return None
+        return (measure * Decimal(str(rule.freight_unit_rate))).quantize(Decimal("0.01"))
+
+    async def find_reference_storage_cost(self, sku: DimErpSku, warehouse_code: str) -> tuple[Decimal | None, WarehouseStorageRule | None]:
+        statement = select(WarehouseStorageRule).where(
+            WarehouseStorageRule.warehouse_code == warehouse_code,
+            WarehouseStorageRule.status == "active",
+            WarehouseStorageRule.effective_from <= date.today(),
+            (WarehouseStorageRule.effective_to.is_(None)) | (WarehouseStorageRule.effective_to >= date.today()),
+        ).order_by(WarehouseStorageRule.effective_from.desc(), WarehouseStorageRule.rule_id.desc())
+        rule = (await self.db.execute(statement)).scalars().first()
+        if rule is None:
+            return None, None
+        volume = None if any(value is None for value in (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)) else _unit_volume_cbm(sku)
+        return build_reference_storage_cost(unit_volume_cbm=volume, unit_rate_cny_per_cbm_month=rule.unit_rate_cny, turnover_class=sku.turnover_class), rule
+
     async def find_latest_purchase_cost(self, sku: DimErpSku) -> Decimal | None:
+        purchase_cost = case(
+            (POLine.currency == "CNY", POLine.unit_price),
+            (
+                and_(
+                    POLine.currency != "CNY",
+                    POLine.base_amt.is_not(None),
+                    POLine.base_amt > 0,
+                    POLine.qty_ordered > 0,
+                ),
+                POLine.base_amt / POLine.qty_ordered,
+            ),
+            else_=None,
+        )
+        valid_purchase_cost = or_(
+            and_(POLine.currency == "CNY", POLine.unit_price.is_not(None)),
+            and_(
+                POLine.currency != "CNY",
+                POLine.base_amt.is_not(None),
+                POLine.base_amt > 0,
+                POLine.qty_ordered > 0,
+            ),
+        )
         row = (
             await self.db.execute(
-                select(POLine.unit_price)
+                select(purchase_cost)
                 .join(POHeader, POHeader.po_id == POLine.po_id)
                 .where(
                     POLine.platform_sku.in_(
@@ -322,12 +450,199 @@ class ProductFinanceService:
                         )
                     )
                     | (POLine.platform_sku == sku.sku_key),
-                    POLine.unit_price.is_not(None),
+                    valid_purchase_cost,
                 )
                 .order_by(POHeader.po_date.desc(), POLine.po_line_id.desc())
             )
         ).scalars().first()
         return Decimal(str(row)) if row is not None else None
+
+    async def prefetch_platform_sku_profit_inputs(
+        self,
+        skus: list[DimErpSku],
+        warehouse_code: str,
+        transport_type: str,
+    ) -> dict[int, dict[str, object]]:
+        """Load cost inputs for a page in bounded queries rather than per-SKU awaits."""
+        if not skus:
+            return {}
+        sku_ids = [sku.sku_id for sku in skus]
+        sku_by_id = {sku.sku_id: sku for sku in skus}
+        source_rows = (
+            await self.db.execute(
+                select(BridgeErpSkuKey.sku_id, BridgeErpSkuKey.source_key).where(
+                    BridgeErpSkuKey.sku_id.in_(sku_ids),
+                    BridgeErpSkuKey.active.is_(True),
+                    BridgeErpSkuKey.effective_to.is_(None),
+                )
+            )
+        ).all()
+        sku_by_source_key = {sku.sku_key: sku.sku_id for sku in skus}
+        sku_by_source_key.update({source_key: sku_id for sku_id, source_key in source_rows})
+        purchase_costs: dict[int, Decimal] = {}
+        if sku_by_source_key:
+            purchase_cost = case(
+                (POLine.currency == "CNY", POLine.unit_price),
+                (
+                    and_(
+                        POLine.currency != "CNY",
+                        POLine.base_amt.is_not(None),
+                        POLine.base_amt > 0,
+                        POLine.qty_ordered > 0,
+                    ),
+                    POLine.base_amt / POLine.qty_ordered,
+                ),
+                else_=None,
+            )
+            valid_purchase_cost = or_(
+                and_(POLine.currency == "CNY", POLine.unit_price.is_not(None)),
+                and_(
+                    POLine.currency != "CNY",
+                    POLine.base_amt.is_not(None),
+                    POLine.base_amt > 0,
+                    POLine.qty_ordered > 0,
+                ),
+            )
+            purchase_rows = (
+                await self.db.execute(
+                    select(POLine.platform_sku, purchase_cost)
+                    .join(POHeader, POHeader.po_id == POLine.po_id)
+                    .where(
+                        POLine.platform_sku.in_(sku_by_source_key),
+                        valid_purchase_cost,
+                    )
+                    .order_by(POHeader.po_date.desc(), POLine.po_line_id.desc())
+                )
+            ).all()
+            for source_key, unit_price in purchase_rows:
+                mapped_sku_id = sku_by_source_key.get(source_key)
+                if mapped_sku_id is not None and mapped_sku_id not in purchase_costs:
+                    purchase_costs[mapped_sku_id] = Decimal(str(unit_price))
+
+        actual_logistics: dict[int, Decimal] = {}
+        allocated_rows = (
+            await self.db.execute(
+                select(
+                    LogisticsBillLineAllocation.sku_id,
+                    func.sum(LogisticsBillLineAllocation.allocated_amount),
+                    func.sum(LogisticsBillLineAllocation.allocated_quantity),
+                )
+                .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
+                .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
+                .where(
+                    LogisticsBillLineAllocation.sku_id.in_(sku_ids),
+                    LogisticsBill.status == "confirmed",
+                    LogisticsBill.currency == "CNY",
+                    LogisticsBill.transport_type == transport_type,
+                    LogisticsBillLine.warehouse_code == warehouse_code,
+                )
+                .group_by(LogisticsBillLineAllocation.sku_id)
+            )
+        ).all()
+        for item_sku_id, amount, quantity in allocated_rows:
+            if quantity:
+                actual_logistics[item_sku_id] = Decimal(str(amount)) / Decimal(str(quantity))
+        missing_actual_ids = [sku_id for sku_id in sku_ids if sku_id not in actual_logistics]
+        if missing_actual_ids:
+            legacy_rows = (
+                await self.db.execute(
+                    select(
+                        LogisticsBillLine.sku_id,
+                        func.sum(LogisticsBillLine.line_total_amount),
+                        func.sum(LogisticsBillLine.shipped_qty),
+                    )
+                    .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
+                    .where(
+                        LogisticsBillLine.sku_id.in_(missing_actual_ids),
+                        LogisticsBill.status == "confirmed",
+                        LogisticsBill.currency == "CNY",
+                        LogisticsBill.transport_type == transport_type,
+                        LogisticsBillLine.warehouse_code == warehouse_code,
+                    )
+                    .group_by(LogisticsBillLine.sku_id)
+                )
+            ).all()
+            for item_sku_id, amount, quantity in legacy_rows:
+                if quantity:
+                    actual_logistics[item_sku_id] = Decimal(str(amount or 0)) / Decimal(str(quantity))
+
+        current_rules = (
+            await self.db.execute(
+                select(LogisticsProviderRule).where(
+                    or_(
+                        LogisticsProviderRule.warehouse_code == warehouse_code,
+                        LogisticsProviderRule.warehouse_code.is_(None),
+                    ),
+                    or_(
+                        LogisticsProviderRule.transport_type == transport_type,
+                        LogisticsProviderRule.transport_type.is_(None),
+                    ),
+                    LogisticsProviderRule.status == "active",
+                    LogisticsProviderRule.is_sensitive.is_(False),
+                    LogisticsProviderRule.currency == "CNY",
+                    LogisticsProviderRule.effective_from <= date.today(),
+                    (LogisticsProviderRule.effective_to.is_(None))
+                    | (LogisticsProviderRule.effective_to >= date.today()),
+                )
+            )
+        ).scalars().all()
+        logistics_rule = self._select_reference_logistics_rule(
+            current_rules, warehouse_code, transport_type
+        )
+        storage_rule = (
+            await self.db.execute(
+                select(WarehouseStorageRule)
+                .where(
+                    WarehouseStorageRule.warehouse_code == warehouse_code,
+                    WarehouseStorageRule.status == "active",
+                    WarehouseStorageRule.effective_from <= date.today(),
+                    (WarehouseStorageRule.effective_to.is_(None))
+                    | (WarehouseStorageRule.effective_to >= date.today()),
+                )
+                .order_by(
+                    WarehouseStorageRule.effective_from.desc(),
+                    WarehouseStorageRule.rule_id.desc(),
+                )
+            )
+        ).scalars().first()
+
+        inputs: dict[int, dict[str, object]] = {}
+        for item_sku_id, sku in sku_by_id.items():
+            reference_logistics = (
+                self._reference_logistics_from_rule(sku, logistics_rule)
+                if logistics_rule is not None
+                else None
+            )
+            volume = (
+                None
+                if any(
+                    value is None
+                    for value in (
+                        sku.package_length_cm,
+                        sku.package_width_cm,
+                        sku.package_height_cm,
+                    )
+                )
+                else _unit_volume_cbm(sku)
+            )
+            reference_storage = (
+                build_reference_storage_cost(
+                    unit_volume_cbm=volume,
+                    unit_rate_cny_per_cbm_month=storage_rule.unit_rate_cny,
+                    turnover_class=sku.turnover_class,
+                )
+                if storage_rule is not None
+                else None
+            )
+            inputs[item_sku_id] = {
+                "purchase_cost": purchase_costs.get(item_sku_id),
+                "actual_logistics_cost": actual_logistics.get(item_sku_id),
+                "reference_logistics_cost": reference_logistics,
+                "reference_logistics_rule": logistics_rule,
+                "reference_storage_cost": reference_storage,
+                "reference_storage_rule": storage_rule,
+            }
+        return inputs
 
     async def preview_profit(self, data: dict) -> dict:
         sku = await self.db.get(DimErpSku, data["sku_id"])
@@ -405,6 +720,9 @@ class ProductFinanceService:
 
     async def preview_operating_profit(self, profile_id: int, data: dict) -> dict:
         profile = await self.get_operating_profile(profile_id)
+        platform = await self.db.get(DimPlatform, profile.platform_code)
+        if platform is None or not platform.is_active or platform.platform_role != "sales":
+            raise ValueError("active sales platform not found")
         sku_data = {
             "sku_id": profile.sku_id,
             "selling_price": data.get("selling_price") if data.get("selling_price") is not None else profile.selling_price,
@@ -431,12 +749,17 @@ class ProductFinanceService:
         if sku is None:
             raise ValueError("SKU not found")
         platform = await self.db.get(DimPlatform, data["platform_code"])
-        if platform is None:
-            raise ValueError("platform not found")
+        if platform is None or not platform.is_active or platform.platform_role != "sales":
+            raise ValueError("active sales platform not found")
+        if await self.db.get(DimWarehouse, data["warehouse_code"]) is None:
+            raise ValueError("warehouse not found")
         purchase_cost = await self.find_latest_purchase_cost(sku)
-        actual_logistics = await self.find_confirmed_logistics_cost(
-            sku.sku_id, data["warehouse_code"], data.get("transport_type")
-        )
+        transport_type = data.get("transport_type")
+        if transport_type not in {"sea", "air", "rail"}:
+            raise ValueError("transport_type must be selected")
+        actual_logistics = await self.find_confirmed_logistics_cost(sku.sku_id, data["warehouse_code"], transport_type)
+        reference_logistics, logistics_rule = await self.find_reference_logistics_cost(sku, data["warehouse_code"], transport_type)
+        reference_storage, storage_rule = await self.find_reference_storage_cost(sku, data["warehouse_code"])
         binding = (
             await self.db.execute(
                 select(BridgeSpuSku).where(
@@ -457,8 +780,8 @@ class ProductFinanceService:
             competitor_price=data.get("competitor_price"),
             seller_coupon_amount=data.get("seller_coupon_amount"),
             purchase_cost=purchase_cost if purchase_cost is not None else sku.default_purchase_cost,
-            expected_logistics_cost=data.get("expected_logistics_cost"),
-            expected_storage_cost=data.get("expected_storage_cost"),
+            expected_logistics_cost=reference_logistics,
+            expected_storage_cost=reference_storage,
             actual_logistics_cost=actual_logistics,
             actual_storage_cost=None,
             platform_fee_rate=platform.default_fee_rate,
@@ -473,6 +796,16 @@ class ProductFinanceService:
             "warehouse_code": data["warehouse_code"],
             "platform_fee_rate": platform.default_fee_rate,
             "actual_storage_cost": None,
+            "transport_type": transport_type,
+            "reference_logistics_cost": reference_logistics,
+            "reference_logistics_rule_id": logistics_rule.rule_id if logistics_rule else None,
+            "reference_storage_cost": reference_storage,
+            "reference_storage_rule_id": storage_rule.rule_id if storage_rule else None,
+            "reference_storage_rule_version": storage_rule.version if storage_rule else None,
+            "reference_storage_days": reference_storage_days(sku.turnover_class),
+            "currency": "CNY",
+            "actual_logistics_cost": actual_logistics,
+            "cost_completeness": "complete" if result["expected"].get("profit") is not None else "incomplete",
         })
         return result
 
