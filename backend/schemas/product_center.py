@@ -351,6 +351,16 @@ class WarehouseStorageRuleUpdateRequest(BaseModel):
     version: Optional[str] = Field(default=None, max_length=64)
     notes: Optional[str] = None
 
+    @model_validator(mode="after")
+    def effective_window_is_valid(self):
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_to < self.effective_from
+        ):
+            raise ValueError("effective_to must not be earlier than effective_from")
+        return self
+
 
 class CostAssumptionCreateRequest(BaseModel):
     profile_name: str = Field(min_length=1, max_length=128)
@@ -772,6 +782,8 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     reference_storage_cost: Optional[float] = None
     reference_cost_status: str = "ready"
     reference_cost_missing_reasons: list[str] = Field(default_factory=list)
+    reference_logistics_missing_reasons: list[str] = Field(default_factory=list)
+    reference_storage_missing_reasons: list[str] = Field(default_factory=list)
     preview: Optional[dict] = None
     currency: str = "CNY"
 

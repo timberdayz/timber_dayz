@@ -521,3 +521,26 @@ def test_storage_rule_patch_accepts_material_changes_as_a_new_version():
     ]
     assert "WarehouseStorageRule(" in section
     assert "storage_rule_versioned" in section
+
+
+def test_storage_rule_version_window_is_validated_by_request_and_database_contract():
+    with pytest.raises(ValidationError, match="effective_to"):
+        WarehouseStorageRuleUpdateRequest(
+            unit_rate_cny=100,
+            effective_from=date(2026, 9, 20),
+            effective_to=date(2026, 9, 19),
+        )
+    source = Path("modules/core/db/schema_parts/business.py").read_text(encoding="utf-8")
+    migration = Path("current_migrations/versions/20260920_sku_direct_volume_and_profit_drafts.py").read_text(encoding="utf-8")
+    assert "ck_warehouse_storage_rules_window" in source
+    assert "ck_warehouse_storage_rules_window" in migration
+
+
+def test_platform_profit_draft_reuses_operating_scope_validation():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    section = source[
+        source.index("async def save_platform_sku_profit_draft"):
+        source.index("async def save_platform_sku_profit_estimates")
+    ]
+    assert "await _validate_operating_dimensions(db, values)" in section
+    assert "except IntegrityError" in section

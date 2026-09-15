@@ -1470,7 +1470,9 @@ const percent = (value) =>
 const referenceCostDisplay = (row, kind) => {
   const value = kind === "logistics" ? referenceLogisticsCost(row) : referenceStorageCost(row);
   if (value != null) return money(value);
-  const reason = row.reference_cost_missing_reasons?.[0];
+  const reason = (kind === "logistics"
+    ? row.reference_logistics_missing_reasons
+    : row.reference_storage_missing_reasons)?.[0];
   return ({
     missing_sku_volume: "待补 SKU 体积",
     missing_sku_weight: "待补 SKU 重量",

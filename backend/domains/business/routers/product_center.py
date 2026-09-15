@@ -1677,6 +1677,8 @@ async def list_platform_sku_profit_candidates(
             "reference_storage_cost": reference_storage,
             "reference_cost_status": "ready" if not missing_reasons else "incomplete",
             "reference_cost_missing_reasons": list(dict.fromkeys(missing_reasons)),
+            "reference_logistics_missing_reasons": [reason for reason in missing_reasons if reason in {"missing_logistics_rule", "missing_sku_weight", "ambiguous_logistics_rule"} or (reason == "missing_sku_volume" and reference_logistics is None)],
+            "reference_storage_missing_reasons": [reason for reason in missing_reasons if reason in {"missing_storage_rule", "missing_turnover_class"} or (reason == "missing_sku_volume" and reference_storage is None)],
             "preview": _decimal_payload(preview),
         })
     return {"data": items, "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
@@ -1742,6 +1744,7 @@ async def _platform_profit_missing_fields(
 @router.post("/api/platform-sku-profit/drafts", status_code=201)
 async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     values = body.model_dump()
+    await _validate_operating_dimensions(db, values)
     profile = (await db.execute(select(SkuOperatingProfile).where(
         SkuOperatingProfile.sku_id == values["sku_id"],
         SkuOperatingProfile.platform_code == values["platform_code"],
@@ -1762,13 +1765,17 @@ async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db
     platform = await db.get(DimPlatform, values["platform_code"])
     profile.reference_selling_price = sku.reference_selling_price if sku else None
     profile.platform_fee_rate = platform.default_fee_rate if platform else None
-    await db.flush()
-    await _write_product_center_audit(
-        db, _user, action_type="save_draft", resource_type="platform_sku_profit_draft",
-        resource_id=f"{values['platform_code']}:{values['warehouse_code']}:{values['sku_id']}",
-        changes=values,
-    )
-    await db.commit()
+    try:
+        await db.flush()
+        await _write_product_center_audit(
+            db, _user, action_type="save_draft", resource_type="platform_sku_profit_draft",
+            resource_id=f"{values['platform_code']}:{values['warehouse_code']}:{values['sku_id']}",
+            changes=values,
+        )
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="platform SKU profit draft conflicts with existing configuration") from exc
     return {"profile_id": profile.profile_id, "status": "draft_saved"}
 
 

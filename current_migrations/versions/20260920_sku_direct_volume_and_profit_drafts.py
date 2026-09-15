@@ -67,6 +67,13 @@ def upgrade() -> None:
             """
         )
     )
+    if not _has_constraint("warehouse_storage_rules", "finance", "ck_warehouse_storage_rules_window"):
+        op.create_check_constraint(
+            "ck_warehouse_storage_rules_window",
+            "warehouse_storage_rules",
+            "effective_to IS NULL OR effective_to >= effective_from",
+            schema="finance",
+        )
 
 
 def downgrade() -> None:
