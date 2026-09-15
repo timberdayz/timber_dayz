@@ -692,6 +692,31 @@ async def bind_spu_sku(spu: str, body: SpuSkuBindingRequest, db: AsyncSession = 
     try:
         await _enqueue_spu_projection(db, await db.get(DimSpu, spu))
         await _enqueue_sku_projection(db, await db.get(DimErpSku, body.sku_id))
+        if current_binding is not None:
+            await _write_product_center_audit(
+                db,
+                current_user,
+                action_type="update",
+                resource_type="spu_sku_binding",
+                resource_id=f"{current_binding.spu}:{current_binding.sku_id}",
+                changes={
+                    "effective_from": current_binding.effective_from,
+                    "effective_to": body.effective_from,
+                    "binding_status": "historical",
+                },
+            )
+        await _write_product_center_audit(
+            db,
+            current_user,
+            action_type="create",
+            resource_type="spu_sku_binding",
+            resource_id=f"{row.spu}:{row.sku_id}",
+            changes={
+                "effective_from": row.effective_from,
+                "effective_to": row.effective_to,
+                "binding_status": row.binding_status,
+            },
+        )
         await db.commit()
         await db.refresh(row)
         asyncio.create_task(trigger_pending_projection_delivery())

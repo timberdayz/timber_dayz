@@ -287,6 +287,34 @@ def test_product_master_and_legacy_profit_writes_are_audited_before_commit():
         ), start
 
 
+def test_spu_sku_binding_audits_both_historical_and_new_effective_bindings_before_commit():
+    """A rebinding must preserve effective-dated lineage in the audit transaction."""
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    section = source[
+        source.index("async def bind_spu_sku"):
+        source.index('@router.get("/api/purchase-orders")')
+    ]
+
+    assert section.count("await _write_product_center_audit(") == 2
+    assert 'action_type="update"' in section
+    assert 'action_type="create"' in section
+    assert section.count('resource_type="spu_sku_binding"') == 2
+    assert 'resource_id=f"{current_binding.spu}:{current_binding.sku_id}"' in section
+    assert 'resource_id=f"{row.spu}:{row.sku_id}"' in section
+    assert '"effective_from": current_binding.effective_from' in section
+    assert '"effective_to": body.effective_from' in section
+    assert '"binding_status": "historical"' in section
+    assert '"effective_from": row.effective_from' in section
+    assert '"effective_to": row.effective_to' in section
+    assert '"binding_status": row.binding_status' in section
+    assert section.index("await _write_product_center_audit(") < section.index(
+        "await db.commit()"
+    )
+    assert "BridgeErpSkuKey" not in section
+
+
 def test_product_warehouse_writes_are_audited_in_the_committing_transaction():
     source = Path("backend/domains/business/routers/product_center.py").read_text(
         encoding="utf-8"
