@@ -260,3 +260,39 @@ def test_compatibility_operating_profile_writes_are_audited_in_the_committing_tr
         section = source[source.index(start):source.index(end)]
         audit_index = section.index("await _write_product_center_audit(")
         assert audit_index < section.index("await db.commit()"), start
+
+
+def test_product_master_and_legacy_profit_writes_are_audited_before_commit():
+    """All product-center write paths must persist audit rows atomically."""
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    endpoint_bounds = [
+        ("async def create_spu", '@router.patch("/api/spus/{spu}"'),
+        ("async def update_spu", '@router.post("/api/spus/bulk"'),
+        ("async def bulk_save_spus", '@router.get("/api/skus"'),
+        ("async def create_sku", '@router.patch("/api/skus/{sku_id}"'),
+        ("async def update_sku", 'async def _apply_bulk_sku_spu_binding'),
+        ("async def bulk_save_skus", '@router.get("/api/spus/{spu}/skus"'),
+        ("async def create_cost_assumption", '@router.patch("/api/cost-assumption-profiles/{profile_id}"'),
+        ("async def update_cost_assumption", 'def _serialize_bill'),
+        ("async def create_profit_estimate", "async def save_baseline_product_profit"),
+        ("async def save_baseline_product_profit", "async def initialize_feishu_projection"),
+    ]
+    for start, end in endpoint_bounds:
+        section = source[source.index(start):source.index(end)]
+        assert "await _write_product_center_audit(" in section, start
+        assert section.index("await _write_product_center_audit(") < section.index(
+            "await db.commit()"
+        ), start
+
+
+def test_product_center_audit_helper_records_identity_fields_without_secrets():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    helper = source[source.index("async def _write_product_center_audit"):source.index("def _decimal_payload")]
+    for field in ("user_id", "username", "action_type", "resource_type", "resource_id"):
+        assert field in helper
+    assert "password" not in helper.lower()
+    assert "secret" not in helper.lower()

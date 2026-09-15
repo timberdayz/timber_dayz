@@ -384,6 +384,10 @@ async def create_spu(body: SpuCreateRequest, db: AsyncSession = Depends(get_asyn
     try:
         await db.flush()
         await _enqueue_spu_projection(db, row)
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="spu",
+            resource_id=row.spu, changes=values,
+        )
         await db.commit()
         await db.refresh(row)
         asyncio.create_task(trigger_pending_projection_delivery())
@@ -406,6 +410,10 @@ async def update_spu(spu: str, body: SpuUpdateRequest, db: AsyncSession = Depend
     for key, value in values.items():
         setattr(row, key, value)
     await _enqueue_spu_projection(db, row)
+    await _write_product_center_audit(
+        db, _user, action_type="update", resource_type="spu",
+        resource_id=row.spu, changes=values,
+    )
     await db.commit()
     await db.refresh(row)
     asyncio.create_task(trigger_pending_projection_delivery())
@@ -421,6 +429,7 @@ async def bulk_save_spus(body: SpuBulkRequest, db: AsyncSession = Depends(get_as
     created = 0
     updated = 0
     rows: list[DimSpu] = []
+    row_actions: list[tuple[DimSpu, str, dict]] = []
     try:
         for item in body.items:
             row = await db.get(DimSpu, item.spu)
@@ -437,14 +446,22 @@ async def bulk_save_spus(body: SpuBulkRequest, db: AsyncSession = Depends(get_as
                 row = DimSpu(**values)
                 db.add(row)
                 created += 1
+                action_type = "bulk_create"
             else:
                 for key, value in values.items():
                     setattr(row, key, value)
                 updated += 1
+                action_type = "bulk_update"
             rows.append(row)
+            row_actions.append((row, action_type, values))
         await db.flush()
         for row in rows:
             await _enqueue_spu_projection(db, row)
+        for row, action_type, values in row_actions:
+            await _write_product_center_audit(
+                db, _user, action_type=action_type, resource_type="spu",
+                resource_id=row.spu, changes=values,
+            )
         await db.commit()
         for row in rows:
             await db.refresh(row)
@@ -523,6 +540,10 @@ async def create_sku(body: SkuCreateRequest, db: AsyncSession = Depends(get_asyn
     try:
         await db.flush()
         await _enqueue_sku_projection(db, row)
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="sku",
+            resource_id=str(row.sku_id), changes=body.model_dump(mode="json"),
+        )
         await db.commit()
         await db.refresh(row)
         asyncio.create_task(trigger_pending_projection_delivery())
@@ -540,6 +561,10 @@ async def update_sku(sku_id: int, body: SkuUpdateRequest, db: AsyncSession = Dep
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
     await _enqueue_sku_projection(db, row)
+    await _write_product_center_audit(
+        db, _user, action_type="update", resource_type="sku",
+        resource_id=str(row.sku_id), changes=body.model_dump(exclude_unset=True, mode="json"),
+    )
     await db.commit()
     await db.refresh(row)
     asyncio.create_task(trigger_pending_projection_delivery())
@@ -585,6 +610,7 @@ async def bulk_save_skus(body: SkuBulkRequest, db: AsyncSession = Depends(get_as
     created = 0
     updated = 0
     rows: list[DimErpSku] = []
+    row_actions: list[tuple[DimErpSku, str, dict]] = []
     try:
         for item in body.items:
             values = item.model_dump(exclude_unset=True)
@@ -603,15 +629,23 @@ async def bulk_save_skus(body: SkuBulkRequest, db: AsyncSession = Depends(get_as
                 db.add(row)
                 await db.flush()
                 created += 1
+                action_type = "bulk_create"
             else:
                 for key, value in values.items():
                     setattr(row, key, value)
                 updated += 1
+                action_type = "bulk_update"
             await _apply_bulk_sku_spu_binding(db, row, spu, effective_from)
             rows.append(row)
+            row_actions.append((row, action_type, {**values, **({"spu": spu} if spu else {})}))
         await db.flush()
         for row in rows:
             await _enqueue_sku_projection(db, row)
+        for row, action_type, values in row_actions:
+            await _write_product_center_audit(
+                db, _user, action_type=action_type, resource_type="sku",
+                resource_id=str(row.sku_id), changes=values,
+            )
         await db.commit()
         for row in rows:
             await db.refresh(row)
@@ -913,6 +947,10 @@ async def create_cost_assumption(body: CostAssumptionCreateRequest, db: AsyncSes
     db.add(row)
     await db.flush()
     await FeishuProjectionService(db).enqueue_full_refresh("cost_assumption_created")
+    await _write_product_center_audit(
+        db, _user, action_type="create", resource_type="cost_assumption_profile",
+        resource_id=str(row.profile_id), changes=body.model_dump(mode="json"),
+    )
     await db.commit()
     asyncio.create_task(trigger_pending_projection_delivery())
     await db.refresh(row)
@@ -927,6 +965,10 @@ async def update_cost_assumption(profile_id: int, body: CostAssumptionUpdateRequ
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
     await FeishuProjectionService(db).enqueue_full_refresh("cost_assumption_changed")
+    await _write_product_center_audit(
+        db, _user, action_type="update", resource_type="cost_assumption_profile",
+        resource_id=str(row.profile_id), changes=body.model_dump(exclude_unset=True, mode="json"),
+    )
     await db.commit()
     asyncio.create_task(trigger_pending_projection_delivery())
     return {"profile_id": row.profile_id, "active": row.active, "updated_at": row.updated_at}
@@ -1867,6 +1909,11 @@ async def create_profit_estimate(body: ProfitEstimateCreateRequest, db: AsyncSes
     values["estimated_margin_rate"] = (revenue - costs) / revenue if revenue > 0 else None
     row = SkuProfitEstimate(**values)
     db.add(row)
+    await db.flush()
+    await _write_product_center_audit(
+        db, _user, action_type="create", resource_type="profit_estimate",
+        resource_id=str(row.estimate_id), changes=values,
+    )
     await db.commit()
     await db.refresh(row)
     return {"estimate_id": row.estimate_id, "sku_id": row.sku_id, "estimated_contribution_profit": float(row.estimated_contribution_profit), "estimated_margin_rate": float(row.estimated_margin_rate) if row.estimated_margin_rate is not None else None}
@@ -1886,6 +1933,10 @@ async def save_baseline_product_profit(body: ProfitEstimateSaveRequest, db: Asyn
     try:
         row = await ProductFinanceService(db).save_profit_estimate(body.model_dump())
         await FeishuProjectionService(db).enqueue("sku", str(row.sku_id), {"sku_id": row.sku_id, "reason": "baseline_profit_saved", "estimate_id": row.estimate_id})
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="profit_estimate",
+            resource_id=str(row.estimate_id), changes=body.model_dump(mode="json"),
+        )
         await db.commit()
         asyncio.create_task(trigger_pending_projection_delivery())
     except ValueError as exc:
