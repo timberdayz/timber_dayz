@@ -555,3 +555,14 @@ def test_missing_logistics_rate_is_reported_as_rule_configuration_not_sku_volume
         source.index('@router.post("/api/platform-sku-profit/preview")')
     ]
     assert 'cost_inputs["reference_logistics_rule"].freight_unit_rate is None' in candidates
+
+
+def test_platform_profit_projection_prefers_immutable_estimate_reference_costs():
+    source = Path("backend/services/feishu_projection_service.py").read_text(encoding="utf-8")
+    payload = source[
+        source.index("async def _platform_sku_profit_payload"):
+        source.index("async def process_pending")
+    ]
+    assert 'SkuProfitEstimate.calculation_basis == "estimated"' in payload
+    assert 'estimate.expected_logistics_cost' in payload
+    assert 'estimate.expected_storage_cost' in payload

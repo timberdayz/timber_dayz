@@ -1791,6 +1791,7 @@ async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db
 @router.post("/api/platform-sku-profit/estimates", status_code=201)
 async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     values = body.model_dump()
+    await _validate_operating_dimensions(db, values)
     try:
         preview = await ProductFinanceService(db).preview_platform_sku_profit(values)
     except ValueError as exc:
@@ -1821,8 +1822,8 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
         row = SkuProfitEstimate(
             sku_id=values["sku_id"], operating_profile_id=profile.profile_id, platform_code=values["platform_code"], warehouse_code=values["warehouse_code"],
             assumption_version=values.get("assumption_version") or "platform-profit-workbench", scenario="base", calculation_basis=basis,
-            selling_price=values.get("expected_selling_price") or profile.reference_selling_price, coupon_amount=values.get("seller_coupon_amount", 0),
-            expected_selling_price=values.get("expected_selling_price") or profile.reference_selling_price, competitor_price=values.get("competitor_price"), expected_ad_rate=values.get("expected_ad_rate", 0),
+            selling_price=values["expected_selling_price"] if values.get("expected_selling_price") is not None else profile.reference_selling_price, coupon_amount=values.get("seller_coupon_amount", 0),
+            expected_selling_price=values["expected_selling_price"] if values.get("expected_selling_price") is not None else profile.reference_selling_price, competitor_price=values.get("competitor_price"), expected_ad_rate=values.get("expected_ad_rate", 0),
             platform_fee=section.get("platform_fee", preview["expected"].get("platform_fee")), expected_ad_cost=preview["expected"].get("ad_cost"),
             expected_logistics_cost=preview["expected"].get("logistics_cost"), actual_logistics_cost=preview.get("actual_logistics_cost"),
             expected_storage_cost=preview["expected"].get("storage_cost"), actual_storage_cost=None,
@@ -1971,8 +1972,9 @@ async def list_sku_operating_profiles(
 
 
 async def _validate_operating_dimensions(db: AsyncSession, values: dict) -> None:
-    if await db.get(DimErpSku, values["sku_id"]) is None:
-        raise HTTPException(status_code=404, detail="SKU not found")
+    sku = await db.get(DimErpSku, values["sku_id"])
+    if sku is None or sku.status != "active":
+        raise HTTPException(status_code=422, detail="SKU not found or inactive")
     platform = await db.get(DimPlatform, values["platform_code"])
     if platform is None or not platform.is_active or platform.platform_role != "sales":
         raise HTTPException(status_code=422, detail="active sales platform not found")

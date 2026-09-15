@@ -259,7 +259,10 @@ class FeishuProjectionService:
         estimate = (
             await self.db.execute(
                 select(SkuProfitEstimate)
-                .where(SkuProfitEstimate.operating_profile_id == profile_id)
+                .where(
+                    SkuProfitEstimate.operating_profile_id == profile_id,
+                    SkuProfitEstimate.calculation_basis == "estimated",
+                )
                 .order_by(SkuProfitEstimate.estimate_as_of.desc())
             )
         ).scalars().first()
@@ -291,8 +294,8 @@ class FeishuProjectionService:
             "预计售价": float(profile.expected_selling_price) if profile.expected_selling_price is not None else None,
             "优惠券": float(profile.seller_coupon_amount) if profile.seller_coupon_amount is not None else None,
             "采购成本": float(estimate.purchase_cost) if estimate and estimate.purchase_cost is not None else None,
-            "预计物流成本": float(profile.expected_logistics_cost) if profile.expected_logistics_cost is not None else None,
-            "预计仓储成本": float(profile.expected_storage_cost) if profile.expected_storage_cost is not None else None,
+            "预计物流成本": float(estimate.expected_logistics_cost) if estimate and estimate.expected_logistics_cost is not None else float(profile.expected_logistics_cost) if profile.expected_logistics_cost is not None else None,
+            "预计仓储成本": float(estimate.expected_storage_cost) if estimate and estimate.expected_storage_cost is not None else float(profile.expected_storage_cost) if profile.expected_storage_cost is not None else None,
             "实际物流成本": float(actual_logistics_cost) if actual_logistics_cost is not None else float(estimate.logistics_cost) if estimate and estimate.logistics_cost_source == "confirmed_logistics_bill" and estimate.logistics_cost is not None else None,
             "实际仓储成本": None,
             "平台费率": float(profile.platform_fee_rate) if profile.platform_fee_rate is not None else None,

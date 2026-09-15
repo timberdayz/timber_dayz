@@ -740,7 +740,7 @@ class PlatformSkuProfitPreviewRequest(BaseModel):
     warehouse_code: str = Field(min_length=1, max_length=128)
     transport_type: str = Field(pattern=r"^(sea|air|rail)$")
     competitor_price: Optional[float] = Field(default=None, ge=0)
-    expected_selling_price: Optional[float] = Field(default=None, ge=0)
+    expected_selling_price: Optional[float] = Field(default=None, gt=0)
     seller_coupon_amount: float = Field(default=0, ge=0)
     expected_ad_rate: float = Field(default=0, ge=0, le=1)
 
