@@ -1144,6 +1144,10 @@ async def create_product_warehouse(body: ProductWarehouseCreateRequest, db: Asyn
     row = DimWarehouse(**body.model_dump())
     db.add(row)
     try:
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="warehouse",
+            resource_id=row.warehouse_code, changes=body.model_dump(mode="json"),
+        )
         await db.commit()
         await db.refresh(row)
     except IntegrityError as exc:
@@ -1157,8 +1161,13 @@ async def update_product_warehouse(warehouse_code: str, body: ProductWarehouseUp
     row = await db.get(DimWarehouse, warehouse_code)
     if row is None:
         raise HTTPException(status_code=404, detail="warehouse not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    values = body.model_dump(exclude_unset=True)
+    for key, value in values.items():
         setattr(row, key, value)
+    await _write_product_center_audit(
+        db, _user, action_type="update", resource_type="warehouse",
+        resource_id=row.warehouse_code, changes=values,
+    )
     await db.commit()
     await db.refresh(row)
     return {"warehouse_code": row.warehouse_code, "warehouse_name": row.warehouse_name, "country_code": row.country_code, "country_name": row.country_name, "region": row.region, "status": row.status}

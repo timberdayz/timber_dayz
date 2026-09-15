@@ -287,6 +287,20 @@ def test_product_master_and_legacy_profit_writes_are_audited_before_commit():
         ), start
 
 
+def test_product_warehouse_writes_are_audited_in_the_committing_transaction():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    endpoint_bounds = [
+        ("async def create_product_warehouse", '@router.patch("/api/product-warehouses/{warehouse_code}"'),
+        ("async def update_product_warehouse", '@router.patch("/api/platforms/{platform_code}/fee-rate"'),
+    ]
+    for start, end in endpoint_bounds:
+        section = source[source.index(start):source.index(end)]
+        audit_index = section.index("await _write_product_center_audit(")
+        assert audit_index < section.index("await db.commit()"), start
+
+
 def test_product_center_audit_helper_records_identity_fields_without_secrets():
     source = Path("backend/domains/business/routers/product_center.py").read_text(
         encoding="utf-8"
