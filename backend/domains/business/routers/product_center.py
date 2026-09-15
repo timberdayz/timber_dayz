@@ -1619,7 +1619,7 @@ async def list_platform_sku_profit_candidates(
         assigned_spu = binding_by_sku.get(row.sku_id)
         assigned = spu_by_code.get(assigned_spu) if assigned_spu else None
         cost_inputs = cost_inputs_by_sku[row.sku_id]
-        purchase_cost = cost_inputs["purchase_cost"] or row.default_purchase_cost
+        purchase_cost = cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost
         reference_logistics = cost_inputs["reference_logistics_cost"]
         reference_storage = cost_inputs["reference_storage_cost"]
         actual_logistics = cost_inputs["actual_logistics_cost"]

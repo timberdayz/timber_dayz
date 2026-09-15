@@ -47,6 +47,9 @@ _CNY_BILLING_UNITS = {
 
 
 def _unit_volume_cbm(sku: DimErpSku) -> Decimal:
+    """Return the canonical bill-allocation volume, defaulting safely to zero."""
+    if sku.unit_volume_cbm is not None:
+        return Decimal(str(sku.unit_volume_cbm))
     dimensions = (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)
     if any(value is None for value in dimensions):
         return Decimal("0")

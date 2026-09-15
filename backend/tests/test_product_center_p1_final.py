@@ -188,7 +188,7 @@ def test_candidate_purchase_cost_falls_back_only_when_foreign_base_cost_is_missi
 
     # The prefetch map contains only valid CNY-derived costs. A missing foreign
     # conversion must therefore use the SKU default, or remain incomplete.
-    assert 'purchase_cost = cost_inputs["purchase_cost"] or row.default_purchase_cost' in candidate_section
+    assert 'purchase_cost = cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost' in candidate_section
     assert 'purchase_cost=purchase_cost' in candidate_section
 
 
@@ -490,6 +490,10 @@ def test_direct_sku_volume_is_the_primary_reference_cost_measurement():
     legacy = DimErpSku(package_length_cm=20, package_width_cm=10, package_height_cm=5)
     assert _reference_unit_volume_cbm(legacy).as_tuple() == Decimal("0.001").as_tuple()
 
+    from backend.services.product_finance_service import _unit_volume_cbm
+
+    assert _unit_volume_cbm(sku).as_tuple() == Decimal("0.0125").as_tuple()
+
 
 def test_platform_profit_version_refuses_incomplete_inputs_with_structured_missing_fields():
     source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
@@ -555,6 +559,15 @@ def test_missing_logistics_rate_is_reported_as_rule_configuration_not_sku_volume
         source.index('@router.post("/api/platform-sku-profit/preview")')
     ]
     assert 'cost_inputs["reference_logistics_rule"].freight_unit_rate is None' in candidates
+
+
+def test_candidate_preserves_valid_zero_purchase_cost_before_sku_fallback():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    candidates = source[
+        source.index("async def list_platform_sku_profit_candidates"):
+        source.index('@router.post("/api/platform-sku-profit/preview")')
+    ]
+    assert 'cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost' in candidates
 
 
 def test_platform_profit_projection_prefers_immutable_estimate_reference_costs():
