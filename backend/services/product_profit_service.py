@@ -9,6 +9,27 @@ MEASURE_QUANTUM = Decimal("0.001")
 VOLUME_QUANTUM = Decimal("0.000001")
 UNIT_COST_QUANTUM = Decimal("0.000001")
 
+TURNOVER_DAYS = {"fast": 30, "normal": 60, "slow": 90}
+
+
+def reference_storage_days(turnover_class: str | None) -> int | None:
+    """Return the company SKU turnover horizon in days."""
+    return TURNOVER_DAYS.get(turnover_class) if turnover_class is not None else None
+
+
+def build_reference_storage_cost(*, unit_volume_cbm: Decimal | int | float | None,
+                                 unit_rate_cny_per_cbm_month: Decimal | int | float | None,
+                                 turnover_class: str | None) -> Decimal | None:
+    """Compute per-unit CNY storage reference; missing inputs remain missing."""
+    days = reference_storage_days(turnover_class)
+    if unit_volume_cbm is None or unit_rate_cny_per_cbm_month is None or days is None:
+        return None
+    volume = Decimal(str(unit_volume_cbm))
+    rate = Decimal(str(unit_rate_cny_per_cbm_month))
+    if volume < 0 or rate < 0:
+        raise ValueError("storage volume and rate must be non-negative")
+    return (volume * rate * Decimal(days) / Decimal("30")).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+
 
 class BillTotalMismatchError(ValueError):
     pass
@@ -118,30 +139,45 @@ def build_platform_profit_preview(
     damage_rate: Decimal | int | float | None,
 ) -> dict[str, dict[str, Decimal | str | None]]:
     """Build side-by-side expected and actual-cost recost profit results."""
-    selling_price = _money(expected_selling_price)
-    coupon = _money(seller_coupon_amount)
-    revenue = _money(selling_price - coupon)
-    purchase = _money(purchase_cost)
-    expected_logistics = _money(expected_logistics_cost)
-    expected_storage = _money(expected_storage_cost)
-    platform_fee = _money(revenue * Decimal(str(platform_fee_rate or 0)))
-    ad_cost = _money(revenue * Decimal(str(expected_ad_rate or 0)))
-    return_loss = _money(revenue * Decimal(str(return_rate or 0)))
-    damage_loss = _money(revenue * Decimal(str(damage_rate or 0)))
+    def optional_money(value: Decimal | int | float | None) -> Decimal | None:
+        return _money(value) if value is not None else None
 
-    expected_profit = _money(
-        revenue - purchase - expected_logistics - expected_storage - platform_fee - ad_cost - return_loss - damage_loss
+    def calculated_profit(*values: Decimal | None) -> Decimal | None:
+        if any(value is None for value in values):
+            return None
+        revenue_value, *costs = values
+        return _money(revenue_value - sum(costs, Decimal("0")))
+
+    selling_price = optional_money(expected_selling_price)
+    coupon = _money(seller_coupon_amount)
+    revenue = _money(selling_price - coupon) if selling_price is not None else None
+    purchase = optional_money(purchase_cost)
+    expected_logistics = optional_money(expected_logistics_cost)
+    expected_storage = optional_money(expected_storage_cost)
+    platform_fee = _money(revenue * Decimal(str(platform_fee_rate))) if revenue is not None and platform_fee_rate is not None else None
+    ad_cost = _money(revenue * Decimal(str(expected_ad_rate))) if revenue is not None and expected_ad_rate is not None else None
+    return_loss = _money(revenue * Decimal(str(return_rate))) if revenue is not None and return_rate is not None else None
+    damage_loss = _money(revenue * Decimal(str(damage_rate))) if revenue is not None and damage_rate is not None else None
+
+    expected_profit = calculated_profit(
+        revenue, purchase, expected_logistics, expected_storage, platform_fee, ad_cost, return_loss, damage_loss
     )
-    actual_logistics = _money(actual_logistics_cost) if actual_logistics_cost is not None else expected_logistics
-    actual_storage = _money(actual_storage_cost) if actual_storage_cost is not None else expected_storage
-    actual_profit = _money(
-        revenue - purchase - actual_logistics - actual_storage - platform_fee - ad_cost - return_loss - damage_loss
+    actual_logistics = optional_money(actual_logistics_cost) if actual_logistics_cost is not None else expected_logistics
+    actual_storage = optional_money(actual_storage_cost) if actual_storage_cost is not None else expected_storage
+    actual_profit = calculated_profit(
+        revenue, purchase, actual_logistics, actual_storage, platform_fee, ad_cost, return_loss, damage_loss
     )
     has_actual_logistics = actual_logistics_cost is not None
     has_actual_storage = actual_storage_cost is not None
-    completeness = "actual" if has_actual_logistics and has_actual_storage else "mixed" if has_actual_logistics or has_actual_storage else "estimated"
-    logistics_variance = _money(actual_logistics - expected_logistics) if has_actual_logistics else None
-    storage_variance = _money(actual_storage - expected_storage) if has_actual_storage else None
+    complete_inputs = expected_profit is not None
+    completeness = (
+        "incomplete" if not complete_inputs
+        else "actual" if has_actual_logistics and has_actual_storage
+        else "mixed" if has_actual_logistics or has_actual_storage
+        else "estimated"
+    )
+    logistics_variance = _money(actual_logistics - expected_logistics) if has_actual_logistics and actual_logistics is not None and expected_logistics is not None else None
+    storage_variance = _money(actual_storage - expected_storage) if has_actual_storage and actual_storage is not None and expected_storage is not None else None
     total_variance = None
     if logistics_variance is not None or storage_variance is not None:
         total_variance = _money((logistics_variance or 0) + (storage_variance or 0))
@@ -156,8 +192,8 @@ def build_platform_profit_preview(
             "return_loss": return_loss,
             "damage_loss": damage_loss,
             "profit": expected_profit,
-            "margin_rate": (expected_profit / revenue).quantize(Decimal("0.00000001")) if revenue else Decimal("0"),
-            "competitor_price_difference": _money(selling_price - Decimal(str(competitor_price))) if competitor_price is not None else None,
+            "margin_rate": (expected_profit / revenue).quantize(Decimal("0.00000001")) if expected_profit is not None and revenue else None,
+            "competitor_price_difference": _money(selling_price - Decimal(str(competitor_price))) if competitor_price is not None and selling_price is not None else None,
         },
         "actual_recost": {
             "net_revenue": revenue,
@@ -166,7 +202,7 @@ def build_platform_profit_preview(
             "storage_cost": actual_storage,
             "storage_cost_source": "actual_storage" if has_actual_storage else "expected_fallback",
             "profit": actual_profit,
-            "margin_rate": (actual_profit / revenue).quantize(Decimal("0.00000001")) if revenue else Decimal("0"),
+            "margin_rate": (actual_profit / revenue).quantize(Decimal("0.00000001")) if actual_profit is not None and revenue else None,
             "completeness": completeness,
         },
         "variance": {

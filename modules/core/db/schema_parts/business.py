@@ -770,7 +770,7 @@ class LogisticsProviderRule(Base):
     cargo_class = Column(String(64), nullable=True)
     is_sensitive = Column(Boolean, nullable=False, default=False)
     billing_basis = Column(String(32), nullable=False, default="volume")
-    billing_unit = Column(String(32), nullable=False, default="RMB/CBM")
+    billing_unit = Column(String(32), nullable=False, default="CNY/CBM")
     freight_unit_rate = Column(Numeric(18, 6), nullable=True)
     sensitive_surcharge_mode = Column(String(32), nullable=False, default="manual")
     sensitive_surcharge_rate = Column(Numeric(18, 6), nullable=True)
@@ -787,6 +787,36 @@ class LogisticsProviderRule(Base):
     __table_args__ = (
         CheckConstraint("transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')", name="ck_logistics_provider_rules_transport_type"),
         Index("ix_logistics_provider_rules_scope", "logistics_provider", "warehouse_code", "transport_type", "effective_from"),
+        {"schema": "finance"},
+    )
+
+
+class WarehouseStorageRule(Base):
+    """Versioned CNY volume storage tariff for a receiving warehouse."""
+
+    __tablename__ = "warehouse_storage_rules"
+
+    rule_id = Column(Integer, primary_key=True, autoincrement=True)
+    warehouse_code = Column(String(128), ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"), nullable=False)
+    billing_basis = Column(String(32), nullable=False, default="volume")
+    billing_unit = Column(String(32), nullable=False, default="CNY/CBM/month")
+    unit_rate_cny = Column(Numeric(18, 6), nullable=False)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    status = Column(String(16), nullable=False, default="active")
+    source = Column(String(128), nullable=True)
+    version = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("billing_basis = 'volume'", name="ck_warehouse_storage_rules_basis"),
+        CheckConstraint("billing_unit = 'CNY/CBM/month'", name="ck_warehouse_storage_rules_unit"),
+        CheckConstraint("unit_rate_cny >= 0", name="ck_warehouse_storage_rules_rate"),
+        CheckConstraint("status IN ('active', 'inactive')", name="ck_warehouse_storage_rules_status"),
+        Index("uq_warehouse_storage_rules_current", "warehouse_code", unique=True, postgresql_where=text("status = 'active' AND effective_to IS NULL")),
+        Index("ix_warehouse_storage_rules_lookup", "warehouse_code", "effective_from"),
         {"schema": "finance"},
     )
 
@@ -953,6 +983,9 @@ class SkuProfitEstimate(Base):
     logistics_cost_variance = Column(Numeric(18, 2), nullable=True)
     storage_cost_variance = Column(Numeric(18, 2), nullable=True)
     total_cost_variance = Column(Numeric(18, 2), nullable=True)
+    reference_storage_days = Column(Integer, nullable=True)
+    storage_rule_id = Column(Integer, ForeignKey("finance.warehouse_storage_rules.rule_id", ondelete="SET NULL"), nullable=True)
+    storage_rule_version = Column(String(64), nullable=True)
     cost_completeness = Column(String(32), nullable=False, default="incomplete")
     confidence_level = Column(String(16), nullable=False, default="medium")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
