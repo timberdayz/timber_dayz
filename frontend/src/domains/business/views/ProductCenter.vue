@@ -418,6 +418,12 @@
                     ><el-option label="普通货" value="normal" /><el-option
                       label="敏感货 M"
                       value="sensitive" /></el-select></template></el-table-column
+              ><el-table-column label="默认规则" width="95"
+                ><template #default="{ row }"
+                  ><el-switch
+                    v-model="row.is_default"
+                    @change="markRuleDirty(row)"
+                  /></template></el-table-column
               ><el-table-column label="计费方式"
                 ><template #default="{ row }"
                   ><el-select v-model="row.billing_basis" size="small"
@@ -894,6 +900,7 @@ const addRuleRow = () =>
     warehouse_code: "",
     transport_type: "sea",
     cargo_class: "normal",
+    is_default: false,
     billing_basis: "volume",
     freight_unit_rate: null,
     effective_from: "",
@@ -1346,14 +1353,15 @@ const matchProviderRule = (isSensitive, warehouseCode = batchDrawer.form.warehou
        (!rule.warehouse_code || rule.warehouse_code === warehouseCode) &&
       (!rule.transport_type || rule.transport_type === form.transport_type),
   );
-  return (
-    candidates.sort((left, right) => {
-      const score = (rule) =>
-         Number(rule.warehouse_code === warehouseCode) * 2 +
-        Number(rule.transport_type === form.transport_type);
-      return score(right) - score(left);
-    })[0] || null
-  );
+  if (!candidates.length) return null;
+  const score = (rule) =>
+    Number(rule.warehouse_code === warehouseCode) * 2 +
+    Number(rule.transport_type === form.transport_type);
+  const highestScore = Math.max(...candidates.map(score));
+  const bestRules = candidates.filter((rule) => score(rule) === highestScore);
+  if (bestRules.length === 1) return bestRules[0];
+  const defaultRules = bestRules.filter((rule) => rule.is_default);
+  return defaultRules.length === 1 ? defaultRules[0] : null;
 };
 const applyRuleToLine = (line, { force = false } = {}) => {
   if (!force && line.rate_source === "manual") return;

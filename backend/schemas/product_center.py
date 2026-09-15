@@ -531,6 +531,7 @@ class LogisticsProviderRuleCreateRequest(BaseModel):
     transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     cargo_class: Optional[str] = Field(default=None, max_length=64)
     is_sensitive: bool = False
+    is_default: bool = False
     billing_basis: str = Field(default="volume", pattern=r"^(volume|weight|quantity|fixed)$")
     billing_unit: Optional[str] = Field(default=None, max_length=32)
     freight_unit_rate: Optional[float] = Field(default=None, ge=0)
@@ -560,6 +561,7 @@ class LogisticsProviderRuleUpdateRequest(BaseModel):
     transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     cargo_class: Optional[str] = Field(default=None, max_length=64)
     is_sensitive: Optional[bool] = None
+    is_default: Optional[bool] = None
     billing_basis: Optional[str] = Field(default=None, pattern=r"^(volume|weight|quantity|fixed)$")
     billing_unit: Optional[str] = Field(default=None, max_length=32)
     freight_unit_rate: Optional[float] = Field(default=None, ge=0)

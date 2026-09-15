@@ -770,6 +770,7 @@ class LogisticsProviderRule(Base):
     transport_type = Column(String(64), nullable=True)
     cargo_class = Column(String(64), nullable=True)
     is_sensitive = Column(Boolean, nullable=False, default=False)
+    is_default = Column(Boolean, nullable=False, default=False)
     billing_basis = Column(String(32), nullable=False, default="volume")
     billing_unit = Column(String(32), nullable=False, default="CNY/CBM")
     freight_unit_rate = Column(Numeric(18, 6), nullable=True)
@@ -788,6 +789,15 @@ class LogisticsProviderRule(Base):
     __table_args__ = (
         CheckConstraint("transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')", name="ck_logistics_provider_rules_transport_type"),
         Index("ix_logistics_provider_rules_scope", "logistics_provider", "warehouse_code", "transport_type", "effective_from"),
+        Index(
+            "uq_logistics_provider_rules_default_scope",
+            text("COALESCE(warehouse_code, '')"),
+            text("COALESCE(transport_type, '')"),
+            text("COALESCE(cargo_class, '')"),
+            "is_sensitive",
+            unique=True,
+            postgresql_where=text("is_default AND status = 'active' AND effective_to IS NULL"),
+        ),
         {"schema": "finance"},
     )
 

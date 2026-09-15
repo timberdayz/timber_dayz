@@ -15,6 +15,112 @@ from backend.schemas.product_center import (
 )
 
 
+def test_reference_logistics_rule_uses_the_only_default_at_highest_specificity():
+    """A configured default resolves same-priority provider tariffs deterministically."""
+    from backend.services.product_finance_service import ProductFinanceService
+    from modules.core.db import LogisticsProviderRule
+
+    common = {
+        "warehouse_code": "US-WH-1",
+        "transport_type": "sea",
+        "cargo_class": "normal",
+        "is_sensitive": False,
+    }
+    first = LogisticsProviderRule(rule_id=1, logistics_provider="Provider A", **common)
+    default = LogisticsProviderRule(
+        rule_id=2, logistics_provider="Provider B", is_default=True, **common
+    )
+
+    assert (
+        ProductFinanceService._select_reference_logistics_rule(
+            [first, default], "US-WH-1", "sea"
+        )
+        is default
+    )
+
+
+def test_reference_logistics_rule_remains_unresolved_for_zero_or_multiple_defaults():
+    from backend.services.product_finance_service import ProductFinanceService
+    from modules.core.db import LogisticsProviderRule
+
+    common = {
+        "warehouse_code": "US-WH-1",
+        "transport_type": "sea",
+        "cargo_class": "normal",
+        "is_sensitive": False,
+    }
+    first = LogisticsProviderRule(rule_id=1, logistics_provider="Provider A", **common)
+    second = LogisticsProviderRule(rule_id=2, logistics_provider="Provider B", **common)
+    assert ProductFinanceService._select_reference_logistics_rule(
+        [first, second], "US-WH-1", "sea"
+    ) is None
+
+    first.is_default = True
+    second.is_default = True
+    assert ProductFinanceService._select_reference_logistics_rule(
+        [first, second], "US-WH-1", "sea"
+    ) is None
+
+
+def test_logistics_provider_rule_default_is_part_of_create_and_patch_contracts():
+    from backend.schemas.product_center import LogisticsProviderRuleCreateRequest
+
+    create = LogisticsProviderRuleCreateRequest(
+        logistics_provider="Provider A",
+        effective_from=date(2026, 9, 19),
+        is_default=True,
+    )
+    update = LogisticsProviderRuleUpdateRequest(is_default=False)
+
+    assert create.is_default is True
+    assert update.model_dump(exclude_unset=True) == {"is_default": False}
+
+
+def test_default_provider_rule_has_a_forward_only_schema_migration():
+    migration = Path(
+        "current_migrations/versions/20260919_logistics_rule_default.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'revision = "current_schema_20260919_logistics_rule_default"' in migration
+    assert 'down_revision = "current_schema_20260918_logistics_bill_currency_cny"' in migration
+    assert '"is_default"' in migration
+    assert "uq_logistics_provider_rules_default_scope" in migration
+
+
+def test_feishu_projection_initialize_and_retry_are_audited_before_commit_without_credentials():
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    endpoints = [
+        (
+            "async def initialize_feishu_projection",
+            '@router.get("/api/feishu-projection/status")',
+            'action_type="initialize"',
+        ),
+        (
+            "async def retry_failed_feishu_projection",
+            '@router.get("/api/spu-operating")',
+            'action_type="retry"',
+        ),
+    ]
+    for start, end, action in endpoints:
+        section = source[source.index(start) : source.index(end)]
+        assert "await _write_product_center_audit(" in section
+        assert action in section
+        assert 'resource_type="feishu_projection"' in section
+        assert section.index("await _write_product_center_audit(") < section.index(
+            "await db.commit()"
+        )
+
+    audit_sections = [
+        source[source.index(start) : source.index(end)] for start, end, _action in endpoints
+    ]
+    for section in audit_sections:
+        audit_call = section[section.index("await _write_product_center_audit(") :]
+        assert "app_secret" not in audit_call.lower()
+        assert "tenant_access_token" not in audit_call.lower()
+
+
 @pytest.mark.parametrize("request_type,payload", [
     (LogisticsBillCreateRequest, {"bill_no": "B-1", "bill_date": date(2026, 9, 16), "total_amount": 1, "currency": "USD"}),
     (LogisticsBillUpdateRequest, {"currency": "USD"}),

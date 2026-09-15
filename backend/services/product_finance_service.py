@@ -376,9 +376,10 @@ class ProductFinanceService:
             for rule in rules
             if specificity(rule) == highest_specificity
         ]
-        if len(best_rules) != 1:
-            return None
-        return best_rules[0]
+        if len(best_rules) == 1:
+            return best_rules[0]
+        default_rules = [rule for rule in best_rules if rule.is_default]
+        return default_rules[0] if len(default_rules) == 1 else None
 
     @staticmethod
     def _reference_logistics_from_rule(

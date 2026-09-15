@@ -150,3 +150,14 @@ test("仓储规则历史行锁定费率和生效日期，新行才可编辑", ()
   assert.match(source, /v-model="row\.unit_rate_cny"[^>]*:disabled="!row\.__new"/);
   assert.match(source, /v-model="row\.effective_from"[^>]*:disabled="!row\.__new"/);
 });
+
+test("物流服务商规则允许维护默认规则且前端不会任意选择同优先级费率", () => {
+  assert.match(source, /v-model="row\.is_default"/);
+  assert.match(source, /默认规则/);
+  const matcher = source.slice(
+    source.indexOf("const matchProviderRule"),
+    source.indexOf("const applyRuleToLine"),
+  );
+  assert.match(matcher, /is_default/);
+  assert.doesNotMatch(matcher, /\}\)\[0\] \|\| null/);
+});

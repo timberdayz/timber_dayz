@@ -879,7 +879,44 @@ async def get_purchase_order(po_id: str, db: AsyncSession = Depends(get_async_db
 
 
 def _serialize_provider_rule(row: LogisticsProviderRule) -> dict:
-    return {"rule_id": row.rule_id, "logistics_provider": row.logistics_provider, "warehouse_code": row.warehouse_code, "transport_type": row.transport_type, "cargo_class": row.cargo_class, "is_sensitive": row.is_sensitive, "billing_basis": row.billing_basis, "billing_unit": row.billing_unit, "freight_unit_rate": float(row.freight_unit_rate) if row.freight_unit_rate is not None else None, "sensitive_surcharge_mode": row.sensitive_surcharge_mode, "sensitive_surcharge_rate": float(row.sensitive_surcharge_rate) if row.sensitive_surcharge_rate is not None else None, "currency": row.currency, "effective_from": row.effective_from, "effective_to": row.effective_to, "status": row.status, "source": row.source, "version": row.version, "notes": row.notes}
+    return {"rule_id": row.rule_id, "logistics_provider": row.logistics_provider, "warehouse_code": row.warehouse_code, "transport_type": row.transport_type, "cargo_class": row.cargo_class, "is_sensitive": row.is_sensitive, "is_default": row.is_default, "billing_basis": row.billing_basis, "billing_unit": row.billing_unit, "freight_unit_rate": float(row.freight_unit_rate) if row.freight_unit_rate is not None else None, "sensitive_surcharge_mode": row.sensitive_surcharge_mode, "sensitive_surcharge_rate": float(row.sensitive_surcharge_rate) if row.sensitive_surcharge_rate is not None else None, "currency": row.currency, "effective_from": row.effective_from, "effective_to": row.effective_to, "status": row.status, "source": row.source, "version": row.version, "notes": row.notes}
+
+
+def _same_nullable_scope(column, value):
+    return column.is_(None) if value is None else column == value
+
+
+async def _ensure_unambiguous_default_provider_rule(
+    db: AsyncSession,
+    values: dict,
+    *,
+    excluding_rule_id: int | None = None,
+) -> None:
+    """Reject overlapping active defaults for a tariff scope before persistence."""
+    if not values.get("is_default") or values.get("status") != "active":
+        return
+    new_effective_to = values.get("effective_to") or date.max
+    statement = select(LogisticsProviderRule).where(
+        LogisticsProviderRule.is_default.is_(True),
+        LogisticsProviderRule.status == "active",
+        _same_nullable_scope(LogisticsProviderRule.warehouse_code, values.get("warehouse_code")),
+        _same_nullable_scope(LogisticsProviderRule.transport_type, values.get("transport_type")),
+        _same_nullable_scope(LogisticsProviderRule.cargo_class, values.get("cargo_class")),
+        LogisticsProviderRule.is_sensitive == values.get("is_sensitive", False),
+    ).with_for_update()
+    if excluding_rule_id is not None:
+        statement = statement.where(LogisticsProviderRule.rule_id != excluding_rule_id)
+    existing_rules = (await db.execute(statement)).scalars().all()
+    for existing_rule in existing_rules:
+        existing_effective_to = existing_rule.effective_to or date.max
+        if (
+            existing_rule.effective_from <= new_effective_to
+            and values["effective_from"] <= existing_effective_to
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="only one default logistics provider rule may be active for this scope",
+            )
 
 
 @router.get("/api/logistics-provider-rules")
@@ -907,6 +944,7 @@ async def list_logistics_provider_rules(provider: str | None = Query(None), ware
 async def create_logistics_provider_rule(body: LogisticsProviderRuleCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     if body.warehouse_code and await db.get(DimWarehouse, body.warehouse_code) is None:
         raise HTTPException(status_code=422, detail="warehouse not found")
+    await _ensure_unambiguous_default_provider_rule(db, body.model_dump())
     row = LogisticsProviderRule(**body.model_dump(), currency="CNY")
     db.add(row)
     try:
@@ -931,6 +969,17 @@ async def update_logistics_provider_rule(rule_id: int, body: LogisticsProviderRu
     values = body.model_dump(exclude_unset=True)
     if values.get("warehouse_code") and await db.get(DimWarehouse, values["warehouse_code"]) is None:
         raise HTTPException(status_code=422, detail="warehouse not found")
+    candidate = {
+        field: getattr(row, field)
+        for field in (
+            "warehouse_code", "transport_type", "cargo_class", "is_sensitive",
+            "is_default", "effective_from", "effective_to", "status",
+        )
+    }
+    candidate.update(values)
+    await _ensure_unambiguous_default_provider_rule(
+        db, candidate, excluding_rule_id=row.rule_id
+    )
     for key, value in values.items():
         setattr(row, key, value)
     await _write_product_center_audit(
@@ -1987,6 +2036,11 @@ async def initialize_feishu_projection(body: FeishuProjectionInitializeRequest, 
     client = FeishuProjectionClient()
     try:
         config = await FeishuProjectionService(db).initialize_tables(client, spu_table_id, sku_table_id, platform_sku_profit_table_id)
+        await _write_product_center_audit(
+            db, _user, action_type="initialize", resource_type="feishu_projection",
+            resource_id=config.provider_code,
+            changes={"status": config.status, "projection_tables_initialized": True},
+        )
         await db.commit()
     except RuntimeError as exc:
         await db.rollback()
@@ -2002,6 +2056,10 @@ async def get_feishu_projection_status(db: AsyncSession = Depends(get_async_db))
 @router.post("/api/feishu-projection/retry-failed")
 async def retry_failed_feishu_projection(db: AsyncSession = Depends(get_async_db), _user=Depends(_require_projection_admin)):
     retried = await FeishuProjectionService(db).retry_failed()
+    await _write_product_center_audit(
+        db, _user, action_type="retry", resource_type="feishu_projection",
+        resource_id="failed_tasks", changes={"retried": retried},
+    )
     await db.commit()
     return {"retried": retried}
 
