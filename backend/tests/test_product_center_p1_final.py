@@ -54,15 +54,32 @@ def test_logistics_provider_rule_patch_derives_unit_only_when_basis_changes():
     }
 
 
-def test_finance_purchase_cost_queries_only_use_cny_or_cny_base_amount():
+def test_finance_purchase_cost_queries_require_positive_cny_base_amount_for_foreign_currency():
     source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
     purchase_section = source[source.index("async def find_latest_purchase_cost"):source.index("async def prefetch_platform_sku_profit_inputs")]
     prefetch_section = source[source.index("async def prefetch_platform_sku_profit_inputs"):source.index("actual_logistics: dict")]
 
     for section in (purchase_section, prefetch_section):
+        # CNY lines use their unit price. Foreign-currency lines are only CNY
+        # costs after a positive converted base amount is present.
         assert "POLine.currency == \"CNY\"" in section
+        assert "POLine.unit_price" in section
         assert "POLine.base_amt" in section
+        assert "POLine.base_amt > 0" in section
         assert "POLine.qty_ordered > 0" in section
+
+
+def test_candidate_purchase_cost_falls_back_only_when_foreign_base_cost_is_missing():
+    router_source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    candidate_section = router_source[
+        router_source.index("async def list_platform_sku_profit_candidates"):
+        router_source.index('@router.post("/api/platform-sku-profit/preview")')
+    ]
+
+    # The prefetch map contains only valid CNY-derived costs. A missing foreign
+    # conversion must therefore use the SKU default, or remain incomplete.
+    assert 'purchase_cost = cost_inputs["purchase_cost"] or row.default_purchase_cost' in candidate_section
+    assert 'purchase_cost=purchase_cost' in candidate_section
 
 
 def test_storage_rule_creation_locks_all_active_windows_and_rejects_overlap():

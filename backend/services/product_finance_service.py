@@ -398,6 +398,7 @@ class ProductFinanceService:
                 and_(
                     POLine.currency != "CNY",
                     POLine.base_amt.is_not(None),
+                    POLine.base_amt > 0,
                     POLine.qty_ordered > 0,
                 ),
                 POLine.base_amt / POLine.qty_ordered,
@@ -409,6 +410,7 @@ class ProductFinanceService:
             and_(
                 POLine.currency != "CNY",
                 POLine.base_amt.is_not(None),
+                POLine.base_amt > 0,
                 POLine.qty_ordered > 0,
             ),
         )
@@ -462,6 +464,7 @@ class ProductFinanceService:
                     and_(
                         POLine.currency != "CNY",
                         POLine.base_amt.is_not(None),
+                        POLine.base_amt > 0,
                         POLine.qty_ordered > 0,
                     ),
                     POLine.base_amt / POLine.qty_ordered,
@@ -473,6 +476,7 @@ class ProductFinanceService:
                 and_(
                     POLine.currency != "CNY",
                     POLine.base_amt.is_not(None),
+                    POLine.base_amt > 0,
                     POLine.qty_ordered > 0,
                 ),
             )
