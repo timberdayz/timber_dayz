@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -392,9 +392,29 @@ class ProductFinanceService:
         return build_reference_storage_cost(unit_volume_cbm=volume, unit_rate_cny_per_cbm_month=rule.unit_rate_cny, turnover_class=sku.turnover_class), rule
 
     async def find_latest_purchase_cost(self, sku: DimErpSku) -> Decimal | None:
+        purchase_cost = case(
+            (POLine.currency == "CNY", POLine.unit_price),
+            (
+                and_(
+                    POLine.currency != "CNY",
+                    POLine.base_amt.is_not(None),
+                    POLine.qty_ordered > 0,
+                ),
+                POLine.base_amt / POLine.qty_ordered,
+            ),
+            else_=None,
+        )
+        valid_purchase_cost = or_(
+            and_(POLine.currency == "CNY", POLine.unit_price.is_not(None)),
+            and_(
+                POLine.currency != "CNY",
+                POLine.base_amt.is_not(None),
+                POLine.qty_ordered > 0,
+            ),
+        )
         row = (
             await self.db.execute(
-                select(POLine.unit_price)
+                select(purchase_cost)
                 .join(POHeader, POHeader.po_id == POLine.po_id)
                 .where(
                     POLine.platform_sku.in_(
@@ -405,7 +425,7 @@ class ProductFinanceService:
                         )
                     )
                     | (POLine.platform_sku == sku.sku_key),
-                    POLine.unit_price.is_not(None),
+                    valid_purchase_cost,
                 )
                 .order_by(POHeader.po_date.desc(), POLine.po_line_id.desc())
             )
@@ -436,13 +456,33 @@ class ProductFinanceService:
         sku_by_source_key.update({source_key: sku_id for sku_id, source_key in source_rows})
         purchase_costs: dict[int, Decimal] = {}
         if sku_by_source_key:
+            purchase_cost = case(
+                (POLine.currency == "CNY", POLine.unit_price),
+                (
+                    and_(
+                        POLine.currency != "CNY",
+                        POLine.base_amt.is_not(None),
+                        POLine.qty_ordered > 0,
+                    ),
+                    POLine.base_amt / POLine.qty_ordered,
+                ),
+                else_=None,
+            )
+            valid_purchase_cost = or_(
+                and_(POLine.currency == "CNY", POLine.unit_price.is_not(None)),
+                and_(
+                    POLine.currency != "CNY",
+                    POLine.base_amt.is_not(None),
+                    POLine.qty_ordered > 0,
+                ),
+            )
             purchase_rows = (
                 await self.db.execute(
-                    select(POLine.platform_sku, POLine.unit_price)
+                    select(POLine.platform_sku, purchase_cost)
                     .join(POHeader, POHeader.po_id == POLine.po_id)
                     .where(
                         POLine.platform_sku.in_(sku_by_source_key),
-                        POLine.unit_price.is_not(None),
+                        valid_purchase_cost,
                     )
                     .order_by(POHeader.po_date.desc(), POLine.po_line_id.desc())
                 )

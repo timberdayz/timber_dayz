@@ -1329,11 +1329,11 @@ const confirmBatch = async (row) => {
 };
 const billingUnitFor = (basis) =>
   ({
-    volume: "RMB/CBM",
-    weight: "RMB/KG",
-    quantity: "RMB/件",
-    fixed: "RMB/票",
-  })[basis] || "RMB/CBM";
+    volume: "CNY/CBM",
+    weight: "CNY/KG",
+    quantity: "CNY/unit",
+    fixed: "CNY",
+  })[basis] || "CNY/CBM";
 const matchProviderRule = (isSensitive, warehouseCode = batchDrawer.form.warehouse_code) => {
   const form = batchDrawer.form;
   if (!form.logistics_provider) return null;
@@ -1396,7 +1396,7 @@ const generateBatchLinesFromPurchaseOrders = async (orders) => {
           actual_total_volume_cbm: unitVolume * shippedQty,
           actual_total_weight_kg: Number(sku.weight_kg || 0) * shippedQty,
           billing_basis: "volume",
-          billing_unit: "RMB/CBM",
+          billing_unit: "CNY/CBM",
           billing_unit_rate: null,
           rate_source: "rule",
           is_sensitive: false,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timedelta, timezone
+import json
 import os
 import re
 
@@ -78,6 +79,7 @@ from modules.core.db import (
     DimProductCategory,
     DimPlatform,
     DimWarehouse,
+    FactAuditLog,
     SkuOperatingProfile,
     WarehouseStorageRule,
 )
@@ -91,6 +93,37 @@ from backend.services.feishu_projection_service import FeishuProjectionService, 
 
 router = APIRouter(tags=["商品中心"], dependencies=[Depends(get_current_user)])
 _EDITOR_ROLES = {"admin", "manager", "finance", "operator"}
+
+
+async def _write_product_center_audit(
+    db: AsyncSession,
+    user,
+    *,
+    action_type: str,
+    resource_type: str,
+    resource_id: str,
+    changes: dict,
+) -> None:
+    """Append a best-effort audit entry without relying on optional user fields."""
+    user_id = getattr(user, "user_id", None)
+    if user_id is None:
+        return
+    username = (
+        getattr(user, "username", None)
+        or getattr(user, "email", None)
+        or f"user:{user_id}"
+    )
+    db.add(
+        FactAuditLog(
+            user_id=user_id,
+            username=str(username)[:100],
+            action_type=action_type,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            action_description=f"product center {action_type}: {resource_type}",
+            changes_json=json.dumps(changes, ensure_ascii=False, default=str),
+        )
+    )
 
 
 def _decimal_payload(value):
@@ -965,27 +998,49 @@ async def list_warehouse_storage_rules(warehouse_code: str | None = Query(None),
 
 @router.post("/api/warehouse-storage-rules", status_code=201)
 async def create_warehouse_storage_rule(body: WarehouseStorageRuleCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_platform_fee_editor)):
-    if await db.get(DimWarehouse, body.warehouse_code) is None:
+    warehouse = (
+        await db.execute(
+            select(DimWarehouse)
+            .where(DimWarehouse.warehouse_code == body.warehouse_code)
+            .with_for_update()
+        )
+    ).scalars().first()
+    if warehouse is None:
         raise HTTPException(status_code=422, detail="warehouse not found")
     if body.status == "active":
-        current_rules = (
+        active_rules = (
             await db.execute(
                 select(WarehouseStorageRule)
                 .where(
                     WarehouseStorageRule.warehouse_code == body.warehouse_code,
                     WarehouseStorageRule.status == "active",
-                    WarehouseStorageRule.effective_to.is_(None),
                 )
                 .with_for_update()
             )
         ).scalars().all()
-        for current_rule in current_rules:
-            if body.effective_from <= current_rule.effective_from:
+        new_effective_to = body.effective_to or date.max
+        for existing_rule in active_rules:
+            existing_effective_to = existing_rule.effective_to or date.max
+            overlaps = (
+                existing_rule.effective_from <= new_effective_to
+                and body.effective_from <= existing_effective_to
+            )
+            if not overlaps:
+                continue
+            if existing_rule.effective_to is not None:
+                raise HTTPException(status_code=409, detail="storage rule effective window overlaps an active historical rule")
+            if body.effective_from <= existing_rule.effective_from:
                 raise HTTPException(status_code=409, detail="new storage rule effective_from must be later than the current rule")
+            current_rule = existing_rule
             current_rule.effective_to = body.effective_from - timedelta(days=1)
     row = WarehouseStorageRule(**body.model_dump(), billing_basis="volume", billing_unit="CNY/CBM/month")
     db.add(row)
     try:
+        await db.flush()
+        await _write_product_center_audit(
+            db, _user, action_type="create", resource_type="warehouse_storage_rule",
+            resource_id=str(row.rule_id), changes=body.model_dump(mode="json"),
+        )
         await db.commit()
         await db.refresh(row)
     except IntegrityError as exc:
@@ -1002,6 +1057,10 @@ async def update_warehouse_storage_rule(rule_id: int, body: WarehouseStorageRule
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
     try:
+        await _write_product_center_audit(
+            db, _user, action_type="update", resource_type="warehouse_storage_rule",
+            resource_id=str(row.rule_id), changes=body.model_dump(mode="json", exclude_unset=True),
+        )
         await db.commit()
         await db.refresh(row)
     except IntegrityError as exc:
@@ -1040,10 +1099,16 @@ async def update_platform_fee_rate(platform_code: str, body: PlatformFeeRateUpda
     row = await db.get(DimPlatform, platform_code)
     if row is None:
         raise HTTPException(status_code=404, detail="platform not found")
+    if row.platform_role != "sales":
+        raise HTTPException(status_code=409, detail="platform fee rates can only be maintained for sales platforms")
     row.default_fee_rate = body.default_fee_rate
     row.fee_rate_effective_from = body.fee_rate_effective_from
     row.fee_rate_source = body.fee_rate_source
     row.fee_rate_version = body.fee_rate_version
+    await _write_product_center_audit(
+        db, _user, action_type="update", resource_type="platform_fee_rate",
+        resource_id=row.platform_code, changes=body.model_dump(mode="json"),
+    )
     await db.commit()
     await db.refresh(row)
     return {"platform_code": row.platform_code, "default_fee_rate": row.default_fee_rate, "fee_rate_effective_from": row.fee_rate_effective_from, "fee_rate_source": row.fee_rate_source, "fee_rate_version": row.fee_rate_version}
@@ -1421,6 +1486,15 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
         estimates.append(row)
     await db.flush()
     await _enqueue_platform_sku_profit_projection(db, profile)
+    await _write_product_center_audit(
+        db, _user, action_type="create", resource_type="platform_sku_profit_estimate",
+        resource_id=f"{values['platform_code']}:{values['warehouse_code']}:{values['sku_id']}",
+        changes={
+            "profile_id": profile.profile_id,
+            "estimate_count": len(estimates),
+            "calculation_bases": [basis for basis, _section in versions],
+        },
+    )
     await db.commit()
     return {"profile_id": profile.profile_id, "estimate_ids": [row.estimate_id for row in estimates]}
 

@@ -380,6 +380,14 @@ class CostAssumptionUpdateRequest(BaseModel):
     active: Optional[bool] = None
 
 
+_LOGISTICS_BILLING_UNITS = {
+    "volume": "CNY/CBM",
+    "weight": "CNY/KG",
+    "quantity": "CNY/unit",
+    "fixed": "CNY",
+}
+
+
 class LogisticsBillCreateRequest(BaseModel):
     bill_no: str = Field(min_length=1, max_length=128)
     logistics_provider: Optional[str] = Field(default=None, max_length=128)
@@ -389,6 +397,12 @@ class LogisticsBillCreateRequest(BaseModel):
     total_amount: float = Field(ge=0)
     notes: Optional[str] = None
 
+    @model_validator(mode="after")
+    def cny_only(self):
+        if self.currency != "CNY":
+            raise ValueError("product-center logistics bills must use CNY")
+        return self
+
 
 class LogisticsBillUpdateRequest(BaseModel):
     logistics_provider: Optional[str] = Field(default=None, max_length=128)
@@ -397,6 +411,12 @@ class LogisticsBillUpdateRequest(BaseModel):
     currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
     total_amount: Optional[float] = Field(default=None, ge=0)
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def cny_only(self):
+        if self.currency is not None and self.currency != "CNY":
+            raise ValueError("product-center logistics bills must use CNY")
+        return self
 
 
 class LogisticsBillSkuLineRequest(BaseModel):
@@ -448,6 +468,14 @@ class LogisticsBillLineRequest(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def derive_cny_billing_unit(self):
+        expected_unit = _LOGISTICS_BILLING_UNITS[self.billing_basis]
+        if self.billing_unit is not None and self.billing_unit != expected_unit:
+            raise ValueError(f"billing_unit must be {expected_unit}; product-center logistics costs use CNY")
+        self.billing_unit = expected_unit
+        return self
+
+    @model_validator(mode="after")
     def validate_allocation_skus(self):
         if not self.allocations:
             return self
@@ -489,14 +517,6 @@ class PurchaseOrderLineCostSupplementRequest(BaseModel):
         return self
 
 
-_LOGISTICS_BILLING_UNITS = {
-    "volume": "CNY/CBM",
-    "weight": "CNY/KG",
-    "quantity": "CNY/unit",
-    "fixed": "CNY",
-}
-
-
 class LogisticsProviderRuleCreateRequest(BaseModel):
     logistics_provider: str = Field(min_length=1, max_length=128)
     warehouse_code: Optional[str] = Field(default=None, max_length=128)
@@ -524,9 +544,33 @@ class LogisticsProviderRuleCreateRequest(BaseModel):
         return self
 
 
-class LogisticsProviderRuleUpdateRequest(LogisticsProviderRuleCreateRequest):
+class LogisticsProviderRuleUpdateRequest(BaseModel):
+    """Partial provider-rule update; never inherit create defaults into PATCHes."""
+
     logistics_provider: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    warehouse_code: Optional[str] = Field(default=None, max_length=128)
+    transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
+    cargo_class: Optional[str] = Field(default=None, max_length=64)
+    is_sensitive: Optional[bool] = None
+    billing_basis: Optional[str] = Field(default=None, pattern=r"^(volume|weight|quantity|fixed)$")
+    billing_unit: Optional[str] = Field(default=None, max_length=32)
+    freight_unit_rate: Optional[float] = Field(default=None, ge=0)
+    sensitive_surcharge_mode: Optional[str] = Field(default=None, max_length=32)
+    sensitive_surcharge_rate: Optional[float] = Field(default=None, ge=0)
     effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def derive_cny_billing_unit_when_basis_changes(self):
+        if "billing_unit" in self.model_fields_set:
+            raise ValueError("billing_unit is derived from billing_basis")
+        if self.billing_basis is not None:
+            self.billing_unit = _LOGISTICS_BILLING_UNITS[self.billing_basis]
+        return self
 
 
 class LogisticsBillVoidRequest(BaseModel):
