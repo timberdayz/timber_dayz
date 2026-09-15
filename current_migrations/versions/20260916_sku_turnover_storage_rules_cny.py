@@ -58,7 +58,7 @@ def upgrade() -> None:
     if _has_table("dim_platforms", "core") and not _has_column("dim_platforms", "core", "platform_role"):
         op.add_column(
             "dim_platforms",
-            sa.Column("platform_role", sa.String(16), nullable=False, server_default="sales"),
+            sa.Column("platform_role", sa.String(16), nullable=False, server_default="source"),
             schema="core",
         )
     if _has_table("dim_platforms", "core") and not _has_constraint("dim_platforms", "core", "ck_dim_platforms_role"):
@@ -70,8 +70,8 @@ def upgrade() -> None:
         )
     if _has_table("dim_platforms", "core"):
         bind = op.get_bind()
+        bind.execute(sa.text("UPDATE core.dim_platforms SET platform_role = 'source'"))
         bind.execute(sa.text("UPDATE core.dim_platforms SET platform_role = 'sales' WHERE platform_code IN ('shopee', 'tiktok', 'amazon')"))
-        bind.execute(sa.text("UPDATE core.dim_platforms SET platform_role = 'source' WHERE platform_code = 'miaoshou'"))
         bind.execute(sa.text("UPDATE core.dim_platforms SET platform_role = 'test' WHERE platform_code = '验证码测试账号'"))
 
     if not _has_table("warehouse_storage_rules", "finance"):

@@ -30,7 +30,7 @@ class DimPlatform(Base):
     fee_rate_source = Column(String(128), nullable=True)
     fee_rate_effective_from = Column(Date, nullable=True)
     fee_rate_version = Column(String(64), nullable=True)
-    platform_role = Column(String(16), nullable=False, default="sales", server_default="sales")
+    platform_role = Column(String(16), nullable=False, default="source", server_default="source")
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

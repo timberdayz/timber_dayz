@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import os
 import re
 
@@ -82,7 +82,10 @@ from modules.core.db import (
     WarehouseStorageRule,
 )
 from backend.services.product_finance_service import BillTotalMismatchError, ProductFinanceService
-from backend.services.product_profit_service import reference_storage_days
+from backend.services.product_profit_service import (
+    build_platform_profit_preview,
+    reference_storage_days,
+)
 from backend.services.feishu_projection_client import FeishuProjectionClient
 from backend.services.feishu_projection_service import FeishuProjectionService, trigger_pending_projection_delivery
 
@@ -738,8 +741,7 @@ async def supplement_purchase_order_line_cost(po_id: str, po_line_id: int, body:
         raise HTTPException(status_code=404, detail="purchase order line not found")
     row.unit_price = body.unit_price
     row.line_amt = float(body.unit_price) * float(row.qty_ordered or 0)
-    if body.currency is not None:
-        row.currency = body.currency
+    row.currency = "CNY"
     row.purchase_cost_source = body.purchase_cost_source
     row.purchase_cost_confirmed_at = datetime.now(timezone.utc)
     canonical_sku = (
@@ -962,9 +964,25 @@ async def list_warehouse_storage_rules(warehouse_code: str | None = Query(None),
 
 
 @router.post("/api/warehouse-storage-rules", status_code=201)
-async def create_warehouse_storage_rule(body: WarehouseStorageRuleCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+async def create_warehouse_storage_rule(body: WarehouseStorageRuleCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_platform_fee_editor)):
     if await db.get(DimWarehouse, body.warehouse_code) is None:
         raise HTTPException(status_code=422, detail="warehouse not found")
+    if body.status == "active":
+        current_rules = (
+            await db.execute(
+                select(WarehouseStorageRule)
+                .where(
+                    WarehouseStorageRule.warehouse_code == body.warehouse_code,
+                    WarehouseStorageRule.status == "active",
+                    WarehouseStorageRule.effective_to.is_(None),
+                )
+                .with_for_update()
+            )
+        ).scalars().all()
+        for current_rule in current_rules:
+            if body.effective_from <= current_rule.effective_from:
+                raise HTTPException(status_code=409, detail="new storage rule effective_from must be later than the current rule")
+            current_rule.effective_to = body.effective_from - timedelta(days=1)
     row = WarehouseStorageRule(**body.model_dump(), billing_basis="volume", billing_unit="CNY/CBM/month")
     db.add(row)
     try:
@@ -977,7 +995,7 @@ async def create_warehouse_storage_rule(body: WarehouseStorageRuleCreateRequest,
 
 
 @router.patch("/api/warehouse-storage-rules/{rule_id}")
-async def update_warehouse_storage_rule(rule_id: int, body: WarehouseStorageRuleUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+async def update_warehouse_storage_rule(rule_id: int, body: WarehouseStorageRuleUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_platform_fee_editor)):
     row = await db.get(WarehouseStorageRule, rule_id)
     if row is None:
         raise HTTPException(status_code=404, detail="warehouse storage rule not found")
@@ -1298,24 +1316,45 @@ async def list_platform_sku_profit_candidates(
     profiles = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id.in_(ids), SkuOperatingProfile.platform_code == platform_code, SkuOperatingProfile.warehouse_code == warehouse_code, SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().all() if ids else []
     profile_by_sku = {row.sku_id: row for row in profiles}
     finance = ProductFinanceService(db)
+    cost_inputs_by_sku = await finance.prefetch_platform_sku_profit_inputs(
+        sku_rows, warehouse_code, transport_type
+    )
     items = []
     for row in sku_rows:
         profile = profile_by_sku.get(row.sku_id)
         assigned_spu = binding_by_sku.get(row.sku_id)
         assigned = spu_by_code.get(assigned_spu) if assigned_spu else None
-        purchase_cost = await finance.find_latest_purchase_cost(row)
-        reference_logistics, _logistics_rule = await finance.find_reference_logistics_cost(row, warehouse_code, transport_type)
-        reference_storage, _storage_rule = await finance.find_reference_storage_cost(row, warehouse_code)
-        actual_logistics = await finance.find_confirmed_logistics_cost(row.sku_id, warehouse_code, transport_type)
+        cost_inputs = cost_inputs_by_sku[row.sku_id]
+        purchase_cost = cost_inputs["purchase_cost"] or row.default_purchase_cost
+        reference_logistics = cost_inputs["reference_logistics_cost"]
+        reference_storage = cost_inputs["reference_storage_cost"]
+        actual_logistics = cost_inputs["actual_logistics_cost"]
+        expected_selling_price = profile.expected_selling_price if profile else row.reference_selling_price
+        seller_coupon_amount = profile.seller_coupon_amount if profile else 0
+        expected_ad_rate = profile.expected_ad_rate if profile else 0
+        preview = build_platform_profit_preview(
+            expected_selling_price=expected_selling_price,
+            competitor_price=profile.competitor_price if profile else None,
+            seller_coupon_amount=seller_coupon_amount,
+            purchase_cost=purchase_cost,
+            expected_logistics_cost=reference_logistics,
+            expected_storage_cost=reference_storage,
+            actual_logistics_cost=actual_logistics,
+            actual_storage_cost=None,
+            platform_fee_rate=platform.default_fee_rate,
+            expected_ad_rate=expected_ad_rate,
+            return_rate=assigned.return_loss_rate if assigned else None,
+            damage_rate=assigned.logistics_damage_rate if assigned else None,
+        )
         items.append({
             "sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name, "specification": row.specification,
             "spu": assigned_spu, "reference_selling_price": row.reference_selling_price,
-            "purchase_cost": purchase_cost if purchase_cost is not None else row.default_purchase_cost,
+            "purchase_cost": purchase_cost,
             "platform_code": platform_code, "warehouse_code": warehouse_code, "transport_type": transport_type,
-            "expected_selling_price": profile.expected_selling_price if profile else row.reference_selling_price,
+            "expected_selling_price": expected_selling_price,
             "competitor_price": profile.competitor_price if profile else None,
-            "seller_coupon_amount": profile.seller_coupon_amount if profile else 0,
-            "expected_ad_rate": profile.expected_ad_rate if profile else 0,
+            "seller_coupon_amount": seller_coupon_amount,
+            "expected_ad_rate": expected_ad_rate,
             "expected_logistics_cost": reference_logistics,
             "expected_storage_cost": reference_storage,
             "actual_logistics_cost": actual_logistics, "actual_storage_cost": None,
@@ -1327,6 +1366,7 @@ async def list_platform_sku_profit_candidates(
             "reference_storage_days": reference_storage_days(row.turnover_class),
             "reference_logistics_cost": reference_logistics,
             "reference_storage_cost": reference_storage,
+            "preview": _decimal_payload(preview),
         })
     return {"data": items, "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
 
