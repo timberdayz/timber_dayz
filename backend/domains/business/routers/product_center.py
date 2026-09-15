@@ -1224,6 +1224,8 @@ async def update_warehouse_storage_rule(rule_id: int, body: WarehouseStorageRule
             next_effective_from = date.today()
         if next_effective_from <= row.effective_from:
             raise HTTPException(status_code=409, detail="new storage rule effective_from must be later than the current rule")
+        if values.get("effective_to") is not None and values["effective_to"] < next_effective_from:
+            raise HTTPException(status_code=422, detail="effective_to must not be earlier than effective_from")
         row.effective_to = next_effective_from - timedelta(days=1)
         next_rule = WarehouseStorageRule(
             warehouse_code=row.warehouse_code,

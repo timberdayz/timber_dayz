@@ -534,6 +534,8 @@ def test_storage_rule_version_window_is_validated_by_request_and_database_contra
     migration = Path("current_migrations/versions/20260920_sku_direct_volume_and_profit_drafts.py").read_text(encoding="utf-8")
     assert "ck_warehouse_storage_rules_window" in source
     assert "ck_warehouse_storage_rules_window" in migration
+    router = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    assert 'values["effective_to"] < next_effective_from' in router
 
 
 def test_platform_profit_draft_reuses_operating_scope_validation():
