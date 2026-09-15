@@ -100,6 +100,10 @@ class SkuBulkItem(BaseModel):
     purchase_cost_confidence: Optional[str] = Field(default="low", pattern=r"^(low|medium|high)$")
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
+    reference_selling_price: Optional[float] = Field(default=None, ge=0)
+    selling_price_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
+    selling_price_source: Optional[str] = Field(default=None, max_length=64)
+    selling_price_confirmed_at: Optional[datetime] = None
 
 
 class SkuBulkRequest(BaseModel):
@@ -168,6 +172,10 @@ class SkuCreateRequest(BaseModel):
     purchase_cost_confidence: str = Field(default="low", pattern=r"^(low|medium|high)$")
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
+    reference_selling_price: Optional[float] = Field(default=None, ge=0)
+    selling_price_currency: str = Field(default="CNY", min_length=3, max_length=8)
+    selling_price_source: Optional[str] = Field(default=None, max_length=64)
+    selling_price_confirmed_at: Optional[datetime] = None
 
 
 class SkuUpdateRequest(BaseModel):
@@ -184,6 +192,10 @@ class SkuUpdateRequest(BaseModel):
     purchase_cost_confidence: Optional[str] = Field(default=None, pattern=r"^(low|medium|high)$")
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
+    reference_selling_price: Optional[float] = Field(default=None, ge=0)
+    selling_price_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
+    selling_price_source: Optional[str] = Field(default=None, max_length=64)
+    selling_price_confirmed_at: Optional[datetime] = None
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
 
 
@@ -221,6 +233,10 @@ class ProductCenterItem(BaseModel):
     purchase_cost_confidence: Optional[str] = None
     expected_logistics_cost: Optional[float] = None
     expected_storage_cost: Optional[float] = None
+    reference_selling_price: Optional[float] = None
+    selling_price_currency: Optional[str] = None
+    selling_price_source: Optional[str] = None
+    selling_price_confirmed_at: Optional[datetime] = None
     logistics_damage_rate: Optional[float] = None
     return_loss_rate: Optional[float] = None
     actual_logistics_cost: Optional[float] = None
@@ -569,6 +585,57 @@ class SkuOperatingProfitHistoryResponse(BaseModel):
     estimated_margin_rate: Optional[float] = None
     cost_completeness: str
     confidence_level: str
+
+
+class PlatformSkuProfitPreviewRequest(BaseModel):
+    sku_id: int = Field(gt=0)
+    platform_code: str = Field(min_length=1, max_length=32)
+    warehouse_code: str = Field(min_length=1, max_length=128)
+    transport_type: str = Field(default="sea", pattern=r"^(sea|air|rail)$")
+    competitor_price: Optional[float] = Field(default=None, ge=0)
+    expected_selling_price: Optional[float] = Field(default=None, ge=0)
+    seller_coupon_amount: float = Field(default=0, ge=0)
+    expected_ad_rate: float = Field(default=0, ge=0, le=1)
+    expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
+    expected_storage_cost: Optional[float] = Field(default=None, ge=0)
+
+
+class PlatformSkuProfitEstimateRequest(PlatformSkuProfitPreviewRequest):
+    assumption_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
+
+class PlatformSkuProfitCandidateResponse(BaseModel):
+    sku_id: int
+    sku_key: str
+    sku_name: Optional[str] = None
+    specification: Optional[str] = None
+    spu: Optional[str] = None
+    reference_selling_price: Optional[float] = None
+    selling_price_currency: Optional[str] = None
+    purchase_cost: Optional[float] = None
+    platform_code: str
+    warehouse_code: str
+    transport_type: str
+    expected_selling_price: Optional[float] = None
+    competitor_price: Optional[float] = None
+    seller_coupon_amount: Optional[float] = None
+    expected_ad_rate: Optional[float] = None
+    expected_logistics_cost: Optional[float] = None
+    expected_storage_cost: Optional[float] = None
+    actual_logistics_cost: Optional[float] = None
+    actual_storage_cost: Optional[float] = None
+    platform_fee_rate: Optional[float] = None
+    logistics_damage_rate: Optional[float] = None
+    return_loss_rate: Optional[float] = None
+    configuration_status: str
+
+
+class PlatformSkuProfitCandidatePageResponse(BaseModel):
+    data: list[PlatformSkuProfitCandidateResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 class ProfitEstimateSaveRequest(ProfitPreviewRequest):

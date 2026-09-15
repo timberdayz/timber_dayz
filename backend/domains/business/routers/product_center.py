@@ -34,6 +34,10 @@ from backend.schemas.product_center import (
     ProductWarehouseCreateRequest,
     ProductWarehouseUpdateRequest,
     PlatformFeeRateUpdateRequest,
+    PlatformSkuProfitCandidateResponse,
+    PlatformSkuProfitCandidatePageResponse,
+    PlatformSkuProfitEstimateRequest,
+    PlatformSkuProfitPreviewRequest,
     SkuCreateRequest,
     SkuUpdateRequest,
     SkuOperatingDimensionsResponse,
@@ -80,6 +84,16 @@ from backend.services.feishu_projection_service import FeishuProjectionService, 
 
 router = APIRouter(tags=["商品中心"], dependencies=[Depends(get_current_user)])
 _EDITOR_ROLES = {"admin", "manager", "finance", "operator"}
+
+
+def _decimal_payload(value):
+    if hasattr(value, "as_tuple"):
+        return float(value)
+    if isinstance(value, dict):
+        return {key: _decimal_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_decimal_payload(item) for item in value]
+    return value
 
 
 def _require_editor(current_user=Depends(get_current_user)):
@@ -1179,6 +1193,140 @@ async def list_sku_operating_dimensions(db: AsyncSession = Depends(get_async_db)
         "skus": [{"sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name} for row in skus],
         "warehouses": [{"warehouse_code": row.warehouse_code, "warehouse_name": row.warehouse_name, "country_code": row.country_code, "country_name": row.country_name} for row in warehouses],
     }
+
+
+@router.get("/api/platform-sku-profit/candidates", response_model=PlatformSkuProfitCandidatePageResponse)
+async def list_platform_sku_profit_candidates(
+    platform_code: str = Query(..., min_length=1),
+    warehouse_code: str = Query(..., min_length=1),
+    spu: str | None = Query(None),
+    sku_id: int | None = Query(None, gt=0),
+    keyword: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+):
+    platform = await db.get(DimPlatform, platform_code)
+    warehouse = await db.get(DimWarehouse, warehouse_code)
+    if platform is None or not platform.is_active:
+        raise HTTPException(status_code=422, detail="platform not found or inactive")
+    if warehouse is None or warehouse.status != "active":
+        raise HTTPException(status_code=422, detail="warehouse not found or inactive")
+    filters = [DimErpSku.status == "active"]
+    if sku_id is not None:
+        filters.append(DimErpSku.sku_id == sku_id)
+    if keyword:
+        token = f"%{keyword}%"
+        filters.append((DimErpSku.sku_key.ilike(token)) | (DimErpSku.sku_name.ilike(token)))
+    if spu:
+        filters.append(DimErpSku.sku_id.in_(select(BridgeSpuSku.sku_id).where(BridgeSpuSku.spu == spu, BridgeSpuSku.binding_status == "active", BridgeSpuSku.effective_to.is_(None))))
+    total = int((await db.execute(select(func.count()).select_from(DimErpSku).where(*filters))).scalar() or 0)
+    sku_rows = (await db.execute(select(DimErpSku).where(*filters).order_by(DimErpSku.sku_key).offset((page - 1) * page_size).limit(page_size))).scalars().all()
+    ids = [row.sku_id for row in sku_rows]
+    bindings = (await db.execute(select(BridgeSpuSku).where(BridgeSpuSku.sku_id.in_(ids), BridgeSpuSku.binding_status == "active", BridgeSpuSku.effective_to.is_(None)))).scalars().all() if ids else []
+    binding_by_sku = {row.sku_id: row.spu for row in bindings}
+    spus = (await db.execute(select(DimSpu).where(DimSpu.spu.in_(set(binding_by_sku.values()))))).scalars().all() if binding_by_sku else []
+    spu_by_code = {row.spu: row for row in spus}
+    profiles = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id.in_(ids), SkuOperatingProfile.platform_code == platform_code, SkuOperatingProfile.warehouse_code == warehouse_code, SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().all() if ids else []
+    profile_by_sku = {row.sku_id: row for row in profiles}
+    finance = ProductFinanceService(db)
+    items = []
+    for row in sku_rows:
+        profile = profile_by_sku.get(row.sku_id)
+        assigned_spu = binding_by_sku.get(row.sku_id)
+        assigned = spu_by_code.get(assigned_spu) if assigned_spu else None
+        actual_logistics = await finance.find_confirmed_logistics_cost(row.sku_id, warehouse_code, profile.transport_type if profile else "sea")
+        items.append({
+            "sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name, "specification": row.specification,
+            "spu": assigned_spu, "reference_selling_price": row.reference_selling_price,
+            "selling_price_currency": row.selling_price_currency, "purchase_cost": row.default_purchase_cost,
+            "platform_code": platform_code, "warehouse_code": warehouse_code, "transport_type": profile.transport_type if profile else "sea",
+            "expected_selling_price": profile.expected_selling_price if profile else row.reference_selling_price,
+            "competitor_price": profile.competitor_price if profile else None,
+            "seller_coupon_amount": profile.seller_coupon_amount if profile else 0,
+            "expected_ad_rate": profile.expected_ad_rate if profile else 0,
+            "expected_logistics_cost": profile.expected_logistics_cost if profile else None,
+            "expected_storage_cost": profile.expected_storage_cost if profile else None,
+            "actual_logistics_cost": actual_logistics, "actual_storage_cost": None,
+            "platform_fee_rate": platform.default_fee_rate,
+            "logistics_damage_rate": assigned.logistics_damage_rate if assigned else None,
+            "return_loss_rate": assigned.return_loss_rate if assigned else None,
+            "configuration_status": "configured" if profile else "unconfigured",
+        })
+    return {"data": items, "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
+
+
+@router.post("/api/platform-sku-profit/preview")
+async def preview_platform_sku_profit(body: PlatformSkuProfitPreviewRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    try:
+        result = await ProductFinanceService(db).preview_platform_sku_profit(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _decimal_payload(result)
+
+
+@router.post("/api/platform-sku-profit/estimates", status_code=201)
+async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    values = body.model_dump()
+    try:
+        preview = await ProductFinanceService(db).preview_platform_sku_profit(values)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    profile = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id == values["sku_id"], SkuOperatingProfile.platform_code == values["platform_code"], SkuOperatingProfile.warehouse_code == values["warehouse_code"], SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().first()
+    if profile is None:
+        profile = SkuOperatingProfile(sku_id=values["sku_id"], platform_code=values["platform_code"], warehouse_code=values["warehouse_code"], status="active", created_by=getattr(_user, "user_id", None))
+        db.add(profile)
+    for key in ("transport_type", "competitor_price", "expected_selling_price", "seller_coupon_amount", "expected_ad_rate", "expected_logistics_cost", "expected_storage_cost"):
+        setattr(profile, key, values.get(key))
+    sku = await db.get(DimErpSku, values["sku_id"])
+    profile.reference_selling_price = sku.reference_selling_price if sku else None
+    platform = await db.get(DimPlatform, values["platform_code"])
+    profile.platform_fee_rate = platform.default_fee_rate if platform else None
+    await db.flush()
+    estimates = []
+    versions = [("estimated", preview["expected"])]
+    if preview["actual_recost"].get("completeness") != "estimated":
+        versions.append(("actual_recost", preview["actual_recost"]))
+    for basis, section in versions:
+        row = SkuProfitEstimate(
+            sku_id=values["sku_id"], operating_profile_id=profile.profile_id, platform_code=values["platform_code"], warehouse_code=values["warehouse_code"],
+            assumption_version=values.get("assumption_version") or "platform-profit-workbench", scenario="base", calculation_basis=basis,
+            selling_price=values.get("expected_selling_price") or profile.reference_selling_price, coupon_amount=values.get("seller_coupon_amount", 0),
+            expected_selling_price=values.get("expected_selling_price") or profile.reference_selling_price, competitor_price=values.get("competitor_price"), expected_ad_rate=values.get("expected_ad_rate", 0),
+            platform_fee=section.get("platform_fee", preview["expected"].get("platform_fee")), expected_ad_cost=preview["expected"].get("ad_cost"),
+            expected_logistics_cost=preview["expected"].get("logistics_cost"), actual_logistics_cost=preview["actual_recost"].get("logistics_cost"),
+            expected_storage_cost=preview["expected"].get("storage_cost"), actual_storage_cost=None,
+            expected_profit=preview["expected"].get("profit"), expected_margin_rate=preview["expected"].get("margin_rate"),
+            actual_recost_profit=preview["actual_recost"].get("profit"), actual_recost_margin_rate=preview["actual_recost"].get("margin_rate"), actual_recost_completeness=preview["actual_recost"].get("completeness"),
+            logistics_cost_variance=preview["variance"].get("logistics"), storage_cost_variance=preview["variance"].get("storage"), total_cost_variance=preview["variance"].get("total"),
+            estimated_contribution_profit=section.get("profit"), estimated_margin_rate=section.get("margin_rate"), cost_completeness=section.get("completeness", "complete"), confidence_level="medium",
+        )
+        db.add(row)
+        estimates.append(row)
+    await db.flush()
+    await _enqueue_platform_sku_profit_projection(db, profile)
+    await db.commit()
+    return {"profile_id": profile.profile_id, "estimate_ids": [row.estimate_id for row in estimates]}
+
+
+@router.get("/api/platform-sku-profit/estimates")
+async def list_platform_sku_profit_estimates(
+    platform_code: str = Query(..., min_length=1),
+    warehouse_code: str = Query(..., min_length=1),
+    sku_id: int | None = Query(None, gt=0),
+    calculation_basis: str | None = Query(None, pattern=r"^(estimated|actual_recost)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+):
+    filters = [SkuProfitEstimate.platform_code == platform_code, SkuProfitEstimate.warehouse_code == warehouse_code]
+    if sku_id is not None:
+        filters.append(SkuProfitEstimate.sku_id == sku_id)
+    if calculation_basis:
+        filters.append(SkuProfitEstimate.calculation_basis == calculation_basis)
+    total = int((await db.execute(select(func.count()).select_from(SkuProfitEstimate).where(*filters))).scalar() or 0)
+    rows = (await db.execute(select(SkuProfitEstimate).where(*filters).order_by(SkuProfitEstimate.estimate_as_of.desc()).offset((page - 1) * page_size).limit(page_size))).scalars().all()
+    return {"data": [_decimal_payload({"estimate_id": row.estimate_id, "sku_id": row.sku_id, "calculation_basis": row.calculation_basis, "expected_profit": row.expected_profit, "expected_margin_rate": row.expected_margin_rate, "actual_recost_profit": row.actual_recost_profit, "actual_recost_margin_rate": row.actual_recost_margin_rate, "actual_recost_completeness": row.actual_recost_completeness, "estimate_as_of": row.estimate_as_of}) for row in rows], "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
 
 
 @router.get("/api/sku-operating-profiles", response_model=list[SkuOperatingProfileResponse])

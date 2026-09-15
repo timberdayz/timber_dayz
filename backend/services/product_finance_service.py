@@ -27,6 +27,7 @@ from modules.core.db import (
 from .product_profit_service import (
     BillTotalMismatchError,
     build_baseline_profit,
+    build_platform_profit_preview,
     build_logistics_sku_line,
     validate_bill_total,
 )
@@ -422,6 +423,56 @@ class ProductFinanceService:
             "profile_id": profile.profile_id,
             "platform_code": profile.platform_code,
             "warehouse_code": profile.warehouse_code,
+        })
+        return result
+
+    async def preview_platform_sku_profit(self, data: dict) -> dict:
+        sku = await self.db.get(DimErpSku, data["sku_id"])
+        if sku is None:
+            raise ValueError("SKU not found")
+        platform = await self.db.get(DimPlatform, data["platform_code"])
+        if platform is None:
+            raise ValueError("platform not found")
+        purchase_cost = await self.find_latest_purchase_cost(sku)
+        actual_logistics = await self.find_confirmed_logistics_cost(
+            sku.sku_id, data["warehouse_code"], data.get("transport_type")
+        )
+        binding = (
+            await self.db.execute(
+                select(BridgeSpuSku).where(
+                    BridgeSpuSku.sku_id == sku.sku_id,
+                    BridgeSpuSku.binding_status == "active",
+                    BridgeSpuSku.effective_to.is_(None),
+                )
+            )
+        ).scalars().first()
+        spu = await self.db.get(DimSpu, binding.spu) if binding else None
+        expected_selling_price = data.get("expected_selling_price")
+        if expected_selling_price is None:
+            expected_selling_price = sku.reference_selling_price
+        if expected_selling_price is None:
+            raise ValueError("expected_selling_price or reference_selling_price is required")
+        result = build_platform_profit_preview(
+            expected_selling_price=expected_selling_price,
+            competitor_price=data.get("competitor_price"),
+            seller_coupon_amount=data.get("seller_coupon_amount"),
+            purchase_cost=purchase_cost if purchase_cost is not None else sku.default_purchase_cost,
+            expected_logistics_cost=data.get("expected_logistics_cost"),
+            expected_storage_cost=data.get("expected_storage_cost"),
+            actual_logistics_cost=actual_logistics,
+            actual_storage_cost=None,
+            platform_fee_rate=platform.default_fee_rate,
+            expected_ad_rate=data.get("expected_ad_rate"),
+            return_rate=spu.return_loss_rate if spu else None,
+            damage_rate=spu.logistics_damage_rate if spu else None,
+        )
+        result.update({
+            "sku_id": sku.sku_id,
+            "spu": spu.spu if spu else None,
+            "platform_code": data["platform_code"],
+            "warehouse_code": data["warehouse_code"],
+            "platform_fee_rate": platform.default_fee_rate,
+            "actual_storage_cost": None,
         })
         return result
 

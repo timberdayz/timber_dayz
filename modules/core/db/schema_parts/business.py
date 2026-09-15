@@ -936,12 +936,30 @@ class SkuProfitEstimate(Base):
     expected_damage_loss = Column(Numeric(18, 2), nullable=True)
     estimated_contribution_profit = Column(Numeric(18, 2), nullable=True)
     estimated_margin_rate = Column(Numeric(12, 8), nullable=True)
+    calculation_basis = Column(String(32), nullable=False, default="estimated")
+    expected_selling_price = Column(Numeric(18, 2), nullable=True)
+    competitor_price = Column(Numeric(18, 2), nullable=True)
+    expected_ad_rate = Column(Numeric(12, 8), nullable=True)
+    expected_ad_cost = Column(Numeric(18, 2), nullable=True)
+    expected_logistics_cost = Column(Numeric(18, 2), nullable=True)
+    actual_logistics_cost = Column(Numeric(18, 2), nullable=True)
+    expected_storage_cost = Column(Numeric(18, 2), nullable=True)
+    actual_storage_cost = Column(Numeric(18, 2), nullable=True)
+    expected_profit = Column(Numeric(18, 2), nullable=True)
+    expected_margin_rate = Column(Numeric(12, 8), nullable=True)
+    actual_recost_profit = Column(Numeric(18, 2), nullable=True)
+    actual_recost_margin_rate = Column(Numeric(12, 8), nullable=True)
+    actual_recost_completeness = Column(String(32), nullable=True)
+    logistics_cost_variance = Column(Numeric(18, 2), nullable=True)
+    storage_cost_variance = Column(Numeric(18, 2), nullable=True)
+    total_cost_variance = Column(Numeric(18, 2), nullable=True)
     cost_completeness = Column(String(32), nullable=False, default="incomplete")
     confidence_level = Column(String(16), nullable=False, default="medium")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         CheckConstraint("scenario IN ('base', 'conservative', 'optimistic')", name="ck_sku_profit_estimate_scenario"),
+        CheckConstraint("calculation_basis IN ('estimated', 'actual_recost')", name="ck_sku_profit_estimate_basis"),
         Index("ix_sku_profit_estimates_sku_time", "sku_id", "estimate_as_of"),
         {"schema": "finance"},
     )
@@ -963,6 +981,11 @@ class SkuOperatingProfile(Base):
     platform_fee_rate = Column(Numeric(12, 8), nullable=True)
     expected_logistics_cost = Column(Numeric(18, 6), nullable=True)
     expected_storage_cost = Column(Numeric(18, 6), nullable=True)
+    reference_selling_price = Column(Numeric(18, 2), nullable=True)
+    competitor_price = Column(Numeric(18, 2), nullable=True)
+    expected_selling_price = Column(Numeric(18, 2), nullable=True)
+    seller_coupon_amount = Column(Numeric(18, 2), nullable=True)
+    expected_ad_rate = Column(Numeric(12, 8), nullable=True)
     status = Column(String(16), nullable=False, default="active")
     effective_from = Column(Date, nullable=False, server_default=func.current_date())
     effective_to = Column(Date, nullable=True)

@@ -27,7 +27,9 @@ class DimPlatform(Base):
     platform_code = Column(String(32), primary_key=True)  # e.g., 'shopee','miaoshou','tiktok'
     name = Column(String(64), nullable=False)             # display name
     default_fee_rate = Column(Float, nullable=True)
+    fee_rate_source = Column(String(128), nullable=True)
     fee_rate_effective_from = Column(Date, nullable=True)
+    fee_rate_version = Column(String(64), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -194,6 +196,10 @@ class DimErpSku(Base):
     purchase_cost_confirmed_at = Column(DateTime(timezone=True), nullable=True)
     expected_logistics_cost = Column(Float, nullable=True)
     expected_storage_cost = Column(Float, nullable=True)
+    reference_selling_price = Column(Float, nullable=True)
+    selling_price_currency = Column(String(8), nullable=False, default="CNY")
+    selling_price_source = Column(String(64), nullable=True)
+    selling_price_confirmed_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(32), nullable=False, default="active")
     source_file_id = Column(Integer, nullable=True)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
