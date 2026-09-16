@@ -988,14 +988,28 @@ const _providerRuleOriginal = (row) => {
   for (const field of _PROVIDER_RULE_PATCH_FIELDS) snapshot[field] = row[field];
   return snapshot;
 };
+const _sortProviderRules = (rows) =>
+  [...rows].sort((a, b) => {
+    const wa = a.warehouse_code || "";
+    const wb = b.warehouse_code || "";
+    if (wa !== wb) return wa.localeCompare(wb);
+    if (a.logistics_provider !== b.logistics_provider) {
+      return (a.logistics_provider || "").localeCompare(b.logistics_provider || "");
+    }
+    return (a.effective_from || "").localeCompare(b.effective_from || "");
+  });
 const loadRules = async () => {
   loadingRules.value = true;
   try {
     const rows = await productCenterApi.listProviderRules({
       status: "active",
     });
-    rules.value = rows.map((row) => ({ ...row, __original: _providerRuleOriginal(row) }));
+    console.info("[loadRules] fetched", rows.length, "provider rules");
+    rules.value = _sortProviderRules(
+      rows.map((row) => ({ ...row, __original: _providerRuleOriginal(row) })),
+    );
   } catch (error) {
+    console.error("[loadRules] failed", error);
     rules.value = [];
     ElMessage.error(error.message || "加载物流规则失败");
   } finally {
