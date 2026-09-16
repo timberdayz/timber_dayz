@@ -1008,6 +1008,31 @@ async def update_logistics_provider_rule(rule_id: int, body: LogisticsProviderRu
     return _serialize_provider_rule(row)
 
 
+@router.delete("/api/logistics-provider-rules/{rule_id}", status_code=204)
+async def delete_logistics_provider_rule(rule_id: int, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
+    row = await db.get(LogisticsProviderRule, rule_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="logistics provider rule not found")
+    await _write_product_center_audit(
+        db, _user, action_type="delete", resource_type="logistics_provider_rule",
+        resource_id=str(rule_id),
+        changes={
+            "logistics_provider": row.logistics_provider,
+            "warehouse_code": row.warehouse_code,
+            "transport_type": row.transport_type,
+            "cargo_class": row.cargo_class,
+            "is_default": row.is_default,
+            "billing_basis": row.billing_basis,
+            "freight_unit_rate": float(row.freight_unit_rate) if row.freight_unit_rate is not None else None,
+            "effective_from": row.effective_from.isoformat() if row.effective_from else None,
+            "effective_to": row.effective_to.isoformat() if row.effective_to else None,
+            "status": row.status,
+        },
+    )
+    await db.delete(row)
+    await db.commit()
+
+
 @router.get("/api/cost-assumption-profiles")
 async def list_cost_assumptions(db: AsyncSession = Depends(get_async_db)):
     rows = (await db.execute(select(ProductCostAssumptionProfile).where(ProductCostAssumptionProfile.active.is_(True)).order_by(ProductCostAssumptionProfile.effective_from.desc()))).scalars().all()

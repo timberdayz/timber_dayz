@@ -58,6 +58,12 @@ export default {
   updateProviderRule(id, payload) {
     return api._patch(`/logistics-provider-rules/${id}`, payload);
   },
+  deleteProviderRule(id) {
+    return api._delete(`/logistics-provider-rules/${id}`);
+  },
+  listLogisticsBills(params = {}) {
+    return api._get("/logistics-bills", { params });
+  },
   listCostAssumptions() {
     return api._get("/cost-assumption-profiles");
   },

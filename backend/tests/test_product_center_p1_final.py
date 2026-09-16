@@ -669,3 +669,92 @@ async def test_warehouse_storage_rule_delete_returns_404_when_row_missing():
 
     assert exc.value.status_code == 404
     assert session.committed is False
+
+
+def test_logistics_provider_rule_delete_endpoint_is_registered():
+    """Deletion must be available so the front-end can drop obsolete rules."""
+    from backend.domains.business.routers.product_center import router
+
+    delete_routes = [
+        route
+        for route in router.routes
+        if getattr(route, "methods", None) and "DELETE" in route.methods
+        and getattr(route, "path", "") == "/api/logistics-provider-rules/{rule_id}"
+    ]
+    assert delete_routes, "DELETE /api/logistics-provider-rules/{rule_id} is not registered"
+
+
+@pytest.mark.asyncio
+async def test_logistics_provider_rule_delete_removes_row_and_writes_audit():
+    """End-to-end: DELETE removes the row and emits an audit entry."""
+    from backend.domains.business.routers import product_center as pc_module
+    from modules.core.db import LogisticsProviderRule
+
+    class _FakeSession:
+        def __init__(self, rule):
+            self.rule = rule
+            self.deleted = []
+            self.audits = []
+            self.added = []
+            self.committed = False
+
+        async def get(self, _model, rule_id):
+            return self.rule if self.rule and self.rule.rule_id == rule_id else None
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def delete(self, row):
+            self.deleted.append(row.rule_id)
+
+        async def commit(self):
+            self.committed = True
+
+    user = type("_U", (), {"user_id": 7, "username": "tester"})()
+    rule = LogisticsProviderRule(
+        rule_id=11,
+        logistics_provider="JD",
+        warehouse_code="WH-1",
+        transport_type="sea",
+        cargo_class="normal",
+        is_sensitive=False,
+        is_default=False,
+        billing_basis="volume",
+        billing_unit="CNY/CBM",
+        freight_unit_rate=Decimal("850"),
+        effective_from=date(2026, 9, 1),
+        effective_to=None,
+        status="active",
+    )
+    session = _FakeSession(rule)
+
+    await pc_module.delete_logistics_provider_rule(rule_id=11, db=session, _user=user)
+
+    assert session.deleted == [11]
+    assert session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_logistics_provider_rule_delete_returns_404_when_row_missing():
+    """End-to-end: DELETE on an unknown id raises 404 and does not commit."""
+    from backend.domains.business.routers import product_center as pc_module
+    from fastapi import HTTPException
+
+    class _FakeSession:
+        def __init__(self):
+            self.committed = False
+
+        async def get(self, _model, _rule_id):
+            return None
+
+        async def commit(self):
+            self.committed = True
+
+    user = type("_U", (), {"user_id": 1, "username": "tester"})()
+    session = _FakeSession()
+
+    with pytest.raises(HTTPException) as exc:
+        await pc_module.delete_logistics_provider_rule(rule_id=999, db=session, _user=user)
+
+    assert exc.value.status_code == 404
+    assert session.committed is False
