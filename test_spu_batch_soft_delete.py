@@ -90,7 +90,6 @@ async def main():
         resp = await batch_soft_delete_spus(
             body=BatchSpuSoftDeleteRequest(
                 spus=spus,
-                reason="M2 test - 批量软删验证,场景1(全部成功)",
                 confirm=True,
             ),
             db=db, _user=FakeUser(),
@@ -147,7 +146,6 @@ async def main():
         resp = await batch_soft_delete_spus(
             body=BatchSpuSoftDeleteRequest(
                 spus=spus,
-                reason="M2 test - 批量软删验证,场景2(预期整体回滚)",
                 confirm=True,
             ),
             db=db, _user=FakeUser(),

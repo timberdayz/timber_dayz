@@ -65,9 +65,17 @@ from backend.schemas.product_center import (
     SpuDeletionCheck,
     SpuSoftDeleteRequest,
     SpuSoftDeleteResponse,
+    SpuRestoreRequest,
+    SpuRestoreResponse,
     BatchSpuSoftDeleteRequest,
     BatchSpuSoftDeleteItem,
     BatchSpuSoftDeleteResponse,
+    SkuDeletionCheck,
+    SkuDeletionPreviewResponse,
+    SkuSoftDeleteRequest,
+    SkuSoftDeleteResponse,
+    SkuRestoreRequest,
+    SkuRestoreResponse,
 )
 from modules.core.db import (
     BridgeSpuSku,
@@ -382,11 +390,14 @@ async def _enqueue_platform_sku_profit_projection(db: AsyncSession, row: SkuOper
 async def list_spus(
     keyword: str | None = Query(None),
     biz_status: str | None = Query(None),
+    include_inactive: bool = Query(False, description="是否包含已软删的 SPU(active=false)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
 ):
     filters = []
+    if not include_inactive:
+        filters.append(DimSpu.active.is_(True))
     if keyword:
         pattern = f"%{keyword}%"
         filters.append((DimSpu.spu.ilike(pattern)) | (DimSpu.spu_name.ilike(pattern)))
@@ -600,6 +611,75 @@ async def soft_delete_spu(
     )
 
 
+@router.post("/api/spus/{spu}/restore", response_model=SpuRestoreResponse)
+async def restore_spu(
+    spu: str,
+    body: SpuRestoreRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """恢复 SPU:active=false → active=true, biz_status 还原。
+
+    复活最早的 inactive binding(effective_to 清空 + binding_status='active')。
+    其他历史 binding 保留 inactive 状态以备追溯。
+    """
+    spu_row = await db.get(DimSpu, spu)
+    if spu_row is None:
+        raise HTTPException(status_code=404, detail=f"SPU '{spu}' not found")
+    if spu_row.active:
+        raise HTTPException(
+            status_code=409,
+            detail=f"SPU '{spu}' 已是启用状态,无需恢复",
+        )
+
+    previous_biz_status = spu_row.biz_status
+    spu_row.active = True
+    # biz_status 复位:从 retired 回到 promoted(用户恢复意图=重新启用)
+    if spu_row.biz_status == "retired":
+        spu_row.biz_status = "promoted"
+
+    earliest_inactive = (await db.execute(
+        select(BridgeSpuSku)
+        .where(
+            BridgeSpuSku.spu == spu,
+            BridgeSpuSku.binding_status == "inactive",
+        )
+        .order_by(BridgeSpuSku.effective_to.asc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    restored_bindings = 0
+    if earliest_inactive is not None:
+        earliest_inactive.binding_status = "active"
+        earliest_inactive.effective_to = None
+        restored_bindings = 1
+
+    await _write_product_center_audit(
+        db, _user,
+        action_type="spu_restore",
+        resource_type="spu",
+        resource_id=spu,
+        changes={
+            "active": True,
+            "previous_biz_status": previous_biz_status,
+            "new_biz_status": spu_row.biz_status,
+            "restored_bindings": restored_bindings,
+            "reason": body.reason,
+        },
+    )
+    await db.commit()
+
+    return SpuRestoreResponse(
+        spu=spu,
+        spu_name=spu_row.spu_name,
+        previous_biz_status=previous_biz_status,
+        new_biz_status=spu_row.biz_status,
+        restored_bindings=restored_bindings,
+        restored_at=datetime.now(timezone.utc),
+        audit_recorded=True,
+    )
+
+
 @router.post("/api/spus/batch-soft-delete", response_model=BatchSpuSoftDeleteResponse)
 async def batch_soft_delete_spus(
     body: BatchSpuSoftDeleteRequest,
@@ -698,6 +778,304 @@ async def batch_soft_delete_spus(
         blocked=0,
         rolled_back=False,
         items=items,
+    )
+
+
+# ==================== SKU 停用/恢复 (M5.1) ====================
+
+async def _count_sku_business_references(db: AsyncSession, sku_id: int) -> dict[str, int]:
+    """统计 SKU 在 9 张业务表中的引用数。返回 {table: count}。
+
+    软删不强制要求 0;硬删(M5.2)才要求全部 0。
+    """
+    refs: dict[str, int] = {}
+    # sku_id 字段的表
+    sku_id_tables = [
+        ("finance", "sku_profit_estimates"),
+        ("finance", "sku_operating_profiles"),
+        ("finance", "logistics_bill_lines"),
+        ("core", "bridge_erp_sku_keys"),
+    ]
+    for sch, tbl in sku_id_tables:
+        try:
+            c = (await db.execute(
+                text(f"SELECT COUNT(*) FROM {sch}.{tbl} WHERE sku_id = :id"), {"id": sku_id}
+            )).scalar() or 0
+            refs[f"{sch}.{tbl}"] = int(c)
+        except Exception:
+            await db.rollback()
+            refs[f"{sch}.{tbl}"] = 0
+    # platform_sku 字段的表(用 sku_key 查)
+    sku_row = await db.get(DimErpSku, sku_id)
+    sku_key = sku_row.sku_key if sku_row else None
+    if sku_key:
+        platform_sku_tables = [
+            ("finance", "po_lines"),
+            ("finance", "grn_lines"),
+            ("finance", "inventory_layers"),
+            ("finance", "inventory_ledger"),
+            ("finance", "return_orders"),
+            ("core", "staging_inventory"),
+        ]
+        for sch, tbl in platform_sku_tables:
+            try:
+                c = (await db.execute(
+                    text(f"SELECT COUNT(*) FROM {sch}.{tbl} WHERE platform_sku = :k"), {"k": sku_key}
+                )).scalar() or 0
+                refs[f"{sch}.{tbl}"] = int(c)
+            except Exception:
+                await db.rollback()
+                refs[f"{sch}.{tbl}"] = 0
+    return refs
+
+
+async def _check_sku_deletion_blockers(db: AsyncSession, sku_id: int) -> list[SkuDeletionCheck]:
+    """6 项 SKU 停用前置校验。
+
+    fail = 阻塞(只 SKU 不存在);warn = 软提示;pass = 无影响。
+    业务引用计数不阻断软删,只用于提示与未来硬删门槛。
+    """
+    checks: list[SkuDeletionCheck] = []
+
+    # 1. SKU 存在
+    sku_row = await db.get(DimErpSku, sku_id)
+    if sku_row is None:
+        checks.append(SkuDeletionCheck(
+            code="sku_exists", label="SKU 存在", status="fail",
+            detail=f"SKU id={sku_id} 不存在",
+        ))
+        return checks
+    checks.append(SkuDeletionCheck(code="sku_exists", label="SKU 存在", status="pass"))
+
+    # 2. status 提示
+    if sku_row.status == "inactive":
+        checks.append(SkuDeletionCheck(
+            code="sku_already_inactive", label="当前已是停用状态", status="warn",
+            detail="如需恢复请走恢复路径",
+        ))
+    else:
+        checks.append(SkuDeletionCheck(code="sku_already_inactive", label="当前已是停用状态", status="pass"))
+
+    # 3. active binding 提示(软删会一并失效,不阻断)
+    active_binding_count = (await db.execute(
+        select(func.count(BridgeSpuSku.id)).where(
+            BridgeSpuSku.sku_id == sku_id,
+            BridgeSpuSku.binding_status == "active",
+            BridgeSpuSku.effective_to.is_(None),
+        )
+    )).scalar() or 0
+    if active_binding_count > 0:
+        checks.append(SkuDeletionCheck(
+            code="has_active_bindings", label="存在 active SPU 绑定", status="warn",
+            detail=f"将有 {active_binding_count} 条 binding 同步失效",
+        ))
+    else:
+        checks.append(SkuDeletionCheck(code="has_active_bindings", label="存在 active SPU 绑定", status="pass"))
+
+    # 4. 业务引用提示(不阻断软删)
+    refs = await _count_sku_business_references(db, sku_id)
+    total_refs = sum(refs.values())
+    non_zero = {k: v for k, v in refs.items() if v > 0}
+    if total_refs > 0:
+        detail_parts = [f"{k}={v}" for k, v in non_zero.items()]
+        checks.append(SkuDeletionCheck(
+            code="business_references", label="业务表引用", status="warn",
+            detail=f"共 {total_refs} 条引用({'; '.join(detail_parts[:3])}{'...' if len(detail_parts) > 3 else ''}),停用不影响数据",
+        ))
+    else:
+        checks.append(SkuDeletionCheck(
+            code="business_references", label="业务表引用", status="pass",
+            detail="0 引用,具备未来硬删条件",
+        ))
+
+    # 5-6 占位
+    checks.append(SkuDeletionCheck(code="no_pending_versions", label="无 pending 利润版本", status="pass", detail="M5.2 完善"))
+    checks.append(SkuDeletionCheck(code="no_pending_inventory", label="无未消耗库存", status="pass", detail="M5.2 完善"))
+
+    return checks
+
+
+@router.post("/api/skus/{sku_id}/deletion-preview", response_model=SkuDeletionPreviewResponse)
+async def preview_sku_deletion(
+    sku_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """预览 SKU 停用:返回校验明细 + 业务引用计数 + 影响范围。"""
+    sku_row = await db.get(DimErpSku, sku_id)
+    checks = await _check_sku_deletion_blockers(db, sku_id)
+    blocked = [c for c in checks if c.status == "fail"]
+
+    refs = await _count_sku_business_references(db, sku_id)
+    total_refs = sum(refs.values())
+
+    can_soft_delete = (
+        sku_row is not None
+        and sku_row.status == "active"
+        and len(blocked) == 0
+    )
+    can_hard_delete = (sku_row is not None and total_refs == 0)  # M5.2 才启用入口
+
+    soft_impact: dict[str, int] = {}
+    if can_soft_delete:
+        active_binding_count = (await db.execute(
+            select(func.count(BridgeSpuSku.id)).where(
+                BridgeSpuSku.sku_id == sku_id,
+                BridgeSpuSku.binding_status == "active",
+                BridgeSpuSku.effective_to.is_(None),
+            )
+        )).scalar() or 0
+        soft_impact["dim_erp_sku_status"] = 1
+        soft_impact["bridge_spu_sku_inactive"] = int(active_binding_count)
+        soft_impact["fact_audit_log"] = 1
+
+    return SkuDeletionPreviewResponse(
+        sku_id=sku_id,
+        sku_key=sku_row.sku_key if sku_row else "",
+        sku_name=sku_row.sku_name if sku_row else None,
+        current_status=sku_row.status if sku_row else "unknown",
+        can_soft_delete=can_soft_delete,
+        can_hard_delete=can_hard_delete,
+        business_reference_count=total_refs,
+        checks=checks,
+        soft_delete_impact=soft_impact,
+        blocked_reasons=[c.label + ": " + (c.detail or "") for c in blocked],
+    )
+
+
+@router.post("/api/skus/{sku_id}/soft-delete", response_model=SkuSoftDeleteResponse)
+async def soft_delete_sku(
+    sku_id: int,
+    body: SkuSoftDeleteRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """停用 SKU:status='inactive',失效所有 active binding,写 audit。
+
+    不需要硬删门槛(任意 SKU 可停用);数据全保留。
+    """
+    sku_row = await db.get(DimErpSku, sku_id)
+    if sku_row is None:
+        raise HTTPException(status_code=404, detail=f"SKU id={sku_id} 不存在")
+    if sku_row.status == "inactive":
+        raise HTTPException(status_code=409, detail=f"SKU {sku_row.sku_key} 已是停用状态,请走恢复路径")
+
+    checks = await _check_sku_deletion_blockers(db, sku_id)
+    blocked = [c for c in checks if c.status == "fail"]
+    if blocked:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "sku_deletion_blocked",
+                "blocked_checks": [c.model_dump() for c in blocked],
+            },
+        )
+
+    previous_status = sku_row.status
+    sku_row.status = "inactive"
+
+    binding_result = await db.execute(
+        update(BridgeSpuSku)
+        .where(
+            BridgeSpuSku.sku_id == sku_id,
+            BridgeSpuSku.binding_status == "active",
+            BridgeSpuSku.effective_to.is_(None),
+        )
+        .values(binding_status="inactive", effective_to=date.today())
+    )
+    affected_bindings = binding_result.rowcount or 0
+
+    await _write_product_center_audit(
+        db, _user,
+        action_type="sku_soft_delete",
+        resource_type="sku",
+        resource_id=str(sku_id),
+        changes={
+            "sku_key": sku_row.sku_key,
+            "previous_status": previous_status,
+            "new_status": "inactive",
+            "affected_bindings": affected_bindings,
+            "reason": body.reason,
+            "warn_checks": [c.model_dump() for c in checks if c.status == "warn"],
+        },
+    )
+    await db.commit()
+
+    return SkuSoftDeleteResponse(
+        sku_id=sku_id,
+        sku_key=sku_row.sku_key,
+        sku_name=sku_row.sku_name,
+        previous_status=previous_status,
+        new_status="inactive",
+        affected_bindings=affected_bindings,
+        soft_deleted_at=datetime.now(timezone.utc),
+        audit_recorded=True,
+    )
+
+
+@router.post("/api/skus/{sku_id}/restore", response_model=SkuRestoreResponse)
+async def restore_sku(
+    sku_id: int,
+    body: SkuRestoreRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """恢复 SKU:status='active',复活最早的 inactive binding(effective_to 清空),写 audit。
+
+    策略:按 effective_to 升序找最早的 inactive binding,清空 effective_to + 改 binding_status='active'。
+    其他历史 binding 保留(inactive 状态)以备追溯。
+    """
+    sku_row = await db.get(DimErpSku, sku_id)
+    if sku_row is None:
+        raise HTTPException(status_code=404, detail=f"SKU id={sku_id} 不存在")
+    if sku_row.status == "active":
+        raise HTTPException(status_code=409, detail=f"SKU {sku_row.sku_key} 已是启用状态,无需恢复")
+
+    previous_status = sku_row.status
+    sku_row.status = "active"
+
+    # 找最早的 inactive binding 复活
+    earliest_inactive = (await db.execute(
+        select(BridgeSpuSku)
+        .where(
+            BridgeSpuSku.sku_id == sku_id,
+            BridgeSpuSku.binding_status == "inactive",
+        )
+        .order_by(BridgeSpuSku.effective_to.asc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    restored_bindings = 0
+    if earliest_inactive is not None:
+        earliest_inactive.binding_status = "active"
+        earliest_inactive.effective_to = None
+        restored_bindings = 1
+
+    await _write_product_center_audit(
+        db, _user,
+        action_type="sku_restore",
+        resource_type="sku",
+        resource_id=str(sku_id),
+        changes={
+            "sku_key": sku_row.sku_key,
+            "previous_status": previous_status,
+            "new_status": "active",
+            "restored_bindings": restored_bindings,
+            "restored_binding_id": earliest_inactive.id if earliest_inactive else None,
+            "reason": body.reason,
+        },
+    )
+    await db.commit()
+
+    return SkuRestoreResponse(
+        sku_id=sku_id,
+        sku_key=sku_row.sku_key,
+        sku_name=sku_row.sku_name,
+        previous_status=previous_status,
+        new_status="active",
+        restored_bindings=restored_bindings,
+        restored_at=datetime.now(timezone.utc),
+        audit_recorded=True,
     )
 
 

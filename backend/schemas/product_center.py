@@ -847,8 +847,8 @@ class SpuDeletionPreviewResponse(BaseModel):
 
 
 class SpuSoftDeleteRequest(BaseModel):
-    """软删请求体。reason 必填 ≥ 10 字,confirm 必须 true(防误触)。"""
-    reason: str = Field(min_length=10, max_length=500)
+    """软删请求体。reason 可选(不强制),confirm 必须 true(防误触)。"""
+    reason: Optional[str] = Field(default=None, max_length=500)
     confirm: bool = False
 
     @model_validator(mode="after")
@@ -868,15 +868,38 @@ class SpuSoftDeleteResponse(BaseModel):
     audit_recorded: bool = True
 
 
+class SpuRestoreRequest(BaseModel):
+    """SPU 恢复请求体(revive 已软删的 SPU)。reason 可选。"""
+    reason: Optional[str] = Field(default=None, max_length=500)
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def check_confirm(self):
+        if not self.confirm:
+            raise ValueError("confirm must be true to proceed with spu restore")
+        return self
+
+
+class SpuRestoreResponse(BaseModel):
+    """SPU 恢复返回。"""
+    spu: str
+    spu_name: Optional[str] = None
+    previous_biz_status: str  # 恢复前 biz_status(通常 'retired')
+    new_biz_status: str  # 恢复后 biz_status(通常 'promoted')
+    restored_bindings: int  # 复活的 binding 数量(0/1)
+    restored_at: datetime
+    audit_recorded: bool = True
+
+
 # ==================== 批量软删 (M2) ====================
 
 class BatchSpuSoftDeleteRequest(BaseModel):
-    """批量软删请求:SPU 列表(1~100)+ reason + confirm。
+    """批量软删请求:SPU 列表(1~100)+ 可选 reason + confirm。
 
     策略:任一 SPU fail 则整体回滚,保证事务原子性。
     """
     spus: list[str] = Field(min_length=1, max_length=100)
-    reason: str = Field(min_length=10, max_length=500)
+    reason: Optional[str] = Field(default=None, max_length=500)
     confirm: bool = False
 
     @model_validator(mode="after")
@@ -905,3 +928,79 @@ class BatchSpuSoftDeleteResponse(BaseModel):
     blocked: int
     rolled_back: bool = False  # True 表示因 fail 整体回滚
     items: list[BatchSpuSoftDeleteItem]
+
+
+# ==================== SKU 停用/恢复 (M5.1) ====================
+
+class SkuDeletionCheck(BaseModel):
+    """SKU 单条校验结果。复用 SPU 语义(fail=阻塞 / warn=软提示 / pass=无影响)。"""
+    code: str
+    label: str
+    status: Literal["pass", "fail", "warn"]
+    detail: Optional[str] = None
+
+
+class SkuDeletionPreviewResponse(BaseModel):
+    """SKU 删除预览。
+
+    can_soft_delete: 当前 status='active' 时 True;已 inactive 时 False(可走恢复路径)。
+    can_hard_delete: 仅当业务引用表全 0 时 True(M5.2 才真正启用,本阶段仅作 hint)。
+    """
+    sku_id: int
+    sku_key: str
+    sku_name: Optional[str] = None
+    current_status: str
+    can_soft_delete: bool
+    can_hard_delete: bool = False  # M5.2 启用
+    business_reference_count: int = 0  # 9 张关联表的引用总数(0 才能硬删)
+    checks: list[SkuDeletionCheck] = Field(default_factory=list)
+    soft_delete_impact: dict[str, int] = Field(default_factory=dict)
+    blocked_reasons: list[str] = Field(default_factory=list)
+
+
+class SkuSoftDeleteRequest(BaseModel):
+    """SKU 停用请求体。reason 可选(不强制),confirm 必须 true。"""
+    reason: Optional[str] = Field(default=None, max_length=500)
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def check_confirm(self):
+        if not self.confirm:
+            raise ValueError("confirm must be true to proceed with sku soft delete")
+        return self
+
+
+class SkuSoftDeleteResponse(BaseModel):
+    """SKU 停用返回。"""
+    sku_id: int
+    sku_key: str
+    sku_name: Optional[str] = None
+    previous_status: str
+    new_status: str  # 'inactive'
+    affected_bindings: int
+    soft_deleted_at: datetime
+    audit_recorded: bool = True
+
+
+class SkuRestoreRequest(BaseModel):
+    """SKU 恢复请求体。reason 可选。"""
+    reason: Optional[str] = Field(default=None, max_length=500)
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def check_confirm(self):
+        if not self.confirm:
+            raise ValueError("confirm must be true to proceed with sku restore")
+        return self
+
+
+class SkuRestoreResponse(BaseModel):
+    """SKU 恢复返回。"""
+    sku_id: int
+    sku_key: str
+    sku_name: Optional[str] = None
+    previous_status: str
+    new_status: str  # 'active'
+    restored_bindings: int
+    restored_at: datetime
+    audit_recorded: bool = True

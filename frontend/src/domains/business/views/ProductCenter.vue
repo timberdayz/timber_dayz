@@ -123,10 +123,16 @@
                 :min="1"
                 :controls="false"
                 size="small" /></template></el-table-column
-          ><el-table-column label="操作" width="180" fixed="right"
+          ><el-table-column label="操作" width="220" fixed="right"
             ><template #default="{ row }"
               ><el-button link type="primary" @click="showBindings(row)"
                 >SKU 归属</el-button
+              ><el-button
+                v-if="row.active === false"
+                link
+                type="success"
+                @click="handleRestoreSpu(row)"
+                >恢复</el-button
               ><el-button
                 link
                 type="danger"
@@ -256,6 +262,22 @@
                 "
                 size="small"
                 >{{ row.data_completeness || "待补充" }}</el-tag
+              ></template
+            ></el-table-column
+          ><el-table-column label="操作" width="160" fixed="right"
+            ><template #default="{ row }"
+              ><el-button
+                v-if="row.status !== 'inactive' && !row.__new"
+                link
+                type="danger"
+                @click="handleDeleteSku(row)"
+                >停用</el-button
+              ><el-button
+                v-if="row.status === 'inactive'"
+                link
+                type="success"
+                @click="handleRestoreSku(row)"
+                >恢复</el-button
               ></template
             ></el-table-column
           ></el-table
@@ -1397,6 +1419,93 @@ const showBindings = async (row) => {
 const onSpuSelectionChange = (rows) => {
   selectedSpus.value = rows.filter((r) => !r.__new && r.active !== false);
 };
+const handleDeleteSku = async (row) => {
+  if (row.__new || row.status === "inactive") return;
+  let preview;
+  try {
+    preview = await productCenterApi.previewSkuDeletion(row.sku_id);
+  } catch (error) {
+    ElMessage.error(error.message || "停用预检失败");
+    return;
+  }
+  const failChecks = (preview.checks || []).filter((c) => c.status === "fail");
+  const warnChecks = (preview.checks || []).filter((c) => c.status === "warn");
+  if (failChecks.length) {
+    const failMsg = failChecks.map((c) => `• ${c.label}${c.detail ? `: ${c.detail}` : ""}`).join("\n");
+    await ElMessageBox.alert(
+      `以下前置条件未通过，暂不可停用：\n${failMsg}`,
+      `SKU ${row.sku_key} 停用预检失败`,
+      { type: "error", confirmButtonText: "我知道了" },
+    );
+    return;
+  }
+  const warnText = warnChecks.length
+    ? `\n\n提示（不阻断）：\n${warnChecks.map((c) => `• ${c.label}${c.detail ? `: ${c.detail}` : ""}`).join("\n")}`
+    : "";
+  const summary = `SKU: ${row.sku_key} (${row.sku_name || ""})\n当前状态: ${preview.current_status}\n\n影响：\n• dim_erp_sku.status → inactive\n• bridge_spu_sku 失效 ${preview.soft_delete_impact?.bridge_spu_sku_inactive ?? 0} 条\n• fact_audit_log 新增 1 条\n• 业务表引用 ${preview.business_reference_count} 条（停用不影响业务数据）${warnText}`;
+  try {
+    await ElMessageBox.confirm(
+      `${summary}\n\n确认停用吗？`,
+      `确认停用 SKU ${row.sku_key}`,
+      { type: "warning", confirmButtonText: "确认停用", cancelButtonText: "取消" },
+    );
+  } catch (e) {
+    return;
+  }
+  try {
+    const resp = await productCenterApi.softDeleteSku(row.sku_id, { confirm: true });
+    ElMessage.success(
+      `SKU ${resp.sku_key} 已停用 (${resp.previous_status} → ${resp.new_status}, 影响 binding=${resp.affected_bindings})`,
+    );
+    await loadSkus();
+  } catch (error) {
+    ElMessage.error(error.message || "停用失败");
+  }
+};
+const handleRestoreSku = async (row) => {
+  if (row.status !== "inactive") return;
+  const summary = `SKU: ${row.sku_key} (${row.sku_name || ""})\n当前状态: ${row.status}\n\n影响：\n• dim_erp_sku.status → active\n• bridge_spu_sku 复活最早的 inactive binding（如有）\n• fact_audit_log 新增 1 条`;
+  try {
+    await ElMessageBox.confirm(
+      `${summary}\n\n确认恢复吗？`,
+      `确认恢复 SKU ${row.sku_key}`,
+      { type: "warning", confirmButtonText: "确认恢复", cancelButtonText: "取消" },
+    );
+  } catch (e) {
+    return;
+  }
+  try {
+    const resp = await productCenterApi.restoreSku(row.sku_id, { confirm: true });
+    ElMessage.success(
+      `SKU ${resp.sku_key} 已恢复 (${resp.previous_status} → ${resp.new_status}, 复活 binding=${resp.restored_bindings})`,
+    );
+    await loadSkus();
+  } catch (error) {
+    ElMessage.error(error.message || "恢复失败");
+  }
+};
+const handleRestoreSpu = async (row) => {
+  if (row.active !== false) return;
+  const summary = `SPU: ${row.spu} (${row.spu_name || ""})\n当前状态: 已软删 (active=false)\n\n影响：\n• dim_spu.active → true\n• dim_spu.biz_status: ${row.biz_status || "retired"} → promoted\n• bridge_spu_sku 复活最早的 inactive binding（如有）\n• fact_audit_log 新增 1 条`;
+  try {
+    await ElMessageBox.confirm(
+      `${summary}\n\n确认恢复吗？`,
+      `确认恢复 SPU ${row.spu}`,
+      { type: "warning", confirmButtonText: "确认恢复", cancelButtonText: "取消" },
+    );
+  } catch (e) {
+    return;
+  }
+  try {
+    const resp = await productCenterApi.restoreSpu(row.spu, { confirm: true });
+    ElMessage.success(
+      `SPU ${resp.spu} 已恢复 (${resp.previous_biz_status} → ${resp.new_biz_status}, 复活 binding=${resp.restored_bindings})`,
+    );
+    await loadSpus();
+  } catch (error) {
+    ElMessage.error(error.message || "恢复失败");
+  }
+};
 const handleDeleteSpu = async (row) => {
   if (row.__new || row.active === false) return;
   let preview;
@@ -1422,31 +1531,17 @@ const handleDeleteSpu = async (row) => {
     ? `\n\n提示（不阻断）：\n${warnChecks.map((c) => `• ${c.label}`).join("\n")}`
     : "";
   const summary = `SPU: ${row.spu} (${row.spu_name || ""})\n影响：\n• dim_spu 记录将置为 inactive + biz_status=retired\n• bridge_spu_sku 失效 ${preview.soft_delete_impact?.bridge_spu_sku_inactive ?? 0} 条\n• fact_audit_log 新增 1 条${warnText}`;
-  let reason = "";
   try {
-    const { value } = await ElMessageBox.prompt(
-      `${summary}\n\n请输入删除原因（10~500 字）：`,
+    await ElMessageBox.confirm(
+      `${summary}\n\n确认软删除吗？`,
       `确认软删除 SPU ${row.spu}`,
-      {
-        type: "warning",
-        confirmButtonText: "确认软删除",
-        cancelButtonText: "取消",
-        inputType: "textarea",
-        inputPlaceholder: "例:该 SPU 已下线,无在售 SKU,删除以减少统计干扰",
-        inputValidator: (val) => {
-          const t = (val || "").trim();
-          if (t.length < 10) return "原因至少 10 字";
-          if (t.length > 500) return "原因最多 500 字";
-          return true;
-        },
-      },
+      { type: "warning", confirmButtonText: "确认软删除", cancelButtonText: "取消" },
     );
-    reason = value.trim();
   } catch (e) {
     return;
   }
   try {
-    const resp = await productCenterApi.softDeleteSpu(row.spu, { reason, confirm: true });
+    const resp = await productCenterApi.softDeleteSpu(row.spu, { confirm: true });
     ElMessage.success(`SPU ${resp.spu} 已软删除 (audit=${resp.audit_recorded})`);
     await loadSpus();
   } catch (error) {
@@ -1496,25 +1591,12 @@ const handleBatchDeleteSpu = async () => {
     0,
   );
   const summary = `即将软删除 ${targets.length} 个 SPU：\n${targets.map((r) => `• ${r.spu} (${r.spu_name || ""})`).join("\n")}\n\n汇总影响：\n• dim_spu: ${targets.length} 条将置为 retired\n• bridge_spu_sku 失效 ${totalBindings} 条\n• fact_audit_log 新增 ${targets.length} 条${warnBlock ? `\n\n提示（不阻断）：\n${warnBlock}` : ""}`;
-  let reason = "";
   try {
-    const { value } = await ElMessageBox.prompt(
-      `${summary}\n\n请输入删除原因（10~500 字）：`,
+    await ElMessageBox.confirm(
+      `${summary}\n\n确认批量软删除吗？`,
       `确认批量软删除 ${targets.length} 个 SPU`,
-      {
-        type: "warning",
-        confirmButtonText: `确认批量删除`,
-        cancelButtonText: "取消",
-        inputType: "textarea",
-        inputValidator: (val) => {
-          const t = (val || "").trim();
-          if (t.length < 10) return "原因至少 10 字";
-          if (t.length > 500) return "原因最多 500 字";
-          return true;
-        },
-      },
+      { type: "warning", confirmButtonText: "确认批量删除", cancelButtonText: "取消" },
     );
-    reason = value.trim();
   } catch (e) {
     return;
   }
@@ -1522,7 +1604,6 @@ const handleBatchDeleteSpu = async () => {
   try {
     const resp = await productCenterApi.batchSoftDeleteSpus({
       spus: targets.map((r) => r.spu),
-      reason,
       confirm: true,
     });
     if (resp.rolled_back) {

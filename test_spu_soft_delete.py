@@ -97,7 +97,7 @@ async def main():
 
             sd_resp = await soft_delete_spu(
                 spu=TEST_SPU,
-                body=SpuSoftDeleteRequest(reason="M1 test - 软删链路验证", confirm=True),
+                body=SpuSoftDeleteRequest(confirm=True),
                 db=db, _user=FakeUser(),
             )
             print(f"  3d. soft_delete_spu response: spu={sd_resp.spu} biz_status={sd_resp.biz_status} audit_recorded={sd_resp.audit_recorded}")

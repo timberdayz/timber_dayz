@@ -28,6 +28,9 @@ export default {
   softDeleteSpu(spu, payload) {
     return api._post(`/spus/${encodeURIComponent(spu)}/soft-delete`, payload);
   },
+  restoreSpu(spu, payload) {
+    return api._post(`/spus/${encodeURIComponent(spu)}/restore`, payload);
+  },
   batchSoftDeleteSpus(payload) {
     return api._post(`/spus/batch-soft-delete`, payload);
   },
@@ -42,6 +45,15 @@ export default {
   },
   updateSku(skuId, payload) {
     return api._patch(`/skus/${skuId}`, payload);
+  },
+  previewSkuDeletion(skuId) {
+    return api._post(`/skus/${skuId}/deletion-preview`, {});
+  },
+  softDeleteSku(skuId, payload) {
+    return api._post(`/skus/${skuId}/soft-delete`, payload);
+  },
+  restoreSku(skuId, payload) {
+    return api._post(`/skus/${skuId}/restore`, payload);
   },
   listSpuSkus(spu) {
     return api._get(`/spus/${encodeURIComponent(spu)}/skus`);
