@@ -399,7 +399,7 @@
                 >保存规则</el-button
               >
             </div>
-            <el-table :data="rules" stripe border
+            <el-table :data="rules" v-loading="loadingRules" stripe border empty-text="暂无物流规则"
               ><el-table-column label="服务商"
                 ><template #default="{ row }"
                   ><el-input
@@ -757,6 +757,7 @@ const costTab = ref("rules");
 const saving = ref(false);
 const selectedSpus = ref([]);
 const loadingSpus = ref(false);
+const loadingRules = ref(false);
 const loadingSkus = ref(false);
 const loadingBills = ref(false);
 const spus = ref([]);
@@ -988,13 +989,17 @@ const _providerRuleOriginal = (row) => {
   return snapshot;
 };
 const loadRules = async () => {
+  loadingRules.value = true;
   try {
     const rows = await productCenterApi.listProviderRules({
       status: "active",
     });
     rules.value = rows.map((row) => ({ ...row, __original: _providerRuleOriginal(row) }));
-  } catch {
+  } catch (error) {
     rules.value = [];
+    ElMessage.error(error.message || "加载物流规则失败");
+  } finally {
+    loadingRules.value = false;
   }
 };
 const loadStorageRules = async () => {
