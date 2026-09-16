@@ -22,11 +22,35 @@ def test_inventory_export_applies_warehouse_scope_filter_before_search():
 
 
 def test_inventory_export_opens_export_dialog_and_selects_all_groups_before_export():
+    """dialog → 字段全选 → expect_download 必须在 run() 体内按序出现。
+
+    v4.20.0+ ID=621 修复后：``_trigger_export(page)`` 被提取到
+    ``_expect_download_with_pageerror_guard`` 内（race pageerror 监听），
+    所以严格按 source.index 顺序检查 ``_trigger_export`` 不再适用
+    （它现在在 helper 函数体内，helper 在 run() 之前定义）。
+    改为在 ``run()`` 体内检查 helper 调用顺序，并断言 ``_trigger_export``
+    不在 run() 体内出现（确保它只在 helper 内被调用，pageerror guard 包裹 click）。
+    """
     source = _source()
-    open_dialog = source.index("await self._open_export_dialog(page)")
-    ensure_fields = source.index("await self._ensure_export_fields_all_selected(page)")
-    trigger_export = source.index("await self._trigger_export(page)")
-    assert open_dialog < ensure_fields < trigger_export
+    # 提取 run() 函数体（在 "async def run" 之后到下一个 "async def " 或 "def " 之前）
+    run_start = source.index("async def run(self")
+    next_def = source.find("\n    async def ", run_start + 1)
+    next_def2 = source.find("\n    def ", run_start + 1)
+    next_def = min(
+        pos for pos in (next_def, next_def2, len(source)) if pos > run_start
+    )
+    run_body = source[run_start:next_def]
+    open_dialog = run_body.index("await self._open_export_dialog(page)")
+    ensure_fields = run_body.index("await self._ensure_export_fields_all_selected(page)")
+    helper_call = run_body.index("await self._expect_download_with_pageerror_guard(page)")
+    assert open_dialog < ensure_fields < helper_call, (
+        "run() 体内顺序必须是: open_dialog → ensure_fields → expect_download guard"
+    )
+    # _trigger_export 不应在 run() 体内出现（必须包裹在 helper 内，确保 pageerror guard）
+    assert "await self._trigger_export(page)" not in run_body, (
+        "_trigger_export(page) 不能直接出现在 run() 顶层 — "
+        "必须包裹在 _expect_download_with_pageerror_guard 内以保证 pageerror guard"
+    )
 
 
 def test_inventory_export_treats_progress_as_intermediate_and_download_as_final_signal():

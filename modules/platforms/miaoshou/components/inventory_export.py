@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -222,6 +223,97 @@ class MiaoshouInventoryExport(ExportComponent):
 
         return target
 
+    async def _expect_download_with_pageerror_guard(self, page: Any) -> Any:
+        """Race ``page.expect_download`` against ``pageerror`` event (ID=621 fix).
+
+        ID=621 (2026-09-14 19:32:33 UTC, 253s, failed): ``/warehouse/checklist``
+        页面 JS 抛 pageerror 后，``expect_download(timeout=180000)`` 仍干等 180s
+        才超时，浪费 253s。本实现：
+
+          1. 注册 pageerror listener，捕获 stack/filename/lineno/colno/name
+          2. ``asyncio.create_task`` 启动 expect_download 和 pageerror.wait()
+          3. ``asyncio.wait(..., return_when=FIRST_COMPLETED)`` — 谁先到谁赢
+          4. pageerror 先到：cancel expect_download task + 抛 RuntimeError
+             （message 包含 filename/lineno/colno/name/stack）
+          5. download 先到：cancel pageerror task + return download
+          6. ``finally`` 清理 pageerror listener（避免重复运行累积）
+
+        Raises:
+            RuntimeError: pageerror fired before download.
+            asyncio.TimeoutError: expect_download timed out (180s).
+        """
+        pageerror_event = asyncio.Event()
+        pageerror_payload: list = []
+
+        def _on_pageerror(error: Any) -> None:
+            if pageerror_event.is_set():
+                return
+            pageerror_payload.append({
+                "error": str(error),
+                "name": getattr(error, "name", None),
+                "stack": getattr(error, "stack", None),
+                "filename": (
+                    getattr(error, "filename", None)
+                    or getattr(error, "fileName", None)
+                ),
+                "lineno": (
+                    getattr(error, "lineno", None)
+                    or getattr(error, "lineNumber", None)
+                ),
+                "colno": (
+                    getattr(error, "colno", None)
+                    or getattr(error, "columnNumber", None)
+                ),
+            })
+            pageerror_event.set()
+
+        page.on("pageerror", _on_pageerror)
+        try:
+            async def _do_download() -> Any:
+                async with page.expect_download(timeout=180000) as dl_info:
+                    await self._trigger_export(page)
+                return await dl_info.value
+
+            download_task = asyncio.create_task(_do_download())
+            pageerror_task = asyncio.create_task(pageerror_event.wait())
+            try:
+                done, pending = await asyncio.wait(
+                    {download_task, pageerror_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+                for t in pending:
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+                if download_task in done:
+                    return download_task.result()
+                # pageerror 赢了 — cancel download_task 后再 cancel 一次确保清理
+                if not download_task.done():
+                    download_task.cancel()
+                    try:
+                        await download_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                payload = pageerror_payload[0]
+                raise RuntimeError(
+                    f"export aborted by pageerror: filename={payload['filename']!r} "
+                    f"lineno={payload['lineno']} colno={payload['colno']} "
+                    f"name={payload['name']!r} stack={payload['stack']!r}"
+                )
+            except BaseException:
+                if not download_task.done():
+                    download_task.cancel()
+                raise
+        finally:
+            try:
+                page.remove_listener("pageerror", _on_pageerror)
+            except Exception:
+                pass
+
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
             nav_result = await self.navigation_component.run(page, TargetPage.WAREHOUSE_CHECKLIST)
@@ -239,9 +331,7 @@ class MiaoshouInventoryExport(ExportComponent):
             await self._open_export_dialog(page)
             await self._ensure_export_fields_all_selected(page)
 
-            async with page.expect_download(timeout=180000) as dl_info:
-                await self._trigger_export(page)
-            download = await dl_info.value
+            download = await self._expect_download_with_pageerror_guard(page)
 
             target = await self._wait_download_complete(page, download)
             return ExportResult(success=True, message="download complete", file_path=str(target))

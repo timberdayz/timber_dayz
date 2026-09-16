@@ -4784,6 +4784,26 @@ class CollectionExecutorV2:
                     "diagnostic_event": "pageerror",
                     "scope": scope,
                     "error": str(error),
+                    # 捕获 stack/filename/lineno/colno/name 以便定位 JS 出错位置。
+                    # ID=621 (inventory 2026-09-14 19:32:33 UTC, 253s, failed) 失败根因：
+                    # pageerror 只记录 str(error)="undefined"，无法定位 JS 错
+                    # 误所在脚本 URL 和行号。新老 Playwright 版本在 Error 属性命
+                    # 名上不一致（filename vs fileName、lineno vs lineNumber、
+                    # colno vs columnNumber），用 getattr + 回退确保兼容。
+                    "name": getattr(error, "name", None),
+                    "stack": getattr(error, "stack", None),
+                    "filename": (
+                        getattr(error, "filename", None)
+                        or getattr(error, "fileName", None)
+                    ),
+                    "lineno": (
+                        getattr(error, "lineno", None)
+                        or getattr(error, "lineNumber", None)
+                    ),
+                    "colno": (
+                        getattr(error, "colno", None)
+                        or getattr(error, "columnNumber", None)
+                    ),
                     "url": getattr(page, "url", None),
                 },
             )
