@@ -474,9 +474,10 @@
                     value-format="YYYY-MM-DD"
                     size="small"
                     @change="markRuleDirty(row)" /></template></el-table-column
-              ><el-table-column v-if="!row.__new" label="操作" width="90" fixed="right"
+              ><el-table-column label="操作" width="90" fixed="right"
                 ><template #default="{ row }"
                   ><el-button
+                    v-if="!row.__new"
                     link
                     type="danger"
                     size="small"
