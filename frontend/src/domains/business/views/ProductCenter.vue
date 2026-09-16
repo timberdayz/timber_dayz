@@ -404,18 +404,19 @@
                 ><template #default="{ row }"
                   ><el-input
                     v-model="row.logistics_provider"
-                    size="small" /></template></el-table-column
+                    size="small"
+                    @change="markRuleDirty(row)" /></template></el-table-column
               ><el-table-column label="收货仓库"
                 ><template #default="{ row }"
-                  ><el-select v-model="row.warehouse_code" size="small" filterable>
+                  ><el-select v-model="row.warehouse_code" size="small" filterable @change="markRuleDirty(row)">
                     <el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" />
                   </el-select></template></el-table-column
               ><el-table-column label="运输方式"
                 ><template #default="{ row }"
-                  ><el-select v-model="row.transport_type" size="small"><el-option label="海运" value="sea" /><el-option label="空运" value="air" /><el-option label="铁路运输" value="rail" /></el-select></template></el-table-column
+                  ><el-select v-model="row.transport_type" size="small" @change="markRuleDirty(row)"><el-option label="海运" value="sea" /><el-option label="空运" value="air" /><el-option label="铁路运输" value="rail" /></el-select></template></el-table-column
               ><el-table-column label="货物类型"
                 ><template #default="{ row }"
-                  ><el-select v-model="row.cargo_class" size="small"
+                  ><el-select v-model="row.cargo_class" size="small" @change="markRuleDirty(row)"
                     ><el-option label="普通货" value="normal" /><el-option
                       label="敏感货 M"
                       value="sensitive" /></el-select></template></el-table-column
@@ -427,7 +428,7 @@
                   /></template></el-table-column
               ><el-table-column label="计费方式"
                 ><template #default="{ row }"
-                  ><el-select v-model="row.billing_basis" size="small"
+                  ><el-select v-model="row.billing_basis" size="small" @change="markRuleDirty(row)"
                     ><el-option label="按体积" value="volume" /><el-option
                       label="按重量"
                       value="weight" /><el-option
@@ -441,14 +442,25 @@
                     v-model="row.freight_unit_rate"
                     :min="0"
                     :controls="false"
-                    size="small" /></template></el-table-column
+                    size="small"
+                    @change="markRuleDirty(row)" /></template></el-table-column
               ><el-table-column label="生效日期"
                 ><template #default="{ row }"
                   ><el-date-picker
                     v-model="row.effective_from"
                     type="date"
                     value-format="YYYY-MM-DD"
-                    size="small" /></template></el-table-column></el-table></el-tab-pane
+                    size="small"
+                    @change="markRuleDirty(row)" /></template></el-table-column
+              ><el-table-column v-if="!row.__new" label="操作" width="90" fixed="right"
+                ><template #default="{ row }"
+                  ><el-button
+                    link
+                    type="danger"
+                    size="small"
+                    @click="removeProviderRule(row)"
+                    >删除</el-button></template></el-table-column
+              ></el-table></el-tab-pane
           ><el-tab-pane label="仓储规则" name="storage-rules"
             ><div class="toolbar">
               <el-button type="primary" :icon="Plus" @click="addStorageRuleRow">新增仓储规则</el-button>
@@ -951,11 +963,36 @@ const loadCategories = async () => {
     categories.value = [];
   }
 };
+const _PROVIDER_RULE_PATCH_FIELDS = [
+  "logistics_provider",
+  "warehouse_code",
+  "transport_type",
+  "cargo_class",
+  "is_sensitive",
+  "is_default",
+  "billing_basis",
+  "billing_unit",
+  "freight_unit_rate",
+  "sensitive_surcharge_mode",
+  "sensitive_surcharge_rate",
+  "effective_from",
+  "effective_to",
+  "status",
+  "source",
+  "version",
+  "notes",
+];
+const _providerRuleOriginal = (row) => {
+  const snapshot = {};
+  for (const field of _PROVIDER_RULE_PATCH_FIELDS) snapshot[field] = row[field];
+  return snapshot;
+};
 const loadRules = async () => {
   try {
-    rules.value = await productCenterApi.listProviderRules({
+    const rows = await productCenterApi.listProviderRules({
       status: "active",
     });
+    rules.value = rows.map((row) => ({ ...row, __original: _providerRuleOriginal(row) }));
   } catch {
     rules.value = [];
   }
@@ -1280,10 +1317,30 @@ const saveSkuRows = async () => {
     saving.value = false;
   }
 };
+const _buildProviderRulePatch = (row) => {
+  // Only forward fields the user actually changed (or that are required for creates).
+  // Sending empty strings / nulls back triggers Pydantic 422 on pattern / date fields.
+  const { __new, __original, rule_id, ...payload } = row;
+  if (__new) {
+    return Object.fromEntries(
+      Object.entries(payload).filter(([, value]) => value !== "" && value !== null),
+    );
+  }
+  const diff = {};
+  for (const field of _PROVIDER_RULE_PATCH_FIELDS) {
+    if (payload[field] !== __original?.[field]) diff[field] = payload[field];
+  }
+  // Empty strings in unchanged optional fields would still 422, so drop them.
+  for (const [key, value] of Object.entries(diff)) {
+    if (value === "") delete diff[key];
+  }
+  return diff;
+};
 const saveRuleRows = async () => {
   try {
     for (const row of ruleDirty.value) {
-      const { __new, ...payload } = row;
+      const payload = _buildProviderRulePatch(row);
+      if (Object.keys(payload).length === 0) continue;
       if (row.__new) await productCenterApi.createProviderRule(payload);
       else await productCenterApi.updateProviderRule(row.rule_id, payload);
     }
@@ -1292,6 +1349,21 @@ const saveRuleRows = async () => {
     ElMessage.success("物流规则已保存");
   } catch (error) {
     ElMessage.error(error.message || "保存物流规则失败");
+  }
+};
+const removeProviderRule = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      "删除后该规则不再用于新的物流账单测算。已落账的物流批次不受影响。",
+      "删除物流服务商规则",
+      { type: "warning" },
+    );
+    await productCenterApi.deleteProviderRule(row.rule_id);
+    rules.value = rules.value.filter((item) => item.rule_id !== row.rule_id);
+    dirtyRuleRows.value.delete(row.rule_id);
+    ElMessage.success("物流规则已删除");
+  } catch (error) {
+    if (error !== "cancel") ElMessage.error(error.message || "删除物流规则失败");
   }
 };
 const showBindings = async (row) => {
