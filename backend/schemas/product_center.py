@@ -822,3 +822,86 @@ class ProfitEstimateCreateRequest(BaseModel):
     expected_damage_loss: Optional[float] = Field(default=None, ge=0)
     cost_completeness: str = Field(default="incomplete", pattern=r"^(complete|partial|incomplete)$")
     confidence_level: str = Field(default="medium", pattern=r"^(low|medium|high)$")
+
+
+# ==================== SPU 删除向导 (M1: 软删最小可用) ====================
+
+class SpuDeletionCheck(BaseModel):
+    """单条校验结果。status=pass 通过 / fail 阻塞 / warn 软提示。"""
+    code: str
+    label: str
+    status: Literal["pass", "fail", "warn"]
+    detail: Optional[str] = None
+
+
+class SpuDeletionPreviewResponse(BaseModel):
+    """删除预览:返回 7 项校验明细 + 软删/硬删能力 + 影响预估。"""
+    spu: str
+    spu_name: Optional[str] = None
+    can_soft_delete: bool
+    can_hard_delete: bool = False  # M3 才启用
+    checks: list[SpuDeletionCheck] = Field(default_factory=list)
+    soft_delete_impact: dict[str, int] = Field(default_factory=dict)
+    hard_delete_impact: dict[str, int] = Field(default_factory=dict)
+    blocked_reasons: list[str] = Field(default_factory=list)
+
+
+class SpuSoftDeleteRequest(BaseModel):
+    """软删请求体。reason 必填 ≥ 10 字,confirm 必须 true(防误触)。"""
+    reason: str = Field(min_length=10, max_length=500)
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def check_confirm(self):
+        if not self.confirm:
+            raise ValueError("confirm must be true to proceed with soft delete")
+        return self
+
+
+class SpuSoftDeleteResponse(BaseModel):
+    """软删返回:告知影响范围 + 时间戳。"""
+    spu: str
+    spu_name: Optional[str] = None
+    soft_deleted_at: datetime
+    affected_bindings: int
+    biz_status: str
+    audit_recorded: bool = True
+
+
+# ==================== 批量软删 (M2) ====================
+
+class BatchSpuSoftDeleteRequest(BaseModel):
+    """批量软删请求:SPU 列表(1~100)+ reason + confirm。
+
+    策略:任一 SPU fail 则整体回滚,保证事务原子性。
+    """
+    spus: list[str] = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=10, max_length=500)
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def check_confirm(self):
+        if not self.confirm:
+            raise ValueError("confirm must be true to proceed with batch soft delete")
+        if len(set(self.spus)) != len(self.spus):
+            raise ValueError("spus contains duplicates")
+        return self
+
+
+class BatchSpuSoftDeleteItem(BaseModel):
+    """批量处理中单个 SPU 的结果。"""
+    spu: str
+    spu_name: Optional[str] = None
+    status: Literal["deleted", "blocked"]
+    affected_bindings: int = 0
+    blocked_reasons: list[str] = Field(default_factory=list)
+    warn_checks: list[dict] = Field(default_factory=list)
+
+
+class BatchSpuSoftDeleteResponse(BaseModel):
+    """批量软删响应:汇总 + 每个 SPU 状态。"""
+    total: int
+    deleted: int
+    blocked: int
+    rolled_back: bool = False  # True 表示因 fail 整体回滚
+    items: list[BatchSpuSoftDeleteItem]

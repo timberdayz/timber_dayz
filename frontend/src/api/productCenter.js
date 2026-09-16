@@ -22,6 +22,15 @@ export default {
   updateSpu(spu, payload) {
     return api._patch(`/spus/${encodeURIComponent(spu)}`, payload);
   },
+  previewSpuDeletion(spu) {
+    return api._post(`/spus/${encodeURIComponent(spu)}/deletion-preview`, {});
+  },
+  softDeleteSpu(spu, payload) {
+    return api._post(`/spus/${encodeURIComponent(spu)}/soft-delete`, payload);
+  },
+  batchSoftDeleteSpus(payload) {
+    return api._post(`/spus/batch-soft-delete`, payload);
+  },
   listSkus(params = {}) {
     return api._get("/skus", { params });
   },

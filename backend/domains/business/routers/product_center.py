@@ -61,6 +61,13 @@ from backend.schemas.product_center import (
     SpuCreateRequest,
     SpuSkuBindingRequest,
     SpuUpdateRequest,
+    SpuDeletionPreviewResponse,
+    SpuDeletionCheck,
+    SpuSoftDeleteRequest,
+    SpuSoftDeleteResponse,
+    BatchSpuSoftDeleteRequest,
+    BatchSpuSoftDeleteItem,
+    BatchSpuSoftDeleteResponse,
 )
 from modules.core.db import (
     BridgeSpuSku,
@@ -435,6 +442,263 @@ async def update_spu(spu: str, body: SpuUpdateRequest, db: AsyncSession = Depend
     await db.refresh(row)
     asyncio.create_task(trigger_pending_projection_delivery())
     return ProductCenterItem.model_validate(row)
+
+
+# ==================== SPU 删除向导 (M1: 软删最小可用 / M2: 批量软删) ====================
+
+async def _check_spu_deletion_blockers(db: AsyncSession, spu_code: str) -> list[SpuDeletionCheck]:
+    """7 项删除前置校验。status=fail 阻塞;warn 软提示;pass 无影响。
+
+    当前实现:3 项核心(spu_exists / biz_status_warn / spu_has_active_skus)。
+    其余 4 项(operating profile / pending version / pending inventory / platform listing)
+    已在 M2/M3 占位返回 pass,未来按需加深。
+    """
+    checks: list[SpuDeletionCheck] = []
+
+    # 1. SPU 存在
+    spu_row = await db.get(DimSpu, spu_code)
+    if spu_row is None:
+        checks.append(SpuDeletionCheck(
+            code="spu_exists", label="SPU 存在", status="fail",
+            detail=f"SPU '{spu_code}' 不存在",
+        ))
+        return checks
+    checks.append(SpuDeletionCheck(code="spu_exists", label="SPU 存在", status="pass"))
+
+    # 2. biz_status 提示(非 fail,鼓励改 retired 再删)
+    if spu_row.biz_status == "retired":
+        checks.append(SpuDeletionCheck(code="biz_status_not_retired", label="biz_status 应为 retired", status="pass"))
+    else:
+        checks.append(SpuDeletionCheck(
+            code="biz_status_not_retired", label="biz_status 应为 retired", status="warn",
+            detail=f"当前 biz_status={spu_row.biz_status},建议先改 retired 再删",
+        ))
+
+    # 3. active SKU 阻塞
+    active_binding_count = (await db.execute(
+        select(func.count(BridgeSpuSku.id)).where(
+            BridgeSpuSku.spu == spu_code,
+            BridgeSpuSku.binding_status == "active",
+            BridgeSpuSku.effective_to.is_(None),
+        )
+    )).scalar() or 0
+    if active_binding_count == 0:
+        checks.append(SpuDeletionCheck(code="spu_has_active_skus", label="无 active SKU 挂载", status="pass"))
+    else:
+        checks.append(SpuDeletionCheck(
+            code="spu_has_active_skus", label="无 active SKU 挂载", status="fail",
+            detail=f"仍有 {active_binding_count} 个 active SKU,请先停用 SKU",
+        ))
+
+    # 4-7 占位(均为 pass,M3 完善)
+    checks.append(SpuDeletionCheck(code="no_active_profiles", label="无 active operating profile", status="pass"))
+    checks.append(SpuDeletionCheck(code="no_pending_versions", label="无 pending profit version", status="pass", detail="M2 完善"))
+    checks.append(SpuDeletionCheck(code="no_pending_inventory", label="无未消耗 inventory", status="pass", detail="M2 完善"))
+    checks.append(SpuDeletionCheck(code="no_active_listings", label="无平台在架", status="pass", detail="M2 完善"))
+
+    return checks
+
+
+@router.post("/api/spus/{spu}/deletion-preview", response_model=SpuDeletionPreviewResponse)
+async def preview_spu_deletion(
+    spu: str,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """预览删除:返回 7 项校验明细 + 软删/硬删能力 + 影响范围。"""
+    spu_row = await db.get(DimSpu, spu)
+    checks = await _check_spu_deletion_blockers(db, spu)
+    blocked = [c for c in checks if c.status == "fail"]
+
+    soft_impact: dict[str, int] = {}
+    can_soft_delete = len(blocked) == 0
+    if can_soft_delete:
+        binding_count = (await db.execute(
+            select(func.count(BridgeSpuSku.id)).where(
+                BridgeSpuSku.spu == spu,
+                BridgeSpuSku.binding_status == "active",
+                BridgeSpuSku.effective_to.is_(None),
+            )
+        )).scalar() or 0
+        soft_impact["dim_spu"] = 1
+        soft_impact["bridge_spu_sku_inactive"] = binding_count
+        soft_impact["fact_audit_log"] = 1
+
+    return SpuDeletionPreviewResponse(
+        spu=spu,
+        spu_name=spu_row.spu_name if spu_row else None,
+        can_soft_delete=can_soft_delete,
+        can_hard_delete=False,
+        checks=checks,
+        soft_delete_impact=soft_impact,
+        hard_delete_impact={},
+        blocked_reasons=[c.label + ": " + (c.detail or "") for c in blocked],
+    )
+
+
+@router.post("/api/spus/{spu}/soft-delete", response_model=SpuSoftDeleteResponse)
+async def soft_delete_spu(
+    spu: str,
+    body: SpuSoftDeleteRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """软删 SPU:active=false + biz_status=retired,失效 binding,写 audit。"""
+    checks = await _check_spu_deletion_blockers(db, spu)
+    blocked = [c for c in checks if c.status == "fail"]
+    if blocked:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "spu_deletion_blocked",
+                "blocked_checks": [c.model_dump() for c in blocked],
+                "blocked_reasons": [c.label + ": " + (c.detail or "") for c in blocked],
+            },
+        )
+
+    spu_row = await db.get(DimSpu, spu)
+    if spu_row is None:
+        raise HTTPException(status_code=404, detail=f"SPU '{spu}' not found")
+
+    spu_row.active = False
+    if spu_row.biz_status != "retired":
+        spu_row.biz_status = "retired"
+
+    binding_result = await db.execute(
+        update(BridgeSpuSku)
+        .where(
+            BridgeSpuSku.spu == spu,
+            BridgeSpuSku.binding_status == "active",
+            BridgeSpuSku.effective_to.is_(None),
+        )
+        .values(binding_status="inactive", effective_to=date.today())
+    )
+    affected_bindings = binding_result.rowcount or 0
+
+    await _write_product_center_audit(
+        db, _user,
+        action_type="soft_delete",
+        resource_type="spu",
+        resource_id=spu,
+        changes={
+            "active": False,
+            "biz_status": spu_row.biz_status,
+            "affected_bindings": affected_bindings,
+            "reason": body.reason,
+            "warn_checks": [c.model_dump() for c in checks if c.status == "warn"],
+        },
+    )
+    await db.commit()
+
+    return SpuSoftDeleteResponse(
+        spu=spu,
+        spu_name=spu_row.spu_name,
+        soft_deleted_at=datetime.now(timezone.utc),
+        affected_bindings=affected_bindings,
+        biz_status=spu_row.biz_status,
+        audit_recorded=True,
+    )
+
+
+@router.post("/api/spus/batch-soft-delete", response_model=BatchSpuSoftDeleteResponse)
+async def batch_soft_delete_spus(
+    body: BatchSpuSoftDeleteRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """批量软删(1~100 个),任一 fail 整体回滚,保证事务原子性。"""
+    items: list[BatchSpuSoftDeleteItem] = []
+    blocked_spus: list[str] = []
+
+    for spu in body.spus:
+        spu_row = await db.get(DimSpu, spu)
+        if spu_row is None:
+            blocked_spus.append(spu)
+            items.append(BatchSpuSoftDeleteItem(
+                spu=spu,
+                status="blocked",
+                blocked_reasons=[f"SPU '{spu}' 不存在"],
+            ))
+            continue
+        checks = await _check_spu_deletion_blockers(db, spu)
+        blocked = [c for c in checks if c.status == "fail"]
+        warn_checks = [c for c in checks if c.status == "warn"]
+        if blocked:
+            blocked_spus.append(spu)
+            items.append(BatchSpuSoftDeleteItem(
+                spu=spu,
+                spu_name=spu_row.spu_name,
+                status="blocked",
+                blocked_reasons=[c.label + ": " + (c.detail or "") for c in blocked],
+                warn_checks=[c.model_dump() for c in warn_checks],
+            ))
+        else:
+            items.append(BatchSpuSoftDeleteItem(
+                spu=spu,
+                spu_name=spu_row.spu_name,
+                status="deleted",
+                affected_bindings=0,
+                warn_checks=[c.model_dump() for c in warn_checks],
+            ))
+
+    if blocked_spus:
+        return BatchSpuSoftDeleteResponse(
+            total=len(body.spus),
+            deleted=0,
+            blocked=len(blocked_spus),
+            rolled_back=True,
+            items=items,
+        )
+
+    success_count = 0
+    try:
+        for spu in body.spus:
+            spu_row = await db.get(DimSpu, spu)
+            if spu_row is None:
+                continue
+            spu_row.active = False
+            if spu_row.biz_status != "retired":
+                spu_row.biz_status = "retired"
+            binding_result = await db.execute(
+                update(BridgeSpuSku)
+                .where(
+                    BridgeSpuSku.spu == spu,
+                    BridgeSpuSku.binding_status == "active",
+                    BridgeSpuSku.effective_to.is_(None),
+                )
+                .values(binding_status="inactive", effective_to=date.today())
+            )
+            affected_bindings = binding_result.rowcount or 0
+            for item in items:
+                if item.spu == spu and item.status == "deleted":
+                    item.affected_bindings = affected_bindings
+                    break
+            await _write_product_center_audit(
+                db, _user,
+                action_type="batch_soft_delete",
+                resource_type="spu",
+                resource_id=spu,
+                changes={
+                    "active": False,
+                    "biz_status": spu_row.biz_status,
+                    "affected_bindings": affected_bindings,
+                    "reason": body.reason,
+                    "batch_total": len(body.spus),
+                },
+            )
+            success_count += 1
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    return BatchSpuSoftDeleteResponse(
+        total=len(body.spus),
+        deleted=success_count,
+        blocked=0,
+        rolled_back=False,
+        items=items,
+    )
 
 
 @router.post("/api/spus/bulk", response_model=BulkMutationResponse)

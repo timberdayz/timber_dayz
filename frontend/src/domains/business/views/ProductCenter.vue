@@ -28,6 +28,11 @@
             :loading="saving"
             @click="saveSpuRows"
             >保存变更</el-button
+          ><el-button
+            type="danger"
+            :disabled="!selectedSpus.length"
+            @click="handleBatchDeleteSpu"
+            >批量软删({{ selectedSpus.length }})</el-button
           >
         </div>
         <el-table
@@ -36,7 +41,9 @@
           stripe
           border
           class="flat-table"
-          ><el-table-column label="SPU" min-width="150"
+          @selection-change="onSpuSelectionChange"
+          ><el-table-column type="selection" width="48" :selectable="(row) => !row.__new && row.active !== false"
+          /><el-table-column label="SPU" min-width="150"
             ><template #default="{ row }"
               ><el-input
                 v-if="row.__new"
@@ -116,10 +123,16 @@
                 :min="1"
                 :controls="false"
                 size="small" /></template></el-table-column
-          ><el-table-column label="操作" width="110" fixed="right"
+          ><el-table-column label="操作" width="180" fixed="right"
             ><template #default="{ row }"
               ><el-button link type="primary" @click="showBindings(row)"
                 >SKU 归属</el-button
+              ><el-button
+                link
+                type="danger"
+                :disabled="row.__new || row.active === false"
+                @click="handleDeleteSpu(row)"
+                >删除</el-button
               ></template
             ></el-table-column
           ></el-table
@@ -730,6 +743,7 @@ const userStore = useUserStore();
 const activeTab = ref("spu");
 const costTab = ref("rules");
 const saving = ref(false);
+const selectedSpus = ref([]);
 const loadingSpus = ref(false);
 const loadingSkus = ref(false);
 const loadingBills = ref(false);
@@ -1287,6 +1301,158 @@ const showBindings = async (row) => {
     bindingDrawer.rows = await productCenterApi.listSpuSkus(row.spu);
   } catch (error) {
     ElMessage.error(error.message || "加载绑定历史失败");
+  }
+};
+const onSpuSelectionChange = (rows) => {
+  selectedSpus.value = rows.filter((r) => !r.__new && r.active !== false);
+};
+const handleDeleteSpu = async (row) => {
+  if (row.__new || row.active === false) return;
+  let preview;
+  try {
+    preview = await productCenterApi.previewSpuDeletion(row.spu);
+  } catch (error) {
+    ElMessage.error(error.message || "删除预检失败");
+    return;
+  }
+  const failChecks = (preview.checks || []).filter((c) => c.status === "fail");
+  const warnChecks = (preview.checks || []).filter((c) => c.status === "warn");
+  if (failChecks.length) {
+    const failMsg = failChecks.map((c) => `• ${c.label}${c.detail ? `: ${c.detail}` : ""}`).join("\n");
+    const warnMsg = warnChecks.map((c) => `• ${c.label}${c.detail ? `: ${c.detail}` : ""}`).join("\n");
+    await ElMessageBox.alert(
+      `以下前置条件未通过，暂不可删除：\n${failMsg}\n${warnMsg ? `\n提示（不阻断）：\n${warnMsg}\n` : ""}\n请先在 SKU 归属页停用关联 SKU。`,
+      `SPU ${row.spu} 删除预检失败`,
+      { type: "error", confirmButtonText: "我知道了" },
+    );
+    return;
+  }
+  const warnText = warnChecks.length
+    ? `\n\n提示（不阻断）：\n${warnChecks.map((c) => `• ${c.label}`).join("\n")}`
+    : "";
+  const summary = `SPU: ${row.spu} (${row.spu_name || ""})\n影响：\n• dim_spu 记录将置为 inactive + biz_status=retired\n• bridge_spu_sku 失效 ${preview.soft_delete_impact?.bridge_spu_sku_inactive ?? 0} 条\n• fact_audit_log 新增 1 条${warnText}`;
+  let reason = "";
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `${summary}\n\n请输入删除原因（10~500 字）：`,
+      `确认软删除 SPU ${row.spu}`,
+      {
+        type: "warning",
+        confirmButtonText: "确认软删除",
+        cancelButtonText: "取消",
+        inputType: "textarea",
+        inputPlaceholder: "例:该 SPU 已下线,无在售 SKU,删除以减少统计干扰",
+        inputValidator: (val) => {
+          const t = (val || "").trim();
+          if (t.length < 10) return "原因至少 10 字";
+          if (t.length > 500) return "原因最多 500 字";
+          return true;
+        },
+      },
+    );
+    reason = value.trim();
+  } catch (e) {
+    return;
+  }
+  try {
+    const resp = await productCenterApi.softDeleteSpu(row.spu, { reason, confirm: true });
+    ElMessage.success(`SPU ${resp.spu} 已软删除 (audit=${resp.audit_recorded})`);
+    await loadSpus();
+  } catch (error) {
+    ElMessage.error(error.message || "软删除失败");
+  }
+};
+const handleBatchDeleteSpu = async () => {
+  const targets = selectedSpus.value.filter((r) => !r.__new && r.active !== false);
+  if (!targets.length) return;
+  // 阶段 1:对每个 SPU 调 preview
+  const previews = await Promise.all(
+    targets.map(async (row) => {
+      try {
+        const pv = await productCenterApi.previewSpuDeletion(row.spu);
+        return { spu: row.spu, spu_name: row.spu_name, preview: pv, error: null };
+      } catch (e) {
+        return { spu: row.spu, spu_name: row.spu_name, preview: null, error: e.message || "预检失败" };
+      }
+    }),
+  );
+  const blockedEntries = previews.filter(
+    (p) => p.error || (p.preview && !p.preview.can_soft_delete),
+  );
+  if (blockedEntries.length) {
+    const list = blockedEntries
+      .map((b) => {
+        const reasons = b.error
+          ? [b.error]
+          : (b.preview.blocked_reasons || []);
+        return `• ${b.spu}: ${reasons.join("; ") || "不通过"}`;
+      })
+      .join("\n");
+    await ElMessageBox.alert(
+      `以下 SPU 未通过预检，批量操作已取消（任一 fail 整体回滚）：\n${list}\n\n请先到 SKU 归属页停用关联 SKU 后再试。`,
+      `批量软删预检失败（${blockedEntries.length}/${targets.length} 不通过）`,
+      { type: "error", confirmButtonText: "我知道了" },
+    );
+    return;
+  }
+  // 阶段 2:弹窗输入 reason
+  const warnBlock = previews
+    .filter((p) => p.preview.checks.some((c) => c.status === "warn"))
+    .map((p) => `• ${p.spu}: ${p.preview.checks.filter((c) => c.status === "warn").map((c) => c.label).join(", ")}`)
+    .join("\n");
+  const totalBindings = previews.reduce(
+    (sum, p) => sum + (p.preview.soft_delete_impact?.bridge_spu_sku_inactive || 0),
+    0,
+  );
+  const summary = `即将软删除 ${targets.length} 个 SPU：\n${targets.map((r) => `• ${r.spu} (${r.spu_name || ""})`).join("\n")}\n\n汇总影响：\n• dim_spu: ${targets.length} 条将置为 retired\n• bridge_spu_sku 失效 ${totalBindings} 条\n• fact_audit_log 新增 ${targets.length} 条${warnBlock ? `\n\n提示（不阻断）：\n${warnBlock}` : ""}`;
+  let reason = "";
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `${summary}\n\n请输入删除原因（10~500 字）：`,
+      `确认批量软删除 ${targets.length} 个 SPU`,
+      {
+        type: "warning",
+        confirmButtonText: `确认批量删除`,
+        cancelButtonText: "取消",
+        inputType: "textarea",
+        inputValidator: (val) => {
+          const t = (val || "").trim();
+          if (t.length < 10) return "原因至少 10 字";
+          if (t.length > 500) return "原因最多 500 字";
+          return true;
+        },
+      },
+    );
+    reason = value.trim();
+  } catch (e) {
+    return;
+  }
+  // 阶段 3:执行批量
+  try {
+    const resp = await productCenterApi.batchSoftDeleteSpus({
+      spus: targets.map((r) => r.spu),
+      reason,
+      confirm: true,
+    });
+    if (resp.rolled_back) {
+      const blockedNames = resp.items
+        .filter((it) => it.status === "blocked")
+        .map((it) => `• ${it.spu}: ${it.blocked_reasons.join("; ")}`)
+        .join("\n");
+      ElMessageBox.alert(
+        `整体回滚，无任何修改：\n${blockedNames}`,
+        "批量软删已回滚",
+        { type: "error", confirmButtonText: "我知道了" },
+      );
+      return;
+    }
+    ElMessage.success(
+      `批量软删完成:成功 ${resp.deleted}/${resp.total},audit 已写入`,
+    );
+    selectedSpus.value = [];
+    await loadSpus();
+  } catch (error) {
+    ElMessage.error(error.message || "批量软删失败");
   }
 };
 const openBatchCreate = () => {
