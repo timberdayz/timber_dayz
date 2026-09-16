@@ -579,3 +579,93 @@ def test_platform_profit_projection_prefers_immutable_estimate_reference_costs()
     assert 'SkuProfitEstimate.calculation_basis == "estimated"' in payload
     assert 'estimate.expected_logistics_cost' in payload
     assert 'estimate.expected_storage_cost' in payload
+
+
+def test_warehouse_storage_rule_delete_endpoint_is_registered():
+    """Deletion must be available so front-end can remove unused storage rules."""
+    from backend.domains.business.routers.product_center import router
+
+    delete_routes = [
+        route
+        for route in router.routes
+        if getattr(route, "methods", None) and "DELETE" in route.methods
+        and getattr(route, "path", "") == "/api/warehouse-storage-rules/{rule_id}"
+    ]
+    assert delete_routes, "DELETE /api/warehouse-storage-rules/{rule_id} is not registered"
+
+
+def test_warehouse_storage_rule_delete_keeps_patch_invariants_intact():
+    """Deletion is additive: the patch path must still refuse to reactivate or version inactive rules."""
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    update_section = source[
+        source.index("async def update_warehouse_storage_rule"):
+        source.index("async def delete_warehouse_storage_rule")
+    ]
+    assert 'values.get("status") == "active" and row.status != "active"' in update_section
+    assert "inactive storage rules cannot be reactivated" in update_section
+    assert "inactive storage rules cannot be versioned" in update_section
+
+
+@pytest.mark.asyncio
+async def test_warehouse_storage_rule_delete_removes_row_and_writes_audit():
+    """End-to-end: DELETE removes the row and emits an audit entry."""
+    from backend.domains.business.routers import product_center as pc_module
+    from modules.core.db import WarehouseStorageRule
+
+    class _FakeSession:
+        def __init__(self, rule):
+            self.rule = rule
+            self.deleted = []
+            self.added = []
+            self.committed = False
+
+        async def get(self, _model, rule_id):
+            return self.rule if self.rule and self.rule.rule_id == rule_id else None
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def delete(self, row):
+            self.deleted.append(row.rule_id)
+
+        async def commit(self):
+            self.committed = True
+
+    user = type("_U", (), {"user_id": 7, "username": "tester"})()
+    rule = WarehouseStorageRule(
+        rule_id=42, warehouse_code="WH-1", billing_basis="volume",
+        billing_unit="CNY/CBM/month", unit_rate_cny=Decimal("100"),
+        effective_from=date(2026, 1, 1), status="active", version="v1",
+    )
+    session = _FakeSession(rule)
+
+    await pc_module.delete_warehouse_storage_rule(rule_id=42, db=session, _user=user)
+
+    assert session.deleted == [42]
+    assert session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_warehouse_storage_rule_delete_returns_404_when_row_missing():
+    """End-to-end: DELETE on an unknown id raises 404 and does not commit."""
+    from backend.domains.business.routers import product_center as pc_module
+    from fastapi import HTTPException
+
+    class _FakeSession:
+        def __init__(self):
+            self.committed = False
+
+        async def get(self, _model, _rule_id):
+            return None
+
+        async def commit(self):
+            self.committed = True
+
+    user = type("_U", (), {"user_id": 1, "username": "tester"})()
+    session = _FakeSession()
+
+    with pytest.raises(HTTPException) as exc:
+        await pc_module.delete_warehouse_storage_rule(rule_id=999, db=session, _user=user)
+
+    assert exc.value.status_code == 404
+    assert session.committed is False

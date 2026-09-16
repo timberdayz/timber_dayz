@@ -1,12 +1,5 @@
 <template>
   <div class="product-center erp-page-container">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">商品中心</h1>
-        <p class="page-subtitle">公司商品主数据、采购批次与可追溯成本</p>
-      </div>
-      <el-tag type="info">ERP 主数据</el-tag>
-    </div>
     <el-tabs v-model="activeTab" class="product-tabs">
       <el-tab-pane label="SPU 管理" name="spu">
         <div class="toolbar">
@@ -46,10 +39,10 @@
           ><el-table-column label="SPU" min-width="150"
             ><template #default="{ row }"
               ><el-input
+                v-if="row.__new"
                 v-model="row.spu"
-                :disabled="!row.__new"
                 size="small"
-                placeholder="HOME-0001" /></template></el-table-column
+                placeholder="HOME-0001" /><span v-else class="readonly-cell">{{ row.spu || "-" }}</span></template></el-table-column
           ><el-table-column label="商品名称" min-width="190"
             ><template #default="{ row }"
               ><el-input
@@ -86,24 +79,26 @@
                   " /></el-select></template></el-table-column
           ><el-table-column label="物流货损率" width="120"
             ><template #default="{ row }"
-              ><el-input-number
-                :model-value="toPercent(row.logistics_damage_rate)"
-                :min="0"
-                :max="100"
-                :step="0.1"
-                @update:model-value="row.logistics_damage_rate = fromPercent($event); markDirty('spu', row)"
-                :controls="false"
-                size="small" /><span class="rate-suffix">%</span></template></el-table-column
+              ><div class="rate-cell"
+                ><el-input-number
+                  :model-value="toPercent(row.logistics_damage_rate)"
+                  :min="0"
+                  :max="100"
+                  :step="0.1"
+                  @update:model-value="row.logistics_damage_rate = fromPercent($event); markDirty('spu', row)"
+                  :controls="false"
+                  size="small" /><span class="rate-suffix">%</span></div></template></el-table-column
           ><el-table-column label="退货损失率" width="120"
             ><template #default="{ row }"
-              ><el-input-number
-                :model-value="toPercent(row.return_loss_rate)"
-                :min="0"
-                :max="100"
-                :step="0.1"
-                @update:model-value="row.return_loss_rate = fromPercent($event); markDirty('spu', row)"
-                :controls="false"
-                size="small" /><span class="rate-suffix">%</span></template></el-table-column
+              ><div class="rate-cell"
+                ><el-input-number
+                  :model-value="toPercent(row.return_loss_rate)"
+                  :min="0"
+                  :max="100"
+                  :step="0.1"
+                  @update:model-value="row.return_loss_rate = fromPercent($event); markDirty('spu', row)"
+                  :controls="false"
+                  size="small" /><span class="rate-suffix">%</span></div></template></el-table-column
           ><el-table-column label="状态" width="110"
             ><template #default="{ row }"
               ><el-select v-model="row.biz_status" size="small"
@@ -175,6 +170,7 @@
           ><el-table-column label="SPU" width="155"
             ><template #default="{ row }"
               ><el-select
+                v-if="row.__new"
                 v-model="row.spu"
                 filterable
                 clearable
@@ -184,13 +180,15 @@
                   v-for="spu in spus"
                   :key="spu.spu"
                   :label="spu.spu"
-                  :value="spu.spu" /></el-select></template></el-table-column
-          ><el-table-column label="ERP SKU" width="160"
+                  :value="spu.spu" /></el-select
+              ><span v-else class="readonly-cell">{{ row.spu || "-" }}</span></template></el-table-column
+          ><el-table-column label="SKU" width="160"
             ><template #default="{ row }"
               ><el-input
+                v-if="row.__new"
                 v-model="row.sku_key"
-                :disabled="!row.__new"
-                size="small" /></template></el-table-column
+                size="small"
+                placeholder="SKU-0001" /><span v-else class="readonly-cell">{{ row.sku_key || "-" }}</span></template></el-table-column
           ><el-table-column label="名称" min-width="180"
             ><template #default="{ row }"
               ><el-input
@@ -327,7 +325,7 @@
           <el-table-column label="物流方式" width="100"><template #default="{ row }">{{ transportLabel(row.transport_type) }}</template></el-table-column>
           <el-table-column label="参考物流" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
           <el-table-column label="参考仓储" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
-          <el-table-column label="广告费率" width="115"><template #default="{ row }"><el-input-number v-model="row.expected_ad_rate_pct" :min="0" :max="100" :step="0.1" :controls="false" size="small" @change="previewOperatingRow(row)" /><span class="rate-suffix">%</span></template></el-table-column>
+          <el-table-column label="广告费率" width="115"><template #default="{ row }"><div class="rate-cell"><el-input-number v-model="row.expected_ad_rate_pct" :min="0" :max="100" :step="0.1" :controls="false" size="small" @change="previewOperatingRow(row)" /><span class="rate-suffix">%</span></div></template></el-table-column>
           <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
           <el-table-column label="平台费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
           <el-table-column label="预计广告费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
@@ -453,7 +451,7 @@
               <el-table-column label="版本" width="120"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
               <el-table-column label="来源" width="130"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
               <el-table-column label="备注" min-width="150"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
-              <el-table-column label="操作" width="180" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveStorageRule(row)">保存（自动新版本）</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="danger" @click="disableStorageRule(row)">停用</el-button></template></el-table-column>
+              <el-table-column label="操作" width="240" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveStorageRule(row)">保存（自动新版本）</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="danger" @click="disableStorageRule(row)">停用</el-button><el-button v-if="!row.__new && row.status !== 'active'" link type="success" @click="enableStorageRule(row)">启用</el-button><el-button v-if="!row.__new" link type="danger" @click="removeStorageRuleRow(row)">删除</el-button></template></el-table-column>
             </el-table></el-tab-pane
           ><el-tab-pane label="物流批次" name="batches"
             ><div class="toolbar">
@@ -518,7 +516,7 @@
       <el-alert type="info" :closable="false" title="平台综合费率用于预计利润计算，仅管理员、主管和财务可维护。" />
       <el-form :model="platformFeeDrawer.form" label-width="110px" class="drawer-form">
         <el-form-item label="平台"><span>{{ platformFeeDrawer.label }}</span></el-form-item>
-        <el-form-item label="综合费率"><el-input-number v-model="platformFeeDrawer.form.default_fee_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></el-form-item>
+        <el-form-item label="综合费率"><div class="rate-cell"><el-input-number v-model="platformFeeDrawer.form.default_fee_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div></el-form-item>
         <el-form-item label="生效日期"><el-date-picker v-model="platformFeeDrawer.form.fee_rate_effective_from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
         <el-form-item label="来源"><el-input v-model="platformFeeDrawer.form.fee_rate_source" /></el-form-item>
         <el-form-item label="版本"><el-input v-model="platformFeeDrawer.form.fee_rate_version" /></el-form-item>
@@ -1009,6 +1007,42 @@ const disableStorageRule = async (row) => {
     ElMessage.success("仓储规则已停用");
   } catch (error) {
     if (error !== "cancel") ElMessage.error(error.message || "停用仓储规则失败");
+  }
+};
+const enableStorageRule = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `将基于此规则（${row.warehouse_code} ${row.version || ""}）创建一条新 active 版本，原规则作为历史保留。`,
+      "启用仓储规则",
+      { type: "warning" },
+    );
+    await productCenterApi.createWarehouseStorageRule({
+      warehouse_code: row.warehouse_code,
+      unit_rate_cny: row.unit_rate_cny,
+      effective_from: new Date().toISOString().slice(0, 10),
+      status: "active",
+      source: row.source || "manual",
+      version: `${row.version || "v1"}-restored`,
+      notes: row.notes || "",
+    });
+    await loadStorageRules();
+    ElMessage.success("仓储规则已启用为新版本");
+  } catch (error) {
+    if (error !== "cancel") ElMessage.error(error.message || "启用仓储规则失败");
+  }
+};
+const removeStorageRuleRow = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      "删除后该仓储规则将从列表中移除。历史利润记录中的 storage_rule_id 会被置空（但 storage_rule_version 字符串保留，可追溯历史）。",
+      "删除仓储规则",
+      { type: "warning" },
+    );
+    await productCenterApi.deleteWarehouseStorageRule(row.rule_id);
+    storageRules.value = storageRules.value.filter((item) => item.rule_id !== row.rule_id);
+    ElMessage.success("仓储规则已删除");
+  } catch (error) {
+    if (error !== "cancel") ElMessage.error(error.message || "删除仓储规则失败");
   }
 };
 const loadPurchaseOrders = async () => {
@@ -1524,12 +1558,34 @@ onMounted(async () => {
 .flat-table :deep(.el-input-number) {
   width: 100%;
 }
+.rate-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.rate-cell :deep(.el-input-number) {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
 .rate-suffix {
-  margin-left: 4px;
+  flex: none;
   color: var(--el-text-color-secondary);
 }
 .sku-table :deep(.el-table__cell) {
   padding: 6px 4px;
+}
+.readonly-cell {
+  display: inline-block;
+  width: 100%;
+  padding: 0 11px;
+  line-height: 24px;
+  color: var(--el-text-color-regular);
+  background-color: var(--el-disabled-bg-color);
+  border: 1px solid var(--el-disabled-border-color);
+  border-radius: var(--el-border-radius-small);
+  font-size: 12px;
+  user-select: text;
 }
 .inline-numbers {
   display: flex;

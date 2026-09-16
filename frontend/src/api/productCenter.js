@@ -153,6 +153,9 @@ export default {
   updateWarehouseStorageRule(ruleId, payload) {
     return api._patch(`/warehouse-storage-rules/${ruleId}`, payload);
   },
+  deleteWarehouseStorageRule(ruleId) {
+    return api._delete(`/warehouse-storage-rules/${ruleId}`);
+  },
   updatePlatformFeeRate(platformCode, payload) {
     return api._patch(`/platforms/${encodeURIComponent(platformCode)}/fee-rate`, payload);
   },

@@ -1263,6 +1263,20 @@ async def update_warehouse_storage_rule(rule_id: int, body: WarehouseStorageRule
     return _serialize_storage_rule(row)
 
 
+@router.delete("/api/warehouse-storage-rules/{rule_id}", status_code=204)
+async def delete_warehouse_storage_rule(rule_id: int, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_platform_fee_editor)):
+    row = await db.get(WarehouseStorageRule, rule_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="warehouse storage rule not found")
+    await _write_product_center_audit(
+        db, _user, action_type="delete", resource_type="warehouse_storage_rule",
+        resource_id=str(rule_id),
+        changes={"warehouse_code": row.warehouse_code, "version": row.version, "status": row.status, "unit_rate_cny": float(row.unit_rate_cny)},
+    )
+    await db.delete(row)
+    await db.commit()
+
+
 @router.post("/api/product-warehouses", status_code=201)
 async def create_product_warehouse(body: ProductWarehouseCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     row = DimWarehouse(**body.model_dump())
