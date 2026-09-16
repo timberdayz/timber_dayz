@@ -1026,12 +1026,27 @@ const loadRules = async () => {
     const rows = await productCenterApi.listProviderRules({
       status: "active",
     });
-    console.info("[loadRules] fetched", rows.length, "provider rules");
+    console.info(
+      "[loadRules] OK rows=",
+      rows.length,
+      "cookies=",
+      document.cookie || "<none>",
+    );
     rules.value = _sortProviderRules(
       rows.map((row) => ({ ...row, __original: _providerRuleOriginal(row) })),
     );
   } catch (error) {
-    console.error("[loadRules] failed", error);
+    const status = error?.response?.status;
+    console.error(
+      "[loadRules] FAIL status=",
+      status,
+      "code=",
+      error?.code,
+      "msg=",
+      error?.message,
+      "cookies=",
+      document.cookie || "<none>",
+    );
     rules.value = [];
     ElMessage.error(error.message || "加载物流规则失败");
   } finally {
