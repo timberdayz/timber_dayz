@@ -20,6 +20,7 @@ DEFAULT_SYSTEM_ROLES = {
         "description": "业务主管，可访问经营、财务、培训和审批相关页面",
         "permissions": [
             "business-overview",
+            "product-center",
             "sales-dashboard",
             "order-management",
             "store-analytics",
@@ -140,9 +141,13 @@ async def ensure_system_roles(db: AsyncSession) -> list[str]:
             continue
 
         current_permissions = getattr(existing_role, "permissions", None) or ""
-        needs_permission_repair = current_permissions in ("", "[]", "null", "None", None)
+        desired_permissions = json.dumps(spec["permissions"], ensure_ascii=False)
+        needs_permission_repair = (
+            current_permissions in ("", "[]", "null", "None", None)
+            or current_permissions != desired_permissions
+        )
         if needs_permission_repair:
-            existing_role.permissions = json.dumps(spec["permissions"], ensure_ascii=False)
+            existing_role.permissions = desired_permissions
             if not getattr(existing_role, "role_name", None):
                 existing_role.role_name = spec["role_name"]
             if not getattr(existing_role, "description", None):

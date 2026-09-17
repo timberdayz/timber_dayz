@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -57,11 +58,12 @@ async def test_default_system_roles_do_not_keep_retired_frontend_page_permission
 @pytest.mark.asyncio
 async def test_ensure_system_roles_inserts_missing_investor_role():
     existing_roles = [
-        SimpleNamespace(role_code="admin", permissions='["*"]'),
-        SimpleNamespace(role_code="manager", permissions='["business-overview"]'),
-        SimpleNamespace(role_code="operator", permissions='["business-overview"]'),
-        SimpleNamespace(role_code="finance", permissions='["business-overview"]'),
-        SimpleNamespace(role_code="tourist", permissions='["business-overview"]'),
+        SimpleNamespace(
+            role_code=role_code,
+            permissions=json.dumps(spec["permissions"], ensure_ascii=False),
+        )
+        for role_code, spec in DEFAULT_SYSTEM_ROLES.items()
+        if role_code != "investor"
     ]
 
     added = []
