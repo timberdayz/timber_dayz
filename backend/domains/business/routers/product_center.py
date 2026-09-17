@@ -372,6 +372,7 @@ async def _enqueue_sku_projection(db: AsyncSession, row: DimErpSku) -> None:
 
 
 async def _enqueue_platform_sku_profit_projection(db: AsyncSession, row: SkuOperatingProfile) -> None:
+    await db.refresh(row)
     await FeishuProjectionService(db).enqueue(
         "platform_sku_profit",
         str(row.profile_id),

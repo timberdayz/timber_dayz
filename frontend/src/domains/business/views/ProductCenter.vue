@@ -186,6 +186,7 @@
           stripe
           border
           class="flat-table sku-table"
+          :header-cell-style="skuHeaderCellStyle"
           ><el-table-column label="SPU" width="155"
             ><template #default="{ row }"
               ><el-select
@@ -783,6 +784,15 @@ const loadingSpus = ref(false);
 const loadingRules = ref(false);
 const loadingSkus = ref(false);
 const loadingBills = ref(false);
+
+// SKU 资料 tab 中视觉标记为可填项的列名（仅改表头颜色，不动字段必填校验）
+const skuOptionalColumnLabels = ["规格", "重量 kg", "箱规（件/箱）", "参考售价", "售价来源"];
+const skuHeaderCellStyle = ({ column }) => {
+  if (skuOptionalColumnLabels.includes(column.label)) {
+    return { color: "#79bbff", fontWeight: "normal" };
+  }
+  return {};
+};
 const spus = ref([]);
 const skus = ref([]);
 const categories = ref([]);

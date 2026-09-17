@@ -1,0 +1,7 @@
+missing_fields = ['采购成本', '单件体积 m³', '周转类型']
+preview.profit = None
+preview.margin = None
+preview.storage = None
+preview.logistics = None
+preview.purchase = None
+preview.platform_fee = 1.86
