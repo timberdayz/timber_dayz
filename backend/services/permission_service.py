@@ -182,6 +182,15 @@ SYSTEM_PERMISSIONS = [
         "action": "all",
         "category": "销售与分析",
     },
+    # 商品中心
+    {
+        "id": "product-center",
+        "name": "商品中心",
+        "description": "管理商品与库存数据",
+        "resource": "product",
+        "action": "all",
+        "category": "商品中心",
+    },
     # 财务管理
     {
         "id": "financial-management",
