@@ -361,6 +361,7 @@
           <el-table-column label="物流方式" width="100"><template #default="{ row }">{{ transportLabel(row.transport_type) }}</template></el-table-column>
           <el-table-column label="参考物流" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
           <el-table-column label="参考仓储" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
+          <el-table-column label="参考贴单费" width="115"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
           <el-table-column label="广告费率" width="115"><template #default="{ row }"><div class="rate-cell"><el-input-number v-model="row.expected_ad_rate_pct" :min="0" :max="100" :step="0.1" :controls="false" size="small" @change="previewOperatingRow(row)" /><span class="rate-suffix">%</span></div></template></el-table-column>
           <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
           <el-table-column label="平台费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
@@ -1879,6 +1880,12 @@ const referenceCostDisplay = (row, kind) => {
     missing_storage_rule: "待配置仓储规则",
     ambiguous_logistics_rule: "参考物流规则待指定默认",
   })[reason] || "待补资料";
+};
+const referenceLabelFee = (row) =>
+  row.reference_label_fee ?? row.expected_label_fee ?? null;
+const referenceLabelFeeDisplay = (row) => {
+  const value = referenceLabelFee(row);
+  return value == null ? "-" : money(value);
 };
 onMounted(async () => {
   await Promise.all([

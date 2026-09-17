@@ -2456,6 +2456,8 @@ async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db
     platform = await db.get(DimPlatform, values["platform_code"])
     profile.reference_selling_price = sku.reference_selling_price if sku else None
     profile.platform_fee_rate = platform.default_fee_rate if platform else None
+    finance = ProductFinanceService(db)
+    profile.expected_label_fee = await finance.find_reference_label_fee(values["warehouse_code"])
     try:
         await db.flush()
         await _write_product_center_audit(
@@ -2492,6 +2494,8 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
     profile.reference_selling_price = sku.reference_selling_price if sku else None
     platform = await db.get(DimPlatform, values["platform_code"])
     profile.platform_fee_rate = platform.default_fee_rate if platform else None
+    finance = ProductFinanceService(db)
+    profile.expected_label_fee = await finance.find_reference_label_fee(values["warehouse_code"])
     await db.flush()
     estimates = []
     versions = [("estimated", preview["expected"])]
@@ -2508,7 +2512,7 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
             expected_selling_price=values["expected_selling_price"] if values.get("expected_selling_price") is not None else profile.reference_selling_price, competitor_price=values.get("competitor_price"), expected_ad_rate=values.get("expected_ad_rate", 0),
             platform_fee=section.get("platform_fee", preview["expected"].get("platform_fee")), expected_ad_cost=preview["expected"].get("ad_cost"),
             expected_logistics_cost=preview["expected"].get("logistics_cost"), actual_logistics_cost=preview.get("actual_logistics_cost"),
-            expected_storage_cost=preview["expected"].get("storage_cost"), actual_storage_cost=None,
+            expected_storage_cost=preview["expected"].get("storage_cost"), expected_label_fee=preview["expected"].get("label_fee"), actual_storage_cost=None,
             expected_profit=preview["expected"].get("profit"), expected_margin_rate=preview["expected"].get("margin_rate"),
             actual_recost_profit=preview["actual_recost"].get("profit"), actual_recost_margin_rate=preview["actual_recost"].get("margin_rate"), actual_recost_completeness=preview["actual_recost"].get("completeness"),
             logistics_cost_variance=preview["variance"].get("logistics"), storage_cost_variance=preview["variance"].get("storage"), total_cost_variance=preview["variance"].get("total"),

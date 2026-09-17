@@ -131,6 +131,7 @@ def build_platform_profit_preview(
     purchase_cost: Decimal | int | float | None,
     expected_logistics_cost: Decimal | int | float | None,
     expected_storage_cost: Decimal | int | float | None,
+    expected_label_fee: Decimal | int | float | None = None,
     actual_logistics_cost: Decimal | int | float | None,
     actual_storage_cost: Decimal | int | float | None,
     platform_fee_rate: Decimal | int | float | None,
@@ -138,7 +139,12 @@ def build_platform_profit_preview(
     return_rate: Decimal | int | float | None,
     damage_rate: Decimal | int | float | None,
 ) -> dict[str, dict[str, Decimal | str | None]]:
-    """Build side-by-side expected and actual-cost recost profit results."""
+    """Build side-by-side expected and actual-cost recost profit results.
+
+    ``expected_ad_rate`` is interpreted as the share of pre-ad profit allocated
+    to advertising (``ad_cost = pre_ad_profit × expected_ad_rate``), not as a
+    fraction of revenue.
+    """
     def optional_money(value: Decimal | int | float | None) -> Decimal | None:
         return _money(value) if value is not None else None
 
@@ -154,19 +160,30 @@ def build_platform_profit_preview(
     purchase = optional_money(purchase_cost)
     expected_logistics = optional_money(expected_logistics_cost)
     expected_storage = optional_money(expected_storage_cost)
+    expected_label_fee = optional_money(expected_label_fee)
     platform_fee = _money(revenue * Decimal(str(platform_fee_rate))) if revenue is not None and platform_fee_rate is not None else None
-    ad_cost = _money(revenue * Decimal(str(expected_ad_rate))) if revenue is not None and expected_ad_rate is not None else None
     return_loss = _money(revenue * Decimal(str(return_rate))) if revenue is not None and return_rate is not None else None
     damage_loss = _money(revenue * Decimal(str(damage_rate))) if revenue is not None and damage_rate is not None else None
 
-    expected_profit = calculated_profit(
-        revenue, purchase, expected_logistics, expected_storage, platform_fee, ad_cost, return_loss, damage_loss
-    )
+    def _pre_ad_components(use_actual: bool) -> list[Decimal | None]:
+        logistics = actual_logistics_cost if use_actual and actual_logistics_cost is not None else expected_logistics
+        storage = actual_storage_cost if use_actual and actual_storage_cost is not None else expected_storage
+        return [purchase, logistics, storage, expected_label_fee, platform_fee, return_loss, damage_loss]
+
+    def _ad_cost_and_profit(use_actual: bool) -> tuple[Decimal | None, Decimal | None]:
+        components = _pre_ad_components(use_actual)
+        if revenue is None or any(c is None for c in components):
+            return None, None
+        pre_ad_profit = revenue - sum(components, Decimal("0"))
+        ad = _money(pre_ad_profit * Decimal(str(expected_ad_rate))) if expected_ad_rate is not None else None
+        profit = _money(pre_ad_profit - ad) if ad is not None else None
+        return ad, profit
+
+    ad_cost, expected_profit = _ad_cost_and_profit(use_actual=False)
+    _, actual_profit = _ad_cost_and_profit(use_actual=True)
     actual_logistics = optional_money(actual_logistics_cost) if actual_logistics_cost is not None else expected_logistics
     actual_storage = optional_money(actual_storage_cost) if actual_storage_cost is not None else expected_storage
-    actual_profit = calculated_profit(
-        revenue, purchase, actual_logistics, actual_storage, platform_fee, ad_cost, return_loss, damage_loss
-    )
+
     has_actual_logistics = actual_logistics_cost is not None
     has_actual_storage = actual_storage_cost is not None
     complete_inputs = expected_profit is not None
@@ -187,6 +204,7 @@ def build_platform_profit_preview(
             "purchase_cost": purchase,
             "logistics_cost": expected_logistics,
             "storage_cost": expected_storage,
+            "label_fee": expected_label_fee,
             "platform_fee": platform_fee,
             "ad_cost": ad_cost,
             "return_loss": return_loss,
@@ -200,6 +218,7 @@ def build_platform_profit_preview(
             "purchase_cost": purchase,
             "logistics_cost": actual_logistics,
             "storage_cost": actual_storage,
+            "label_fee": expected_label_fee,
             "storage_cost_source": "actual_storage" if has_actual_storage else "expected_fallback",
             "profit": actual_profit,
             "margin_rate": (actual_profit / revenue).quantize(Decimal("0.00000001")) if actual_profit is not None and revenue else None,
