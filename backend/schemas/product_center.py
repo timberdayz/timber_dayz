@@ -330,6 +330,7 @@ class PlatformFeeRateUpdateRequest(BaseModel):
 class WarehouseStorageRuleCreateRequest(BaseModel):
     warehouse_code: str = Field(min_length=1, max_length=128)
     unit_rate_cny: float = Field(ge=0)
+    label_fee: Optional[float] = Field(default=None, ge=0)
     effective_from: date
     effective_to: Optional[date] = None
     status: str = Field(default="active", pattern=r"^(active|inactive)$")
@@ -346,6 +347,7 @@ class WarehouseStorageRuleCreateRequest(BaseModel):
 
 class WarehouseStorageRuleUpdateRequest(BaseModel):
     unit_rate_cny: Optional[float] = Field(default=None, ge=0)
+    label_fee: Optional[float] = Field(default=None, ge=0)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")

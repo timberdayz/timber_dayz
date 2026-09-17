@@ -1803,6 +1803,7 @@ async def list_product_warehouses(include_inactive: bool = Query(False), db: Asy
 def _serialize_storage_rule(row: WarehouseStorageRule) -> dict:
     return {"rule_id": row.rule_id, "warehouse_code": row.warehouse_code, "billing_basis": row.billing_basis,
             "billing_unit": row.billing_unit, "unit_rate_cny": float(row.unit_rate_cny),
+            "label_fee": float(row.label_fee) if row.label_fee is not None else None,
             "effective_from": row.effective_from,
             "effective_to": row.effective_to, "status": row.status, "source": row.source,
             "version": row.version, "notes": row.notes}
@@ -2304,6 +2305,7 @@ async def list_platform_sku_profit_candidates(
         purchase_cost = cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost
         reference_logistics = cost_inputs["reference_logistics_cost"]
         reference_storage = cost_inputs["reference_storage_cost"]
+        reference_label_fee = cost_inputs.get("reference_label_fee")
         actual_logistics = cost_inputs["actual_logistics_cost"]
         expected_selling_price = profile.expected_selling_price if profile else row.reference_selling_price
         seller_coupon_amount = profile.seller_coupon_amount if profile else 0
@@ -2335,6 +2337,7 @@ async def list_platform_sku_profit_candidates(
             purchase_cost=purchase_cost,
             expected_logistics_cost=reference_logistics,
             expected_storage_cost=reference_storage,
+            expected_label_fee=reference_label_fee,
             actual_logistics_cost=actual_logistics,
             actual_storage_cost=None,
             platform_fee_rate=platform.default_fee_rate,
@@ -2362,6 +2365,7 @@ async def list_platform_sku_profit_candidates(
             "reference_storage_days": reference_storage_days(row.turnover_class),
             "reference_logistics_cost": reference_logistics,
             "reference_storage_cost": reference_storage,
+            "reference_label_fee": reference_label_fee,
             "reference_cost_status": "ready" if not missing_reasons else "incomplete",
             "reference_cost_missing_reasons": list(dict.fromkeys(missing_reasons)),
             "reference_logistics_missing_reasons": [reason for reason in missing_reasons if reason in {"missing_logistics_rule", "missing_sku_weight", "ambiguous_logistics_rule"} or (reason == "missing_sku_volume" and reference_logistics is None)],

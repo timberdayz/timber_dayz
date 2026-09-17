@@ -496,6 +496,7 @@
               <el-table-column label="计费方式" width="110"><template #default>按体积</template></el-table-column>
               <el-table-column label="计费单位" width="130"><template #default>CNY/CBM/月</template></el-table-column>
               <el-table-column label="仓储单价" width="120"><template #default="{ row }"><el-input-number v-model="row.unit_rate_cny" :min="0" :precision="4" :controls="false" size="small" /></template></el-table-column>
+              <el-table-column label="贴单费" width="110"><template #default="{ row }"><el-input-number v-model="row.label_fee" :min="0" :precision="2" :controls="false" size="small" placeholder="可选" /></template></el-table-column>
               <el-table-column label="生效日期" width="145"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" /></template></el-table-column>
               <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '已停用' }}</el-tag></template></el-table-column>
               <el-table-column label="版本" width="120"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
@@ -1090,6 +1091,7 @@ const addStorageRuleRow = () =>
     __new: true,
     warehouse_code: "",
     unit_rate_cny: null,
+    label_fee: null,
     effective_from: new Date().toISOString().slice(0, 10),
     status: "active",
     source: "manual",
@@ -1099,7 +1101,7 @@ const addStorageRuleRow = () =>
 const storageRulePayload = (row) => {
   const { __new, __original, rule_id, billing_basis, billing_unit, ...payload } = row;
   if (!__new) {
-    for (const field of ["unit_rate_cny", "effective_from", "effective_to"]) {
+    for (const field of ["unit_rate_cny", "label_fee", "effective_from", "effective_to"]) {
       if (payload[field] === __original?.[field]) delete payload[field];
     }
   }
@@ -1292,7 +1294,9 @@ const handleOperatingSpuChange = () => {
 };
 const previewOperatingRow = async (row) => {
   try {
-    row.preview = await productCenterApi.previewPlatformSkuProfit(operatingPayload(row));
+    const result = await productCenterApi.previewPlatformSkuProfit(operatingPayload(row));
+    row.preview = result;
+    row.reference_label_fee = result.reference_label_fee ?? null;
   } catch (error) {
     ElMessage.error(error.message || "利润试算失败");
   }

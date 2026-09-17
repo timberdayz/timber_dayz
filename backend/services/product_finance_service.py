@@ -633,6 +633,12 @@ class ProductFinanceService:
             )
         ).scalars().first()
 
+        reference_label_fee = (
+            Decimal(str(storage_rule.label_fee))
+            if storage_rule is not None and storage_rule.label_fee is not None
+            else None
+        )
+
         inputs: dict[int, dict[str, object]] = {}
         for item_sku_id, sku in sku_by_id.items():
             reference_logistics = (
@@ -658,6 +664,7 @@ class ProductFinanceService:
                 "reference_logistics_ambiguous": logistics_rule_ambiguous,
                 "reference_storage_cost": reference_storage,
                 "reference_storage_rule": storage_rule,
+                "reference_label_fee": reference_label_fee,
             }
         return inputs
 
