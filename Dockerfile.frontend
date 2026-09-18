@@ -56,7 +56,7 @@ RUN echo "=== Building Vue application ===" && \
     npx vite build
 
 # ==================== 运行阶段 ====================
-FROM nginx:alpine AS production
+FROM nginx:1.27-alpine AS production
 
 LABEL maintainer="西虹ERP团队"
 LABEL description="西虹ERP系统前端服务 - 生产版"
