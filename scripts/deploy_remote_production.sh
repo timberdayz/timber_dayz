@@ -909,7 +909,7 @@ echo "[INFO] Phase 3b: starting frontend..."
 echo "[INFO] Waiting for frontend health..."
 frontend_healthy=0
 for i in $(seq 1 30); do
-  if docker exec xihong_erp_frontend wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1/ >/dev/null 2>&1; then
+  if docker exec xihong_erp_frontend sh -c 'curl -fsS http://127.0.0.1/ >/dev/null 2>&1'; then
     frontend_healthy=1
     echo "[OK] Frontend responded on container port 80"
     break
