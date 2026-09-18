@@ -119,3 +119,64 @@ def reconcile(
     lookup_only = sorted(lookup_keys - db_keys)
     db_only = sorted(db_keys - lookup_keys)
     return matched, lookup_only, db_only
+
+
+def build_update_rows(
+    matched: list[tuple[str, float]],
+    now: datetime,
+) -> list[tuple[str, float, str, str, str, datetime]]:
+    """把 matched 展开成 executemany 需要的行.
+
+    每行: (sku_key, price, currency, source, confidence, confirmed_at)
+    """
+    return [
+        (sku_code, price, CURRENCY_VALUE, SOURCE_VALUE, CONFIDENCE_VALUE, now)
+        for sku_code, price in matched
+    ]
+
+
+async def create_backup_table(db_url: str, backup_table: str) -> None:
+    """全表快照备份(覆盖原表前必做)。"""
+    import asyncpg
+    conn = await asyncpg.connect(db_url)
+    try:
+        await conn.execute(f"DROP TABLE IF EXISTS {backup_table}")
+        await conn.execute(
+            f"CREATE TABLE {backup_table} AS SELECT * FROM core.dim_erp_sku"
+        )
+    finally:
+        await conn.close()
+
+
+async def apply_update(
+    db_url: str,
+    matched: list[tuple[str, float]],
+    backup_table: str,
+    skip_backup: bool = False,
+) -> int:
+    """事务内 UPDATE。失败自动 ROLLBACK。返回成功行数."""
+    import asyncpg
+    if not skip_backup:
+        await create_backup_table(db_url, backup_table)
+
+    now = datetime.now(timezone.utc)
+    rows = build_update_rows(matched, now)
+
+    conn = await asyncpg.connect(db_url)
+    try:
+        async with conn.transaction():
+            await conn.executemany(
+                """
+                UPDATE core.dim_erp_sku
+                SET default_purchase_cost = $2,
+                    purchase_cost_currency = $3,
+                    purchase_cost_source = $4,
+                    purchase_cost_confidence = $5,
+                    purchase_cost_confirmed_at = $6
+                WHERE sku_key = $1
+                """,
+                rows,
+            )
+    finally:
+        await conn.close()
+    return len(rows)

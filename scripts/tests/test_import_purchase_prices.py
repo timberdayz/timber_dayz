@@ -2,6 +2,8 @@
 import pytest
 from importlib import import_module
 
+pytest_plugins = ("pytest_asyncio",)
+
 @pytest.fixture
 def mod():
     return import_module("import_purchase_prices")
@@ -63,3 +65,38 @@ def test_reconcile_db_only(mod):
     assert [c for c, _ in matched] == ["A"]
     assert lookup_only == []
     assert db_only == ["Z"]
+
+
+def test_build_update_rows_shape(mod):
+    from datetime import datetime, timezone
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=timezone.utc)
+    matched = [("A", 10.0), ("B", 20.0)]
+    rows = mod.build_update_rows(matched, now)
+    assert len(rows) == 2
+    # (sku_key, price, currency, source, confidence, confirmed_at)
+    assert rows[0] == ("A", 10.0, "CNY", "妙手导入", "medium", now)
+
+
+@pytest.mark.asyncio
+async def test_apply_update_rollback_on_failure(mod):
+    """集成测试: 故意传错字段值,事务应回滚,DB 不变。"""
+    import asyncpg
+    db_url = "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
+    # 用一个错误的价格(字符串)让 UPDATE 失败
+    bad = [("__NONEXISTENT_SKU_FOR_TEST__", "NOT_A_NUMBER")]  # type: ignore
+    with pytest.raises(Exception):
+        await mod.apply_update(
+            db_url,
+            bad,  # type: ignore[arg-type]
+            backup_table="core.dim_erp_sku_backup_TEST",
+            skip_backup=True,
+        )
+    # 验证备份表未创建(skip_backup=True)
+    conn = await asyncpg.connect(db_url)
+    try:
+        exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname='core' AND tablename='dim_erp_sku_backup_TEST')"
+        )
+        assert exists is False
+    finally:
+        await conn.close()
