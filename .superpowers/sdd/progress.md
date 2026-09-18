@@ -690,3 +690,111 @@ MiaoshouPurchaseExport.run:
 - **mirror 兄弟组件是 anti-fragile 策略**: orders / inventory 都做了 wait progress,只有 purchase 漏了。如果购买日期 picker fix 时同时把这个补上,就不会有今天的 73s 回归。**lesson**: 当一个数据域修改了关键路径(search/wait/export),要 grep 兄弟组件(miaoshou 三大数据域)看是否有 mirror 模式未对齐。
 - **race condition 在 download + save_as 之间**: Playwright `expect_download` 在收到 Content-Disposition header 时立即 fire,但 server-side 写入文件到磁盘是异步的。`save_as` 立即调用 = save 当时浏览器内存中的 byte stream,而不是磁盘 committed 文件。**lesson**: 对异步 IO 路径,wait 一个 explicit signal(progress dialog visible) 比依赖 raw download event 更可靠。
 - **3 个 contract test 锚定 ordering + 内容**: 第 4 条 test (`wait_idx < save_idx`) 特别关键 — 即使有人未来"重构"代码把 save_as 提前到 wait 之前,这个 test 也会失败。这保护 ordering invariant。
+
+---
+
+# 商品中心 SKU 采购价批量录入 — Subagent-Driven Progress Ledger
+
+**Plan:** `docs/superpowers/plans/2026-09-18-purchase-price-import.md`
+**Branch:** main(不建分支,改动留在工作区)
+**Spec:** `docs/superpowers/specs/2026-09-18-purchase-price-import-design.md`
+
+## In Progress
+(none)
+
+## Completed Tasks
+(none)
+
+## Pending Tasks
+- Task 1: 写脚本骨架 + xlsx 解析 + 过滤逻辑(带测试)
+- Task 2: 对账逻辑(读 DB + 比对 xlsx vs DB)
+- Task 3: 备份 + 事务写入(核心)
+- Task 4: CLI + 验证查询 + 报告输出(完整入口)
+- Task 5: dry-run 执行 + 用户 review(gate)
+- Task 6: 本地库真写(阶段 1)+ 验证(gate)
+- Task 7: 云端库真写(阶段 2,需用户批准)(gate)
+
+## Notes
+- 所有 commit 步骤已移除,改动留在工作区
+- Task 5/6/7 含用户 review gate,不能全自动
+
+## In Progress
+(none)
+
+## Completed Tasks
+
+- **Task 1: 写脚本骨架 + xlsx 解析 + 过滤逻辑(带测试)** (complete, commit e3cf3774, review Approved)
+  - Minor findings (roll-up for final review):
+    1. `import_purchase_prices.py:50` — `wb.close()` 未显式调用(read_only 句柄在 Windows 上可能锁文件)
+    2. `import_purchase_prices.py:94` / `test_import_purchase_prices.py:41` — 文件末尾无换行符(POSIX 惯例)
+    3. `import_purchase_prices.py:9-18` — `argparse / asyncio / csv / logging / sys / Path` 等 import 未触达(为后续 task 预热)
+    4. `import_purchase_prices.py:68-69` — `if row is None: continue` 不可达(`iter_rows(values_only=True)` 不会 yield None 行)
+
+
+- **Task 2: 对账逻辑(读 DB + 比对 xlsx vs DB)** (complete, commit c792a57b, review Approved)
+  - Minor findings (roll-up for final review):
+    1. 文件末尾无换行符(Task 1 已记,继续)
+    2. `fetch_db_sku_keys:103` — `if r["sku_key"]` 同时过滤 None 和空串(口径 OK,DB 列 NOT NULL)
+    3. 边缘情况未覆盖(`reconcile([], ...)` / `reconcile(valid, set())` / `valid` 含重复 SKU code)
+
+- **Task 3: 备份 + 事务写入(核心)** (complete, committed, review Approved)
+  - Minor findings (roll-up for final review):
+    1. `import_purchase_prices.py:143,145` — `backup_table` 字符串拼接有 SQL 注入面(脚本语境风险低,可加 quote_ident)
+    2. `test_import_purchase_prices.py:87` — `pytest.raises(Exception)` 过宽,建议收紧为 `asyncpg.exceptions.PostgresError`
+    3. `import_purchase_prices.py:158-179` — `matched=[]` 时无 fast-path,仍会建备份表
+    4. `import_purchase_prices.py:159-160` — 备份表创建不在事务内(下次 DROP IF EXISTS 覆盖,语义自洽但 docstring 应注明)
+    5. 文件末尾无换行符(累计 roll-up)
+
+- **Task 4: CLI + 验证查询 + 报告输出** (complete, committed, review Approved)
+  - Minor findings (roll-up for final review):
+    1. `import_purchase_prices.py:13` — `import logging` 遗留未用(累计)
+    2. `import_purchase_prices.py:281` — 函数内 `from pathlib import Path` 重复 import(顶部已有)
+    3. `.env` 解析不支持注释/多行/转义(简单实现)
+    4. `write_sample_csv` 空 samples 创建零字节文件
+    5. CSV 写出无 try/except(磁盘满/权限不足会抛未处理)
+    6. `--output-dir` 默认相对路径 "output" 跨目录易混淆
+
+- **Task 5: dry-run 执行 + 用户 review (gate)** (complete, no commit per `short-session-no-auto-commit`)
+  - dry-run 结果:xlsx 1086 valid / 36 跳过(—)/ 0 错误
+  - reconcile:matched=1082 / lookup_only=4 / db_only=39(差异正常,信息性,不阻断)
+  - 输出:`output/purchase_price_reconciliation_20260918.csv` + `output/purchase_price_import_dryrun_20260918.csv`
+  - 用户 review lookup_only 与 db_only 列表,确认差异属数据治理问题,可推进
+  - 决策:继续到 Task 6
+
+- **Task 6: 本地库真写(阶段 1)+ 验证(gate)** (complete, no commit per `short-session-no-auto-commit`)
+  - `--apply` 执行:xlsx 1086 valid / 36 跳过 → reconcile matched=1082 → 备份表 `core.dim_erp_sku_backup_20260918`(1121 行)→ 单事务 UPDATE 1082 行
+  - **post-state 全通过**:
+    - total=1121 / filled=1084(1082 妙手导入 + 1 manual + 1 None)
+    - negative=0 / zero=0(无脏数据)
+    - 元数据全覆盖:10 个抽样样本 source=妙手导入 / confidence=medium / confirmed_at=2026-09-18 一致
+  - **全量对账 100% 通过**:1082/1082 SKU 价格与 xlsx 完全一致,0 diff
+  - 输出:`output/purchase_price_sample_check_20260918.csv`(15 条样本对照)
+  - **本批次净增量**:filled 从 2 → 1084(+1082);backup 表已就位可回滚
+  - 决策:本地完成,**不**自动进入 Task 7 云端(用户明确"一直到本地完成",需再批)
+
+## 阶段状态:本地完成 ✓ / 云端待批
+- ✅ Task 1-6 本地端到端完成,数据已落库,备份表保留 7 天
+- ⏸️ **Task 7 云端库 apply 已预批**(用户原话:"先录入到本地,看看有没有问题,没问题再录入到云端"),等待用户最终 OK
+- 📦 工作区状态:`scripts/import_purchase_prices.py` + `scripts/tests/` + `output/*.csv` + 备份表(自动 7 天后清理)
+
+- **Task 7: 云端库 apply(阶段 2)** (complete, no commit per `short-session-no-auto-commit`)
+  - **门 0 SSH 连通**:`deploy@134.175.222.171` 密码登录 OK,服务器 `VM-0-15-ubuntu` up 27 周
+  - **门 1 容器状态**:`xihong_erp_postgres` (Up 3 months, healthy, port `127.0.0.1:15435->5432`),其它 6 个服务全 healthy
+  - **门 2 云端只读快照**:total=1121 / filled=2 / negative=0 / zero=0 / miaoshou=0 / 备份表不存在 — **与本地 apply 前完全一致**,无覆盖风险
+  - **隧道方案**:SSH `-L 15433:127.0.0.1:15435`(用 `~/.ssh/github_actions_deploy` key,与 `Ensure-CloudSyncTunnel` 等效),全程 5 分钟,不开 docker、不启额外服务
+  - **`--apply` 执行**:xlsx 1086 valid → 36 跳过 → matched=1082 → 备份表 `core.dim_erp_sku_backup_20260918`(1121 行)→ 单事务 UPDATE 1082 行
+  - **post-state 全通过**:
+    - total=1121 / filled=1083(1082 妙手导入 + 1 manual 预存,**比本地少 1 是因为云端原本没有 None source 那条**)
+    - negative=0 / zero=0
+    - 元数据全覆盖
+  - **全量对账 100%**:1082/1082 与 xlsx 完全一致,0 diff(server=`172.18.0.3` 确认是云端容器非本地)
+  - **预存 manual `SKU-0001` 保留**:cost=100.00 src=manual 不变(确认 --apply 没冲掉预存数据)
+  - **清理**:SSH 隧道已 taskkill,临时文件 `/tmp/cloud_url.txt` 已删除
+  - 决策:云端完成 ✓
+
+## 最终阶段状态:本地 + 云端全完成 ✓
+- ✅ Task 1-7 全阶段端到端完成,本地 + 云端数据均已落库
+- ✅ 两个备份表 `core.dim_erp_sku_backup_20260918` 均 1121 行,7 天后清理
+- ✅ 临时文件已清理
+- ✅ 工作区改动:`scripts/import_purchase_prices.py` + `scripts/tests/` + `output/*.csv` + ledger
+- ⏸️ **git commit 仍未执行**(遵守 `short-session-no-auto-commit`),等你决定是否提交
