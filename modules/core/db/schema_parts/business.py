@@ -2199,7 +2199,7 @@ class SalesTarget(Base):
     用途:存储绩效目标配置(店铺/产品/战役/运营级别)
     达成数据:从fact_orders表自动计算(C类数据)
 
-    表结构以本模型为 SSOT:增删改列须在 migrations/versions 中新增迁移,
+    表结构以本模型为 SSOT:增删改列须在 current_migrations/versions 中新增迁移,
     本地 alembic upgrade head 验证后再发布;云端在部署时自动执行迁移。
     """
 
@@ -2335,7 +2335,7 @@ class TargetBreakdown(Base):
     用途:存储目标分解配置(按店铺/按时间)
     达成数据:从fact_orders表自动计算(C类数据)
 
-    表结构以本模型为 SSOT:增删改列须在 migrations/versions 中新增迁移,
+    表结构以本模型为 SSOT:增删改列须在 current_migrations/versions 中新增迁移,
     本地 alembic upgrade head 验证后再发布;云端在部署时自动执行迁移。
     """
 
