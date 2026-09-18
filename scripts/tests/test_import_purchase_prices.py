@@ -39,3 +39,27 @@ def test_parse_skips_zero(mod, tmp_path):
     valid, skipped, errors = mod.parse_lookup_xlsx(str(p))
     assert valid == []
     assert "TEST-ZERO" in skipped
+
+def test_reconcile_perfect_match(mod):
+    valid = [("A", 10.0), ("B", 20.0), ("C", 30.0)]
+    db = {"A", "B", "C"}
+    matched, lookup_only, db_only = mod.reconcile(valid, db)
+    assert {c for c, _ in matched} == {"A", "B", "C"}
+    assert lookup_only == []
+    assert db_only == []
+
+def test_reconcile_lookup_only(mod):
+    valid = [("A", 10.0), ("B", 20.0)]  # B 在 DB 里没有
+    db = {"A"}
+    matched, lookup_only, db_only = mod.reconcile(valid, db)
+    assert [c for c, _ in matched] == ["A"]
+    assert lookup_only == ["B"]
+    assert db_only == []
+
+def test_reconcile_db_only(mod):
+    valid = [("A", 10.0)]
+    db = {"A", "Z"}  # Z 在 lookup 里没有
+    matched, lookup_only, db_only = mod.reconcile(valid, db)
+    assert [c for c, _ in matched] == ["A"]
+    assert lookup_only == []
+    assert db_only == ["Z"]

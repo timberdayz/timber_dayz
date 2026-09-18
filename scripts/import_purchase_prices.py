@@ -92,3 +92,30 @@ def parse_lookup_xlsx(path: str) -> tuple[list[tuple[str, float]], list[str], li
         errors.append(f"{sku_code_str}: 价格类型未知 {type(price).__name__}")
 
     return valid, skipped, errors
+
+
+async def fetch_db_sku_keys(db_url: str) -> set[str]:
+    """从 core.dim_erp_sku 读所有 sku_key."""
+    import asyncpg
+    conn = await asyncpg.connect(db_url)
+    try:
+        rows = await conn.fetch('SELECT sku_key FROM core.dim_erp_sku')
+        return {r["sku_key"] for r in rows if r["sku_key"]}
+    finally:
+        await conn.close()
+
+
+def reconcile(
+    valid: list[tuple[str, float]],
+    db_keys: set[str],
+) -> tuple[list[tuple[str, float]], list[str], list[str]]:
+    """比对 xlsx 有效条目与 DB sku_key.
+
+    Returns:
+        (matched, lookup_only, db_only)
+    """
+    lookup_keys = {code for code, _ in valid}
+    matched = [(code, price) for code, price in valid if code in db_keys]
+    lookup_only = sorted(lookup_keys - db_keys)
+    db_only = sorted(db_keys - lookup_keys)
+    return matched, lookup_only, db_only
