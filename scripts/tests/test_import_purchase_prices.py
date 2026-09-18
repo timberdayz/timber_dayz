@@ -78,6 +78,18 @@ def test_build_update_rows_shape(mod):
 
 
 @pytest.mark.asyncio
+async def test_verify_post_state_returns_dict(mod):
+    db_url = "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
+    result = await mod.verify_post_state(db_url)
+    assert "total" in result
+    assert "filled" in result
+    assert "negative" in result
+    assert "zero" in result
+    assert result["negative"] == 0
+    assert result["zero"] == 0
+
+
+@pytest.mark.asyncio
 async def test_apply_update_rollback_on_failure(mod):
     """集成测试: 故意传错字段值,事务应回滚,DB 不变。"""
     import asyncpg

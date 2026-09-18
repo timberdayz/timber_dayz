@@ -180,3 +180,158 @@ async def apply_update(
     finally:
         await conn.close()
     return len(rows)
+
+
+async def verify_post_state(db_url: str) -> dict:
+    """执行后验证 DB 状态."""
+    import asyncpg
+    conn = await asyncpg.connect(db_url)
+    try:
+        total = await conn.fetchval("SELECT COUNT(*) FROM core.dim_erp_sku")
+        filled = await conn.fetchval(
+            "SELECT COUNT(*) FROM core.dim_erp_sku WHERE default_purchase_cost IS NOT NULL"
+        )
+        negative = await conn.fetchval(
+            "SELECT COUNT(*) FROM core.dim_erp_sku WHERE default_purchase_cost < 0"
+        )
+        zero = await conn.fetchval(
+            "SELECT COUNT(*) FROM core.dim_erp_sku WHERE default_purchase_cost = 0"
+        )
+        rows = await conn.fetch(
+            """SELECT purchase_cost_source, COUNT(*) AS n
+               FROM core.dim_erp_sku
+               WHERE default_purchase_cost IS NOT NULL
+               GROUP BY purchase_cost_source"""
+        )
+        by_source = {r["purchase_cost_source"]: r["n"] for r in rows}
+        return {
+            "total": total,
+            "filled": filled,
+            "negative": negative,
+            "zero": zero,
+            "by_source": by_source,
+        }
+    finally:
+        await conn.close()
+
+
+async def sample_check(db_url: str, sample_size: int = 10) -> list[dict]:
+    """抽取 N 个有采购价的 SKU 供人工核对."""
+    import asyncpg
+    conn = await asyncpg.connect(db_url)
+    try:
+        rows = await conn.fetch(
+            """SELECT sku_key, default_purchase_cost, purchase_cost_currency,
+                      purchase_cost_source, purchase_cost_confidence,
+                      purchase_cost_confirmed_at
+               FROM core.dim_erp_sku
+               WHERE default_purchase_cost IS NOT NULL
+               ORDER BY random()
+               LIMIT $1""",
+            sample_size,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+def write_reconciliation_csv(path: Path, lookup_only: list[str], db_only: list[str]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["kind", "sku_code"])
+        for code in lookup_only:
+            w.writerow(["lookup_only", code])
+        for code in db_only:
+            w.writerow(["db_only", code])
+
+
+def write_dryrun_csv(path: Path, matched: list[tuple[str, float]]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["sku_code", "new_price", "currency", "source", "confidence"])
+        for sku_code, price in matched:
+            w.writerow([sku_code, price, CURRENCY_VALUE, SOURCE_VALUE, CONFIDENCE_VALUE])
+
+
+def write_sample_csv(path: Path, samples: list[dict]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as f:
+        if not samples:
+            return
+        w = csv.DictWriter(f, fieldnames=list(samples[0].keys()))
+        w.writeheader()
+        for s in samples:
+            w.writerow(s)
+
+
+def make_argparser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="商品中心 SKU 采购价批量录入")
+    p.add_argument("--xlsx-path", default=r"F:\Work Tool\resource\skills\team-skills\product-catalog\sku-reverse-lookup.xlsx")
+    p.add_argument("--database-url", default=None, help="PostgreSQL 连接 URL,默认从 settings.DATABASE_URL 读")
+    p.add_argument("--apply", action="store_true", help="真实写入数据库(默认 dry-run)")
+    p.add_argument("--skip-backup", action="store_true", help="跳过备份表创建(慎用)")
+    p.add_argument("--backup-table", default=None, help="备份表名,默认 core.dim_erp_sku_backup_YYYYMMDD")
+    p.add_argument("--output-dir", default="output", help="报告/日志输出目录")
+    return p
+
+
+def _resolve_db_url(arg: str | None) -> str:
+    if arg:
+        return arg
+    # 从 .env 读(简单实现,避免 import 完整 settings)
+    from pathlib import Path
+    env = Path(".env")
+    if env.exists():
+        for line in env.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith("DATABASE_URL="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError("无法从 .env 读 DATABASE_URL,请用 --database-url 显式指定")
+
+
+async def run(args: argparse.Namespace) -> int:
+    """主入口."""
+    db_url = _resolve_db_url(args.database_url)
+    today = datetime.now().strftime("%Y%m%d")
+    backup_table = args.backup_table or f"core.dim_erp_sku_backup_{today}"
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    valid, skipped, errors = parse_lookup_xlsx(args.xlsx_path)
+    if errors:
+        for e in errors:
+            print(f"[ERROR] {e}", file=sys.stderr)
+        return 2
+
+    print(f"[INFO] xlsx: {len(valid)} valid, {len(skipped)} skipped (—/0/empty)")
+
+    db_keys = await fetch_db_sku_keys(db_url)
+    matched, lookup_only, db_only = reconcile(valid, db_keys)
+    print(f"[INFO] reconcile: matched={len(matched)} lookup_only={len(lookup_only)} db_only={len(db_only)}")
+
+    write_reconciliation_csv(output_dir / f"purchase_price_reconciliation_{today}.csv", lookup_only, db_only)
+    write_dryrun_csv(output_dir / f"purchase_price_import_dryrun_{today}.csv", matched)
+
+    if not args.apply:
+        print("[INFO] dry-run 模式,未写入数据库。带 --apply 真实执行")
+        return 1 if (lookup_only or db_only) else 0
+
+    # 真写
+    print(f"[INFO] 备份表: {backup_table}")
+    count = await apply_update(db_url, matched, backup_table, skip_backup=args.skip_backup)
+    print(f"[INFO] 写入完成: {count} 行")
+
+    state = await verify_post_state(db_url)
+    print(f"[INFO] post-state: {state}")
+    samples = await sample_check(db_url)
+    write_sample_csv(output_dir / f"purchase_price_sample_check_{today}.csv", samples)
+
+    return 0 if state["negative"] == 0 and state["zero"] == 0 else 2
+
+
+def main() -> None:
+    args = make_argparser().parse_args()
+    code = asyncio.run(run(args))
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()
