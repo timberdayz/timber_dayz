@@ -4,6 +4,20 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: xihong_erp_postgres
+    # A3: 显式注入 4 个 -c 参数。
+    # 之前 prod overlay 没有 command 段，compose merge 把 base 的 command 整体替换为空，
+    # 导致生产实际拿不到 statement_timeout / work_mem / shared_buffers / max_parallel_workers_per_gather，
+    # 静默回退到镜像默认（statement_timeout=0、work_mem=4MB、shared_buffers=128MB）。
+    command:
+      - postgres
+      - -c
+      - statement_timeout=120s
+      - -c
+      - work_mem=32MB
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - max_parallel_workers_per_gather=4
     restart: always
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}

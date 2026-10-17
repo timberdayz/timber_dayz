@@ -181,6 +181,84 @@ function Ensure-CloudSyncTunnel {
     throw "Cloud sync tunnel did not become reachable within 20 seconds: ${localHost}:${localPort}"
 }
 
+function Test-PgReady {
+    <#
+    .SYNOPSIS
+        B1: Preflight PG connection capacity before migration backup.
+
+    .DESCRIPTION
+        Queries pg_stat_activity vs max_connections inside the PG container.
+        If usage >= 80%, reaps idle sessions (state IN ('idle','idle in transaction','disabled')
+        with state_change < now() - 60s) and re-checks. Fails closed if still >= 80%
+        so the subsequent migration backup doesn't hit a generic 'too many clients'
+        that masks the real capacity issue.
+    #>
+    $container = "xihong_erp_postgres"
+    $user = Get-EnvOrDefault "POSTGRES_USER" "erp_user"
+    $db = Get-EnvOrDefault "POSTGRES_DB" "xihong_erp"
+
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        Write-Host "[PgReady] docker not in PATH; skipping capacity check"
+        return
+    }
+    $containerStatus = docker inspect -f '{{.State.Running}}' $container 2>$null
+    if ($containerStatus -ne "true") {
+        Write-Host "[PgReady] PG container not running; skipping capacity check"
+        return
+    }
+
+    $queryArgs = @(
+        "exec", $container,
+        "psql", "-U", $user, "-d", $db, "-tAc",
+        "SELECT count(*) || '/' || current_setting('max_connections')::int FROM pg_stat_activity"
+    )
+    $result = Invoke-CapturedNativeCommand -FilePath "docker" -ArgumentList $queryArgs
+    if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.StdOut)) {
+        Write-Host "[PgReady] Could not query pg_stat_activity (exit=$($result.ExitCode)); skipping"
+        return
+    }
+    $parts = $result.StdOut.Trim() -split "/"
+    if ($parts.Count -ne 2) {
+        Write-Host "[PgReady] Unexpected response: $($result.StdOut); skipping"
+        return
+    }
+    $used = 0; $maxConn = 0
+    if (-not [int]::TryParse($parts[0].Trim(), [ref]$used)) { return }
+    if (-not [int]::TryParse($parts[1].Trim(), [ref]$maxConn)) { return }
+    if ($maxConn -le 0) { return }
+    $pct = [int](($used * 100) / $maxConn)
+    Write-Host "[PgReady] PG usage: ${used}/${maxConn} (${pct}%)"
+    if ($pct -lt 80) { return }
+
+    # 80%+ → reap idle sessions older than 60s
+    Write-Host "[PgReady] Reaping idle PG sessions (state IN idle, state_change < now - 60s)..."
+    $reapArgs = @(
+        "exec", $container,
+        "psql", "-U", $user, "-d", $db, "-tAc",
+        "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE state IN ('idle', 'idle in transaction', 'disabled') AND state_change < now() - interval '60 seconds' AND pid <> pg_backend_pid()"
+    )
+    $reapResult = Invoke-CapturedNativeCommand -FilePath "docker" -ArgumentList $reapArgs
+    $reaped = if ($reapResult.ExitCode -eq 0) { $reapResult.StdOut.Trim() } else { "0" }
+    Write-Host "[PgReady] Reaped ${reaped} idle session(s)"
+
+    # Re-check
+    $result2 = Invoke-CapturedNativeCommand -FilePath "docker" -ArgumentList $queryArgs
+    if ($result2.ExitCode -ne 0) {
+        Write-Host "[PgReady] Re-check failed; continuing"
+        return
+    }
+    $parts2 = $result2.StdOut.Trim() -split "/"
+    if ($parts2.Count -ne 2) { return }
+    $used2 = 0
+    if (-not [int]::TryParse($parts2[0].Trim(), [ref]$used2)) { return }
+    $pct2 = [int](($used2 * 100) / $maxConn)
+    Write-Host "[PgReady] PG usage after reap: ${used2}/${maxConn} (${pct2}%)"
+    if ($pct2 -ge 80) {
+        Write-FailureResult -Code "pg_max_connections_exhausted" -Summary "PG usage is ${used2}/${maxConn} (${pct2}%) after idle reap. Capacity exhausted; migration backup is unsafe to attempt." -Hint "Free PG connections manually (pg_terminate_backend on remaining idle sessions) before retrying." -SourceExitCode 2
+        exit 2
+    }
+}
+
 function Invoke-LocalCurrentSchemaMigration {
     Write-StageResult -Stage "migration_preflight" -Status "started"
     Write-StageResult -Stage "backup" -Status "started"
@@ -272,6 +350,7 @@ if ($TunnelOnly) {
 }
 
 if (-not $SkipChecks) {
+    Test-PgReady
     Invoke-LocalCurrentSchemaMigration
     Write-StageResult -Stage "environment" -Status "started"
     & python "$repoRoot\scripts\check_local_run_env.py" --profile collection --require-cloud-tunnel

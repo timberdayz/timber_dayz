@@ -197,7 +197,7 @@ if not should_init_db_on_startup(settings.ENVIRONMENT):
 async def lifespan(app: FastAPI):
     """应用生命周期管理(v4.1.0优化版 - 完整启动)"""
     import time
-    from backend.models.database import engine, warm_up_pool
+    from backend.models.database import engine, async_engine, warm_up_pool
     from sqlalchemy import text
 
     # 启动性能监控
@@ -916,6 +916,20 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         logger.error(f"[ERROR] 系统启动失败: {e}")
+        # A1: lifespan startup 失败时 dispose 兜底。
+        # Starlette 仅在 startup 成功进入 yield 后才调用 __aexit__；startup raise 时
+        # yield 后的 dispose 块（main.py:983-993）不会被执行，sync/async 池在进程
+        # 退出前残留，配合 PG max_connections=100 易导致下次启动即撞满槽。
+        try:
+            engine.dispose()
+            logger.info("[DBEngine] Sync engine disposed (startup-fail fallback)")
+        except Exception as dispose_err:
+            logger.warning(f"[DBEngine] Startup-fail sync dispose error (non-blocking): {dispose_err}")
+        try:
+            await async_engine.dispose()
+            logger.info("[DBEngine] Async engine disposed (startup-fail fallback)")
+        except Exception as dispose_err:
+            logger.warning(f"[DBEngine] Startup-fail async dispose error (non-blocking): {dispose_err}")
         raise
 
         # Legacy dashboard scheduler notes retained for historical context only.
@@ -979,6 +993,18 @@ async def lifespan(app: FastAPI):
             logger.info("[CollectionLeaderLock] Released leader lock")
     except Exception as e:
         logger.warning(f"[CollectionLeaderLock] Release failed (non-blocking): {e}")
+
+    # v6.x:关闭时优雅释放同步/异步引擎连接,避免孤儿连接堆积导致 PG max_connections 耗尽
+    try:
+        engine.dispose()
+        logger.info("[DBEngine] Sync engine disposed")
+    except Exception as e:
+        logger.warning(f"[DBEngine] Sync engine dispose failed (non-blocking): {e}")
+    try:
+        await async_engine.dispose()
+        logger.info("[DBEngine] Async engine disposed")
+    except Exception as e:
+        logger.warning(f"[DBEngine] Async engine dispose failed (non-blocking): {e}")
 
     # v4.12.0修复:正确取消后台任务,优雅处理CancelledError异常
     # 使用try-except包装整个关闭流程,避免CancelledError影响关闭

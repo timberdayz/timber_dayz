@@ -3231,11 +3231,16 @@ async def get_governance_stats(
             1 for file_record in all_pending_files if not is_catalog_file_semantically_valid(file_record)
         )
 
-        for file_record in pending_files:
-            readiness = await data_sync_service.get_file_sync_readiness(
+        # [*] v6.x 修复:避免串行 N 次 await 把 governance/stats 拖到分钟级
+        # 受 pool_size 限制,gather 会自动串行化(不会超过 pool 容量)
+        readiness_list = await asyncio.gather(*[
+            data_sync_service.get_file_sync_readiness(
                 file_record.id,
                 use_template_header_row=True,
             )
+            for file_record in pending_files
+        ])
+        for readiness in readiness_list:
             template_status = readiness.get("template_status")
             if readiness.get("should_auto_sync"):
                 ready_to_sync_count += 1

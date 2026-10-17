@@ -43,6 +43,10 @@ MIGRATION_FAILURE_CODES = {
     "backup": "migration_backup_failed",
     "environment": "environment_invalid",
     "lock": "migration_lock_unavailable",
+    # A2: 区分 PG 不可达 vs max_connections 耗尽（之前都被归为 environment_invalid，
+    # 16:31 这类事故运维看不到精确根因）
+    "pg_unavailable": "pg_unavailable",
+    "pg_max_connections_exhausted": "pg_max_connections_exhausted",
 }
 MIGRATION_LOCK_KEY = 848_010_247
 LOCAL_BACKUP_GUARD_ENV = "XIHONG_REQUIRE_LOCAL_MIGRATION_BACKUP"
@@ -288,6 +292,28 @@ def _validate_approved_manifest(source: dict[str, Any]) -> None:
 
 def failure_code_for(exc: BaseException) -> str:
     """Map fail-closed failures to a small protocol shared with the launcher."""
+    # A2: 沿异常链查找 PG 层根因，PG 错误优先于包裹层（backup/lock 等）的判定。
+    # 例如 BackupValidationError("migration backup command failed") 源自 pg_dump 连接被拒，
+    # 链上能拿到 sqlalchemy.exc.OperationalError("...too many clients...")。
+    cur = exc
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        chain_message = str(cur).lower()
+        if "too many clients" in chain_message or "remaining connection slots" in chain_message:
+            return MIGRATION_FAILURE_CODES["pg_max_connections_exhausted"]
+        if (
+            "could not connect" in chain_message
+            or "connection refused" in chain_message
+            or "server closed the connection unexpectedly" in chain_message
+            or "could not translate host" in chain_message
+            or "network is unreachable" in chain_message
+            or "connection to server" in chain_message and "failed:" in chain_message
+        ):
+            return MIGRATION_FAILURE_CODES["pg_unavailable"]
+        cur = cur.__cause__ or cur.__context__
+
+    # 非 PG 错误时，按外层消息分类
     message = str(exc).lower()
     if "backup" in message:
         return MIGRATION_FAILURE_CODES["backup"]
