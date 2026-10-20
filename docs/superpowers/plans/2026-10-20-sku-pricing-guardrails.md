@@ -630,12 +630,28 @@ def test_policy_update_closes_old_row_and_inserts_new():
     from backend.services.product_pricing_service import resolve_policy_update
 
     decision = resolve_policy_update(
-        current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
-        requested={"min_age_days": 0, "effective_from": date(2026, 11, 1)},
+        current={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
+        requested={"min_age_days": 0, "effective_from": date(2026, 10, 15)},
         today=date(2026, 10, 20),
     )
     assert decision["action"] == "version"
-    assert decision["close_current"] == date(2026, 11, 1)
+    assert decision["close_current"] == date(2026, 10, 15)
+
+
+def test_policy_update_retier_when_boundary_changes():
+    """路径指向被编辑的档位，body 的 min_age_days 是新起点；两者不同 = 改边界。"""
+    from datetime import date
+
+    from backend.services.product_pricing_service import resolve_policy_update
+
+    decision = resolve_policy_update(
+        current={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
+        requested={"min_age_days": 45, "effective_from": date(2026, 10, 1)},
+        today=date(2026, 10, 20),
+    )
+    assert decision["action"] == "retier"
+    assert decision["close_current"] == date(2026, 10, 1)
+    assert decision["values"]["min_age_days"] == 45
 
 
 def test_policy_update_rejects_future_and_backdated():
@@ -648,12 +664,14 @@ def test_policy_update_rejects_future_and_backdated():
         resolve_policy_update,
     )
 
+    # 未来生效 -> 拒绝
     with pytest.raises(PolicyUpdateRejected):
         resolve_policy_update(
-            current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+            current={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
             requested={"min_age_days": 0, "effective_from": date(2026, 11, 1)},
             today=date(2026, 10, 20),
         )
+    # 回溯生效 -> 拒绝
     with pytest.raises(PolicyUpdateRejected):
         resolve_policy_update(
             current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
@@ -787,12 +805,8 @@ def compute_min_selling_price(
     }
 
 
-class PolicyUpdateConflict(ValueError):
-    """规则版本更新冲突（路径与 body 不一致 / 起点已被占用）。"""
-
-
 class PolicyUpdateRejected(ValueError):
-    """规则版本更新被拒绝（未来生效 / 回溯生效）。"""
+    """规则版本更新被拒绝（未来生效 / 回溯生效 / 档位不存在）。"""
 
 
 def resolve_policy_update(
@@ -803,20 +817,41 @@ def resolve_policy_update(
 ) -> dict:
     """规则表版本化更新的纯判定：返回 action 与要写入的字段。
 
+    `current` 是**路径参数指向的档位**（被编辑的那一档）的当前行：
+    `{"min_age_days": int, "effective_from": date}`；该档位没有当前行时传 None。
+
+    `requested` 是请求体，其中 `min_age_days` 是**该档位的新起点**。
+    因此「路径起点 != body 起点」= 运营在改库龄档位的边界，而不是调用方搞混。
+
     四条路径（与 spec §5.1 一致）：
-    - 无当前行            -> action="create"（等价 POST）
-    - effective_from 相同 -> action="update"（原地改，同日不可新建否则撞 UNIQUE）
-    - effective_from 更晚 -> action="version"（关旧行 + 建新行）
-    - effective_from 更早 -> 拒绝（回溯超出范围）
-    未来生效一律拒绝。
+    - 该档位没有当前行            -> action="create"（等价 POST）
+    - 起点与生效日期都没变          -> action="update"（原地改，同日不可新建否则撞 UNIQUE）
+    - 起点变了（改档位边界）        -> action="retier"（关旧行 + 建新行，新行用新起点）
+    - 起点没变但生效日期更晚        -> action="version"（关旧行 + 建新行）
+
+    未来生效一律拒绝；回溯生效一律拒绝。
     """
     requested_effective_from = requested["effective_from"]
+    requested_min_age = requested["min_age_days"]
+
     if requested_effective_from > today:
         raise PolicyUpdateRejected("effective_from cannot be in the future")
     if current is None:
         return {"action": "create", "close_current": None, "values": dict(requested)}
+
     current_effective_from = current["effective_from"]
+    current_min_age = current["min_age_days"]
+
+    if requested_min_age != current_min_age:
+        # 改档位边界：关旧行 + 建新行（新行用新起点）。
+        # 新起点与生效日期的组合若已被占用，会撞 UNIQUE(min_age_days, effective_from) -> 409
+        return {
+            "action": "retier",
+            "close_current": requested_effective_from,
+            "values": dict(requested),
+        }
     if requested_effective_from == current_effective_from:
+        # 同日、同档位：原地 UPDATE。effective_from 不变，因此不会撞 UNIQUE
         values = {k: v for k, v in requested.items() if k != "effective_from"}
         return {"action": "update", "close_current": None, "values": values}
     if requested_effective_from > current_effective_from:
@@ -1096,10 +1131,14 @@ def test_router_exposes_pricing_policy_routes():
 
 
 @pytest.mark.asyncio
-async def test_pricing_policy_crud_and_versioned_update(async_client, auth_headers):
-    created = await async_client.post(
+async def test_pricing_policy_crud_and_versioned_update(
+    pg_async_client, pricing_auth_headers, pg_session
+):
+    await _seed_pricing_fixtures(pg_session)
+
+    created = await pg_async_client.post(
         "/api/sku-pricing-policies",
-        headers=auth_headers,
+        headers=pricing_auth_headers,
         json={
             "min_age_days": 30,
             "tier_label": "测试档",
@@ -1111,14 +1150,16 @@ async def test_pricing_policy_crud_and_versioned_update(async_client, auth_heade
     )
     assert created.status_code == 201, created.text
 
-    current = await async_client.get("/api/sku-pricing-policies/current", headers=auth_headers)
+    current = await pg_async_client.get(
+        "/api/sku-pricing-policies/current", headers=pricing_auth_headers
+    )
     assert current.status_code == 200
     assert any(row["min_age_days"] == 30 for row in current.json())
 
     # 未来生效日期 -> 422
-    future = await async_client.post(
+    future = await pg_async_client.post(
         "/api/sku-pricing-policies",
-        headers=auth_headers,
+        headers=pricing_auth_headers,
         json={
             "min_age_days": 45,
             "tier_label": "未来档",
@@ -1131,9 +1172,9 @@ async def test_pricing_policy_crud_and_versioned_update(async_client, auth_heade
     assert future.status_code == 422
 
     # 同一档位再 POST -> 409
-    duplicate = await async_client.post(
+    duplicate = await pg_async_client.post(
         "/api/sku-pricing-policies",
-        headers=auth_headers,
+        headers=pricing_auth_headers,
         json={
             "min_age_days": 30,
             "tier_label": "测试档2",
@@ -1146,9 +1187,9 @@ async def test_pricing_policy_crud_and_versioned_update(async_client, auth_heade
     assert duplicate.status_code == 409
 
     # 同日改率 -> 原地更新，仍只有一条当前行
-    same_day = await async_client.put(
+    same_day = await pg_async_client.put(
         "/api/sku-pricing-policies/30",
-        headers=auth_headers,
+        headers=pricing_auth_headers,
         json={
             "min_age_days": 30,
             "tier_label": "测试档",
@@ -1159,32 +1200,58 @@ async def test_pricing_policy_crud_and_versioned_update(async_client, auth_heade
         },
     )
     assert same_day.status_code == 200, same_day.text
-    current = await async_client.get("/api/sku-pricing-policies/current", headers=auth_headers)
+    current = await pg_async_client.get(
+        "/api/sku-pricing-policies/current", headers=pricing_auth_headers
+    )
     rows = [row for row in current.json() if row["min_age_days"] == 30]
     assert len(rows) == 1
     assert rows[0]["discount_rate"] == pytest.approx(0.14)
 
-    # 路径与 body 不一致 -> 422
-    mismatch = await async_client.put(
+    # 改档位边界（路径=30 旧起点, body=60 新起点）-> 关旧行 + 建新行
+    retier = await pg_async_client.put(
         "/api/sku-pricing-policies/30",
-        headers=auth_headers,
+        headers=pricing_auth_headers,
         json={
-            "min_age_days": 31,
-            "tier_label": "测试档",
-            "discount_rate": 0.14,
+            "min_age_days": 60,
+            "tier_label": "改边界档",
+            "discount_rate": 0.15,
             "target_margin_rate": 0.22,
             "platform_basis": "tiktok",
             "effective_from": date.today().isoformat(),
         },
     )
-    assert mismatch.status_code == 422
+    assert retier.status_code == 200, retier.text
+    current = await pg_async_client.get(
+        "/api/sku-pricing-policies/current", headers=pricing_auth_headers
+    )
+    tiers = {row["min_age_days"] for row in current.json()}
+    assert 60 in tiers
+    assert 30 not in tiers
+
+    # 改成已被占用的起点 -> 409
+    conflict = await pg_async_client.put(
+        "/api/sku-pricing-policies/60",
+        headers=pricing_auth_headers,
+        json={
+            "min_age_days": 30,
+            "tier_label": "冲突档",
+            "discount_rate": 0.16,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert conflict.status_code == 409
 
 
 @pytest.mark.asyncio
-async def test_pricing_policy_write_is_audited(async_client, auth_headers, pg_session):
-    await async_client.post(
+async def test_pricing_policy_write_is_audited(
+    pg_async_client, pricing_auth_headers, pg_session
+):
+    await _seed_pricing_fixtures(pg_session)
+    await pg_async_client.post(
         "/api/sku-pricing-policies",
-        headers=auth_headers,
+        headers=pricing_auth_headers,
         json={
             "min_age_days": 77,
             "tier_label": "审计档",
@@ -1205,6 +1272,77 @@ async def test_pricing_policy_write_is_audited(async_client, auth_headers, pg_se
 
 > 测试文件顶部需要 `from datetime import date, timedelta`、`import pytest`、`from sqlalchemy import text`。
 > `pg_session` fixture 依赖 testcontainers（需 Docker）；若 CI 无 Docker，参照仓库既有用法加 `@pytest.mark.pg_only` 标记跳过。
+>
+> ⚠️ **必须用 `pg_async_client`（不是 `async_client`）**：
+> - `async_client` 走**内存 SQLite**，`pg_session` 走**Postgres testcontainer**，是两个不同的库。
+>   用 `async_client` 写数据、再用 `pg_session` 查审计，count 恒为 0。
+>   `pg_async_client` 与 `pg_session` 共用同一个 Postgres，会话内可见。
+> - `conftest.py` 的 `_MockUser` **只有 `id = 1`，没有 `user_id`**；
+>   而 `_write_product_center_audit` 取 `getattr(user, "user_id", None)`，为 None 就直接 return
+>   （`product_center.py:124-126`）→ **一行审计都不会写**。
+>   仓库其他测试（如 `test_approval_center_routes.py:75`）用的是自定义 `MockUser(user_id=1)`。
+>   本用例必须**自己覆盖 `get_current_user` 依赖**并带上 `user_id`，否则审计断言必然失败。
+>
+> ```python
+> @pytest_asyncio.fixture
+> async def pricing_auth_headers(pg_session):
+>     """带 user_id 的 mock 用户——没有 user_id 审计不会落库。"""
+>     from backend.main import app
+>     from backend.dependencies.auth import get_current_user
+>
+>     class _MockUser:
+>         id = 1
+>         user_id = 1
+>         username = "test_admin"
+>         is_active = True
+>         is_superuser = True
+>         role_id = 1
+>
+>     async def override_current_user():
+>         return _MockUser()
+>
+>     app.dependency_overrides[get_current_user] = override_current_user
+>     yield {}
+>     app.dependency_overrides.pop(get_current_user, None)
+> ```
+>
+> ⚠️ **`FactAuditLog.user_id` 是 NOT NULL 外键，指向 `core.dim_users.user_id`**（`business.py:3419`）。
+> 测试库没有 `DimUser` 种子行时插入会 FK 失败 → 审计用例连 201 都拿不到。
+> 必须在 seed 里插入一条 `core.dim_users` 行（`user_id=1`）。
+>
+> ⚠️ **候选接口与保存接口都有前置数据要求**（`product_center.py:2272-2277` / `:2664-2673`）：
+> - `GET /api/platform-sku-profit/candidates` 要求存在 `platform_role='sales'` 且 `is_active` 的
+>   `DimPlatform`，以及 `status='active'` 的 `DimWarehouse`，否则 422
+> - `POST /api/platform-sku-profit/estimates` 先走 `_validate_operating_dimensions`，
+>   缺平台/仓库/SKU 同样先 422，`below_min_selling_price` 永远轮不到
+>
+> 所以这些集成测试**必须先 seed**：
+
+```python
+async def _seed_pricing_fixtures(pg_session):
+    """候选/保存/审计三个端点共用的最小种子数据。"""
+    from modules.core.db import (
+        BridgeSpuSku, DimErpSku, DimPlatform, DimSpu, DimUser, DimWarehouse,
+    )
+
+    pg_session.add(DimUser(user_id=1, username="test_admin"))
+    pg_session.add(DimPlatform(platform_code="tiktok", name="TikTok",
+                               platform_role="sales", is_active=True))
+    pg_session.add(DimWarehouse(warehouse_code="MY-01", warehouse_name="主仓",
+                               country_code="MY", country_name="马来西亚",
+                               status="active"))
+    pg_session.add(DimSpu(spu="TEST-SPU-1", spu_name="测试SPU",
+                          return_loss_rate=0.0467, logistics_damage_rate=0.0158))
+    pg_session.add(DimErpSku(sku_id=9001, sku_key="TEST-SKU-1", sku_name="测试SKU",
+                             status="active", default_purchase_cost=10,
+                             reference_selling_price=30))
+    pg_session.add(BridgeSpuSku(sku_id=9001, spu="TEST-SPU-1", binding_status="active"))
+    await pg_session.flush()
+```
+
+> `DimUser` / `DimSpu` / `DimErpSku` / `BridgeSpuSku` 的其余必填列以仓库 ORM 定义为准
+> （`modules/core/db/schema_parts/dimensions.py`），实现时按 `inspect(Model).columns` 补齐。
+> **这些 seed 建议放在 `backend/tests/conftest.py` 里做成一个共用 fixture**，避免 Task 4 与 Task 6 各写一份。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -1311,24 +1449,27 @@ async def update_sku_pricing_policy(
     db: AsyncSession = Depends(get_async_db),
     _user=Depends(_require_platform_fee_editor),
 ):
-    if body.min_age_days != min_age_days:
-        raise HTTPException(status_code=422, detail="min_age_days in path and body must match")
+    """路径参数 = 被编辑的档位（旧起点）；body 的 min_age_days = 该档位的新起点。
+
+    两者不同 = 运营在改库龄档位的边界（改这一格就改了滞销阈值）。
+    """
     current = (await db.execute(
         select(SkuPricingPolicy).where(
             SkuPricingPolicy.min_age_days == min_age_days,
             *_policy_current_predicate(),
         ).with_for_update()
     )).scalars().first()
+    if current is None:
+        raise HTTPException(status_code=404, detail="pricing policy tier not found")
 
-    current_data = (
-        {"min_age_days": current.min_age_days, "effective_from": current.effective_from}
-        if current is not None
-        else None
-    )
+    current_data = {
+        "min_age_days": current.min_age_days,
+        "effective_from": current.effective_from,
+    }
     try:
         decision = resolve_policy_update(
             current=current_data,
-            requested=body.model_dump(),
+            requested=body.model_dump(exclude_unset=True),
             today=date.today(),
         )
     except PolicyUpdateRejected as exc:
@@ -1340,10 +1481,15 @@ async def update_sku_pricing_policy(
             setattr(current, key, value)
         row = current
     else:
-        if decision["close_current"] is not None and current is not None:
-            current.effective_to = decision["close_current"]
-            current.status = "inactive"
-        row = SkuPricingPolicy(**decision["values"])
+        # 关旧行 + 建新行（改边界或跨期）
+        current.effective_to = decision["close_current"]
+        current.status = "inactive"
+        values = dict(decision["values"])
+        # 保留旧行的来源标记，避免把迁移灌的 source='industry_benchmark_2026' 覆盖成 None
+        values.setdefault("source", current.source)
+        values.setdefault("version", current.version)
+        values["status"] = "active"
+        row = SkuPricingPolicy(**values)
         db.add(row)
 
     try:
@@ -1360,9 +1506,14 @@ async def update_sku_pricing_policy(
     return SkuPricingPolicyResponse.model_validate(row)
 ```
 
+> **路径参数语义**：`min_age_days`（路径）是**被编辑的档位**，`body.min_age_days` 是**该档位的新起点**。
+> 两者不同 → `action="retier"`（关旧行 + 建新行）；相同且同日 → `action="update"`（原地改）。
+> **不要**再写「路径与 body 不一致 → 422」——那会让「库龄起点列可编辑」这个需求永远不可达。
+>
+> `body.model_dump(exclude_unset=True)`：`source` / `version` / `notes` 未传时保留旧行取值，
+> 不会把迁移灌的 `source='industry_benchmark_2026'` 覆盖成 None（否则 `downgrade()` 按 source 删种子行会失效）。
+>
 > **四路径判定放在纯函数 `resolve_policy_update` 里**（Task 2 已实现并单测），路由只负责取数、落库、审计。
-> 这样「同日原地改 / 跨期关旧开新 / 无当前行等价 POST / 未来与回溯拒绝」四条规则可以被**真单测**覆盖，
-> 而不是靠源码 grep 断言「文档里写了」。
 >
 > `PolicyUpdateRejected` 与 `resolve_policy_update` 需要一并加入 Task 4 Step 3 的服务 import 块。
 
@@ -1454,6 +1605,11 @@ async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[in
 
     mart.inventory_age_current.sku_id 是 varchar 的平台侧 id，与 dim_erp_sku.sku_id(integer)
     不是一回事，必须走 product_sku -> sku_key。
+
+    ⚠️ 必须容错：mart 是 raw SQL 层（sql/mart/*.sql），不在 Base.metadata 里。
+    测试库的 conftest 只建 core/a_class/b_class/c_class/finance/ops 六个 schema，
+    没有 mart -> 裸查会抛 ProgrammingError -> 整个 list_skus 端点 500。
+    查不到就返回空 dict，调用方按 spec §4.4 回落「日常」档。
     """
     if not sku_ids:
         return {}
@@ -1464,15 +1620,19 @@ async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[in
     key_to_sku = {row.sku_key: row.sku_id for row in rows}
     if not key_to_sku:
         return {}
-    age_rows = (await db.execute(
-        text(
-            "SELECT product_sku, MIN(age_days) AS age_days "
-            "FROM mart.inventory_age_current "
-            "WHERE product_sku = ANY(:keys) "
-            "GROUP BY product_sku"
-        ),
-        {"keys": list(key_to_sku)},
-    )).all()
+    try:
+        age_rows = (await db.execute(
+            text(
+                "SELECT product_sku, MIN(age_days) AS age_days "
+                "FROM mart.inventory_age_current "
+                "WHERE product_sku = ANY(:keys) "
+                "GROUP BY product_sku"
+            ),
+            {"keys": list(key_to_sku)},
+        )).all()
+    except Exception:
+        # mart 层缺失或未灌数：按无库龄处理，回落「日常」档
+        return {}
     return {key_to_sku[row.product_sku]: row.age_days for row in age_rows if row.product_sku in key_to_sku}
 
 
@@ -1677,12 +1837,16 @@ def test_profit_candidates_and_estimate_guardrail_wired():
 
 
 @pytest.mark.asyncio
-async def test_estimate_below_floor_is_rejected_but_draft_is_not(async_client, auth_headers):
+async def test_estimate_below_floor_is_rejected_but_draft_is_not(
+    pg_async_client, pricing_auth_headers, pg_session
+):
     """低于最低售价时 estimates 422 拦截，drafts 仍放行。"""
-    # 先确保有一条当前生效的规则（迁移已灌 4 档，这里不重复依赖）
-    candidates = await async_client.get(
+    await _seed_pricing_fixtures(pg_session)
+
+    # 候选接口需要 active 的 sales 平台 + active 仓库 + SKU，seed 已满足
+    candidates = await pg_async_client.get(
         "/api/platform-sku-profit/candidates",
-        headers=auth_headers,
+        headers=pricing_auth_headers,
         params={
             "platform_code": "tiktok",
             "warehouse_code": "MY-01",
@@ -1691,29 +1855,28 @@ async def test_estimate_below_floor_is_rejected_but_draft_is_not(async_client, a
     )
     assert candidates.status_code == 200, candidates.text
     rows = candidates.json()["data"]
-    if not rows:
-        return  # 本地库无 SKU 库存时跳过，CI 用固定夹具
+    assert rows, "seed 后应有候选行"
     row = rows[0]
     assert "min_selling_price" in row
+    assert row["min_selling_price"] is not None
 
-    below = 0.01
     payload = {
         "sku_id": row["sku_id"],
         "platform_code": row["platform_code"],
         "warehouse_code": row["warehouse_code"],
         "transport_type": row["transport_type"],
-        "expected_selling_price": below,
+        "expected_selling_price": 0.01,
     }
-    estimate = await async_client.post(
-        "/api/platform-sku-profit/estimates", headers=auth_headers, json=payload
+    estimate = await pg_async_client.post(
+        "/api/platform-sku-profit/estimates", headers=pricing_auth_headers, json=payload
     )
-    assert estimate.status_code == 422
+    assert estimate.status_code == 422, estimate.text
     assert estimate.json()["detail"]["code"] == "below_min_selling_price"
 
-    draft = await async_client.post(
-        "/api/platform-sku-profit/drafts", headers=auth_headers, json=payload
+    draft = await pg_async_client.post(
+        "/api/platform-sku-profit/drafts", headers=pricing_auth_headers, json=payload
     )
-    assert draft.status_code == 201
+    assert draft.status_code == 201, draft.text
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -1745,15 +1908,20 @@ pricing_payload["min_selling_price_below"] = bool(
     and Decimal(str(expected_selling_price)) < Decimal(str(floor))
 )
 # 把 pricing_payload 的键合进该行原有的返回 dict（其余键保持原样）
-items.append({**pricing_payload, **row_payload})
+items.append({**row_payload, **pricing_payload})
 ```
 
-> `row_payload` 指该候选行原本要返回的字段字典（sku_id / sku_key / sku_name / reference_selling_price /
-> purchase_cost / platform_code / warehouse_code / transport_type / expected_selling_price /
-> competitor_price / seller_coupon_amount / expected_ad_rate / platform_fee_rate /
-> logistics_damage_rate / return_loss_rate / configuration_status / turnover_class /
-> reference_storage_days / preview 等）。**用真实的字典合并，不要用 Python 的 `...`（Ellipsis）占位**，
-> 否则响应里会多出一个 `Ellipsis` 键。
+> `row_payload` 指该候选行**原本就要返回**的字段字典（`product_center.py:2310` 附近那一整串）：
+> `sku_id` / `sku_key` / `sku_name` / `specification` / `spu` / `reference_selling_price` /
+> `purchase_cost` / `platform_code` / `warehouse_code` / `transport_type` /
+> `expected_selling_price` / `competitor_price` / `seller_coupon_amount` / `expected_ad_rate` /
+> `actual_logistics_cost` / `actual_storage_cost` / `platform_fee_rate` /
+> `logistics_damage_rate` / `return_loss_rate` / `configuration_status` / `turnover_class` /
+> `reference_storage_days` / `reference_logistics_cost` / `reference_storage_cost` /
+> `reference_label_fee` / `reference_cost_status` / `reference_cost_missing_reasons` /
+> `reference_logistics_missing_reasons` / `reference_storage_missing_reasons` / `preview` 等。
+> **实现时把原有 `items.append({...})` 的字典原样保留，只在其上合并 `pricing_payload`**，
+> 不要用 Python 的 `...`（Ellipsis）占位——否则响应里会多出一个 `Ellipsis` 键。
 
 > ⚠️ **不要重新赋值 `expected_selling_price`**。既有代码（`product_center.py:2310`）已经算好了：
 > ```python
@@ -2136,7 +2304,20 @@ Expected: 新增一条 FAIL。
 <el-input-number
   v-model="row.expected_selling_price"
   :class="{ 'price-below-floor': isBelowFloor(row) }"
-  ... />
+  :min="0"
+  :precision="2"
+  :controls="false"
+  size="small" />
+```
+
+**配套样式必须一起加**（否则输入框不会真的变红，Task 10 的手工验证第 6 步不成立）：
+
+```css
+/* 追加到 ProductCenter.vue 现有 <style> 段 */
+.price-below-floor :deep(.el-input__inner) {
+  border-color: var(--el-color-danger);
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+}
 ```
 
 ```js

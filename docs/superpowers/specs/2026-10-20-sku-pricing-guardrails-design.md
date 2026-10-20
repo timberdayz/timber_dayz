@@ -542,7 +542,7 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 | GET | `/api/sku-pricing-policies` | 登录 | 返回全部规则行（含历史），按 `min_age_days, effective_from` 排序 |
 | GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行。**筛选条件必须与下方「当前行」判定完全一致**（复用同一个 helper/常量，禁止在两处各写一份谓词） |
 | POST | `/api/sku-pricing-policies` | `_require_platform_fee_editor` | 新建规则行；若同档位已有生效行则拒绝（409），要求先关闭 |
-| PUT | `/api/sku-pricing-policies/{min_age_days}` | `_require_platform_fee_editor` | 版本化更新。**具体行为有四条路径**（跨期新建 / 同日原地改 / 回溯拒绝 / 无当前行等价 POST），详见下方「版本化更新的多条路径」——实现时不要只按摘要这一句做 |
+| PUT | `/api/sku-pricing-policies/{min_age_days}` | `_require_platform_fee_editor` | 版本化更新。**路径参数 = 被编辑的档位（旧起点），请求体的 `min_age_days` = 该档位的新起点**。具体行为有五条路径（改边界 / 同日原地改 / 跨期关旧开新 / 回溯拒绝 / 路径档位不存在），详见下方「版本化更新的多条路径」——实现时不要只按摘要这一句做 |
 
 **规则行请求/响应模型字段**：`min_age_days` / `tier_label` / `discount_rate` / `target_margin_rate` / `platform_basis` / `effective_from` / `effective_to` / `status` / `source` / `version` / `notes`。
 
@@ -590,32 +590,35 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 
 | 场景 | 行为 | 原因 |
 |---|---|---|
-| 请求的 `effective_from` **严格大于**当前行的 `effective_from` | 版本化更新：关闭当前行（写 `effective_to` = 新 `effective_from`，`status='inactive'`）+ 新建一行 | 跨期变更需要留版本历史 |
-| 请求的 `effective_from` **等于**当前行的 `effective_from` | **原地 UPDATE 当前行**（不新建版本），仍写审计 | 同日纠错必须可用。`UNIQUE(min_age_days, effective_from)` 决定了同日新建会撞唯一索引，故同日只能原地改 |
-| 请求的 `effective_from` **小于**当前行的 `effective_from` | 422 拒绝 | 回溯变更超出范围，需手工改数据 |
-| 该档位**没有**当前行 | 等价于 `POST`：直接新建一行 | `PUT` 在无当前行时不得 404——运营不该需要先 POST 再 PUT |
+| 路径档位**没有**当前行 | 404 | 不能改一个不存在的档位；要新建请用 `POST` |
+| 起点变了（改档位边界） | 关闭旧行（`effective_to` = 新 `effective_from`、`status='inactive'`）+ 新建一行（`min_age_days` = 新起点） | 改边界是新档位，需要留版本 |
+| 起点没变、`effective_from` **等于**当前行 | **原地 UPDATE 当前行**（不新建版本），仍写审计 | 同日纠错必须可用。`UNIQUE(min_age_days, effective_from)` 决定了同档位同日新建会撞唯一索引，故同日只能原地改 |
+| 起点没变、`effective_from` **严格大于**当前行 | 版本化更新：关闭当前行 + 新建一行 | 跨期变更需要留版本历史 |
+| 起点没变、`effective_from` **小于**当前行 | 422 拒绝 | 回溯变更超出范围，需手工改数据 |
+| `effective_from` 晚于今日 | 422 拒绝 | 不支持未来生效的规则行 |
 
 新行 `effective_from` 必须 **严格大于**（`>`）旧行，不能是 `>=`——否则同日新建会撞 `UNIQUE(min_age_days, effective_from)`，按规范返回 409，用户当天无法纠错。
 
 **「档位起点 `min_age_days` 变更」是独立于版本期的操作**（改的是档位边界，不是生效时间）：
 
+> **`PUT /api/sku-pricing-policies/{min_age_days}` 的路径参数 = 被编辑的档位（旧起点）；请求体的 `min_age_days` = 该档位的新起点。**
+> 两者不同 = 运营在改库龄档位的边界（改这一格就改了滞销阈值），**不是调用方搞混**。
+
 | 场景 | 行为 |
 |---|---|
-| 路径参数 `min_age_days` 与 body 不一致 | 422（以 body 为准，路径参数仅作定位；不一致说明调用方搞混了） |
-| 改成**已存在**的起点 | 409（撞 `UNIQUE(min_age_days, effective_from)` 与 `uq_sku_pricing_policies_current`） |
-| 改成**全新**的起点 | 关闭旧行（`effective_to` = 今日、`status='inactive'`）+ 新建一行（`min_age_days` = 新值、`effective_from` = 今日） |
+| 路径档位没有当前行 | 404（不能改一个不存在的档位） |
+| 起点变了（改边界） | 关闭旧行（`effective_to` = 新 `effective_from`、`status='inactive'`）+ 新建一行（`min_age_days` = 新起点） |
+| 起点没变、生效日期也没变 | **原地 UPDATE 当前行**（不新建版本） |
+| 起点没变、生效日期更晚 | 关闭旧行 + 新建一行（跨期版本化） |
+| 起点没变、生效日期更早 | 422 拒绝（回溯变更超出范围） |
+| 新起点 + 生效日期的组合已被别的档位占用 | 409（撞 `UNIQUE(min_age_days, effective_from)`） |
+| `effective_from` 晚于今日 | 422 拒绝（不支持未来生效） |
 
-**⚠️ 起点变更豁免「新行 `effective_from` 必须严格大于旧行」这条规则**。理由：该规则是为「只改率、不改边界」设计的（那种情况下同档位同日新建会撞 `UNIQUE(min_age_days, effective_from)`）。而改边界时 `min_age_days` 不同，**不会**撞该唯一约束，因此新行可以与旧行同一天生效。
+**「改档位边界」就是一次普通的关旧开新**，不需要额外端点；`min_age_days` 变成新值即代表新档位。
 
-这样「改档位边界」就是一次普通的关旧开新，不需要额外端点；`min_age_days` 变成新值即代表新档位。
+**为什么同日原地 UPDATE 不新建版本**：`UNIQUE(min_age_days, effective_from)` 只在「同档位 + 同一天」时冲突。改边界时 `min_age_days` 已变、跨期时 `effective_from` 已变，两者都不会撞——所以这两条路径都能安全地与旧行同一天生效。
 
-**同一天内的操作优先级**（`PUT` 一次请求可能同时改边界和率）：
-
-| 请求改了什么 | 走哪条路径 |
-|---|---|
-| 只改率（`min_age_days` 不变） | 原地 UPDATE 当前行（`effective_from` 不变） |
-| 只改边界（`min_age_days` 变） | 关旧行 + 新建一行（`effective_from` = 今日） |
-| 同时改边界和率 | 走「改边界」路径：关旧行 + 新建一行，新行带上新边界与新率 |
+**同一天内的操作优先级**：只改率走原地 UPDATE；改边界或改生效日期走关旧开新。
 
 **错误契约**：
 
@@ -623,9 +626,8 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 |---|---|---|
 | `effective_from` 晚于今日 | 422 | 不支持未来生效的规则行 |
 | `effective_from` 小于当前行 | 422 | 回溯变更超出范围 |
-| `min_age_days` 路径参数与 body 不一致 | 422 | 以 body 为准 |
-| `min_age_days` 改成已存在的起点 | 409 | 撞 `UNIQUE(min_age_days, effective_from)` / `uq_sku_pricing_policies_current` |
-| 撞 `UNIQUE(min_age_days, effective_from)` | 409 | 例如 `POST` 或「无当前行的 PUT」用了同档位**已关闭历史行**的日期 |
+| 路径档位不存在 | 404 | 不能改一个不存在的档位 |
+| 新起点 + 生效日期的组合已被别的档位占用 | 409 | 撞 `UNIQUE(min_age_days, effective_from)` |
 | 撞 `uq_sku_pricing_policies_current` | 409 | 并发 `PUT` 同一档位（`IntegrityError` → `rollback` → 409，与 `bulk_save_skus` 的 409 模式一致） |
 
 ### 5.2 平台成本率（扩展既有端点，不新增路由）
@@ -915,7 +917,7 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 | 达人佣金回退 | SKU 未设 `creator_commission_rate` 时取 `platform_basis` 平台的默认；设了则用 SKU 值 |
 | 覆盖值可低于成本线 | `min_selling_price_override` 小于成本线时，生效值 = 覆盖值，来源 = `manual_override` |
 | 规则表约束 | `discount_rate` 越界 / `target_margin ≥ 1` / `min_age_days < 0` 均被拒 |
-| 版本化更新 | `effective_from` 严格大于旧行时 → 旧行关闭 + 新行生效；等于旧行时 → 原地 UPDATE；小于旧行 → 422 |
+| 版本化更新 | `effective_from` 严格大于旧行时 → 旧行关闭 + 新行生效；等于旧行时 → 原地 UPDATE；小于旧行 → 422；起点变更 → 旧行关闭 + 新起点新行；路径档位不存在 → 404 |
 | 并发 PUT | 撞 `uq_sku_pricing_policies_current` 时返回 409 |
 | 护栏拦截 | 预计售价 < 最低售价 → 422 `below_min_selling_price`；≥ 则通过 |
 | 草稿不拦截 | `POST /drafts` 在低于最低售价时仍返回 201 |
