@@ -89,7 +89,7 @@
 1. **物流 + 广告 + 仓储合计占收入约 30%+，且无法逐 SKU 精确计算**（尺寸数据 0~3/1121）。逐项精算不可行，必须用平台级成本率参数。
 2. **组合净利率 17.81% / 12.84%，但单 SKU 平均销售利润率仅 8.31% / 6.88%**。行业口径是净利率 <10% 进观察名单、<5% 已在失败（TikTok 品类基准：美妆 25–35%、服饰 15–25%、电子 10–15%）。长尾 SKU 大面积贴在盈亏线上，这是「最低售价」功能的直接价值来源。
 3. **平台佣金当前配置值 2% 明显低于实测值**（TikTok 7.37%、Shopee 14.87%），利润测算算出的利润系统性偏高。
-4. **上表的分项列不可直接加总**。TikTok 分项相加 98.75%，与其 17.81% 净利率隐含的 82.19% 成本率相差 16.56pp；Shopee 分项相加 42.65% vs 反推 49.01%，差 6.36pp。两处差额都无法归因，说明原始列之间存在口径重叠或符号约定差异。**因此平台成本率一律用恒等式反推（§2.3），分项仅用于说明成本结构，不可写进计算。**
+4. **上表的分项列不可直接加总**。TikTok 按成本口径相加 98.75%（仓库操作费按回冲则 86.93%），与其 17.81% 净利率隐含的 82.19% 成本率相差 4.74~16.56pp；Shopee 全部非采购成本项相加 48.15% vs 反推 49.01%，差 0.86pp。两处差额都说明分项不可直接写进计算，平台成本率一律用恒等式反推（§2.3）。
 
 ### 1.3 达人佣金粒度（设计输入）
 
@@ -186,7 +186,7 @@ tiktok: 1 − 0.4261 − 0.1781 − 0.0467 − 0.0158 − 0.0606 = 0.2727
 shopee:  1 − 0.3815 − 0.1284 − 0.0467 − 0.0158 − 0.0111 = 0.4165
 ```
 
-用恒等式反推而非逐项加总，因为逐项加总会漏项（Shopee 分项加总 42.65% vs 反推 49.01%，差 6.36 个百分点无法归因）。**分项列不可直接加总**——TikTok 分项相加 98.75% 与其 17.81% 净利率隐含的 82.19% 成本率相差 16.56pp，同样无法归因。分项仅用于说明成本结构，不可写进计算。
+用恒等式反推而非逐项加总。**分项列不可直接加总**——两边都有无法归因的残差，且仓库操作费的符号约定不明（TikTok 侧 `仓库操作费` 在源数据里是回冲，按成本加总得 98.75%、按回冲算得 86.93%，而净利率隐含的总成本率是 82.19%，差 4.74~16.56pp；Shopee 侧全部非采购成本项加总 48.15% vs 反推 49.01%，差 0.86pp）。分项仅用于说明成本结构，不可写进计算。
 
 **⚠️ `default_fee_rate`（平台佣金率）不单独进入成本线分母**——它**已经包含在 `other_cost_rate` 桶内**（反推式从净利率倒推，净利率早已扣掉平台佣金）。若再减一次就是重复计算，会让底线偏高 26%（例 1：分母 0.3542 → 0.2805，底线 28.23 → 35.65）。
 
@@ -375,8 +375,7 @@ SKU 单独设了达人佣金率时，底线基数 = 平台其他成本率 + **SK
 #    ⚠️ join 键是 product_sku → dim_erp_sku.sku_key，不是 mart 的 sku_id
 #    （mart.inventory_age_current.sku_id 是 varchar 的平台侧 id，与 dim_erp_sku.sku_id(integer) 不是一回事）
 候选行 = mart.inventory_age_current 中 product_sku = dim_erp_sku.sku_key 的所有行
-命中平台 = platform_basis（tiktok）对应的行；若无该平台行 → 取 age_days 最大的那一行
-age_days = 命中行的 age_days
+age_days = 候选行中 age_days 的**最小值**（同一 platform_code 下多行同样取最小）
 无候选行（库龄不可得）→ age_days = None
 
 # 2) 在当前生效的规则行里匹配档位
@@ -387,22 +386,28 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 无生效规则 → 该 SKU 的 min_selling_price = unavailable，missing_reasons 含 'missing_pricing_policy'
 ```
 
+**为什么取 `age_days` 最小值（而不是按平台挑一行 / 取最大值）**：
+
+- **库龄是货品层面的事实**，不是平台层面的事实。同一批货在多个平台看到的库龄差异来自快照时序（补货锚点重置的先后），不是货品真的有两批
+- 取最小值 = 认为「这批货是最新进的」→ 命中**最浅**的档位 → 目标利润率最高 → **底线最高** = 最保守，不会亏本
+- 取最大值会命中最深档位、目标利润率最低、底线最低，是**最激进**的方向，与「底线是护栏」的定位相反
+- 这也让档位匹配**完全不依赖 `platform_basis`**，避免了「先要档位才知道用哪个平台、先要平台才知道档位」的循环依赖。`platform_basis` 只用于**成本线取哪个平台的费率**（§4.1）
+
 **join 路径的事实依据**（实测，2026-10-20）：
 
 | 事实 | 值 |
 |---|---|
 | `mart.inventory_age_current.sku_id` 类型 | `character varying`（**平台侧**商品 id 字符串） |
 | `core.dim_erp_sku.sku_id` 类型 | `integer`（ERP 主键） |
-| `mart.inventory_age_current` 主键 | `(platform_code, sku_key)`，其中 `sku_key = COALESCE(platform_sku, product_sku, sku_id, product_id)`（`sql/mart/inventory_snapshot_company_daily.sql:31`） |
+| `mart.inventory_age_current` 主键 | `(platform_code, sku_key)`（`sql/mart/inventory_age_current.sql:26`），其中 `sku_key = COALESCE(platform_sku, product_sku, sku_id, product_id)`（`sql/mart/inventory_snapshot_company_daily.sql:8-13`） |
 | **可用 join 键** | `mart.inventory_age_current.product_sku` → `core.dim_erp_sku.sku_key`（妙手商品编码，两侧同形） |
-| 该 join 实测匹配率 | **1080 / 1094（98.7%）**，精确匹配（去空格忽略大小写结果相同） |
-| 一对多风险 | **0**（不存在一个 `product_sku` 对应多个 `dim_erp_sku` 的情况） |
+| 该 join 实测匹配率 | **1080 / 1094（98.72%）**，精确匹配（去空格忽略大小写结果相同）。**实测在 `core.staging_inventory` 上**（`mart.inventory_age_current` 现为 0 行，无法在该表上直接测） |
+| 一对多风险 | **0**（不存在一个 `product_sku` 对应多个 `dim_erp_sku` 的情况；`dim_erp_sku.sku_key` 亦无重复） |
+| 未匹配的 14 个 | 均为 ERP 主数据里没有的新品族（`A-00001-ACU camouflage`、`HJJ-XH-CTD01`、`SG-JWG-A` 等），非格式差异 |
 | `core.bridge_erp_sku_keys` | 1118 行，`source_key` 与 `dim_erp_sku.sku_key` 完全同形（匹配 1118 行），可作等价桥接；但它**不提供**平台 SKU → ERP SKU 映射 |
 
-**多行聚合规则**：同一 ERP SKU 在多个平台（tiktok / shopee / miaoshou）各有库存行，`age_days` 不同。取
-1. `platform_basis`（tiktok）那一行——与底线的成本率口径保持一致，定价决策看的就是主战场；
-2. 若无 tiktok 行 → 取 `age_days` 最大的那一行（最保守）；
-3. 若仍无 → `age_days = None`，回落「日常」档。
+**⚠️ 覆盖率风险（管道修通后需验收）**：`mart` 链路里 `product_sku = NULLIF(BTRIM(product_sku), '')`（`sql/mart/inventory_snapshot_company_daily.sql:15`），而 `sku_key = COALESCE(platform_sku, product_sku, sku_id, product_id)`（同文件 `:8-13`）——**以 `platform_sku` 为键的平台行，其 `product_sku` 可能为 NULL**，这类行对上述 join **不可见**，对应 SKU 会静默回落「日常」档（方向安全但覆盖率打折）。
+→ 管道修通后须加一条验收断言：**tiktok / shopee 的库存行必须带 `商品SKU`**，否则该平台的库龄永远匹配不上。
 
 其中：
 - 平台其他成本率 = `platform_basis` 平台的 `dim_platforms.other_cost_rate`（已含平台佣金率，**不含**达人佣金与 SPU 两率）
@@ -435,6 +440,7 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 ```
 
 **`SKU-0001`**（采购成本 100，参考售价 500，日常档，SPU 率取仓库均值）：
+> 注：该 SKU 在库中 `status='inactive'`，此处仅作**数据形态示例**（它与 `166851422928` 一样是仅有的两个有参考售价的 SKU 之一）；active 且有参考售价的 SKU 目前只有 `166851422928` 一个。
 ```
 成本线 = 100 ÷ (1 − 0.2727 − 0.0606 − 0.0467 − 0.0158 − 0.25) = 100 ÷ 0.3542 = 282.33
 纪律线 = 500 × (1 − 0.10) = 450.00
@@ -526,8 +532,7 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 # 1) 取 SKU 当前库龄
 #    ⚠️ join 键是 product_sku → dim_erp_sku.sku_key（不是 mart 的 sku_id，见 §4.1 的事实依据）
 候选行 = mart.inventory_age_current 中 product_sku = dim_erp_sku.sku_key 的所有行
-命中平台 = platform_basis（tiktok）对应的行；若无该平台行 → 取 age_days 最大的那一行
-age_days = 命中行的 age_days
+age_days = 候选行中 age_days 的最小值（跨平台、同平台多行均取最小，理由见 §4.1）
 无候选行（库龄不可得）→ age_days = None
 
 # 2) 在当前生效的规则行里匹配档位
@@ -572,9 +577,19 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 |---|---|
 | 路径参数 `min_age_days` 与 body 不一致 | 422（以 body 为准，路径参数仅作定位；不一致说明调用方搞混了） |
 | 改成**已存在**的起点 | 409（撞 `UNIQUE(min_age_days, effective_from)` 与 `uq_sku_pricing_policies_current`） |
-| 改成**全新**的起点 | 关闭旧行（`effective_to` = 今日、`status='inactive'`）+ 新建一行（`effective_from` = 今日） |
+| 改成**全新**的起点 | 关闭旧行（`effective_to` = 今日、`status='inactive'`）+ 新建一行（`min_age_days` = 新值、`effective_from` = 今日） |
 
-这样「改档位边界」就是一次普通的关旧开新，不需要额外的端点；`min_age_days` 变成新值即代表新档位。
+**⚠️ 起点变更豁免「新行 `effective_from` 必须严格大于旧行」这条规则**。理由：该规则是为「只改率、不改边界」设计的（那种情况下同档位同日新建会撞 `UNIQUE(min_age_days, effective_from)`）。而改边界时 `min_age_days` 不同，**不会**撞该唯一约束，因此新行可以与旧行同一天生效。
+
+这样「改档位边界」就是一次普通的关旧开新，不需要额外端点；`min_age_days` 变成新值即代表新档位。
+
+**同一天内的操作优先级**（`PUT` 一次请求可能同时改边界和率）：
+
+| 请求改了什么 | 走哪条路径 |
+|---|---|
+| 只改率（`min_age_days` 不变） | 原地 UPDATE 当前行（`effective_from` 不变） |
+| 只改边界（`min_age_days` 变） | 关旧行 + 新建一行（`effective_from` = 今日） |
+| 同时改边界和率 | 走「改边界」路径：关旧行 + 新建一行，新行带上新边界与新率 |
 
 **错误契约**：
 
@@ -799,7 +814,7 @@ HTTP 422
 ```js
 const fromPercent = (value, fallback = 0) => value == null || value === "" ? fallback : Number(value) / 100;
 ```
-默认 `fallback = 0` 会把空值转成 **0** 并落库（DB CHECK 允许 0），计算时按 0% 而不是平台默认 6.06% 计算，底线被系统性抬高 13%。**该字段必须用 `fromPercent(value, null)`**（或等价写法），让空值原样传 `null` 落库，语义才是「未单独设置 → 用平台默认兜底」。
+默认 `fallback = 0` 会把空值转成 **0** 并落库（DB CHECK 允许 0），计算时按 0% 而不是平台默认 6.06% 计算，**分母变大 → 底线被系统性压低 14.6%**（例 1：28.23 → 24.11）——方向是**压低（亏本风险）**，不是抬高。**该字段必须用 `fromPercent(value, null)`**（或等价写法），让空值原样传 `null` 落库，语义才是「未单独设置 → 用平台默认兜底」。
 
 - 来源标记 tooltip 文案：
   - `manual_override` → 「人工设定」
@@ -946,13 +961,15 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 3. `core.dim_erp_sku` 加 `creator_commission_rate` / `min_selling_price_override` 两列 + 2 个 CHECK（命名 `ck_dim_erp_sku_*`）
 4. 插入 **5 条** `finance.sku_pricing_policies` 初始规则（`effective_from` = 执行日，`status = 'active'`，`source = 'industry_benchmark_2026'`，`version = 'v1'`）：
 
-   | min_age_days | tier_label | standard_discount_rate | clearance_discount_rate | target_margin_rate |
-   |---|---|---|---|---|
-   | 0 | 日常 | 0.05 | 0.10 | 0.25 |
-   | 60 | 滞销30天 | 0.10 | 0.15 | 0.22 |
-   | 90 | 滞销60天 | 0.15 | 0.20 | 0.18 |
-   | 120 | 滞销90天 | 0.20 | 0.25 | 0.15 |
-   | 150 | 滞销90天+ | 0.25 | 0.30 | 0.10 |
+   | min_age_days | tier_label | standard_discount_rate | clearance_discount_rate | target_margin_rate | platform_basis |
+   |---|---|---|---|---|---|
+   | 0 | 日常 | 0.05 | 0.10 | 0.25 | tiktok |
+   | 60 | 滞销30天 | 0.10 | 0.15 | 0.22 | tiktok |
+   | 90 | 滞销60天 | 0.15 | 0.20 | 0.18 | tiktok |
+   | 120 | 滞销90天 | 0.20 | 0.25 | 0.15 | tiktok |
+   | 150 | 滞销90天+ | 0.25 | 0.30 | 0.10 | tiktok |
+
+   > `platform_basis` 是规则表的 `nullable=False` 列，但**只用于成本线取哪个平台的费率**，不参与档位匹配（避免「先要档位才知道平台」的循环，§4.1）。当前所有档位统一为 `tiktok`。
 
 5. 更新 `core.dim_platforms` 初始成本率（当前两行均为 `default_fee_rate=0.02, fee_rate_source='manual', fee_rate_version='v1'`）：
    - tiktok：`default_fee_rate = 0.0737`、`default_creator_commission_rate = 0.0606`、`other_cost_rate = 0.2727`、`fee_rate_source = 'b_class_measured_2026_01_07'`、`fee_rate_version = 'v2'`
