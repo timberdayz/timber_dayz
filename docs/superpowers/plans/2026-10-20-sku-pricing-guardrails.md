@@ -2208,13 +2208,14 @@ if floor is not None and values.get("expected_selling_price") is not None:
 > 走 `error_response_v2`，`detail` **原样透传**，最终是：
 >
 > ```json
-> {"success": false, "error": {"code": 3001, "type": "DataError", "detail": {"code": "below_min_selling_price", "min_selling_price": 28.23, ...}}, "message": "预计售价 0.01 低于最低售价 28.23"}
+> {"success": false, "error": {"code": 3001, "type": "DataError", "detail": {"code": "below_min_selling_price", "min_selling_price": 28.23, ...}}, "message": "[3001] 预计售价 0.01 低于最低售价 28.23"}
 > ```
 >
+> （`message` 前面的 `[3001]` 是 `ERPException.__str__` 带 `error_code` 时的固定格式。）
+>
 > 顶层**没有** `detail` 键，结构化业务码在 `error.detail.code`。
-> 仓库既有的 `cannot_save_profit_version`（同文件 `:2487` / `:2490`）用的是老的
-> `HTTPException` 写法，其 `error.detail` 是**字符串化的 dict**；
-> 前端读 `missing_fields` 时必须**同时兼容 dict 与字符串**（见 Task 9 的读法）。
+> 仓库既有的 `cannot_save_profit_version`（同文件 `:2487` / `:2490`）**本任务一并换成本同一个异常类型**，
+> 所以两个业务码都落在 `error.detail` 这个 **dict** 里，前端只需一套读法（见 Task 9）。
 
 在 `product_center.py` 顶部补导入（**Task 4 Step 3 已加过这一行，这里不要重复加**）：
 
@@ -2355,6 +2356,17 @@ Expected: 新增两条 FAIL（既有那条 `preview:\s*null` 的失败与本任�
 3. SKU 资料 tab 工具栏新增「定价设置」按钮，打开时默认选中「库龄档位规则」子页
 4. 百分比输入统一走既有的 `toPercent` / `fromPercent`（`ProductCenter.vue:1866-1869`）
 5. 抽屉「库龄档位规则」子页需注明「**最深档（120 天）的折扣率 30% 同时就是 SKU 资料页「滞销可优惠」列的清货极限**」
+6. 抽屉保存失败时的提示**优先读 `error?.detail?.reason`**（中文、无错误码前缀），
+   其次才回退 `error?.message`：
+
+```js
+const detail = error?.detail && typeof error.detail === "object" ? error.detail : null;
+ElMessage.error(detail?.reason || error?.message || "保存定价规则失败");
+```
+
+> `error.message` 是仓库统一信封的 `message` 字段，由 `ERPException.__str__` 拼出来，
+> **前面会带 `[3001]` 这样的错误码前缀**（`modules/core/exceptions.py`）。
+> 直接把它弹给财务看会显得很怪，所以优先用 `detail.reason`（纯中文）。
 
 > ⚠️ **「默认达人佣金率」在 SKU 资料页的「达人佣金率」列被清空时，必须提交 `null` 而不是 `0`**。既有 `fromPercent(value, fallback = 0)` 默认会把空值转成 0 落库，导致成本线按 0% 佣金算、底线被压低 14.6%。该列要用 `fromPercent($event, null)`。
 
