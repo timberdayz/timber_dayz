@@ -246,18 +246,25 @@ class SkuPricingPolicy(Base):
 
 ### 4.3 计算示例
 
-**`166851422928`**（采购成本 10，参考售价 30，fast 档，SPU 率 4.67% / 1.58%）：
+**`166851422928`**（采购成本 10，参考售价 30，fast 档，SPU 率取仓库均值 4.67% / 1.58%）：
 ```
-成本线 = 10 ÷ (1 − 0.2727 − 0.0467 − 0.0158 − 0.0606 − 0.20) = 28.12
+成本线 = 10 ÷ (1 − 0.2727 − 0.0467 − 0.0158 − 0.0606 − 0.20) = 10 ÷ 0.4042 = 24.74
 纪律线 = 30 × (1 − 0.20) = 24.00
-最低售价 = 28.12   来源：cost_floor
+最低售价 = 24.74   来源：cost_floor
 ```
 
-**`SKU-0001`**（采购成本 100，参考售价 500，normal 档）：
+**`SKU-0001`**（采购成本 100，参考售价 500，normal 档，SPU 率取仓库均值）：
 ```
-成本线 = 100 ÷ (1 − 0.2727 − 0.0467 − 0.0158 − 0.0606 − 0.18) = 236.26
+成本线 = 100 ÷ (1 − 0.2727 − 0.0467 − 0.0158 − 0.0606 − 0.18) = 100 ÷ 0.4242 = 235.74
 纪律线 = 500 × (1 − 0.30) = 350.00
 最低售价 = 350.00   来源：discount_guard
+```
+
+**`227764033069`**（采购成本 1.26，参考售价未填，normal 档）：
+```
+成本线 = 1.26 ÷ 0.4242 = 2.97
+纪律线 = 不可算（参考售价为空）
+最低售价 = 2.97   来源：cost_floor
 ```
 
 ### 4.4 降级链与来源标记
@@ -313,7 +320,7 @@ class SkuPricingPolicy(Base):
 
 ### 5.3 SKU 读接口
 
-`GET /api/skus` 响应 `ProductCenterItem` 新增 5 个字段：
+`GET /api/skus` 响应 `ProductCenterItem` 新增 8 个字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -351,9 +358,9 @@ HTTP 422
 {
   "detail": {
     "code": "below_min_selling_price",
-    "min_selling_price": 28.12,
-    "expected_selling_price": 25.00,
-    "message": "预计售价低于最低售价 28.12"
+    "min_selling_price": 24.74,
+    "expected_selling_price": 22.00,
+    "message": "预计售价低于最低售价 24.74"
   }
 }
 ```
@@ -386,7 +393,7 @@ HTTP 422
 │                                                    │
 │ 生效日期   [2026-09-01]                            │
 │ 来源       [b_class 实测 2026-01~07]                │
-│ 版本       [v1]                                    │
+│ 版本       [v2]                                    │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -434,6 +441,10 @@ HTTP 422
 - 未命中档位时（`pricing_tier_is_fallback === true`）在档位标签上加「兜底」提示
 - 编辑最低售价 → 写入 `min_selling_price_override`，走既有 `dirtyRows` + `/api/skus/bulk` 批量保存链路
 - 「重置为自动值」→ 把 `min_selling_price_override` 置 `null`，恢复自动计算
+- `blankSku()` 工厂（`ProductCenter.vue:925`）需同步新增 `creator_commission_rate: null` 与 `min_selling_price_override: null`，避免新建行携带未定义字段
+- `payloadSku()`（`ProductCenter.vue:1341`）当前展开整行，需**剔除只读计算字段** `standard_discount_rate` / `clearance_discount_rate` / `min_selling_price` / `min_selling_price_source` / `min_selling_price_is_override` / `min_selling_price_missing_reasons` / `pricing_tier` / `pricing_tier_is_fallback`。
+  - `SkuBulkItem` 未设 `model_config`，Pydantic v2 默认 `extra="ignore"`，多余字段不会报错，但会让每次批量保存把未修改的 `creator_commission_rate` / `min_selling_price_override` 原值重写一遍，产生无谓的审计记录。
+  - `min_selling_price_override` 的 `null` 必须保留在 payload 中——`SkuBulkItem` 用 `model_dump(exclude_unset=True)`，显式传 `null` 才会把覆盖值清空。
 
 ### 6.4 利润测算 tab 护栏
 
@@ -507,6 +518,7 @@ HTTP 422
 - 最低售价列的来源标记 tooltip 文案
 - 利润测算 tab 低于最低售价时输入框标红、保存按钮禁用
 - 定价设置抽屉两个子 Tab 可切换，字段绑定正确
+- `payloadSku()` 输出不含只读计算字段，且显式保留 `min_selling_price_override: null`
 
 ---
 
