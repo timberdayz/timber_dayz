@@ -142,17 +142,16 @@
 | 净利率观察线 / 失败线 | < 10% / < 5% | margn.shop《unprofitable tiktok shop products》 |
 | 品类净利率基准 | 美妆 25–35%、服饰 15–25%、电子 10–15% | margn.shop 同上 |
 
-### 2.2 规则表初始值（库龄阶梯，5 档）
+### 2.2 规则表初始值（库龄阶梯，4 档）
 
-`finance.sku_pricing_policies` 初始 5 行（`effective_from` = 迁移执行日）：
+`finance.sku_pricing_policies` 初始 4 行（`effective_from` = 迁移执行日）：
 
 | 库龄起点(天) | 档位名 | 常规最大折扣率 | 滞销最大折扣率 | 目标利润率 | 依据 |
 |---|---|---|---|---|---|
 | 0 | 日常 | 5% | 10% | 25% | 新品要求高毛利；清货折扣上限 10%（拉新促销 10–25% 的下沿） |
 | 60 | 滞销30天 | 10% | 15% | 22% | 滞销阈值 60 天（≈对齐现有库龄页「只看高库龄 ≥61 天」）；对应行业「90–180 天降 20–25%」 |
 | 90 | 滞销60天 | 15% | 20% | 18% | 目标利润率贴近实测净利率 17.81% |
-| 120 | 滞销90天 | 20% | 25% | 15% | 15% 正是行业清仓毛利底线 |
-| 150 | 滞销90天+ | 25% | 30% | 10% | 最后清档，低于行业 15% 底线是刻意为之（150 天未动的货再保 15% 毛利不现实） |
+| 120 | 滞销60天以上 | 25% | 30% | 10% | 最深档，吸收所有 ≥120 天；目标利润率 10% 低于行业 15% 清仓底线是刻意为之（120 天未动的货再保 15% 毛利不现实） |
 
 **库龄阶梯的语义**：
 - 档位由**当前库龄**（`mart.inventory_age_current.age_days`）落在哪个区间决定，与 SKU 的快销/普通/慢销属性**无关**
@@ -160,6 +159,8 @@
 - 库龄越久，折扣上限与目标利润率同步放宽——这就是「越滞销越该让利清货」
 
 **「滞销阈值」不是一个独立参数**，它内含在档位边界里（第 1 档 0–59 天为未滞销，第 2 档起为滞销）。要改阈值就是改第 2 档的 `min_age_days`。
+
+**最深的 120 天档吸收所有 ≥120 天的库存，不再单设「150 天以上」档**。该档取合并前最深档的率（常规 25% / 滞销 30% / 目标利润率 10%），理由：既然 120 天以上一律归入最深档，就该给最深的权限——否则「压了 200 天的货反而只能给 25% 折、清不掉」，合并反而会**丢失清货能力**。合并后规则不丢任何已有能力。
 
 **「常规最大折扣率」的用途**：只用于算**日常售价下限**（参考售价 × (1 − 该值)），在利润测算 tab 做黄色软提示，**不参与最低售价计算**。「滞销最大折扣率」才进入最低售价的纪律线。详见 §4.1 的三数职责表。
 
@@ -771,8 +772,7 @@ HTTP 422
 │ 0 天       │ 日常      │   5%     │   10%    │   25%    │
 │ 60 天      │ 滞销30天  │  10%     │   15%    │   22%    │
 │ 90 天      │ 滞销60天  │  15%     │   20%    │   18%    │
-│ 120 天     │ 滞销90天  │  20%     │   25%    │   15%    │
-│ 150 天     │ 滞销90天+ │  25%     │   30%    │   10%    │
+│ 120 天     │ 滞销60天以上│ 25%     │   30%    │   10%    │
 └────────────┴──────────┴──────────┴──────────┴──────────┘
 ```
 
@@ -881,7 +881,7 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 | 日常售价下限 | 参考售价 × (1 − standard_discount_rate)，**不参与**最低售价取大 |
 | 取大 | 成本线与纪律线取大，人工覆盖优先级最高 |
 | 降级链 | 采购成本缺失 / SPU 未绑定 / 平台成本率未配置 / 无生效规则 → `unavailable` + 原因清单 |
-| **库龄档位匹配** | `age_days=75` 命中 `min_age_days=60` 档；`age_days=59` 命中 `min_age_days=0` 档；`age_days=200` 命中 `min_age_days=150` 档 |
+| **库龄档位匹配** | `age_days=75` 命中 `min_age_days=60` 档；`age_days=59` 命中 `min_age_days=0` 档；`age_days=200` 命中 `min_age_days=120` 档（最深档，无更深的档） |
 | **库龄缺失回落** | 库龄不可得时命中 `min_age_days=0` 档，且 `pricing_tier_source = 'fallback_no_age_data'`；底线取该档的率（目标利润率 25%，最保守） |
 | **档位边界可配** | 规则表 `min_age_days` 改动后，匹配结果随之变化（不依赖 `turnover_class`） |
 | **定价不读 turnover_class** | 同一 SKU 的 `turnover_class` 改成任何值，底线结果**不变** |
@@ -912,7 +912,7 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 - 迁移文件包含 `sku_pricing_policies` 建表语句
 - 迁移文件包含 `dim_platforms` 两列新增
 - 迁移文件包含 `dim_erp_sku` 两列新增
-- 迁移文件包含 5 条规则初始数据与 2 条平台成本率初始数据
+- 迁移文件包含 4 条规则初始数据与 2 条平台成本率初始数据
 - 迁移文件包含 `downgrade()` 且同样有存在性守卫
 - 迁移 revision 链正确：`down_revision == "current_schema_20260921_warehouse_storage_label_fee"`（实施时以 `alembic heads` 实际输出为准）
 
@@ -959,15 +959,14 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 1. 建 `finance.sku_pricing_policies` 表（含 7 个 CHECK、1 个 UNIQUE、2 个 INDEX，其中 `uq_sku_pricing_policies_current` 为部分唯一索引）
 2. `core.dim_platforms` 加 `default_creator_commission_rate` / `other_cost_rate` 两列 + 3 个 CHECK（命名 `ck_dim_platforms_*`）
 3. `core.dim_erp_sku` 加 `creator_commission_rate` / `min_selling_price_override` 两列 + 2 个 CHECK（命名 `ck_dim_erp_sku_*`）
-4. 插入 **5 条** `finance.sku_pricing_policies` 初始规则（`effective_from` = 执行日，`status = 'active'`，`source = 'industry_benchmark_2026'`，`version = 'v1'`）：
+4. 插入 **4 条** `finance.sku_pricing_policies` 初始规则（`effective_from` = 执行日，`status = 'active'`，`source = 'industry_benchmark_2026'`，`version = 'v1'`）：
 
    | min_age_days | tier_label | standard_discount_rate | clearance_discount_rate | target_margin_rate | platform_basis |
    |---|---|---|---|---|---|
    | 0 | 日常 | 0.05 | 0.10 | 0.25 | tiktok |
    | 60 | 滞销30天 | 0.10 | 0.15 | 0.22 | tiktok |
    | 90 | 滞销60天 | 0.15 | 0.20 | 0.18 | tiktok |
-   | 120 | 滞销90天 | 0.20 | 0.25 | 0.15 | tiktok |
-   | 150 | 滞销90天+ | 0.25 | 0.30 | 0.10 | tiktok |
+   | 120 | 滞销60天以上 | 0.25 | 0.30 | 0.10 | tiktok |
 
    > `platform_basis` 是规则表的 `nullable=False` 列，但**只用于成本线取哪个平台的费率**，不参与档位匹配（避免「先要档位才知道平台」的循环，§4.1）。当前所有档位统一为 `tiktok`。
 
