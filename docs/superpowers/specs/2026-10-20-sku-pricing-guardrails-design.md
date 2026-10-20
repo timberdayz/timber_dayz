@@ -195,7 +195,10 @@ class SkuPricingPolicy(Base):
     platform_basis            = Column(String(32), nullable=False)          # 成本基准平台
     effective_from            = Column(Date, nullable=False)
     effective_to              = Column(Date, nullable=True)
-    policy_source             = Column(String(128), nullable=True)
+    status                    = Column(String(16), nullable=False, default="active")
+    source                    = Column(String(128), nullable=True)
+    version                   = Column(String(64), nullable=True)
+    notes                     = Column(Text, nullable=True)
     created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at                = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -205,10 +208,19 @@ class SkuPricingPolicy(Base):
         CheckConstraint("standard_discount_rate >= 0 AND standard_discount_rate <= 1", name="ck_sku_pricing_policy_standard_discount"),
         CheckConstraint("clearance_discount_rate >= standard_discount_rate", name="ck_sku_pricing_policy_clearance_ge_standard"),
         CheckConstraint("target_margin_rate >= 0 AND target_margin_rate < 1", name="ck_sku_pricing_policy_target_margin"),
+        CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_sku_pricing_policy_window"),
+        CheckConstraint("status IN ('active', 'inactive')", name="ck_sku_pricing_policy_status"),
+        Index("uq_sku_pricing_policies_current", "turnover_class", unique=True,
+              postgresql_where=text("status = 'active' AND effective_to IS NULL")),
         Index("ix_sku_pricing_policy_scope", "turnover_class", "effective_from", schema="finance"),
         {"schema": "finance"},
     )
 ```
+
+**字段命名对齐仓库既有「版本化规则表」约定**：`WarehouseStorageRule`（`business.py:805`）与 `LogisticsProviderRule`（`business.py:775`）均使用 `effective_from` / `effective_to` / `status` / `source` / `version` / `notes` 六件套，并用**部分唯一索引**（`postgresql_where`）保证「每作用域只有一条当前行」。`SkuPricingPolicy` 沿用同一约定：
+- `source` / `version` / `notes` / `status` 与既有规则表字段名一致
+- `uq_sku_pricing_policies_current` 部分唯一索引在**数据库层**保证每个档位至多一条当前行（`status='active' AND effective_to IS NULL`），不依赖应用层逻辑
+- 额外保留 `UNIQUE(turnover_class, effective_from)` 防止同一档位同一天出现两条
 
 规则变更需要真实版本历史（改一次影响 1118 个 SKU 的底价），因此用 `effective_from` / `effective_to` 软关闭历史行。
 
@@ -305,14 +317,17 @@ class SkuPricingPolicy(Base):
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
 | GET | `/api/sku-pricing-policies` | 登录 | 返回全部规则行（含历史），按 `turnover_class, effective_from` 排序 |
-| GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行（`effective_from <= 今日` 且 `effective_to IS NULL OR > 今日`） |
+| GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行（`effective_from <= 今日` 且 `effective_to IS NULL OR > 今日` 且 `status='active'`） |
 | POST | `/api/sku-pricing-policies` | `_require_platform_fee_editor` | 新建规则行；若同档位已有生效行则拒绝（409），要求先关闭 |
 | PUT | `/api/sku-pricing-policies/{turnover_class}` | `_require_platform_fee_editor` | 版本化更新：关闭当前行（写 `effective_to`）并新建一行 |
 
+规则行请求/响应模型字段：`turnover_class` / `standard_discount_rate` / `clearance_discount_rate` / `target_margin_rate` / `platform_basis` / `effective_from` / `effective_to` / `status` / `source` / `version` / `notes`。
+
 `PUT` 采用「关旧行 + 建新行」而非原地 UPDATE，保证历史可追溯。新行的 `effective_from` 必须 ≥ 旧行的 `effective_from`。
 
-**规则选档规则**（服务端统一实现，前端不得自行推导）：
+**数据库层并发保护**：`uq_sku_pricing_policies_current` 部分唯一索引保证每个档位至多一条 `status='active' AND effective_to IS NULL` 的行。若两个请求并发 `PUT` 同一档位，后到者会撞唯一索引报错，实现需捕获 `IntegrityError` → `rollback` → 返回 409（与 `bulk_save_skus` 的 409 模式一致）。
 
+**规则选档规则**（服务端统一实现，前端不得自行推导）：
 ```
 命中档位 = SKU.turnover_class，若为 NULL 则回退到 'unclassified'
 生效规则 = 该档位中满足 (effective_from <= 今日) AND (effective_to IS NULL OR effective_to > 今日) 的最新一行
@@ -532,6 +547,13 @@ HTTP 422
 - 定价设置抽屉两个子 Tab 可切换，字段绑定正确
 - `payloadSku()` 输出不含只读计算字段，且显式保留 `min_selling_price_override: null`
 
+**必须同时修改的既有断言**（改名会打破它们）：
+
+- `frontend/tests/productCenterUi.test.mjs:130` — `assert.match(source, /平台费率管理/)`。按钮与抽屉标题从「平台费率管理」改名为「定价设置」后该断言会失败，需改为匹配新标签（如 `/定价设置/`）。
+- `frontend/tests/productCenterUi.test.mjs` 其余断言不受影响。
+
+**无需改动的文档**：根目录 `API_CONTRACT.md` 与 `docs/API_CONTRACTS.md` 均为通用契约规范（响应格式、错误处理约定），**未列出商品中心的具体路由**，因此本次新增端点不需要更新它们。
+
 ---
 
 ## 9. 迁移
@@ -546,10 +568,10 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 ```
 
 内容：
-1. 建 `finance.sku_pricing_policies` 表（含 5 个 CHECK、1 个 UNIQUE、1 个 INDEX）
+1. 建 `finance.sku_pricing_policies` 表（含 6 个 CHECK、1 个 UNIQUE、2 个 INDEX，其中 `uq_sku_pricing_policies_current` 为部分唯一索引）
 2. `core.dim_platforms` 加 `default_creator_commission_rate` / `other_cost_rate` 两列 + 3 个 CHECK
 3. `core.dim_erp_sku` 加 `creator_commission_rate` / `min_selling_price_override` 两列 + 2 个 CHECK
-4. 插入 4 条 `finance.sku_pricing_policies` 初始规则（`effective_from` = 执行日，`policy_source = 'industry_benchmark_2026'`）
+4. 插入 4 条 `finance.sku_pricing_policies` 初始规则（`effective_from` = 执行日，`status = 'active'`，`source = 'industry_benchmark_2026'`，`version = 'v1'`）
 5. 更新 `core.dim_platforms` 初始成本率（当前两行均为 `default_fee_rate=0.02, fee_rate_source='manual', fee_rate_version='v1'`）：
    - tiktok：`default_fee_rate = 0.0737`、`default_creator_commission_rate = 0.0606`、`other_cost_rate = 0.2727`、`fee_rate_source = 'b_class_measured_2026_01_07'`、`fee_rate_version = 'v2'`
    - shopee：`default_fee_rate = 0.1487`、`default_creator_commission_rate = 0.0111`、`other_cost_rate = 0.4165`、同上
