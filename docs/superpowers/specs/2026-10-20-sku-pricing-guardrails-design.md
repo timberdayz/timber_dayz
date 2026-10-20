@@ -513,6 +513,25 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 
 回落档的目标利润率最高（25%）、折扣率最浅（10%），所以**底线最保守（最高）→ 不会亏本**。这是刻意设计：库龄数据缺失时宁可把底线抬高，也不要给一个乐观的低价。
 
+**⚠️ 「库龄不可得」必须做到**事务不受伤**：
+
+`mart.inventory_age_current` 是 raw SQL 层（`sql/mart/*.sql`），**不在 `Base.metadata` 里**。
+测试库的 `conftest.py` 只建 `core/a_class/b_class/c_class/finance/ops` 六个 schema，**没有 `mart`**；
+生产环境在管道修通前同样可能没有这张表或没有数据。
+
+**禁止**用「try/except 包住一条裸查询」来容错：PostgreSQL 里一条语句失败会让**整个事务进入 aborted 状态**，
+后续所有语句都抛 `InFailedSQLTransactionError`。那样「查不到就回落日常档」的承诺根本不成立——
+不是这里返回空 dict，而是整个 `GET /api/skus` / 候选接口在后面某处 500。
+
+正确做法（两步）：
+
+1. 先 `SELECT to_regclass('mart.inventory_age_current')` 探测表是否存在——
+   不存在就**根本不发出那条会失败的查询**，事务毫发无损；
+2. 万一表存在但查询仍失败（列变了、权限不足等），用 `db.begin_nested()` 开一个 **SAVEPOINT** 包住它，
+   异常时只回滚到保存点，外层事务仍然可用。
+
+表存在但没有数据 → 返回空 dict（不是错误），走「日常」档兜底，标 `fallback_no_age_data`。
+
 **边界**：
 - 分母 `1 − 各项率 ≤ 0` → 不计算成本线，降级到纪律线，并在 `missing_reasons` 记 `non_positive_cost_denominator`
 - 全部率之和 ≥ 1 → 视为配置错误，返回 `unavailable`
@@ -545,6 +564,17 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 | PUT | `/api/sku-pricing-policies/{min_age_days}` | `_require_platform_fee_editor` | 版本化更新。**路径参数 = 被编辑的档位（旧起点），请求体的 `min_age_days` = 该档位的新起点**。具体行为有五条路径（改边界 / 同日原地改 / 跨期关旧开新 / 回溯拒绝 / 路径档位不存在），详见下方「版本化更新的多条路径」——实现时不要只按摘要这一句做 |
 
 **规则行请求/响应模型字段**：`min_age_days` / `tier_label` / `discount_rate` / `target_margin_rate` / `platform_basis` / `effective_from` / `effective_to` / `status` / `source` / `version` / `notes`。
+
+> ⚠️ **`PUT` 的请求模型不得包含 `status`**。当前行谓词是
+> `status='active' AND effective_to IS NULL`，一旦允许把当前行直接置成 `inactive`，
+> 这个库龄档位就会从「当前生效规则」里消失——等于**静默删掉一档**，
+> 且 `_current_policies` 变空后所有 SKU 一起掉进 `missing_pricing_policy`、最低售价算不出来。
+> 停用请走版本化路径（`PUT` 改 `effective_from` → 关旧行 + 建新行），由统一判定裁决。
+> `POST` 仍可指定初始 `status`（建出来的行若为 `inactive`，本就不进入当前规则集合）。
+>
+> `PUT` 未传的 `source` / `version` / `notes` 必须**继承旧行**（原地 update 天然保留；
+> 关旧行 + 建新行时显式 `setdefault`），否则迁移灌的 `source='industry_benchmark_2026'`
+> 会被覆盖成 `None`，`downgrade()` 按 source 删种子行就会失效。
 
 `PUT` 的具体行为见下方「版本化更新的多条路径」。
 
@@ -596,6 +626,15 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 | 起点没变、`effective_from` **严格大于**当前行 | 版本化更新：关闭当前行 + 新建一行 | 跨期变更需要留版本历史 |
 | 起点没变、`effective_from` **小于**当前行 | 422 拒绝 | 回溯变更超出范围，需手工改数据 |
 | `effective_from` 晚于今日 | 422 拒绝 | 不支持未来生效的规则行 |
+| 起点变了（改档位边界）**且** `effective_from` **小于**当前行 | 422 拒绝 | **回溯拒绝必须排在「改边界」判定之前** |
+
+> ⚠️ **回溯拒绝的判定顺序**：无论是否同时改档位起点，
+> 只要 `effective_from < 当前行的 effective_from` 就一律 422。
+> 若把回溯检查放在「改边界」分支之后，「改起点 + 把日期往回拨」会绕过拒绝，
+> 去插一行 `effective_from` 早于当前行的记录，
+> 撞 `ck_sku_pricing_policy_window`（`effective_to >= effective_from`）变成
+> **IntegrityError(409)**，而不是规范要求的 422。
+> 实现上：先判「未来生效」→ 再判「回溯生效」→ 再判「改边界 / 同日原地改 / 跨期版本化」。
 
 新行 `effective_from` 必须 **严格大于**（`>`）旧行，不能是 `>=`——否则同日新建会撞 `UNIQUE(min_age_days, effective_from)`，按规范返回 409，用户当天无法纠错。
 
@@ -734,16 +773,41 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 ```json
 HTTP 422
 {
-  "detail": {
-    "code": "below_min_selling_price",
-    "min_selling_price": 28.23,
-    "expected_selling_price": 25.00,
-    "message": "预计售价低于最低售价 28.23"
-  }
+  "success": false,
+  "error": {
+    "code": 3001,
+    "type": "DataError",
+    "detail": {
+      "code": "below_min_selling_price",
+      "min_selling_price": 28.23,
+      "expected_selling_price": 25.00,
+      "sku_id": 9001
+    }
+  },
+  "message": "预计售价 25.00 低于最低售价 28.23",
+  "timestamp": "2026-10-20T09:12:33.101Z"
 }
 ```
 
 判定条件：`expected_selling_price` 非空 且 `min_selling_price` 非空 且 `expected_selling_price < min_selling_price`。
+
+> ⚠️ **错误信封必须用仓库统一格式**：顶层是 `{"success": false, "error": {...}, "message": ..., "timestamp": ...}`，
+> **没有顶层 `detail` 键**；结构化业务码在 **`error.detail.code`**。
+> 实现上必须抛 `BusinessValidationError`（`backend/utils/exceptions.py`）而不是
+> `HTTPException(status_code=422, detail={...})`——
+> 后者会被全局处理器 `backend/app/exception_handlers.py` 的
+> `detail=str(exc.detail)` **拍平成字符串**，前端拿到的 `error.detail` 就是一段
+> `"{'code': 'below_min_selling_price', ...}"` 文本，无法分支处理。
+>
+> 同 endpoint 的既有错误码 `cannot_save_profit_version` 一并换成 `BusinessValidationError`，
+> 让两个业务码落在同一位置（`error.detail.code` / `error.detail.missing_fields`）。
+> 这顺带修掉一个既有缺陷：原来前端 `detail?.missing_fields` 恒为 `undefined`，
+> 「资料未完整，不能保存利润版本：xxx」这条提示从未真正显示过。
+
+**护栏必须排在「资料完整性」校验之前**。若排在后面，当物流规则/仓储规则/平台费率缺失时，
+用户先撞到 `cannot_save_profit_version`（缺资料），永远看不到「低于最低售价」这个更可执行的原因。
+护栏的输入（采购成本 + 平台成本率 + 参考售价 + 规则表）不依赖物流/仓储规则，前置是安全的；
+底线算不出来时（`min_selling_price` 为空）护栏自动跳过，交给后面的缺资料校验。
 
 **`POST /api/platform-sku-profit/drafts` 不拦截**——草稿是探索性保存，允许记录"我试过这个价"。
 
@@ -873,7 +937,123 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 | `expected_selling_price < min_selling_price` | 预计售价输入框**标红** + 行内提示「低于最低售价 {min_selling_price}」 | ✅ 硬拦截：「保存利润版本」按钮禁用 + tooltip 说明；后端 422 兜底 |
 | `expected_selling_price >= min_selling_price` | 无提示 | ❌ |
 
-- 后端 422 返回时，前端展示 `detail.min_selling_price` 与差额。既有 catch 分支（`ProductCenter.vue:1322`）只读 `detail.missing_fields`，**需要扩充分支**读 `detail.code === 'below_min_selling_price'` 时的 `detail.min_selling_price`，与 `missing_fields` 分支并存。
+- 后端 422 返回时，前端展示 `min_selling_price` 与差额。既有 catch 分支（`ProductCenter.vue:1322`）只读 `detail.missing_fields`，**需要扩充分支**读 `code === 'below_min_selling_price'` 时的 `min_selling_price`，与 `missing_fields` 分支并存。
+  - ⚠️ 读取位置必须是 **`error.detail`**（axios 响应拦截器 `frontend/src/api/index.js:662` 已把 `responseData.error.detail` 挂到 `error.detail` 上），**不能读 `error.response.data.detail`**——仓库错误信封没有顶层 `detail` 键，那个表达式恒为 `undefined`。
+  - 后端两个业务码都走 `BusinessValidationError`，所以 `error.detail` 一定是 **dict**，`detail.code` 与 `detail.missing_fields` 都能直接取到。前端仍保留 `typeof === "object"` 兜底，防止其它接口返回字符串时炸掉。
+
+### 6.5 团队在页面上实际看到什么（业务视角）
+
+这一节回答的是：**这套东西上线后，运营/财务/主管打开系统，屏幕上会是什么样子。**
+
+#### 6.5.1 一线运营：在 SKU 资料页改价
+
+运营的日常动作是「打开商品中心 → SKU 资料 → 找一批品 → 改价」。这次改动只在这张表上，
+**紧挨着「参考售价」的右边，加了 4 列**，其余列、筛选、批量保存按钮全部不动：
+
+| 屏幕上看到 | 长什么样 | 运营怎么理解 |
+|---|---|---|
+| **当前可优惠** | 一个灰色小标签，写着 `10%`，旁边跟着档位名「日常」 | 「这个品现在正常能打 10% 折，再多就要申请了」 |
+| **滞销可优惠** | 一个橙色小标签，写着 `30%` | 「真要清仓，最多能打 30%，这是底线」 |
+| **最低售价** | 上半行是 `28.23` 加一个来源标签；下半行是一个可以填的空输入框 | 「这个品低于 28.23 就别卖了」 |
+| **达人佣金率** | 一个空的输入框 | 「这个品有没有另外谈达人佣金？谈了就填这里」 |
+
+关键点：
+
+- **最低售价那一格里有两个数**。上面那个 `28.23` 是**系统算出来的**，只读；
+  下面那个空框是**留给人工拍板的覆盖值**。不填就跟着系统走；填了就以人工为准，
+  旁边会多出一个小标签写着「人工设定」，还有个「重置为自动值」的按钮可以一键撤销。
+- **来源标签就是底线的"依据"**，运营不用猜这个数怎么来的：
+  - 「成本底线」= 按成本和目标利润率倒推出来的（这个 SKU 是 28.23，来源就是它）
+  - 「折扣纪律」= 参考售价按当前档折扣率折算出来的
+  - 「人工设定」= 有人手动改过
+  - 「无法计算」= 数据不全，鼠标悬停会告诉运营缺哪几项（缺采购成本 / 缺 SPU 费率 / 没绑 SPU …）
+- **达人佣金率留空 = 没单独谈**，按平台默认值算。输入框里是百分数（填 `15` 表示 15%），
+  但**填了会立刻抬高最低售价**（这个 SKU 从 28.23 变成 37.76）——因为达人佣金是要从收入里扣的钱，
+  佣金给得多，能卖的价格就得高。这一点必须在字段旁写一句提示，否则运营会以为系统在乱改数。
+- **注意一个反直觉点**：覆盖值允许**填得比成本线低**。人工有权拍板（比如清仓、亏本冲量），
+  所以填了 20.00 就是 20.00，系统只是把上面那行只读数字从 28.23 变成 20.00 并标成「人工设定」，
+  **不会偷偷把你拉回 28.23**。但系统会记一笔账（审计），谁改的、什么时候改的、为什么改，都查得到。
+
+#### 6.5.2 一线运营：在利润测算页定价
+
+利润测算 tab 是运营真正「定价」的地方——填预计售价、看利润、存盘。改动是：
+
+- 「预计售价」右边加一列**「最低售价」**，只读，白底黑字。
+- 「竞品价格」右边加两列：**「当前可优惠」**（如 `10%`）和 **「清货极限」**（如 `30%`）。
+- 运营把预计售价填到低于最低售价时，**输入框边框变红**，旁边一行小字提示「低于最低售价 28.23」，
+  「保存利润版本」按钮**变灰点不动**。
+  - 如果绕过前端直接调接口，后端也会挡下来，返回 422，提示「预计售价 25.00 低于最低售价 28.23」。
+- 想不清楚就先存**草稿**——草稿**不拦**，可以先记一个「我试过这个价」，回头再讨论。
+- **「最低售价」这一列在利润测算页里不随筛选条件变**。切平台、切仓库、切运输方式，
+  它都是同一个数——因为底线的口径是公司统一的（按 TikTok 口径算，见 §2.3）。
+  这一点必须在列头写明，否则运营会以为「换到 Shopee 底线就变了」，进而觉得系统算错。
+  这是**有意的取舍**：统一口径比逐平台精确更重要，否则同一件商品在两个平台上会有一堆不同的底线，
+  没人记得住哪条才是真的。
+
+#### 6.5.3 财务/主管：定价设置
+
+权限收紧到 admin / manager / finance。入口是**两个**，都在商品中心里（不新建页面）：
+利润测算 tab 右上角（原「平台费率管理」按钮改名）、SKU 资料 tab 新增一个。
+点开是一个 720px 宽的抽屉，顶部两个子页：
+
+**子页 1「平台成本率」**——决定底线基数的那几个数：
+
+```
+┌─ 定价设置 · TikTok ───────────────────────────────┐
+│ [info] 平台成本率用于最低售价底线计算，仅管理员、  │
+│        主管和财务可维护。                           │
+├────────────────────────────────────────────────────┤
+│ 平台   TikTok                                     │
+│  平台佣金率          [ 7.37 ] %                    │
+│  默认达人佣金率      [ 6.06 ] %   (兜底值)         │
+│  平台其他成本率      [ 27.27 ] %                   │
+│  ──────────────────────────────────────            │
+│  成本率合计          40.70 %   (自动算，只读)       │
+│                                                    │
+│ 生效日期   [2026-09-01]                            │
+│ 来源       [b_class 实测 2026-01~07]                │
+│ 版本       [v2]                                    │
+└────────────────────────────────────────────────────┘
+```
+
+- 「成本率合计 40.70%」**只是展示**，不是底线基数。真正的底线基数是
+  **默认达人佣金率 6.06% + 平台其他成本率 27.27% = 33.33%**（平台佣金率已经算在「其他成本率」里了，不重复扣）。
+  抽屉里必须写清这个限定语，否则财务按 40.70% 复算，会和系统给出的 28.23 对不上。
+- 「默认达人佣金率」这一项的 label 必须带「**SKU 未单独设置时的兜底值**」——
+  否则运营以为改它就改了所有商品的佣金。
+
+**子页 2「库龄档位规则」**——4 行，决定「什么品能打几折」：
+
+```
+┌────────────┬────────────────┬────────┬──────────┐
+│ 库龄起点    │ 档位名          │ 折扣率  │ 目标利润率│
+├────────────┼────────────────┼────────┼──────────┤
+│ 0 天       │ 日常            │  10%   │   25%    │
+│ 60 天      │ 滞销30天        │  15%   │   22%    │
+│ 90 天      │ 滞销60天        │  20%   │   18%    │
+│ 120 天     │ 滞销60天以上    │  30%   │   10%    │
+└────────────┴────────────────┴────────┴──────────┘
+```
+
+- 「库龄起点」列**可以改**——改这一格就等于改了滞销阈值。改完保存，系统会**关掉旧档、开一个新档**，
+  历史记录留着，不会覆盖（这样任何时候都能回答「上个月这个品为什么按 15% 算的」）。
+- **改生效日期不能往回拨**（系统会挡下来，提示「生效日期不能早于当前规则」）。
+  规则只能往前改，不能偷偷追溯重算历史。
+- 这张表就是 SKU 资料页「当前可优惠」那个标签的数据来源——改这里，SKU 资料页那一列就跟着变。
+- 档位名建议写成自解释形式（「库龄≥60天」而不是「滞销30天」）：因为**库龄起点 60 天 ≠ 滞销第 30 天**，
+  运营很容易读反。保留「滞销30天」这类业务叫法也行，但必须在旁边同时显示库龄天数。
+
+#### 6.5.4 现在就能看到的东西，和暂时看不到的东西
+
+- **现在就能看到**：4 列定价底线、利润测算页的红色护栏、定价设置抽屉。
+- **暂时看不到**：真正的库龄天数。库龄管道当前是空的（`mart.inventory_age_current` 0 行），
+  所以**所有 SKU 一律按「日常」档算**，档位标签后面会挂一个「兜底」小标，
+  鼠标悬停说明「库龄数据未就绪，暂按日常档计算」。
+  - 这意味着**上线当天，所有 SKU 的「当前可优惠」都是 10%**，「滞销可优惠」都是 30%——
+    因为「清货极限」取的是最深档的折扣率，跟这个品当前落在哪一档无关。
+  - 库龄管道修通（独立任务）之后，**不需要改任何代码**，同样这套界面就会自动按真实库龄分档。
+- **也就是说：护栏和底线现在是真的能用的**（成本线、纪律线都算得出来），
+  **只是「按库龄自动放宽折扣」这一层还没通电**。
 
 ---
 
@@ -896,7 +1076,22 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 
 ### 8.1 后端
 
-新建 `backend/tests/test_product_pricing_guardrails.py`：
+新建 `backend/tests/test_product_pricing_guardrails.py`。
+
+> ⚠️ **pg 集成用例的运行命令必须带两个 loop scope 选项**：
+> ```powershell
+> python -m pytest backend/tests/test_product_pricing_guardrails.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session
+> ```
+> `backend/tests/conftest.py` 的 `pg_engine` 是 **session 作用域**的 `pytest_asyncio.fixture`，
+> 而 pytest-asyncio 1.3.0 默认 fixture / test loop scope 是 **function**，
+> 于是 engine 建在 A 循环、测试跑在 B 循环 → `RuntimeError: Future attached to a different loop`。
+> 这两个 `-o` 让 fixture 与 test 共用同一个 session 级事件循环。
+> 若在别的机器上仍报 loop 不一致，按仓库惯例**本地跳过** pg 用例
+> （参考 `backend/tests/test_conftest_fixtures.py:116-134`），**不要**改 `conftest.py` 的 fixture 作用域。
+>
+> ⚠️ **pg 集成用例的 seed 必须自成闭环**：护栏、利润测算保存、审计三条链路各自查不同的表，
+> 少任何一样，测试会先在**别的错误**上失败，看起来像「护栏没实现」，实际是 seed 缺数据。
+> 必需的 9 张表见计划 Task 4 Step 1 的清单表。
 
 | 用例 | 断言 |
 |---|---|
@@ -918,9 +1113,17 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 | 覆盖值可低于成本线 | `min_selling_price_override` 小于成本线时，生效值 = 覆盖值，来源 = `manual_override` |
 | 规则表约束 | `discount_rate` 越界 / `target_margin ≥ 1` / `min_age_days < 0` 均被拒 |
 | 版本化更新 | `effective_from` 严格大于旧行时 → 旧行关闭 + 新行生效；等于旧行时 → 原地 UPDATE；小于旧行 → 422；起点变更 → 旧行关闭 + 新起点新行；路径档位不存在 → 404 |
+| **回溯拒绝优先于改边界** | 同时「改起点 + 把生效日期往回拨」→ **422**（不是 409）。若判定顺序写反，会插出一行 `effective_from` 早于当前行的记录，撞 `ck_sku_pricing_policy_window` 变成 IntegrityError |
+| **PUT 不得改 status** | `SkuPricingPolicyUpdateRequest` 不含 `status` 字段。当前行一旦被置 `inactive`，该档位会从「当前生效规则」里消失，等于静默删掉一档 |
+| **未传字段继承旧行** | PUT 不传 `source` / `version` / `notes` 时，原地更新与关旧开新两条路径都保留旧行取值（否则迁移灌的 `source='industry_benchmark_2026'` 被覆盖成 None，`downgrade()` 删不掉种子行） |
 | 并发 PUT | 撞 `uq_sku_pricing_policies_current` 时返回 409 |
 | 护栏拦截 | 预计售价 < 最低售价 → 422 `below_min_selling_price`；≥ 则通过 |
+| **护栏优先于缺资料** | 同时「低于底线」且「缺物流规则」时，返回的必须是 `below_min_selling_price`（更可执行的原因），不是 `cannot_save_profit_version` |
+| **错误信封位置** | 422 响应体形如 `{"success": false, "error": {"code": 3001, "detail": {"code": "below_min_selling_price", ...}}, "message": ...}`。**顶层没有 `detail` 键**；结构化业务码在 `error.detail.code` |
+| **高价能存（seed 完整性探针）** | 预计售价 35（高于底线 28.23）→ estimates 返回 **201**。若返回 `cannot_save_profit_version`，说明 seed 缺物流规则 / 仓储规则 / 平台费率 |
+| **规则表必须灌满** | 候选行的 `min_selling_price` 非空且 = 28.23、`min_selling_price_source='cost_floor'`；规则表为空时底线恒 None、护栏永不触发 |
 | 草稿不拦截 | `POST /drafts` 在低于最低售价时仍返回 201 |
+| **mart 表缺失不伤事务** | `mart.inventory_age_current` 不存在时，`GET /api/skus` 与候选接口正常返回（回落日常档），**后续语句不报 `InFailedSQLTransactionError`** |
 | 写接口审计 | 规则表 / 平台成本率 / SKU 覆盖值与达人佣金率的写操作均产生 `FactAuditLog` |
 | 平台成本率部分更新 | 只传 `default_creator_commission_rate` 时，`default_fee_rate` / `fee_rate_effective_from` / `fee_rate_source` / `fee_rate_version` **保持原值不变**（不被写成 NULL、不被刷成当天） |
 | 未来生效日期 | `effective_from` 晚于今日 → 422；`effective_to` 非空时 `status` 必须为 `inactive` |
@@ -952,6 +1155,7 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 - 最低售价列的可编辑输入框绑定 `min_selling_price_override`（**不是** `min_selling_price`）
 - 达人佣金率列绑定 `creator_commission_rate`，且百分比 ↔ 小数转换走 `toPercent` / `fromPercent`
 - 利润测算 tab 低于最低售价时输入框标红、保存按钮禁用
+- **错误信封读取走 `error.detail`**（axios 拦截器 `frontend/src/api/index.js:662` 的挂载点），**不是** `error.response.data.detail`——后者恒为 `undefined`
 - 定价设置抽屉两个子 Tab 可切换，字段绑定正确
 - `payloadSku()` 输出不含只读计算字段（含 `min_selling_price`），且显式保留 `min_selling_price_override: null` 与 `creator_commission_rate`
 

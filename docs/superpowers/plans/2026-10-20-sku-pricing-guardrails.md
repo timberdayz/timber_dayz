@@ -54,16 +54,29 @@ assert.doesNotMatch(operatingSection, /preview:\s*null/);
 ### 0.4 测试命令
 
 ```powershell
-# 后端
-python -m pytest backend/tests/test_product_pricing_guardrails.py -q
+# 后端（纯函数 / 契约，无 DB）
 python -m pytest backend/tests/test_sku_pricing_guardrails_contract.py -q
 python -m pytest backend/tests/test_product_center_schema_contract.py -q
+
+# 后端（含 pg 集成用例）——必须补两个 loop scope 选项
+python -m pytest backend/tests/test_product_pricing_guardrails.py -q `
+  -o asyncio_default_fixture_loop_scope=session `
+  -o asyncio_default_test_loop_scope=session
 
 # 前端
 node --test frontend/tests/productCenterUi.test.mjs
 ```
 
 系统 Python 已装齐依赖（pytest 8.4.1 / sqlalchemy 2.0.41 / pydantic 2.11.7 / fastapi 0.116.1）；仓库 `.venv` 缺这些包，**不要用 `.venv` 跑测试**。
+
+> ⚠️ **pg 集成用例必须带 `-o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`**。
+> `backend/tests/conftest.py` 里 `pg_engine` 是 **session 作用域**的 `pytest_asyncio.fixture`，
+> 而 pytest-asyncio 1.3.0 默认的 fixture / test loop scope 是 **function**，
+> 于是 engine 建在 A 循环、测试跑在 B 循环 → `RuntimeError: Future attached to a different loop`。
+> 这两个 `-o` 让 fixture 与 test 共用同一个 session 级事件循环，实测可跑通。
+> 如果在别的机器上仍然报 loop 不一致，按仓库惯例**本地跳过** pg 用例
+> （参考 `backend/tests/test_conftest_fixtures.py:116-134` 的 `pytest.skip` 写法），
+> **不要**为了跑通去改 `conftest.py` 的 fixture 作用域——那是全仓库共享的测试基础设施。
 
 ---
 
@@ -678,11 +691,50 @@ def test_policy_update_rejects_future_and_backdated():
             requested={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
             today=date(2026, 10, 20),
         )
+
+
+def test_policy_update_rejects_backdated_retier():
+    """同时改档位起点 + 把生效日期往回拨 -> 必须 422 拒绝，不能落到 retier 分支。
+
+    retier 会插一行 effective_from 早于当前行的记录，撞 ck_sku_pricing_policy_window
+    变成 IntegrityError(409)，与 spec §5.1 的 422 语义不符。
+    """
+    from datetime import date
+
+    import pytest
+
+    from backend.services.product_pricing_service import (
+        PolicyUpdateRejected,
+        resolve_policy_update,
+    )
+
+    with pytest.raises(PolicyUpdateRejected):
+        resolve_policy_update(
+            current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+            requested={"min_age_days": 60, "effective_from": date(2026, 10, 1)},
+            today=date(2026, 10, 20),
+        )
+
+
+def test_policy_update_retier_allows_same_day_boundary_change():
+    """改档位边界（但生效日期不倒退）-> retier。"""
+    from datetime import date
+
+    from backend.services.product_pricing_service import resolve_policy_update
+
+    decision = resolve_policy_update(
+        current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+        requested={"min_age_days": 30, "effective_from": date(2026, 10, 20)},
+        today=date(2026, 10, 20),
+    )
+    assert decision["action"] == "retier"
+    assert decision["close_current"] == date(2026, 10, 20)
+    assert decision["values"]["min_age_days"] == 30
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q`
+Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'backend.services.product_pricing_service'`.
 
@@ -823,13 +875,20 @@ def resolve_policy_update(
     `requested` 是请求体，其中 `min_age_days` 是**该档位的新起点**。
     因此「路径起点 != body 起点」= 运营在改库龄档位的边界，而不是调用方搞混。
 
-    四条路径（与 spec §5.1 一致）：
+    两条拒绝路径（与 spec §5.1 一致）：
+    - 生效日期在未来                -> 拒绝（未来生效不允许）
+    - 生效日期早于当前行的生效日期    -> 拒绝（回溯生效不允许）
+
+    四条落库路径：
     - 该档位没有当前行            -> action="create"（等价 POST）
     - 起点与生效日期都没变          -> action="update"（原地改，同日不可新建否则撞 UNIQUE）
     - 起点变了（改档位边界）        -> action="retier"（关旧行 + 建新行，新行用新起点）
     - 起点没变但生效日期更晚        -> action="version"（关旧行 + 建新行）
 
-    未来生效一律拒绝；回溯生效一律拒绝。
+    ⚠️ **回溯拒绝必须排在 retier 判定之前**：否则「同时改起点 + 把生效日期往回拨」
+    会绕过回溯拒绝，直接去插一行 effective_from 早于当前行的记录，
+    撞 `ck_sku_pricing_policy_window`（effective_to >= effective_from）变成
+    IntegrityError(409)，而不是 spec §5.1 要求的 422。
     """
     requested_effective_from = requested["effective_from"]
     requested_min_age = requested["min_age_days"]
@@ -842,6 +901,9 @@ def resolve_policy_update(
     current_effective_from = current["effective_from"]
     current_min_age = current["min_age_days"]
 
+    # 回溯生效一律拒绝——先于 retier / version 判定
+    if requested_effective_from < current_effective_from:
+        raise PolicyUpdateRejected("effective_from cannot be earlier than the current policy")
     if requested_min_age != current_min_age:
         # 改档位边界：关旧行 + 建新行（新行用新起点）。
         # 新起点与生效日期的组合若已被占用，会撞 UNIQUE(min_age_days, effective_from) -> 409
@@ -854,18 +916,17 @@ def resolve_policy_update(
         # 同日、同档位：原地 UPDATE。effective_from 不变，因此不会撞 UNIQUE
         values = {k: v for k, v in requested.items() if k != "effective_from"}
         return {"action": "update", "close_current": None, "values": values}
-    if requested_effective_from > current_effective_from:
-        return {
-            "action": "version",
-            "close_current": requested_effective_from,
-            "values": dict(requested),
-        }
-    raise PolicyUpdateRejected("effective_from cannot be earlier than the current policy")
+    # 起点没变、生效日期更晚：版本化
+    return {
+        "action": "version",
+        "close_current": requested_effective_from,
+        "values": dict(requested),
+    }
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q`
+Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`
 
 Expected: PASS.
 
@@ -928,6 +989,17 @@ def test_pricing_policy_request_models_expose_single_discount_rate():
         assert "discount_rate" in model.model_fields
         assert "standard_discount_rate" not in model.model_fields
         assert "clearance_discount_rate" not in model.model_fields
+
+
+def test_pricing_policy_update_request_cannot_deactivate_current_tier():
+    """更新请求不得能改 status —— 否则当前行会从「当前生效规则」里消失，静默丢掉一档。"""
+    from backend.schemas.product_center import SkuPricingPolicyUpdateRequest
+
+    assert "status" not in SkuPricingPolicyUpdateRequest.model_fields
+    # create 仍然可以指定初始状态（建出来的行若为 inactive，不进入当前规则集合）
+    from backend.schemas.product_center import SkuPricingPolicyCreateRequest
+
+    assert "status" in SkuPricingPolicyCreateRequest.model_fields
 
 
 def test_profit_candidate_response_exposes_pricing_fields():
@@ -1081,8 +1153,26 @@ class SkuPricingPolicyCreateRequest(SkuPricingPolicyBase):
     min_age_days: int = Field(ge=0)
 
 
-class SkuPricingPolicyUpdateRequest(SkuPricingPolicyBase):
+class SkuPricingPolicyUpdateRequest(BaseModel):
+    """更新档位规则。
+
+    ⚠️ **刻意不含 `status`**：`_current_policies` 的当前行谓词是
+    `status='active' AND effective_to IS NULL`，一旦把当前行直接置成 `inactive`，
+    这个库龄档位就会从「当前生效规则」里消失——等于**静默删掉一档**，
+    而 `_current_policies` 为空时所有 SKU 都会掉回 `missing_pricing_policy`、
+    最低售价算不出来。停用请走版本化（改 `effective_from` 关旧行 + 建新行），
+    那条路径由 `resolve_policy_update` 统一裁决。
+    """
+
+    tier_label: str = Field(min_length=1, max_length=32)
+    discount_rate: float = Field(ge=0, le=1)
+    target_margin_rate: float = Field(ge=0, lt=1)
+    platform_basis: str = Field(min_length=1, max_length=32)
+    effective_from: date
     min_age_days: int = Field(ge=0)
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
 
 
 class SkuPricingPolicyResponse(SkuPricingPolicyBase):
@@ -1320,33 +1410,105 @@ async def test_pricing_policy_write_is_audited(
 
 ```python
 async def _seed_pricing_fixtures(pg_session):
-    """候选/保存/审计三个端点共用的最小种子数据。"""
+    """候选 / 保存 / 审计 / 护栏四个端点共用的最小种子数据。
+
+    ⚠️ **这份 seed 必须自成闭环**。护栏（Task 6）、利润测算保存、审计三条链路
+    各自会查不同的表；少任何一样，测试会先在**别的错误**上失败，
+    看起来像「护栏没实现」，实际是 seed 缺数据——这正是第 3 轮终审的头号阻断。
+
+    必需清单（少一样，对应断言就先红在别处）：
+    | 表 | 为什么必须有 |
+    |---|---|
+    | `DimUser` | 审计外键；`user_id`/`username`/`email`/`password_hash` 全是 NOT NULL |
+    | `DimPlatform` | `default_fee_rate` / `default_creator_commission_rate` / `other_cost_rate` 三项费率缺一不可 |
+    | `DimWarehouse` | `status='active'` |
+    | `DimSpu` | 货损率 + 退货损失率（成本线分母要用） |
+    | `DimErpSku` | 采购成本 / 参考售价 / 重量 / 体积 / 周转类型 |
+    | `BridgeSpuSku` | SKU↔SPU 绑定（`effective_from` NOT NULL） |
+    | `SkuPricingPolicy` | **4 个库龄档位。没有它 `_current_policies` 返回空 → 最低售价恒 None → 护栏永不触发** |
+    | `LogisticsProviderRule` | 参考物流成本（否则先报「缺物流规则」） |
+    | `WarehouseStorageRule` | 参考仓储成本 + 标签费（否则先报「缺仓储规则」） |
+    """
+    from datetime import date
+
     from modules.core.db import (
         BridgeSpuSku, DimErpSku, DimPlatform, DimSpu, DimUser, DimWarehouse,
+        LogisticsProviderRule, SkuPricingPolicy, WarehouseStorageRule,
     )
 
-    pg_session.add(DimUser(user_id=1, username="test_admin"))
-    pg_session.add(DimPlatform(platform_code="tiktok", name="TikTok",
-                               platform_role="sales", is_active=True))
-    pg_session.add(DimWarehouse(warehouse_code="MY-01", warehouse_name="主仓",
-                               country_code="MY", country_name="马来西亚",
-                               status="active"))
-    pg_session.add(DimSpu(spu="TEST-SPU-1", spu_name="测试SPU",
-                          return_loss_rate=0.0467, logistics_damage_rate=0.0158))
-    pg_session.add(DimErpSku(sku_id=9001, sku_key="TEST-SKU-1", sku_name="测试SKU",
-                             status="active", default_purchase_cost=10,
-                             reference_selling_price=30))
-    pg_session.add(BridgeSpuSku(sku_id=9001, spu="TEST-SPU-1", binding_status="active"))
+    effective_from = date(2026, 1, 1)
+
+    pg_session.add(DimUser(
+        user_id=1, username="test_admin",
+        email="test_admin@example.com", password_hash="not-a-real-hash",
+    ))
+    pg_session.add(DimPlatform(
+        platform_code="tiktok", name="TikTok", platform_role="sales", is_active=True,
+        default_fee_rate=0.0737,
+        default_creator_commission_rate=0.0606,
+        other_cost_rate=0.2727,
+    ))
+    pg_session.add(DimWarehouse(
+        warehouse_code="MY-01", warehouse_name="主仓",
+        country_code="MY", country_name="马来西亚", status="active",
+    ))
+    pg_session.add(DimSpu(
+        spu="TEST-SPU-1", spu_name="测试SPU",
+        return_loss_rate=0.0467, logistics_damage_rate=0.0158,
+    ))
+    pg_session.add(DimErpSku(
+        sku_id=9001, sku_key="TEST-SKU-1", sku_name="测试SKU",
+        status="active", default_purchase_cost=10, reference_selling_price=30,
+        weight_kg=0.5, unit_volume_cbm=0.01, turnover_class="slow",
+    ))
+    pg_session.add(BridgeSpuSku(
+        sku_id=9001, spu="TEST-SPU-1", binding_status="active",
+        effective_from=effective_from,
+    ))
+    # 库龄档位规则：缺这 4 行 -> 最低售价算不出来 -> 护栏永不触发
+    for min_age_days, tier_label, discount_rate, target_margin_rate in (
+        (0, "日常", 0.10, 0.25),
+        (60, "滞销30天", 0.15, 0.22),
+        (90, "滞销60天", 0.20, 0.18),
+        (120, "滞销60天以上", 0.30, 0.10),
+    ):
+        pg_session.add(SkuPricingPolicy(
+            min_age_days=min_age_days, tier_label=tier_label,
+            discount_rate=discount_rate, target_margin_rate=target_margin_rate,
+            platform_basis="tiktok", effective_from=effective_from,
+            status="active", source="test_seed", version="v1",
+        ))
+    pg_session.add(LogisticsProviderRule(
+        logistics_provider="TEST-LOG", warehouse_code="MY-01", transport_type="sea",
+        status="active", is_sensitive=False, is_default=True, currency="CNY",
+        billing_basis="volume", billing_unit="cbm", freight_unit_rate=5,
+        effective_from=effective_from,
+    ))
+    pg_session.add(WarehouseStorageRule(
+        warehouse_code="MY-01", billing_basis="volume", billing_unit="cbm",
+        unit_rate_cny=100, label_fee=0.5, status="active",
+        effective_from=effective_from,
+    ))
     await pg_session.flush()
 ```
 
-> `DimUser` / `DimSpu` / `DimErpSku` / `BridgeSpuSku` 的其余必填列以仓库 ORM 定义为准
-> （`modules/core/db/schema_parts/dimensions.py`），实现时按 `inspect(Model).columns` 补齐。
-> **这些 seed 建议放在 `backend/tests/conftest.py` 里做成一个共用 fixture**，避免 Task 4 与 Task 6 各写一份。
+> **这套 seed 的期望数值**（可直接写进断言）：
+> - 成本线 = 10 ÷ (1 − 0.2727 − 0.0606 − 0.0467 − 0.0158 − 0.25) = 10 ÷ 0.3542 = **28.23**
+> - 纪律线 = 30 × (1 − 0.10) = **27.00**
+> - 最低售价 = max(28.23, 27.00) = **28.23**（来源 `cost_floor`）
+> - `expected_selling_price = 0.01` → 低于底线 → 护栏 422
+> - 库龄表 `mart.inventory_age_current` 在测试库里不存在 →
+>   `pricing_tier_source='fallback_no_age_data'`、`pricing_age_days=None`、档位取「日常」
+>
+> `DimUser` / `DimSpu` / `DimErpSku` / `BridgeSpuSku` / `LogisticsProviderRule` /
+> `WarehouseStorageRule` / `SkuPricingPolicy` 的其余必填列以仓库 ORM 定义为准
+> （`modules/core/db/schema_parts/`），实现时按 `inspect(Model).columns` 补齐。
+> **这些 seed 放在 `backend/tests/conftest.py` 里做成一个共用 fixture**，
+> 避免 Task 4 与 Task 6 各写一份。
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q`
+Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`
 
 Expected: FAIL — 路由不存在。
 
@@ -1488,6 +1650,8 @@ async def update_sku_pricing_policy(
         # 保留旧行的来源标记，避免把迁移灌的 source='industry_benchmark_2026' 覆盖成 None
         values.setdefault("source", current.source)
         values.setdefault("version", current.version)
+        # 备注同理：新行没显式写 notes 时继承旧行，否则关档留痕后备注凭空消失
+        values.setdefault("notes", current.notes)
         values["status"] = "active"
         row = SkuPricingPolicy(**values)
         db.add(row)
@@ -1512,6 +1676,8 @@ async def update_sku_pricing_policy(
 >
 > `body.model_dump(exclude_unset=True)`：`source` / `version` / `notes` 未传时保留旧行取值，
 > 不会把迁移灌的 `source='industry_benchmark_2026'` 覆盖成 None（否则 `downgrade()` 按 source 删种子行会失效）。
+> `notes` 在**原地 update** 分支天然保留（没传就不 setattr），
+> 在**关旧行 + 建新行**分支靠 `values.setdefault("notes", current.notes)` 继承。
 >
 > **四路径判定放在纯函数 `resolve_policy_update` 里**（Task 2 已实现并单测），路由只负责取数、落库、审计。
 >
@@ -1548,7 +1714,7 @@ for key, value in values.items():
 
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py backend/tests/test_product_center_schema_contract.py -q`
+Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py backend/tests/test_product_center_schema_contract.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`
 
 Expected: PASS.
 
@@ -1591,7 +1757,7 @@ def test_list_skus_injects_pricing_payload():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q`
+Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`
 
 Expected: FAIL — 字段未注入。
 
@@ -1608,8 +1774,18 @@ async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[in
 
     ⚠️ 必须容错：mart 是 raw SQL 层（sql/mart/*.sql），不在 Base.metadata 里。
     测试库的 conftest 只建 core/a_class/b_class/c_class/finance/ops 六个 schema，
-    没有 mart -> 裸查会抛 ProgrammingError -> 整个 list_skus 端点 500。
-    查不到就返回空 dict，调用方按 spec §4.4 回落「日常」档。
+    没有 mart -> 裸查会抛 ProgrammingError。
+
+    ⚠️⚠️ **不能用「try/except 包住裸查」来容错**：PostgreSQL 里一条语句失败会让
+    **整个事务进入 aborted 状态**，后续所有语句都抛 `InFailedSQLTransactionError`。
+    那样「查不到就回落日常档」的承诺根本不成立——不是这里返回空 dict，
+    而是整个 `list_skus` / 候选接口在后面某处 500。
+
+    正确做法（两步）：
+    1. 先用 `SELECT to_regclass('mart.inventory_age_current')` 探测表是否存在——
+       不存在就**根本不发出那条会失败的查询**，事务毫发无损；
+    2. 万一表存在但查询仍失败（列变了、权限不足等），用 `db.begin_nested()` 开一个
+       SAVEPOINT 包住它，异常时只回滚到保存点，外层事务仍然可用。
     """
     if not sku_ids:
         return {}
@@ -1621,17 +1797,24 @@ async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[in
     if not key_to_sku:
         return {}
     try:
-        age_rows = (await db.execute(
-            text(
-                "SELECT product_sku, MIN(age_days) AS age_days "
-                "FROM mart.inventory_age_current "
-                "WHERE product_sku = ANY(:keys) "
-                "GROUP BY product_sku"
-            ),
-            {"keys": list(key_to_sku)},
-        )).all()
+        async with db.begin_nested():
+            exists = (await db.execute(
+                text("SELECT to_regclass('mart.inventory_age_current')")
+            )).scalar()
+            if not exists:
+                # mart 层不存在：不发出会失败的查询，事务保持健康
+                return {}
+            age_rows = (await db.execute(
+                text(
+                    "SELECT product_sku, MIN(age_days) AS age_days "
+                    "FROM mart.inventory_age_current "
+                    "WHERE product_sku = ANY(:keys) "
+                    "GROUP BY product_sku"
+                ),
+                {"keys": list(key_to_sku)},
+            )).all()
     except Exception:
-        # mart 层缺失或未灌数：按无库龄处理，回落「日常」档
+        # 保存点回滚后外层事务仍可用：按无库龄处理，回落「日常」档
         return {}
     return {key_to_sku[row.product_sku]: row.age_days for row in age_rows if row.product_sku in key_to_sku}
 
@@ -1805,7 +1988,7 @@ def test_sku_update_accepts_null_to_clear_override():
 
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q`
+Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`
 
 Expected: PASS.
 
@@ -1859,6 +2042,12 @@ async def test_estimate_below_floor_is_rejected_but_draft_is_not(
     row = rows[0]
     assert "min_selling_price" in row
     assert row["min_selling_price"] is not None
+    # seed 的期望数值：成本线 10/0.3542 = 28.23 > 纪律线 30*0.9 = 27.00
+    assert row["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert row["min_selling_price_source"] == "cost_floor"
+    # 库龄表在测试库不存在 -> 回落「日常」档
+    assert row["pricing_tier_source"] == "fallback_no_age_data"
+    assert row["pricing_age_days"] is None
 
     payload = {
         "sku_id": row["sku_id"],
@@ -1871,17 +2060,51 @@ async def test_estimate_below_floor_is_rejected_but_draft_is_not(
         "/api/platform-sku-profit/estimates", headers=pricing_auth_headers, json=payload
     )
     assert estimate.status_code == 422, estimate.text
-    assert estimate.json()["detail"]["code"] == "below_min_selling_price"
+    body = estimate.json()
+    # ⚠️ 仓库统一错误信封是 {"success": false, "error": {...}, "message": ..., "timestamp": ...}
+    # **没有顶层 `detail` 键**；结构化业务码在 `error.detail.code`。
+    # （`backend/app/exception_handlers.py` 的 handle_http_exception 会把 HTTPException.detail
+    #   拍平成字符串，所以必须走 APIException 路线才能保住 dict 结构。）
+    assert body["success"] is False
+    assert body["error"]["detail"]["code"] == "below_min_selling_price"
+    assert body["error"]["detail"]["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert body["error"]["detail"]["expected_selling_price"] == pytest.approx(0.01, abs=0.01)
 
     draft = await pg_async_client.post(
         "/api/platform-sku-profit/drafts", headers=pricing_auth_headers, json=payload
     )
     assert draft.status_code == 201, draft.text
+
+
+@pytest.mark.asyncio
+async def test_estimate_above_floor_saves_successfully(
+    pg_async_client, pricing_auth_headers, pg_session
+):
+    """高于底线的价格必须能存——证明护栏只拦「低于底线」，不是把整条保存链路堵死。
+
+    这条同时是 **seed 完整性的探针**：如果 seed 缺物流规则 / 仓储规则 / 平台费率，
+    这里会拿到 `cannot_save_profit_version` 而不是 201。
+    """
+    await _seed_pricing_fixtures(pg_session)
+
+    ok = await pg_async_client.post(
+        "/api/platform-sku-profit/estimates",
+        headers=pricing_auth_headers,
+        json={
+            "sku_id": 9001,
+            "platform_code": "tiktok",
+            "warehouse_code": "MY-01",
+            "transport_type": "sea",
+            "expected_selling_price": 35,
+        },
+    )
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["estimate_ids"]
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q`
+Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`
 
 Expected: FAIL — 护栏未接线。
 
@@ -1939,30 +2162,102 @@ items.append({**row_payload, **pricing_payload})
 
 - [ ] **Step 4: 实现保存拦截**
 
-`save_platform_sku_profit_estimates`（`product_center.py:2479`）在 `missing_fields` 校验之后、落库之前插入：
+`save_platform_sku_profit_estimates`（`product_center.py:2480`）在 **`_validate_operating_dimensions` 之后、
+`preview_platform_sku_profit` 之前**插入护栏：
 
 ```python
 floor = await _compute_sku_min_selling_price(db, values["sku_id"])
 if floor is not None and values.get("expected_selling_price") is not None:
     if Decimal(str(values["expected_selling_price"])) < floor:
-        raise HTTPException(
-            status_code=422,
+        raise BusinessValidationError(
+            message=f"预计售价 {values['expected_selling_price']} 低于最低售价 {floor}",
             detail={
                 "code": "below_min_selling_price",
                 "min_selling_price": float(floor),
                 "expected_selling_price": values["expected_selling_price"],
-                "message": f"预计售价低于最低售价 {floor}",
+                "sku_id": values["sku_id"],
             },
         )
 ```
 
 `_compute_sku_min_selling_price(db, sku_id)` 是把 Task 5 的单 SKU 计算抽出来的薄封装（供这里复用，避免重复实现）。
 
+> ⚠️ **必须用 `BusinessValidationError`，不能用 `HTTPException(status_code=422, detail={...})`**。
+> 仓库全局异常处理器（`backend/app/exception_handlers.py` 的 `handle_http_exception`，
+> 由 `backend/main.py:1373` 注册、覆盖了 FastAPI 默认处理器）会执行
+> `detail=str(exc.detail)` —— **把 dict 拍平成字符串**：
+>
+> ```json
+> {"success": false, "error": {"code": 422, "type": "...", "detail": "{'code': 'below_min_selling_price', ...}"}, "message": "..."}
+> ```
+>
+> 前端拿到的 `error.detail` 是**字符串**，`detail?.code` 恒 `undefined`，护栏报错无法分支处理。
+> `BusinessValidationError`（`backend/utils/exceptions.py`，继承 `APIException` → `ERPException`）
+> 走 `error_response_v2`，`detail` **原样透传**，最终是：
+>
+> ```json
+> {"success": false, "error": {"code": 3001, "type": "DataError", "detail": {"code": "below_min_selling_price", "min_selling_price": 28.23, ...}}, "message": "预计售价 0.01 低于最低售价 28.23"}
+> ```
+>
+> 顶层**没有** `detail` 键，结构化业务码在 `error.detail.code`。
+> 仓库既有的 `cannot_save_profit_version`（同文件 `:2487` / `:2490`）用的是老的
+> `HTTPException` 写法，其 `error.detail` 是**字符串化的 dict**；
+> 前端读 `missing_fields` 时必须**同时兼容 dict 与字符串**（见 Task 9 的读法）。
+
+在 `product_center.py` 顶部补导入：
+
+```python
+from backend.utils.exceptions import BusinessValidationError
+```
+
+> ⚠️ **护栏必须排在 `missing_fields` 校验之前**。
+> 若排在后面：当 seed/真实数据缺物流规则、仓储规则或平台费率时，
+> 先命中的是 `cannot_save_profit_version`（缺资料），
+> 用户永远看不到「低于最低售价」这个更可执行的原因；
+> 而且这会让「低于底线必须 422」这条断言在数据不全时测不出真实意图。
+> 护栏的输入（采购成本 + 平台成本率 + 参考售价 + 规则表）**不依赖**物流/仓储规则，
+> 所以前置是安全的：底线算不出来时 `floor is None`，护栏自动跳过，交给后面的缺资料校验。
+
 > **草稿不拦截**：`save_platform_sku_profit_draft` 不加这段。
+> 草稿是「还没定价的记录」，允许运营先存一个低于底线的草稿去讨论；
+> 护栏只作用在「正式发布利润版本」这一步。
+
+**顺手把同函数里两处既有的 `cannot_save_profit_version` 也换成 `BusinessValidationError`**
+（`product_center.py:2487` 与 `:2490`）：
+
+```python
+    except ValueError as exc:
+        missing_fields = await _platform_profit_missing_fields(db, values)
+        raise BusinessValidationError(
+            message="资料未完整，不能保存利润版本",
+            detail={
+                "code": "cannot_save_profit_version",
+                "missing_fields": missing_fields or [str(exc)],
+            },
+        ) from exc
+    missing_fields = await _platform_profit_missing_fields(db, values, preview)
+    if missing_fields:
+        raise BusinessValidationError(
+            message="资料未完整，不能保存利润版本",
+            detail={
+                "code": "cannot_save_profit_version",
+                "missing_fields": missing_fields,
+            },
+        )
+```
+
+> **为什么连这块一起改**：这两处原来用 `HTTPException(status_code=422, detail={...})`，
+> 经全局处理器后 `error.detail` 是**字符串化的 dict**，
+> 前端 `detail?.missing_fields` **恒为 undefined**——
+> 也就是说「资料未完整，不能保存利润版本：物流规则、仓储规则」这条提示**从来没有真正显示过**。
+> 换成 `BusinessValidationError` 后 `error.detail` 是 dict，
+> 两个错误码（`below_min_selling_price` / `cannot_save_profit_version`）落在**同一个位置**，
+> 前端只需一套读法（Task 9）。
+> 这属于**修既有缺陷**，不改变 HTTP 状态码（仍是 422），不新增接口。
 
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q`
+Run: `python -m pytest backend/tests/test_product_pricing_guardrails.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session`
 
 Expected: PASS.
 
@@ -2260,6 +2555,10 @@ test("利润测算页展示最低售价并拦截低于底线的预计售价", ()
   assert.match(source, /row\.clearance_max_discount_rate/);
   assert.match(source, /低于最低售价/);
   assert.match(source, /below_min_selling_price/);
+  // 错误信封读取：结构化业务码在 error.detail（axios 拦截器挂载点），
+  // 不是顶层 data.detail —— 断言这一点，防止有人改回读不到值的写法
+  assert.match(source, /readApiErrorDetail/);
+  assert.match(source, /error\?\.detail/);
 });
 ```
 
@@ -2341,7 +2640,20 @@ const isBelowFloor = (row) =>
 `saveOperatingEstimate` 的 catch 分支扩展示新 422：
 
 ```js
-const detail = error?.response?.data?.detail || error?.detail;
+const readApiErrorDetail = (error) => {
+  // 仓库统一错误信封：{"success": false, "error": {"code": ..., "detail": {...}}, "message": ...}
+  // 顶层没有 detail 键；axios 拦截器（frontend/src/api/index.js:662）已把
+  // responseData.error.detail 挂到 error.detail 上。
+  const raw =
+    error?.detail ??
+    error?.response?.data?.error?.detail ??
+    error?.response?.data?.detail;
+  return raw && typeof raw === "object" ? raw : null;
+};
+```
+
+```js
+const detail = readApiErrorDetail(error);
 if (detail?.code === "below_min_selling_price") {
   ElMessage.error(
     `预计售价低于最低售价 ${money(detail.min_selling_price)}（当前 ${money(detail.expected_selling_price)}）`,
@@ -2350,6 +2662,12 @@ if (detail?.code === "below_min_selling_price") {
 }
 const missing = detail?.missing_fields;
 ```
+
+> ⚠️ **不要写成 `error?.response?.data?.detail`**：仓库错误信封**没有顶层 `detail` 键**，
+> 那个表达式恒为 `undefined`，前端会静默退化成通用报错文案。
+> 同时后端把 `cannot_save_profit_version` 也换成了 `BusinessValidationError`（Task 6 Step 4），
+> 所以 `detail` 现在一定是 **dict**，`detail?.code` 与 `detail?.missing_fields` 都能取到；
+> `readApiErrorDetail` 仍保留 `typeof === "object"` 兜底，防止别的接口返回字符串时炸掉。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -2394,10 +2712,13 @@ assert.doesNotMatch(operatingSection, /preview:\s*null/);
 
 Run:
 ```powershell
-python -m pytest backend/tests/test_product_pricing_guardrails.py backend/tests/test_sku_pricing_guardrails_contract.py backend/tests/test_product_center_schema_contract.py backend/tests/test_turnover_storage_contract.py backend/tests/test_product_center_service.py backend/tests/test_product_center_p1_final.py -q
+python -m pytest backend/tests/test_product_pricing_guardrails.py backend/tests/test_sku_pricing_guardrails_contract.py backend/tests/test_product_center_schema_contract.py backend/tests/test_turnover_storage_contract.py backend/tests/test_product_center_service.py backend/tests/test_product_center_p1_final.py -q -o asyncio_default_fixture_loop_scope=session -o asyncio_default_test_loop_scope=session
 ```
 
 Expected: 全部 PASS（既有测试不得回归）。
+
+> 两个 `-o` 选项**不能省**：pg 集成用例共用 session 级 `pg_engine`，
+> 不加就会 `RuntimeError: Future attached to a different loop`（详见 §0.4）。
 
 - [ ] **Step 3: 跑全部前端测试**
 
