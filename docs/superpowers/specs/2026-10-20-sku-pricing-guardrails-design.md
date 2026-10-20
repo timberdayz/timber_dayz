@@ -305,10 +305,17 @@ class SkuPricingPolicy(Base):
         CheckConstraint("status IN ('active', 'inactive')", name="ck_sku_pricing_policy_status"),
         Index("uq_sku_pricing_policies_current", "min_age_days", unique=True,
               postgresql_where=text("status = 'active' AND effective_to IS NULL")),
-        Index("ix_sku_pricing_policy_scope", "min_age_days", "effective_from", schema="finance"),
+        Index("ix_sku_pricing_policy_scope", "min_age_days", "effective_from"),
         {"schema": "finance"},
     )
 ```
+
+> ⚠️ **`Index` 不得传 `schema=` 关键字**。SQLAlchemy 2.0.41 的 `Index.__init__` 只接受 `name / *expressions / unique / quote / info / **dialect_kw`，传 `schema="finance"` 会抛
+> `TypeError: Additional arguments should be named <dialectname>_<argument>, got 'schema'`，
+> **在 `modules.core.db` import 期就崩**，导致所有依赖 `modules.core.db` 的后端模块与测试全挂。
+> 索引的 schema 由 `__table_args__` 末尾的 `{"schema": "finance"}` 自动继承，编译结果为
+> `CREATE INDEX ix_sku_pricing_policy_scope ON finance.sku_pricing_policies (min_age_days, effective_from)`。
+> 仓库既有的 `WarehouseStorageRule` / `LogisticsProviderRule` 索引也都不带 `schema=`。
 
 **字段命名对齐仓库既有「版本化规则表」约定**：`WarehouseStorageRule`（类定义 `business.py:805`，六件套字段在 `:816-821`）与 `LogisticsProviderRule`（类定义 `business.py:762`，六件套字段在 `:780-785`）均使用 `effective_from` / `effective_to` / `status` / `source` / `version` / `notes` 六件套，并用**部分唯一索引**（`postgresql_where`）保证「每作用域只有一条当前行」。`SkuPricingPolicy` 沿用同一约定：
 - `source` / `version` / `notes` / `status` 与既有规则表字段名一致

@@ -382,10 +382,16 @@ class SkuPricingPolicy(Base):
         CheckConstraint("status IN ('active', 'inactive')", name="ck_sku_pricing_policy_status"),
         Index("uq_sku_pricing_policies_current", "min_age_days", unique=True,
               postgresql_where=text("status = 'active' AND effective_to IS NULL")),
-        Index("ix_sku_pricing_policy_scope", "min_age_days", "effective_from", schema="finance"),
+        Index("ix_sku_pricing_policy_scope", "min_age_days", "effective_from"),
         {"schema": "finance"},
     )
 ```
+
+> ⚠️ **`Index` 不得传 `schema=` 关键字**。SQLAlchemy 2.0.41 会抛
+> `TypeError: Additional arguments should be named <dialectname>_<argument>, got 'schema'`，
+> **在 `modules.core.db` import 期就崩**，导致所有依赖它的后端模块与测试全挂。
+> 索引 schema 由 `__table_args__` 末尾的 `{"schema": "finance"}` 自动继承。
+> 仓库既有的 `WarehouseStorageRule` / `LogisticsProviderRule` 索引也都不带 `schema=`。
 
 `modules/core/db/schema.py`：在 `from .schema_parts.business import (...)` 加 `SkuPricingPolicy`，并在 `__all__` 加 `"SkuPricingPolicy"`。
 
@@ -586,6 +592,74 @@ def test_min_selling_price_reports_unavailable_when_no_line():
     assert result["min_selling_price"] is None
     assert result["source"] == "unavailable"
     assert result["missing_reasons"]
+
+
+def test_policy_update_creates_when_no_current_row():
+    from datetime import date
+
+    from backend.services.product_pricing_service import resolve_policy_update
+
+    decision = resolve_policy_update(
+        current=None,
+        requested={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+        today=date(2026, 10, 20),
+    )
+    assert decision["action"] == "create"
+    assert decision["close_current"] is None
+
+
+def test_policy_update_same_day_updates_in_place():
+    from datetime import date
+
+    from backend.services.product_pricing_service import resolve_policy_update
+
+    decision = resolve_policy_update(
+        current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+        requested={"min_age_days": 0, "effective_from": date(2026, 10, 20), "discount_rate": 0.12},
+        today=date(2026, 10, 20),
+    )
+    assert decision["action"] == "update"
+    assert decision["close_current"] is None
+    # 同日原地改不产生新行，因此不需要 effective_from
+    assert "effective_from" not in decision["values"]
+
+
+def test_policy_update_closes_old_row_and_inserts_new():
+    from datetime import date
+
+    from backend.services.product_pricing_service import resolve_policy_update
+
+    decision = resolve_policy_update(
+        current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+        requested={"min_age_days": 0, "effective_from": date(2026, 11, 1)},
+        today=date(2026, 10, 20),
+    )
+    assert decision["action"] == "version"
+    assert decision["close_current"] == date(2026, 11, 1)
+
+
+def test_policy_update_rejects_future_and_backdated():
+    from datetime import date
+
+    import pytest
+
+    from backend.services.product_pricing_service import (
+        PolicyUpdateRejected,
+        resolve_policy_update,
+    )
+
+    with pytest.raises(PolicyUpdateRejected):
+        resolve_policy_update(
+            current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+            requested={"min_age_days": 0, "effective_from": date(2026, 11, 1)},
+            today=date(2026, 10, 20),
+        )
+    with pytest.raises(PolicyUpdateRejected):
+        resolve_policy_update(
+            current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+            requested={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
+            today=date(2026, 10, 20),
+        )
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -598,7 +672,6 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'backend.services.prod
 
 创建 `backend/services/product_pricing_service.py`：
 
-```python
 ```python
 """商品中心 SKU 定价底线的纯计算逻辑。
 
@@ -712,6 +785,47 @@ def compute_min_selling_price(
         "is_override": False,
         "missing_reasons": [],
     }
+
+
+class PolicyUpdateConflict(ValueError):
+    """规则版本更新冲突（路径与 body 不一致 / 起点已被占用）。"""
+
+
+class PolicyUpdateRejected(ValueError):
+    """规则版本更新被拒绝（未来生效 / 回溯生效）。"""
+
+
+def resolve_policy_update(
+    *,
+    current: Optional[dict],
+    requested: dict,
+    today,
+) -> dict:
+    """规则表版本化更新的纯判定：返回 action 与要写入的字段。
+
+    四条路径（与 spec §5.1 一致）：
+    - 无当前行            -> action="create"（等价 POST）
+    - effective_from 相同 -> action="update"（原地改，同日不可新建否则撞 UNIQUE）
+    - effective_from 更晚 -> action="version"（关旧行 + 建新行）
+    - effective_from 更早 -> 拒绝（回溯超出范围）
+    未来生效一律拒绝。
+    """
+    requested_effective_from = requested["effective_from"]
+    if requested_effective_from > today:
+        raise PolicyUpdateRejected("effective_from cannot be in the future")
+    if current is None:
+        return {"action": "create", "close_current": None, "values": dict(requested)}
+    current_effective_from = current["effective_from"]
+    if requested_effective_from == current_effective_from:
+        values = {k: v for k, v in requested.items() if k != "effective_from"}
+        return {"action": "update", "close_current": None, "values": values}
+    if requested_effective_from > current_effective_from:
+        return {
+            "action": "version",
+            "close_current": requested_effective_from,
+            "values": dict(requested),
+        }
+    raise PolicyUpdateRejected("effective_from cannot be earlier than the current policy")
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -779,6 +893,69 @@ def test_pricing_policy_request_models_expose_single_discount_rate():
         assert "discount_rate" in model.model_fields
         assert "standard_discount_rate" not in model.model_fields
         assert "clearance_discount_rate" not in model.model_fields
+
+
+def test_profit_candidate_response_exposes_pricing_fields():
+    """候选接口的 response_model 必须同步扩展，否则字段被 Pydantic 丢弃、前端护栏空转。"""
+    from backend.schemas.product_center import PlatformSkuProfitCandidateResponse
+
+    fields = PlatformSkuProfitCandidateResponse.model_fields
+    for name in (
+        "creator_commission_rate",
+        "current_discount_rate",
+        "clearance_max_discount_rate",
+        "min_selling_price",
+        "min_selling_price_source",
+        "min_selling_price_is_override",
+        "min_selling_price_override",
+        "min_selling_price_missing_reasons",
+        "pricing_tier_label",
+        "pricing_age_days",
+        "pricing_tier_source",
+        "min_selling_price_below",
+    ):
+        assert name in fields, name
+
+
+def test_orm_models_expose_pricing_columns_and_policy_table():
+    """ORM 层断言：能提前抓住 import 期崩溃（例如 Index 误传 schema=）。"""
+    from sqlalchemy import inspect
+
+    from modules.core.db import DimErpSku, DimPlatform, SkuPricingPolicy
+
+    sku_columns = {c["name"] for c in inspect(DimErpSku).columns}
+    assert {"creator_commission_rate", "min_selling_price_override"} <= sku_columns
+
+    platform_columns = {c["name"] for c in inspect(DimPlatform).columns}
+    assert {"default_creator_commission_rate", "other_cost_rate"} <= platform_columns
+
+    policy_columns = {c["name"] for c in inspect(SkuPricingPolicy).columns}
+    assert {
+        "policy_id", "min_age_days", "tier_label", "discount_rate",
+        "target_margin_rate", "platform_basis", "effective_from", "effective_to",
+        "status", "source", "version", "notes",
+    } <= policy_columns
+
+    constraint_names = {c.name for c in SkuPricingPolicy.__table__.constraints}
+    assert {
+        "uq_sku_pricing_policy_tier_start",
+        "ck_sku_pricing_policy_age_start",
+        "ck_sku_pricing_policy_discount_rate",
+        "ck_sku_pricing_policy_target_margin",
+        "ck_sku_pricing_policy_window",
+        "ck_sku_pricing_policy_status",
+    } <= constraint_names
+
+    index_names = {i.name for i in SkuPricingPolicy.__table__.indexes}
+    assert {
+        "uq_sku_pricing_policies_current",
+        "ix_sku_pricing_policy_scope",
+    } <= index_names
+
+    # Index 不接受 schema= 关键字，索引 schema 由表继承
+    assert SkuPricingPolicy.__table__.schema == "finance"
+    for index in SkuPricingPolicy.__table__.indexes:
+        assert index.table.schema == "finance"
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -822,7 +999,33 @@ other_cost_rate: Optional[float] = Field(default=None, ge=0, lt=1)
 # SkuOperatingPlatformOption 内追加
 default_creator_commission_rate: Optional[float] = None
 other_cost_rate: Optional[float] = None
+
+# PlatformSkuProfitCandidateResponse 内追加（⚠️ 见下方警示）
+creator_commission_rate: Optional[float] = None
+current_discount_rate: Optional[float] = None
+clearance_max_discount_rate: Optional[float] = None
+min_selling_price: Optional[float] = None
+min_selling_price_source: Optional[str] = None
+min_selling_price_is_override: Optional[bool] = None
+min_selling_price_override: Optional[float] = None
+min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
+pricing_tier_label: Optional[str] = None
+pricing_age_days: Optional[int] = None
+pricing_tier_source: Optional[str] = None
+min_selling_price_below: Optional[bool] = None
 ```
+
+> ⚠️ **`PlatformSkuProfitCandidateResponse` 必须同步扩展，否则整个前端护栏是空转。**
+> 该端点声明了 `response_model=PlatformSkuProfitCandidatePageResponse`，Pydantic v2 默认 `extra='ignore'`——
+> 路由返回的 dict 里即使带了 `min_selling_price` 等字段，**序列化时也会被全部丢弃**，响应体里一个都没有。
+> 实测复现：
+> ```python
+> out = PlatformSkuProfitCandidatePageResponse(data=[{...,"min_selling_price":24.74}], ...)
+> assert "min_selling_price" in out.model_dump()["data"][0]   # -> False
+> ```
+> 后果：前端 `row.min_selling_price` 恒为 `undefined`，`isBelowFloor()` 恒 false，标红与禁用永不触发，
+> 三列永远显示 `-`；只有后端 422 兜底还活着。而前端用例是源码正则匹配，照样 PASS → **假绿**。
+> 本 spec §5.5 明确要求候选行新增这些字段，实现时必须先扩 response_model。
 
 新增规则表模型：
 
@@ -878,7 +1081,7 @@ git commit -m "feat:定价底线 Pydantic 契约"
 
 - [ ] **Step 1: 写失败测试**
 
-在 `backend/tests/test_product_pricing_guardrails.py` 追加（用仓库既有的 `AsyncSession` 测试夹具；**若该夹具不存在，改为纯源码断言**，参照 `backend/tests/test_product_center_p1_final.py` 的 `source.index()` 风格）：
+在 `backend/tests/test_product_pricing_guardrails.py` 追加**真集成测试**（仓库 `backend/tests/conftest.py` 已提供 `pg_session` / `async_client` / `auth_headers` fixture，本机 Docker 28.5.1 + testcontainers 可用，**不要只写源码 grep** ——源码 grep 无法区分「实现了」和「写在了文档里」）：
 
 ```python
 def test_router_exposes_pricing_policy_routes():
@@ -890,7 +1093,118 @@ def test_router_exposes_pricing_policy_routes():
     assert '@router.post("/api/sku-pricing-policies")' in source
     assert '@router.put("/api/sku-pricing-policies/{min_age_days}")' in source
     assert "_require_platform_fee_editor" in source
+
+
+@pytest.mark.asyncio
+async def test_pricing_policy_crud_and_versioned_update(async_client, auth_headers):
+    created = await async_client.post(
+        "/api/sku-pricing-policies",
+        headers=auth_headers,
+        json={
+            "min_age_days": 30,
+            "tier_label": "测试档",
+            "discount_rate": 0.12,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    current = await async_client.get("/api/sku-pricing-policies/current", headers=auth_headers)
+    assert current.status_code == 200
+    assert any(row["min_age_days"] == 30 for row in current.json())
+
+    # 未来生效日期 -> 422
+    future = await async_client.post(
+        "/api/sku-pricing-policies",
+        headers=auth_headers,
+        json={
+            "min_age_days": 45,
+            "tier_label": "未来档",
+            "discount_rate": 0.12,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": (date.today() + timedelta(days=7)).isoformat(),
+        },
+    )
+    assert future.status_code == 422
+
+    # 同一档位再 POST -> 409
+    duplicate = await async_client.post(
+        "/api/sku-pricing-policies",
+        headers=auth_headers,
+        json={
+            "min_age_days": 30,
+            "tier_label": "测试档2",
+            "discount_rate": 0.13,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert duplicate.status_code == 409
+
+    # 同日改率 -> 原地更新，仍只有一条当前行
+    same_day = await async_client.put(
+        "/api/sku-pricing-policies/30",
+        headers=auth_headers,
+        json={
+            "min_age_days": 30,
+            "tier_label": "测试档",
+            "discount_rate": 0.14,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert same_day.status_code == 200, same_day.text
+    current = await async_client.get("/api/sku-pricing-policies/current", headers=auth_headers)
+    rows = [row for row in current.json() if row["min_age_days"] == 30]
+    assert len(rows) == 1
+    assert rows[0]["discount_rate"] == pytest.approx(0.14)
+
+    # 路径与 body 不一致 -> 422
+    mismatch = await async_client.put(
+        "/api/sku-pricing-policies/30",
+        headers=auth_headers,
+        json={
+            "min_age_days": 31,
+            "tier_label": "测试档",
+            "discount_rate": 0.14,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert mismatch.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_pricing_policy_write_is_audited(async_client, auth_headers, pg_session):
+    await async_client.post(
+        "/api/sku-pricing-policies",
+        headers=auth_headers,
+        json={
+            "min_age_days": 77,
+            "tier_label": "审计档",
+            "discount_rate": 0.2,
+            "target_margin_rate": 0.18,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    result = await pg_session.execute(
+        text(
+            "SELECT count(*) FROM public.fact_audit_logs "
+            "WHERE resource_type = 'sku_pricing_policy'"
+        )
+    )
+    assert result.scalar() >= 1
 ```
+
+> 测试文件顶部需要 `from datetime import date, timedelta`、`import pytest`、`from sqlalchemy import text`。
+> `pg_session` fixture 依赖 testcontainers（需 Docker）；若 CI 无 Docker，参照仓库既有用法加 `@pytest.mark.pg_only` 标记跳过。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -906,13 +1220,17 @@ Expected: FAIL — 路由不存在。
 from decimal import Decimal
 ```
 
-并在 `from modules.core.db import (...)` 那一组里加入 `SkuPricingPolicy`；同时新增：
+并在 `from modules.core.db import (...)` 那一组里加入 `SkuPricingPolicy`；同时在
+`from backend.schemas.product_center import (...)` 那一组里加入
+`SkuPricingPolicyCreateRequest` / `SkuPricingPolicyUpdateRequest` / `SkuPricingPolicyResponse`；另外新增：
 
 ```python
 from backend.services.product_pricing_service import (
+    PolicyUpdateRejected,
     compute_cost_floor,
     compute_discount_guard,
     compute_min_selling_price,
+    resolve_policy_update,
     select_age_tier,
 )
 ```
@@ -930,7 +1248,9 @@ def _policy_current_predicate():
 
 async def _current_policies(db: AsyncSession) -> list[SkuPricingPolicy]:
     result = await db.execute(
-        select(SkuPricingPolicy).where(*_policy_current_predicate())
+        select(SkuPricingPolicy)
+        .where(*_policy_current_predicate())
+        .order_by(SkuPricingPolicy.min_age_days)
     )
     return list(result.scalars().all())
 ```
@@ -958,6 +1278,8 @@ async def create_sku_pricing_policy(
     db: AsyncSession = Depends(get_async_db),
     _user=Depends(_require_platform_fee_editor),
 ):
+    if body.effective_from > date.today():
+        raise HTTPException(status_code=422, detail="effective_from cannot be in the future")
     existing = (await db.execute(
         select(SkuPricingPolicy).where(
             SkuPricingPolicy.min_age_days == body.min_age_days,
@@ -968,7 +1290,11 @@ async def create_sku_pricing_policy(
         raise HTTPException(status_code=409, detail="a current policy already exists for this age tier")
     row = SkuPricingPolicy(**body.model_dump())
     db.add(row)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="pricing policy conflicts with an existing row") from exc
     await _write_product_center_audit(
         db, _user, action_type="create", resource_type="sku_pricing_policy",
         resource_id=str(row.policy_id), changes=body.model_dump(mode="json"),
@@ -994,28 +1320,37 @@ async def update_sku_pricing_policy(
         ).with_for_update()
     )).scalars().first()
 
-    if current is None:
-        # 无当前行：等价 POST
-        row = SkuPricingPolicy(**body.model_dump())
-        db.add(row)
-        action = "create"
-    elif body.effective_from == current.effective_from:
-        # 同日：原地 UPDATE（避免撞 UNIQUE(min_age_days, effective_from)）
-        for key, value in body.model_dump(exclude_unset=True).items():
+    current_data = (
+        {"min_age_days": current.min_age_days, "effective_from": current.effective_from}
+        if current is not None
+        else None
+    )
+    try:
+        decision = resolve_policy_update(
+            current=current_data,
+            requested=body.model_dump(),
+            today=date.today(),
+        )
+    except PolicyUpdateRejected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    action = decision["action"]
+    if action == "update":
+        for key, value in decision["values"].items():
             setattr(current, key, value)
         row = current
-        action = "update"
-    elif body.effective_from > current.effective_from:
-        # 跨期：关旧行 + 建新行（min_age_days 不同则不撞 UNIQUE）
-        current.effective_to = body.effective_from
-        current.status = "inactive"
-        row = SkuPricingPolicy(**body.model_dump())
-        db.add(row)
-        action = "version"
     else:
-        raise HTTPException(status_code=422, detail="effective_from cannot be earlier than the current policy")
+        if decision["close_current"] is not None and current is not None:
+            current.effective_to = decision["close_current"]
+            current.status = "inactive"
+        row = SkuPricingPolicy(**decision["values"])
+        db.add(row)
 
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="pricing policy conflicts with an existing row") from exc
     await _write_product_center_audit(
         db, _user, action_type=action, resource_type="sku_pricing_policy",
         resource_id=str(row.policy_id), changes=body.model_dump(mode="json"),
@@ -1025,7 +1360,13 @@ async def update_sku_pricing_policy(
     return SkuPricingPolicyResponse.model_validate(row)
 ```
 
-**并发保护**：捕获 `IntegrityError` → `await db.rollback()` → `HTTPException(409)`，与 `bulk_save_skus` 的既有模式一致。
+> **四路径判定放在纯函数 `resolve_policy_update` 里**（Task 2 已实现并单测），路由只负责取数、落库、审计。
+> 这样「同日原地改 / 跨期关旧开新 / 无当前行等价 POST / 未来与回溯拒绝」四条规则可以被**真单测**覆盖，
+> 而不是靠源码 grep 断言「文档里写了」。
+>
+> `PolicyUpdateRejected` 与 `resolve_policy_update` 需要一并加入 Task 4 Step 3 的服务 import 块。
+
+**并发保护**：`IntegrityError` → `await db.rollback()` → `HTTPException(409)`，与 `bulk_save_skus`（`product_center.py:1315-1317`）的既有模式一致。**上面的代码里已经带了 try/except，不要删。**
 
 - [ ] **Step 4: 扩展平台成本率端点**
 
@@ -1188,19 +1529,35 @@ def _compute_pricing_for_sku(
             missing_reasons.append("missing_platform_cost_rate")
         if creator_rate is None:
             missing_reasons.append("missing_creator_commission_rate")
-        if other_rate is not None and creator_rate is not None:
+        if linked_spu is None:
+            missing_reasons.append("missing_spu_binding")
+        elif (
+            linked_spu.return_loss_rate is None or linked_spu.logistics_damage_rate is None
+        ):
+            missing_reasons.append("missing_spu_rates")
+        if sku_row.default_purchase_cost is None:
+            missing_reasons.append("missing_purchase_cost")
+
+        # 只有输入齐全才计算成本线；缺项时算不出底线，
+        # 而不是把 None 当 0 代入分母算出偏乐观的结果
+        if (
+            sku_row.default_purchase_cost is not None
+            and other_rate is not None
+            and creator_rate is not None
+            and linked_spu is not None
+            and linked_spu.return_loss_rate is not None
+            and linked_spu.logistics_damage_rate is not None
+        ):
             cost_floor = compute_cost_floor(
                 purchase_cost=sku_row.default_purchase_cost,
                 other_cost_rate=other_rate,
                 creator_commission_rate=creator_rate,
-                spu_return_loss_rate=linked_spu.return_loss_rate if linked_spu else None,
-                spu_damage_rate=linked_spu.logistics_damage_rate if linked_spu else None,
+                spu_return_loss_rate=linked_spu.return_loss_rate,
+                spu_damage_rate=linked_spu.logistics_damage_rate,
                 target_margin_rate=policy["target_margin_rate"],
             )
             if cost_floor is None:
                 missing_reasons.append("non_positive_cost_denominator")
-        if linked_spu is None:
-            missing_reasons.append("missing_spu_binding")
         discount_guard = compute_discount_guard(
             reference_selling_price=sku_row.reference_selling_price,
             discount_rate=policy["discount_rate"],
@@ -1317,6 +1674,46 @@ def test_profit_candidates_and_estimate_guardrail_wired():
     assert "below_min_selling_price" in source
     assert "min_selling_price_below" in source
     assert "clearance_max_discount_rate" in source
+
+
+@pytest.mark.asyncio
+async def test_estimate_below_floor_is_rejected_but_draft_is_not(async_client, auth_headers):
+    """低于最低售价时 estimates 422 拦截，drafts 仍放行。"""
+    # 先确保有一条当前生效的规则（迁移已灌 4 档，这里不重复依赖）
+    candidates = await async_client.get(
+        "/api/platform-sku-profit/candidates",
+        headers=auth_headers,
+        params={
+            "platform_code": "tiktok",
+            "warehouse_code": "MY-01",
+            "transport_type": "sea",
+        },
+    )
+    assert candidates.status_code == 200, candidates.text
+    rows = candidates.json()["data"]
+    if not rows:
+        return  # 本地库无 SKU 库存时跳过，CI 用固定夹具
+    row = rows[0]
+    assert "min_selling_price" in row
+
+    below = 0.01
+    payload = {
+        "sku_id": row["sku_id"],
+        "platform_code": row["platform_code"],
+        "warehouse_code": row["warehouse_code"],
+        "transport_type": row["transport_type"],
+        "expected_selling_price": below,
+    }
+    estimate = await async_client.post(
+        "/api/platform-sku-profit/estimates", headers=auth_headers, json=payload
+    )
+    assert estimate.status_code == 422
+    assert estimate.json()["detail"]["code"] == "below_min_selling_price"
+
+    draft = await async_client.post(
+        "/api/platform-sku-profit/drafts", headers=auth_headers, json=payload
+    )
+    assert draft.status_code == 201
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -1341,15 +1738,33 @@ pricing_payload = _compute_pricing_for_sku(
     sku_row=row,
     linked_spu=assigned,
 )
-expected_selling_price = profile.expected_selling_price if profile else None
 floor = pricing_payload["min_selling_price"]
 pricing_payload["min_selling_price_below"] = bool(
     floor is not None
     and expected_selling_price is not None
     and Decimal(str(expected_selling_price)) < Decimal(str(floor))
 )
-items.append({**pricing_payload, ...})
+# 把 pricing_payload 的键合进该行原有的返回 dict（其余键保持原样）
+items.append({**pricing_payload, **row_payload})
 ```
+
+> `row_payload` 指该候选行原本要返回的字段字典（sku_id / sku_key / sku_name / reference_selling_price /
+> purchase_cost / platform_code / warehouse_code / transport_type / expected_selling_price /
+> competitor_price / seller_coupon_amount / expected_ad_rate / platform_fee_rate /
+> logistics_damage_rate / return_loss_rate / configuration_status / turnover_class /
+> reference_storage_days / preview 等）。**用真实的字典合并，不要用 Python 的 `...`（Ellipsis）占位**，
+> 否则响应里会多出一个 `Ellipsis` 键。
+
+> ⚠️ **不要重新赋值 `expected_selling_price`**。既有代码（`product_center.py:2310`）已经算好了：
+> ```python
+> expected_selling_price = profile.expected_selling_price if profile else row.reference_selling_price
+> ```
+> 它的兜底是 `row.reference_selling_price`（无经营档案时用参考售价），**不是 None**。
+> 若在 Task 6 里重写成 `profile.expected_selling_price if profile else None`，这批 SKU 的
+> `build_platform_profit_preview` 会拿不到参考售价（利润试算回归），且 `min_selling_price_below` 恒 False。
+> **复用既有变量，只新增 `min_selling_price_below` 这一个键。**
+>
+> `items.append(...)` 里除 `pricing_payload` 外的键沿用该函数原有的返回内容，不要用 Python 的 `...`（Ellipsis）占位。
 
 > 候选接口一次最多 100 行，**用同一个 `_pricing_context` 批量取**，不要逐行 await。
 > `assigned` 是该行绑定的 SPU（`spu_by_code.get(assigned_spu)`），没有绑定时传 `None`。
@@ -1413,10 +1828,22 @@ test("商品中心提供定价纪律规则表 API", () => {
 test("商品中心把平台费率抽屉升级为定价设置", () => {
   assert.match(source, /定价设置/);
   assert.match(source, /库龄档位规则/);
-  assert.match(source, /当前可优惠/);
-  assert.match(source, /清货极限/);
 });
 ```
+
+> **这两条断言在 Task 7 内必须可达。** 抽屉的两个子 Tab 分别是「平台成本率」和「库龄档位规则」，
+> 所以「定价设置」「库龄档位规则」这两个串由 Task 7 产生。
+> 「当前可优惠」「清货极限」两个串分别由 Task 8（SKU 资料页列）和 Task 9（利润测算列）引入，
+> **不要在这里断言**，否则 Task 7 跑不绿。
+>
+> ⚠️ **同时必须修改既有绿断言**：`frontend/tests/productCenterUi.test.mjs:130` 有
+> `assert.match(source, /平台费率管理/)`。Task 7 把按钮与抽屉标题改名为「定价设置」后，
+> 该字符串在 `ProductCenter.vue` 中消失（原本恰好出现 2 次：line 323 按钮、line 563 抽屉标题），
+> **这条绿断言会失败**。改法：
+> ```js
+> assert.match(source, /定价设置/);
+> ```
+> （spec §8.4 已列明这条，本任务必须一并处理。）
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -1452,6 +1879,7 @@ Expected: 新增两条 FAIL（既有那条 `preview:\s*null` 的失败与本任�
 2. 利润测算 tab 的「平台费率管理」按钮改文案为「定价设置」，`@click` 打开抽屉时默认选中「平台成本率」子页
 3. SKU 资料 tab 工具栏新增「定价设置」按钮，打开时默认选中「库龄档位规则」子页
 4. 百分比输入统一走既有的 `toPercent` / `fromPercent`（`ProductCenter.vue:1866-1869`）
+5. 抽屉「库龄档位规则」子页需注明「**最深档（120 天）的折扣率 30% 同时就是 SKU 资料页「滞销可优惠」列的清货极限**」
 
 > ⚠️ **「默认达人佣金率」在 SKU 资料页的「达人佣金率」列被清空时，必须提交 `null` 而不是 `0`**。既有 `fromPercent(value, fallback = 0)` 默认会把空值转成 0 落库，导致成本线按 0% 佣金算、底线被压低 14.6%。该列要用 `fromPercent($event, null)`。
 
@@ -1460,6 +1888,7 @@ Expected: 新增两条 FAIL（既有那条 `preview:\s*null` 的失败与本任�
 Run: `node --test frontend/tests/productCenterUi.test.mjs`
 
 Expected: 本任务新增的两条 PASS；`preview:\s*null` 那条仍 FAIL（Task 10 修）。
+`/平台费率管理/` 那条既有断言已在本任务改为 `/定价设置/`，应 PASS。
 
 - [ ] **Step 6: 提交**
 
@@ -1523,10 +1952,22 @@ Expected: 新增两条 FAIL。
     <el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag>
   </template>
 </el-table-column>
-<el-table-column label="最低售价" width="190">
+<el-table-column label="最低售价" width="220">
   <template #default="{ row }">
-    <div class="rate-cell">
-      <span class="readonly-cell">{{ money(row.min_selling_price) }}</span>
+    <div class="pricing-cell">
+      <div class="pricing-cell-head">
+        <span class="readonly-cell">{{ money(row.min_selling_price) }}</span>
+        <el-tag size="small" :type="pricingSourceTagType(row.min_selling_price_source)">
+          {{ pricingSourceLabel(row.min_selling_price_source) }}
+        </el-tag>
+        <el-button
+          v-if="row.min_selling_price_is_override"
+          link
+          type="warning"
+          @click="resetMinSellingPrice(row)">
+          重置为自动值
+        </el-button>
+      </div>
       <el-input-number
         v-model="row.min_selling_price_override"
         :min="0.01"
@@ -1535,6 +1976,13 @@ Expected: 新增两条 FAIL。
         size="small"
         placeholder="自动"
         @change="markDirty('sku', row)" />
+      <div class="pricing-tier-hint">
+        {{ row.pricing_tier_label || "-" }}
+        <template v-if="row.pricing_age_days != null">（库龄 {{ row.pricing_age_days }} 天）</template>
+        <el-tag v-if="row.pricing_tier_source === 'fallback_no_age_data'" size="small" type="info">
+          兜底
+        </el-tag>
+      </div>
     </div>
   </template>
 </el-table-column>
@@ -1553,7 +2001,34 @@ Expected: 新增两条 FAIL。
 </el-table-column>
 ```
 
-> `percent` / `money` helper 若不存在，用既有的百分比与金额格式化函数替换。
+配套的 `<script setup>` 辅助函数（**必须一起加，否则模板引用不到**）：
+
+```js
+const PRICING_SOURCE_LABELS = {
+  manual_override: "人工设定",
+  discount_guard: "折扣纪律",
+  cost_floor: "成本底线",
+  unavailable: "无法计算",
+};
+const pricingSourceLabel = (source) => PRICING_SOURCE_LABELS[source] || "-";
+const pricingSourceTagType = (source) =>
+  ({ manual_override: "danger", discount_guard: "warning", cost_floor: "success" })[source] || "info";
+const resetMinSellingPrice = (row) => {
+  row.min_selling_price_override = null;
+  markDirty("sku", row);
+};
+```
+
+样式（追加到 `ProductCenter.vue` 现有 `<style>` 段）：
+
+```css
+.pricing-cell { display: flex; flex-direction: column; gap: 4px; }
+.pricing-cell-head { display: flex; align-items: center; gap: 6px; }
+.pricing-tier-hint { font-size: 12px; color: var(--el-text-color-secondary); }
+```
+
+> `percent` / `money` 两个 helper 已存在于 `ProductCenter.vue:1870-1871`（`money(null)` 返回 `"-"`，`percent(null)` 返回 `"-"`），**不需要兜底实现**。
+> `el-tag` 的 `type` 必须是 `primary|success|warning|danger|info` 之一，上面映射表已保证。
 
 - [ ] **Step 4: 剔除只读字段**
 
@@ -1652,6 +2127,8 @@ Expected: 新增一条 FAIL。
   </template>
 </el-table-column>
 ```
+
+> 「最低售价」列显示的是 **SKU 全局底线**（按 `platform_basis` 的 tiktok 口径计算），**不随本 tab 所选平台/仓库/运输方式变化**。列头或 tooltip 必须写明这一点，避免使用者误以为切换平台后底线会变。
 
 「预计售价」输入框加标红与提示：
 
