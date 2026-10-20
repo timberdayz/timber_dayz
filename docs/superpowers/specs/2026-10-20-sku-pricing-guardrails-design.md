@@ -575,6 +575,13 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 > `PUT` 未传的 `source` / `version` / `notes` 必须**继承旧行**（原地 update 天然保留；
 > 关旧行 + 建新行时显式 `setdefault`），否则迁移灌的 `source='industry_benchmark_2026'`
 > 会被覆盖成 `None`，`downgrade()` 按 source 删种子行就会失效。
+>
+> **规则表的 422 也要走 `BusinessValidationError`**（与 §5.5 的护栏同一个异常类型），
+> 这样抽屉里的前端只需一套读法（`error.detail.code`）。
+> 业务码：`pricing_policy_future_effective_from`（生效日期在未来）、
+> `pricing_policy_update_rejected`（回溯生效等其它拒绝，带 `reason` 字段）。
+> 提示文案用中文（「生效日期不能晚于今天」「生效日期不能早于当前规则」），
+> 因为这段文案会直接展示给财务和主管看。
 
 `PUT` 的具体行为见下方「版本化更新的多条路径」。
 
@@ -784,10 +791,13 @@ HTTP 422
       "sku_id": 9001
     }
   },
-  "message": "预计售价 25.00 低于最低售价 28.23",
+  "message": "[3001] 预计售价 25.00 低于最低售价 28.23",
   "timestamp": "2026-10-20T09:12:33.101Z"
 }
 ```
+
+> `message` 前面的 `[3001]` 是仓库既有格式：`ERPException.__str__` 在带 `error_code` 时会拼上错误码
+> （`modules/core/exceptions.py`）。前端展示自定义文案时不需要用它。
 
 判定条件：`expected_selling_price` 非空 且 `min_selling_price` 非空 且 `expected_selling_price < min_selling_price`。
 

@@ -894,7 +894,7 @@ def resolve_policy_update(
     requested_min_age = requested["min_age_days"]
 
     if requested_effective_from > today:
-        raise PolicyUpdateRejected("effective_from cannot be in the future")
+        raise PolicyUpdateRejected("生效日期不能晚于今天")
     if current is None:
         return {"action": "create", "close_current": None, "values": dict(requested)}
 
@@ -903,7 +903,7 @@ def resolve_policy_update(
 
     # 回溯生效一律拒绝——先于 retier / version 判定
     if requested_effective_from < current_effective_from:
-        raise PolicyUpdateRejected("effective_from cannot be earlier than the current policy")
+        raise PolicyUpdateRejected("生效日期不能早于当前规则")
     if requested_min_age != current_min_age:
         # 改档位边界：关旧行 + 建新行（新行用新起点）。
         # 新起点与生效日期的组合若已被占用，会撞 UNIQUE(min_age_days, effective_from) -> 409
@@ -1535,6 +1535,12 @@ from backend.services.product_pricing_service import (
 )
 ```
 
+并新增业务异常的导入（**Task 4 是第一个用到它的地方**，Task 6 的护栏复用同一行）：
+
+```python
+from backend.utils.exceptions import BusinessValidationError
+```
+
 新增「当前行」唯一谓词与共享 helper（**两处必须复用，禁止各写一份**）：
 
 ```python
@@ -1579,7 +1585,10 @@ async def create_sku_pricing_policy(
     _user=Depends(_require_platform_fee_editor),
 ):
     if body.effective_from > date.today():
-        raise HTTPException(status_code=422, detail="effective_from cannot be in the future")
+        raise BusinessValidationError(
+            message="生效日期不能晚于今天",
+            detail={"code": "pricing_policy_future_effective_from"},
+        )
     existing = (await db.execute(
         select(SkuPricingPolicy).where(
             SkuPricingPolicy.min_age_days == body.min_age_days,
@@ -1635,7 +1644,10 @@ async def update_sku_pricing_policy(
             today=date.today(),
         )
     except PolicyUpdateRejected as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise BusinessValidationError(
+            message=str(exc),
+            detail={"code": "pricing_policy_update_rejected", "reason": str(exc)},
+        ) from exc
 
     action = decision["action"]
     if action == "update":
@@ -2204,7 +2216,7 @@ if floor is not None and values.get("expected_selling_price") is not None:
 > `HTTPException` 写法，其 `error.detail` 是**字符串化的 dict**；
 > 前端读 `missing_fields` 时必须**同时兼容 dict 与字符串**（见 Task 9 的读法）。
 
-在 `product_center.py` 顶部补导入：
+在 `product_center.py` 顶部补导入（**Task 4 Step 3 已加过这一行，这里不要重复加**）：
 
 ```python
 from backend.utils.exceptions import BusinessValidationError
