@@ -366,7 +366,7 @@ class SkuPricingPolicy(Base):
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
 | GET | `/api/sku-pricing-policies` | 登录 | 返回全部规则行（含历史），按 `turnover_class, effective_from` 排序 |
-| GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行（`effective_from <= 今日` 且 `effective_to IS NULL OR > 今日` 且 `status='active'`） |
+| GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行。**筛选条件必须与下方「当前行」判定完全一致**（复用同一个 helper/常量，禁止在两处各写一份谓词） |
 | POST | `/api/sku-pricing-policies` | `_require_platform_fee_editor` | 新建规则行；若同档位已有生效行则拒绝（409），要求先关闭 |
 | PUT | `/api/sku-pricing-policies/{turnover_class}` | `_require_platform_fee_editor` | 版本化更新：关闭当前行（写 `effective_to`）并新建一行 |
 
@@ -384,7 +384,20 @@ class SkuPricingPolicy(Base):
 无生效规则 → 该 SKU 的 min_selling_price = unavailable，missing_reasons 含 'missing_pricing_policy'
 ```
 
-「当前行」定义在 `GET /current` 与服务端选档逻辑中**必须完全一致**（同一段代码 / 同一个 helper），否则 `/current` 返回的规则与护栏实际生效的规则会不一致。
+「当前行」定义在 `GET /current` 与服务端选档逻辑中**必须完全一致**（同一个 helper / 同一组常量），否则 `/current` 返回的规则与护栏实际生效的规则会不一致。
+
+**唯一谓词**（两处共用，禁止各写一份）：
+
+```python
+# 当前行 = status='active' AND effective_to IS NULL AND effective_from <= 今日
+```
+
+**必须用 `effective_to IS NULL` 而不是 `effective_to IS NULL OR effective_to > 今日`**：若用后者，一个 `active` 且 `effective_to` 设在未来的行会被 `/current` 列出、却被定价引擎忽略——正是本 spec 禁止的那种不一致。
+
+因此 **不支持"未来生效"的规则行**：
+- `POST` / `PUT` 新建行时，`effective_from` 不得晚于今日（晚于则 422 拒绝）
+- `effective_to` 必须为 `NULL` 才能是 active 当前行；写入 `effective_to` 即表示该行已关闭（`status` 同步置 `'inactive'`）
+- 这条约束同时保证 `uq_sku_pricing_policies_current` 部分唯一索引不会被"未来占位行"占住，从而不会卡住「关旧行 + 建新行」的路径
 
 若同一档位出现多行同时满足上述条件（理论上由 `PUT` 的「关旧开新」保证唯一；出现多行说明数据被绕过 API 直接改动，属数据异常），取 `effective_from` 最大者，并在实现中记 warning 日志。
 
@@ -395,6 +408,7 @@ class SkuPricingPolicy(Base):
 | 请求的 `effective_from` **严格大于**当前行的 `effective_from` | 版本化更新：关闭当前行（写 `effective_to` = 新 `effective_from`，`status='inactive'`）+ 新建一行 | 跨期变更需要留版本历史 |
 | 请求的 `effective_from` **等于**当前行的 `effective_from` | **原地 UPDATE 当前行**（不新建版本），仍写审计 | 同日纠错必须可用。`UNIQUE(turnover_class, effective_from)` 决定了同日新建会撞唯一索引，故同日只能原地改 |
 | 请求的 `effective_from` **小于**当前行的 `effective_from` | 422 拒绝 | 回溯变更超出范围，需手工改数据 |
+| 该档位**没有**当前行 | 等价于 `POST`：直接新建一行 | `PUT` 在无当前行时不得 404——运营不该需要先 POST 再 PUT |
 
 新行 `effective_from` 必须 **严格大于**（`>`）旧行，不能是 `>=`——否则同日新建会撞 `UNIQUE(turnover_class, effective_from)`，按规范返回 409，用户当天无法纠错。
 
@@ -411,17 +425,26 @@ class SkuPricingPolicy(Base):
 | PATCH | `/api/platforms/{platform_code}/fee-rate` | `_require_platform_fee_editor` | **扩展**：请求体新增 `default_creator_commission_rate` / `other_cost_rate` 两个可选字段，与既有 `default_fee_rate` / `fee_rate_effective_from` / `fee_rate_source` / `fee_rate_version` 一并写入，写审计 |
 
 - 请求模型 `PlatformFeeRateUpdateRequest`（`backend/schemas/product_center.py:323`）新增两个 `Optional[float] = None` 字段
-- 读：复用 `GET /api/sku-operating-dimensions`（`SkuOperatingPlatformOption` 新增两字段），**不新增 GET 路由**
+- **既有 4 个字段的写入语义必须一并改为「未传则保持原值」**。现状 `product_center.py:1990-1993` 是无条件赋值：
+  ```python
+  row.default_fee_rate = body.default_fee_rate
+  row.fee_rate_effective_from = body.fee_rate_effective_from
+  row.fee_rate_source = body.fee_rate_source
+  row.fee_rate_version = body.fee_rate_version
+  ```
+  若不改成 `exclude_unset` 语义，则抽屉里只改「达人佣金率」也会把 `default_fee_rate` 写成 NULL、并把 `fee_rate_effective_from` 刷成当天——**保存一次就把平台佣金率清空**。实现必须改成「字段未传 → 不动该列」。
+- 读：复用 `GET /api/sku-operating-dimensions`（`SkuOperatingPlatformOption` 新增两字段），**不新增 GET 路由**。注意该端点的 platforms 是**显式 dict 拼装**（`product_center.py:2250-2252`），两个新字段必须加进那个 dict，否则永远序列化为 `null`，抽屉「成本率合计」会显示 0。
 - 路径名仍是 `fee-rate`（沿用既有），但语义扩展为「该平台的成本率组」；前端 API 方法名 `updatePlatformFeeRate` 保持不变
 - 仍只允许 `platform_role = 'sales'` 的平台（沿用既有 409 规则）
 - `default_creator_commission_rate` / `other_cost_rate` 未传（`exclude_unset`）时保持原值不变，**不写 NULL**
 
 ### 5.3 SKU 读接口
 
-`GET /api/skus` 响应 `ProductCenterItem` 新增 10 个字段：
+`GET /api/skus` 响应 `ProductCenterItem` 新增 11 个字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
+| `creator_commission_rate` | `Optional[float] = None` | 该 SKU 的达人佣金率（SKU 主数据字段，`dim_erp_sku`） |
 | `standard_discount_rate` | `Optional[float] = None` | 规则表该档位的常规最大折扣率 |
 | `clearance_discount_rate` | `Optional[float] = None` | 规则表该档位的滞销最大折扣率 |
 | `daily_min_selling_price` | `Optional[float] = None` | 日常售价下限 = 参考售价 × (1 − `standard_discount_rate`)，软提示阈值 |
@@ -463,6 +486,8 @@ class SkuPricingPolicy(Base):
 - `POST /api/skus/bulk`：`SkuBulkItem` 同步新增两个字段，语义同上。
 - `POST /api/skus`：`SkuCreateRequest` 同步新增两个字段。
 
+**`creator_commission_rate` 的 UI 范围**：本次**不新增前端列**——用户明确的诉求是三列（常规可优惠 / 滞销可优惠 / 最低售价），达人佣金率列属于超范围。该字段在本期**仅通过 API 维护**，`GET /api/skus` 仍需返回它（它是 SKU 主数据字段，与 `default_purchase_cost` / `reference_selling_price` 同类），前端后续需要时可直接用。前端 `blankSku()` 仍需初始化为 `null`。
+
 ### 5.5 利润测算护栏
 
 `GET /api/platform-sku-profit/candidates` 每行新增：
@@ -477,6 +502,10 @@ class SkuPricingPolicy(Base):
 | `daily_min_selling_price_below` | `expected_selling_price < daily_min_selling_price` 时为 `True` |
 
 `GET /api/platform-sku-profit/candidates` 是**按平台+仓库+运输方式**筛选的，但返回的 `min_selling_price` 是**SKU 全局底线**（按 `platform_basis` 的 tiktok 口径计算，与该行的平台/仓库/运输方式无关）。响应中应明确这一点，避免使用者误以为它随所选平台变化。
+
+**⚠️ `min_selling_price_below` / `daily_min_selling_price_below` 是按服务端已存的 `expected_selling_price` 算的，用户在表格里改了预计售价后就会过期**。因此：
+- 前端的标红/标黄**必须用当前输入框的值实时比较**，不能信这两个布尔值
+- 这两个布尔值仅用于首屏渲染与后端自检，前端不得作为唯一判断依据
 
 `POST /api/platform-sku-profit/estimates` 增加拦截：
 
@@ -578,7 +607,7 @@ HTTP 422
 - `blankSku()` 工厂（`ProductCenter.vue:925`）需同步新增 `creator_commission_rate: null` 与 `min_selling_price_override: null`，避免新建行携带未定义字段
 - `payloadSku()`（`ProductCenter.vue:1341`）当前展开整行，需**剔除只读计算字段** `standard_discount_rate` / `clearance_discount_rate` / `daily_min_selling_price` / `min_selling_price` / `min_selling_price_source` / `min_selling_price_is_override` / `min_selling_price_missing_reasons` / `pricing_tier` / `pricing_tier_is_fallback`。
   - `SkuBulkItem` 未设 `model_config`，Pydantic v2 默认 `extra="ignore"`，多余字段不会报错，但会让每次批量保存把未修改的 `creator_commission_rate` / `min_selling_price_override` 原值重写一遍，产生无谓的审计记录。
-  - **`min_selling_price_override` 必须保留在 payload 中**——`SkuBulkItem` 用 `model_dump(exclude_unset=True)`，显式传 `null` 才会把覆盖值清空。它是**可写字段**，不属于上面的只读剔除清单。
+  - **`min_selling_price_override` 与 `creator_commission_rate` 必须保留在 payload 中**——它们是**可写字段**。`SkuBulkItem` 用 `model_dump(exclude_unset=True)`，显式传 `null` 才会把覆盖值清空。二者都不属于上面的只读剔除清单。
 
 ### 6.4 利润测算 tab 护栏
 
@@ -637,11 +666,13 @@ HTTP 422
 | 软提示不拦截 | 预计售价 < 日常售价下限但 ≥ 最低售价 → 保存通过 |
 | 草稿不拦截 | `POST /drafts` 在低于最低售价时仍返回 201 |
 | 写接口审计 | 规则表 / 平台成本率 / SKU 覆盖值的写操作均产生 `FactAuditLog` |
+| 平台成本率部分更新 | 只传 `default_creator_commission_rate` 时，`default_fee_rate` / `fee_rate_effective_from` / `fee_rate_source` / `fee_rate_version` **保持原值不变**（不被写成 NULL、不被刷成当天） |
+| 未来生效日期 | `effective_from` 晚于今日 → 422；`effective_to` 非空时 `status` 必须为 `inactive` |
 
 ### 8.2 契约测试
 
 在 `backend/tests/test_product_center_schema_contract.py` 追加：
-- `ProductCenterItem` 含 10 个新字段，**且全部为可选**（`field.is_required()` 为 `False`）——回归护栏，防止后续有人把它们改成必填导致 `model_validate(ORM row)` 抛 ValidationError
+- `ProductCenterItem` 含 11 个新字段，**且全部为可选**（`field.is_required()` 为 `False`）——回归护栏，防止后续有人把它们改成必填导致 `model_validate(ORM row)` 抛 ValidationError
 - `SkuUpdateRequest` / `SkuBulkItem` / `SkuCreateRequest` 含 2 个新字段
 - `DimErpSku` 含 `creator_commission_rate` / `min_selling_price_override`
 - `DimPlatform` 含 `default_creator_commission_rate` / `other_cost_rate`
@@ -666,7 +697,7 @@ HTTP 422
 - 利润测算 tab 低于最低售价时输入框标红、保存按钮禁用
 - 利润测算 tab 低于日常售价下限（但不低于最低售价）时输入框标黄、保存**不**禁用
 - 定价设置抽屉两个子 Tab 可切换，字段绑定正确
-- `payloadSku()` 输出不含只读计算字段（含 `min_selling_price`），且显式保留 `min_selling_price_override: null`
+- `payloadSku()` 输出不含只读计算字段（含 `min_selling_price`），且显式保留 `min_selling_price_override: null` 与 `creator_commission_rate`
 
 **必须同时修改的既有断言**（改名会打破它们）：
 
@@ -708,7 +739,7 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 
 `dim_platforms.default_fee_rate` 的校准值**必须用 SQL UPDATE 显式写入**，不能依赖 ORM 默认值。
 
-`amazon`（role=sales）与 `miaoshou`（role=source）、`验证码测试账号`（role=test）三行不配置成本率；`amazon` 的 SKU 底线因此只能走纪律线或 `unavailable`。
+`amazon`（role=sales）与 `miaoshou`（role=source）、`验证码测试账号`（role=test）三行不配置成本率。这**不影响**这些 SKU 的最低售价——底线按 `platform_basis`（当前 tiktok）的费率计算，与该 SKU 在哪个平台卖无关。
 
 ---
 
