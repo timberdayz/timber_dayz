@@ -43,7 +43,7 @@
 | `dim_erp_sku.unit_volume_cbm` | 3 | 0.3% | 物流仓储无法逐 SKU 精算 |
 | `dim_erp_sku.weight_kg` | 0 | 0% | 同上 |
 | `dim_erp_sku.units_per_carton` | 0 | 0% | 同上 |
-| `bridge_spu_sku` 有效绑定 | 1121 | 100% | SPU 率可继承 |
+| `bridge_spu_sku` 有效绑定 | 1118（总 1121，其中 3 条 `effective_to` 非空或非 active） | 100% / 99.7% | SPU 率可继承；3 个 SKU 走 `missing_spu_binding` |
 
 **库存库龄数据现状**（档位匹配的数据源）：
 
@@ -62,6 +62,13 @@
 **对本 spec 的影响**：库龄档位读不到数据 → 全部回落「日常」档（§4.4）。库龄管道修复是**独立任务**，不在本 spec 范围。
 
 **订单侧实际成本结构**（`b_class.fact_tiktok_orders_monthly` 2026-01~07 共 4080 行、`b_class.fact_shopee_orders_monthly` 22347 行；口径为「合计金额 / 合计收入」）：
+
+**收入基数口径（必须写明，否则无法复算）**：
+
+| 平台 | 收入基数列 | 合计 | 说明 |
+|---|---|---|---|
+| TikTok | `总收入` | 261,932 | 订单表自带的总收入列 |
+| Shopee | `买家支付` | 1,360,218 | shopee 表**没有** `总收入` 列，用 `买家支付` 作基数（`实付金额` 为空；`订单原始金额` 1,475,909 是含退款前的原价，不能当分母） |
 
 | 成本项 | TikTok 占收入 | Shopee 占收入 |
 |---|---|---|
@@ -142,7 +149,7 @@
 | 库龄起点(天) | 档位名 | 常规最大折扣率 | 滞销最大折扣率 | 目标利润率 | 依据 |
 |---|---|---|---|---|---|
 | 0 | 日常 | 5% | 10% | 25% | 新品要求高毛利；清货折扣上限 10%（拉新促销 10–25% 的下沿） |
-| 60 | 滞销30天 | 10% | 15% | 22% | 滞销阈值 60 天（对齐现有库龄页「只看高库龄 ≥61 天」）；对应行业「90–180 天降 20–25%」 |
+| 60 | 滞销30天 | 10% | 15% | 22% | 滞销阈值 60 天（≈对齐现有库龄页「只看高库龄 ≥61 天」）；对应行业「90–180 天降 20–25%」 |
 | 90 | 滞销60天 | 15% | 20% | 18% | 目标利润率贴近实测净利率 17.81% |
 | 120 | 滞销90天 | 20% | 25% | 15% | 15% 正是行业清仓毛利底线 |
 | 150 | 滞销90天+ | 25% | 30% | 10% | 最后清档，低于行业 15% 底线是刻意为之（150 天未动的货再保 15% 毛利不现实） |
@@ -183,12 +190,17 @@ shopee:  1 − 0.3815 − 0.1284 − 0.0467 − 0.0158 − 0.0111 = 0.4165
 
 **⚠️ `default_fee_rate`（平台佣金率）不单独进入成本线分母**——它**已经包含在 `other_cost_rate` 桶内**（反推式从净利率倒推，净利率早已扣掉平台佣金）。若再减一次就是重复计算，会让底线偏高 26%（例 1：分母 0.3542 → 0.2805，底线 28.23 → 35.65）。
 
-**底线基数（平台侧）= 默认达人佣金率 + 平台其他成本率**：
+**默认底线基数（平台侧，SKU 未单独设置达人佣金率时）= 平台其他成本率 + 默认达人佣金率**：
 ```
-tiktok: 0.0606 + 0.2727 = 0.3333
-shopee:  0.0111 + 0.4165 = 0.4276
+默认底线基数 = 0.2727(其他成本) + 0.0606(达人默认) = 0.3333   (tiktok，SKU 未单独设置达人佣金率时)
 ```
-完整分母 = 1 − 底线基数 − SPU退货率 − SPU货损率 − 目标利润率。
+> 「底线基数」这个合计值**只在 SKU 未单独设置达人佣金率时成立**。SKU 设了别的值时，底线基数 = 平台其他成本率 + **SKU 达人佣金率**（见 §4.1）。
+
+**平台侧其他成本率**（已含平台佣金、**不含**达人佣金与 SPU 两率）：
+```
+shopee: 0.4165
+```
+完整分母还要再减 SPU 退货/货损率与目标利润率。
 
 **各平台费率字段的用途**：
 
@@ -321,14 +333,28 @@ class SkuPricingPolicy(Base):
 ```
 日常售价下限 = 参考售价 × (1 − 常规最大折扣率)          ← 软提示阈值，不参与最低售价
 
-底线基数（平台侧） = 默认达人佣金率 + 平台其他成本率      ← 平台佣金率已含在 other_cost_rate 内，不重复计
-
-成本线 = 采购成本 C ÷ (1 − 底线基数 − SPU退货损失率 − SPU货损率 − 目标利润率)
+成本线 = 采购成本 C ÷ (1 − 平台其他成本率 − 达人佣金率 − SPU退货损失率 − SPU货损率 − 目标利润率)
 
 纪律线 = 参考售价 × (1 − 滞销可优惠率)
 
 最低售价 = max(成本线, 纪律线, min_selling_price_override)
 ```
+
+**其中「达人佣金率」= `dim_erp_sku.creator_commission_rate`，为 NULL 时取 `platform_basis` 平台的 `default_creator_commission_rate`。**
+
+> ⚠️ 这里必须用**SKU 实际值**，不能写死平台默认值。同一 SKU 若把达人佣金率从默认 6.06% 改成 15%：
+> - 按 SKU 实际值：分母 = 1 − 0.2727 − 0.15 − 0.0467 − 0.0158 − 0.25 = 0.2648 → 底线 10 ÷ 0.2648 = **37.76**
+> - 若误用平台默认值 6.06%：分母 = 0.3542 → 底线 **28.23**
+>
+> 两者差 34%。因此公式框里的达人佣金项是**变量**，不是常量。
+
+**「底线基数」这个词只在 SKU 未单独设置达人佣金率时成立**：
+```
+默认底线基数 = 平台其他成本率 + 默认达人佣金率 = 0.2727 + 0.0606 = 0.3333   (tiktok)
+```
+SKU 单独设了达人佣金率时，底线基数 = 平台其他成本率 + **SKU 达人佣金率**。UI 与文档里凡是写「底线基数」的地方，必须带上这个限定语。
+
+**为什么用 SKU 实际值替换默认达人佣金率不会重复扣减**：`other_cost_rate` 的反推式（§2.3）已经从净利率里**减掉了默认达人佣金率**，所以 `平台其他成本率` 这一项**不含**达人佣金；分母里单独减一次 SKU 实际值，扣的正是达人佣金这一项，**没有重复**。
 
 **⚠️ 分母里没有 `default_fee_rate`（平台佣金率）**。`other_cost_rate` 是从实测净利率反推的，而净利率早已扣掉平台佣金，所以平台佣金**已在桶内**。再减一次会重复计算：分母 0.3542 → 0.2805，例 1 底线 28.23 → 35.65（偏高 26%）。`default_fee_rate` 只服务利润测算。
 
@@ -345,45 +371,72 @@ class SkuPricingPolicy(Base):
 **档位从哪来**（三者的率都取自同一档位）：
 
 ```
-SKU 当前库龄 age_days ← mart.inventory_age_current.age_days（按 sku_id 关联）
-命中档位 = 规则表中 min_age_days <= age_days 的行里 min_age_days 最大的一行
-库龄缺失 → 命中第 1 档（min_age_days = 0，日常档），并标记 pricing_tier_source = 'fallback_no_age_data'
+# 1) 取 SKU 当前库龄
+#    ⚠️ join 键是 product_sku → dim_erp_sku.sku_key，不是 mart 的 sku_id
+#    （mart.inventory_age_current.sku_id 是 varchar 的平台侧 id，与 dim_erp_sku.sku_id(integer) 不是一回事）
+候选行 = mart.inventory_age_current 中 product_sku = dim_erp_sku.sku_key 的所有行
+命中平台 = platform_basis（tiktok）对应的行；若无该平台行 → 取 age_days 最大的那一行
+age_days = 命中行的 age_days
+无候选行（库龄不可得）→ age_days = None
+
+# 2) 在当前生效的规则行里匹配档位
+生效规则 = 满足「当前行」条件 且 min_age_days <= age_days 的行中 min_age_days 最大的一行
+age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 min_age_days = 0 的「日常」档）
+
+# 3) 无生效规则
+无生效规则 → 该 SKU 的 min_selling_price = unavailable，missing_reasons 含 'missing_pricing_policy'
 ```
 
+**join 路径的事实依据**（实测，2026-10-20）：
+
+| 事实 | 值 |
+|---|---|
+| `mart.inventory_age_current.sku_id` 类型 | `character varying`（**平台侧**商品 id 字符串） |
+| `core.dim_erp_sku.sku_id` 类型 | `integer`（ERP 主键） |
+| `mart.inventory_age_current` 主键 | `(platform_code, sku_key)`，其中 `sku_key = COALESCE(platform_sku, product_sku, sku_id, product_id)`（`sql/mart/inventory_snapshot_company_daily.sql:31`） |
+| **可用 join 键** | `mart.inventory_age_current.product_sku` → `core.dim_erp_sku.sku_key`（妙手商品编码，两侧同形） |
+| 该 join 实测匹配率 | **1080 / 1094（98.7%）**，精确匹配（去空格忽略大小写结果相同） |
+| 一对多风险 | **0**（不存在一个 `product_sku` 对应多个 `dim_erp_sku` 的情况） |
+| `core.bridge_erp_sku_keys` | 1118 行，`source_key` 与 `dim_erp_sku.sku_key` 完全同形（匹配 1118 行），可作等价桥接；但它**不提供**平台 SKU → ERP SKU 映射 |
+
+**多行聚合规则**：同一 ERP SKU 在多个平台（tiktok / shopee / miaoshou）各有库存行，`age_days` 不同。取
+1. `platform_basis`（tiktok）那一行——与底线的成本率口径保持一致，定价决策看的就是主战场；
+2. 若无 tiktok 行 → 取 `age_days` 最大的那一行（最保守）；
+3. 若仍无 → `age_days = None`，回落「日常」档。
+
 其中：
-- 底线基数 = `platform_basis` 平台的 `default_creator_commission_rate` + `other_cost_rate`（**当前统一为 tiktok**，不随 SKU 售卖平台变化）
-- 平台其他成本率 = 该平台的 `dim_platforms.other_cost_rate`（已含平台佣金率）
-- SPU 退货损失率 / 货损率 = 该 SKU 有效绑定 SPU 的 `dim_spu.return_loss_rate` / `logistics_damage_rate`
+- 平台其他成本率 = `platform_basis` 平台的 `dim_platforms.other_cost_rate`（已含平台佣金率，**不含**达人佣金与 SPU 两率）
 - 达人佣金率 = `dim_erp_sku.creator_commission_rate`，NULL 时取 `platform_basis` 平台的 `default_creator_commission_rate`
+- SPU 退货损失率 / 货损率 = 该 SKU 有效绑定 SPU 的 `dim_spu.return_loss_rate` / `logistics_damage_rate`
 - 目标利润率 = 命中档位的 `target_margin_rate`
 - 滞销可优惠率 = 命中档位的 `clearance_discount_rate`
 - 常规最大折扣率 = 命中档位的 `standard_discount_rate`（仅用于日常售价下限）
 
 ### 4.2 自洽性验证
 
-当「目标利润率 = 实测净利率」且「各 SKU 率 = 实测均值」时：
+当「目标利润率 = 实测净利率」且「各 SKU 率 = 实测均值」时（此处按 SKU **未**单独设置达人佣金率、取平台默认 6.06% 计算）：
 
 ```
-分母 = 1 − 0.3333 − 0.0467 − 0.0158 − 0.1781 = 0.4261 = 实测采购成本率
+分母 = 1 − 0.2727(其他成本) − 0.0606(达人默认) − 0.0467(SPU退货) − 0.0158(SPU货损) − 0.1781 = 0.4261 = 实测采购成本率
 ⟹ 最低售价 = C ÷ 0.4261 = 当前平均售价
 ```
 
-（0.3333 = 底线基数 0.0606 + 0.2727）
-
-模型天然自校准：调高目标利润率 → 底线线性抬高；调低 → 放宽折扣空间。
+模型天然自校准：调高目标利润率 → 底线线性抬高；调低 → 放宽折扣空间。**这个自洽点只在「达人佣金率 = 平台默认」时成立**——当 SKU 单独设了达人佣金率，底线会按 §4.1 的变量口径相应变化。
 
 ### 4.3 计算示例
 
+三个示例 SKU **均未设置** `creator_commission_rate`，故达人佣金率取平台默认 6.06%（底线基数 = 0.2727 + 0.0606 = 0.3333）。
+
 **`166851422928`**（采购成本 10，参考售价 30，命中「日常」档（库龄未知→回落第 1 档），SPU 率取仓库均值 4.67% / 1.58%）：
 ```
-成本线 = 10 ÷ (1 − 0.3333 − 0.0467 − 0.0158 − 0.25) = 10 ÷ 0.3542 = 28.23
+成本线 = 10 ÷ (1 − 0.2727 − 0.0606 − 0.0467 − 0.0158 − 0.25) = 10 ÷ 0.3542 = 28.23
 纪律线 = 30 × (1 − 0.10) = 27.00
 最低售价 = 28.23   来源：cost_floor
 ```
 
 **`SKU-0001`**（采购成本 100，参考售价 500，日常档，SPU 率取仓库均值）：
 ```
-成本线 = 100 ÷ (1 − 0.3333 − 0.0467 − 0.0158 − 0.25) = 100 ÷ 0.3542 = 282.33
+成本线 = 100 ÷ (1 − 0.2727 − 0.0606 − 0.0467 − 0.0158 − 0.25) = 100 ÷ 0.3542 = 282.33
 纪律线 = 500 × (1 − 0.10) = 450.00
 最低售价 = 450.00   来源：discount_guard
 ```
@@ -394,6 +447,14 @@ SKU 当前库龄 age_days ← mart.inventory_age_current.age_days（按 sku_id �
 纪律线 = 不可算（参考售价为空）
 最低售价 = 3.56   来源：cost_floor
 ```
+
+**SKU 单独设置达人佣金率时（以 `166851422928` 把佣金率改成 15% 为例）**：
+```
+成本线 = 10 ÷ (1 − 0.2727 − 0.15 − 0.0467 − 0.0158 − 0.25) = 10 ÷ 0.2648 = 37.76
+纪律线 = 27.00
+最低售价 = 37.76   来源：cost_floor
+```
+**同一个 SKU，达人佣金率从 6.06% 改到 15%，底线从 28.23 抬到 37.76**——这正是「达人佣金率必须进分母」的业务含义。
 
 ### 4.4 降级链与来源标记
 
@@ -428,7 +489,7 @@ SKU 当前库龄 age_days ← mart.inventory_age_current.age_days（按 sku_id �
 
 ### 4.5 金额精度与量化边界
 
-**⚠️ 费率不得走 `_money` 量化。** `_money` 的 `MONEY_QUANTUM = 0.01` 是**金额**精度；若把费率也过一遍 `_money`，`0.2727` 会被量化为 `0.27`，底线基数从 `0.3333` 变成 `0.3358`，§4.3 例 1 的底线从 **28.23 变成 27.79**，与本 spec 的示例和 §8.1「精确 Decimal 值」用例直接冲突。
+**⚠️ 费率不得走 `_money` 量化。** `_money` 的 `MONEY_QUANTUM = 0.01` 是**金额**精度；若把费率也过一遍 `_money`，`0.2727` 会被量化为 `0.27`，底线基数从 `0.0606 + 0.2727 = 0.3333` 变成 `0.0606 + 0.27 = 0.3306`，分母从 `0.3542` 变成 `0.3569`，§4.3 例 1 的底线从 **28.23 变成 28.02**，与本 spec 的示例和 §8.1「精确 Decimal 值」用例直接冲突。
 
 规则：
 
@@ -463,8 +524,11 @@ SKU 当前库龄 age_days ← mart.inventory_age_current.age_days（按 sku_id �
 
 ```
 # 1) 取 SKU 当前库龄
-age_days = mart.inventory_age_current 中该 sku_id 的 age_days（按 sku_id 关联）
-库龄不可得（无该 SKU 的库龄记录 / 表为空）→ age_days = None
+#    ⚠️ join 键是 product_sku → dim_erp_sku.sku_key（不是 mart 的 sku_id，见 §4.1 的事实依据）
+候选行 = mart.inventory_age_current 中 product_sku = dim_erp_sku.sku_key 的所有行
+命中平台 = platform_basis（tiktok）对应的行；若无该平台行 → 取 age_days 最大的那一行
+age_days = 命中行的 age_days
+无候选行（库龄不可得）→ age_days = None
 
 # 2) 在当前生效的规则行里匹配档位
 生效规则 = 满足「当前行」条件 且 min_age_days <= age_days 的行中 min_age_days 最大的一行
@@ -502,12 +566,24 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 
 新行 `effective_from` 必须 **严格大于**（`>`）旧行，不能是 `>=`——否则同日新建会撞 `UNIQUE(min_age_days, effective_from)`，按规范返回 409，用户当天无法纠错。
 
+**「档位起点 `min_age_days` 变更」是独立于版本期的操作**（改的是档位边界，不是生效时间）：
+
+| 场景 | 行为 |
+|---|---|
+| 路径参数 `min_age_days` 与 body 不一致 | 422（以 body 为准，路径参数仅作定位；不一致说明调用方搞混了） |
+| 改成**已存在**的起点 | 409（撞 `UNIQUE(min_age_days, effective_from)` 与 `uq_sku_pricing_policies_current`） |
+| 改成**全新**的起点 | 关闭旧行（`effective_to` = 今日、`status='inactive'`）+ 新建一行（`effective_from` = 今日） |
+
+这样「改档位边界」就是一次普通的关旧开新，不需要额外的端点；`min_age_days` 变成新值即代表新档位。
+
 **错误契约**：
 
 | 情况 | HTTP | 说明 |
 |---|---|---|
 | `effective_from` 晚于今日 | 422 | 不支持未来生效的规则行 |
 | `effective_from` 小于当前行 | 422 | 回溯变更超出范围 |
+| `min_age_days` 路径参数与 body 不一致 | 422 | 以 body 为准 |
+| `min_age_days` 改成已存在的起点 | 409 | 撞 `UNIQUE(min_age_days, effective_from)` / `uq_sku_pricing_policies_current` |
 | 撞 `UNIQUE(min_age_days, effective_from)` | 409 | 例如 `POST` 或「无当前行的 PUT」用了同档位**已关闭历史行**的日期 |
 | 撞 `uq_sku_pricing_policies_current` | 409 | 并发 `PUT` 同一档位（`IntegrityError` → `rollback` → 409，与 `bulk_save_skus` 的 409 模式一致） |
 
@@ -601,6 +677,7 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 | `daily_min_selling_price` | 日常售价下限（软提示阈值） |
 | `pricing_tier_label` | 命中的库龄档位名 |
 | `pricing_age_days` | 该 SKU 当前库龄天数 |
+| `pricing_tier_source` | `age_data` / `fallback_no_age_data`（利润 tab 据此显示「兜底」提示） |
 | `min_selling_price_below` | `expected_selling_price < min_selling_price` 时为 `True` |
 | `daily_min_selling_price_below` | `expected_selling_price < daily_min_selling_price` 时为 `True` |
 
@@ -658,11 +735,13 @@ HTTP 422
 
 「成本率合计」= 平台佣金率 + 默认达人佣金率 + 平台其他成本率 = 40.70%，**仅作成本结构展示**，不是底线基数。
 
-**真正的底线基数（平台侧）= 默认达人佣金率 + 平台其他成本率 = 33.33%**（平台佣金率已包含在 `other_cost_rate` 内，不重复计入）。完整分母还要再减 SPU 退货/货损率与目标利润率（以「日常」档 25% 为例）：
+**默认底线基数（平台侧，SKU 未单独设置达人佣金率时）= 默认达人佣金率 + 平台其他成本率 = 33.33%**（平台佣金率已包含在 `other_cost_rate` 内，不重复计入）。完整分母还要再减 SPU 退货/货损率与目标利润率（以「日常」档 25% 为例）：
 
 ```
 分母 = 1 − 0.0606(达人) − 0.2727(其他成本) − 0.0467(SPU退货) − 0.0158(SPU货损) − 0.25(目标利润率) = 0.3542
 ```
+
+> 抽屉文案必须写明「**SKU 未单独设置达人佣金率时**」这个限定语——SKU 一旦单独设置了佣金率，实际分母里的达人佣金项就是 SKU 值，底线会不同（§4.1）。
 
 抽屉提示文案必须写明这一点，避免财务按 40.70% 复算时与系统值对不上。
 
@@ -683,8 +762,9 @@ HTTP 422
 ```
 
 - 「库龄起点」列可编辑（改这一格就改了滞销阈值），「档位名」列可编辑
-- 编辑任一格 → 保存时提交 `PUT /api/sku-pricing-policies/{min_age_days}`（版本化更新）
+- 编辑任一格 → 保存时提交 `PUT /api/sku-pricing-policies/{min_age_days}`（版本化更新，变更起点走 §5.1 的「档位起点变更」路径）
 - 表头需说明「库龄起点 = 从该天数起，本行规则生效」
+- **档位名建议写成自解释形式**：`tier_label` 初始值用「库龄≥60天」「库龄≥90天」这类以库龄表达的文案，而不是「滞销30天」——因为「滞销30天」指的是「进入滞销后第 30 天」，而库龄起点是 60 天，运营容易读成「库龄 30 天」。若要保留「滞销30天」这类业务称呼，UI 必须在档位标签旁同时显示库龄天数（`pricing_age_days`）。
 
 ### 6.2 入口
 
@@ -703,7 +783,7 @@ HTTP 422
 |---|---|---|
 | 常规可优惠 | 只读 tag + 档位标签（`row.pricing_tier_label`，如「日常」「滞销30天」） | 否 |
 | 滞销可优惠 | 只读 tag | 否 |
-| 最低售价 | **两段式**：<br>① 生效值只读文本 `row.min_selling_price` + 来源 tag<br>② 覆盖值输入框 `el-input-number` 绑 `row.min_selling_price_override`（`:min="0"` `:precision="2"` `:controls="false"`），空值时 placeholder 显示生效值<br>③ 「重置为自动值」按钮（仅当 `min_selling_price_is_override` 为真时显示） | 是（仅覆盖值） |
+| 最低售价 | **两段式**：<br>① 生效值只读文本 `row.min_selling_price` + 来源 tag<br>② 覆盖值输入框 `el-input-number` 绑 `row.min_selling_price_override`（`:min="0.01"` `:precision="2"` `:controls="false"`），空值时 placeholder 显示生效值<br>③ 「重置为自动值」按钮（仅当 `min_selling_price_is_override` 为真时显示） | 是（仅覆盖值） |
 | 达人佣金率 | `el-input-number` 绑 `row.creator_commission_rate`（`:min="0"` `:max="100"` `:step="0.1"` `:precision="2"` `:controls="false"`），单位 % | 是 |
 
 **绑定字段必须是 `min_selling_price_override`，不能是 `min_selling_price`**：
@@ -713,7 +793,13 @@ HTTP 422
 - 若绑到 `min_selling_price_override`，`GET /api/skus` 必须返回该字段（见 §5.3），否则单元格无法显示"已人工设过 = X"
 - `max()` 允许覆盖值**低于**成本线（人工有权拍板），此时 `min_selling_price ≠ min_selling_price_override`，两者必须分开显示
 
-**「达人佣金率」列**：单位是**百分比**（前端 `%`），后端字段是**小数**（`0.0606`），提交时用既有的 `toPercent` / `fromPercent` 互转（`ProductCenter.vue` 已有这两个 helper，`platformFeeDrawer` 在用）。留空表示「未单独设置」，计算时取平台默认值兜底；空值时 placeholder 提示兜底值与说明。
+**「达人佣金率」列**：单位是**百分比**（前端 `%`），后端字段是**小数**（`0.0606`），提交时用既有的 `toPercent` / `fromPercent` 互转（`ProductCenter.vue` 已有这两个 helper，`platformFeeDrawer` 在用）。
+
+**⚠️ 清空该列必须提交 `null` 而不是 `0`**。既有 helper 的签名是：
+```js
+const fromPercent = (value, fallback = 0) => value == null || value === "" ? fallback : Number(value) / 100;
+```
+默认 `fallback = 0` 会把空值转成 **0** 并落库（DB CHECK 允许 0），计算时按 0% 而不是平台默认 6.06% 计算，底线被系统性抬高 13%。**该字段必须用 `fromPercent(value, null)`**（或等价写法），让空值原样传 `null` 落库，语义才是「未单独设置 → 用平台默认兜底」。
 
 - 来源标记 tooltip 文案：
   - `manual_override` → 「人工设定」
@@ -743,7 +829,7 @@ HTTP 422
 | `expected_selling_price < daily_min_selling_price`（但 ≥ 最低售价） | 预计售价输入框**标黄** + 行内提示「低于日常售价下限 {daily_min_selling_price}」 | ❌ 软提示，允许保存（滞销清货时低于它是合理的） |
 | 两者都不满足 | 无提示 | ❌ |
 
-- 后端 422 返回时，前端展示 `detail.min_selling_price` 与差额（沿用既有 `error?.response?.data?.detail` 读取路径，见 `ProductCenter.vue:1322`）
+- 后端 422 返回时，前端展示 `detail.min_selling_price` 与差额。既有 catch 分支（`ProductCenter.vue:1322`）只读 `detail.missing_fields`，**需要扩充分支**读 `detail.code === 'below_min_selling_price'` 时的 `detail.min_selling_price`，与 `missing_fields` 分支并存。
 
 ---
 
@@ -771,8 +857,9 @@ HTTP 422
 | 用例 | 断言 |
 |---|---|
 | 成本线公式 | 给定固定输入，返回精确 Decimal 值（到分） |
-| **平台佣金不重复计** | 分母只含「底线基数 + SPU两率 + 目标利润率」。`default_fee_rate` **不得**单独进入分母——断言例 1 结果为 28.23，若误加平台佣金会变成 30.90 |
-| **费率不量化** | 输入 `other_cost_rate=0.2727` 时，底线基数必须是 0.3333（不是 0.3358），例 1 结果为 28.23（不是 27.79）——守住 §4.5 的量化边界 |
+| **平台佣金不重复计** | 分母只含「平台其他成本率 + 达人佣金率 + SPU两率 + 目标利润率」。`default_fee_rate` **不得**单独进入分母——断言例 1 结果为 28.23，若误加平台佣金会变成 35.65 |
+| **费率不量化** | 输入 `other_cost_rate=0.2727` 时，底线基数必须是 0.3333（不是 0.3306），例 1 结果为 28.23（不是 28.02）——守住 §4.5 的量化边界 |
+| **达人佣金率进分母** | SKU 设 `creator_commission_rate=0.15` 时，例 1 底线 = 10 ÷ (1−0.2727−0.15−0.0467−0.0158−0.25) = **37.76**；不设时 = 28.23。两者必须不同 |
 | 自洽性 | 目标利润率 = 实测净利率、各项率 = 实测均值时，底线 = C ÷ 采购成本率 |
 | 分母 ≤ 0 | 不抛异常，降级到纪律线，`missing_reasons` 含 `non_positive_cost_denominator` |
 | 纪律线 | 参考售价 × (1 − clearance_discount_rate) |
@@ -889,7 +976,7 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 4. **参考售价 0.2% 填充率**，纪律线当前几乎不生效，绝大多数 SKU 走成本线。参考售价补齐后纪律线自动叠加，无需改代码。
 5. **⚠️ 库龄数据管道当前是空的，本次上线时全部 SKU 落在「日常」档**。`mart.inventory_age_current` 目前 0 行（源表 `semantic.fact_inventory_snapshot` 也是 0 行，采集层 2026-09 重写为 V2 canonical 后同步层与 SQL 三层未同步）。因此：
    - 本次交付后 1118 个 SKU 的 `pricing_tier_source = 'fallback_no_age_data'`，全部按「日常」档（目标利润率 25%、滞销折扣上限 10%）计算——**这是最保守的档，底线最高，不会亏本**
-   - 库龄管道修通后，档位按真实库龄自动下沉，**无需改任何代码**
+   - 库龄管道修通后，档位按真实库龄自动下沉，**无需改任何代码**——join 路径（`mart.inventory_age_current.product_sku` → `core.dim_erp_sku.sku_key`，实测匹配 1080/1094）已在 §4.1 定稿，管通即生效
    - 库龄管道修复是独立任务，不在本 spec 范围内
 6. **`other_cost_rate` 是黑盒数字**。它是恒等式反推值，财务无法从 UI 看出构成；子 Tab 1 应展示「成本率合计」并注明推导方式。
 7. **校准 `default_fee_rate` 会改变利润测算结果**（TikTok 利润下降约 5.4 个百分点，Shopee 约 12.9 个百分点）。历史 `finance.sku_profit_estimates` 版本不被改写，但新旧测算不可直接比较，需在 UI 上标注 `fee_rate_version`。
