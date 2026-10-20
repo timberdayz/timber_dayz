@@ -89,13 +89,14 @@
 | 决策项 | 结论 |
 |---|---|
 | 最低售价定义 | `max(成本线, 纪律线, 人工覆盖值)` |
+| 底线口径 | **公司统一口径**：所有 SKU 的底线都用「成本基准平台」这一个平台的费率计算（`platform_basis`，四档统一为 `tiktok`）。底线**不是**按该 SKU 实际售卖平台逐个算的 |
 | 成本线 | 采购成本 ÷ (1 − 平台其他成本率 − SPU退货损失率 − SPU货损率 − 达人佣金率 − 目标利润率) |
 | 纪律线 | 参考售价 × (1 − 滞销可优惠率) |
 | 折扣率归属 | 公司级规则表 `finance.sku_pricing_policies`，按周转档位 |
 | 档位缺失 | 规则表增加 `unclassified` 兜底档，不动存量数据 |
 | 目标利润率 | 规则表每档独立 |
 | 人工覆盖 | `core.dim_erp_sku.min_selling_price_override` 存人工值；自动值**实时计算，不落库** |
-| 平台佣金校准 | 本次一并校准 `dim_platforms.default_fee_rate` 为实测值；底线口径与利润测算口径合并 |
+| 平台佣金校准 | 本次一并校准 `dim_platforms.default_fee_rate` 为实测值。合并的是**「平台佣金率」这一个字段**（利润测算与底线计算共用），不是「每个平台的整套费率共用」 |
 | 护栏 | 利润测算 tab 显示最低售价 + 填价标红 + 保存利润版本后端 422 |
 | 参数录入入口 | 升级现有「平台费率管理」抽屉为「定价设置」抽屉（两个子 Tab），不新增独立入口 |
 
@@ -119,9 +120,11 @@
 | turnover_class | 常规最大折扣率 | 滞销最大折扣率 | 目标利润率 | 成本基准平台 | 依据 |
 |---|---|---|---|---|---|
 | `fast` (30 天) | 10% | 20% | 20% | tiktok | 常规取拉新促销 10–25% 下沿；30 天压货对应行业 90–180 天档 20–25% |
-| `normal` (60 天) | 10% | 30% | 18% | tiktok | 清仓 30–50% 下沿；目标毛利贴近实测净利率 17.81% |
+| `normal` (60 天) | 10% | 30% | 18% | tiktok | 清仓 30–50% 下沿；目标利润率贴近实测净利率 17.81% |
 | `slow` (90 天) | 15% | 40% | 15% | tiktok | 慢销品本就让利；15% 正是行业清仓毛利底线 |
 | `unclassified` | 10% | 30% | 18% | tiktok | 兜底取 normal 档 |
+
+**「常规最大折扣率」的用途**：只用于算**日常售价下限**（参考售价 × (1 − 该值)），在利润测算 tab 做黄色软提示，**不参与最低售价计算**。「滞销最大折扣率」才进入最低售价的纪律线。详见 §4.1 的三数职责表。
 
 目标利润率阶梯跨越实测净利率 17.81%：快销品要求比现状更好（20%），普通品维持现状（18%），慢销品允许降到行业清仓底线（15%）。
 
@@ -131,12 +134,15 @@
 
 `core.dim_platforms`：
 
-| platform_code | `default_fee_rate`（平台佣金率） | `default_creator_commission_rate` | `other_cost_rate` |
-|---|---|---|---|
-| tiktok | 0.0737 | 0.0606 | 0.2727 |
-| shopee | 0.1487 | 0.0111 | 0.4165 |
+| platform_code | `default_fee_rate`（平台佣金率） | `default_creator_commission_rate` | `other_cost_rate` | 参与底线计算？ |
+|---|---|---|---|---|
+| tiktok | 0.0737 | 0.0606 | 0.2727 | **是**（当前 `platform_basis`） |
+| shopee | 0.1487 | 0.0111 | 0.4165 | 否（仅供利润测算与将来切换基准平台） |
+| amazon | NULL | NULL | NULL | 否（`platform_role='sales'` 但未配置费率） |
 
-`other_cost_rate` 定义（平台级，除采购成本、平台佣金、达人佣金、SPU 退货/货损之外的全部成本占收入比）：
+**口径说明**：
+- `default_creator_commission_rate` = 「达人佣金 + 联盟商店广告佣金」合计。tiktok 0.0606 = 达人佣金 5.29% + 联盟广告佣金 0.77%；shopee 0.0111 = 联盟佣金 1.11%（shopee 无达人佣金列）
+- `other_cost_rate` 定义（平台级，除采购成本、平台佣金、达人佣金、SPU 退货/货损之外的全部成本占收入比）：
 
 ```
 other_cost_rate = 1 − 实测采购成本率 − 实测净利率 − 平均 SPU 退货损失率 − 平均 SPU 货损率 − 默认达人佣金率
@@ -147,7 +153,12 @@ shopee:  1 − 0.3815 − 0.1284 − 0.0467 − 0.0158 − 0.0111 = 0.4165
 
 用恒等式反推而非逐项加总，因为逐项加总会漏项（Shopee 分项加总 42.65% vs 反推 49.01%，差 6.36 个百分点无法归因）。
 
-`amazon` 无实测数据，`default_fee_rate` 保持 NULL，三项成本率均不设置 → 不参与底线计算（见 §4.4 降级链）。
+**「参与底线计算」的含义**：底线计算只读取**当前 `platform_basis` 指向的那个平台**的费率（当前为 tiktok）。其余平台的费率：
+- 仍被**利润测算**使用（利润测算按用户当前选择的平台取 `default_fee_rate`）
+- **不参与**底线计算——除非把规则表的 `platform_basis` 切到该平台
+- 因此 `amazon` 未配置费率**不影响** amazon SKU 的最低售价：amazon SKU 的底线照常按 tiktok 口径计算
+
+`amazon` 在利润测算中 `default_fee_rate` 仍为 NULL → 平台费用算不出（与现状一致，非本次引入）。
 
 ---
 
@@ -164,10 +175,13 @@ other_cost_rate                 = Column(Numeric(12, 8), nullable=True)  # 平�
 
 约束：
 ```sql
+-- 命名沿用仓库约定：ck_<table>_<rule>（对照 dimensions.py:220-222 的 ck_dim_erp_sku_*）
 CHECK (default_fee_rate IS NULL OR (default_fee_rate >= 0 AND default_fee_rate <= 1))
 CHECK (default_creator_commission_rate IS NULL OR (default_creator_commission_rate >= 0 AND default_creator_commission_rate <= 1))
 CHECK (other_cost_rate IS NULL OR (other_cost_rate >= 0 AND other_cost_rate < 1))
 ```
+
+约束名分别为 `ck_dim_platforms_fee_rate_range` / `ck_dim_platforms_creator_commission_rate_range` / `ck_dim_platforms_other_cost_rate_range`。
 
 ### 3.2 `core.dim_erp_sku` — 新增 2 列
 
@@ -209,6 +223,7 @@ class SkuPricingPolicy(Base):
         CheckConstraint("turnover_class IN ('fast','normal','slow','unclassified')", name="ck_sku_pricing_policy_tier"),
         CheckConstraint("standard_discount_rate >= 0 AND standard_discount_rate <= 1", name="ck_sku_pricing_policy_standard_discount"),
         CheckConstraint("clearance_discount_rate >= standard_discount_rate", name="ck_sku_pricing_policy_clearance_ge_standard"),
+        CheckConstraint("clearance_discount_rate <= 1", name="ck_sku_pricing_policy_clearance_max"),
         CheckConstraint("target_margin_rate >= 0 AND target_margin_rate < 1", name="ck_sku_pricing_policy_target_margin"),
         CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_sku_pricing_policy_window"),
         CheckConstraint("status IN ('active', 'inactive')", name="ck_sku_pricing_policy_status"),
@@ -242,6 +257,8 @@ class SkuPricingPolicy(Base):
 ### 4.1 公式
 
 ```
+日常售价下限 = 参考售价 × (1 − 常规最大折扣率)          ← 软提示阈值，不参与最低售价
+
 成本线 = 采购成本 C ÷ (1 − 平台其他成本率 − SPU退货损失率 − SPU货损率 − 达人佣金率 − 目标利润率)
 
 纪律线 = 参考售价 × (1 − 滞销可优惠率)
@@ -249,12 +266,23 @@ class SkuPricingPolicy(Base):
 最低售价 = max(成本线, 纪律线, min_selling_price_override)
 ```
 
+**三个数各自的职责**（三者互不重复）：
+
+| 名称 | 公式 | 职责 | 是否硬拦截 |
+|---|---|---|---|
+| 日常售价下限 | 参考售价 × (1 − `standard_discount_rate`) | 日常销售的参考区间下沿。低于它说明「这个品已经打折打过头了」 | ❌ 仅黄色软提示（滞销清货时低于它是合理的） |
+| 纪律线 | 参考售价 × (1 − `clearance_discount_rate`) | 折扣纪律天花板。低于它说明「超出了公司允许的最大折扣」 | ✅ 参与最低售价取大 |
+| 成本线 | 采购成本反解 | 钱的底线。低于它说明「在亏本卖」 | ✅ 参与最低售价取大 |
+
+**为什么用「滞销折扣率」而不是「常规折扣率」参与纪律线**：纪律线要卡的是**最坏情况**——折扣只会一路加码往下走，价格地板必须用最激进的那一档来卡；常规折扣率是日常操作的参考，其阈值（日常售价下限）单独以软提示呈现。
+
 其中：
-- 平台其他成本率 = 规则表 `platform_basis` 对应平台的 `dim_platforms.other_cost_rate`
+- 平台其他成本率 = 规则表 `platform_basis` 对应平台的 `dim_platforms.other_cost_rate`（**当前统一为 tiktok**，不随 SKU 售卖平台变化）
 - SPU 退货损失率 / 货损率 = 该 SKU 有效绑定 SPU 的 `dim_spu.return_loss_rate` / `logistics_damage_rate`
-- 达人佣金率 = `dim_erp_sku.creator_commission_rate`，NULL 时取平台的 `default_creator_commission_rate`
+- 达人佣金率 = `dim_erp_sku.creator_commission_rate`，NULL 时取 `platform_basis` 平台的 `default_creator_commission_rate`
 - 目标利润率 = 规则表对应档位的 `target_margin_rate`
 - 滞销可优惠率 = 规则表对应档位的 `clearance_discount_rate`
+- 常规最大折扣率 = 规则表对应档位的 `standard_discount_rate`（仅用于日常售价下限）
 
 ### 4.2 自洽性验证
 
@@ -315,9 +343,19 @@ class SkuPricingPolicy(Base):
 - 分母 `1 − 各项率 ≤ 0` → 不计算成本线，降级到纪律线，并在 `missing_reasons` 记 `non_positive_cost_denominator`
 - 全部率之和 ≥ 1 → 视为配置错误，返回 `unavailable`
 
-### 4.5 金额精度
+### 4.5 金额精度与量化边界
 
-复用 `backend/services/product_profit_service.py` 的 `_money`（`Decimal` + `ROUND_HALF_UP` + `MONEY_QUANTUM = 0.01`）。禁止用 float 做成本线计算。
+**⚠️ 费率不得走 `_money` 量化。** `_money` 的 `MONEY_QUANTUM = 0.01` 是**金额**精度；若把费率也过一遍 `_money`，`0.2727` 会被量化为 `0.27`，分母从 `0.4042` 变成 `0.4069`，§4.3 例 1 的底线从 **24.74 变成 24.58**，与本 spec 的示例和 §8.1「精确 Decimal 值」用例直接冲突。
+
+规则：
+
+| 量 | 处理方式 |
+|---|---|
+| 费率（`other_cost_rate` / 各类率 / 目标利润率 / 折扣率） | 只做 `Decimal(str(value))` 转换，**不量化**，保留全精度参与分母运算 |
+| 最终金额（成本线、纪律线、最低售价、覆盖值） | 过 `_money`（`Decimal` + `ROUND_HALF_UP` + `MONEY_QUANTUM = 0.01`） |
+| `DimPlatform.default_fee_rate` 等 `Float` 列 | 读取后立即 `Decimal(str(x))`，避免二进制浮点误差进入分母 |
+
+复用 `backend/services/product_profit_service.py` 的 `_money`（`:38-39`）与 `MONEY_QUANTUM`（`:7`）做最终金额量化；**不要**复用它处理费率。
 
 ---
 
@@ -334,42 +372,71 @@ class SkuPricingPolicy(Base):
 
 规则行请求/响应模型字段：`turnover_class` / `standard_discount_rate` / `clearance_discount_rate` / `target_margin_rate` / `platform_basis` / `effective_from` / `effective_to` / `status` / `source` / `version` / `notes`。
 
-`PUT` 采用「关旧行 + 建新行」而非原地 UPDATE，保证历史可追溯。新行的 `effective_from` 必须 ≥ 旧行的 `effective_from`。
+`PUT` 的具体行为见下方「版本化更新的两条路径」。
 
 **数据库层并发保护**：`uq_sku_pricing_policies_current` 部分唯一索引保证每个档位至多一条 `status='active' AND effective_to IS NULL` 的行。若两个请求并发 `PUT` 同一档位，后到者会撞唯一索引报错，实现需捕获 `IntegrityError` → `rollback` → 返回 409（与 `bulk_save_skus` 的 409 模式一致）。
 
 **规则选档规则**（服务端统一实现，前端不得自行推导）：
 ```
 命中档位 = SKU.turnover_class，若为 NULL 则回退到 'unclassified'
-生效规则 = 该档位中满足 (effective_from <= 今日) AND (effective_to IS NULL OR effective_to > 今日) 的最新一行
+生效规则 = 该档位中满足「当前行」条件的最新一行
+「当前行」= status = 'active' AND effective_to IS NULL AND effective_from <= 今日
 无生效规则 → 该 SKU 的 min_selling_price = unavailable，missing_reasons 含 'missing_pricing_policy'
 ```
 
-同一档位若出现多行同时满足上述条件，以 `effective_from` 最大者为准（理论上由 `PUT` 的「关旧开新」保证唯一；出现多行说明数据被绕过 API 直接改动，属于数据异常，应在实现中记日志并取最新一行）。
+「当前行」定义在 `GET /current` 与服务端选档逻辑中**必须完全一致**（同一段代码 / 同一个 helper），否则 `/current` 返回的规则与护栏实际生效的规则会不一致。
 
-### 5.2 平台成本率
+若同一档位出现多行同时满足上述条件（理论上由 `PUT` 的「关旧开新」保证唯一；出现多行说明数据被绕过 API 直接改动，属数据异常），取 `effective_from` 最大者，并在实现中记 warning 日志。
 
-| 方法 | 路径 | 权限 | 说明 |
+**版本化更新的两条路径**（`PUT /api/sku-pricing-policies/{turnover_class}`）：
+
+| 场景 | 行为 | 原因 |
+|---|---|---|
+| 请求的 `effective_from` **严格大于**当前行的 `effective_from` | 版本化更新：关闭当前行（写 `effective_to` = 新 `effective_from`，`status='inactive'`）+ 新建一行 | 跨期变更需要留版本历史 |
+| 请求的 `effective_from` **等于**当前行的 `effective_from` | **原地 UPDATE 当前行**（不新建版本），仍写审计 | 同日纠错必须可用。`UNIQUE(turnover_class, effective_from)` 决定了同日新建会撞唯一索引，故同日只能原地改 |
+| 请求的 `effective_from` **小于**当前行的 `effective_from` | 422 拒绝 | 回溯变更超出范围，需手工改数据 |
+
+新行 `effective_from` 必须 **严格大于**（`>`）旧行，不能是 `>=`——否则同日新建会撞 `UNIQUE(turnover_class, effective_from)`，按规范返回 409，用户当天无法纠错。
+
+### 5.2 平台成本率（扩展既有端点，不新增路由）
+
+**决策：扩展既有 `PATCH /api/platforms/{platform_code}/fee-rate`，不新增 `/cost-rates` 路由。**
+
+理由：
+- 若保留旧路由 + 新增 `/cost-rates`，同一个平台会有**两条写路径**，旧路径只写 `default_fee_rate`，不写另两项费率 → 留下陈旧值，且用户可能改到"半套"数据
+- 既有路由的路径字面量 `'@router.patch("/api/platforms/{platform_code}/fee-rate"'` 被 `backend/tests/test_product_center_p1_final.py:464` 用作 `source.index()` 的区间边界，**删除该路由会让这个既有测试直接抛 ValueError**
+
+| 方法 | 路径 | 权限 | 变更 |
 |---|---|---|---|
-| GET | `/api/platforms/{platform_code}/cost-rates` | 登录 | 返回 `default_fee_rate` / `default_creator_commission_rate` / `other_cost_rate` / 生效日期 / 来源 / 版本 |
-| PATCH | `/api/platforms/{platform_code}/cost-rates` | `_require_platform_fee_editor` | 更新三项成本率 + 生效日期 / 来源 / 版本，写审计 |
+| PATCH | `/api/platforms/{platform_code}/fee-rate` | `_require_platform_fee_editor` | **扩展**：请求体新增 `default_creator_commission_rate` / `other_cost_rate` 两个可选字段，与既有 `default_fee_rate` / `fee_rate_effective_from` / `fee_rate_source` / `fee_rate_version` 一并写入，写审计 |
 
-`PATCH` 只允许 `platform_role = 'sales'` 的平台（沿用既有 `update_platform_fee_rate` 的 409 规则）。
+- 请求模型 `PlatformFeeRateUpdateRequest`（`backend/schemas/product_center.py:323`）新增两个 `Optional[float] = None` 字段
+- 读：复用 `GET /api/sku-operating-dimensions`（`SkuOperatingPlatformOption` 新增两字段），**不新增 GET 路由**
+- 路径名仍是 `fee-rate`（沿用既有），但语义扩展为「该平台的成本率组」；前端 API 方法名 `updatePlatformFeeRate` 保持不变
+- 仍只允许 `platform_role = 'sales'` 的平台（沿用既有 409 规则）
+- `default_creator_commission_rate` / `other_cost_rate` 未传（`exclude_unset`）时保持原值不变，**不写 NULL**
 
 ### 5.3 SKU 读接口
 
-`GET /api/skus` 响应 `ProductCenterItem` 新增 8 个字段：
+`GET /api/skus` 响应 `ProductCenterItem` 新增 10 个字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `standard_discount_rate` | `Optional[float] = None` | 规则表该档位的常规最大折扣率 |
 | `clearance_discount_rate` | `Optional[float] = None` | 规则表该档位的滞销最大折扣率 |
-| `min_selling_price` | `Optional[float] = None` | 生效的最低售价 |
+| `daily_min_selling_price` | `Optional[float] = None` | 日常售价下限 = 参考售价 × (1 − `standard_discount_rate`)，软提示阈值 |
+| `min_selling_price` | `Optional[float] = None` | 生效的最低售价（`max(成本线, 纪律线, 覆盖值)`） |
 | `min_selling_price_source` | `Optional[str] = None` | `manual_override` / `discount_guard` / `cost_floor` / `unavailable` |
 | `min_selling_price_is_override` | `Optional[bool] = None` | 是否人工覆盖 |
+| `min_selling_price_override` | `Optional[float] = None` | **人工覆盖值原值**（`dim_erp_sku.min_selling_price_override`） |
 | `min_selling_price_missing_reasons` | `list[str] = []` | 无法计算时的原因清单 |
 | `pricing_tier` | `Optional[str] = None` | 实际命中的档位（含 `unclassified`） |
 | `pricing_tier_is_fallback` | `Optional[bool] = None` | 是否走了兜底档 |
+
+**`min_selling_price_override` 必须单独返回**，理由：
+- 前端「最低售价」列的**可编辑输入框绑定的是覆盖值**，不是生效值。绑 `min_selling_price` 会导致用户输入被 `payloadSku()` 的只读字段剔除清单误删（见 §6.3）
+- 不返回覆盖值，单元格就无法显示「这个 SKU 已经人工设过最低售价 = X」，运营会误以为系统算出来的就是最终值
+- `max(成本线, 纪律线, 覆盖值)` 允许覆盖值**低于**成本线（人工有权拍板），此时生效值 ≠ 覆盖值，两者必须都能看到
 
 **⚠️ 所有新增字段必须带默认值（`Optional[...] = None`），不得声明为必填。**
 
@@ -388,7 +455,7 @@ class SkuPricingPolicy(Base):
 - 计算结果只在 `list_skus` 中通过既有的 `payload.update({...})` 注入（与既有 `spu` / `logistics_damage_rate` / `data_completeness` 同一模式）
 - `create_sku` / `update_sku` / `bulk_save_skus` 的返回值中这些字段为默认值即可——前端在这三处之后都会重新拉取列表（`saveSkuRows` 末尾调用 `loadSkus()`），不影响使用
 
-`GET /api/sku-operating-dimensions` 的 `platforms` 项新增 `default_creator_commission_rate`、`other_cost_rate`（供前端展示成本率合计）。
+**`GET /api/sku-operating-dimensions` 的 `platforms` 项**：Pydantic 类是 `SkuOperatingPlatformOption`（`backend/schemas/product_center.py:682-688`），需在该类新增 `default_creator_commission_rate` 与 `other_cost_rate` 两个 `Optional[float] = None` 字段，供前端展示成本率合计。
 
 ### 5.4 SKU 写接口
 
@@ -404,7 +471,12 @@ class SkuPricingPolicy(Base):
 |---|---|
 | `min_selling_price` | 该 SKU 的全局最低售价（SKU 资料页同一个数） |
 | `min_selling_price_source` | 来源标记 |
+| `min_selling_price_is_override` | 是否人工覆盖 |
+| `daily_min_selling_price` | 日常售价下限（软提示阈值） |
 | `min_selling_price_below` | `expected_selling_price < min_selling_price` 时为 `True` |
+| `daily_min_selling_price_below` | `expected_selling_price < daily_min_selling_price` 时为 `True` |
+
+`GET /api/platform-sku-profit/candidates` 是**按平台+仓库+运输方式**筛选的，但返回的 `min_selling_price` 是**SKU 全局底线**（按 `platform_basis` 的 tiktok 口径计算，与该行的平台/仓库/运输方式无关）。响应中应明确这一点，避免使用者误以为它随所选平台变化。
 
 `POST /api/platform-sku-profit/estimates` 增加拦截：
 
@@ -486,29 +558,41 @@ HTTP 422
 |---|---|---|
 | 常规可优惠 | 只读 tag + 档位标签（`快销(30天)` / `未分类`） | 否 |
 | 滞销可优惠 | 只读 tag | 否 |
-| 最低售价 | `el-input-number`（`:min="0"` `:precision="2"` `:controls="false"`）+ 来源标记 tooltip + 「重置为自动值」按钮 | 是 |
+| 最低售价 | **两段式**：<br>① 生效值只读文本 `row.min_selling_price` + 来源 tag<br>② 覆盖值输入框 `el-input-number` 绑 `row.min_selling_price_override`（`:min="0"` `:precision="2"` `:controls="false"`），空值时 placeholder 显示生效值<br>③ 「重置为自动值」按钮（仅当 `min_selling_price_is_override` 为真时显示） | 是（仅覆盖值） |
+
+**绑定字段必须是 `min_selling_price_override`，不能是 `min_selling_price`**：
+
+- `min_selling_price` 是**生效值**（`max(成本线, 纪律线, 覆盖值)`），是后端算出来的派生值，不可编辑
+- 若把输入框绑到 `min_selling_price`，用户输入的值会在 `payloadSku()` 剔除只读字段时被**静默丢弃**——用户以为改了，保存后没反应
+- 若绑到 `min_selling_price_override`，`GET /api/skus` 必须返回该字段（见 §5.3），否则单元格无法显示"已人工设过 = X"
+- `max()` 允许覆盖值**低于**成本线（人工有权拍板），此时 `min_selling_price ≠ min_selling_price_override`，两者必须分开显示
 
 - 来源标记 tooltip 文案：
   - `manual_override` → 「人工设定」
   - `discount_guard` → 「参考售价 × (1 − 滞销可优惠率)」
-  - `cost_floor` → 「成本 + 目标毛利反解」
+  - `cost_floor` → 「成本 + 目标利润率反解」
   - `unavailable` → 展示缺失原因（`min_selling_price_missing_reasons`）
 - 未命中档位时（`pricing_tier_is_fallback === true`）在档位标签上加「兜底」提示
-- 编辑最低售价 → 写入 `min_selling_price_override`，走既有 `dirtyRows` + `/api/skus/bulk` 批量保存链路
-- 「重置为自动值」→ 把 `min_selling_price_override` 置 `null`，恢复自动计算
+- 编辑覆盖值 → 写入 `row.min_selling_price_override`，走既有 `dirtyRows` + `/api/skus/bulk` 批量保存链路
+- 「重置为自动值」→ 把 `row.min_selling_price_override` 置 `null`，恢复自动计算
 - `blankSku()` 工厂（`ProductCenter.vue:925`）需同步新增 `creator_commission_rate: null` 与 `min_selling_price_override: null`，避免新建行携带未定义字段
-- `payloadSku()`（`ProductCenter.vue:1341`）当前展开整行，需**剔除只读计算字段** `standard_discount_rate` / `clearance_discount_rate` / `min_selling_price` / `min_selling_price_source` / `min_selling_price_is_override` / `min_selling_price_missing_reasons` / `pricing_tier` / `pricing_tier_is_fallback`。
+- `payloadSku()`（`ProductCenter.vue:1341`）当前展开整行，需**剔除只读计算字段** `standard_discount_rate` / `clearance_discount_rate` / `daily_min_selling_price` / `min_selling_price` / `min_selling_price_source` / `min_selling_price_is_override` / `min_selling_price_missing_reasons` / `pricing_tier` / `pricing_tier_is_fallback`。
   - `SkuBulkItem` 未设 `model_config`，Pydantic v2 默认 `extra="ignore"`，多余字段不会报错，但会让每次批量保存把未修改的 `creator_commission_rate` / `min_selling_price_override` 原值重写一遍，产生无谓的审计记录。
-  - `min_selling_price_override` 的 `null` 必须保留在 payload 中——`SkuBulkItem` 用 `model_dump(exclude_unset=True)`，显式传 `null` 才会把覆盖值清空。
+  - **`min_selling_price_override` 必须保留在 payload 中**——`SkuBulkItem` 用 `model_dump(exclude_unset=True)`，显式传 `null` 才会把覆盖值清空。它是**可写字段**，不属于上面的只读剔除清单。
 
 ### 6.4 利润测算 tab 护栏
 
-- 「预计售价」列右侧新增「最低售价」只读列
-- `expected_selling_price < min_selling_price` 时：
-  - 预计售价输入框标红
-  - 行内提示「低于最低售价 {min_selling_price}」
-  - 「保存利润版本」按钮禁用 + tooltip 说明原因
-- 后端 422 返回时，前端展示 `detail.min_selling_price` 与差额
+- 「预计售价」列右侧新增「最低售价」只读列（显示 `row.min_selling_price` + 来源 tag）
+- 另在「竞品价格」列右侧新增「日常售价下限」只读列（显示 `row.daily_min_selling_price`）
+- 三档提示：
+
+| 条件 | 表现 | 是否拦截 |
+|---|---|---|
+| `expected_selling_price < min_selling_price` | 预计售价输入框**标红** + 行内提示「低于最低售价 {min_selling_price}」 | ✅ 硬拦截：「保存利润版本」按钮禁用 + tooltip 说明；后端 422 兜底 |
+| `expected_selling_price < daily_min_selling_price`（但 ≥ 最低售价） | 预计售价输入框**标黄** + 行内提示「低于日常售价下限 {daily_min_selling_price}」 | ❌ 软提示，允许保存（滞销清货时低于它是合理的） |
+| 两者都不满足 | 无提示 | ❌ |
+
+- 后端 422 返回时，前端展示 `detail.min_selling_price` 与差额（沿用既有 `error?.response?.data?.detail` 读取路径，见 `ProductCenter.vue:1322`）
 
 ---
 
@@ -536,23 +620,28 @@ HTTP 422
 | 用例 | 断言 |
 |---|---|
 | 成本线公式 | 给定固定输入，返回精确 Decimal 值（到分） |
+| **费率不量化** | 输入 `other_cost_rate=0.2727` 时，结果必须等于按 `0.2727` 计算的值（24.74），**不是**按 `0.27` 计算的 24.58——守住 §4.5 的量化边界 |
 | 自洽性 | 目标利润率 = 实测净利率、各项率 = 实测均值时，底线 = C ÷ 采购成本率 |
 | 分母 ≤ 0 | 不抛异常，降级到纪律线，`missing_reasons` 含 `non_positive_cost_denominator` |
 | 纪律线 | 参考售价 × (1 − clearance_discount_rate) |
+| 日常售价下限 | 参考售价 × (1 − standard_discount_rate)，**不参与**最低售价取大 |
 | 取大 | 成本线与纪律线取大，人工覆盖优先级最高 |
-| 降级链 | 采购成本缺失 / SPU 未绑定 / 平台成本率未配置 → `unavailable` + 原因清单 |
+| 降级链 | 采购成本缺失 / SPU 未绑定 / 平台成本率未配置 / 无生效规则 → `unavailable` + 原因清单 |
 | 兜底档 | `turnover_class` 为 NULL 的 SKU 命中 `unclassified` 规则，`pricing_tier_is_fallback = True` |
-| 达人佣金回退 | SKU 未设 `creator_commission_rate` 时取平台默认；设了则用 SKU 值 |
-| 规则表约束 | `clearance < standard` / `target_margin ≥ 1` / 非法 turnover_class 均被拒 |
-| 版本化更新 | `PUT` 后旧行 `effective_to` 被写，新行生效，历史行未被删 |
+| 达人佣金回退 | SKU 未设 `creator_commission_rate` 时取 `platform_basis` 平台的默认；设了则用 SKU 值 |
+| 覆盖值可低于成本线 | `min_selling_price_override` 小于成本线时，生效值 = 覆盖值，来源 = `manual_override` |
+| 规则表约束 | `clearance < standard` / `clearance > 1` / `target_margin ≥ 1` / 非法 turnover_class 均被拒 |
+| 版本化更新 | `effective_from` 严格大于旧行时 → 旧行关闭 + 新行生效；等于旧行时 → 原地 UPDATE；小于旧行 → 422 |
+| 并发 PUT | 撞 `uq_sku_pricing_policies_current` 时返回 409 |
 | 护栏拦截 | 预计售价 < 最低售价 → 422 `below_min_selling_price`；≥ 则通过 |
+| 软提示不拦截 | 预计售价 < 日常售价下限但 ≥ 最低售价 → 保存通过 |
 | 草稿不拦截 | `POST /drafts` 在低于最低售价时仍返回 201 |
 | 写接口审计 | 规则表 / 平台成本率 / SKU 覆盖值的写操作均产生 `FactAuditLog` |
 
 ### 8.2 契约测试
 
 在 `backend/tests/test_product_center_schema_contract.py` 追加：
-- `ProductCenterItem` 含 8 个新字段，**且全部为可选**（`field.is_required()` 为 `False`）——回归护栏，防止后续有人把它们改成必填导致 `model_validate(ORM row)` 抛 ValidationError
+- `ProductCenterItem` 含 10 个新字段，**且全部为可选**（`field.is_required()` 为 `False`）——回归护栏，防止后续有人把它们改成必填导致 `model_validate(ORM row)` 抛 ValidationError
 - `SkuUpdateRequest` / `SkuBulkItem` / `SkuCreateRequest` 含 2 个新字段
 - `DimErpSku` 含 `creator_commission_rate` / `min_selling_price_override`
 - `DimPlatform` 含 `default_creator_commission_rate` / `other_cost_rate`
@@ -560,20 +649,24 @@ HTTP 422
 
 ### 8.3 迁移契约
 
-在 `backend/tests/test_turnover_storage_contract.py` 同级新增迁移断言：
+**新建独立文件** `backend/tests/test_sku_pricing_guardrails_contract.py`（与 §8.1 的新文件风格一致；不并入 `test_turnover_storage_contract.py`，避免不同功能的迁移断言混在一起）：
 - 迁移文件包含 `sku_pricing_policies` 建表语句
 - 迁移文件包含 `dim_platforms` 两列新增
 - 迁移文件包含 `dim_erp_sku` 两列新增
 - 迁移文件包含 4 条规则初始数据与 2 条平台成本率初始数据
+- 迁移文件包含 `downgrade()` 且同样有存在性守卫
+- 迁移 revision 链正确：`down_revision == "current_schema_20260921_warehouse_storage_label_fee"`（实施时以 `alembic heads` 实际输出为准）
 
 ### 8.4 前端
 
 在 `frontend/tests/productCenterUi.test.mjs` 追加：
 - SKU 资料 tab 渲染 3 个新列
 - 最低售价列的来源标记 tooltip 文案
+- 最低售价列的可编辑输入框绑定 `min_selling_price_override`（**不是** `min_selling_price`）
 - 利润测算 tab 低于最低售价时输入框标红、保存按钮禁用
+- 利润测算 tab 低于日常售价下限（但不低于最低售价）时输入框标黄、保存**不**禁用
 - 定价设置抽屉两个子 Tab 可切换，字段绑定正确
-- `payloadSku()` 输出不含只读计算字段，且显式保留 `min_selling_price_override: null`
+- `payloadSku()` 输出不含只读计算字段（含 `min_selling_price`），且显式保留 `min_selling_price_override: null`
 
 **必须同时修改的既有断言**（改名会打破它们）：
 
@@ -603,15 +696,15 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 `downgrade()` 需要：删除 `finance.sku_pricing_policies` 表（含其索引与约束）、删除 `core.dim_platforms` 与 `core.dim_erp_sku` 的 4 个新列。注意 `down_revision` 指向 `current_schema_20260921_warehouse_storage_label_fee`——**实施时需再次确认当前 head**（迁移链存在多个分支时以 `alembic heads` 实际输出为准）。
 
 内容：
-1. 建 `finance.sku_pricing_policies` 表（含 6 个 CHECK、1 个 UNIQUE、2 个 INDEX，其中 `uq_sku_pricing_policies_current` 为部分唯一索引）
-2. `core.dim_platforms` 加 `default_creator_commission_rate` / `other_cost_rate` 两列 + 3 个 CHECK
-3. `core.dim_erp_sku` 加 `creator_commission_rate` / `min_selling_price_override` 两列 + 2 个 CHECK
+1. 建 `finance.sku_pricing_policies` 表（含 7 个 CHECK、1 个 UNIQUE、2 个 INDEX，其中 `uq_sku_pricing_policies_current` 为部分唯一索引）
+2. `core.dim_platforms` 加 `default_creator_commission_rate` / `other_cost_rate` 两列 + 3 个 CHECK（命名 `ck_dim_platforms_*`）
+3. `core.dim_erp_sku` 加 `creator_commission_rate` / `min_selling_price_override` 两列 + 2 个 CHECK（命名 `ck_dim_erp_sku_*`）
 4. 插入 4 条 `finance.sku_pricing_policies` 初始规则（`effective_from` = 执行日，`status = 'active'`，`source = 'industry_benchmark_2026'`，`version = 'v1'`）
 5. 更新 `core.dim_platforms` 初始成本率（当前两行均为 `default_fee_rate=0.02, fee_rate_source='manual', fee_rate_version='v1'`）：
    - tiktok：`default_fee_rate = 0.0737`、`default_creator_commission_rate = 0.0606`、`other_cost_rate = 0.2727`、`fee_rate_source = 'b_class_measured_2026_01_07'`、`fee_rate_version = 'v2'`
    - shopee：`default_fee_rate = 0.1487`、`default_creator_commission_rate = 0.0111`、`other_cost_rate = 0.4165`、同上
 
-   `fee_rate_effective_from` **保留原值**（tiktok `2026-09-01`、shopee `2026-09-15`）——本次是纠正错误取值而非新增未来费率，回溯生效日期才能让历史区间的测算也用正确费率。
+   `fee_rate_effective_from` **保留原值**（tiktok `2026-09-01`、shopee `2026-09-15`）——本次是纠正错误取值而非新增未来费率，保留原值仅为**审计连续性**：现有利润测算代码直接取 `platform.default_fee_rate`，并不按生效日期选版本，历史 `finance.sku_profit_estimates` 也不重算，因此回溯生效日期对历史测算没有实际影响。
 
 `dim_platforms.default_fee_rate` 的校准值**必须用 SQL UPDATE 显式写入**，不能依赖 ORM 默认值。
 
@@ -628,4 +721,5 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 5. **周转档位 0.3% 填充率**，1118 个 SKU 走 `unclassified` 兜底档。档位补齐后底线会自动重算。
 6. **`other_cost_rate` 是黑盒数字**。它是恒等式反推值，财务无法从 UI 看出构成；子 Tab 1 应展示「成本率合计」并注明推导方式。
 7. **校准 `default_fee_rate` 会改变利润测算结果**（TikTok 利润下降约 5.4 个百分点，Shopee 约 12.9 个百分点）。历史 `finance.sku_profit_estimates` 版本不被改写，但新旧测算不可直接比较，需在 UI 上标注 `fee_rate_version`。
-8. **`amazon` 未配置成本率**，不参与底线计算，其 SKU 的最低售价只会走纪律线或 `unavailable`。
+8. **`amazon` 未配置自身成本率**，在**利润测算**中 `default_fee_rate` 仍为 NULL → 平台费用算不出（与现状一致，非本次引入）。但这**不影响** amazon SKU 的最低售价：底线按 `platform_basis`（当前 tiktok）的费率计算，与该 SKU 在哪个平台卖无关。
+9. **底线是公司统一口径，不是按售卖平台逐个算的**。若将来要「按每个平台各自算底线」，需要把 `platform_basis` 从规则表列改为 SKU×平台维度，工作量与数据模型都要重做，属于 V2 范围。
