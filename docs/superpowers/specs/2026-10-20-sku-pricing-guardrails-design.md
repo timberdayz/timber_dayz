@@ -120,7 +120,7 @@
 | 档位维度 | **库龄阶梯**：按 SKU 当前库龄落在哪一档取对应规则。`turnover_class`（快销/普通/慢销）**不参与定价**，它只用于参考仓储天数 |
 | 底线口径 | **公司统一口径**：所有 SKU 的底线都用「成本基准平台」这一个平台的费率计算（`platform_basis`，统一为 `tiktok`）。底线**不是**按该 SKU 实际售卖平台逐个算的 |
 | 成本线 | 采购成本 ÷ (1 − 平台其他成本率 − SPU退货损失率 − SPU货损率 − 达人佣金率 − 目标利润率) |
-| 纪律线 | 参考售价 × (1 − 滞销可优惠率) |
+| 纪律线 | 参考售价 × (1 − **当前库龄档位的 `discount_rate`**) |
 | 折扣率归属 | 公司级规则表 `finance.sku_pricing_policies`，按库龄档位 |
 | 达人佣金率 | **SKU 级字段**（`core.dim_erp_sku.creator_commission_rate`），在商品中心填写与计算使用。**不做自动回填、不建平台商品映射表**。SKU 未设置时取平台的 `default_creator_commission_rate` 兜底 |
 | 库龄缺失 | 回落到第 1 档（日常，目标利润率最高 → 底线最保守），并标记 `pricing_tier_source='fallback_no_age_data'` |
@@ -148,10 +148,10 @@
 
 | 库龄起点(天) | 档位名 | 折扣率 | 目标利润率 | 依据 |
 |---|---|---|---|---|
-| 0 | 日常 | 10% | 25% | 新品要求高毛利；折扣上限取拉新促销 10–25% 的下沿 |
-| 60 | 滞销30天 | 15% | 22% | 滞销阈值 60 天（≈对齐现有库龄页「只看高库龄 ≥61 天」）；对应行业「90–180 天降 20–25%」 |
+| 0 | 日常 | 10% | 25% | 新品要求高毛利；折扣率取拉新促销 10–25% 的下沿 |
+| 60 | 滞销30天 | 15% | 22% | 滞销阈值 60 天（≈对齐现有库龄页「只看高库龄 ≥61 天」）；折扣率取拉新促销区间上沿附近，清仓 30–50% 的起步 |
 | 90 | 滞销60天 | 20% | 18% | 目标利润率贴近实测净利率 17.81%；折扣率对应行业清仓 30–50% 区间下沿 |
-| 120 | 滞销60天以上 | 30% | 10% | 最深档，吸收所有 ≥120 天；目标利润率 10% 低于行业 15% 清仓底线是刻意为之（120 天未动的货再保 15% 毛利不现实） |
+| 120 | 滞销60天以上 | 30% | 10% | 最深档，吸收所有 ≥120 天；折扣率对应行业清仓 30–50% 区间中位；目标利润率 10% 低于行业 15% 清仓底线是刻意为之（120 天未动的货再保 15% 毛利不现实） |
 
 **每档只有一个折扣率**——折扣力度**完全由库龄档位触发**，没有「同档位两个额度」的概念。
 
@@ -163,6 +163,8 @@
 | **滞销可优惠** | **最深档（120 天档）的折扣率 = 30%** | 「**清货极限**」——公司统一红线，所有 SKU 一样 |
 
 两列**不重复**：一列随库龄变化，一列是不变的红线。规则表里最深的折扣率同时就是「滞销可优惠」列的取值来源，不需要额外的参数。
+
+> **边界情形**：库龄 ≥120 天的 SKU 两列同为 30%（当前档就是最深档）。这不是 bug——此时「现在能给多少」和「清货极限」本来就重合。UI 上这两列会显示相同值，属预期。
 
 **库龄阶梯的语义**：
 - 档位由**当前库龄**（`mart.inventory_age_current.age_days`）落在哪个区间决定，与 SKU 的快销/普通/慢销属性**无关**
@@ -502,7 +504,7 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 - `age_data` —— 命中了真实库龄档位
 - `fallback_no_age_data` —— 库龄不可得，回落到第 1 档（日常）
 
-回落档的目标利润率最高（25%）、折扣上限最浅（滞销 10%），所以**底线最保守（最高）→ 不会亏本**。这是刻意设计：库龄数据缺失时宁可把底线抬高，也不要给一个乐观的低价。
+回落档的目标利润率最高（25%）、折扣率最浅（10%），所以**底线最保守（最高）→ 不会亏本**。这是刻意设计：库龄数据缺失时宁可把底线抬高，也不要给一个乐观的低价。
 
 **边界**：
 - 分母 `1 − 各项率 ≤ 0` → 不计算成本线，降级到纪律线，并在 `missing_reasons` 记 `non_positive_cost_denominator`
@@ -531,7 +533,7 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
 | GET | `/api/sku-pricing-policies` | 登录 | 返回全部规则行（含历史），按 `min_age_days, effective_from` 排序 |
-| GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 5 行。**筛选条件必须与下方「当前行」判定完全一致**（复用同一个 helper/常量，禁止在两处各写一份谓词） |
+| GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行。**筛选条件必须与下方「当前行」判定完全一致**（复用同一个 helper/常量，禁止在两处各写一份谓词） |
 | POST | `/api/sku-pricing-policies` | `_require_platform_fee_editor` | 新建规则行；若同档位已有生效行则拒绝（409），要求先关闭 |
 | PUT | `/api/sku-pricing-policies/{min_age_days}` | `_require_platform_fee_editor` | 版本化更新。**具体行为有四条路径**（跨期新建 / 同日原地改 / 回溯拒绝 / 无当前行等价 POST），详见下方「版本化更新的多条路径」——实现时不要只按摘要这一句做 |
 
@@ -542,6 +544,8 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 **数据库层并发保护**：`uq_sku_pricing_policies_current` 部分唯一索引保证每个库龄档位至多一条 `status='active' AND effective_to IS NULL` 的行。若两个请求并发 `PUT` 同一档位，后到者会撞唯一索引报错，实现需捕获 `IntegrityError` → `rollback` → 返回 409（与 `bulk_save_skus` 的 409 模式一致）。
 
 **档位匹配规则**（服务端统一实现，前端不得自行推导）：
+
+> ⚠️ §4.1 的「档位从哪来」与本节的伪码是**同一段逻辑的两处表述**。**实现时只写一处**（放 `backend/services/product_pricing_service.py`），另一处只作说明引用，避免两处漂移。
 
 ```
 # 1) 取 SKU 当前库龄
@@ -811,7 +815,7 @@ HTTP 422
 
 | 列 | 渲染 | 可编辑 |
 |---|---|---|
-| 常规可优惠 | 只读 tag = `row.current_discount_rate` + 档位标签（`row.pricing_tier_label`，如「滞销30天」「日常」） | 否 |
+| 常规可优惠 | 只读 tag = `row.current_discount_rate` + 档位标签（`row.pricing_tier_label`，如「滞销30天」「日常」）<br>⚠️ 利润测算 tab 里同一字段叫「当前可优惠」，**统一用「当前可优惠」**，本列表头同步改名 | 否 |
 | 滞销可优惠 | 只读 tag = `row.clearance_max_discount_rate`（清货极限，全 SKU 同一值）+ tooltip「清货极限」 | 否 |
 | 最低售价 | **两段式**：<br>① 生效值只读文本 `row.min_selling_price` + 来源 tag<br>② 覆盖值输入框 `el-input-number` 绑 `row.min_selling_price_override`（`:min="0.01"` `:precision="2"` `:controls="false"`），空值时 placeholder 显示生效值<br>③ 「重置为自动值」按钮（仅当 `min_selling_price_is_override` 为真时显示） | 是（仅覆盖值） |
 | 达人佣金率 | `el-input-number` 绑 `row.creator_commission_rate`（`:min="0"` `:max="100"` `:step="0.1"` `:precision="2"` `:controls="false"`），单位 % | 是 |
@@ -833,7 +837,7 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 
 - 来源标记 tooltip 文案：
   - `manual_override` → 「人工设定」
-  - `discount_guard` → 「参考售价 × (1 − 滞销可优惠率)」
+  - `discount_guard` → 「参考售价 × (1 − 当前档折扣率)」
   - `cost_floor` → 「成本 + 目标利润率反解」
   - `unavailable` → 展示缺失原因（`min_selling_price_missing_reasons`）
 - 档位来源（`pricing_tier_source`）：
@@ -850,7 +854,9 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 ### 6.4 利润测算 tab 护栏
 
 - 「预计售价」列右侧新增「最低售价」只读列（显示 `row.min_selling_price` + 来源 tag）
-- 另在「竞品价格」列右侧新增「当前可优惠」只读列（显示 `row.current_discount_rate`）
+- 另在「竞品价格」列右侧新增「当前可优惠」只读列（显示 `row.current_discount_rate`）与「清货极限」只读列（显示 `row.clearance_max_discount_rate`）
+  - **命名统一**：同一字段 `current_discount_rate` 在 SKU 资料页叫「常规可优惠」、在利润测算 tab 叫「当前可优惠」——**统一为「当前可优惠」**，SKU 资料页的列标题同步改名（它本来就在「常规可优惠」的位置上，改名后语义更准：它就是当前档位的折扣率）
+  - `clearance_max_discount_rate` 已在 §5.5 下发，利润测算 tab 补上「清货极限」列，避免「拿到了字段但界面不显示」
 - **护栏只有一层**（纪律线已是最低售价的组成部分，不需要额外的黄色软提示）：
 
 | 条件 | 表现 | 是否拦截 |
@@ -968,7 +974,7 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 `downgrade()` 需要：删除 `finance.sku_pricing_policies` 表（含其索引与约束）、删除 `core.dim_platforms` 与 `core.dim_erp_sku` 的 4 个新列。注意 `down_revision` 指向 `current_schema_20260921_warehouse_storage_label_fee`——**实施时需再次确认当前 head**（迁移链存在多个分支时以 `alembic heads` 实际输出为准）。
 
 内容：
-1. 建 `finance.sku_pricing_policies` 表（含 7 个 CHECK、1 个 UNIQUE、2 个 INDEX，其中 `uq_sku_pricing_policies_current` 为部分唯一索引）
+1. 建 `finance.sku_pricing_policies` 表（含 5 个 CHECK、1 个 UNIQUE、2 个 INDEX，其中 `uq_sku_pricing_policies_current` 为部分唯一索引）
 2. `core.dim_platforms` 加 `default_creator_commission_rate` / `other_cost_rate` 两列 + 3 个 CHECK（命名 `ck_dim_platforms_*`）
 3. `core.dim_erp_sku` 加 `creator_commission_rate` / `min_selling_price_override` 两列 + 2 个 CHECK（命名 `ck_dim_erp_sku_*`）
 4. 插入 **4 条** `finance.sku_pricing_policies` 初始规则（`effective_from` = 执行日，`status = 'active'`，`source = 'industry_benchmark_2026'`，`version = 'v1'`）：
@@ -1003,7 +1009,7 @@ down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 3. **达人佣金未设置时用平台默认值**。实测波动 3.7%–33.8%，平台均值（tiktok 6.06%）对高佣金商品偏低。本次不做自动回填（订单表 `商品SKU`/`平台SKU`/`SKU_ID` 三列全空，无法映射到 ERP SKU），由运营在 SKU 资料页逐个设置。
 4. **参考售价 0.2% 填充率**，纪律线当前几乎不生效，绝大多数 SKU 走成本线。参考售价补齐后纪律线自动叠加，无需改代码。
 5. **⚠️ 库龄数据管道当前是空的，本次上线时全部 SKU 落在「日常」档**。`mart.inventory_age_current` 目前 0 行（源表 `semantic.fact_inventory_snapshot` 也是 0 行，采集层 2026-09 重写为 V2 canonical 后同步层与 SQL 三层未同步）。因此：
-   - 本次交付后 1118 个 SKU 的 `pricing_tier_source = 'fallback_no_age_data'`，全部按「日常」档（目标利润率 25%、滞销折扣上限 10%）计算——**这是最保守的档，底线最高，不会亏本**
+   - 本次交付后 1118 个 SKU 的 `pricing_tier_source = 'fallback_no_age_data'`，全部按「日常」档（折扣率 10%、目标利润率 25%）计算——**这是最保守的档，底线最高，不会亏本**
    - 库龄管道修通后，档位按真实库龄自动下沉，**无需改任何代码**——join 路径（`mart.inventory_age_current.product_sku` → `core.dim_erp_sku.sku_key`，实测匹配 1080/1094）已在 §4.1 定稿，管通即生效
    - 库龄管道修复是独立任务，不在本 spec 范围内
 6. **`other_cost_rate` 是黑盒数字**。它是恒等式反推值，财务无法从 UI 看出构成；子 Tab 1 应展示「成本率合计」并注明推导方式。
