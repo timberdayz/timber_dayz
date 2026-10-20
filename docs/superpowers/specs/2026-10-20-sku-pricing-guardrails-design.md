@@ -281,10 +281,12 @@ class SkuPricingPolicy(Base):
 **降级链（逐级尝试）**：
 
 1. 人工覆盖值非空 → 直接返回
-2. 成本线可算？需要：采购成本、SPU 有效绑定且两率齐全、平台 `other_cost_rate` 已配置、目标毛利率与达人佣金率可解析
-3. 纪律线可算？需要：参考售价非空
+2. 成本线可算？需要：采购成本、SPU 有效绑定且两率齐全、平台 `other_cost_rate` 已配置、生效规则已命中（档位有规则）、目标毛利率与达人佣金率可解析
+3. 纪律线可算？需要：参考售价非空且生效规则已命中
 4. 取二者较大值；仅一条可算时取该条
 5. 都不可算 → `unavailable`，同时返回 `min_selling_price_missing_reasons` 清单（对齐既有 `reference_cost_missing_reasons` 风格）
+
+**`missing_reasons` 取值**：`missing_purchase_cost` / `missing_spu_binding` / `missing_spu_rates` / `missing_platform_cost_rate` / `missing_pricing_policy` / `missing_creator_commission_rate` / `non_positive_cost_denominator`。
 
 **边界**：
 - 分母 `1 − 各项率 ≤ 0` → 不计算成本线，降级到纪律线，并在 `missing_reasons` 记 `non_positive_cost_denominator`
@@ -303,11 +305,21 @@ class SkuPricingPolicy(Base):
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
 | GET | `/api/sku-pricing-policies` | 登录 | 返回全部规则行（含历史），按 `turnover_class, effective_from` 排序 |
-| GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行（`effective_to IS NULL`） |
+| GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行（`effective_from <= 今日` 且 `effective_to IS NULL OR > 今日`） |
 | POST | `/api/sku-pricing-policies` | `_require_platform_fee_editor` | 新建规则行；若同档位已有生效行则拒绝（409），要求先关闭 |
 | PUT | `/api/sku-pricing-policies/{turnover_class}` | `_require_platform_fee_editor` | 版本化更新：关闭当前行（写 `effective_to`）并新建一行 |
 
 `PUT` 采用「关旧行 + 建新行」而非原地 UPDATE，保证历史可追溯。新行的 `effective_from` 必须 ≥ 旧行的 `effective_from`。
+
+**规则选档规则**（服务端统一实现，前端不得自行推导）：
+
+```
+命中档位 = SKU.turnover_class，若为 NULL 则回退到 'unclassified'
+生效规则 = 该档位中满足 (effective_from <= 今日) AND (effective_to IS NULL OR effective_to > 今日) 的最新一行
+无生效规则 → 该 SKU 的 min_selling_price = unavailable，missing_reasons 含 'missing_pricing_policy'
+```
+
+同一档位若出现多行同时满足上述条件，以 `effective_from` 最大者为准（理论上由 `PUT` 的「关旧开新」保证唯一；出现多行说明数据被绕过 API 直接改动，属于数据异常，应在实现中记日志并取最新一行）。
 
 ### 5.2 平台成本率
 
