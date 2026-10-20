@@ -2,7 +2,7 @@
 
 **状态**: 设计稿待评审
 **日期**: 2026-10-20
-**范围**: 商品中心（`backend/domains/business/routers/product_center.py`、`backend/schemas/product_center.py`、`backend/services/product_pricing_service.py`（新建）、`modules/core/db/schema_parts/dimensions.py`、`current_migrations/versions/`、`frontend/src/domains/business/views/ProductCenter.vue`、`frontend/src/api/productCenter.js`）。
+**范围**: 商品中心（`backend/domains/business/routers/product_center.py`、`backend/schemas/product_center.py`、`backend/services/product_pricing_service.py`（新建）、`modules/core/db/schema_parts/dimensions.py`、`modules/core/db/schema_parts/business.py`、`modules/core/db/schema.py`、`current_migrations/versions/`、`frontend/src/domains/business/views/ProductCenter.vue`、`frontend/src/api/productCenter.js`）。
 
 **非范围**:
 - 不修改利润测算公式 `build_platform_profit_preview` 的成本项构成（仍只含采购/物流/仓储/贴单/平台费/退货/货损/广告）
@@ -89,11 +89,11 @@
 | 决策项 | 结论 |
 |---|---|
 | 最低售价定义 | `max(成本线, 纪律线, 人工覆盖值)` |
-| 成本线 | 采购成本 ÷ (1 − 平台其他成本率 − SPU退货损失率 − SPU货损率 − 达人佣金率 − 目标毛利率) |
+| 成本线 | 采购成本 ÷ (1 − 平台其他成本率 − SPU退货损失率 − SPU货损率 − 达人佣金率 − 目标利润率) |
 | 纪律线 | 参考售价 × (1 − 滞销可优惠率) |
 | 折扣率归属 | 公司级规则表 `finance.sku_pricing_policies`，按周转档位 |
 | 档位缺失 | 规则表增加 `unclassified` 兜底档，不动存量数据 |
-| 目标毛利率 | 规则表每档独立 |
+| 目标利润率 | 规则表每档独立 |
 | 人工覆盖 | `core.dim_erp_sku.min_selling_price_override` 存人工值；自动值**实时计算，不落库** |
 | 平台佣金校准 | 本次一并校准 `dim_platforms.default_fee_rate` 为实测值；底线口径与利润测算口径合并 |
 | 护栏 | 利润测算 tab 显示最低售价 + 填价标红 + 保存利润版本后端 422 |
@@ -116,14 +116,16 @@
 
 `finance.sku_pricing_policies` 初始 4 行（`effective_from` = 迁移执行日）：
 
-| turnover_class | 常规最大折扣率 | 滞销最大折扣率 | 目标毛利率 | 成本基准平台 | 依据 |
+| turnover_class | 常规最大折扣率 | 滞销最大折扣率 | 目标利润率 | 成本基准平台 | 依据 |
 |---|---|---|---|---|---|
 | `fast` (30 天) | 10% | 20% | 20% | tiktok | 常规取拉新促销 10–25% 下沿；30 天压货对应行业 90–180 天档 20–25% |
 | `normal` (60 天) | 10% | 30% | 18% | tiktok | 清仓 30–50% 下沿；目标毛利贴近实测净利率 17.81% |
 | `slow` (90 天) | 15% | 40% | 15% | tiktok | 慢销品本就让利；15% 正是行业清仓毛利底线 |
 | `unclassified` | 10% | 30% | 18% | tiktok | 兜底取 normal 档 |
 
-目标毛利率阶梯跨越实测净利率 17.81%：快销品要求比现状更好（20%），普通品维持现状（18%），慢销品允许降到行业清仓底线（15%）。
+目标利润率阶梯跨越实测净利率 17.81%：快销品要求比现状更好（20%），普通品维持现状（18%），慢销品允许降到行业清仓底线（15%）。
+
+**术语约定**：本 spec 中的「目标利润率」= **净利口径**（利润 ÷ 净收入），与仓库既有 `SkuProfitEstimate.estimated_margin_rate` / `build_platform_profit_preview` 的 `margin_rate` 同义（`product_profit_service.py:122` `estimated_margin_rate = profit / revenue`）。**不是**中文严格意义上的「毛利率」（毛利 ÷ 收入）。实现与 UI 文案统一用「利润率」，不混用「毛利率」。
 
 ### 2.3 平台成本率初始值
 
@@ -191,7 +193,7 @@ class SkuPricingPolicy(Base):
     turnover_class            = Column(String(16), nullable=False)          # fast|normal|slow|unclassified
     standard_discount_rate    = Column(Numeric(12, 8), nullable=False)      # 常规最大折扣率
     clearance_discount_rate   = Column(Numeric(12, 8), nullable=False)      # 滞销最大折扣率
-    target_margin_rate        = Column(Numeric(12, 8), nullable=False)      # 目标净利率
+    target_margin_rate        = Column(Numeric(12, 8), nullable=False)      # 目标利润率（净利口径：利润 ÷ 净收入）
     platform_basis            = Column(String(32), nullable=False)          # 成本基准平台
     effective_from            = Column(Date, nullable=False)
     effective_to              = Column(Date, nullable=True)
@@ -224,6 +226,15 @@ class SkuPricingPolicy(Base):
 
 规则变更需要真实版本历史（改一次影响 1118 个 SKU 的底价），因此用 `effective_from` / `effective_to` 软关闭历史行。
 
+**ORM 注册步骤**（`AGENTS.md` 要求 ORM SSOT 为 `modules/core/db/schema.py`）：
+
+1. `SkuPricingPolicy` 类加到 `modules/core/db/schema_parts/business.py`（与 `WarehouseStorageRule` 同文件）
+2. `modules/core/db/schema.py` 的 `from .schema_parts.business import (...)` 中加入 `SkuPricingPolicy`（`schema.py:127`）
+3. `modules/core/db/schema.py` 的 `__all__` 列表中加入 `"SkuPricingPolicy"`（`schema.py:351` 附近）
+4. `modules/core/db/__init__.py` 无需改动——它是 `from .schema import *` 的薄包装（`__init__.py:13`），会自动带上 `__all__` 中的新名字
+
+`backend/domains/business/routers/product_center.py` 从 `modules.core.db` 导入（`product_center.py:80`），注册后即可直接 `from modules.core.db import SkuPricingPolicy`。
+
 ---
 
 ## 4. 计算模型
@@ -231,7 +242,7 @@ class SkuPricingPolicy(Base):
 ### 4.1 公式
 
 ```
-成本线 = 采购成本 C ÷ (1 − 平台其他成本率 − SPU退货损失率 − SPU货损率 − 达人佣金率 − 目标毛利率)
+成本线 = 采购成本 C ÷ (1 − 平台其他成本率 − SPU退货损失率 − SPU货损率 − 达人佣金率 − 目标利润率)
 
 纪律线 = 参考售价 × (1 − 滞销可优惠率)
 
@@ -242,19 +253,19 @@ class SkuPricingPolicy(Base):
 - 平台其他成本率 = 规则表 `platform_basis` 对应平台的 `dim_platforms.other_cost_rate`
 - SPU 退货损失率 / 货损率 = 该 SKU 有效绑定 SPU 的 `dim_spu.return_loss_rate` / `logistics_damage_rate`
 - 达人佣金率 = `dim_erp_sku.creator_commission_rate`，NULL 时取平台的 `default_creator_commission_rate`
-- 目标毛利率 = 规则表对应档位的 `target_margin_rate`
+- 目标利润率 = 规则表对应档位的 `target_margin_rate`
 - 滞销可优惠率 = 规则表对应档位的 `clearance_discount_rate`
 
 ### 4.2 自洽性验证
 
-当「目标毛利率 = 实测净利率」且「各 SKU 率 = 实测均值」时：
+当「目标利润率 = 实测净利率」且「各 SKU 率 = 实测均值」时：
 
 ```
 分母 = 1 − 0.2727 − 0.0467 − 0.0158 − 0.0606 − 0.1781 = 0.4261 = 实测采购成本率
 ⟹ 最低售价 = C ÷ 0.4261 = 当前平均售价
 ```
 
-模型天然自校准：调高目标毛利率 → 底线线性抬高；调低 → 放宽折扣空间。
+模型天然自校准：调高目标利润率 → 底线线性抬高；调低 → 放宽折扣空间。
 
 ### 4.3 计算示例
 
@@ -293,7 +304,7 @@ class SkuPricingPolicy(Base):
 **降级链（逐级尝试）**：
 
 1. 人工覆盖值非空 → 直接返回
-2. 成本线可算？需要：采购成本、SPU 有效绑定且两率齐全、平台 `other_cost_rate` 已配置、生效规则已命中（档位有规则）、目标毛利率与达人佣金率可解析
+2. 成本线可算？需要：采购成本、SPU 有效绑定且两率齐全、平台 `other_cost_rate` 已配置、生效规则已命中（档位有规则）、目标利润率与达人佣金率可解析
 3. 纪律线可算？需要：参考售价非空且生效规则已命中
 4. 取二者较大值；仅一条可算时取该条
 5. 都不可算 → `unavailable`，同时返回 `min_selling_price_missing_reasons` 清单（对齐既有 `reference_cost_missing_reasons` 风格）
@@ -351,14 +362,31 @@ class SkuPricingPolicy(Base):
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `standard_discount_rate` | `float \| None` | 规则表该档位的常规最大折扣率 |
-| `clearance_discount_rate` | `float \| None` | 规则表该档位的滞销最大折扣率 |
-| `min_selling_price` | `float \| None` | 生效的最低售价 |
-| `min_selling_price_source` | `str` | `manual_override` / `discount_guard` / `cost_floor` / `unavailable` |
-| `min_selling_price_is_override` | `bool` | 是否人工覆盖 |
-| `min_selling_price_missing_reasons` | `list[str]` | 无法计算时的原因清单 |
-| `pricing_tier` | `str` | 实际命中的档位（含 `unclassified`） |
-| `pricing_tier_is_fallback` | `bool` | 是否走了兜底档 |
+| `standard_discount_rate` | `Optional[float] = None` | 规则表该档位的常规最大折扣率 |
+| `clearance_discount_rate` | `Optional[float] = None` | 规则表该档位的滞销最大折扣率 |
+| `min_selling_price` | `Optional[float] = None` | 生效的最低售价 |
+| `min_selling_price_source` | `Optional[str] = None` | `manual_override` / `discount_guard` / `cost_floor` / `unavailable` |
+| `min_selling_price_is_override` | `Optional[bool] = None` | 是否人工覆盖 |
+| `min_selling_price_missing_reasons` | `list[str] = []` | 无法计算时的原因清单 |
+| `pricing_tier` | `Optional[str] = None` | 实际命中的档位（含 `unclassified`） |
+| `pricing_tier_is_fallback` | `Optional[bool] = None` | 是否走了兜底档 |
+
+**⚠️ 所有新增字段必须带默认值（`Optional[...] = None`），不得声明为必填。**
+
+`ProductCenterItem` 声明了 `model_config = {"from_attributes": True}`（`backend/schemas/product_center.py:232`），且被直接用于校验**裸 ORM 行**：
+
+- `product_center.py:1181` — `list_skus` 中 `ProductCenterItem.model_validate(row)`
+- `product_center.py:1213` — `create_sku` 返回值
+- `product_center.py:1231` — `update_sku` 返回值
+- `product_center.py:1319` — `bulk_save_skus` 返回值
+
+这些调用点传入的 `DimErpSku` 对象**没有** `min_selling_price` 等属性。Pydantic v2 在 `from_attributes=True` 下遇到缺失的必填字段会抛 `ValidationError`（而非填 None），会直接打断这四处既有流程。
+
+因此：
+
+- 字段一律 `Optional[...] = None`（`min_selling_price_missing_reasons` 用 `Field(default_factory=list)`）
+- 计算结果只在 `list_skus` 中通过既有的 `payload.update({...})` 注入（与既有 `spu` / `logistics_damage_rate` / `data_completeness` 同一模式）
+- `create_sku` / `update_sku` / `bulk_save_skus` 的返回值中这些字段为默认值即可——前端在这三处之后都会重新拉取列表（`saveSkuRows` 末尾调用 `loadSkus()`），不影响使用
 
 `GET /api/sku-operating-dimensions` 的 `platforms` 项新增 `default_creator_commission_rate`、`other_cost_rate`（供前端展示成本率合计）。
 
@@ -424,13 +452,13 @@ HTTP 422
 └────────────────────────────────────────────────────┘
 ```
 
-「成本率合计」= 平台佣金率 + 默认达人佣金率 + 平台其他成本率，仅作展示参考；**实际底线计算还要叠加 SPU 退货/货损率与目标毛利率**（提示文案需说明，避免误解为最终底线）。
+「成本率合计」= 平台佣金率 + 默认达人佣金率 + 平台其他成本率，仅作展示参考；**实际底线计算还要叠加 SPU 退货/货损率与目标利润率**（提示文案需说明，避免误解为最终底线）。
 
 **子 Tab 2「档位折扣规则」** — 4 行可编辑表格：
 
 ```
 ┌────────────┬──────────┬──────────┬──────────┬──────────┐
-│ 周转档位    │ 常规可优惠│ 滞销可优惠│ 目标毛利率│ 成本基准平台│
+│ 周转档位    │ 常规可优惠│ 滞销可优惠│ 目标利润率│ 成本基准平台│
 ├────────────┼──────────┼──────────┼──────────┼──────────┤
 │ 快销(30天)  │  10%     │   20%    │   20%    │ tiktok   │
 │ 普通(60天)  │  10%     │   30%    │   18%    │ tiktok   │
@@ -508,7 +536,7 @@ HTTP 422
 | 用例 | 断言 |
 |---|---|
 | 成本线公式 | 给定固定输入，返回精确 Decimal 值（到分） |
-| 自洽性 | 目标毛利率 = 实测净利率、各项率 = 实测均值时，底线 = C ÷ 采购成本率 |
+| 自洽性 | 目标利润率 = 实测净利率、各项率 = 实测均值时，底线 = C ÷ 采购成本率 |
 | 分母 ≤ 0 | 不抛异常，降级到纪律线，`missing_reasons` 含 `non_positive_cost_denominator` |
 | 纪律线 | 参考售价 × (1 − clearance_discount_rate) |
 | 取大 | 成本线与纪律线取大，人工覆盖优先级最高 |
@@ -524,11 +552,11 @@ HTTP 422
 ### 8.2 契约测试
 
 在 `backend/tests/test_product_center_schema_contract.py` 追加：
-- `ProductCenterItem` 含 8 个新字段
+- `ProductCenterItem` 含 8 个新字段，**且全部为可选**（`field.is_required()` 为 `False`）——回归护栏，防止后续有人把它们改成必填导致 `model_validate(ORM row)` 抛 ValidationError
 - `SkuUpdateRequest` / `SkuBulkItem` / `SkuCreateRequest` 含 2 个新字段
 - `DimErpSku` 含 `creator_commission_rate` / `min_selling_price_override`
 - `DimPlatform` 含 `default_creator_commission_rate` / `other_cost_rate`
-- `SkuPricingPolicy` 表存在且约束齐全
+- `SkuPricingPolicy` 表存在且约束齐全，且已从 `modules.core.db` 导出
 
 ### 8.3 迁移契约
 
@@ -560,12 +588,19 @@ HTTP 422
 
 文件：`current_migrations/versions/20261020_sku_pricing_guardrails.py`
 
-沿用 `20260916_sku_turnover_storage_rules_cny.py` 的幂等范式（`_has_table` / `_has_column` / `_has_constraint` / `_has_index` 守卫）。
+沿用 `20260916_sku_turnover_storage_rules_cny.py` 的幂等范式（`_has_table` / `_has_column` / `_has_constraint` / `_has_index` 守卫），并满足 `docs/DEVELOPMENT_RULES/DATABASE.md` §7.2 / §9.7 的迁移检查清单：
+
+- `upgrade()` 与 `downgrade()` **都要写**，且 `downgrade()` 同样幂等
+- 所有 `op.add_column()` / `op.create_index()` / `op.create_table()` / `op.create_check_constraint()` 都要有存在性守卫
+- 输出用 `safe_print()`，不用 `print()`
+- 验证链路：`alembic upgrade heads` → `alembic downgrade -1` → `alembic upgrade heads` 三步可重复执行无报错
 
 ```python
 revision = "current_schema_20261020_sku_pricing_guardrails"
 down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 ```
+
+`downgrade()` 需要：删除 `finance.sku_pricing_policies` 表（含其索引与约束）、删除 `core.dim_platforms` 与 `core.dim_erp_sku` 的 4 个新列。注意 `down_revision` 指向 `current_schema_20260921_warehouse_storage_label_fee`——**实施时需再次确认当前 head**（迁移链存在多个分支时以 `alembic heads` 实际输出为准）。
 
 内容：
 1. 建 `finance.sku_pricing_policies` 表（含 6 个 CHECK、1 个 UNIQUE、2 个 INDEX，其中 `uq_sku_pricing_policies_current` 为部分唯一索引）
