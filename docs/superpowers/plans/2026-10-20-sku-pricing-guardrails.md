@@ -1133,6 +1133,14 @@ min_selling_price_below: Optional[bool] = None
 > 后果：前端 `row.min_selling_price` 恒为 `undefined`，`isBelowFloor()` 恒 false，标红与禁用永不触发，
 > 三列永远显示 `-`；只有后端 422 兜底还活着。而前端用例是源码正则匹配，照样 PASS → **假绿**。
 > 本 spec §5.5 明确要求候选行新增这些字段，实现时必须先扩 response_model。
+>
+> ℹ️ **顺带说明现状（不用改）**：该模型目前**已经**漏了 3 个路由在返回的字段——
+> `expected_logistics_cost` / `expected_storage_cost` / `reference_label_fee`，
+> 它们今天就被 `extra='ignore'` 丢掉了。这是既有行为，**本次不扩大范围去修**；
+> 前端之所以没出事，是因为它取的是 `row.reference_logistics_cost ?? row.expected_logistics_cost`
+> 的第一档（`reference_logistics_cost` 在模型里），
+> `reference_label_fee` 则来自利润试算接口的 preview 而非候选行。
+> 新增的 12 个字段走的是**同一个陷阱**，所以契约测试必须把它们钉住。
 
 新增规则表模型：
 
