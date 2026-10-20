@@ -62,6 +62,7 @@
 1. **物流 + 广告 + 仓储合计占收入约 30%+，且无法逐 SKU 精确计算**（尺寸数据 0~3/1121）。逐项精算不可行，必须用平台级成本率参数。
 2. **组合净利率 17.81% / 12.84%，但单 SKU 平均销售利润率仅 8.31% / 6.88%**。行业口径是净利率 <10% 进观察名单、<5% 已在失败（TikTok 品类基准：美妆 25–35%、服饰 15–25%、电子 10–15%）。长尾 SKU 大面积贴在盈亏线上，这是「最低售价」功能的直接价值来源。
 3. **平台佣金当前配置值 2% 明显低于实测值**（TikTok 7.37%、Shopee 14.87%），利润测算算出的利润系统性偏高。
+4. **上表的分项列不可直接加总**。TikTok 分项相加 98.75%，与其 17.81% 净利率隐含的 82.19% 成本率相差 16.56pp；Shopee 分项相加 42.65% vs 反推 49.01%，差 6.36pp。两处差额都无法归因，说明原始列之间存在口径重叠或符号约定差异。**因此平台成本率一律用恒等式反推（§2.3），分项仅用于说明成本结构，不可写进计算。**
 
 ### 1.3 达人佣金粒度（设计输入）
 
@@ -96,7 +97,7 @@
 | 档位缺失 | 规则表增加 `unclassified` 兜底档，不动存量数据 |
 | 目标利润率 | 规则表每档独立 |
 | 人工覆盖 | `core.dim_erp_sku.min_selling_price_override` 存人工值；自动值**实时计算，不落库** |
-| 平台佣金校准 | 本次一并校准 `dim_platforms.default_fee_rate` 为实测值。合并的是**「平台佣金率」这一个字段**（利润测算与底线计算共用），不是「每个平台的整套费率共用」 |
+| 平台佣金校准 | 本次一并校准 `dim_platforms.default_fee_rate` 为实测值。**校准的是「平台佣金率」这一个字段，它只服务利润测算**；底线计算用的是 `other_cost_rate` + `default_creator_commission_rate`，平台佣金已包含在 `other_cost_rate` 内，不重复扣减 |
 | 护栏 | 利润测算 tab 显示最低售价 + 两级提示（低于日常售价下限=黄软提示 / 低于最低售价=红+拦截）+ 保存利润版本后端 422 |
 | 参数录入入口 | 升级现有「平台费率管理」抽屉为「定价设置」抽屉（两个子 Tab），不新增独立入口 |
 
@@ -142,7 +143,7 @@
 
 **口径说明**：
 - `default_creator_commission_rate` = 「达人佣金 + 联盟商店广告佣金」合计。tiktok 0.0606 = 达人佣金 5.29% + 联盟广告佣金 0.77%；shopee 0.0111 = 联盟佣金 1.11%（shopee 无达人佣金列）
-- `other_cost_rate` 定义（平台级，除采购成本、平台佣金、达人佣金、SPU 退货/货损之外的全部成本占收入比）：
+- `other_cost_rate` 定义（平台级，除采购成本、达人佣金、SPU 退货/货损之外的全部成本占收入比，**平台佣金率已包含在内**）：
 
 ```
 other_cost_rate = 1 − 实测采购成本率 − 实测净利率 − 平均 SPU 退货损失率 − 平均 SPU 货损率 − 默认达人佣金率
@@ -151,7 +152,24 @@ tiktok: 1 − 0.4261 − 0.1781 − 0.0467 − 0.0158 − 0.0606 = 0.2727
 shopee:  1 − 0.3815 − 0.1284 − 0.0467 − 0.0158 − 0.0111 = 0.4165
 ```
 
-用恒等式反推而非逐项加总，因为逐项加总会漏项（Shopee 分项加总 42.65% vs 反推 49.01%，差 6.36 个百分点无法归因）。
+用恒等式反推而非逐项加总，因为逐项加总会漏项（Shopee 分项加总 42.65% vs 反推 49.01%，差 6.36 个百分点无法归因）。**分项列不可直接加总**——TikTok 分项相加 98.75% 与其 17.81% 净利率隐含的 82.19% 成本率相差 16.56pp，同样无法归因。分项仅用于说明成本结构，不可写进计算。
+
+**⚠️ `default_fee_rate`（平台佣金率）不单独进入成本线分母**——它**已经包含在 `other_cost_rate` 桶内**（反推式从净利率倒推，净利率早已扣掉平台佣金）。若再减一次就是重复计算，会让底线偏高 22%（例 1：分母 0.4042 → 0.3305，底线 24.74 → 30.26）。
+
+**底线基数（平台侧）= 默认达人佣金率 + 平台其他成本率**：
+```
+tiktok: 0.0606 + 0.2727 = 0.3333
+shopee:  0.0111 + 0.4165 = 0.4276
+```
+完整分母 = 1 − 底线基数 − SPU退货率 − SPU货损率 − 目标利润率。
+
+**各平台费率字段的用途**：
+
+| 字段 | 利润测算 | 底线计算 |
+|---|---|---|
+| `default_fee_rate`（平台佣金率） | ✅ 用（`platform_fee = 净收入 × 该值`） | ❌ **不单独使用**（已含在 `other_cost_rate` 内） |
+| `default_creator_commission_rate` | ❌ 不用（利润测算公式无达人佣金项） | ✅ 用（作为底线基数的一部分） |
+| `other_cost_rate` | ❌ 不用 | ✅ 用（作为底线基数的一部分） |
 
 **「参与底线计算」的含义**：底线计算只读取**当前 `platform_basis` 指向的那个平台**的费率（当前为 tiktok）。其余平台的费率：
 - 仍被**利润测算**使用（利润测算按用户当前选择的平台取 `default_fee_rate`）
@@ -234,7 +252,7 @@ class SkuPricingPolicy(Base):
     )
 ```
 
-**字段命名对齐仓库既有「版本化规则表」约定**：`WarehouseStorageRule`（`business.py:805`）与 `LogisticsProviderRule`（`business.py:775`）均使用 `effective_from` / `effective_to` / `status` / `source` / `version` / `notes` 六件套，并用**部分唯一索引**（`postgresql_where`）保证「每作用域只有一条当前行」。`SkuPricingPolicy` 沿用同一约定：
+**字段命名对齐仓库既有「版本化规则表」约定**：`WarehouseStorageRule`（类定义 `business.py:805`，六件套字段在 `:816-821`）与 `LogisticsProviderRule`（类定义 `business.py:762`，六件套字段在 `:780-785`）均使用 `effective_from` / `effective_to` / `status` / `source` / `version` / `notes` 六件套，并用**部分唯一索引**（`postgresql_where`）保证「每作用域只有一条当前行」。`SkuPricingPolicy` 沿用同一约定：
 - `source` / `version` / `notes` / `status` 与既有规则表字段名一致
 - `uq_sku_pricing_policies_current` 部分唯一索引在**数据库层**保证每个档位至多一条当前行（`status='active' AND effective_to IS NULL`），不依赖应用层逻辑
 - 额外保留 `UNIQUE(turnover_class, effective_from)` 防止同一档位同一天出现两条
@@ -246,7 +264,7 @@ class SkuPricingPolicy(Base):
 1. `SkuPricingPolicy` 类加到 `modules/core/db/schema_parts/business.py`（与 `WarehouseStorageRule` 同文件）
 2. `modules/core/db/schema.py` 的 `from .schema_parts.business import (...)` 中加入 `SkuPricingPolicy`（`schema.py:127`）
 3. `modules/core/db/schema.py` 的 `__all__` 列表中加入 `"SkuPricingPolicy"`（`schema.py:351` 附近）
-4. `modules/core/db/__init__.py` 无需改动——它是 `from .schema import *` 的薄包装（`__init__.py:13`），会自动带上 `__all__` 中的新名字
+4. `modules/core/db/__init__.py` 无需改动——它是 `from .schema import *` 的薄包装（`__init__.py:14`），会自动带上 `__all__` 中的新名字
 
 `backend/domains/business/routers/product_center.py` 从 `modules.core.db` 导入（`product_center.py:80`），注册后即可直接 `from modules.core.db import SkuPricingPolicy`。
 
@@ -259,12 +277,16 @@ class SkuPricingPolicy(Base):
 ```
 日常售价下限 = 参考售价 × (1 − 常规最大折扣率)          ← 软提示阈值，不参与最低售价
 
-成本线 = 采购成本 C ÷ (1 − 平台其他成本率 − SPU退货损失率 − SPU货损率 − 达人佣金率 − 目标利润率)
+底线基数（平台侧） = 默认达人佣金率 + 平台其他成本率      ← 平台佣金率已含在 other_cost_rate 内，不重复计
+
+成本线 = 采购成本 C ÷ (1 − 底线基数 − SPU退货损失率 − SPU货损率 − 目标利润率)
 
 纪律线 = 参考售价 × (1 − 滞销可优惠率)
 
 最低售价 = max(成本线, 纪律线, min_selling_price_override)
 ```
+
+**⚠️ 分母里没有 `default_fee_rate`（平台佣金率）**。`other_cost_rate` 是从实测净利率反推的，而净利率早已扣掉平台佣金，所以平台佣金**已在桶内**。再减一次会重复计算：分母 0.4042 → 0.3305，例 1 底线 24.74 → 30.26（偏高 22%）。`default_fee_rate` 只服务利润测算。
 
 **三个数各自的职责**（三者互不重复）：
 
@@ -277,7 +299,8 @@ class SkuPricingPolicy(Base):
 **为什么用「滞销折扣率」而不是「常规折扣率」参与纪律线**：纪律线要卡的是**最坏情况**——折扣只会一路加码往下走，价格地板必须用最激进的那一档来卡；常规折扣率是日常操作的参考，其阈值（日常售价下限）单独以软提示呈现。
 
 其中：
-- 平台其他成本率 = 规则表 `platform_basis` 对应平台的 `dim_platforms.other_cost_rate`（**当前统一为 tiktok**，不随 SKU 售卖平台变化）
+- 底线基数 = `platform_basis` 平台的 `default_creator_commission_rate` + `other_cost_rate`（**当前统一为 tiktok**，不随 SKU 售卖平台变化）
+- 平台其他成本率 = 该平台的 `dim_platforms.other_cost_rate`（已含平台佣金率）
 - SPU 退货损失率 / 货损率 = 该 SKU 有效绑定 SPU 的 `dim_spu.return_loss_rate` / `logistics_damage_rate`
 - 达人佣金率 = `dim_erp_sku.creator_commission_rate`，NULL 时取 `platform_basis` 平台的 `default_creator_commission_rate`
 - 目标利润率 = 规则表对应档位的 `target_margin_rate`
@@ -368,7 +391,7 @@ class SkuPricingPolicy(Base):
 | GET | `/api/sku-pricing-policies` | 登录 | 返回全部规则行（含历史），按 `turnover_class, effective_from` 排序 |
 | GET | `/api/sku-pricing-policies/current` | 登录 | 返回当前生效的 4 行。**筛选条件必须与下方「当前行」判定完全一致**（复用同一个 helper/常量，禁止在两处各写一份谓词） |
 | POST | `/api/sku-pricing-policies` | `_require_platform_fee_editor` | 新建规则行；若同档位已有生效行则拒绝（409），要求先关闭 |
-| PUT | `/api/sku-pricing-policies/{turnover_class}` | `_require_platform_fee_editor` | 版本化更新：关闭当前行（写 `effective_to`）并新建一行 |
+| PUT | `/api/sku-pricing-policies/{turnover_class}` | `_require_platform_fee_editor` | 版本化更新。**具体行为有四条路径**（跨期新建 / 同日原地改 / 回溯拒绝 / 无当前行等价 POST），详见下方「版本化更新的多条路径」——实现时不要只按摘要这一句做 |
 
 规则行请求/响应模型字段：`turnover_class` / `standard_discount_rate` / `clearance_discount_rate` / `target_margin_rate` / `platform_basis` / `effective_from` / `effective_to` / `status` / `source` / `version` / `notes`。
 
@@ -401,7 +424,7 @@ class SkuPricingPolicy(Base):
 
 若同一档位出现多行同时满足上述条件（理论上由 `PUT` 的「关旧开新」保证唯一；出现多行说明数据被绕过 API 直接改动，属数据异常），取 `effective_from` 最大者，并在实现中记 warning 日志。
 
-**版本化更新的两条路径**（`PUT /api/sku-pricing-policies/{turnover_class}`）：
+**版本化更新的多条路径**（`PUT /api/sku-pricing-policies/{turnover_class}`）：
 
 | 场景 | 行为 | 原因 |
 |---|---|---|
@@ -411,6 +434,15 @@ class SkuPricingPolicy(Base):
 | 该档位**没有**当前行 | 等价于 `POST`：直接新建一行 | `PUT` 在无当前行时不得 404——运营不该需要先 POST 再 PUT |
 
 新行 `effective_from` 必须 **严格大于**（`>`）旧行，不能是 `>=`——否则同日新建会撞 `UNIQUE(turnover_class, effective_from)`，按规范返回 409，用户当天无法纠错。
+
+**错误契约**：
+
+| 情况 | HTTP | 说明 |
+|---|---|---|
+| `effective_from` 晚于今日 | 422 | 不支持未来生效的规则行 |
+| `effective_from` 小于当前行 | 422 | 回溯变更超出范围 |
+| 撞 `UNIQUE(turnover_class, effective_from)` | 409 | 例如 `POST` 或「无当前行的 PUT」用了同档位**已关闭历史行**的日期 |
+| 撞 `uq_sku_pricing_policies_current` | 409 | 并发 `PUT` 同一档位（`IntegrityError` → `rollback` → 409，与 `bulk_save_skus` 的 409 模式一致） |
 
 ### 5.2 平台成本率（扩展既有端点，不新增路由）
 
@@ -435,6 +467,7 @@ class SkuPricingPolicy(Base):
   若不改成 `exclude_unset` 语义，则抽屉里只改「达人佣金率」也会把 `default_fee_rate` 写成 NULL、并把 `fee_rate_effective_from` 刷成当天——**保存一次就把平台佣金率清空**。实现必须改成「字段未传 → 不动该列」。
 - 读：复用 `GET /api/sku-operating-dimensions`（`SkuOperatingPlatformOption` 新增两字段），**不新增 GET 路由**。注意该端点的 platforms 是**显式 dict 拼装**（`product_center.py:2250-2252`），两个新字段必须加进那个 dict，否则永远序列化为 `null`，抽屉「成本率合计」会显示 0。
 - 路径名仍是 `fee-rate`（沿用既有），但语义扩展为「该平台的成本率组」；前端 API 方法名 `updatePlatformFeeRate` 保持不变
+- **PATCH 响应回填全部五项**（`default_fee_rate` / `default_creator_commission_rate` / `other_cost_rate` / `fee_rate_effective_from` / `fee_rate_source` / `fee_rate_version`）。现状 `product_center.py:2000` 只回 4 项，实现时需一并补上新字段，前端保存后可直接用响应刷新表单而不必再拉一次 dimensions
 - 仍只允许 `platform_role = 'sales'` 的平台（沿用既有 409 规则）
 - `default_creator_commission_rate` / `other_cost_rate` 未传（`exclude_unset`）时保持原值不变，**不写 NULL**
 
@@ -553,7 +586,15 @@ HTTP 422
 └────────────────────────────────────────────────────┘
 ```
 
-「成本率合计」= 平台佣金率 + 默认达人佣金率 + 平台其他成本率，仅作展示参考；**实际底线计算还要叠加 SPU 退货/货损率与目标利润率**（提示文案需说明，避免误解为最终底线）。
+「成本率合计」= 平台佣金率 + 默认达人佣金率 + 平台其他成本率 = 40.70%，**仅作成本结构展示**，不是底线基数。
+
+**真正的底线基数（平台侧）= 默认达人佣金率 + 平台其他成本率 = 33.33%**（平台佣金率已包含在 `other_cost_rate` 内，不重复计入）。完整分母还要再减 SPU 退货/货损率与目标利润率：
+
+```
+分母 = 1 − 0.0606(达人) − 0.2727(其他成本) − 0.0467(SPU退货) − 0.0158(SPU货损) − 0.20(目标利润率) = 0.4042
+```
+
+抽屉提示文案必须写明这一点，避免财务按 40.70% 复算时与系统值对不上。
 
 **子 Tab 2「档位折扣规则」** — 4 行可编辑表格：
 
@@ -649,6 +690,7 @@ HTTP 422
 | 用例 | 断言 |
 |---|---|
 | 成本线公式 | 给定固定输入，返回精确 Decimal 值（到分） |
+| **平台佣金不重复计** | 分母只含「底线基数 + SPU两率 + 目标利润率」。`default_fee_rate` **不得**单独进入分母——断言例 1 结果为 24.74，若误加平台佣金会变成 30.26 |
 | **费率不量化** | 输入 `other_cost_rate=0.2727` 时，结果必须等于按 `0.2727` 计算的值（24.74），**不是**按 `0.27` 计算的 24.58——守住 §4.5 的量化边界 |
 | 自洽性 | 目标利润率 = 实测净利率、各项率 = 实测均值时，底线 = C ÷ 采购成本率 |
 | 分母 ≤ 0 | 不抛异常，降级到纪律线，`missing_reasons` 含 `non_positive_cost_denominator` |
