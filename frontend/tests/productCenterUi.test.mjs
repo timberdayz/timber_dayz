@@ -124,18 +124,52 @@ test("平台 SKU 利润测算按平台、仓库和运输方式自动计算参考
   assert.doesNotMatch(source, /transport_type: row\.transport_type \|\| "sea"/);
 });
 
-test("平台 SKU 利润测算按 SPU 级联 SKU，并提供平台费率与仓储规则入口", () => {
+test("平台 SKU 利润测算按 SPU 级联 SKU，并提供定价设置与仓储规则入口", () => {
   assert.match(source, /filteredOperatingSkus/);
   assert.match(source, /clearOperatingSkuOutsideSpu/);
-  assert.match(source, /平台费率管理/);
+  // 抽屉从「平台费率管理」升级为「定价设置」
+  assert.match(source, /定价设置/);
   assert.match(source, /仓储规则/);
   assert.match(api, /listWarehouseStorageRules/);
   assert.match(api, /createWarehouseStorageRule/);
   assert.match(api, /updateWarehouseStorageRule/);
 });
 
+test("商品中心提供定价纪律规则表 API", () => {
+  assert.match(api, /sku-pricing-policies/);
+  assert.match(api, /listSkuPricingPolicies/);
+  assert.match(api, /updateSkuPricingPolicy/);
+});
+
+test("商品中心把平台费率抽屉升级为定价设置", () => {
+  assert.match(source, /定价设置/);
+  assert.match(source, /库龄档位规则/);
+  assert.match(source, /平台成本率/);
+});
+
+test("抽屉保存失败时读结构化错误原因而不是带错误码前缀的 message", () => {
+  assert.match(source, /readApiErrorDetail/);
+  assert.match(source, /detail\?\.reason/);
+});
+
+test("定价设置抽屉区分「成本率合计」与「底线基数」", () => {
+  // 成本率合计（40.70%）只是成本结构展示，底线基数是 33.33%（默认达人佣金 + 平台其他成本）
+  assert.match(source, /成本率合计/);
+  assert.match(source, /底线基数/);
+  // 必须带上「SKU 未单独设置达人佣金率时」这个限定语
+  assert.match(source, /未单独设置/);
+});
+
 test("平台 SKU 利润测算保留候选接口预览并支持分页", () => {
-  assert.doesNotMatch(source, /preview:\s*null/);
+  // ⚠️ 断言必须**限定在利润测算区域**：
+  // 全文件的 /preview:\s*null/ 还会命中 SPU 删除预检的错误分支
+  // （ProductCenter.vue 的 `preview: null, error: e.message`），
+  // 那是有意义的错误语义，不能删。
+  const operatingSection = source.slice(
+    source.indexOf('label="平台 SKU 利润测算"'),
+    source.indexOf('label="物流仓储管理"'),
+  );
+  assert.doesNotMatch(operatingSection, /preview:\s*null/);
   assert.match(source, /page:\s*1/);
   assert.match(source, /page_size:\s*20/);
   assert.match(source, /const operatingTotal = ref\(0\)/);

@@ -178,6 +178,11 @@
             :loading="saving"
             @click="saveSkuRows"
             >保存变更</el-button
+          ><el-button
+            v-if="canManagePlatformFee"
+            plain
+            @click="openPlatformFeeDrawer('tiers')"
+            >定价设置</el-button
           >
         </div>
         <el-table
@@ -320,7 +325,7 @@
           <el-select v-model="operatingQuery.sku_id" clearable filterable placeholder="ERP SKU" @change="resetOperatingPage">
             <el-option v-for="item in filteredOperatingSkus" :key="item.sku_id" :label="item.sku_key" :value="item.sku_id" />
           </el-select>
-          <el-button v-if="canManagePlatformFee" plain @click="openPlatformFeeDrawer">平台费率管理</el-button>
+          <el-button v-if="canManagePlatformFee" plain @click="openPlatformFeeDrawer('platform')">定价设置</el-button>
         </div>
         <el-alert v-if="!operatingQuery.platform_code || !operatingQuery.warehouse_code || !operatingQuery.transport_type" type="info" :closable="false" title="请选择平台、收货仓库和物流方式后加载 SKU 测算数据" />
         <el-table
@@ -559,20 +564,77 @@
       >
     </el-tabs>
     <el-drawer
-      v-model="platformFeeDrawer.visible"
-      title="平台费率管理"
-      size="460px"
+      v-model="pricingDrawer.visible"
+      title="定价设置"
+      size="720px"
       destroy-on-close
     >
-      <el-alert type="info" :closable="false" title="平台综合费率用于预计利润计算，仅管理员、主管和财务可维护。" />
-      <el-form :model="platformFeeDrawer.form" label-width="110px" class="drawer-form">
-        <el-form-item label="平台"><span>{{ platformFeeDrawer.label }}</span></el-form-item>
-        <el-form-item label="综合费率"><div class="rate-cell"><el-input-number v-model="platformFeeDrawer.form.default_fee_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div></el-form-item>
-        <el-form-item label="生效日期"><el-date-picker v-model="platformFeeDrawer.form.fee_rate_effective_from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-        <el-form-item label="来源"><el-input v-model="platformFeeDrawer.form.fee_rate_source" /></el-form-item>
-        <el-form-item label="版本"><el-input v-model="platformFeeDrawer.form.fee_rate_version" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="platformFeeDrawer.visible = false">取消</el-button><el-button type="primary" :loading="saving" @click="savePlatformFeeRate">保存</el-button></template>
+      <el-tabs v-model="pricingDrawer.tab">
+        <el-tab-pane label="平台成本率" name="platform">
+          <el-alert type="info" :closable="false" title="平台成本率用于最低售价底线计算，仅管理员、主管和财务可维护。" />
+          <el-form :model="pricingDrawer.form" label-width="150px" class="drawer-form">
+            <el-form-item label="平台"><span>{{ pricingDrawer.label }}</span></el-form-item>
+            <el-form-item label="平台佣金率">
+              <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.default_fee_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
+            </el-form-item>
+            <el-form-item label="默认达人佣金率">
+              <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.default_creator_commission_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
+              <div class="pricing-tier-hint">SKU 未单独设置时的兜底值</div>
+            </el-form-item>
+            <el-form-item label="平台其他成本率">
+              <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.other_cost_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
+            </el-form-item>
+            <el-form-item label="成本率合计">
+              <span>{{ pricingDrawer.costRateTotalPct }}%</span>
+              <div class="pricing-tier-hint">仅作成本结构展示，不是底线基数</div>
+            </el-form-item>
+            <el-form-item label="默认底线基数">
+              <span>{{ pricingDrawer.baseRatePct }}%</span>
+              <div class="pricing-tier-hint">
+                默认达人佣金率 + 平台其他成本率（平台佣金率已含在「平台其他成本率」内，不重复计入）。<br />
+                <strong>仅在 SKU 未单独设置达人佣金率时成立</strong>；SKU 单独设置后，底线基数 = 平台其他成本率 + 该 SKU 的达人佣金率。
+              </div>
+            </el-form-item>
+            <el-form-item label="生效日期"><el-date-picker v-model="pricingDrawer.form.fee_rate_effective_from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+            <el-form-item label="来源"><el-input v-model="pricingDrawer.form.fee_rate_source" /></el-form-item>
+            <el-form-item label="版本"><el-input v-model="pricingDrawer.form.fee_rate_version" /></el-form-item>
+          </el-form>
+        </el-tab-pane>
+        <el-tab-pane label="库龄档位规则" name="tiers">
+          <el-alert type="info" :closable="false" title="库龄起点 = 从该天数起，本行规则生效。折扣力度完全由库龄档位触发，每档只有一个折扣率。" />
+          <el-table :data="pricingDrawer.policies" size="small" border>
+            <el-table-column label="库龄起点" width="120">
+              <template #default="{ row }">
+                <el-input-number v-model="row.min_age_days" :min="0" :step="1" :precision="0" :controls="false" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="档位名" min-width="140">
+              <template #default="{ row }">
+                <el-input v-model="row.tier_label" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="折扣率" width="120">
+              <template #default="{ row }">
+                <div class="rate-cell"><el-input-number v-model="row.discount_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" /><span class="rate-suffix">%</span></div>
+              </template>
+            </el-table-column>
+            <el-table-column label="目标利润率" width="120">
+              <template #default="{ row }">
+                <div class="rate-cell"><el-input-number v-model="row.target_margin_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" /><span class="rate-suffix">%</span></div>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pricing-tier-hint">
+            最深档（120 天）的折扣率 30% 同时就是 SKU 资料页「滞销可优惠」列的清货极限。
+            改「库龄起点」= 改滞销阈值，保存时关旧档、开新档，历史留档。
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+      <template #footer>
+        <el-button @click="pricingDrawer.visible = false">取消</el-button>
+        <el-button v-if="pricingDrawer.tab === 'platform'" type="primary" :loading="saving" @click="savePlatformFeeRate">保存</el-button>
+        <el-button v-else type="primary" :loading="saving" @click="savePricingPolicies">保存</el-button>
+      </template>
     </el-drawer>
     <el-drawer
       v-model="batchDrawer.visible"
@@ -824,15 +886,35 @@ const operatingQuery = reactive({
   page: 1,
   page_size: 20,
 });
-const platformFeeDrawer = reactive({
+const pricingDrawer = reactive({
   visible: false,
+  tab: "platform",
   label: "",
   form: {
     default_fee_rate_pct: null,
+    default_creator_commission_rate_pct: null,
+    other_cost_rate_pct: null,
     fee_rate_effective_from: "",
     fee_rate_source: "",
     fee_rate_version: "",
   },
+  policies: [],
+});
+// 成本率合计 = 平台佣金率 + 默认达人佣金率 + 平台其他成本率（仅作成本结构展示）
+const costRateTotalPct = computed(() => {
+  const form = pricingDrawer.form;
+  const total = [form.default_fee_rate_pct, form.default_creator_commission_rate_pct, form.other_cost_rate_pct]
+    .map((value) => Number(value) || 0)
+    .reduce((sum, value) => sum + value, 0);
+  return total.toFixed(2);
+});
+// 默认底线基数 = 默认达人佣金率 + 平台其他成本率（平台佣金率已含在 other_cost_rate 内）
+const baseRatePct = computed(() => {
+  const form = pricingDrawer.form;
+  const total = [form.default_creator_commission_rate_pct, form.other_cost_rate_pct]
+    .map((value) => Number(value) || 0)
+    .reduce((sum, value) => sum + value, 0);
+  return total.toFixed(2);
 });
 const billStatus = ref("");
 const selectedPurchaseOrders = ref([]);
@@ -1200,7 +1282,23 @@ const loadOperatingDimensions = async () => {
     operatingDimensions.warehouses = [];
   }
 };
-const openPlatformFeeDrawer = () => {
+// 仓库统一错误信封：{"success": false, "error": {"code": ..., "detail": {...}}, "message": ...}
+// 顶层没有 detail 键；axios 响应拦截器（frontend/src/api/index.js）已把
+// responseData.error.detail 挂到 error.detail 上。
+const readApiErrorDetail = (error) => {
+  const raw =
+    error?.detail ??
+    error?.response?.data?.error?.detail ??
+    error?.response?.data?.detail;
+  return raw && typeof raw === "object" ? raw : null;
+};
+const openPlatformFeeDrawer = async (tab = "platform") => {
+  pricingDrawer.tab = tab;
+  if (tab === "tiers") {
+    await loadPricingPolicies();
+    pricingDrawer.visible = true;
+    return;
+  }
   const platform = operatingDimensions.platforms.find(
     (item) => item.platform_code === operatingQuery.platform_code,
   );
@@ -1208,31 +1306,78 @@ const openPlatformFeeDrawer = () => {
     ElMessage.warning("请先选择销售平台");
     return;
   }
-  platformFeeDrawer.label = platform.name || platform.platform_code;
-  platformFeeDrawer.form = {
+  pricingDrawer.label = platform.name || platform.platform_code;
+  pricingDrawer.form = {
     default_fee_rate_pct: toPercent(platform.default_fee_rate),
+    default_creator_commission_rate_pct: toPercent(platform.default_creator_commission_rate),
+    other_cost_rate_pct: toPercent(platform.other_cost_rate),
     fee_rate_effective_from: platform.fee_rate_effective_from || new Date().toISOString().slice(0, 10),
     fee_rate_source: platform.fee_rate_source || "manual",
     fee_rate_version: platform.fee_rate_version || "v1",
   };
-  platformFeeDrawer.visible = true;
+  pricingDrawer.visible = true;
+};
+const loadPricingPolicies = async () => {
+  try {
+    const rows = await productCenterApi.listCurrentSkuPricingPolicies();
+    pricingDrawer.policies = (rows || []).map((row) => ({
+      ...row,
+      discount_rate_pct: toPercent(row.discount_rate),
+      target_margin_rate_pct: toPercent(row.target_margin_rate),
+    }));
+  } catch (error) {
+    pricingDrawer.policies = [];
+    ElMessage.error(readApiErrorDetail(error)?.reason || error?.message || "加载库龄档位规则失败");
+  }
+};
+const savePricingPolicies = async () => {
+  saving.value = true;
+  try {
+    for (const row of pricingDrawer.policies) {
+      await productCenterApi.updateSkuPricingPolicy(row.min_age_days, {
+        min_age_days: row.min_age_days,
+        tier_label: row.tier_label,
+        discount_rate: fromPercent(row.discount_rate_pct, null),
+        target_margin_rate: fromPercent(row.target_margin_rate_pct, null),
+        platform_basis: row.platform_basis,
+        effective_from: row.effective_from,
+      });
+    }
+    await loadPricingPolicies();
+    await loadSkus();
+    ElMessage.success("库龄档位规则已保存");
+  } catch (error) {
+    const detail = readApiErrorDetail(error);
+    ElMessage.error(detail?.reason || error?.message || "保存库龄档位规则失败");
+  } finally {
+    saving.value = false;
+  }
 };
 const savePlatformFeeRate = async () => {
   const platformCode = operatingQuery.platform_code;
   if (!platformCode) return;
   saving.value = true;
   try {
-    const { default_fee_rate_pct, ...feePayload } = platformFeeDrawer.form;
+    const {
+      default_fee_rate_pct,
+      default_creator_commission_rate_pct,
+      other_cost_rate_pct,
+      ...feePayload
+    } = pricingDrawer.form;
     await productCenterApi.updatePlatformFeeRate(platformCode, {
       ...feePayload,
       default_fee_rate: fromPercent(default_fee_rate_pct, null),
+      default_creator_commission_rate: fromPercent(default_creator_commission_rate_pct, null),
+      other_cost_rate: fromPercent(other_cost_rate_pct, null),
     });
-    platformFeeDrawer.visible = false;
+    pricingDrawer.visible = false;
     await loadOperatingDimensions();
     await loadOperatingProfiles();
-    ElMessage.success("平台费率已保存");
+    await loadSkus();
+    ElMessage.success("平台成本率已保存");
   } catch (error) {
-    ElMessage.error(error.message || "保存平台费率失败");
+    const detail = readApiErrorDetail(error);
+    ElMessage.error(detail?.reason || error?.message || "保存平台成本率失败");
   } finally {
     saving.value = false;
   }
@@ -1961,6 +2106,32 @@ onMounted(async () => {
   border-radius: var(--el-border-radius-small);
   font-size: 12px;
   user-select: text;
+}
+/* --- SKU 定价底线 --- */
+.pricing-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pricing-cell-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pricing-tier-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+/* 利润测算页：预计售价低于最低售价时标红 */
+.price-below-floor :deep(.el-input__inner) {
+  border-color: var(--el-color-danger);
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+}
+.price-floor-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-color-danger);
 }
 .inline-numbers {
   display: flex;

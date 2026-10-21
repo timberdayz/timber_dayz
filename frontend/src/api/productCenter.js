@@ -224,4 +224,14 @@ export default {
   listPlatformSkuProfitEstimates(params = {}) {
     return api._get("/platform-sku-profit/estimates", { params });
   },
+  // --- SKU 定价纪律规则（库龄档位） ---
+  listSkuPricingPolicies(params = {}) {
+    return api._get("/sku-pricing-policies", { params });
+  },
+  listCurrentSkuPricingPolicies() {
+    return api._get("/sku-pricing-policies/current");
+  },
+  updateSkuPricingPolicy(minAgeDays, payload) {
+    return api._put(`/sku-pricing-policies/${minAgeDays}`, payload);
+  },
 };
