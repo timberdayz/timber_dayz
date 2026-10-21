@@ -255,7 +255,7 @@
           ><el-table-column label="参考售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="当前可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="滞销可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
-          ><el-table-column label="最低售价" width="230"><template #default="{ row }"><div class="pricing-cell"><div class="pricing-cell-head"><span class="readonly-cell">{{ money(row.min_selling_price) }}</span><el-tag size="small" :type="pricingSourceTagType(row.min_selling_price_source)" :title="PRICING_SOURCE_TOOLTIPS[row.min_selling_price_source]">{{ pricingSourceLabel(row.min_selling_price_source) }}</el-tag><el-button v-if="row.min_selling_price_is_override" link type="warning" @click="resetMinSellingPrice(row)">重置为自动值</el-button></div><el-input-number v-model="row.min_selling_price_override" :min="0.01" :precision="2" :controls="false" size="small" :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'" @change="markDirty('sku', row)" /><div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_age_days != null">（库龄 {{ row.pricing_age_days }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_age_data'" size="small" type="info">兜底</el-tag></div></div></template></el-table-column
+          ><el-table-column label="最低售价" width="230"><template #default="{ row }"><div class="pricing-cell"><div class="pricing-cell-head"><span class="readonly-cell" :class="{ 'pending-override': pendingOverride(row) != null }">{{ pendingOverride(row) != null ? `保存后生效：${money(pendingOverride(row))}` : money(row.min_selling_price) }}</span><el-tag v-if="pendingOverride(row) == null" size="small" :type="pricingSourceTagType(row.min_selling_price_source)" :title="PRICING_SOURCE_TOOLTIPS[row.min_selling_price_source]">{{ pricingSourceLabel(row.min_selling_price_source) }}</el-tag><el-button v-if="row.min_selling_price_is_override || row.min_selling_price_override != null" link type="warning" @click="resetMinSellingPrice(row)">重置为自动值</el-button></div><el-input-number v-model="row.min_selling_price_override" :min="0.01" :precision="2" :controls="false" size="small" :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'" @change="markDirty('sku', row)" /><div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_age_days != null">（库龄 {{ row.pricing_age_days }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_age_data'" size="small" type="info">兜底</el-tag></div></div></template></el-table-column
           ><el-table-column label="达人佣金率" width="125"><template #default="{ row }"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><div class="pricing-tier-hint">留空表示不单独设置，按平台默认计算</div></template></el-table-column
           ><el-table-column label="售价来源" width="120"><template #default="{ row }"><el-input v-model="row.selling_price_source" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="周转类型" width="120"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
@@ -1064,6 +1064,20 @@ const pricingSourceTagType = (source) =>
 const resetMinSellingPrice = (row) => {
   row.min_selling_price_override = null;
   markDirty("sku", row);
+};
+// 输入框里填了、但还没保存的覆盖值。
+// 只读值显示的是**服务端已保存**的生效值，运营在输入框里改完还没点保存时，
+// 上方那个数不会变——容易被误读成「我改了没生效」。
+// 这个函数把「待生效的覆盖值」挑出来，界面据此改成显示「保存后生效：¥X」。
+const pendingOverride = (row) => {
+  const typed = row.min_selling_price_override;
+  if (typed == null) return null;
+  // 之前没设过覆盖值 -> 现在填的是新增
+  if (!row.min_selling_price_is_override) return Number(typed);
+  // 之前设过覆盖值 -> 已保存的生效值就等于当时的覆盖值；与现在输入的不一致即为待生效
+  if (row.min_selling_price == null) return Number(typed);
+  if (Number(typed) !== Number(row.min_selling_price)) return Number(typed);
+  return null;
 };
 const addSpuRow = () => spus.value.unshift(blankSpu());
 const addSkuRow = () => skus.value.unshift(blankSku());
@@ -2195,6 +2209,12 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--el-text-color-secondary);
+}
+/* 输入框有未保存的覆盖值：只读值那一行标成「待生效」 */
+.readonly-cell.pending-override {
+  color: var(--el-color-warning);
+  border-color: var(--el-color-warning);
+  font-weight: 600;
 }
 /* 利润测算页：预计售价低于最低售价时标红 */
 .price-below-floor :deep(.el-input__inner) {

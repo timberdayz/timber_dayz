@@ -171,8 +171,7 @@ test("SKU 资料页展示定价底线四列", () => {
   assert.match(source, /row\.creator_commission_rate/);
 });
 
-test("SKU 保存剔除只读计算字段但保留可写字段", () => {
-  const section = source.slice(
+test("SKU 保存剔除只读计算字段但保留可写字段", () => {  const section = source.slice(
     source.indexOf("const payloadSku"),
     source.indexOf("const validateSpu"),
   );
@@ -182,6 +181,14 @@ test("SKU 保存剔除只读计算字段但保留可写字段", () => {
   assert.match(section, /delete payload\.creator_commission_rate_fallback/);
   assert.doesNotMatch(section, /delete payload\.min_selling_price_override/);
   assert.doesNotMatch(section, /delete payload\.creator_commission_rate;/);
+});
+
+test("最低售价在覆盖值未保存时提示「保存后生效」", () => {
+  // 只读值显示的是服务端已保存的生效值；运营改了输入框还没保存时，
+  // 必须明确提示「保存后生效」，否则会被误读成「改了没生效」
+  assert.match(source, /pendingOverride/);
+  assert.match(source, /保存后生效/);
+  assert.match(source, /pending-override/);
 });
 
 test("利润测算页展示最低售价并拦截低于底线的预计售价", () => {
