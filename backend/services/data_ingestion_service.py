@@ -1126,7 +1126,7 @@ class DataIngestionService:
                         source_table_name=source_table_name,
                         row_count=imported,
                     )
-                    event_listener.handle_data_ingested(event)
+                    await event_listener.handle_data_ingested_async(event)
                     logger.info(
                         f"[Ingest] 已触发DATA_INGESTED事件: domain={domain}, rows={imported}"
                     )

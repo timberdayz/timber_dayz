@@ -598,3 +598,96 @@ async def test_process_refresh_queue_task_marks_failed_on_exception(monkeypatch)
     assert calls[1][0] == "failed"
     assert calls[1][1] == 7
     assert "boom" in calls[1][2]
+
+
+@pytest.mark.asyncio
+async def test_process_refresh_queue_task_syncs_inventory_skus_before_age_refresh(monkeypatch):
+    """inventory 域刷新必须先同步 SKU 身份,再刷库龄。
+
+    少了 sync_inventory_skus,core.bridge_erp_sku_keys 就不会有 miaoshou 源的别名,
+    商品中心的 sku_id 映射与最低售价都会缺料。
+    """
+    from backend.tasks import refresh_queue_tasks as task_module
+
+    calls = []
+
+    class _FakeTask:
+        id = 20
+        job_id = "job-20"
+        trigger_type = "data_ingested"
+        pipeline_name = "data_ingested_refresh"
+        targets_json = ["api.clearance_ranking_module"]
+        context_json = {"file_id": 2764, "data_domain": "inventory"}
+
+    class _FakeSession:
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+        async def close(self):
+            return None
+
+    class _FakeQueueService:
+        def __init__(self, db):
+            self.db = db
+
+        async def recover_stale_running_tasks(self, timeout_seconds: int):
+            return 0
+
+        async def claim_next_refresh_task(self):
+            return _FakeTask()
+
+        async def mark_completed(self, task_id: int):
+            calls.append(("completed", task_id))
+
+        async def mark_failed(self, task_id: int, error_message: str):
+            calls.append(("failed", task_id, error_message))
+
+    class _FakeCacheService:
+        async def invalidate_dashboard_business_overview(self):
+            return 0
+
+        async def invalidate(self, cache_type):
+            return 0
+
+    class _FakeAgeRefreshService:
+        def __init__(self, db):
+            self.db = db
+
+        async def refresh(self, force_full: bool = False):
+            calls.append("age_refresh")
+            return {"mode": "incremental"}
+
+    async def _fake_execute_refresh_plan(*args, **kwargs):
+        calls.append("execute")
+        return {"run_id": "run-20", "status": "success", "failed_targets": []}
+
+    async def _fake_sync_inventory_skus(db, *, source_file_id=None):
+        calls.append(("sync_skus", source_file_id))
+        return 1122
+
+    async def _fake_validate_refresh_result(*args, **kwargs):
+        class _Report:
+            def is_success(self):
+                return True
+
+        return _Report()
+
+    monkeypatch.setattr(task_module, "AsyncSessionLocal", lambda: _FakeSession(), raising=False)
+    monkeypatch.setattr(task_module, "RefreshQueueService", _FakeQueueService, raising=False)
+    monkeypatch.setattr(task_module, "execute_refresh_plan", _fake_execute_refresh_plan, raising=False)
+    monkeypatch.setattr(task_module, "sync_inventory_skus", _fake_sync_inventory_skus, raising=False)
+    monkeypatch.setattr(task_module, "InventoryAgeRefreshService", _FakeAgeRefreshService, raising=False)
+    monkeypatch.setattr(task_module, "validate_refresh_result", _fake_validate_refresh_result, raising=False)
+    monkeypatch.setattr(task_module, "get_cache_service", lambda: _FakeCacheService(), raising=False)
+
+    result = await task_module._async_process_refresh_queue_task()
+
+    assert result["status"] == "success"
+    assert ("sync_skus", 2764) in calls
+    assert "age_refresh" in calls
+    # 顺序:先同步 SKU 身份,再刷库龄
+    assert calls.index(("sync_skus", 2764)) < calls.index("age_refresh")
+

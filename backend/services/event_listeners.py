@@ -195,26 +195,49 @@ class EventListener:
         return db, service
 
     @staticmethod
-    def handle_data_ingested(event: DataIngestedEvent) -> dict | None:
+    async def handle_data_ingested_async(event: DataIngestedEvent) -> dict | None:
+        """DATA_INGESTED 的生产入口:先把 PostgreSQL 刷新入队落库,再做同步派发。
+
+        入队必须在这里 await 完成 —— 早先用 ``asyncio.create_task`` 把入队排进事件循环,
+        而调用方跑在 Celery worker 的 ``asyncio.run(...)`` 里,收尾时会把尚未完成的 task
+        取消掉。结果是刷新从未真正入队,``mart.inventory_age_current`` 一直是空的。
+        """
+        try:
+            await enqueue_refresh_for_data_ingested_event(event)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[EventListener] DATA_INGESTED PostgreSQL refresh enqueue failed: %s",
+                exc,
+                exc_info=True,
+            )
+        return EventListener.handle_data_ingested(event, enqueue_refresh=False)
+
+    @staticmethod
+    def handle_data_ingested(
+        event: DataIngestedEvent,
+        *,
+        enqueue_refresh: bool = True,
+    ) -> dict | None:
         logger.info(
             "[EventListener] Received DATA_INGESTED event: "
             f"file_id={event.file_id}, domain={event.data_domain}, granularity={event.granularity}, "
             f"rows={event.row_count}, source_table={event.source_table_name}"
         )
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            logger.info(
-                "[EventListener] No running event loop; skip inline PostgreSQL refresh scheduling: "
-                f"file_id={event.file_id}"
-            )
-        else:
-            task = asyncio.create_task(enqueue_refresh_for_data_ingested_event(event))
-            logger.info(
-                "[EventListener] PostgreSQL refresh enqueue task scheduled: "
-                f"file_id={event.file_id}, task={task!r}"
-            )
+        if enqueue_refresh:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                # 没有事件循环:就地跑完一次入队,保证刷新不会丢
+                asyncio.run(enqueue_refresh_for_data_ingested_event(event))
+            else:
+                # 有事件循环时只能尽力而为:调用方若是 asyncio.run(...),
+                # 收尾时未完成的 task 会被取消。生产路径请走 handle_data_ingested_async。
+                task = asyncio.create_task(enqueue_refresh_for_data_ingested_event(event))
+                logger.info(
+                    "[EventListener] PostgreSQL refresh enqueue task scheduled: "
+                    f"file_id={event.file_id}, task={task!r}"
+                )
 
         if event.source_table_name:
             try:

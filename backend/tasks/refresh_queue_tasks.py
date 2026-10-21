@@ -16,6 +16,7 @@ from backend.services.data_pipeline.refresh_validation import (
     RefreshValidationReport,
     validate_refresh_result,
 )
+from backend.services.product_center_service import sync_inventory_skus
 from backend.services.data_pipeline.refresh_runner import (
     execute_refresh_plan,
     extract_failed_targets,
@@ -195,6 +196,8 @@ async def _async_process_refresh_queue_task() -> dict:
             refresh_status = extract_refresh_status(refresh_result)
             failed_targets = extract_failed_targets(refresh_result)
             if (task.context_json or {}).get("data_domain") == "inventory":
+                # 先同步 SKU 身份(miaoshou 别名桥),库龄刷新才拿得到 sku_id 映射
+                await sync_inventory_skus(db, source_file_id=context.get("file_id"))
                 await InventoryAgeRefreshService(db).refresh(force_full=False)
             if hasattr(db, "commit"):
                 await db.commit()

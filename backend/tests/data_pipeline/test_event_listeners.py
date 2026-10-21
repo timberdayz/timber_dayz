@@ -10,26 +10,16 @@ async def test_data_ingested_event_triggers_postgresql_refresh_enqueue(monkeypat
     from backend.services.event_listeners import event_listener
 
     captured = {}
-    scheduled = {}
+    completed = {}
 
-    def _fake_enqueue_refresh(event):
+    async def _fake_enqueue_refresh(event):
         captured["event"] = event
-        async def _noop():
-            return None
-        return _noop()
-
-    def _fake_create_task(coro):
-        scheduled["coro"] = coro
-        coro.close()
-        return "task-created"
+        completed["done"] = True
+        return "refresh-job-1"
 
     monkeypatch.setattr(
         "backend.services.event_listeners.enqueue_refresh_for_data_ingested_event",
         _fake_enqueue_refresh,
-    )
-    monkeypatch.setattr(
-        "backend.services.event_listeners.asyncio.create_task",
-        _fake_create_task,
     )
 
     event = DataIngestedEvent(
@@ -40,10 +30,39 @@ async def test_data_ingested_event_triggers_postgresql_refresh_enqueue(monkeypat
         row_count=10,
     )
 
-    event_listener.handle_data_ingested(event)
+    await event_listener.handle_data_ingested_async(event)
 
-    assert scheduled["coro"] is not None
+    # 入队必须被 await 到完成:早先用 create_task 排进事件循环,调用方
+    # asyncio.run(...) 收尾时会把未完成的 task 取消,刷新从未真正入队。
+    assert completed.get("done") is True
     assert captured["event"] == event
+
+
+@pytest.mark.asyncio
+async def test_data_ingested_enqueue_failure_does_not_break_dispatch(monkeypatch):
+    """入队失败只告警,不能把整个 DATA_INGESTED 派发打断。"""
+    from backend.services.event_listeners import event_listener
+
+    async def _fake_enqueue_refresh(event):
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr(
+        "backend.services.event_listeners.enqueue_refresh_for_data_ingested_event",
+        _fake_enqueue_refresh,
+    )
+
+    event = DataIngestedEvent(
+        file_id=2,
+        platform_code="shopee",
+        data_domain="orders",
+        granularity="daily",
+        row_count=10,
+    )
+
+    result = await event_listener.handle_data_ingested_async(event)
+
+    # source_table_name 为空 -> 没有云同步分支, 返回 None
+    assert result is None
 
 
 @pytest.mark.asyncio
