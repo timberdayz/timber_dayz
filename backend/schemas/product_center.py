@@ -106,6 +106,8 @@ class SkuBulkItem(BaseModel):
     selling_price_source: Optional[str] = Field(default=None, max_length=64)
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
+    creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    min_selling_price_override: Optional[float] = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def cny_only(self):
@@ -186,6 +188,8 @@ class SkuCreateRequest(BaseModel):
     selling_price_source: Optional[str] = Field(default=None, max_length=64)
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
+    creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    min_selling_price_override: Optional[float] = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def cny_only(self):
@@ -214,6 +218,8 @@ class SkuUpdateRequest(BaseModel):
     selling_price_source: Optional[str] = Field(default=None, max_length=64)
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
+    creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    min_selling_price_override: Optional[float] = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def cny_only(self):
@@ -270,6 +276,19 @@ class ProductCenterItem(BaseModel):
     actual_storage_cost: Optional[float] = None
     data_completeness: Optional[str] = None
     updated_at: Optional[datetime] = None
+    # --- SKU 定价底线（全部 Optional：ProductCenterItem 会被用于校验裸 ORM 行）---
+    creator_commission_rate: Optional[float] = None
+    creator_commission_rate_fallback: Optional[float] = None
+    current_discount_rate: Optional[float] = None
+    clearance_max_discount_rate: Optional[float] = None
+    min_selling_price: Optional[float] = None
+    min_selling_price_source: Optional[str] = None
+    min_selling_price_is_override: Optional[bool] = None
+    min_selling_price_override: Optional[float] = None
+    min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
+    pricing_tier_label: Optional[str] = None
+    pricing_age_days: Optional[int] = None
+    pricing_tier_source: Optional[str] = None
 
 
 class ProductCenterListResponse(BaseModel):
@@ -325,6 +344,9 @@ class PlatformFeeRateUpdateRequest(BaseModel):
     fee_rate_effective_from: date = Field(default_factory=date.today)
     fee_rate_source: Optional[str] = Field(default=None, max_length=128)
     fee_rate_version: Optional[str] = Field(default=None, max_length=64)
+    # 平台成本率：底线计算的成本基数来源
+    default_creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    other_cost_rate: Optional[float] = Field(default=None, ge=0, lt=1)
 
 
 class WarehouseStorageRuleCreateRequest(BaseModel):
@@ -686,6 +708,8 @@ class SkuOperatingPlatformOption(BaseModel):
     fee_rate_effective_from: Optional[date] = None
     fee_rate_source: Optional[str] = None
     fee_rate_version: Optional[str] = None
+    default_creator_commission_rate: Optional[float] = None
+    other_cost_rate: Optional[float] = None
 
 
 class SkuOperatingDimensionsResponse(BaseModel):
@@ -790,6 +814,22 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     reference_storage_missing_reasons: list[str] = Field(default_factory=list)
     preview: Optional[dict] = None
     currency: str = "CNY"
+    # --- SKU 定价底线 ---
+    # ⚠️ 该模型被候选接口当作 response_model，Pydantic v2 默认 extra='ignore'：
+    # 路由返回的字典里没在这里声明的字段，**序列化时会被全部丢弃**。
+    creator_commission_rate: Optional[float] = None
+    creator_commission_rate_fallback: Optional[float] = None
+    current_discount_rate: Optional[float] = None
+    clearance_max_discount_rate: Optional[float] = None
+    min_selling_price: Optional[float] = None
+    min_selling_price_source: Optional[str] = None
+    min_selling_price_is_override: Optional[bool] = None
+    min_selling_price_override: Optional[float] = None
+    min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
+    pricing_tier_label: Optional[str] = None
+    pricing_age_days: Optional[int] = None
+    pricing_tier_source: Optional[str] = None
+    min_selling_price_below: Optional[bool] = None
 
 
 class PlatformSkuProfitCandidatePageResponse(BaseModel):
@@ -1006,3 +1046,51 @@ class SkuRestoreResponse(BaseModel):
     restored_bindings: int
     restored_at: datetime
     audit_recorded: bool = True
+
+
+class SkuPricingPolicyBase(BaseModel):
+    """库龄档位定价纪律规则（公司级）。"""
+
+    tier_label: str = Field(min_length=1, max_length=32)
+    discount_rate: float = Field(ge=0, le=1)
+    target_margin_rate: float = Field(ge=0, lt=1)
+    platform_basis: str = Field(min_length=1, max_length=32)
+    effective_from: date
+    status: str = Field(default="active", pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
+
+
+class SkuPricingPolicyCreateRequest(SkuPricingPolicyBase):
+    min_age_days: int = Field(ge=0)
+
+
+class SkuPricingPolicyUpdateRequest(BaseModel):
+    """更新档位规则。
+
+    ⚠️ **刻意不含 `status`**：当前行谓词是
+    `status='active' AND effective_to IS NULL`，一旦把当前行直接置成 `inactive`，
+    这个库龄档位就会从「当前生效规则」里消失——等于**静默删掉一档**，
+    且规则集合变空后所有 SKU 一起掉进 `missing_pricing_policy`、最低售价算不出来。
+    停用请走版本化路径（`PUT` 改 `effective_from` → 关旧行 + 建新行），
+    那条路径由 `resolve_policy_update` 统一裁决。
+    """
+
+    tier_label: str = Field(min_length=1, max_length=32)
+    discount_rate: float = Field(ge=0, le=1)
+    target_margin_rate: float = Field(ge=0, lt=1)
+    platform_basis: str = Field(min_length=1, max_length=32)
+    effective_from: date
+    min_age_days: int = Field(ge=0)
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
+
+
+class SkuPricingPolicyResponse(SkuPricingPolicyBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    policy_id: int
+    min_age_days: int
+    effective_to: Optional[date] = None

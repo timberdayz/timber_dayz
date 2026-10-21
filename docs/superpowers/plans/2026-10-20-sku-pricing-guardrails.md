@@ -38,6 +38,25 @@ assert.doesNotMatch(operatingSection, /preview:\s*null/);
 
 在 Task 10 修好之前，前端相关的每个 Task 的「Run test」步骤都必须**只统计本任务新增的用例**，不要把这条既有失败算到自己头上。
 
+### 0.1b 已知既有红测试（后端，与本次无关）
+
+`backend/tests/test_platform_sku_profit_workbench.py` 有 **3 条**用例在本次开工前就已经是红的：
+
+```
+test_expected_profit_uses_ad_rate_and_ignores_competitor_price
+test_actual_recost_falls_back_to_expected_storage_and_is_mixed
+test_recost_without_any_actual_cost_has_no_cost_variance
+```
+
+症状：`build_platform_profit_preview(...)` 返回的 `expected["ad_cost"]` 是 `None`，断言期望 `Decimal("9.00")`。
+
+根因在 `backend/services/product_profit_service.py` 的 `build_platform_profit_preview`，
+该文件最近一次改动是 `1fad5356`（早于本计划），**与本次定价底线无关**。
+
+验证方式：把这两个文件 checkout 到本计划开工前的基线 `0bdd02a6`，三条同样红。
+**不要**把它算到 Task 1–9 头上，也不要在本次顺手去修（那是另一个功能的缺陷）。
+Task 10 的全量验证时，这 3 条应与现状一致（仍然红、数量不变）。
+
 ### 0.2 两项待业务确认的数值（Task 1 需落库，先按下列初值，可后续在定价设置抽屉改）
 
 | 项 | 初值 | 状态 |
