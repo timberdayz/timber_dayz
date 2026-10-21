@@ -3520,6 +3520,11 @@ git commit -m "docs:记录定价底线交付后的库龄兜底实况"
 
 ## 附：给后续任务（不属本计划）的移交说明
 
+> 📌 **库龄管道修复已有独立 spec，优先读它**：
+> `docs/superpowers/specs/2026-10-21-inventory-aging-pipeline-recovery-design.md`
+> （含 2026-10-21 实测的断点定位、修复步骤、10 条验收断言）。
+> 下面 5 条是该 spec 的结论摘要，**以 spec 为准**。
+
 库龄管道修复（独立 spec / 独立计划）需要处理：
 
 1. `b_class.fact_*_inventory_snapshot` 三张表 0 行 —— 采集层 2026-09 重写为 V2 canonical（`modules/platforms/miaoshou/components/inventory_export.py` + `DATA_DOMAIN_EXPORT_MAP["miaoshou"]["inventory"]`）后，同步层未同步（该次 spec 非范围明确写了「不改同步层、不改 SQL 三层」）
@@ -3527,3 +3532,18 @@ git commit -m "docs:记录定价底线交付后的库龄兜底实况"
 3. `core.staging_inventory` 的 80280 行是 2025-11-17~22 的一次性历史导入（`scripts/migrate_miaoshou_to_inventory_domain.py` 的数据域改名迁移产物），不是持续采集
 4. 管道修通后必须补的验收断言：**tiktok / shopee 的库存行必须带 `商品SKU`**，否则 `mart.inventory_age_current.product_sku` 为 NULL，该平台库龄对商品中心的 join 永远匹配不上
 5. 库龄匹配率基线：`mart.inventory_age_current.product_sku` → `core.dim_erp_sku.sku_key` 实测 1080/1094（98.72%），无一对多
+
+> ⚠️ **本节第 1、2 条是 2026-10-20 的早期判断，2026-10-21 复测后已纠正**：
+> - 「同步层未同步」**不成立**：`semantic.fact_inventory_snapshot` 是**视图**，直接 UNION 读
+>   b_class 三张快照表，**没有"同步层"这一环**；
+>   `data_ingestion_service.py` 里的 `stage_*` / `upsert_*` 全是**死导入**（旧链路遗留），
+>   当前链路走 `raw_data_importer` + `platform_table_manager` 直写 b_class。
+> - **真实断点**（2026-10-21 实测）：采集**跑过**（2026-09-14 任务 622 completed，产出 1 个文件），
+>   但两个 inventory 文件都卡在 `public.catalog_files`：
+>   ① 一个 `template_update_required`（published 模板 309 是 2026-06-01 的 25 列，
+>   2026-09-15 采集表头 28 列 → 新增 3 字段，匹配率 89.3%，治理判定 `breaking_drift`）；
+>   ② 一个 `processing`（自动入库任务超时回退）；
+>   ③ 另外 `collection_configs.id=30` 的 `schedule_enabled=false`，定时采集没开。
+> - 另：`core.staging_inventory` 那 80280 行是 **2025-11 一次性导入且键名是英文
+>   （`product_sku`/`total_stock`/`price`）**，与当前 `semantic` 视图的映射清单对不上，
+>   **灌进去会算出 0 库存 0 价值**，只能用来测 join 命中率，不能当库龄数据源。
