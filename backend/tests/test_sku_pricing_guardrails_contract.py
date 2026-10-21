@@ -55,6 +55,33 @@ def test_migration_is_idempotent_guarded():
         assert f"def {guard}" in source, guard
 
 
+def test_migration_module_imports_and_defines_its_constants():
+    """**真导入**迁移模块并校验常量。
+
+    纯源码 grep 抓不到「用了没定义的常量」这类真崩——
+    计划里的迁移块就曾引用了未定义的 POLICY_SOURCE，
+    而 grep 型契约测试照样 3 passed（假绿）。
+    导入一次模块 + 断言常量存在，成本极低但能挡住这类问题。
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("pricing_guardrails_migration", MIGRATION)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.revision == "current_schema_20261020_sku_pricing_guardrails"
+    assert module.down_revision == "current_schema_20260921_warehouse_storage_label_fee"
+    assert module.POLICY_SOURCE == "industry_benchmark_2026"
+    assert module.POLICY_VERSION == "v1"
+    assert len(module.POLICY_ROWS) == 4
+    assert {row[0] for row in module.POLICY_ROWS} == {0, 60, 90, 120}
+    assert set(module.PLATFORM_COST_RATES) == {"tiktok", "shopee"}
+    for values in module.PLATFORM_COST_RATES.values():
+        assert set(values) == {
+            "default_fee_rate", "default_creator_commission_rate", "other_cost_rate",
+        }
+
+
 def test_orm_exposes_pricing_columns_and_policy_table():
     from modules.core.db import DimErpSku, DimPlatform, SkuPricingPolicy
 

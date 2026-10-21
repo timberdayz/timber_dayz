@@ -261,6 +261,10 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
         default_fee_rate=0.0737,
         default_creator_commission_rate=0.0606,
         other_cost_rate=0.2727,
+        # 刻意给一个**非今日**的生效日期：用来验证「部分更新」不会把它刷成当天
+        fee_rate_effective_from=date(2026, 9, 1),
+        fee_rate_source="test_seed",
+        fee_rate_version="v0",
     ))
     await pg_session.flush()
 

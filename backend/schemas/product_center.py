@@ -349,6 +349,24 @@ class PlatformFeeRateUpdateRequest(BaseModel):
     other_cost_rate: Optional[float] = Field(default=None, ge=0, lt=1)
 
 
+class PlatformFeeRateResponse(BaseModel):
+    """平台成本率的读取形状（与 `PlatformFeeRateUpdateRequest` 对应）。
+
+    声明 response_model 的意义：端点返回的字段集合被钉死，
+    避免「加字段忘了加契约 → 前端永远拿到 null」。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    platform_code: str
+    default_fee_rate: Optional[float] = None
+    default_creator_commission_rate: Optional[float] = None
+    other_cost_rate: Optional[float] = None
+    fee_rate_effective_from: Optional[date] = None
+    fee_rate_source: Optional[str] = None
+    fee_rate_version: Optional[str] = None
+
+
 class WarehouseStorageRuleCreateRequest(BaseModel):
     warehouse_code: str = Field(min_length=1, max_length=128)
     unit_rate_cny: float = Field(ge=0)

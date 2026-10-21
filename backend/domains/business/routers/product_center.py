@@ -36,6 +36,7 @@ from backend.schemas.product_center import (
     ProductWarehouseCreateRequest,
     ProductWarehouseUpdateRequest,
     PlatformFeeRateUpdateRequest,
+    PlatformFeeRateResponse,
     PlatformSkuProfitCandidateResponse,
     PlatformSkuProfitCandidatePageResponse,
     PlatformSkuProfitEstimateRequest,
@@ -116,11 +117,13 @@ from backend.services.product_pricing_service import (
     resolve_policy_update,
     select_age_tier,
 )
-from backend.utils.exceptions import BusinessValidationError
+from backend.utils.exceptions import BusinessValidationError, ConflictError
+from modules.core.logger import get_logger
 from backend.services.feishu_projection_client import FeishuProjectionClient
 from backend.services.feishu_projection_service import FeishuProjectionService, trigger_pending_projection_delivery
 
 router = APIRouter(tags=["商品中心"], dependencies=[Depends(get_current_user)])
+logger = get_logger(__name__)
 _EDITOR_ROLES = {"admin", "manager", "finance", "operator"}
 
 
@@ -1209,8 +1212,11 @@ async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[in
                 _AGE_LOOKUP_STMT,
                 {"keys": list(key_to_sku)},
             )).all()
-    except Exception:
-        # 保存点回滚后外层事务仍可用：按无库龄处理，回落「日常」档
+    except Exception as exc:
+        # 保存点回滚后外层事务仍可用：按无库龄处理，回落「日常」档。
+        # ⚠️ 必须留日志：表不存在、列改名、权限不足、SQL 拼错、类型推断失败
+        # 全部退化成同一种「无库龄数据」，不记日志的话，库龄管道坏了运维无从发现。
+        logger.warning("pricing age lookup failed, falling back to the base tier: %s", exc)
         return {}
     return {key_to_sku[row.product_sku]: row.age_days for row in age_rows if row.product_sku in key_to_sku}
 
@@ -2210,14 +2216,26 @@ async def create_sku_pricing_policy(
         )
     )).scalars().first()
     if existing is not None:
-        raise HTTPException(status_code=409, detail="a current policy already exists for this age tier")
+        raise ConflictError(
+            message="该库龄档位已有生效规则，请先修改现有规则",
+            detail={
+                "code": "pricing_policy_tier_exists",
+                "reason": "该库龄档位已有生效规则，请先修改现有规则",
+            },
+        )
     row = SkuPricingPolicy(**body.model_dump())
     db.add(row)
     try:
         await db.flush()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="pricing policy conflicts with an existing row") from exc
+        raise ConflictError(
+            message="该库龄起点已被其它档位占用，请改用空闲起点",
+            detail={
+                "code": "pricing_policy_conflict",
+                "reason": "该库龄起点已被其它档位占用，请改用空闲起点",
+            },
+        ) from exc
     await _write_product_center_audit(
         db, _user, action_type="create", resource_type="sku_pricing_policy",
         resource_id=str(row.policy_id), changes=body.model_dump(mode="json"),
@@ -2292,7 +2310,15 @@ async def update_sku_pricing_policy(
         await db.flush()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="pricing policy conflicts with an existing row") from exc
+        # 409 也走 ConflictError：全局异常处理器会把 HTTPException 的 detail
+        # 拍平成字符串，前端就拿不到结构化的 code / reason 了
+        raise ConflictError(
+            message="该库龄起点已被其它档位占用，请改用空闲起点",
+            detail={
+                "code": "pricing_policy_conflict",
+                "reason": "该库龄起点已被其它档位占用，请改用空闲起点",
+            },
+        ) from exc
     await _write_product_center_audit(
         db, _user, action_type=action, resource_type="sku_pricing_policy",
         resource_id=str(row.policy_id), changes=body.model_dump(mode="json"),
@@ -2302,7 +2328,7 @@ async def update_sku_pricing_policy(
     return SkuPricingPolicyResponse.model_validate(row)
 
 
-@router.patch("/api/platforms/{platform_code}/fee-rate")
+@router.patch("/api/platforms/{platform_code}/fee-rate", response_model=PlatformFeeRateResponse)
 async def update_platform_fee_rate(platform_code: str, body: PlatformFeeRateUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_platform_fee_editor)):
     row = await db.get(DimPlatform, platform_code)
     if row is None:

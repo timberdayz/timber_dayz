@@ -324,6 +324,8 @@ def test_sku_pricing_missing_policy_reports_unavailable():
     assert out["min_selling_price"] is None
     assert out["min_selling_price_source"] == "unavailable"
     assert "missing_pricing_policy" in out["min_selling_price_missing_reasons"]
+    # 两条线都算不出时还会带上 no_pricing_input（compute_min_selling_price 的原因）
+    assert "no_pricing_input" in out["min_selling_price_missing_reasons"]
 
 
 def test_sku_pricing_missing_platform_cost_rate_reports_reason():
@@ -569,6 +571,8 @@ async def test_platform_fee_rate_partial_update_keeps_other_fields(
     assert body["other_cost_rate"] == pytest.approx(0.2727)
     assert body["fee_rate_source"] == "b_class_measured_2026_01_07"
     assert body["fee_rate_version"] == "v2"
+    # 生效日期也不得被刷成当天（seed 刻意给的是 2026-09-01）
+    assert body["fee_rate_effective_from"] == "2026-09-01"
 
 
 @pytest.mark.asyncio
