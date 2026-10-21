@@ -762,12 +762,20 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 | `min_selling_price` | 该 SKU 的全局最低售价（SKU 资料页同一个数） |
 | `min_selling_price_source` | 来源标记 |
 | `min_selling_price_is_override` | 是否人工覆盖 |
+| `creator_commission_rate` | **SKU 自己**的达人佣金率；未单独设置时为 `null`（前端输入框留空 = 按平台默认） |
+| `creator_commission_rate_fallback` | `platform_basis` 平台的默认达人佣金率，**仅供展示**（前端输入框 placeholder），不参与计算 |
 | `current_discount_rate` | 当前库龄档位的折扣率 |
 | `clearance_max_discount_rate` | 清货极限折扣率（= 30%） |
 | `pricing_tier_label` | 命中的库龄档位名 |
 | `pricing_age_days` | 该 SKU 当前库龄天数 |
 | `pricing_tier_source` | `age_data` / `fallback_no_age_data`（利润 tab 据此显示「兜底」提示） |
 | `min_selling_price_below` | `expected_selling_price < min_selling_price` 时为 `True` |
+
+> `creator_commission_rate` 与 `creator_commission_rate_fallback` **必须是两个字段**：
+> 前者恒为 SKU 自己的值（没设就是 `null`），
+> 后者恒为平台默认值（SKU 设了 15% 时兜底值仍是 6.06%）。
+> 只回一个的话，要么前端输入框被回填成平台值（运营以为已经单独设置过），
+> 要么 placeholder 提示不出该填多少。
 
 `GET /api/platform-sku-profit/candidates` 是**按平台+仓库+运输方式**筛选的，但返回的 `min_selling_price` 是**SKU 全局底线**（按 `platform_basis` 的 tiktok 口径计算，与该行的平台/仓库/运输方式无关）。响应中应明确这一点，避免使用者误以为它随所选平台变化。
 

@@ -1052,9 +1052,18 @@ def compute_sku_pricing(
     )
     all_reasons = list(dict.fromkeys(pricing["missing_reasons"] + missing_reasons))
     sku_creator_rate = _decimal(creator_commission_rate)
+    platform_creator_rate = _decimal(platform_creator_commission_rate)
     override = _decimal(min_selling_price_override)
     return {
         "creator_commission_rate": float(sku_creator_rate) if sku_creator_rate is not None else None,
+        # 平台兜底值：前端要用它做「达人佣金率」输入框的 placeholder
+        # （spec §5.4：留空 = 未单独设置 = 按平台默认计算，输入框要提示兜底值）。
+        # 它**不是** SKU 的值，不参与任何计算，只用于展示；
+        # 注意取的是**平台默认值本身**，不是解析后的 creator_rate
+        #（SKU 自己设了 15% 时，兜底值仍是平台的 6.06%）。
+        "creator_commission_rate_fallback": (
+            float(platform_creator_rate) if platform_creator_rate is not None else None
+        ),
         "current_discount_rate": float(policy["discount_rate"]) if policy else None,
         "clearance_max_discount_rate": (
             float(deepest_policy["discount_rate"]) if deepest_policy else None
@@ -1177,6 +1186,7 @@ def test_product_center_item_exposes_pricing_fields_as_optional():
     fields = ProductCenterItem.model_fields
     for name in (
         "creator_commission_rate",
+        "creator_commission_rate_fallback",
         "current_discount_rate",
         "clearance_max_discount_rate",
         "min_selling_price",
@@ -1230,6 +1240,7 @@ def test_profit_candidate_response_exposes_pricing_fields():
     fields = PlatformSkuProfitCandidateResponse.model_fields
     for name in (
         "creator_commission_rate",
+        "creator_commission_rate_fallback",
         "current_discount_rate",
         "clearance_max_discount_rate",
         "min_selling_price",
@@ -1299,6 +1310,7 @@ Expected: FAIL with `ImportError` / `AssertionError` — 新字段与模型不�
 ```python
 # ProductCenterItem 内追加（全部 Optional，带默认值）
 creator_commission_rate: Optional[float] = None
+creator_commission_rate_fallback: Optional[float] = None
 current_discount_rate: Optional[float] = None
 clearance_max_discount_rate: Optional[float] = None
 min_selling_price: Optional[float] = None
@@ -1330,6 +1342,7 @@ other_cost_rate: Optional[float] = None
 
 # PlatformSkuProfitCandidateResponse 内追加（⚠️ 见下方警示）
 creator_commission_rate: Optional[float] = None
+creator_commission_rate_fallback: Optional[float] = None
 current_discount_rate: Optional[float] = None
 clearance_max_discount_rate: Optional[float] = None
 min_selling_price: Optional[float] = None
@@ -1831,11 +1844,14 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
 ```
 
 > **这套 seed 的期望数值**（可直接写进断言）：
-> - 成本线 = 10 ÷ (1 − 0.2727 − 0.0606 − 0.0467 − 0.0158 − 0.25) = 10 ÷ 0.3542 = **28.23**
+> - 底线基数 = **0.3333**（= 0.0606 达人佣金 + 0.2727 平台其他成本；平台佣金率已含在 other_cost_rate 内，不重复计入）
+> - 分母 = 1 − 0.3333 − 0.0467(SPU退货) − 0.0158(SPU货损) − 0.25(日常档目标利润率) = **0.3542**
+> - 成本线 = 10 ÷ 0.3542 = **28.23**
 > - 纪律线 = 30 × (1 − 0.10) = **27.00**
 > - 最低售价 = max(28.23, 27.00) = **28.23**（来源 `cost_floor`）
 > - `expected_selling_price = 0.01` → 低于底线 → 护栏 422
 > - `expected_selling_price = 35` → 高于底线 → 201（实测 `expected.profit = 16.69`）
+> - 达人佣金率改 15% → 底线基数 0.2727 + 0.15 = 0.4227，分母 0.2648，底线 = 10 ÷ 0.2648 = **37.76**
 > - 库龄表 `mart.inventory_age_current` 在测试库里不存在 →
 >   `pricing_tier_source='fallback_no_age_data'`、`pricing_age_days=None`、档位取「日常」
 >
@@ -2110,6 +2126,8 @@ def test_list_skus_injects_pricing_payload():
         "pricing_tier_label",
         "pricing_age_days",
         "pricing_tier_source",
+        "creator_commission_rate",
+        "creator_commission_rate_fallback",
     ):
         assert name in source, name
 ```
@@ -2695,6 +2713,14 @@ test("抽屉保存失败时读结构化错误原因而不是带错误码前缀�
   assert.match(source, /readApiErrorDetail/);
   assert.match(source, /detail\?\.reason/);
 });
+
+test("定价设置抽屉区分「成本率合计」与「底线基数」", () => {
+  // 成本率合计（40.70%）只是成本结构展示，底线基数是 33.33%（默认达人佣金 + 平台其他成本）
+  assert.match(source, /成本率合计/);
+  assert.match(source, /底线基数/);
+  // 必须带上「SKU 未单独设置达人佣金率时」这个限定语
+  assert.match(source, /未单独设置/);
+});
 ```
 
 > **这三条断言在 Task 7 内必须可达。** 抽屉的两个子 Tab 分别是「平台成本率」和「库龄档位规则」，
@@ -2742,6 +2768,17 @@ Expected: 新增两条 FAIL（既有那条 `preview:\s*null` 的失败与本任�
 
 1. 现有 `platformFeeDrawer` 改名 `pricingDrawer`，`title="定价设置"`，`size="720px"`，内含两个 `el-tab-pane`：
    - `平台成本率`：现有字段 + `默认达人佣金率`（`default_creator_commission_rate`）+ `平台其他成本率`（`other_cost_rate`）+ 只读「成本率合计」
+     - **「成本率合计」= 平台佣金率 + 默认达人佣金率 + 平台其他成本率**（TikTok = 7.37% + 6.06% + 27.27% = **40.70%**），
+       **仅作成本结构展示，不是底线基数**
+     - ⚠️ **必须同时显示这段文案**（spec §6.1 硬要求，缺了财务会按 40.70% 复算、和系统给出的 28.23 对不上）：
+
+       > **默认底线基数（SKU 未单独设置达人佣金率时）= 默认达人佣金率 + 平台其他成本率 = 33.33%**
+       > （平台佣金率已包含在「平台其他成本率」内，不重复计入）
+       > SKU 单独设置了达人佣金率时，底线基数 = 平台其他成本率 + **该 SKU 的达人佣金率**。
+
+     - 「平台其他成本率」是**恒等式反推值**（`1 − 采购成本率 − 净利率 − 平均SPU两率 − 默认达人佣金率`），
+       财务无法从 UI 看出构成 → 字段旁注明推导方式（spec §10 已知限制第 6 条）
+     - 「默认达人佣金率」的 label 必须带「**SKU 未单独设置时的兜底值**」
    - `库龄档位规则`：4 行可编辑表格，列为 `库龄起点(min_age_days)` / `档位名(tier_label)` / `折扣率(discount_rate)` / `目标利润率(target_margin_rate)`
 2. 利润测算 tab 的「平台费率管理」按钮改文案为「定价设置」，`@click` 打开抽屉时默认选中「平台成本率」子页
 3. SKU 资料 tab 工具栏新增「定价设置」按钮，打开时默认选中「库龄档位规则」子页
@@ -2868,7 +2905,7 @@ Expected: 新增两条 FAIL。
         :precision="2"
         :controls="false"
         size="small"
-        placeholder="自动"
+        :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'"
         @change="markDirty('sku', row)" />
       <div class="pricing-tier-hint">
         {{ row.pricing_tier_label || "-" }}
@@ -2890,10 +2927,21 @@ Expected: 新增两条 FAIL。
       :precision="2"
       :controls="false"
       size="small"
+      :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'"
       @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" />
+    <div class="pricing-tier-hint">留空表示不单独设置，按平台默认计算</div>
   </template>
 </el-table-column>
 ```
+
+> ⚠️ **「达人佣金率」列必须提示兜底值**（spec §5.4 硬要求）：
+> 「留空 = 未单独设置 = 计算时取平台默认值兜底」，输入框在空值时用 placeholder 显示兜底值，
+> 下方固定一行「留空表示不单独设置，按平台默认计算」。
+> 兜底值由后端随行下发 `creator_commission_rate_fallback`
+> （= `platform_basis` 平台的 `default_creator_commission_rate`），
+> **前端不要自己挑平台**，否则口径会漂。
+> 注意它取的是**平台默认值本身**，不是解析后的有效值——
+> SKU 自己设了 15% 时，兜底值仍是 6.06%。
 
 配套的 `<script setup>` 辅助函数（**必须一起加，否则模板引用不到**）：
 
@@ -3031,14 +3079,23 @@ Expected: 新增一条 FAIL。
 「预计售价」输入框加标红与提示：
 
 ```vue
-<el-input-number
-  v-model="row.expected_selling_price"
-  :class="{ 'price-below-floor': isBelowFloor(row) }"
-  :min="0"
-  :precision="2"
-  :controls="false"
-  size="small" />
+<template #default="{ row }">
+  <el-input-number
+    v-model="row.expected_selling_price"
+    :class="{ 'price-below-floor': isBelowFloor(row) }"
+    :min="0"
+    :precision="2"
+    :controls="false"
+    size="small" />
+  <div v-if="isBelowFloor(row)" class="price-floor-hint">
+    低于最低售价 {{ money(row.min_selling_price) }}
+  </div>
+</template>
 ```
+
+> ⚠️ **行内提示是 spec §6.4 的硬要求**，不只是把输入框描红：
+> 条件成立时除了标红，还要在输入框下方显示「低于最低售价 {min_selling_price}」，
+> 让运营**在填的时候就看到原因**，而不是点保存后才弹一个 toast。
 
 **配套样式必须一起加**（否则输入框不会真的变红，Task 10 的手工验证第 6 步不成立）：
 
@@ -3047,6 +3104,11 @@ Expected: 新增一条 FAIL。
 .price-below-floor :deep(.el-input__inner) {
   border-color: var(--el-color-danger);
   box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+}
+.price-floor-hint {
+  font-size: 12px;
+  color: var(--el-color-danger);
+  line-height: 1.4;
 }
 ```
 
