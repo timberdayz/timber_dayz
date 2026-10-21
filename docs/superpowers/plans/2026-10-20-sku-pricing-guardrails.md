@@ -75,7 +75,7 @@ node --test frontend/tests/productCenterUi.test.mjs
 > 于是 engine 建在 A 循环、测试跑在 B 循环 → `RuntimeError: Future attached to a different loop`。
 > 这两个 `-o` 让 fixture 与 test 共用同一个 session 级事件循环，实测可跑通。
 > 如果在别的机器上仍然报 loop 不一致，按仓库惯例**本地跳过** pg 用例
-> （参考 `backend/tests/test_conftest_fixtures.py:116-134` 的 `pytest.skip` 写法），
+> （参考 `backend/tests/test_conftest_fixtures.py:118-134` 用的 `@pytest.mark.skip(reason=...)` 装饰器写法），
 > **不要**为了跑通去改 `conftest.py` 的 fixture 作用域——那是全仓库共享的测试基础设施。
 
 ---
@@ -460,10 +460,13 @@ git commit -m "feat:商品中心定价底线 - 迁移与 ORM 骨架"
 ```python
 from decimal import Decimal
 
+import pytest
+
 from backend.services.product_pricing_service import (
     compute_cost_floor,
     compute_discount_guard,
     compute_min_selling_price,
+    compute_sku_pricing,
     select_age_tier,
 )
 
@@ -730,6 +733,107 @@ def test_policy_update_retier_allows_same_day_boundary_change():
     assert decision["action"] == "retier"
     assert decision["close_current"] == date(2026, 10, 20)
     assert decision["values"]["min_age_days"] == 30
+
+
+# ---------------------------------------------------------------- 降级链（spec §4.4 / §8.1）
+
+def _pricing(**overrides):
+    """完整输入的一组默认值；测试里只覆盖要破坏的那一项。"""
+    payload = {
+        "purchase_cost": Decimal("10"),
+        "reference_selling_price": Decimal("30"),
+        "creator_commission_rate": None,
+        "platform_creator_commission_rate": CREATOR_COMMISSION_RATE,
+        "other_cost_rate": OTHER_COST_RATE,
+        "spu_bound": True,
+        "spu_return_loss_rate": RETURN_LOSS_RATE,
+        "spu_damage_rate": DAMAGE_RATE,
+        "policy": _policy(0, "日常", 0.10, 0.25),
+        "deepest_policy": _policy(120, "滞销60天以上", 0.30, 0.10),
+        "min_selling_price_override": None,
+        "age_days": None,
+    }
+    payload.update(overrides)
+    return compute_sku_pricing(**payload)
+
+
+def test_sku_pricing_happy_path_matches_spec_example():
+    out = _pricing()
+    assert out["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert out["min_selling_price_source"] == "cost_floor"
+    assert out["current_discount_rate"] == pytest.approx(0.10)
+    assert out["clearance_max_discount_rate"] == pytest.approx(0.30)
+    assert out["pricing_tier_label"] == "日常"
+    assert out["pricing_tier_source"] == "fallback_no_age_data"
+    assert out["pricing_age_days"] is None
+    assert out["min_selling_price_missing_reasons"] == []
+
+
+def test_sku_pricing_missing_purchase_cost_degrades_to_discount_guard():
+    out = _pricing(purchase_cost=None)
+    assert out["min_selling_price"] == pytest.approx(27.00, abs=0.01)
+    assert out["min_selling_price_source"] == "discount_guard"
+    assert "missing_purchase_cost" in out["min_selling_price_missing_reasons"]
+
+
+def test_sku_pricing_missing_policy_reports_unavailable():
+    out = _pricing(policy=None, deepest_policy=None)
+    assert out["min_selling_price"] is None
+    assert out["min_selling_price_source"] == "unavailable"
+    assert "missing_pricing_policy" in out["min_selling_price_missing_reasons"]
+
+
+def test_sku_pricing_missing_platform_cost_rate_reports_reason():
+    out = _pricing(other_cost_rate=None)
+    assert "missing_platform_cost_rate" in out["min_selling_price_missing_reasons"]
+    # 成本线算不出，但纪律线仍可算
+    assert out["min_selling_price_source"] == "discount_guard"
+
+
+def test_sku_pricing_missing_creator_commission_rate_reports_reason():
+    out = _pricing(creator_commission_rate=None, platform_creator_commission_rate=None)
+    assert "missing_creator_commission_rate" in out["min_selling_price_missing_reasons"]
+
+
+def test_sku_pricing_missing_spu_binding_and_rates_are_distinguished():
+    unbound = _pricing(spu_bound=False)
+    assert "missing_spu_binding" in unbound["min_selling_price_missing_reasons"]
+    assert "missing_spu_rates" not in unbound["min_selling_price_missing_reasons"]
+
+    no_rates = _pricing(spu_return_loss_rate=None)
+    assert "missing_spu_rates" in no_rates["min_selling_price_missing_reasons"]
+    assert "missing_spu_binding" not in no_rates["min_selling_price_missing_reasons"]
+
+
+def test_sku_pricing_non_positive_denominator_falls_back_to_discount_guard():
+    """分母 ≤ 0 -> 不抛异常，降级到纪律线，并记 non_positive_cost_denominator。"""
+    out = _pricing(policy=_policy(0, "日常", 0.10, 0.99))
+    assert out["min_selling_price"] == pytest.approx(27.00, abs=0.01)
+    assert out["min_selling_price_source"] == "discount_guard"
+    assert "non_positive_cost_denominator" in out["min_selling_price_missing_reasons"]
+
+
+def test_sku_pricing_never_reads_turnover_class():
+    """档位只由库龄决定；turnover_class 不得作为定价输入（spec §4.1 / §8.1）。"""
+    import inspect
+
+    assert "turnover_class" not in inspect.signature(compute_sku_pricing).parameters
+
+
+def test_sku_pricing_returns_sku_creator_commission_rate_untouched():
+    """SKU 没单独设置佣金时，回给前端的仍是 None（空框），不能把平台兜底值填进输入框。"""
+    out = _pricing(creator_commission_rate=None)
+    assert out["creator_commission_rate"] is None
+    # 但底线计算用的是平台兜底值
+    assert out["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+
+
+def test_sku_pricing_manual_override_wins_and_is_flagged():
+    out = _pricing(min_selling_price_override=Decimal("20.00"))
+    assert out["min_selling_price"] == pytest.approx(20.00, abs=0.01)
+    assert out["min_selling_price_source"] == "manual_override"
+    assert out["min_selling_price_is_override"] is True
+    assert out["min_selling_price_override"] == pytest.approx(20.00, abs=0.01)
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -753,6 +857,11 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'backend.services.prod
 
 本模块**不持有任何平台参数**——费率由调用方从 dim_platforms 读出后传入，
 避免平台口径变化时服务里的常量悄悄过期。
+
+**本模块不 import ORM、不碰 DB**：所有函数都是纯函数，
+因此降级链的 7 种 `missing_reasons`、分母 ≤ 0、折扣纪律兜底都能写成无 DB 单测。
+ORM 行 → 标量的适配在路由侧（`backend/domains/business/routers/product_center.py`
+的 `_compute_pricing_for_sku`），业务判断只有这一处（spec §5.1「实现时只写一处」）。
 """
 
 from __future__ import annotations
@@ -857,6 +966,118 @@ def compute_min_selling_price(
     }
 
 
+def compute_sku_pricing(
+    *,
+    purchase_cost,
+    reference_selling_price,
+    creator_commission_rate,
+    platform_creator_commission_rate,
+    other_cost_rate,
+    spu_bound,
+    spu_return_loss_rate,
+    spu_damage_rate,
+    policy,
+    deepest_policy,
+    min_selling_price_override,
+    age_days=None,
+) -> dict:
+    """单个 SKU 的完整定价字段。**纯函数**：无 ORM、无 DB、无 I/O。
+
+    参数全是标量/字典，ORM 适配放在路由侧（`_compute_pricing_for_sku`）。
+    这样降级链的 7 种 `missing_reasons`、分母 ≤ 0、折扣纪律的兜底
+    都能写成**无 DB 单测**（spec §5.1「实现时只写一处」的要求）。
+
+    `creator_commission_rate` 是 **SKU 自己的值**（可能为 None = 未单独设置）；
+    `platform_creator_commission_rate` 是平台兜底，只用于**计算**，**不回填到返回值**——
+    返回值里的 `creator_commission_rate` 必须仍是 None，前端输入框才显示「空 = 按平台默认」。
+
+    `spu_bound` 与两个 SPU 率分开传，是为了区分两种缺料：
+    没绑 SPU -> `missing_spu_binding`；绑了但率没维护 -> `missing_spu_rates`。
+    """
+    missing_reasons: list[str] = []
+    cost_floor = None
+    discount_guard = None
+
+    creator_rate = _decimal(creator_commission_rate)
+    if creator_rate is None:
+        creator_rate = _decimal(platform_creator_commission_rate)
+
+    if policy is None:
+        missing_reasons.append("missing_pricing_policy")
+    else:
+        other_rate = _decimal(other_cost_rate)
+        return_loss_rate = _decimal(spu_return_loss_rate)
+        damage_rate = _decimal(spu_damage_rate)
+        purchase = _decimal(purchase_cost)
+        if other_rate is None:
+            missing_reasons.append("missing_platform_cost_rate")
+        if creator_rate is None:
+            missing_reasons.append("missing_creator_commission_rate")
+        if not spu_bound:
+            missing_reasons.append("missing_spu_binding")
+        elif return_loss_rate is None or damage_rate is None:
+            missing_reasons.append("missing_spu_rates")
+        if purchase is None:
+            missing_reasons.append("missing_purchase_cost")
+
+        # 只有输入齐全才计算成本线；缺项时算不出底线，
+        # 而不是把 None 当 0 代入分母算出偏乐观的结果
+        if (
+            purchase is not None
+            and other_rate is not None
+            and creator_rate is not None
+            and spu_bound
+            and return_loss_rate is not None
+            and damage_rate is not None
+        ):
+            cost_floor = compute_cost_floor(
+                purchase_cost=purchase,
+                other_cost_rate=other_rate,
+                creator_commission_rate=creator_rate,
+                spu_return_loss_rate=return_loss_rate,
+                spu_damage_rate=damage_rate,
+                target_margin_rate=policy["target_margin_rate"],
+            )
+            if cost_floor is None:
+                missing_reasons.append("non_positive_cost_denominator")
+        discount_guard = compute_discount_guard(
+            reference_selling_price=reference_selling_price,
+            discount_rate=policy["discount_rate"],
+        )
+
+    pricing = compute_min_selling_price(
+        cost_floor=cost_floor,
+        discount_guard=discount_guard,
+        manual_override=min_selling_price_override,
+    )
+    all_reasons = list(dict.fromkeys(pricing["missing_reasons"] + missing_reasons))
+    sku_creator_rate = _decimal(creator_commission_rate)
+    override = _decimal(min_selling_price_override)
+    return {
+        "creator_commission_rate": float(sku_creator_rate) if sku_creator_rate is not None else None,
+        "current_discount_rate": float(policy["discount_rate"]) if policy else None,
+        "clearance_max_discount_rate": (
+            float(deepest_policy["discount_rate"]) if deepest_policy else None
+        ),
+        "min_selling_price": (
+            float(pricing["min_selling_price"]) if pricing["min_selling_price"] is not None else None
+        ),
+        "min_selling_price_source": pricing["source"],
+        "min_selling_price_is_override": pricing["is_override"],
+        "min_selling_price_override": float(override) if override is not None else None,
+        "min_selling_price_missing_reasons": all_reasons,
+        "pricing_tier_label": policy["tier_label"] if policy else None,
+        "pricing_age_days": age_days,
+        "pricing_tier_source": "age_data" if age_days is not None else "fallback_no_age_data",
+    }
+
+
+# 规则更新的拒绝原因（模块级常量：路由、spec §5.1、前端文案共用同一份，
+# 不要在多处各写一遍中文提示）
+POLICY_REJECT_FUTURE = "生效日期不能晚于今天"
+POLICY_REJECT_BACKDATED = "生效日期不能早于当前规则"
+
+
 class PolicyUpdateRejected(ValueError):
     """规则版本更新被拒绝（未来生效 / 回溯生效 / 档位不存在）。"""
 
@@ -894,7 +1115,7 @@ def resolve_policy_update(
     requested_min_age = requested["min_age_days"]
 
     if requested_effective_from > today:
-        raise PolicyUpdateRejected("生效日期不能晚于今天")
+        raise PolicyUpdateRejected(POLICY_REJECT_FUTURE)
     if current is None:
         return {"action": "create", "close_current": None, "values": dict(requested)}
 
@@ -903,7 +1124,7 @@ def resolve_policy_update(
 
     # 回溯生效一律拒绝——先于 retier / version 判定
     if requested_effective_from < current_effective_from:
-        raise PolicyUpdateRejected("生效日期不能早于当前规则")
+        raise PolicyUpdateRejected(POLICY_REJECT_BACKDATED)
     if requested_min_age != current_min_age:
         # 改档位边界：关旧行 + 建新行（新行用新起点）。
         # 新起点与生效日期的组合若已被占用，会撞 UNIQUE(min_age_days, effective_from) -> 409
@@ -1366,6 +1587,69 @@ async def test_pricing_policy_write_is_audited(
         )
     )
     assert result.scalar() >= 1
+
+
+@pytest.mark.asyncio
+async def test_platform_fee_rate_partial_update_keeps_other_fields(
+    pg_async_client, pricing_auth_headers, pg_session
+):
+    """只传 default_creator_commission_rate 时，其余费率与来源标记保持原值。
+
+    既有实现是无条件赋值（`row.default_fee_rate = body.default_fee_rate`），
+    未传的字段会被写成 NULL —— 这会让平台佣金率、来源标记被静默清空。
+    """
+    from modules.core.db import DimPlatform
+
+    await _seed_pricing_fixtures(pg_session)
+    platform_row = await pg_session.get(DimPlatform, "tiktok")
+    platform_row.fee_rate_source = "b_class_measured_2026_01_07"
+    platform_row.fee_rate_version = "v2"
+    await pg_session.flush()
+
+    resp = await pg_async_client.patch(
+        "/api/platforms/tiktok/fee-rate",
+        headers=pricing_auth_headers,
+        json={"default_creator_commission_rate": 0.09},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["default_creator_commission_rate"] == pytest.approx(0.09)
+    # 其余保持原值，不得被刷成 NULL
+    assert body["default_fee_rate"] == pytest.approx(0.0737)
+    assert body["other_cost_rate"] == pytest.approx(0.2727)
+    assert body["fee_rate_source"] == "b_class_measured_2026_01_07"
+    assert body["fee_rate_version"] == "v2"
+
+
+@pytest.mark.asyncio
+async def test_platform_fee_rate_and_sku_writes_are_audited(
+    pg_async_client, pricing_auth_headers, pg_session
+):
+    """平台成本率与 SKU 覆盖值/达人佣金率的写操作都要产生审计。"""
+    await _seed_pricing_fixtures(pg_session)
+
+    await pg_async_client.patch(
+        "/api/platforms/tiktok/fee-rate",
+        headers=pricing_auth_headers,
+        json={"default_creator_commission_rate": 0.09},
+    )
+    await pg_async_client.patch(
+        "/api/skus/9001",
+        headers=pricing_auth_headers,
+        json={
+            "creator_commission_rate": 0.15,
+            "min_selling_price_override": 20.0,
+        },
+    )
+    for resource_type in ("platform_fee_rate", "sku"):
+        result = await pg_session.execute(
+            text(
+                "SELECT count(*) FROM public.fact_audit_logs "
+                "WHERE resource_type = :t"
+            ),
+            {"t": resource_type},
+        )
+        assert result.scalar() >= 1, resource_type
 ```
 
 > 测试文件顶部需要 `from datetime import date, timedelta`、`import pytest`、`from sqlalchemy import text`。
@@ -1417,25 +1701,50 @@ async def test_pricing_policy_write_is_audited(
 > 所以这些集成测试**必须先 seed**：
 
 ```python
-async def _seed_pricing_fixtures(pg_session):
+async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
     """候选 / 保存 / 审计 / 护栏四个端点共用的最小种子数据。
 
-    ⚠️ **这份 seed 必须自成闭环**。护栏（Task 6）、利润测算保存、审计三条链路
-    各自会查不同的表；少任何一样，测试会先在**别的错误**上失败，
-    看起来像「护栏没实现」，实际是 seed 缺数据——这正是第 3 轮终审的头号阻断。
+    ⚠️ **这份 seed 必须自成闭环**，而且**必须分批 flush**。
 
-    必需清单（少一样，对应断言就先红在别处）：
+    ### 为什么必须分批 flush
+
+    SQLAlchemy 的 unit-of-work 排 INSERT 顺序**只认 `relationship()` 派生的 mapper 依赖，
+    不认裸 `ForeignKey` 约束**（裸 FK 只影响 DDL 排序）。实测：
+
+    LogisticsProviderRule.__mapper__.relationships  -> []
+    WarehouseStorageRule.__mapper__.relationships     -> []
+    BridgeSpuSku.__mapper__.relationships             -> []
+    FactAuditLog.__mapper__.relationships             -> ['user']   # 有 relationship，所以它的 FK 是安全的
+
+    所以「一次 `add` 全部 + 一次 `flush`」**不会**把 `core.dim_warehouses` / `core.dim_spu`
+    排在 `finance.logistics_provider_rules` / `core.bridge_spu_sku` 之前，
+    实测直接炸：
+
+    IntegrityError: ForeignKeyViolationError: insert or update on table
+    "logistics_provider_rules" violates foreign key constraint
+    "logistics_provider_rules_warehouse_code_fkey"
+    DETAIL:  Key (warehouse_code)=(MY-01) is not present in table "dim_warehouses".
+
+    **必须按 FK 依赖顺序逐个 flush。**（隔离复现：只 add 一个 DimWarehouse + 一个
+    LogisticsProviderRule 再单次 flush → 同样报错；改成先 flush 仓库再 flush 规则 → 成功。）
+
+    ### 必需清单（少一样，对应断言就先红在别处）
+
     | 表 | 为什么必须有 |
     |---|---|
     | `DimUser` | 审计外键；`user_id`/`username`/`email`/`password_hash` 全是 NOT NULL |
     | `DimPlatform` | `default_fee_rate` / `default_creator_commission_rate` / `other_cost_rate` 三项费率缺一不可 |
-    | `DimWarehouse` | `status='active'` |
-    | `DimSpu` | 货损率 + 退货损失率（成本线分母要用） |
-    | `DimErpSku` | 采购成本 / 参考售价 / 重量 / 体积 / 周转类型 |
+    | `DimWarehouse` | `status='active'`；**同时是两条 finance 规则的外键目标** |
+    | `DimSpu` | 货损率 + 退货损失率（成本线分母要用）；**同时是 `bridge_spu_sku` 的外键目标** |
+    | `DimErpSku` | 采购成本 / 参考售价 / 重量 / 体积 / 周转类型；**`bridge_spu_sku` 的外键目标** |
     | `BridgeSpuSku` | SKU↔SPU 绑定（`effective_from` NOT NULL） |
     | `SkuPricingPolicy` | **4 个库龄档位。没有它 `_current_policies` 返回空 → 最低售价恒 None → 护栏永不触发** |
     | `LogisticsProviderRule` | 参考物流成本（否则先报「缺物流规则」） |
     | `WarehouseStorageRule` | 参考仓储成本 + 标签费（否则先报「缺仓储规则」） |
+
+    `with_cost_rules=False` 用来构造「缺物流规则 / 缺仓储规则」的场景，
+    用来验证**护栏排在缺资料校验之前**——用完整 seed 时 `missing_fields` 恒为 `[]`，
+    那条断言永远观察不到差别（完整 seed 下护栏放前放后结果一样）。
     """
     from datetime import date
 
@@ -1446,33 +1755,46 @@ async def _seed_pricing_fixtures(pg_session):
 
     effective_from = date(2026, 1, 1)
 
+    # ---- 严格按 FK 依赖顺序，逐个 flush ----
     pg_session.add(DimUser(
         user_id=1, username="test_admin",
         email="test_admin@example.com", password_hash="not-a-real-hash",
     ))
+    await pg_session.flush()
+
     pg_session.add(DimPlatform(
         platform_code="tiktok", name="TikTok", platform_role="sales", is_active=True,
         default_fee_rate=0.0737,
         default_creator_commission_rate=0.0606,
         other_cost_rate=0.2727,
     ))
+    await pg_session.flush()
+
     pg_session.add(DimWarehouse(
         warehouse_code="MY-01", warehouse_name="主仓",
         country_code="MY", country_name="马来西亚", status="active",
     ))
+    await pg_session.flush()
+
     pg_session.add(DimSpu(
         spu="TEST-SPU-1", spu_name="测试SPU",
         return_loss_rate=0.0467, logistics_damage_rate=0.0158,
     ))
+    await pg_session.flush()
+
     pg_session.add(DimErpSku(
         sku_id=9001, sku_key="TEST-SKU-1", sku_name="测试SKU",
         status="active", default_purchase_cost=10, reference_selling_price=30,
         weight_kg=0.5, unit_volume_cbm=0.01, turnover_class="slow",
     ))
+    await pg_session.flush()
+
     pg_session.add(BridgeSpuSku(
         sku_id=9001, spu="TEST-SPU-1", binding_status="active",
         effective_from=effective_from,
     ))
+    await pg_session.flush()
+
     # 库龄档位规则：缺这 4 行 -> 最低售价算不出来 -> 护栏永不触发
     for min_age_days, tier_label, discount_rate, target_margin_rate in (
         (0, "日常", 0.10, 0.25),
@@ -1486,18 +1808,26 @@ async def _seed_pricing_fixtures(pg_session):
             platform_basis="tiktok", effective_from=effective_from,
             status="active", source="test_seed", version="v1",
         ))
-    pg_session.add(LogisticsProviderRule(
-        logistics_provider="TEST-LOG", warehouse_code="MY-01", transport_type="sea",
-        status="active", is_sensitive=False, is_default=True, currency="CNY",
-        billing_basis="volume", billing_unit="cbm", freight_unit_rate=5,
-        effective_from=effective_from,
-    ))
-    pg_session.add(WarehouseStorageRule(
-        warehouse_code="MY-01", billing_basis="volume", billing_unit="cbm",
-        unit_rate_cny=100, label_fee=0.5, status="active",
-        effective_from=effective_from,
-    ))
     await pg_session.flush()
+
+    if with_cost_rules:
+        # ⚠️ billing_unit 必须用仓库 CHECK 约束要求的值：
+        #   WarehouseStorageRule -> 'CNY/CBM/month'（ck_warehouse_storage_rules_unit）
+        #   LogisticsProviderRule -> 'CNY/CBM'（与仓库既有迁移口径一致）
+        # 写成 'cbm' 会撞 CheckViolationError: violates check constraint
+        # "ck_warehouse_storage_rules_unit"
+        pg_session.add(LogisticsProviderRule(
+            logistics_provider="TEST-LOG", warehouse_code="MY-01", transport_type="sea",
+            status="active", is_sensitive=False, is_default=True, currency="CNY",
+            billing_basis="volume", billing_unit="CNY/CBM", freight_unit_rate=5,
+            effective_from=effective_from,
+        ))
+        pg_session.add(WarehouseStorageRule(
+            warehouse_code="MY-01", billing_basis="volume", billing_unit="CNY/CBM/month",
+            unit_rate_cny=100, label_fee=0.5, status="active",
+            effective_from=effective_from,
+        ))
+        await pg_session.flush()
 ```
 
 > **这套 seed 的期望数值**（可直接写进断言）：
@@ -1505,6 +1835,7 @@ async def _seed_pricing_fixtures(pg_session):
 > - 纪律线 = 30 × (1 − 0.10) = **27.00**
 > - 最低售价 = max(28.23, 27.00) = **28.23**（来源 `cost_floor`）
 > - `expected_selling_price = 0.01` → 低于底线 → 护栏 422
+> - `expected_selling_price = 35` → 高于底线 → 201（实测 `expected.profit = 16.69`）
 > - 库龄表 `mart.inventory_age_current` 在测试库里不存在 →
 >   `pricing_tier_source='fallback_no_age_data'`、`pricing_age_days=None`、档位取「日常」
 >
@@ -1534,14 +1865,16 @@ from decimal import Decimal
 
 ```python
 from backend.services.product_pricing_service import (
+    POLICY_REJECT_FUTURE,
     PolicyUpdateRejected,
-    compute_cost_floor,
-    compute_discount_guard,
-    compute_min_selling_price,
+    compute_sku_pricing,
     resolve_policy_update,
     select_age_tier,
 )
 ```
+
+> 只导入路由**真正用到**的：`compute_cost_floor` / `compute_discount_guard` / `compute_min_selling_price`
+> 已被 `compute_sku_pricing` 内部消化，路由层不再需要（避免「导入未用」把真正用错的地方盖住）。
 
 并新增业务异常的导入（**Task 4 是第一个用到它的地方**，Task 6 的护栏复用同一行）：
 
@@ -1594,8 +1927,11 @@ async def create_sku_pricing_policy(
 ):
     if body.effective_from > date.today():
         raise BusinessValidationError(
-            message="生效日期不能晚于今天",
-            detail={"code": "pricing_policy_future_effective_from"},
+            message=POLICY_REJECT_FUTURE,
+            detail={
+                "code": "pricing_policy_future_effective_from",
+                "reason": POLICY_REJECT_FUTURE,
+            },
         )
     existing = (await db.execute(
         select(SkuPricingPolicy).where(
@@ -1654,7 +1990,10 @@ async def update_sku_pricing_policy(
     except PolicyUpdateRejected as exc:
         raise BusinessValidationError(
             message=str(exc),
-            detail={"code": "pricing_policy_update_rejected", "reason": str(exc)},
+            detail={
+                "code": "pricing_policy_update_rejected",
+                "reason": str(exc),
+            },
         ) from exc
 
     action = decision["action"]
@@ -1785,7 +2124,26 @@ Expected: FAIL — 字段未注入。
 
 在 `product_center.py` 新增两个辅助函数（`Decimal` 已在 Task 4 Step 3 导入；`DimErpSku` / `DimSpu` / `DimPlatform` / `BridgeSpuSku` 该文件已 import）：
 
+> ⚠️ **还要给 `sqlalchemy` 的 import 加上 `bindparam`**：
+> ```python
+> from sqlalchemy import bindparam, func, select, text, update
+> ```
+
 ```python
+# 库龄查询用**展开式绑定参数**（expanding=True），不用 `= ANY(:keys)`。
+# 原因：`ANY($1)` 在 asyncpg 下要求驱动能推断出数组类型，
+# 而 `text()` 没有类型信息，可能直接报「could not determine data type of parameter」。
+# expanding=True 会渲染成 `IN (?, ?, ...)`，逐个绑定字符串，asyncpg 无需推断数组类型。
+# （`mart` 是 raw SQL 层不在 Base.metadata 里，这条语句在测试库里默认不会执行，
+#   必须有专门用例真的跑到它，否则它就是个从未被执行过的盲区。）
+_AGE_LOOKUP_STMT = text(
+    "SELECT product_sku, MIN(age_days) AS age_days "
+    "FROM mart.inventory_age_current "
+    "WHERE product_sku IN :keys "
+    "GROUP BY product_sku"
+).bindparams(bindparam("keys", expanding=True))
+
+
 async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[int, int]:
     """按 product_sku -> dim_erp_sku.sku_key 关联取当前库龄。
 
@@ -1825,12 +2183,7 @@ async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[in
                 # mart 层不存在：不发出会失败的查询，事务保持健康
                 return {}
             age_rows = (await db.execute(
-                text(
-                    "SELECT product_sku, MIN(age_days) AS age_days "
-                    "FROM mart.inventory_age_current "
-                    "WHERE product_sku = ANY(:keys) "
-                    "GROUP BY product_sku"
-                ),
+                _AGE_LOOKUP_STMT,
                 {"keys": list(key_to_sku)},
             )).all()
     except Exception:
@@ -1868,90 +2221,34 @@ def _compute_pricing_for_sku(
     sku_row,
     linked_spu,
 ) -> dict:
-    """给定 SKU 与其 SPU 率，算出该 SKU 的定价字段。list_skus 与利润测算护栏共用。"""
+    """ORM 适配层：把行数据喂给纯函数 `compute_sku_pricing`。
+
+    **这里不放任何业务判断**——降级链、取大、来源标记全在
+    `backend/services/product_pricing_service.py` 里（spec §5.1「实现时只写一处」）。
+    """
     policies = context["policies"]
     platform = context["platform"]
     age_days = context["age_days"].get(sku_row.sku_id)
 
     policy = select_age_tier(policies, age_days)
     deepest = max(policies, key=lambda p: p["min_age_days"]) if policies else None
-    tier_source = "age_data" if age_days is not None else "fallback_no_age_data"
 
-    missing_reasons: list[str] = []
-    cost_floor = None
-    discount_guard = None
-
-    if policy is None:
-        missing_reasons.append("missing_pricing_policy")
-    else:
-        creator_rate = sku_row.creator_commission_rate
-        if creator_rate is None and platform is not None:
-            creator_rate = platform.default_creator_commission_rate
-        other_rate = platform.other_cost_rate if platform is not None else None
-        if other_rate is None:
-            missing_reasons.append("missing_platform_cost_rate")
-        if creator_rate is None:
-            missing_reasons.append("missing_creator_commission_rate")
-        if linked_spu is None:
-            missing_reasons.append("missing_spu_binding")
-        elif (
-            linked_spu.return_loss_rate is None or linked_spu.logistics_damage_rate is None
-        ):
-            missing_reasons.append("missing_spu_rates")
-        if sku_row.default_purchase_cost is None:
-            missing_reasons.append("missing_purchase_cost")
-
-        # 只有输入齐全才计算成本线；缺项时算不出底线，
-        # 而不是把 None 当 0 代入分母算出偏乐观的结果
-        if (
-            sku_row.default_purchase_cost is not None
-            and other_rate is not None
-            and creator_rate is not None
-            and linked_spu is not None
-            and linked_spu.return_loss_rate is not None
-            and linked_spu.logistics_damage_rate is not None
-        ):
-            cost_floor = compute_cost_floor(
-                purchase_cost=sku_row.default_purchase_cost,
-                other_cost_rate=other_rate,
-                creator_commission_rate=creator_rate,
-                spu_return_loss_rate=linked_spu.return_loss_rate,
-                spu_damage_rate=linked_spu.logistics_damage_rate,
-                target_margin_rate=policy["target_margin_rate"],
-            )
-            if cost_floor is None:
-                missing_reasons.append("non_positive_cost_denominator")
-        discount_guard = compute_discount_guard(
-            reference_selling_price=sku_row.reference_selling_price,
-            discount_rate=policy["discount_rate"],
-        )
-
-    pricing = compute_min_selling_price(
-        cost_floor=cost_floor,
-        discount_guard=discount_guard,
-        manual_override=sku_row.min_selling_price_override,
+    return compute_sku_pricing(
+        purchase_cost=sku_row.default_purchase_cost,
+        reference_selling_price=sku_row.reference_selling_price,
+        creator_commission_rate=sku_row.creator_commission_rate,
+        platform_creator_commission_rate=(
+            platform.default_creator_commission_rate if platform else None
+        ),
+        other_cost_rate=platform.other_cost_rate if platform else None,
+        spu_bound=linked_spu is not None,
+        spu_return_loss_rate=linked_spu.return_loss_rate if linked_spu else None,
+        spu_damage_rate=linked_spu.logistics_damage_rate if linked_spu else None,
+        policy=policy,
+        deepest_policy=deepest,
+        min_selling_price_override=sku_row.min_selling_price_override,
+        age_days=age_days,
     )
-    all_reasons = list(dict.fromkeys(pricing["missing_reasons"] + missing_reasons))
-
-    return {
-        "creator_commission_rate": sku_row.creator_commission_rate,
-        "current_discount_rate": float(policy["discount_rate"]) if policy else None,
-        "clearance_max_discount_rate": float(deepest["discount_rate"]) if deepest else None,
-        "min_selling_price": (
-            float(pricing["min_selling_price"]) if pricing["min_selling_price"] is not None else None
-        ),
-        "min_selling_price_source": pricing["source"],
-        "min_selling_price_is_override": pricing["is_override"],
-        "min_selling_price_override": (
-            float(sku_row.min_selling_price_override)
-            if sku_row.min_selling_price_override is not None
-            else None
-        ),
-        "min_selling_price_missing_reasons": all_reasons,
-        "pricing_tier_label": policy["tier_label"] if policy else None,
-        "pricing_age_days": age_days,
-        "pricing_tier_source": tier_source,
-    }
 
 
 async def _compute_sku_min_selling_price(db: AsyncSession, sku_id: int) -> Optional[Decimal]:
@@ -2120,6 +2417,86 @@ async def test_estimate_above_floor_saves_successfully(
     )
     assert ok.status_code == 201, ok.text
     assert ok.json()["estimate_ids"]
+
+
+@pytest.mark.asyncio
+async def test_guardrail_precedes_missing_fields_check(
+    pg_async_client, pricing_auth_headers, pg_session
+):
+    """缺物流/仓储规则 + 低于底线 -> 必须报 below_min_selling_price。
+
+    ⚠️ 这是「护栏排在缺资料校验之前」的**唯一可观测断言**。
+    用完整 seed 时 `_platform_profit_missing_fields` 恒返回 `[]`，
+    护栏放前放后结果完全一样，测不出差别——所以必须用 `with_cost_rules=False` 的 seed。
+    """
+    await _seed_pricing_fixtures(pg_session, with_cost_rules=False)
+
+    estimate = await pg_async_client.post(
+        "/api/platform-sku-profit/estimates",
+        headers=pricing_auth_headers,
+        json={
+            "sku_id": 9001,
+            "platform_code": "tiktok",
+            "warehouse_code": "MY-01",
+            "transport_type": "sea",
+            "expected_selling_price": 0.01,
+        },
+    )
+    assert estimate.status_code == 422, estimate.text
+    body = estimate.json()
+    # 不能是 cannot_save_profit_version（缺物流规则 / 缺仓储规则）
+    assert body["error"]["detail"]["code"] == "below_min_selling_price"
+    assert body["error"]["detail"]["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_mart_age_lookup_works_when_table_exists_and_survives_when_not(
+    pg_async_client, pricing_auth_headers, pg_session
+):
+    """mart 表存在时真能取到库龄；不存在时回落日常档，**且事务不被 abort**。
+
+    这条同时守住三件事：
+    1. `_AGE_LOOKUP_STMT` 的展开式绑定参数在 asyncpg 下真的能执行并取到数
+       （用 `= ANY(:keys)` 的话，类型推断失败会被 `except Exception` 静默吞掉，
+        库龄永远回落日常档且**没有任何报错**）；
+    2. `to_regclass` 短路分支生效（表不存在时不发出会失败的查询）；
+    3. 外层事务仍然可用——后续语句不抛 `InFailedSQLTransactionError`。
+    """
+    from sqlalchemy import text
+
+    await _seed_pricing_fixtures(pg_session)
+
+    # 1) mart 表存在且有一行：age_days=75 -> 命中 min_age_days=60 的「滞销30天」档
+    await pg_session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
+    await pg_session.execute(text(
+        "CREATE TABLE IF NOT EXISTS mart.inventory_age_current ("
+        " product_sku text, age_days integer)"
+    ))
+    await pg_session.execute(text(
+        "INSERT INTO mart.inventory_age_current (product_sku, age_days) "
+        "VALUES ('TEST-SKU-1', 75)"
+    ))
+
+    skus = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    assert skus.status_code == 200, skus.text
+    row = skus.json()["data"][0]
+    assert row["pricing_age_days"] == 75
+    assert row["pricing_tier_source"] == "age_data"
+    assert row["pricing_tier_label"] == "滞销30天"
+    assert row["current_discount_rate"] == pytest.approx(0.15)
+
+    # 2) mart 表没了：回落日常档，且事务仍然健康
+    await pg_session.execute(text("DROP SCHEMA mart CASCADE"))
+
+    fallback = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    assert fallback.status_code == 200, fallback.text
+    row = fallback.json()["data"][0]
+    assert row["pricing_tier_source"] == "fallback_no_age_data"
+    assert row["pricing_age_days"] is None
+
+    # 3) 再查一次：若事务在上一步被 abort，这里会 500
+    again = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    assert again.status_code == 200, again.text
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -2313,12 +2690,18 @@ test("商品中心把平台费率抽屉升级为定价设置", () => {
   assert.match(source, /定价设置/);
   assert.match(source, /库龄档位规则/);
 });
+
+test("抽屉保存失败时读结构化错误原因而不是带错误码前缀的 message", () => {
+  assert.match(source, /readApiErrorDetail/);
+  assert.match(source, /detail\?\.reason/);
+});
 ```
 
-> **这两条断言在 Task 7 内必须可达。** 抽屉的两个子 Tab 分别是「平台成本率」和「库龄档位规则」，
+> **这三条断言在 Task 7 内必须可达。** 抽屉的两个子 Tab 分别是「平台成本率」和「库龄档位规则」，
 > 所以「定价设置」「库龄档位规则」这两个串由 Task 7 产生。
 > 「当前可优惠」「清货极限」两个串分别由 Task 8（SKU 资料页列）和 Task 9（利润测算列）引入，
 > **不要在这里断言**，否则 Task 7 跑不绿。
+> `readApiErrorDetail` 由本任务定义（抽屉先用到），Task 9 复用同一个，**不要写第二份**。
 >
 > ⚠️ **同时必须修改既有绿断言**：`frontend/tests/productCenterUi.test.mjs:130` 有
 > `assert.match(source, /平台费率管理/)`。Task 7 把按钮与抽屉标题改名为「定价设置」后，
@@ -2364,17 +2747,33 @@ Expected: 新增两条 FAIL（既有那条 `preview:\s*null` 的失败与本任�
 3. SKU 资料 tab 工具栏新增「定价设置」按钮，打开时默认选中「库龄档位规则」子页
 4. 百分比输入统一走既有的 `toPercent` / `fromPercent`（`ProductCenter.vue:1866-1869`）
 5. 抽屉「库龄档位规则」子页需注明「**最深档（120 天）的折扣率 30% 同时就是 SKU 资料页「滞销可优惠」列的清货极限**」
-6. 抽屉保存失败时的提示**优先读 `error?.detail?.reason`**（中文、无错误码前缀），
-   其次才回退 `error?.message`：
+6. 抽屉保存失败时的提示：**统一用 `readApiErrorDetail` 读结构化错误**
+   （这个 helper 在本任务里定义，Task 9 的利润测算页**复用同一个**，不要各写一套）：
 
 ```js
-const detail = error?.detail && typeof error.detail === "object" ? error.detail : null;
+// 仓库统一错误信封：{"success": false, "error": {"code": ..., "detail": {...}}, "message": ...}
+// 顶层没有 detail 键；axios 响应拦截器（frontend/src/api/index.js:662）已把
+// responseData.error.detail 挂到 error.detail 上。
+const readApiErrorDetail = (error) => {
+  const raw =
+    error?.detail ??
+    error?.response?.data?.error?.detail ??
+    error?.response?.data?.detail;
+  return raw && typeof raw === "object" ? raw : null;
+};
+```
+
+```js
+const detail = readApiErrorDetail(error);
 ElMessage.error(detail?.reason || error?.message || "保存定价规则失败");
 ```
 
 > `error.message` 是仓库统一信封的 `message` 字段，由 `ERPException.__str__` 拼出来，
 > **前面会带 `[3001]` 这样的错误码前缀**（`modules/core/exceptions.py`）。
 > 直接把它弹给财务看会显得很怪，所以优先用 `detail.reason`（纯中文）。
+> 后端两个业务码都带 `reason`：
+> `pricing_policy_future_effective_from`（生效日期在未来）、
+> `pricing_policy_update_rejected`（回溯生效等其它拒绝）。
 
 > ⚠️ **「默认达人佣金率」在 SKU 资料页的「达人佣金率」列被清空时，必须提交 `null` 而不是 `0`**。既有 `fromPercent(value, fallback = 0)` 默认会把空值转成 0 落库，导致成本线按 0% 佣金算、底线被压低 14.6%。该列要用 `fromPercent($event, null)`。
 
@@ -2590,7 +2989,7 @@ test("利润测算页展示最低售价并拦截低于底线的预计售价", ()
   // 错误信封读取：结构化业务码在 error.detail（axios 拦截器挂载点），
   // 不是顶层 data.detail —— 断言这一点，防止有人改回读不到值的写法
   assert.match(source, /readApiErrorDetail/);
-  assert.match(source, /error\?\.detail/);
+  assert.match(source, /detail\?\.code === "below_min_selling_price"/);
 });
 ```
 
@@ -2669,20 +3068,7 @@ const isBelowFloor = (row) =>
 </el-button>
 ```
 
-`saveOperatingEstimate` 的 catch 分支扩展示新 422：
-
-```js
-const readApiErrorDetail = (error) => {
-  // 仓库统一错误信封：{"success": false, "error": {"code": ..., "detail": {...}}, "message": ...}
-  // 顶层没有 detail 键；axios 拦截器（frontend/src/api/index.js:662）已把
-  // responseData.error.detail 挂到 error.detail 上。
-  const raw =
-    error?.detail ??
-    error?.response?.data?.error?.detail ??
-    error?.response?.data?.detail;
-  return raw && typeof raw === "object" ? raw : null;
-};
-```
+`saveOperatingEstimate` 的 catch 分支扩展示新 422（**复用 Task 7 定义的 `readApiErrorDetail`，不要写第二份**）：
 
 ```js
 const detail = readApiErrorDetail(error);
@@ -2697,7 +3083,7 @@ const missing = detail?.missing_fields;
 
 > ⚠️ **不要写成 `error?.response?.data?.detail`**：仓库错误信封**没有顶层 `detail` 键**，
 > 那个表达式恒为 `undefined`，前端会静默退化成通用报错文案。
-> 同时后端把 `cannot_save_profit_version` 也换成了 `BusinessValidationError`（Task 6 Step 4），
+> 后端把 `cannot_save_profit_version` 也换成了 `BusinessValidationError`（Task 6 Step 4），
 > 所以 `detail` 现在一定是 **dict**，`detail?.code` 与 `detail?.missing_fields` 都能取到；
 > `readApiErrorDetail` 仍保留 `typeof === "object"` 兜底，防止别的接口返回字符串时炸掉。
 

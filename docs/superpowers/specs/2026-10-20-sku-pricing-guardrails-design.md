@@ -1113,7 +1113,8 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 | 分母 ≤ 0 | 不抛异常，降级到纪律线，`missing_reasons` 含 `non_positive_cost_denominator` |
 | 纪律线 | 参考售价 × (1 − 当前档 `discount_rate`) |
 | 取大 | 成本线与纪律线取大，人工覆盖优先级最高 |
-| 降级链 | 采购成本缺失 / SPU 未绑定 / 平台成本率未配置 / 无生效规则 → `unavailable` + 原因清单 |
+| 降级链 | 采购成本缺失 / SPU 未绑定 / SPU 两率缺失 / 平台成本率未配置 / 达人佣金率无法解析 / 无生效规则 → 降级或 `unavailable` + 原因清单。**7 个 `missing_reasons`（`missing_purchase_cost` / `missing_spu_binding` / `missing_spu_rates` / `missing_platform_cost_rate` / `missing_creator_commission_rate` / `missing_pricing_policy` / `non_positive_cost_denominator`）逐个都要有单测** |
+| **SKU 佣金率不被回填** | SKU 未单独设置佣金率时，返回的 `creator_commission_rate` 仍是 `None`（前端输入框显示「空 = 按平台默认」），**不能**把平台兜底值填回输入框 |
 | **库龄档位匹配** | `age_days=75` 命中 `min_age_days=60` 档；`age_days=59` 命中 `min_age_days=0` 档；`age_days=200` 命中 `min_age_days=120` 档（最深档，无更深的档） |
 | **库龄缺失回落** | 库龄不可得时命中 `min_age_days=0` 档，且 `pricing_tier_source = 'fallback_no_age_data'`；底线取该档的率（目标利润率 25%，最保守） |
 | **档位边界可配** | 规则表 `min_age_days` 改动后，匹配结果随之变化（不依赖 `turnover_class`） |
@@ -1128,15 +1129,25 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 | **未传字段继承旧行** | PUT 不传 `source` / `version` / `notes` 时，原地更新与关旧开新两条路径都保留旧行取值（否则迁移灌的 `source='industry_benchmark_2026'` 被覆盖成 None，`downgrade()` 删不掉种子行） |
 | 并发 PUT | 撞 `uq_sku_pricing_policies_current` 时返回 409 |
 | 护栏拦截 | 预计售价 < 最低售价 → 422 `below_min_selling_price`；≥ 则通过 |
-| **护栏优先于缺资料** | 同时「低于底线」且「缺物流规则」时，返回的必须是 `below_min_selling_price`（更可执行的原因），不是 `cannot_save_profit_version` |
+| **护栏优先于缺资料** | 同时「低于底线」且「缺物流规则」时，返回的必须是 `below_min_selling_price`（更可执行的原因），不是 `cannot_save_profit_version`。⚠️ 这条**必须用「不写物流/仓储规则」的 seed 变体**才可观测——完整 seed 下 `missing_fields` 恒为 `[]`，护栏放前放后结果一样，测不出差别 |
 | **错误信封位置** | 422 响应体形如 `{"success": false, "error": {"code": 3001, "detail": {"code": "below_min_selling_price", ...}}, "message": ...}`。**顶层没有 `detail` 键**；结构化业务码在 `error.detail.code` |
 | **高价能存（seed 完整性探针）** | 预计售价 35（高于底线 28.23）→ estimates 返回 **201**。若返回 `cannot_save_profit_version`，说明 seed 缺物流规则 / 仓储规则 / 平台费率 |
 | **规则表必须灌满** | 候选行的 `min_selling_price` 非空且 = 28.23、`min_selling_price_source='cost_floor'`；规则表为空时底线恒 None、护栏永不触发 |
+| **seed 必须分批 flush** | 9 张表的 seed 按 FK 依赖顺序逐个 flush（`dim_users → dim_platforms → dim_warehouses → dim_spu → dim_erp_sku → bridge_spu_sku → sku_pricing_policies → finance 规则`）。⚠️ SQLAlchemy 的 unit-of-work **只按 `relationship()` 派生的依赖排序，不认裸 `ForeignKey`**；一次 flush 会撞 `ForeignKeyViolationError` |
+| **seed 必须满足 CHECK 约束** | `WarehouseStorageRule.billing_unit` 必须是 `'CNY/CBM/month'`（`ck_warehouse_storage_rules_unit`）；`LogisticsProviderRule.billing_unit` 用 `'CNY/CBM'` |
 | 草稿不拦截 | `POST /drafts` 在低于最低售价时仍返回 201 |
 | **mart 表缺失不伤事务** | `mart.inventory_age_current` 不存在时，`GET /api/skus` 与候选接口正常返回（回落日常档），**后续语句不报 `InFailedSQLTransactionError`** |
+| **mart 表存在时真能取到库龄** | 建一张有一行数据的 `mart.inventory_age_current`（`product_sku='TEST-SKU-1'`, `age_days=75`）→ `pricing_age_days=75`、`pricing_tier_source='age_data'`、命中「滞销30天」档。⚠️ 这条同时验证库龄查询语句**真的能在 asyncpg 下执行**——用 `= ANY(:keys)` 的话类型推断失败会被 `except Exception` 静默吞掉，库龄永远回落日常档且**没有任何报错**。查询必须用**展开式绑定参数**（`IN :keys` + `bindparam(expanding=True)`） |
 | 写接口审计 | 规则表 / 平台成本率 / SKU 覆盖值与达人佣金率的写操作均产生 `FactAuditLog` |
-| 平台成本率部分更新 | 只传 `default_creator_commission_rate` 时，`default_fee_rate` / `fee_rate_effective_from` / `fee_rate_source` / `fee_rate_version` **保持原值不变**（不被写成 NULL、不被刷成当天） |
+| **审计资源类型要钉住** | 三类写入分别落在 `sku_pricing_policy` / `platform_fee_rate` / `sku` 三个 `resource_type` 上，断言时按类型分别查 |
+| 平台成本率部分更新 | 只传 `default_creator_commission_rate` 时，`default_fee_rate` / `other_cost_rate` / `fee_rate_effective_from` / `fee_rate_source` / `fee_rate_version` **保持原值不变**（不被写成 NULL、不被刷成当天）。⚠️ 既有实现是无条件赋值（`row.default_fee_rate = body.default_fee_rate`），不改就会把未传的字段静默清空 |
 | 未来生效日期 | `effective_from` 晚于今日 → 422；`effective_to` 非空时 `status` 必须为 `inactive` |
+
+> ⚠️ **降级链与「实现时只写一处」**：上表里所有降级链分支的业务判断必须落在
+> **一个纯函数**里（`backend/services/product_pricing_service.py` 的 `compute_sku_pricing`），
+> 路由侧只做「ORM 行 → 标量」的适配。
+> 这样 7 个 `missing_reasons`、分母 ≤ 0、折扣纪律兜底全部能写成**无 DB 单测**；
+> 如果把判断写在路由里，这些分支就只能靠集成测试间接覆盖，改代码极易漏。
 
 ### 8.2 契约测试
 
