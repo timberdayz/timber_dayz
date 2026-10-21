@@ -160,6 +160,42 @@ test("定价设置抽屉区分「成本率合计」与「底线基数」", () =>
   assert.match(source, /未单独设置/);
 });
 
+test("SKU 资料页展示定价底线四列", () => {
+  assert.match(source, /当前可优惠/);
+  assert.match(source, /滞销可优惠/);
+  assert.match(source, /最低售价/);
+  assert.match(source, /达人佣金率/);
+  assert.match(source, /row\.current_discount_rate/);
+  assert.match(source, /row\.clearance_max_discount_rate/);
+  assert.match(source, /row\.min_selling_price_override/);
+  assert.match(source, /row\.creator_commission_rate/);
+});
+
+test("SKU 保存剔除只读计算字段但保留可写字段", () => {
+  const section = source.slice(
+    source.indexOf("const payloadSku"),
+    source.indexOf("const validateSpu"),
+  );
+  assert.match(section, /delete payload\.current_discount_rate/);
+  assert.match(section, /delete payload\.min_selling_price/);
+  // 平台兜底值只是展示，不能回提交成「SKU 单独设置过」
+  assert.match(section, /delete payload\.creator_commission_rate_fallback/);
+  assert.doesNotMatch(section, /delete payload\.min_selling_price_override/);
+  assert.doesNotMatch(section, /delete payload\.creator_commission_rate;/);
+});
+
+test("利润测算页展示最低售价并拦截低于底线的预计售价", () => {
+  assert.match(source, /row\.min_selling_price/);
+  assert.match(source, /row\.current_discount_rate/);
+  assert.match(source, /row\.clearance_max_discount_rate/);
+  assert.match(source, /低于最低售价/);
+  assert.match(source, /below_min_selling_price/);
+  // 错误信封读取：结构化业务码在 error.detail（axios 拦截器挂载点），
+  // 不是顶层 data.detail —— 断言这一点，防止有人改回读不到值的写法
+  assert.match(source, /readApiErrorDetail/);
+  assert.match(source, /detail\?\.code === "below_min_selling_price"/);
+});
+
 test("平台 SKU 利润测算保留候选接口预览并支持分页", () => {
   // ⚠️ 断言必须**限定在利润测算区域**：
   // 全文件的 /preview:\s*null/ 还会命中 SPU 删除预检的错误分支
