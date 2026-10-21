@@ -3455,6 +3455,37 @@ Expected: 全部 PASS。
 6. 利润测算 tab 输入低于最低售价的预计售价 → 输入框标红、保存按钮禁用
 7. 恢复上述手工改动（清空达人佣金率与覆盖值、档位恢复 10%）
 
+> ℹ️ **第 1 步的期望值要按 SKU 的真实 SPU 两率算，不能用仓库均值**：
+> `166851422928` 的参考售价 30 × 0.9 = **27.00**，
+> 而它的成本线（按它自己 SPU 的两率）低于 27.00，
+> 所以**生效值是 27.00，来源 `discount_guard`（纪律线），不是 28.23**。
+> 28.23 是「用仓库均值 4.67%/1.58% 算」的形态示例值（见 spec §4.3）。
+
+**已执行的等效验证**（在**本地真库**上跑真实数据，2026-10-21）：
+
+```
+GET /api/skus -> 200
+  20 行, 17 行算出了最低售价
+    166851422928   最低售价=27.0  来源=discount_guard  档位=日常  可优惠=0.1  兜底佣金=0.0606
+    1HJJ-XH-YSC034 最低售价=7.01  来源=cost_floor      档位=日常  可优惠=0.1  兜底佣金=0.0606
+    227764033069   最低售价=3.53  来源=cost_floor      档位=日常  可优惠=0.1  兜底佣金=0.0606
+  算不出来的样例: 166851422929 原因=['no_pricing_input', 'missing_purchase_cost']
+GET /api/platform-sku-profit/candidates -> 200（50 行，带 min_selling_price / min_selling_price_below）
+POST /api/platform-sku-profit/estimates (低于底线) -> 422
+  {"success": false, "error": {"code": 3001, "type": "DataError",
+   "detail": {"code": "below_min_selling_price", "min_selling_price": 27.0,
+              "expected_selling_price": 0.01, "sku_id": 1768}},
+   "message": "[3001] 预计售价 0.01 低于最低售价 27.0"}
+GET /api/sku-pricing-policies/current -> 200（4 档，0/60/90/120 天）
+```
+
+要点：
+- **降级链在真实数据上生效**：缺采购成本的 SKU 给出 `missing_purchase_cost` + `no_pricing_input`，
+  没有静默算出一个乐观的低价。
+- **错误信封完整**：`error.detail.code` 是可读的机器码（不是拍平的字符串）。
+- 真实库里 **`mart.inventory_age_current` 是空的**，所以所有 SKU 都按「日常」档算，
+  档位来源都是 `fallback_no_age_data`（与 §0.3 一致）。
+
 - [ ] **Step 5: 提交**
 
 ```bash
