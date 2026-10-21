@@ -503,7 +503,12 @@ def test_platform_profit_version_refuses_incomplete_inputs_with_structured_missi
     ]
     assert "cannot_save_profit_version" in section
     assert "missing_fields" in section
-    assert "status_code=422" in section
+    # 422 现在由 BusinessValidationError 携带（它的 detail 不会被全局处理器拍平成字符串），
+    # 所以不再依赖 HTTPException(status_code=422) 的字面量
+    assert "BusinessValidationError" in section
+    from backend.utils.exceptions import BusinessValidationError
+
+    assert BusinessValidationError(message="x").http_status_code == 422
 
 
 def test_platform_profit_draft_is_distinct_from_immutable_profit_versions():

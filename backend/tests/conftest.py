@@ -208,8 +208,11 @@ PRICING_SEED_CLEANUP_SQL = (
     "WHERE business_key = '9001' "
     "OR business_key IN (SELECT profile_id::text FROM finance.sku_operating_profiles WHERE sku_id = 9001)",
     "DELETE FROM finance.sku_profit_estimates WHERE sku_id = 9001",
+    # 审计：resource_id 有三种形态——纯 sku_id、平台 code、
+    # 以及草稿/利润版本的复合 key（"tiktok:MY-01:9001"），所以用 user_id 兜底
     "DELETE FROM public.fact_audit_logs "
-    "WHERE resource_id = '9001' OR resource_id = 'tiktok' OR resource_type = 'sku_pricing_policy'",
+    "WHERE user_id = 1 OR resource_id = '9001' OR resource_id = 'tiktok' "
+    "OR resource_id LIKE '%9001%' OR resource_type = 'sku_pricing_policy'",
     "DELETE FROM finance.sku_operating_profiles WHERE sku_id = 9001",
     "DELETE FROM finance.sku_pricing_policies",
     "DELETE FROM finance.logistics_provider_rules WHERE logistics_provider = 'TEST-LOG'",

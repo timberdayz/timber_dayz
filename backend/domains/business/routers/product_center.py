@@ -2622,6 +2622,8 @@ async def list_platform_sku_profit_candidates(
     cost_inputs_by_sku = await finance.prefetch_platform_sku_profit_inputs(
         sku_rows, warehouse_code, transport_type
     )
+    # 定价底线：一次取齐，循环内只做纯计算（候选一次最多 100 行，不要逐行 await）
+    pricing_context = await _pricing_context(db, [row.sku_id for row in sku_rows])
     items = []
     for row in sku_rows:
         profile = profile_by_sku.get(row.sku_id)
@@ -2672,8 +2674,7 @@ async def list_platform_sku_profit_candidates(
             damage_rate=assigned.logistics_damage_rate if assigned else None,
         )
         items.append({
-            "sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name, "specification": row.specification,
-            "spu": assigned_spu, "reference_selling_price": row.reference_selling_price,
+            "sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name, "specification": row.specification,            "spu": assigned_spu, "reference_selling_price": row.reference_selling_price,
             "purchase_cost": purchase_cost,
             "platform_code": platform_code, "warehouse_code": warehouse_code, "transport_type": transport_type,
             "expected_selling_price": expected_selling_price,
@@ -2698,6 +2699,19 @@ async def list_platform_sku_profit_candidates(
             "reference_storage_missing_reasons": [reason for reason in missing_reasons if reason in {"missing_storage_rule", "missing_turnover_class"} or (reason == "missing_sku_volume" and reference_storage is None)],
             "preview": _decimal_payload(preview),
         })
+        # 定价底线字段并进这一行（其余键保持原样）
+        pricing_payload = _compute_pricing_for_sku(
+            context=pricing_context,
+            sku_row=row,
+            linked_spu=assigned,
+        )
+        floor = pricing_payload["min_selling_price"]
+        pricing_payload["min_selling_price_below"] = bool(
+            floor is not None
+            and expected_selling_price is not None
+            and Decimal(str(expected_selling_price)) < Decimal(str(floor))
+        )
+        items[-1] = {**items[-1], **pricing_payload}
     return {"data": items, "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
 
 
@@ -2806,14 +2820,43 @@ async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db
 async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     values = body.model_dump()
     await _validate_operating_dimensions(db, values)
+    # 护栏：**排在「资料完整性」校验之前**。
+    # 若排在后面，缺物流/仓储规则时会先撞 cannot_save_profit_version（缺资料），
+    # 用户永远看不到「低于最低售价」这个更可执行的原因。
+    # 护栏的输入（采购成本 + 平台成本率 + 参考售价 + 规则表）不依赖物流/仓储规则，
+    # 底线算不出来时 floor 为 None，护栏自动跳过，交给后面的缺资料校验。
+    floor = await _compute_sku_min_selling_price(db, values["sku_id"])
+    if floor is not None and values.get("expected_selling_price") is not None:
+        if Decimal(str(values["expected_selling_price"])) < floor:
+            raise BusinessValidationError(
+                message=f"预计售价 {values['expected_selling_price']} 低于最低售价 {floor}",
+                detail={
+                    "code": "below_min_selling_price",
+                    "min_selling_price": float(floor),
+                    "expected_selling_price": values["expected_selling_price"],
+                    "sku_id": values["sku_id"],
+                },
+            )
     try:
         preview = await ProductFinanceService(db).preview_platform_sku_profit(values)
     except ValueError as exc:
         missing_fields = await _platform_profit_missing_fields(db, values)
-        raise HTTPException(status_code=422, detail={"code": "cannot_save_profit_version", "missing_fields": missing_fields or [str(exc)]}) from exc
+        raise BusinessValidationError(
+            message="资料未完整，不能保存利润版本",
+            detail={
+                "code": "cannot_save_profit_version",
+                "missing_fields": missing_fields or [str(exc)],
+            },
+        ) from exc
     missing_fields = await _platform_profit_missing_fields(db, values, preview)
     if missing_fields:
-        raise HTTPException(status_code=422, detail={"code": "cannot_save_profit_version", "missing_fields": missing_fields})
+        raise BusinessValidationError(
+            message="资料未完整，不能保存利润版本",
+            detail={
+                "code": "cannot_save_profit_version",
+                "missing_fields": missing_fields,
+            },
+        )
     profile = (await db.execute(select(SkuOperatingProfile).where(SkuOperatingProfile.sku_id == values["sku_id"], SkuOperatingProfile.platform_code == values["platform_code"], SkuOperatingProfile.warehouse_code == values["warehouse_code"], SkuOperatingProfile.status == "active", SkuOperatingProfile.effective_to.is_(None)))).scalars().first()
     if profile is None:
         profile = SkuOperatingProfile(sku_id=values["sku_id"], platform_code=values["platform_code"], warehouse_code=values["warehouse_code"], status="active", created_by=getattr(_user, "user_id", None))

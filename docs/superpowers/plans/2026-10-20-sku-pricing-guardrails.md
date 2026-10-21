@@ -1947,6 +1947,13 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
 > `UniqueViolationError: duplicate key value violates unique constraint "dim_users_pkey"`。
 > 清理 SQL 按 FK 顺序（子表先删）：投影任务 → 利润版本 → 审计 → 经营档案 →
 > 规则表 → 物流/仓储规则 → SKU 绑定 → SKU → SPU → 仓库 → 平台 → 用户。
+>
+> ⚠️ **审计表的清理条件要覆盖三种 `resource_id` 形态**：
+> 纯 sku_id（`'9001'`）、平台 code（`'tiktok'`）、
+> 以及草稿/利润版本的复合 key（`'tiktok:MY-01:9001'`）。
+> 漏掉复合 key 的话，删 `dim_users` 会撞
+> `ForeignKeyViolationError: fact_audit_logs_user_id_fkey`。
+> 所以条件里加了 `user_id = 1`（本组用例的 mock 用户）与 `resource_id LIKE '%9001%'`。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -2436,9 +2443,13 @@ def test_profit_candidates_and_estimate_guardrail_wired():
     from pathlib import Path
 
     source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    service = Path("backend/services/product_pricing_service.py").read_text(encoding="utf-8")
     assert "below_min_selling_price" in source
     assert "min_selling_price_below" in source
-    assert "clearance_max_discount_rate" in source
+    # 这三个字段由纯函数服务产出（路由只做 ORM 适配 + 合并），
+    # 所以要在 service 里断言，而不是在路由里
+    for name in ("min_selling_price", "clearance_max_discount_rate", "current_discount_rate"):
+        assert name in service, name
 
 
 @pytest.mark.asyncio

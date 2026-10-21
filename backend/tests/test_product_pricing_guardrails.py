@@ -379,7 +379,6 @@ def test_sku_pricing_manual_override_wins_and_is_flagged():
     assert out["min_selling_price_override"] == pytest.approx(20.00, abs=0.01)
 
 
-
 def test_router_exposes_pricing_policy_routes():
     from pathlib import Path
 
@@ -716,3 +715,131 @@ async def test_mart_age_lookup_works_when_table_exists_and_survives_when_not(
     # 3) 再查一次：若事务在上一步被 abort，这里会 500
     again = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
     assert again.status_code == 200, again.text
+
+
+def test_profit_candidates_and_estimate_guardrail_wired():
+    from pathlib import Path
+
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    service = Path("backend/services/product_pricing_service.py").read_text(encoding="utf-8")
+    assert "below_min_selling_price" in source
+    assert "min_selling_price_below" in source
+    # 这三个字段由纯函数服务产出（路由只做 ORM 适配 + 合并），
+    # 所以要在 service 里断言，而不是在路由里
+    for name in ("min_selling_price", "clearance_max_discount_rate", "current_discount_rate"):
+        assert name in service, name
+
+
+@pytest.mark.asyncio
+async def test_estimate_below_floor_is_rejected_but_draft_is_not(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """低于最低售价时 estimates 422 拦截，drafts 仍放行。"""
+    await pricing_seed()
+
+    # 候选接口需要 active 的 sales 平台 + active 仓库 + SKU，seed 已满足
+    candidates = await pg_async_client.get(
+        "/api/platform-sku-profit/candidates",
+        headers=pricing_auth_headers,
+        params={
+            "platform_code": "tiktok",
+            "warehouse_code": "MY-01",
+            "transport_type": "sea",
+        },
+    )
+    assert candidates.status_code == 200, candidates.text
+    rows = candidates.json()["data"]
+    assert rows, "seed 后应有候选行"
+    row = rows[0]
+    assert "min_selling_price" in row
+    assert row["min_selling_price"] is not None
+    # seed 的期望数值：成本线 10/0.3542 = 28.23 > 纪律线 30*0.9 = 27.00
+    assert row["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert row["min_selling_price_source"] == "cost_floor"
+    # 库龄表在测试库不存在 -> 回落「日常」档
+    assert row["pricing_tier_source"] == "fallback_no_age_data"
+    assert row["pricing_age_days"] is None
+
+    payload = {
+        "sku_id": row["sku_id"],
+        "platform_code": row["platform_code"],
+        "warehouse_code": row["warehouse_code"],
+        "transport_type": row["transport_type"],
+        "expected_selling_price": 0.01,
+    }
+    estimate = await pg_async_client.post(
+        "/api/platform-sku-profit/estimates", headers=pricing_auth_headers, json=payload
+    )
+    assert estimate.status_code == 422, estimate.text
+    body = estimate.json()
+    # ⚠️ 仓库统一错误信封是 {"success": false, "error": {...}, "message": ..., "timestamp": ...}
+    # **没有顶层 `detail` 键**；结构化业务码在 `error.detail.code`。
+    # （`backend/app/exception_handlers.py` 的 handle_http_exception 会把 HTTPException.detail
+    #   拍平成字符串，所以必须走 APIException 路线才能保住 dict 结构。）
+    assert body["success"] is False
+    assert body["error"]["detail"]["code"] == "below_min_selling_price"
+    assert body["error"]["detail"]["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert body["error"]["detail"]["expected_selling_price"] == pytest.approx(0.01, abs=0.01)
+
+    draft = await pg_async_client.post(
+        "/api/platform-sku-profit/drafts", headers=pricing_auth_headers, json=payload
+    )
+    assert draft.status_code == 201, draft.text
+
+
+@pytest.mark.asyncio
+async def test_estimate_above_floor_saves_successfully(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """高于底线的价格必须能存——证明护栏只拦「低于底线」，不是把整条保存链路堵死。
+
+    这条同时是 **seed 完整性的探针**：如果 seed 缺物流规则 / 仓储规则 / 平台费率，
+    这里会拿到 `cannot_save_profit_version` 而不是 201。
+    """
+    await pricing_seed()
+
+    ok = await pg_async_client.post(
+        "/api/platform-sku-profit/estimates",
+        headers=pricing_auth_headers,
+        json={
+            "sku_id": 9001,
+            "platform_code": "tiktok",
+            "warehouse_code": "MY-01",
+            "transport_type": "sea",
+            "expected_selling_price": 35,
+        },
+    )
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["estimate_ids"]
+
+
+@pytest.mark.asyncio
+async def test_guardrail_precedes_missing_fields_check(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """缺物流/仓储规则 + 低于底线 -> 必须报 below_min_selling_price。
+
+    ⚠️ 这是「护栏排在缺资料校验之前」的**唯一可观测断言**。
+    用完整 seed 时 `_platform_profit_missing_fields` 恒返回 `[]`，
+    护栏放前放后结果完全一样，测不出差别——所以必须用 `with_cost_rules=False` 的 seed。
+    """
+    await pricing_seed(with_cost_rules=False)
+
+    estimate = await pg_async_client.post(
+        "/api/platform-sku-profit/estimates",
+        headers=pricing_auth_headers,
+        json={
+            "sku_id": 9001,
+            "platform_code": "tiktok",
+            "warehouse_code": "MY-01",
+            "transport_type": "sea",
+            "expected_selling_price": 0.01,
+        },
+    )
+    assert estimate.status_code == 422, estimate.text
+    body = estimate.json()
+    # 不能是 cannot_save_profit_version（缺物流规则 / 缺仓储规则）
+    assert body["error"]["detail"]["code"] == "below_min_selling_price"
+    assert body["error"]["detail"]["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+
+
