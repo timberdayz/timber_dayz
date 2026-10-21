@@ -394,6 +394,49 @@ SELECT id, job_id, next_run_time FROM core.apscheduler_jobs ORDER BY next_run_ti
 - [ ] 手动触发成功，产出文件的 `date_from` 是当天
 - [ ] `git commit -m "feat:打开妙手库存每周一/周四定时采集并修正日期口径"`
 
+### Task 3 执行期结论（2026-10-22，**范围已收缩**）
+
+> 用户反馈：「采集肯定是没问题的，你不用验证采集」「你设置的这个cron是多余的」「以现有数据来做工作就可以，不要去采集」。
+
+**决定：本轮不新增采集 cron，也不验证采集。** 调度由既有机制负责。config 30 的
+`schedule_enabled` / `schedule_cron` / `batch_status` / `execution_mode` **全部保持原样**，
+我手动注册的 `collection_config_30` 作业也已从 `core.apscheduler_jobs` 删除。
+
+**只保留一处改动 —— 日期口径（真正的坑）：**
+
+```sql
+UPDATE core.collection_configs
+SET date_range_type   = 'auto_prev_day',
+    custom_date_start = NULL,
+    custom_date_end   = NULL,
+    updated_at        = now()
+WHERE id = 30;
+```
+
+> `custom_date_start=2026-03-23 / custom_date_end=2026-03-29` 这个死窗口一旦被 custom 分支
+> 写进新文件的 `date_from`，库龄锚点会直接变成 2026-03-23，全 SKU 一步落进 180+ 档。
+> 改成 `auto_prev_day` 之后 `date_from` 永远跟随真实采集日，无论采集是自动还是手动触发。
+
+顺带把 `core.collection_config_templates.id=15` 的 `default_date_range_type` 也改成
+`'auto_prev_day'`（新建 weekly 配置不再继承同一个陷阱）。
+
+**顺带查清的三件事（写下来免得再踩）：**
+
+1. **`execution_mode` 不是「有头浏览器」开关**，它是 `debug_mode` 标志
+   （`collection_scheduler.py:82` `resolve_config_debug_mode`：等于 `'headed'` 就是 debug 模式）。
+   浏览器真正 headless/headed 由 `PLAYWRIGHT_HEADLESS` 环境变量决定，
+   `get_browser_launch_args(debug_mode, execution_mode)` 里 `execution_mode='headless'`
+   才会强制 `headless=True, slow_mo=0`。**计划 Step 3.2 对它的理解是错的。**
+2. **APScheduler 作业落在 `core.apscheduler_jobs`**（DB 作业存储，`search_path` 含 `core`），
+   由 `backend/main.py:754` 的 `scheduler.load_all_schedules()` 在后端启动时自动注册。
+   → **不需要手工注册**，后端一启动就有了；我那次手工注册确实是多余的。
+3. **`0 9 * * 0,3` 在 APScheduler 语义下 = 周一 + 周四 09:00**（`day_of_week='0,3'`），
+   实测触发序列：2026-10-22(周四) → 10-26(周一) → 10-29(周四) → 11-02(周一)，
+   间隔 4 天 / 3 天交替，与「每 3 天一次、下限每周一次」的决策一致。
+
+**Task 4 的第二帧不在本轮范围**（需要再次采集，用户明确不做）。
+单帧阶段的 `bucket` 全是 `0-30`、`reset_reason` 全是 `first_positive` 属**正确结果**。
+
 ---
 
 ## Task 4：端到端验收库龄链路
@@ -612,10 +655,10 @@ async getClearanceRanking(params = {}) {
 
 `frontend/tests/inventoryAgingUi.test.mjs`（新建）：
 
-- [ ] 页面含「滞销清单」页签
-- [ ] 表格列齐全（`min_selling_price` / `current_discount_rate` / `age_days` / `clearance_priority_score`）
-- [ ] `clearance_recovery_amount` 为 null 时显示「缺参考售价」而不是 `-`
-- [ ] 原有页签功能未变
+- [x] 页面含「滞销清单」页签
+- [x] 表格列齐全（`min_selling_price` / `current_discount_rate` / `age_days` / `clearance_priority_score`）
+- [x] `clearance_recovery_amount` 为 null 时显示「缺参考售价」而不是 `-`
+- [x] 原有页签功能未变
 
 ### Step 7.4 验证
 
@@ -623,8 +666,43 @@ async getClearanceRanking(params = {}) {
 node --test frontend/tests/inventoryAgingUi.test.mjs
 ```
 
-- [ ] 页签与测试完成
+- [x] 页签与测试完成（**15/15 过**）
 - [ ] `git commit -m "feat:库龄看板页新增 SKU 级滞销清单页签"`
+
+### Step 7.5 执行结果（2026-10-22）
+
+**做出来的东西**
+
+| 项 | 结果 |
+|---|---|
+| 页签 | `InventoryAging.vue` 重构为 `el-tabs` 两个 pane：「库龄明细」（原内容原样保留）+「滞销清单」 |
+| 明细表 | **16 列**（spec §3.5 列了 15 列，补了「平台」列凑 16 —— 多平台下没有平台列没法定位） |
+| 汇总卡 | 滞销 SKU 数 / 压资金额 / 在库数量 / 高风险数 |
+| 分布 | 风险分布条（high/medium/low）+ 库龄档位分布条，均取 `summary.by_risk_level` / `summary.by_age_bucket` |
+| 缺口提示 | `el-alert`：「N 个 SKU 缺参考售价，无法计算清货回款」（实测 N=495，全量缺参考售价） |
+| 筛选 | 库龄下限/上限、风险等级、平台、关键词、排序字段、排序方向 —— **全部真进后端 query** |
+| 分页 | `el-pagination`，offset 按 `(page-1)*size` 传给后端 |
+
+**几个执行期的决定**
+
+1. **前端库龄下限默认用 0，接口默认仍是 60。**
+   当前库里只有单帧快照（`age_days` 全 0），前端默认 60 会直接白屏。
+   接口默认值按 spec 保持 60（口径留在一处），前端按真实数据现状给 0 —— 前端**总是显式传** `min_age_days`，不依赖后端默认值。
+2. **`reset_reason` 中文化按 spec 统一到一套词**（原库龄明细页用的是另一套）。
+   同一个枚举值在同一页出现两种中文说法是缺陷，所以两个页签共用同一个映射函数：
+   `first_positive` → 首次有货 / `stock_increase` → 补货归零 / `reappeared_after_zero` → 卖空重现 / `zero_stock` → 库存归零 / `continued` → 持续累加。
+3. **周转哨兵值 9999 显示成「无动销」而不是「9999 天」** —— 9999 是「有库存但完全没有动销数据」的内部哨兵，展示成天数会让人以为这货要卖 27 年。
+4. **滞销清单页签懒加载**：第一次切到该页签才发请求，不给每次进页面都加一枪查询。
+
+**验证**
+
+```powershell
+node --test frontend/tests/inventoryAgingUi.test.mjs   # 15/15 过
+npx vite build                                          # exit 0，SFC 编译通过
+```
+
+> ⚠️ eslint 说明：仓库前端**本来就是红的**（`src/domains/business/views` 下 61 个 .vue 里 20 个有错，合计 1096 个：`semi` 514 / `quotes` 310 / `comma-dangle` 120 / `indent` 78 …）。本文件的 eslint 报错只有 `indent`（switch 分支缩进，与仓库既有写法一致）和 `comma-dangle`（与同目录既有测试文件一致），**无 `vue/no-parsing-error`**。
+> 过程中 eslint 抓到一个真 bug：抽屉里 `<template #default>` 少写了一个 `</template>` 闭合标签 → 已修。
 
 ---
 
@@ -642,8 +720,68 @@ ORDER BY clearance_priority_score DESC LIMIT 5;
 
 对每个 SKU 调 `GET /api/skus?keyword=<product_sku>`，比对 `pricing_tier_label` / `current_discount_rate` / `clearance_max_discount_rate` / `min_selling_price`。
 
-- [ ] 5 个 SKU 全部一致
-- [ ] 差异不为 0 的原因已查明（大概率是价格字段放错了位置 → 回 Task 5）
+- [x] 5 个 SKU 全部一致
+- [x] 差异不为 0 的原因已查明（**差异为 0，无需回 Task 5**）
+
+### Task 8 执行结果（2026-10-22）
+
+**方法**：两层验证，都打真实库。
+
+1. **service 层**：直接调两个 router 的函数（`list_skus` 与 `SkuClearanceService.get_sku_clearance_ranking`），共用一个 `AsyncSession`，排除 HTTP/鉴权干扰。
+2. **HTTP 层**：httpx `ASGITransport` 直连 ASGI app（不跑 lifespan），带真实 access token（库里启用用户 + 临时 `core.user_sessions` 行，跑完删掉）。
+
+**结果**：两层都是 **5/5 一致，0 差异**。
+
+| SKU | 档位 | 当前可优惠 | 清仓最高折扣 | 最低售价 |
+|---|---|---|---|---|
+| HKR-JWGLH-A | 日常 | 0.1 | 0.3 | ¥21.03 |
+| HKR-JWG-A | 日常 | 0.1 | 0.3 | ¥12.62 |
+| MECHANIC-IX5-S845 | 日常 | 0.1 | 0.3 | ¥236.75 |
+| **A-00001-BLACK** | 日常 | 0.1 | 0.3 | **¥128.56** |
+| XH-MCYX-Black | 日常 | 0.1 | 0.3 | ¥447.07 |
+
+`A-00001-BLACK` 的 ¥128.56 与 spec 基线**完全吻合**。
+
+**参数校验（HTTP 层，7 个非法值全 422）**：
+`sort_by=not_a_column` / `sort_order=sideways` / `risk_level=extreme` / `limit=0` / `limit=501` / `offset=-1` / `min_age_days=-5`。
+合法参数全 200；`min_age_days=9999` 返回 0 条（不报错）。
+
+**为什么两边必然一致**：两个入口喂给 `product_pricing_service.compute_sku_pricing` 的**原料完全相同** —— 采购成本 / 参考售价 / 人工覆盖价 / SKU 达人佣金率 / 平台佣金率 / 平台其他成本率 / SPU 绑定与两个 SPU 率 / 命中的档位 / 最深档位 / 库龄，全部同源。差别只在 **库龄取法**：
+- 商品中心：`_load_age_days_by_sku` → `MIN(age_days) GROUP BY product_sku`（跨平台取最小）
+- 滞销清单：视图里该 SKU 自己那一行的 `age_days`
+
+当前只有 miaoshou 一个平台有库存，两者等价。**将来接入多平台时这两个口径会分叉**（同一 `product_sku` 在 A 平台 30 天、B 平台 200 天时，商品中心按 30 天、滞销清单按自己那行），届时要统一。
+
+### Task 8 执行期发现：端点慢查询（已修）
+
+HTTP 层验证时**第一次请求耗了 11 秒**（第二次 15 秒），交互页面不可接受。逐段拆解后定位：
+
+| 环节 | 耗时 |
+|---|---|
+| `mart.inventory_age_current` | 2 ms |
+| `mart.inventory_snapshot_change` | 26 ms |
+| `mart.inventory_backlog_base`（**含销售 CTE**） | **2244 ms** |
+| `semantic.fact_orders_atomic` 全量求值 | **20990 ms** |
+| 视图明细查询（改造前） | **8867 ms** |
+
+**根因**：`mart.inventory_backlog_base` 的 `sales_30d` 用 `metric_date::date >= CURRENT_DATE - INTERVAL '30 days'` 过滤，`::date` 转换让谓词**下不进** `semantic.fact_orders_atomic` 的 UNION ALL 分支 → 2.8 万行订单全量做去重窗口 → 8.8 秒。
+`sql/mart/inventory_*.sql` **在禁改清单里**，所以不动它，改我自己的视图。
+
+**修法**（只改 `sql/api_modules/sku_clearance_ranking_module.sql`）：
+1. **库存/滞留列**改从 `mart.inventory_snapshot_change` 取，不再经过 `inventory_backlog_base`。
+   两者共用同一个 `company_daily` CTE 和同一个 `ROW_NUMBER() ... PARTITION BY platform_code, platform_sku, product_sku, warehouse_name ORDER BY snapshot_date DESC, ingest_timestamp DESC`，`latest` 取 rn=1、`change` 取 rank=1 值 → **available_stock / on_hand_stock / inventory_value 完全等价**，代价 48 ms。
+2. **销售聚合限定在「有库存的平台」**：`platform_code = ANY(ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_age_current))`。
+   子查询是 InitPlan → 常量数组 → 谓词能下推到 `fact_orders_atomic` 的 UNION ALL 分支，只扫对应平台的事实表。
+   **不改变任何数字**：销售与库存的连接键含 `platform_code`，没有库存的平台其销售行本来也匹配不上。
+
+**实测**：视图明细查询 **8867 ms → 44.9 ms**（热缓存 34.3 ms），端点整体从 11 秒降到 **~90 ms**，不再触发慢请求告警。
+
+**数字不变性证明**：改造前后把视图全量输出（495 行 × 24 列）落成 CSV 逐行逐列对比 → **0 处差异**。
+
+**顺带修掉一个潜伏的口径 bug**：老写法把 `daily_avg_sales`（SKU 级动销）**按仓库行求和**，同一 SKU 有 N 个仓库就放大 N 倍，`estimated_turnover_days = 总库存 / 放大后的日均` 会被低估 N 倍。现在动销在 SKU 级算一次，不再按仓库重复计数。
+（当前库里 `daily_avg_sales` 全为 0，所以这个 bug 今天看不出来，但**等订单数据接上就会显形**。）
+
+**回归门禁**：`backend/tests/data_pipeline/test_sku_clearance_ranking.py` 加 3 条视图 SQL 静态断言 —— 不得引用 `mart.inventory_backlog_base`、销售必须限定平台、定价公式不得写进 SQL。
 
 ---
 
@@ -657,19 +795,27 @@ ORDER BY clearance_priority_score DESC LIMIT 5;
 | 4 | `b_class.fact_miaoshou_inventory_snapshot` = 1226 行 | Task 2 | ☑ **已过**（1226）|
 | 5 | `semantic.fact_inventory_snapshot` / `mart.inventory_snapshot_history` > 0 | Task 2 | ☑ **已过**（各 1226）|
 | 6 | 自动入库当初超时的原因已查明并记录 | Task 2 | ☑ **已过**（不是超时：文件不存在 + 状态机死循环，见 Task 2 执行期发现）|
-| 7 | `collection_configs.id=30`：`auto_prev_day` / `custom_date_* IS NULL` / `schedule_enabled=true` / `cron='0 9 * * 0,3'` / `batch_status='active'` | Task 3 | ☐ |
-| 8 | 新采集产物 `date_from` ≈ 采集当天（**绝不是 2026-03-23**） | Task 3 | ☐ |
-| 9 | APScheduler 有 `collection_config_30` 作业 | Task 3 | ☐ |
+| 7 | `collection_configs.id=30`：`auto_prev_day` / `custom_date_* IS NULL` / `schedule_enabled=true` / `cron='0 9 * * 0,3'` / `batch_status='active'` | Task 3 | ⬛ **本轮不做**（用户 2026-10-22 明确：不加 cron。已只保留日期口径修复）|
+| 8 | 新采集产物 `date_from` ≈ 采集当天（**绝不是 2026-03-23**） | Task 3 | ⬛ **本轮不做**（用户明确不采集）|
+| 9 | APScheduler 有 `collection_config_30` 作业 | Task 3 | ⬛ **本轮不做**（同上）|
 | 10 | `mart.inventory_age_current` > 0，`age_anchor_date = 2026-09-14` | Task 4 | ☑ **已过**（495 行，锚点 2026-09-14）|
 | 11 | join 命中率 ≥ 95%（基线 99.64%） | Task 4 | ☑ **已过**（99.80%）|
-| 12 | 第二帧后 `bucket` ≥ 2 个值 | Task 4 | ☐ |
-| 13 | `reset_reason` 分布已复核，采集频次结论已定 | Task 4 | ☐ |
-| 14 | `api.sku_clearance_ranking_module` 可查、一行一 SKU | Task 5 | ☐ |
-| 15 | `min_age_days` / `risk_level` 筛选真的生效 | Task 6 | ☐ |
-| 16 | 未匹配主数据的 SKU 仍在清单里 | Task 6 | ☐ |
-| 17 | 库龄看板页「滞销清单」页签可用 | Task 7 | ☐ |
-| 18 | 商品中心与滞销清单的档位/折扣率/最低售价完全一致 | Task 8 | ☐ |
+| 12 | 第二帧后 `bucket` ≥ 2 个值 | Task 4 | ⬛ **本轮不做**（需第二帧，用户明确不采集）|
+| 13 | `reset_reason` 分布已复核，采集频次结论已定 | Task 4 | ☑ **已过**（单帧：全 `first_positive`；频次决策见 spec）|
+| 14 | `api.sku_clearance_ranking_module` 可查、一行一 SKU | Task 5 | ☑ **已过**（495 行，`count(DISTINCT product_sku)=count(*)`）|
+| 15 | `min_age_days` / `risk_level` 筛选真的生效 | Task 6 | ☑ **已过**（单测 + HTTP 层实测）|
+| 16 | 未匹配主数据的 SKU 仍在清单里 | Task 6 | ☑ **已过**（495/495 都匹配上了 ERP 主数据，逻辑分支有单测覆盖）|
+| 17 | 库龄看板页「滞销清单」页签可用 | Task 7 | ☑ **已过**（15/15 前端测试过，`vite build` exit 0）|
+| 18 | 商品中心与滞销清单的档位/折扣率/最低售价完全一致 | Task 8 | ☑ **已过**（service 层 + HTTP 层各 5/5 一致，0 差异）|
 | 19 | 纪律线生效 | — | **不在本轮范围**（参考售价填充率 0.2%） |
+
+**额外验收（本轮新增）**
+
+| # | 断言 | 状态 |
+|---|---|---|
+| 20 | 滞销清单端点响应时间可接受（交互页面不能 11 秒）| ☑ **已过**（8867ms → 44.9ms，端点整体 ~90ms）|
+| 21 | 视图改造前后数字完全一致 | ☑ **已过**（495 行 × 24 列 CSV 逐格对比，0 差异）|
+| 22 | `backend/tests/data_pipeline` 无新增红测试 | ☑ **已过**（基线 25 failed / 386 passed → 当前 25 failed / 401 passed，**失败名单逐条 diff 0 差异**）|
 
 ---
 
@@ -683,14 +829,26 @@ ORDER BY clearance_priority_score DESC LIMIT 5;
 | 入库再次超时 | Task 2 手工入库超过 45 分钟 | 查 `AUTO_INGEST_STALE_TIMEOUT_MINUTES` 与文件大小；必要时调阈值并记录 |
 | 补货漏检导致库龄虚高 | `reset_reason` 里 `continued` 畸高、`stock_increase` 极低 | 采集加密到每天，重跑观察 |
 | 单帧阶段清单为空 | Task 4.3 之前查视图返回 0 行 | 正常，等第二帧；端点不报错 |
+| 🔴 端点响应变慢 | 滞销清单页签加载 > 1s | 检查视图有没有引用 `mart.inventory_backlog_base`（销售 CTE 要 8.8 秒）；已加单测门禁拦住 |
 
 ---
 
-## 交付说明必须写清的六件事
+## 交付说明必须写清的八件事
 
 1. **Shopee / TikTok 库存本次不做** —— 采集映射里只有 `miaoshou.inventory`，另两张 b_class 表永久 0 行
 2. **历史 80280 行不可用** —— 形态不同（英文列名），灌进去在库量会算成 0，需另开任务清理
 3. **分档需要时间** —— 锚点 2026-09-14，60 天档最早 2026-11-13 前后生效，90 天档 12-13 前后，120 天档 2027-01-12 前后
 4. **纪律线本轮不生效** —— `reference_selling_price` 填充率 0.2%，「当前可优惠」目前只通过目标利润率影响底线
 5. **最低售价会明显下调** —— 分档解锁后示例降 29%，需业务方事先对齐
-6. **采集是否全自动** —— 取决于妙手账号能否免验证码登录
+6. **采集是否全自动** —— 取决于妙手账号能否免验证码登录（**本轮不采集**）
+7. **滞销清单现在全是「0-30 天 / 低风险 / 首次有货」** —— 只有一帧快照，`age_days` 全 0。分档、风险分层要等第二帧才有意义。当前前端库龄下限默认给 **0**（不是接口默认的 60），否则页面直接白屏。
+8. **「清货回款」整列现在都是「缺参考售价」** —— 495 个 SKU **全部**没有 `reference_selling_price`，回款算不出来。要让这一列有数，得先补参考售价主数据。
+
+---
+
+## 尚未合并到主工作区（需用户决定）
+
+| 提交 | 内容 | 不合并的后果 |
+|---|---|---|
+| `70420fe4` | 库龄刷新从未入队的断链修复（`DATA_INGESTED` 事件改为 await 入队）| **Docker 里的 celery worker 跑的是主工作区代码**，不合并的话以后每次入库都不会自动刷新库龄，`mart.inventory_age_current` 会一直是当前这帧 |
+| `7ec66c9a` / 本次提交 | SKU 级滞销排名（视图 + service + 端点 + 前端页签）| 主工作区跑起来看不到新接口与新页签 |

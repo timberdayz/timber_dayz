@@ -99,24 +99,27 @@ WITH age AS (
     WHERE a.product_sku IS NOT NULL
 ),
 turnover AS (
-    -- 动销辅助：backlog_base 是仓库行，这里聚合到 SKU
+    -- 动销辅助：仓库行聚合到 SKU
+    -- ⚠️ **实施期调整（2026-10-22）**：原稿这里读 mart.inventory_backlog_base，
+    --    但那个视图的 sales_30d 要 8.8 秒（详见 §3.1a），
+    --    改读 mart.inventory_snapshot_change（等价、48ms）+ 单独的销售聚合。
     SELECT
         platform_code,
         product_sku,
         SUM(available_stock)      AS available_stock,
         SUM(on_hand_stock)        AS on_hand_stock,
         SUM(inventory_value)      AS inventory_value,
-        SUM(daily_avg_sales)      AS daily_avg_sales,
+        MAX(daily_avg_sales)      AS daily_avg_sales,
         CASE
-            WHEN SUM(daily_avg_sales) > 0
-            THEN ROUND(SUM(available_stock)::numeric / SUM(daily_avg_sales), 2)
+            WHEN MAX(daily_avg_sales) > 0
+            THEN ROUND(SUM(available_stock)::numeric / MAX(daily_avg_sales), 2)
             WHEN SUM(available_stock) > 0 THEN 9999
             ELSE 0
         END                      AS estimated_turnover_days,
         MAX(is_stagnant)                AS is_stagnant,
         MAX(estimated_stagnant_days)    AS estimated_stagnant_days,
         MAX(stagnant_snapshot_count)    AS stagnant_snapshot_count
-    FROM mart.inventory_backlog_base
+    FROM mart.inventory_snapshot_change
     WHERE product_sku IS NOT NULL
     GROUP BY platform_code, product_sku
 ),
@@ -239,6 +242,50 @@ LEFT JOIN core.dim_spu spu ON spu.spu = b.spu
 > ⚠️ 上面是**结构草图**，`min_selling_price` 那一坨在实现时要按可读性拆成 CTE，并逐条对齐 `backend/services/product_pricing_service.py` 的公式与降级链（分母 ≤ 0 时返回 NULL、缺料时不硬算）。
 >
 > **更稳的替代方案（推荐）**：如果视图里的价格计算不好维护，改为**视图只出库龄/库存/动销/ERP 关联，价格字段由后端 service 调用 `product_pricing_service` 的纯函数补齐**。这样定价口径只有一处（`compute_sku_pricing`），不会有两处公式漂移。**实施时按 §6 Task 5 的判断二选一。**
+
+### 3.1a 视图性能：实施期实测（2026-10-22）
+
+**这一节是实施期补的，原设计稿没预见到。**
+
+HTTP 层验证时第一次请求 **11 秒**，第二次 15 秒。逐段拆解：
+
+| 环节 | 耗时 |
+|---|---|
+| `mart.inventory_age_current` | 2 ms |
+| `mart.inventory_snapshot_change` | 26 ms |
+| `mart.inventory_backlog_base`（含销售 CTE） | **2244 ms** |
+| `semantic.fact_orders_atomic` 全量求值 | **20990 ms** |
+| 视图明细查询（调整前） | **8867 ms** |
+
+**根因**：`mart.inventory_backlog_base` 的 `sales_30d` 用
+`metric_date::date >= CURRENT_DATE - INTERVAL '30 days'` 过滤，`::date` 转换让谓词
+**下不进** `semantic.fact_orders_atomic` 的 UNION ALL 分支 → shopee/tiktok 的 2.8 万行订单
+全量做去重窗口（`row_number() OVER (PARTITION BY platform_code, shop_id, data_hash ...)`）。
+
+`sql/mart/inventory_*.sql` 在禁改清单里，**不动它**，改我自己的视图：
+
+1. **库存/滞留列**改从 `mart.inventory_snapshot_change` 取（不再经过 `inventory_backlog_base`）。
+   `inventory_snapshot_change` 与 `inventory_snapshot_latest` 共用同一个 `company_daily` CTE
+   和同一个 `ROW_NUMBER() ... PARTITION BY platform_code, platform_sku, product_sku, warehouse_name
+   ORDER BY snapshot_date DESC, ingest_timestamp DESC`，`latest` 取 rn=1、`change` 取 rank=1 值
+   → **available_stock / on_hand_stock / inventory_value 完全等价**，代价 48 ms。
+2. **销售聚合限定在「有库存的平台」**：
+   `platform_code = ANY(ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_age_current))`。
+   子查询是 InitPlan → 常量数组 → 谓词能下推到 `fact_orders_atomic` 的 UNION ALL 分支，
+   只扫对应平台的事实表。**不改变任何数字**：销售与库存的连接键含 `platform_code`，
+   没有库存的平台其销售行本来也匹配不上。
+
+**实测**：视图明细查询 **8867 ms → 44.9 ms**（热 34.3 ms），端点整体 **11 秒 → ~90 ms**。
+数字不变性：改造前后全量输出（495 行 × 24 列）CSV 逐格对比 → **0 处差异**。
+
+**顺带修掉一个潜伏口径 bug**：原草图里 `SUM(daily_avg_sales)` 是把 **SKU 级**动销**按仓库行**求和
+（`sales_30d` 按 `(platform_code, platform_sku, product_sku)` 聚合，每个仓库行都带同一份），
+同一 SKU 有 N 个仓库就放大 N 倍，`estimated_turnover_days` 会被低估 N 倍。
+现在动销在 SKU 级算一次，不再按仓库重复计数。（当前 `daily_avg_sales` 全为 0，
+今天看不出来，**等订单数据接上就会显形**。）
+
+**回归门禁**：`backend/tests/data_pipeline/test_sku_clearance_ranking.py` 加 3 条视图 SQL 静态断言 ——
+不得引用 `mart.inventory_backlog_base`、销售必须限定平台、定价公式不得写进 SQL。
 
 ### 3.2 字段契约
 
@@ -467,7 +514,7 @@ async getClearanceRanking(params = {}) {
 | 风险 | 说明 | 应对 |
 |---|---|---|
 | **价格口径在视图与 service 之间漂移** | 视图里重写定价公式 = 第二份口径 | §6 Task 5 建议放 service；验收项 5 做跨接口一致性比对 |
-| **视图性能** | `api.sku_clearance_ranking_module` 跨 `mart` / `core` / `finance` 四层 join，且 `mart.inventory_backlog_base` 本身含 30 天订单聚合 | 清单默认 `limit=100`；必要时在 `mart.inventory_age_current` 的 `product_sku` 上加索引（该表已有 `ix_inventory_age_current_age_days` / `_bucket`） |
+| **视图性能** | `api.sku_clearance_ranking_module` 跨 `mart` / `core` / `finance` 四层 join，且 `mart.inventory_backlog_base` 本身含 30 天订单聚合 | ✅ **已处理（2026-10-22）**：实测 8867ms → 44.9ms，详见 §3.1a；并加了单测门禁禁止退回慢路径 |
 | **单帧阶段清单没意义** | 只有一帧快照时 `age_days` 全 0，`min_age_days=60` 会返回空 | 端点不报错，返回空清单 + `summary` 里说明快照数；等第二帧 |
 | **`estimated_stagnant_days` 随采集变密而变小** | §2 | 已明确不参与主判定 |
 | **清货回款几乎全为 NULL** | `reference_selling_price` 填充率 0.2% | 已知；用 `missing_reference_price_count` 显式暴露，把补料优先级可视化 |
