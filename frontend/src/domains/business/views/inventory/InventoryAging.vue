@@ -2,144 +2,385 @@
   <div class="inventory-age-page">
     <h1 class="page-title">库存库龄</h1>
 
-    <el-card class="filters-card">
-      <el-form :inline="true" class="filters-form">
-        <el-form-item label="平台">
-          <el-input
-            v-model="filters.platform"
-            clearable
-            placeholder="如 miaoshou"
-          />
-        </el-form-item>
-        <el-form-item label="SKU">
-          <el-input
-            v-model="filters.platform_sku"
-            clearable
-            placeholder="输入 SKU 或 SKU Key"
-          />
-        </el-form-item>
-        <el-form-item label="重置原因">
-          <el-select v-model="filters.reset_reason" clearable placeholder="全部原因" style="width: 180px">
-            <el-option label="首次有库存" value="first_positive" />
-            <el-option label="归零后恢复" value="reappeared_after_zero" />
-            <el-option label="库存增加重置" value="stock_increase" />
-            <el-option label="延续上次库龄" value="continued" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="库龄区间">
-          <el-select v-model="filters.bucket" clearable placeholder="全部区间" style="width: 150px">
-            <el-option label="0-30" value="0-30" />
-            <el-option label="31-60" value="31-60" />
-            <el-option label="61-90" value="61-90" />
-            <el-option label="91-180" value="91-180" />
-            <el-option label="180+" value="180+" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-checkbox v-model="filters.onlyHighAge">只看高库龄(>=61天)</el-checkbox>
-        </el-form-item>
-        <el-form-item>
-          <el-checkbox v-model="filters.onlyRecentReset">只看最近重置</el-checkbox>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="reload">查询</el-button>
-        </el-form-item>
-        <el-form-item>
-          <el-button @click="resetFilters">重置</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+    <el-tabs v-model="activeTab" class="inventory-age-tabs" @tab-change="handleTabChange">
+      <!-- ==================== 页签一：库龄明细 ==================== -->
+      <el-tab-pane label="库龄明细" name="aging">
+        <el-card class="filters-card">
+          <el-form :inline="true" class="filters-form">
+            <el-form-item label="平台">
+              <el-input
+                v-model="filters.platform"
+                clearable
+                placeholder="如 miaoshou"
+              />
+            </el-form-item>
+            <el-form-item label="SKU">
+              <el-input
+                v-model="filters.platform_sku"
+                clearable
+                placeholder="输入 SKU 或 SKU Key"
+              />
+            </el-form-item>
+            <el-form-item label="重置原因">
+              <el-select v-model="filters.reset_reason" clearable placeholder="全部原因" style="width: 180px">
+                <el-option label="首次有货" value="first_positive" />
+                <el-option label="卖空重现" value="reappeared_after_zero" />
+                <el-option label="补货归零" value="stock_increase" />
+                <el-option label="持续累加" value="continued" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="库龄区间">
+              <el-select v-model="filters.bucket" clearable placeholder="全部区间" style="width: 150px">
+                <el-option label="0-30" value="0-30" />
+                <el-option label="31-60" value="31-60" />
+                <el-option label="61-90" value="61-90" />
+                <el-option label="91-180" value="91-180" />
+                <el-option label="180+" value="180+" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-checkbox v-model="filters.onlyHighAge">只看高库龄(>=61天)</el-checkbox>
+            </el-form-item>
+            <el-form-item>
+              <el-checkbox v-model="filters.onlyRecentReset">只看最近重置</el-checkbox>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="reload">查询</el-button>
+            </el-form-item>
+            <el-form-item>
+              <el-button @click="resetFilters">重置</el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
 
-    <el-row :gutter="20" class="summary-row">
-      <el-col :span="8">
-        <el-card>
-          <el-statistic title="有库存 SKU 数" :value="summary.total_sku_count" />
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card>
-          <el-statistic title="总库存数量" :value="summary.total_quantity" />
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card>
-          <el-statistic
-            title="总库存金额"
-            :value="summary.total_value"
-            prefix="¥"
-            :precision="2"
-          />
-        </el-card>
-      </el-col>
-    </el-row>
+        <el-row :gutter="20" class="summary-row">
+          <el-col :span="8">
+            <el-card>
+              <el-statistic title="有库存 SKU 数" :value="summary.total_sku_count" />
+            </el-card>
+          </el-col>
+          <el-col :span="8">
+            <el-card>
+              <el-statistic title="总库存数量" :value="summary.total_quantity" />
+            </el-card>
+          </el-col>
+          <el-col :span="8">
+            <el-card>
+              <el-statistic
+                title="总库存金额"
+                :value="summary.total_value"
+                prefix="¥"
+                :precision="2"
+              />
+            </el-card>
+          </el-col>
+        </el-row>
 
-    <el-row :gutter="20">
-      <el-col :span="7">
-        <el-card>
-          <template #header>库龄分布</template>
-          <el-table :data="summary.buckets" size="small" stripe>
-            <el-table-column prop="bucket" label="区间" width="100" />
-            <el-table-column prop="sku_count" label="SKU 数" width="90" />
-            <el-table-column prop="quantity" label="数量" width="90" />
-            <el-table-column prop="inventory_value" label="金额" min-width="120">
-              <template #default="{ row }">
-                ¥{{ Number(row.inventory_value || 0).toFixed(2) }}
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
+        <el-row :gutter="20">
+          <el-col :span="7">
+            <el-card>
+              <template #header>库龄分布</template>
+              <el-table :data="summary.buckets" size="small" stripe>
+                <el-table-column prop="bucket" label="区间" width="100" />
+                <el-table-column prop="sku_count" label="SKU 数" width="90" />
+                <el-table-column prop="quantity" label="数量" width="90" />
+                <el-table-column prop="inventory_value" label="金额" min-width="120">
+                  <template #default="{ row }">
+                    ¥{{ Number(row.inventory_value || 0).toFixed(2) }}
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+          </el-col>
 
-      <el-col :span="17">
-        <el-card>
-          <template #header>SKU 连续库龄明细</template>
-          <el-table :data="filteredRows" v-loading="loading" stripe>
-            <el-table-column prop="platform_code" label="平台" width="110" />
-            <el-table-column label="SKU" min-width="190">
+          <el-col :span="17">
+            <el-card>
+              <template #header>SKU 连续库龄明细</template>
+              <el-table :data="filteredRows" v-loading="loading" stripe>
+                <el-table-column prop="platform_code" label="平台" width="110" />
+                <el-table-column label="SKU" min-width="190">
+                  <template #default="{ row }">
+                    <div class="sku-cell">
+                      <div class="sku-primary">{{ row.platform_sku || row.sku_key }}</div>
+                      <div v-if="row.product_sku && row.product_sku !== row.platform_sku" class="sku-secondary">
+                        {{ row.product_sku }}
+                      </div>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="product_name" label="商品名称" min-width="240" show-overflow-tooltip />
+                <el-table-column prop="current_qty" label="当前库存" width="100" />
+                <el-table-column prop="age_days" label="库龄天数" width="100" />
+                <el-table-column label="起算日期" width="120">
+                  <template #default="{ row }">
+                    {{ formatDate(row.age_anchor_date) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="重置原因" width="140">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="tagType(row.reset_reason)">
+                      {{ resetReasonLabel(row.reset_reason) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="bucket" label="区间" width="90" />
+                <el-table-column label="快照日期" width="120">
+                  <template #default="{ row }">
+                    {{ formatDate(row.snapshot_date) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="inventory_value" label="库存金额" min-width="120">
+                  <template #default="{ row }">
+                    ¥{{ Number(row.inventory_value || 0).toFixed(2) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="110" fixed="right">
+                  <template #default="{ row }">
+                    <el-button link type="primary" @click="openHistory(row)">查看轨迹</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+          </el-col>
+        </el-row>
+      </el-tab-pane>
+
+      <!-- ==================== 页签二：滞销清单 ==================== -->
+      <el-tab-pane label="滞销清单" name="clearance">
+        <el-card class="filters-card">
+          <el-form :inline="true" class="filters-form">
+            <el-form-item label="库龄下限(天)">
+              <el-input-number
+                v-model="clearanceFilters.min_age_days"
+                :min="0"
+                :max="3650"
+                :step="30"
+                controls-position="right"
+                style="width: 130px"
+              />
+            </el-form-item>
+            <el-form-item label="库龄上限(天)">
+              <el-input-number
+                v-model="clearanceFilters.max_age_days"
+                :min="0"
+                :max="3650"
+                :step="30"
+                controls-position="right"
+                placeholder="不限"
+                style="width: 130px"
+              />
+            </el-form-item>
+            <el-form-item label="风险等级">
+              <el-select v-model="clearanceFilters.risk_level" clearable placeholder="全部" style="width: 120px">
+                <el-option label="高" value="high" />
+                <el-option label="中" value="medium" />
+                <el-option label="低" value="low" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="平台">
+              <el-input
+                v-model="clearanceFilters.platform_code"
+                clearable
+                placeholder="如 miaoshou"
+                style="width: 140px"
+              />
+            </el-form-item>
+            <el-form-item label="关键词">
+              <el-input
+                v-model="clearanceFilters.keyword"
+                clearable
+                placeholder="SKU 或商品名"
+                style="width: 180px"
+              />
+            </el-form-item>
+            <el-form-item label="排序">
+              <el-select v-model="clearanceFilters.sort_by" style="width: 150px">
+                <el-option label="清货优先级" value="clearance_priority_score" />
+                <el-option label="库龄天数" value="age_days" />
+                <el-option label="库存金额" value="inventory_value" />
+                <el-option label="周转天数" value="estimated_turnover_days" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="方向">
+              <el-select v-model="clearanceFilters.sort_order" style="width: 100px">
+                <el-option label="降序" value="desc" />
+                <el-option label="升序" value="asc" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="queryClearance">查询</el-button>
+            </el-form-item>
+            <el-form-item>
+              <el-button @click="resetClearanceFilters">重置</el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+
+        <el-row :gutter="20" class="summary-row">
+          <el-col :span="6">
+            <el-card>
+              <el-statistic title="滞销 SKU 数" :value="clearanceSummary.sku_count" />
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card>
+              <el-statistic
+                title="压资金额"
+                :value="clearanceSummary.total_inventory_value"
+                prefix="¥"
+                :precision="2"
+              />
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card>
+              <el-statistic title="在库数量" :value="clearanceSummary.total_quantity" />
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card>
+              <el-statistic title="高风险数" :value="clearanceHighRiskCount" />
+            </el-card>
+          </el-col>
+        </el-row>
+
+        <el-alert
+          v-if="clearanceSummary.missing_reference_price_count > 0"
+          type="warning"
+          show-icon
+          :closable="false"
+          class="clearance-gap-alert"
+          :title="`${clearanceSummary.missing_reference_price_count} 个 SKU 缺参考售价，无法计算清货回款`"
+        />
+
+        <el-row :gutter="20" class="distribution-row">
+          <el-col :span="12">
+            <el-card>
+              <template #header>风险分布</template>
+              <div v-for="item in clearanceRiskDistribution" :key="item.key" class="distribution-row-item">
+                <span class="distribution-label">{{ item.label }}</span>
+                <div class="distribution-track">
+                  <div
+                    class="distribution-fill"
+                    :style="{ width: item.percent + '%', backgroundColor: item.color }"
+                  />
+                </div>
+                <span class="distribution-value">{{ item.count }} SKU</span>
+              </div>
+            </el-card>
+          </el-col>
+          <el-col :span="12">
+            <el-card>
+              <template #header>库龄档位分布</template>
+              <div v-for="item in clearanceBucketDistribution" :key="item.key" class="distribution-row-item">
+                <span class="distribution-label">{{ item.key }}</span>
+                <div class="distribution-track">
+                  <div
+                    class="distribution-fill"
+                    :style="{ width: item.percent + '%', backgroundColor: '#2563eb' }"
+                  />
+                </div>
+                <span class="distribution-value">{{ item.count }} SKU</span>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+
+        <el-card class="clearance-detail-card">
+          <template #header>SKU 级滞销明细</template>
+          <el-table :data="clearanceRows" v-loading="clearanceLoading" stripe>
+            <el-table-column prop="clearance_priority_score" label="优先级" width="90" align="right" />
+            <el-table-column prop="platform_code" label="平台" width="100" />
+            <el-table-column prop="product_sku" label="SKU" width="150" show-overflow-tooltip />
+            <el-table-column prop="product_name" label="商品名" min-width="220" show-overflow-tooltip />
+            <el-table-column label="库龄" width="140">
               <template #default="{ row }">
                 <div class="sku-cell">
-                  <div class="sku-primary">{{ row.platform_sku || row.sku_key }}</div>
-                  <div v-if="row.product_sku && row.product_sku !== row.platform_sku" class="sku-secondary">
-                    {{ row.product_sku }}
-                  </div>
+                  <div class="sku-primary">{{ row.age_days }} 天</div>
+                  <div class="sku-secondary">{{ row.age_bucket || '-' }}</div>
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="product_name" label="商品名称" min-width="240" show-overflow-tooltip />
-            <el-table-column prop="current_qty" label="当前库存" width="100" />
-            <el-table-column prop="age_days" label="库龄天数" width="100" />
-            <el-table-column label="起算日期" width="120">
+            <el-table-column label="起算日" width="110">
               <template #default="{ row }">
                 {{ formatDate(row.age_anchor_date) }}
               </template>
             </el-table-column>
-            <el-table-column label="重置原因" width="140">
+            <el-table-column label="重置原因" width="110">
               <template #default="{ row }">
                 <el-tag size="small" :type="tagType(row.reset_reason)">
                   {{ resetReasonLabel(row.reset_reason) }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="bucket" label="区间" width="90" />
-            <el-table-column label="快照日期" width="120">
+            <el-table-column prop="current_qty" label="可用库存" width="100" align="right" />
+            <el-table-column label="库存金额" width="120" align="right">
               <template #default="{ row }">
-                {{ formatDate(row.snapshot_date) }}
+                {{ formatMoney(row.inventory_value) }}
               </template>
             </el-table-column>
-            <el-table-column prop="inventory_value" label="库存金额" min-width="120">
+            <el-table-column label="周转天数" width="100" align="right">
               <template #default="{ row }">
-                ¥{{ Number(row.inventory_value || 0).toFixed(2) }}
+                {{ formatTurnoverDays(row.estimated_turnover_days) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="110" fixed="right">
+            <el-table-column label="日均销量" width="100" align="right">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openHistory(row)">查看轨迹</el-button>
+                {{ formatQuantity(row.daily_avg_sales) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="风险" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="riskTagType(row.risk_level)">
+                  {{ riskLabel(row.risk_level) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="档位" width="110">
+              <template #default="{ row }">
+                <el-tag v-if="!row.pricing_matched_erp" size="small" type="info">未匹配主数据</el-tag>
+                <span v-else>{{ row.pricing_tier_label || '-' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="当前可优惠" width="110" align="right">
+              <template #default="{ row }">
+                {{ formatPercent(row.current_discount_rate) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="最低售价" width="120" align="right">
+              <template #default="{ row }">
+                <div class="sku-cell">
+                  <div class="sku-primary">{{ formatMoney(row.min_selling_price) }}</div>
+                  <div class="sku-secondary">{{ minSellingPriceSourceLabel(row.min_selling_price_source) }}</div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="清货回款" width="130" align="right">
+              <template #default="{ row }">
+                <span
+                  v-if="row.clearance_recovery_amount === null || row.clearance_recovery_amount === undefined"
+                  class="missing-price-hint"
+                >缺参考售价</span>
+                <span v-else>{{ formatMoney(row.clearance_recovery_amount) }}</span>
               </template>
             </el-table-column>
           </el-table>
+
+          <div class="clearance-pagination">
+            <el-pagination
+              v-model:current-page="clearanceCurrentPage"
+              v-model:page-size="clearancePageSize"
+              :total="clearanceTotal"
+              :page-sizes="[20, 50, 100, 200]"
+              layout="total, sizes, prev, pager, next, jumper"
+              background
+              @size-change="handleClearanceSizeChange"
+              @current-change="handleClearancePageChange"
+            />
+          </div>
         </el-card>
-      </el-col>
-    </el-row>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-drawer
       v-model="historyDrawer.visible"
@@ -197,6 +438,8 @@ import { ElMessage } from 'element-plus'
 import echarts from '@/utils/echarts'
 import inventoryDomainApi from '@/api/inventoryDomain'
 
+const activeTab = ref('aging')
+
 const loading = ref(false)
 const rows = ref([])
 const historyChartEl = ref(null)
@@ -227,16 +470,57 @@ const historyDrawer = reactive({
   currentPlatform: ''
 })
 
+// ------------------------------------------------------------------
+// 滞销清单（SKU 级，真库龄口径）
+// ------------------------------------------------------------------
+const clearanceLoading = ref(false)
+const clearanceLoaded = ref(false)
+const clearanceRows = ref([])
+const clearanceTotal = ref(0)
+const clearanceCurrentPage = ref(1)
+const clearancePageSize = ref(50)
+const clearanceSummary = reactive({
+  sku_count: 0,
+  total_quantity: 0,
+  total_inventory_value: 0,
+  by_risk_level: {},
+  by_age_bucket: {},
+  missing_reference_price_count: 0
+})
+const clearanceFilters = reactive({
+  // 默认 0：当前库里只有单帧快照（age_days 全 0），用 60 会直接白屏。
+  // 接口默认值仍是 60（spec 口径），前端按真实数据现状给 0。
+  min_age_days: 0,
+  max_age_days: null,
+  risk_level: '',
+  platform_code: '',
+  keyword: '',
+  sort_by: 'clearance_priority_score',
+  sort_order: 'desc'
+})
+const clearancePage = reactive({
+  limit: 50,
+  offset: 0
+})
+
+const RISK_LEVEL_META = [
+  { key: 'high', label: '高风险', color: '#ef4444' },
+  { key: 'medium', label: '中风险', color: '#f59e0b' },
+  { key: 'low', label: '低风险', color: '#3b82f6' }
+]
+
 const resetReasonLabel = (reason) => {
   switch (reason) {
     case 'first_positive':
-      return '首次有库存'
+      return '首次有货'
     case 'reappeared_after_zero':
-      return '归零后恢复'
+      return '卖空重现'
     case 'stock_increase':
-      return '库存增加重置'
+      return '补货归零'
+    case 'zero_stock':
+      return '库存归零'
     case 'continued':
-      return '延续上次库龄'
+      return '持续累加'
     default:
       return reason || '未知'
   }
@@ -255,9 +539,80 @@ const tagType = (reason) => {
   }
 }
 
+const riskLabel = (risk) => {
+  switch (risk) {
+    case 'high':
+      return '高'
+    case 'medium':
+      return '中'
+    case 'low':
+      return '低'
+    default:
+      return risk || '-'
+  }
+}
+
+const riskTagType = (risk) => {
+  switch (risk) {
+    case 'high':
+      return 'danger'
+    case 'medium':
+      return 'warning'
+    case 'low':
+      return 'info'
+    default:
+      return 'info'
+  }
+}
+
 const formatDate = (value) => {
   if (!value) return '-'
   return String(value).slice(0, 10)
+}
+
+const formatMoney = (value) => {
+  if (value === null || value === undefined || value === '') return '-'
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '-'
+  return `¥${num.toFixed(2)}`
+}
+
+const formatPercent = (value) => {
+  if (value === null || value === undefined || value === '') return '-'
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '-'
+  return `${Number((num * 100).toFixed(2))}%`
+}
+
+const formatQuantity = (value) => {
+  if (value === null || value === undefined || value === '') return '-'
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '-'
+  return String(Number(num.toFixed(2)))
+}
+
+// 9999 是「有库存但完全没有动销数据」的哨兵值，直接显示会把运营吓一跳
+const formatTurnoverDays = (value) => {
+  if (value === null || value === undefined || value === '') return '-'
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '-'
+  if (num >= 9999) return '无动销'
+  return `${num} 天`
+}
+
+const minSellingPriceSourceLabel = (source) => {
+  switch (source) {
+    case 'manual_override':
+      return '人工覆盖'
+    case 'cost_floor':
+      return '成本底线'
+    case 'discount_guard':
+      return '折扣护栏'
+    case 'unavailable':
+      return '无法计算'
+    default:
+      return ''
+  }
 }
 
 const filteredRows = computed(() => {
@@ -268,6 +623,25 @@ const filteredRows = computed(() => {
     if (filters.onlyRecentReset && !['stock_increase', 'first_positive', 'reappeared_after_zero'].includes(row.reset_reason)) return false
     return true
   })
+})
+
+const clearanceHighRiskCount = computed(() => {
+  return Number((clearanceSummary.by_risk_level || {}).high || 0)
+})
+
+const clearanceRiskDistribution = computed(() => {
+  const byLevel = clearanceSummary.by_risk_level || {}
+  const counts = RISK_LEVEL_META.map((meta) => ({ ...meta, count: Number(byLevel[meta.key] || 0) }))
+  const max = Math.max(...counts.map((item) => item.count), 1)
+  return counts.map((item) => ({ ...item, percent: Math.round((item.count / max) * 100) }))
+})
+
+const clearanceBucketDistribution = computed(() => {
+  const byBucket = clearanceSummary.by_age_bucket || {}
+  const items = Object.entries(byBucket).map(([key, count]) => ({ key, count: Number(count || 0) }))
+  items.sort((a, b) => a.key.localeCompare(b.key))
+  const max = Math.max(...items.map((item) => item.count), 1)
+  return items.map((item) => ({ ...item, percent: Math.round((item.count / max) * 100) }))
 })
 
 const buildHistoryChart = async () => {
@@ -371,6 +745,72 @@ const reload = async () => {
   }
 }
 
+const reloadClearance = async () => {
+  clearanceLoading.value = true
+  try {
+    const response = await inventoryDomainApi.getClearanceRanking({
+      min_age_days: clearanceFilters.min_age_days,
+      max_age_days: clearanceFilters.max_age_days ?? undefined,
+      risk_level: clearanceFilters.risk_level || undefined,
+      platform_code: clearanceFilters.platform_code || undefined,
+      keyword: clearanceFilters.keyword || undefined,
+      sort_by: clearanceFilters.sort_by,
+      sort_order: clearanceFilters.sort_order,
+      limit: clearancePage.limit,
+      offset: clearancePage.offset
+    })
+    clearanceRows.value = response.items || []
+    Object.assign(clearanceSummary, response.summary || {})
+    clearanceTotal.value = Number(response.total || 0)
+    clearanceLoaded.value = true
+  } catch (error) {
+    ElMessage.error('加载滞销清单失败')
+  } finally {
+    clearanceLoading.value = false
+  }
+}
+
+const queryClearance = async () => {
+  clearancePage.offset = 0
+  clearanceCurrentPage.value = 1
+  await reloadClearance()
+}
+
+const resetClearanceFilters = async () => {
+  Object.assign(clearanceFilters, {
+    min_age_days: 0,
+    max_age_days: null,
+    risk_level: '',
+    platform_code: '',
+    keyword: '',
+    sort_by: 'clearance_priority_score',
+    sort_order: 'desc'
+  })
+  clearancePage.offset = 0
+  clearanceCurrentPage.value = 1
+  await reloadClearance()
+}
+
+const handleClearancePageChange = async (page) => {
+  clearanceCurrentPage.value = page
+  clearancePage.offset = (page - 1) * clearancePageSize.value
+  await reloadClearance()
+}
+
+const handleClearanceSizeChange = async (size) => {
+  clearancePageSize.value = size
+  clearancePage.limit = size
+  clearancePage.offset = (clearanceCurrentPage.value - 1) * size
+  await reloadClearance()
+}
+
+// 首次切到滞销清单页签时才拉数据，避免每次进页面都多打一枪查询
+const handleTabChange = async (name) => {
+  if (name === 'clearance' && !clearanceLoaded.value) {
+    await reloadClearance()
+  }
+}
+
 onMounted(reload)
 
 watch(
@@ -406,8 +846,13 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
+.inventory-age-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
 .filters-card,
-.summary-row {
+.summary-row,
+.distribution-row {
   margin-bottom: 20px;
 }
 
@@ -431,6 +876,61 @@ onBeforeUnmount(() => {
 .sku-secondary {
   color: #6b7280;
   font-size: 12px;
+}
+
+.clearance-gap-alert {
+  margin-bottom: 20px;
+}
+
+.distribution-row-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.distribution-label {
+  width: 64px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #374151;
+}
+
+.distribution-track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  overflow: hidden;
+}
+
+.distribution-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.distribution-value {
+  width: 72px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.clearance-detail-card {
+  margin-bottom: 20px;
+}
+
+.missing-price-hint {
+  color: #d97706;
+  font-size: 12px;
+}
+
+.clearance-pagination {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .history-drawer {

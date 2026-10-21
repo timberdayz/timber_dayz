@@ -59,5 +59,13 @@ export default {
 
   async getAgingHistory(params = {}) {
     return await api._get('/inventory/aging/history', { params })
+  },
+
+  /**
+   * SKU 级滞销清单（真库龄口径）
+   * 库龄取 mart.inventory_age_current.age_days，与商品中心定价同源。
+   */
+  async getClearanceRanking(params = {}) {
+    return await api._get('/inventory/clearance-ranking', { params })
   }
 }
