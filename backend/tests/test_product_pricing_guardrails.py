@@ -1,6 +1,9 @@
+from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
+from sqlalchemy import text
 
 from backend.services.product_pricing_service import (
     compute_cost_floor,
@@ -374,3 +377,227 @@ def test_sku_pricing_manual_override_wins_and_is_flagged():
     assert out["min_selling_price_source"] == "manual_override"
     assert out["min_selling_price_is_override"] is True
     assert out["min_selling_price_override"] == pytest.approx(20.00, abs=0.01)
+
+
+
+def test_router_exposes_pricing_policy_routes():
+    from pathlib import Path
+
+    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    # 只匹配到路径为止的装饰器前缀：新路由必须声明 response_model（AGENTS.md 硬要求），
+    # 精确匹配整个装饰器会因为多了 ", response_model=..." 而失配
+    assert '@router.get("/api/sku-pricing-policies"' in source
+    assert '@router.get("/api/sku-pricing-policies/current"' in source
+    assert '@router.post("/api/sku-pricing-policies"' in source
+    assert '@router.put("/api/sku-pricing-policies/{min_age_days}"' in source
+    # 四条端点都必须声明 response_model
+    for line in source.splitlines():
+        if "@router." in line and "sku-pricing-policies" in line:
+            assert "response_model" in line, line
+    assert "_require_platform_fee_editor" in source
+
+
+@pytest.mark.asyncio
+async def test_pricing_policy_crud_and_versioned_update(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    await pricing_seed()
+
+    created = await pg_async_client.post(
+        "/api/sku-pricing-policies",
+        headers=pricing_auth_headers,
+        json={
+            "min_age_days": 30,
+            "tier_label": "测试档",
+            "discount_rate": 0.12,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    current = await pg_async_client.get(
+        "/api/sku-pricing-policies/current", headers=pricing_auth_headers
+    )
+    assert current.status_code == 200
+    assert any(row["min_age_days"] == 30 for row in current.json())
+
+    # 未来生效日期 -> 422
+    future = await pg_async_client.post(
+        "/api/sku-pricing-policies",
+        headers=pricing_auth_headers,
+        json={
+            "min_age_days": 45,
+            "tier_label": "未来档",
+            "discount_rate": 0.12,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": (date.today() + timedelta(days=7)).isoformat(),
+        },
+    )
+    assert future.status_code == 422
+
+    # 同一档位再 POST -> 409
+    duplicate = await pg_async_client.post(
+        "/api/sku-pricing-policies",
+        headers=pricing_auth_headers,
+        json={
+            "min_age_days": 30,
+            "tier_label": "测试档2",
+            "discount_rate": 0.13,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert duplicate.status_code == 409
+
+    # 同日改率 -> 原地更新，仍只有一条当前行
+    same_day = await pg_async_client.put(
+        "/api/sku-pricing-policies/30",
+        headers=pricing_auth_headers,
+        json={
+            "min_age_days": 30,
+            "tier_label": "测试档",
+            "discount_rate": 0.14,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert same_day.status_code == 200, same_day.text
+    current = await pg_async_client.get(
+        "/api/sku-pricing-policies/current", headers=pricing_auth_headers
+    )
+    rows = [row for row in current.json() if row["min_age_days"] == 30]
+    assert len(rows) == 1
+    assert rows[0]["discount_rate"] == pytest.approx(0.14)
+
+    # 改档位边界（路径=30 旧起点, body=45 新起点）-> 关旧行 + 建新行
+    # ⚠️ 新起点必须选一个**空闲**档位：seed 已经占了 0/60/90/120。
+    # 改到 60 会撞 uq_sku_pricing_policies_current（每个档位至多一条当前行）-> 409，
+    # 测的就不是「改边界」而是「冲突」了。
+    retier = await pg_async_client.put(
+        "/api/sku-pricing-policies/30",
+        headers=pricing_auth_headers,
+        json={
+            "min_age_days": 45,
+            "tier_label": "改边界档",
+            "discount_rate": 0.15,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert retier.status_code == 200, retier.text
+    current = await pg_async_client.get(
+        "/api/sku-pricing-policies/current", headers=pricing_auth_headers
+    )
+    tiers = {row["min_age_days"] for row in current.json()}
+    assert 45 in tiers
+    assert 30 not in tiers
+
+    # 改成已被占用的起点（seed 占了 60）-> 409
+    conflict = await pg_async_client.put(
+        "/api/sku-pricing-policies/45",
+        headers=pricing_auth_headers,
+        json={
+            "min_age_days": 60,
+            "tier_label": "冲突档",
+            "discount_rate": 0.16,
+            "target_margin_rate": 0.22,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    assert conflict.status_code == 409, conflict.text
+
+
+@pytest.mark.asyncio
+async def test_pricing_policy_write_is_audited(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    await pricing_seed()
+    await pg_async_client.post(
+        "/api/sku-pricing-policies",
+        headers=pricing_auth_headers,
+        json={
+            "min_age_days": 77,
+            "tier_label": "审计档",
+            "discount_rate": 0.2,
+            "target_margin_rate": 0.18,
+            "platform_basis": "tiktok",
+            "effective_from": date.today().isoformat(),
+        },
+    )
+    result = await pg_session.execute(
+        text(
+            "SELECT count(*) FROM public.fact_audit_logs "
+            "WHERE resource_type = 'sku_pricing_policy'"
+        )
+    )
+    assert result.scalar() >= 1
+
+
+@pytest.mark.asyncio
+async def test_platform_fee_rate_partial_update_keeps_other_fields(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """只传 default_creator_commission_rate 时，其余费率与来源标记保持原值。
+
+    既有实现是无条件赋值（`row.default_fee_rate = body.default_fee_rate`），
+    未传的字段会被写成 NULL —— 这会让平台佣金率、来源标记被静默清空。
+    """
+    from modules.core.db import DimPlatform
+
+    await pricing_seed()
+    platform_row = await pg_session.get(DimPlatform, "tiktok")
+    platform_row.fee_rate_source = "b_class_measured_2026_01_07"
+    platform_row.fee_rate_version = "v2"
+    await pg_session.flush()
+
+    resp = await pg_async_client.patch(
+        "/api/platforms/tiktok/fee-rate",
+        headers=pricing_auth_headers,
+        json={"default_creator_commission_rate": 0.09},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["default_creator_commission_rate"] == pytest.approx(0.09)
+    # 其余保持原值，不得被刷成 NULL
+    assert body["default_fee_rate"] == pytest.approx(0.0737)
+    assert body["other_cost_rate"] == pytest.approx(0.2727)
+    assert body["fee_rate_source"] == "b_class_measured_2026_01_07"
+    assert body["fee_rate_version"] == "v2"
+
+
+@pytest.mark.asyncio
+async def test_platform_fee_rate_and_sku_writes_are_audited(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """平台成本率与 SKU 覆盖值/达人佣金率的写操作都要产生审计。"""
+    await pricing_seed()
+
+    await pg_async_client.patch(
+        "/api/platforms/tiktok/fee-rate",
+        headers=pricing_auth_headers,
+        json={"default_creator_commission_rate": 0.09},
+    )
+    await pg_async_client.patch(
+        "/api/skus/9001",
+        headers=pricing_auth_headers,
+        json={
+            "creator_commission_rate": 0.15,
+            "min_selling_price_override": 20.0,
+        },
+    )
+    for resource_type in ("platform_fee_rate", "sku"):
+        result = await pg_session.execute(
+            text(
+                "SELECT count(*) FROM public.fact_audit_logs "
+                "WHERE resource_type = :t"
+            ),
+            {"t": resource_type},
+        )
+        assert result.scalar() >= 1, resource_type

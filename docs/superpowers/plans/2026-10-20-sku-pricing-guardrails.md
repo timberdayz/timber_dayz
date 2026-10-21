@@ -1511,10 +1511,16 @@ def test_router_exposes_pricing_policy_routes():
     from pathlib import Path
 
     source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
-    assert '@router.get("/api/sku-pricing-policies")' in source
-    assert '@router.get("/api/sku-pricing-policies/current")' in source
-    assert '@router.post("/api/sku-pricing-policies")' in source
-    assert '@router.put("/api/sku-pricing-policies/{min_age_days}")' in source
+    # 只匹配到路径为止的装饰器前缀：新路由必须声明 response_model（AGENTS.md 硬要求），
+    # 精确匹配整个装饰器会因为多了 ", response_model=..." 而失配
+    assert '@router.get("/api/sku-pricing-policies"' in source
+    assert '@router.get("/api/sku-pricing-policies/current"' in source
+    assert '@router.post("/api/sku-pricing-policies"' in source
+    assert '@router.put("/api/sku-pricing-policies/{min_age_days}"' in source
+    # 四条端点都必须声明 response_model
+    for line in source.splitlines():
+        if "@router." in line and "sku-pricing-policies" in line:
+            assert "response_model" in line, line
     assert "_require_platform_fee_editor" in source
 
 
@@ -1595,12 +1601,15 @@ async def test_pricing_policy_crud_and_versioned_update(
     assert len(rows) == 1
     assert rows[0]["discount_rate"] == pytest.approx(0.14)
 
-    # 改档位边界（路径=30 旧起点, body=60 新起点）-> 关旧行 + 建新行
+    # 改档位边界（路径=30 旧起点, body=45 新起点）-> 关旧行 + 建新行
+    # ⚠️ 新起点必须选一个**空闲**档位：seed 已经占了 0/60/90/120。
+    # 改到 60 会撞 uq_sku_pricing_policies_current（每个档位至多一条当前行）-> 409，
+    # 测的就不是「改边界」而是「冲突」了。
     retier = await pg_async_client.put(
         "/api/sku-pricing-policies/30",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 60,
+            "min_age_days": 45,
             "tier_label": "改边界档",
             "discount_rate": 0.15,
             "target_margin_rate": 0.22,
@@ -1613,15 +1622,15 @@ async def test_pricing_policy_crud_and_versioned_update(
         "/api/sku-pricing-policies/current", headers=pricing_auth_headers
     )
     tiers = {row["min_age_days"] for row in current.json()}
-    assert 60 in tiers
+    assert 45 in tiers
     assert 30 not in tiers
 
-    # 改成已被占用的起点 -> 409
+    # 改成已被占用的起点（seed 占了 60）-> 409
     conflict = await pg_async_client.put(
-        "/api/sku-pricing-policies/60",
+        "/api/sku-pricing-policies/45",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 30,
+            "min_age_days": 60,
             "tier_label": "冲突档",
             "discount_rate": 0.16,
             "target_margin_rate": 0.22,
@@ -1629,7 +1638,7 @@ async def test_pricing_policy_crud_and_versioned_update(
             "effective_from": date.today().isoformat(),
         },
     )
-    assert conflict.status_code == 409
+    assert conflict.status_code == 409, conflict.text
 
 
 @pytest.mark.asyncio
@@ -1914,8 +1923,30 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
 > `DimUser` / `DimSpu` / `DimErpSku` / `BridgeSpuSku` / `LogisticsProviderRule` /
 > `WarehouseStorageRule` / `SkuPricingPolicy` 的其余必填列以仓库 ORM 定义为准
 > （`modules/core/db/schema_parts/`），实现时按 `inspect(Model).columns` 补齐。
-> **这些 seed 放在 `backend/tests/conftest.py` 里做成一个共用 fixture**，
-> 避免 Task 4 与 Task 6 各写一份。
+>
+> **这些 seed 放在 `backend/tests/conftest.py` 里**，做成一个共用 fixture：
+>
+> ```python
+> @pytest_asyncio.fixture
+> async def pricing_seed(pg_session):
+>     """返回「种数据」的协程；用例结束后自动清理干净。"""
+>     async def _seed(*, with_cost_rules: bool = True):
+>         await _seed_pricing_fixtures(pg_session, with_cost_rules=with_cost_rules)
+>     yield _seed
+>     for sql in PRICING_SEED_CLEANUP_SQL:
+>         await pg_session.execute(text(sql))
+>     await pg_session.commit()
+> ```
+>
+> 用例里写 `await pricing_seed()` / `await pricing_seed(with_cost_rules=False)`。
+>
+> ⚠️ **必须清理，这是实测踩到的坑**：`pg_engine` 是 **session 级**容器，
+> 而端点内部会 `db.commit()`——种下去的行会被**提交**，
+> `pg_session` 的 teardown `rollback()` **撤不掉**。
+> 不清理的话，下一个用例种同样的主键直接撞
+> `UniqueViolationError: duplicate key value violates unique constraint "dim_users_pkey"`。
+> 清理 SQL 按 FK 顺序（子表先删）：投影任务 → 利润版本 → 审计 → 经营档案 →
+> 规则表 → 物流/仓储规则 → SKU 绑定 → SKU → SPU → 仓库 → 平台 → 用户。
 
 - [ ] **Step 2: 跑测试确认失败**
 

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 import json
 import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select, text, update
+from sqlalchemy import bindparam, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -76,6 +77,9 @@ from backend.schemas.product_center import (
     SkuSoftDeleteResponse,
     SkuRestoreRequest,
     SkuRestoreResponse,
+    SkuPricingPolicyCreateRequest,
+    SkuPricingPolicyResponse,
+    SkuPricingPolicyUpdateRequest,
 )
 from modules.core.db import (
     BridgeSpuSku,
@@ -97,6 +101,7 @@ from modules.core.db import (
     DimWarehouse,
     FactAuditLog,
     SkuOperatingProfile,
+    SkuPricingPolicy,
     WarehouseStorageRule,
 )
 from backend.services.product_finance_service import BillTotalMismatchError, ProductFinanceService
@@ -104,6 +109,14 @@ from backend.services.product_profit_service import (
     build_platform_profit_preview,
     reference_storage_days,
 )
+from backend.services.product_pricing_service import (
+    POLICY_REJECT_FUTURE,
+    PolicyUpdateRejected,
+    compute_sku_pricing,
+    resolve_policy_update,
+    select_age_tier,
+)
+from backend.utils.exceptions import BusinessValidationError
 from backend.services.feishu_projection_client import FeishuProjectionClient
 from backend.services.feishu_projection_service import FeishuProjectionService, trigger_pending_projection_delivery
 
@@ -1980,6 +1993,163 @@ async def update_product_warehouse(warehouse_code: str, body: ProductWarehouseUp
     return {"warehouse_code": row.warehouse_code, "warehouse_name": row.warehouse_name, "country_code": row.country_code, "country_name": row.country_name, "region": row.region, "status": row.status}
 
 
+# ==================== SKU 定价纪律规则（库龄档位） ====================
+#
+# 「当前行」谓词只有这一处定义，GET /current 与服务端选档逻辑共用，
+# 禁止在两处各写一份（否则 /current 列出的规则与护栏实际生效的规则会不一致）。
+#
+#   当前行 = status='active' AND effective_to IS NULL AND effective_from <= 今日
+#
+# 用 `effective_to IS NULL` 而不是 `effective_to IS NULL OR effective_to > 今日`：
+# 后者会把「已关闭但关闭日期在未来」的行也算进来，规则集合与实际生效的集合就分家了。
+
+
+def _policy_current_predicate():
+    return (
+        SkuPricingPolicy.status == "active",
+        SkuPricingPolicy.effective_to.is_(None),
+        SkuPricingPolicy.effective_from <= date.today(),
+    )
+
+
+async def _current_policies(db: AsyncSession) -> list[SkuPricingPolicy]:
+    result = await db.execute(
+        select(SkuPricingPolicy)
+        .where(*_policy_current_predicate())
+        .order_by(SkuPricingPolicy.min_age_days)
+    )
+    return list(result.scalars().all())
+
+
+@router.get("/api/sku-pricing-policies", response_model=list[SkuPricingPolicyResponse])
+async def list_sku_pricing_policies(db: AsyncSession = Depends(get_async_db)):
+    """返回全部规则行（含历史），按档位起点、生效日期排序。"""
+    rows = (await db.execute(
+        select(SkuPricingPolicy).order_by(SkuPricingPolicy.min_age_days, SkuPricingPolicy.effective_from)
+    )).scalars().all()
+    return [SkuPricingPolicyResponse.model_validate(row) for row in rows]
+
+
+@router.get("/api/sku-pricing-policies/current", response_model=list[SkuPricingPolicyResponse])
+async def list_current_sku_pricing_policies(db: AsyncSession = Depends(get_async_db)):
+    """返回当前生效的规则行。筛选条件与选档逻辑共用同一组谓词。"""
+    rows = await _current_policies(db)
+    return [SkuPricingPolicyResponse.model_validate(row) for row in rows]
+
+
+@router.post("/api/sku-pricing-policies", response_model=SkuPricingPolicyResponse, status_code=201)
+async def create_sku_pricing_policy(
+    body: SkuPricingPolicyCreateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_platform_fee_editor),
+):
+    if body.effective_from > date.today():
+        raise BusinessValidationError(
+            message=POLICY_REJECT_FUTURE,
+            detail={
+                "code": "pricing_policy_future_effective_from",
+                "reason": POLICY_REJECT_FUTURE,
+            },
+        )
+    existing = (await db.execute(
+        select(SkuPricingPolicy).where(
+            SkuPricingPolicy.min_age_days == body.min_age_days,
+            *_policy_current_predicate(),
+        )
+    )).scalars().first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="a current policy already exists for this age tier")
+    row = SkuPricingPolicy(**body.model_dump())
+    db.add(row)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="pricing policy conflicts with an existing row") from exc
+    await _write_product_center_audit(
+        db, _user, action_type="create", resource_type="sku_pricing_policy",
+        resource_id=str(row.policy_id), changes=body.model_dump(mode="json"),
+    )
+    await db.commit()
+    await db.refresh(row)
+    return SkuPricingPolicyResponse.model_validate(row)
+
+
+@router.put("/api/sku-pricing-policies/{min_age_days}", response_model=SkuPricingPolicyResponse)
+async def update_sku_pricing_policy(
+    min_age_days: int,
+    body: SkuPricingPolicyUpdateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_platform_fee_editor),
+):
+    """路径参数 = 被编辑的档位（旧起点），body 的 min_age_days = 该档位的新起点。
+
+    两者不同 = 运营在改库龄档位的边界（改这一格就改了滞销阈值），不是调用方搞混。
+
+    「四路径判定」在纯函数 `resolve_policy_update` 里（`backend/services/product_pricing_service.py`），
+    路由只负责取数、落库、审计。
+    """
+    current = (await db.execute(
+        select(SkuPricingPolicy).where(
+            SkuPricingPolicy.min_age_days == min_age_days,
+            *_policy_current_predicate(),
+        ).with_for_update()
+    )).scalars().first()
+    if current is None:
+        raise HTTPException(status_code=404, detail="pricing policy tier not found")
+
+    current_data = {
+        "min_age_days": current.min_age_days,
+        "effective_from": current.effective_from,
+    }
+    try:
+        decision = resolve_policy_update(
+            current=current_data,
+            requested=body.model_dump(exclude_unset=True),
+            today=date.today(),
+        )
+    except PolicyUpdateRejected as exc:
+        raise BusinessValidationError(
+            message=str(exc),
+            detail={
+                "code": "pricing_policy_update_rejected",
+                "reason": str(exc),
+            },
+        ) from exc
+
+    action = decision["action"]
+    if action == "update":
+        for key, value in decision["values"].items():
+            setattr(current, key, value)
+        row = current
+    else:
+        # 关旧行 + 建新行（改边界或跨期）
+        current.effective_to = decision["close_current"]
+        current.status = "inactive"
+        values = dict(decision["values"])
+        # 保留旧行的来源标记，避免把迁移灌的 source='industry_benchmark_2026' 覆盖成 None
+        values.setdefault("source", current.source)
+        values.setdefault("version", current.version)
+        # 备注同理：新行没显式写 notes 时继承旧行，否则关档留痕后备注凭空消失
+        values.setdefault("notes", current.notes)
+        values["status"] = "active"
+        row = SkuPricingPolicy(**values)
+        db.add(row)
+
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="pricing policy conflicts with an existing row") from exc
+    await _write_product_center_audit(
+        db, _user, action_type=action, resource_type="sku_pricing_policy",
+        resource_id=str(row.policy_id), changes=body.model_dump(mode="json"),
+    )
+    await db.commit()
+    await db.refresh(row)
+    return SkuPricingPolicyResponse.model_validate(row)
+
+
 @router.patch("/api/platforms/{platform_code}/fee-rate")
 async def update_platform_fee_rate(platform_code: str, body: PlatformFeeRateUpdateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_platform_fee_editor)):
     row = await db.get(DimPlatform, platform_code)
@@ -1987,17 +2157,18 @@ async def update_platform_fee_rate(platform_code: str, body: PlatformFeeRateUpda
         raise HTTPException(status_code=404, detail="platform not found")
     if row.platform_role != "sales":
         raise HTTPException(status_code=409, detail="platform fee rates can only be maintained for sales platforms")
-    row.default_fee_rate = body.default_fee_rate
-    row.fee_rate_effective_from = body.fee_rate_effective_from
-    row.fee_rate_source = body.fee_rate_source
-    row.fee_rate_version = body.fee_rate_version
+    # 「未传则保持原值」：抽屉里只改「达人佣金率」时，
+    # 无条件赋值会把 default_fee_rate 写成 NULL、fee_rate_effective_from 刷成当天
+    values = body.model_dump(exclude_unset=True)
+    for key, value in values.items():
+        setattr(row, key, value)
     await _write_product_center_audit(
         db, _user, action_type="update", resource_type="platform_fee_rate",
         resource_id=row.platform_code, changes=body.model_dump(mode="json"),
     )
     await db.commit()
     await db.refresh(row)
-    return {"platform_code": row.platform_code, "default_fee_rate": row.default_fee_rate, "fee_rate_effective_from": row.fee_rate_effective_from, "fee_rate_source": row.fee_rate_source, "fee_rate_version": row.fee_rate_version}
+    return {"platform_code": row.platform_code, "default_fee_rate": row.default_fee_rate, "default_creator_commission_rate": row.default_creator_commission_rate, "other_cost_rate": row.other_cost_rate, "fee_rate_effective_from": row.fee_rate_effective_from, "fee_rate_source": row.fee_rate_source, "fee_rate_version": row.fee_rate_version}
 
 
 @router.get("/api/logistics-bills")
@@ -2249,7 +2420,10 @@ async def list_sku_operating_dimensions(db: AsyncSession = Depends(get_async_db)
     return {
         "platforms": [{"platform_code": row.platform_code, "name": row.name,
                        "default_fee_rate": row.default_fee_rate, "fee_rate_effective_from": row.fee_rate_effective_from,
-                       "fee_rate_source": row.fee_rate_source, "fee_rate_version": row.fee_rate_version} for row in platforms],
+                       "fee_rate_source": row.fee_rate_source, "fee_rate_version": row.fee_rate_version,
+                       # 定价抽屉的「成本率合计 / 底线基数」要用的两个成本率
+                       "default_creator_commission_rate": row.default_creator_commission_rate,
+                       "other_cost_rate": row.other_cost_rate} for row in platforms],
         "spus": list(spus),
         "skus": [{"sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name,
                   "spu": spu_by_sku.get(row.sku_id)} for row in skus],

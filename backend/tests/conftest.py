@@ -174,3 +174,168 @@ def auth_headers() -> dict[str, str]:
     app.dependency_overrides[get_current_user] = override_current_user
 
     return {"Authorization": "Bearer test-token-for-unit-tests"}
+
+
+@pytest_asyncio.fixture
+async def pricing_auth_headers(pg_session):
+    """带 user_id 的 mock 用户——没有 user_id 审计不会落库。"""
+    from backend.main import app
+    from backend.dependencies.auth import get_current_user
+
+    class _MockUser:
+        id = 1
+        user_id = 1
+        username = "test_admin"
+        is_active = True
+        is_superuser = True
+        role_id = 1
+
+    async def override_current_user():
+        return _MockUser()
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    yield {}
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+# ---------------------------------------------------------------------------
+# SKU 定价底线：共用种子与清理
+# ---------------------------------------------------------------------------
+
+PRICING_SEED_CLEANUP_SQL = (
+    # 子表先删，父表后删（FK 顺序）
+    "DELETE FROM ops.feishu_projection_tasks "
+    "WHERE business_key = '9001' "
+    "OR business_key IN (SELECT profile_id::text FROM finance.sku_operating_profiles WHERE sku_id = 9001)",
+    "DELETE FROM finance.sku_profit_estimates WHERE sku_id = 9001",
+    "DELETE FROM public.fact_audit_logs "
+    "WHERE resource_id = '9001' OR resource_id = 'tiktok' OR resource_type = 'sku_pricing_policy'",
+    "DELETE FROM finance.sku_operating_profiles WHERE sku_id = 9001",
+    "DELETE FROM finance.sku_pricing_policies",
+    "DELETE FROM finance.logistics_provider_rules WHERE logistics_provider = 'TEST-LOG'",
+    "DELETE FROM finance.warehouse_storage_rules WHERE warehouse_code = 'MY-01'",
+    "DELETE FROM core.bridge_spu_sku WHERE sku_id = 9001",
+    "DELETE FROM core.dim_erp_sku WHERE sku_id = 9001",
+    "DELETE FROM core.dim_spu WHERE spu = 'TEST-SPU-1'",
+    "DELETE FROM core.dim_warehouses WHERE warehouse_code = 'MY-01'",
+    "DELETE FROM core.dim_platforms WHERE platform_code = 'tiktok'",
+    "DELETE FROM core.dim_users WHERE user_id = 1",
+)
+
+
+async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
+    """种下商品中心定价底线相关的最小数据集。
+
+    ⚠️ **必须按 FK 依赖顺序逐个 flush**：
+    SQLAlchemy 的 unit-of-work 排 INSERT 顺序只认 `relationship()` 派生的 mapper 依赖，
+    **不认裸 `ForeignKey` 约束**（裸 FK 只影响 DDL 排序）。实测
+    `LogisticsProviderRule` / `WarehouseStorageRule` / `BridgeSpuSku` 的
+    `__mapper__.relationships` 都是 `[]`，一次 flush 会让
+    `core.dim_warehouses` / `core.dim_spu` 排在规则表之前 →
+    `ForeignKeyViolationError: Key (warehouse_code)=(MY-01) is not present in table "dim_warehouses"`。
+
+    `with_cost_rules=False` 构造「缺物流规则 / 缺仓储规则」的场景，
+    用来验证**护栏排在缺资料校验之前**——用完整 seed 时 `missing_fields` 恒为 `[]`，
+    那条断言永远观察不到差别。
+    """
+    from datetime import date
+
+    from modules.core.db import (
+        BridgeSpuSku, DimErpSku, DimPlatform, DimSpu, DimUser, DimWarehouse,
+        LogisticsProviderRule, SkuPricingPolicy, WarehouseStorageRule,
+    )
+
+    effective_from = date(2026, 1, 1)
+
+    pg_session.add(DimUser(
+        user_id=1, username="test_admin",
+        email="test_admin@example.com", password_hash="not-a-real-hash",
+    ))
+    await pg_session.flush()
+
+    pg_session.add(DimPlatform(
+        platform_code="tiktok", name="TikTok", platform_role="sales", is_active=True,
+        default_fee_rate=0.0737,
+        default_creator_commission_rate=0.0606,
+        other_cost_rate=0.2727,
+    ))
+    await pg_session.flush()
+
+    pg_session.add(DimWarehouse(
+        warehouse_code="MY-01", warehouse_name="主仓",
+        country_code="MY", country_name="马来西亚", status="active",
+    ))
+    await pg_session.flush()
+
+    pg_session.add(DimSpu(
+        spu="TEST-SPU-1", spu_name="测试SPU",
+        return_loss_rate=0.0467, logistics_damage_rate=0.0158,
+    ))
+    await pg_session.flush()
+
+    pg_session.add(DimErpSku(
+        sku_id=9001, sku_key="TEST-SKU-1", sku_name="测试SKU",
+        status="active", default_purchase_cost=10, reference_selling_price=30,
+        weight_kg=0.5, unit_volume_cbm=0.01, turnover_class="slow",
+    ))
+    await pg_session.flush()
+
+    pg_session.add(BridgeSpuSku(
+        sku_id=9001, spu="TEST-SPU-1", binding_status="active",
+        effective_from=effective_from,
+    ))
+    await pg_session.flush()
+
+    # 库龄档位规则：缺这 4 行 -> 最低售价算不出来 -> 护栏永不触发
+    for min_age_days, tier_label, discount_rate, target_margin_rate in (
+        (0, "日常", 0.10, 0.25),
+        (60, "滞销30天", 0.15, 0.22),
+        (90, "滞销60天", 0.20, 0.18),
+        (120, "滞销60天以上", 0.30, 0.10),
+    ):
+        pg_session.add(SkuPricingPolicy(
+            min_age_days=min_age_days, tier_label=tier_label,
+            discount_rate=discount_rate, target_margin_rate=target_margin_rate,
+            platform_basis="tiktok", effective_from=effective_from,
+            status="active", source="test_seed", version="v1",
+        ))
+    await pg_session.flush()
+
+    if with_cost_rules:
+        # ⚠️ billing_unit 必须用仓库 CHECK 约束要求的值：
+        #   WarehouseStorageRule -> 'CNY/CBM/month'（ck_warehouse_storage_rules_unit）
+        #   LogisticsProviderRule -> 'CNY/CBM'（与仓库既有迁移口径一致）
+        # 写成 'cbm' 会撞 CheckViolationError
+        pg_session.add(LogisticsProviderRule(
+            logistics_provider="TEST-LOG", warehouse_code="MY-01", transport_type="sea",
+            status="active", is_sensitive=False, is_default=True, currency="CNY",
+            billing_basis="volume", billing_unit="CNY/CBM", freight_unit_rate=5,
+            effective_from=effective_from,
+        ))
+        pg_session.add(WarehouseStorageRule(
+            warehouse_code="MY-01", billing_basis="volume", billing_unit="CNY/CBM/month",
+            unit_rate_cny=100, label_fee=0.5, status="active",
+            effective_from=effective_from,
+        ))
+        await pg_session.flush()
+
+
+@pytest_asyncio.fixture
+async def pricing_seed(pg_session):
+    """返回「种数据」的协程；用例结束后自动清理干净。
+
+    ⚠️ **必须清理**：pg 容器是 **session 级**的，而端点内部会 `db.commit()`——
+    种下去的行会被**提交**，不会��� pg_session 的 teardown `rollback()` 掉。
+    不清理的话，下一个用例种同样的主键会撞
+    `UniqueViolationError: duplicate key value violates unique constraint "dim_users_pkey"`。
+    """
+    from sqlalchemy import text
+
+    async def _seed(*, with_cost_rules: bool = True):
+        await _seed_pricing_fixtures(pg_session, with_cost_rules=with_cost_rules)
+
+    yield _seed
+
+    for sql in PRICING_SEED_CLEANUP_SQL:
+        await pg_session.execute(text(sql))
+    await pg_session.commit()
